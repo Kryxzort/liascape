@@ -154,12 +154,15 @@ fn scene_loudness_cli_estimates_a_packaged_scene() {
     assert!(got - base["lufs"].as_f64().unwrap() > 2.0);
     assert_eq!(on["cache"]["decodes"], 1);
 
-    // LWE (the default): volume ignored, both play whatever the property says
+    // LWE (the default) plays WE's rules since fork patch 0018: the property counts the same;
+    // only the fingerprint's model prefix differs
     let (_, lwe) = run(&dir, &["--cache", c]);
     assert_eq!(lwe["model"], "lwe");
-    assert!((lwe["lufs"].as_f64().unwrap() - on["lufs"].as_f64().unwrap()).abs() < 0.01);
+    assert_eq!(lwe["lufs"], base["lufs"]);
     let (_, lwe_on) = run(&dir, &["--cache", c, "--props", r#"{"rain": true}"#]);
-    assert_eq!(lwe_on["fingerprint"], lwe["fingerprint"]);
+    assert_eq!(lwe_on["lufs"], on["lufs"]);
+    assert_ne!(lwe_on["fingerprint"], lwe["fingerprint"]);
+    assert!(lwe["fingerprint"].as_str().unwrap().starts_with("lwe-"));
 
     // not a scene → exit 1 with the error; usage → 2
     let (code, err) = run(&root, &[]);

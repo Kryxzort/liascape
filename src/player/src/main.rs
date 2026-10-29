@@ -218,7 +218,8 @@ fn main() -> ExitCode {
 /// {level, notes}, sounds, files, cache, ms}` — `state`/`seed.state` are the live learner's
 /// `state_json` shape (a `loudness_seed`).
 /// `--props` = the item's `scene_props` (name → value) over project.json's defaults; `--model`
-/// `lwe` (default: what liascape-player plays — LWE ignores `volume`) or `we`. `--assets` = WE's
+/// `lwe` (default: what liascape-player plays — LWE with fork patch 0018, WE's rules) or `we`
+/// (the same plan; another fingerprint prefix). `--assets` = WE's
 /// assets dir for sounds the scene takes from it (else resolved like `scene-check`). Per-file
 /// stats are cached (`$XDG_CACHE_HOME/liascape/scene-loudness`), so a re-estimate is a re-mix.
 /// `--horizon S` simulates exactly the first S s of play (validation against a recording).

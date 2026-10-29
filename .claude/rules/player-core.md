@@ -3941,16 +3941,17 @@ normalized from its first second. Not wired into the backend yet (docs/TODO.md �
   `[end of the table + offset, + length)`. Every `scene.pkg` of the owner's library (96, headers `PKGV0001`…`0024`)
   parses with one layout: entries contiguous from offset 0, the last ending exactly at EOF. Lookup exact, else
   ASCII-case-insensitive (fork patch 0016's rule). `pkg::build` writes one (fixtures).
-- **What plays, by [`Model`]** — `lwe` (default; what the player really plays): LWE `next-v2`'s `CSound` makes one
-  stream per file of a sound object (`objects[]` with a `sound` array), ALL at once from the start, each looping iff
-  `playbackmode == "loop"` (else once), unity-gain sum (`HostAudioDriver::pull`); it **ignores `volume`** (and every
-  user property bound to it), `visible`, `startsilent`, `mintime`/`maxtime`. So under the player a scene's user
-  properties never change its sound (a fidelity gap — docs/TODO.md). `we`: Wallpaper Engine 2.8.485's decompiled
-  rules (`docs/player/spikes/we-sound-semantics.md`) — stream amplitude = `volume²` (unclamped), a bound property's
-  value (slider = its value, bool = 1/0, `{name, condition}` = 1 iff equal: LWE's `DynamicValue` rule — WE's own
-  conversion not decompiled), absent `playbackmode` = `loop`, `loop` = one random file at a time back-to-back
-  (time-weighted like a playlist), `random` = one random file at a time + the mean of `mintime`/`maxtime` (defaults
-  1 / 5 s) of silence, `single` = one random file once (the first stands in), `startsilent` = silent.
+- **What plays, by [`Model`]** — both models play Wallpaper Engine 2.8.485's decompiled rules
+  (`docs/player/spikes/we-sound-semantics.md`), which LWE plays since fork patch 0018 (§ "LWE core"): stream
+  amplitude = `volume²` (unclamped), a bound property's value (slider = its value, bool = 1/0, `{name,
+  condition}` = 1 iff equal: LWE's `DynamicValue` rule — WE's own conversion not decompiled), `sound` a string
+  or a list, absent/unknown `playbackmode` = `loop`, `loop` = one random file at a time back-to-back
+  (time-weighted like a playlist, in listed order), `random` = one random file at a time + the mean of
+  `mintime`/`maxtime` (defaults 1 / 5 s) of silence, `single` = one random file once (the first stands in),
+  `startsilent` = silent. `lwe` (default) = what the player plays; `we` = the same plan, kept for the
+  fingerprint's prefix and its notes (a `startsilent` under `we` is `low` — a WE script could start it; under
+  `lwe` certain: LWE's SceneScript has no sound methods; the scripts note is `we`'s). Before 0018 `lwe` was
+  LWE's old behaviour (every file of an object at once, unity gain, `volume` and user properties ignored).
 - **Per-file stats, cached** (`FileStats`, `Cache`): each file decoded ONCE by ffmpeg (`PATH`; a package entry
   piped through stdin; `-ac 2 -ar 48000 f32le`, so a mono file is at −3 dB per channel like LWE's resampler;
   ≤ 1800 s; 120 s timeout, PDEATHSIG) and reduced through the live `SegmentMeter` to per-100 ms K-weighted powers +
@@ -3962,42 +3963,56 @@ normalized from its first second. Not wired into the backend yet (docs/TODO.md �
   their phases mix; ≤ 1800 s; `--horizon S` = exactly the first S s), fed to `Learner` itself → the SAME
   `state_json` (`state`) the live learner continues, + `seed.state` scaled to `--seed-seconds` (default 10 s,
   largest-remainder counts) — the weight an estimated seed should carry.
-- **Fingerprint** (`fingerprint`): `<model>-<fnv64>` over the active tracks (object, pattern, files, gain to 1e-4),
-  order-free: property changes that don't touch audio (colours, visual toggles) never change it; under `lwe` no
-  property does.
+- **Fingerprint** (`fingerprint`): `<model>-<fnv64>` over `SOUND_SEMANTICS` and the active tracks (object,
+  pattern, files, gain to 1e-4), order-free: property changes that don't touch audio (colours, visual toggles)
+  never change it, one that changes a sound's level or which sounds play always does. **`SOUND_SEMANTICS`** = how
+  the player plays sound objects: 1 = LWE before 0018, **2** = 0018 (2026-10-29) — every fingerprint changed
+  with it, so nothing keyed by a fingerprint continues a measurement of the old sound. Bump it whenever the
+  player's sound semantics change. (Today nothing stores by fingerprint yet — docs/TODO.md "Offline scene
+  loudness → integration"; the index's flat `loudnessState` isn't keyed by it: see TODO "LWE ignores a sound
+  object's `volume`" for the entries 0018 made stale.)
 - **CLI** `liascape-player scene-loudness <scene dir> [--assets <dir>] [--props '<scene_props json>'] [--model
   lwe|we] [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache]` → one JSON line `{path, estimated: true,
   model, fingerprint, lufs, peak_dbfs, audible_s, horizon_s, state, seed {weight_s, state}, confidence {level
   high|medium|low, notes}, sounds [{id, name, files, playbackmode, volume, gain, active, silent}], files [{file,
   duration_s, lufs}], cache {hits, disk_hits, decodes}, ms}`; exit 1 = not a scene / unreadable (`{path, error}`).
   Measured: 80–250 ms per scene with one 1.5–4 min mp3 (decode), a re-mix from the disk cache 0.2–1.9 ms in-process (`ms`; + the process start).
-- **Validated** against LWE's real output: `liascape-scene-worker --lwe-smoke <scene> --assets … --out … --audio-dump 45`
-  (the 1× dump = exactly what the worker's meter sees) of the 53 scenes with sound LWE loads (2 of 55 don't), measured
-  through the same estimator (the dump as a one-shot WAV) vs `--horizon 45`: within ±0.10 LU in 46, ±0.25 in 51,
-  median −0.03, mean −0.10; the two outliers are `low` and bracketed by `lufs_if_coherent` — 3289734539 −2.64 (a
-  vocal and an instrumental mix of one song at once: partly coherent; actual −7.05 between −9.68 and −4.96) and
-  3174556087 −0.75 (11 tracks at once; −2.33 between −3.08 and −1.76). Against the live learner's stored `state`
-  (the index's `loudnessState`, integrated — not `loudnessI`, which moves only by ≥ 0.5 LU): 2375914945 −16.59 vs
-  −16.58, 3422085307 −5.11 vs −5.12, 2371103399 −14.57 vs −15.18 (its first 45 s match LWE's within 0.07: the live
-  plays, each from the track's start and mostly shorter than its 167 s, over-weight the quiet intro — inferred).
-  Peaks match the live `loudnessTP` to 0.001 dB. The full-track estimate is a median 1.1 LU (up to 10.7) away from a
-  scene's first 45 s — what a first live report sees.
-- **`lufs_if_coherent`**: tracks of equal length (± 0.5 s, ≥ 5 s) start together under LWE and may be versions of
-  one recording; `mix_with(…, coherent: true)` sums them in amplitude (`(Σ gain·√power)²`) — the upper bound; a
+- **Validated (since 0018, 2026-10-29)** against the patched LWE's real output: `WPENGINE_SOUND_SEED=7
+  liascape-scene-worker --lwe-smoke <scene> --assets … --out … --audio-dump 45` (the 1× dump = what the worker's
+  meter sees; the dump renders at 30 fps meanwhile, so playlists advance) of 20 scenes, measured through the same
+  estimator (the dump as a one-shot WAV) vs `--horizon 45`: within ±0.10 LU in 17, ±0.25 in 18, median −0.05;
+  the two outliers are random picks, not rules — 3174556087 (`random`, 11 files) −0.91 and 3013489778 (`loop`, 5)
+  −0.65: the estimate's 45 s is the FIRST listed file, the player picked another; with the picked file
+  (identified by correlation) −0.08 / −0.04 → all 20 within ±0.15, 19 within ±0.10, median −0.04. The old
+  outlier 3289734539 (vocal + instrumental at once, −2.64) is −0.06 (it plays one of them: the dump = 0.49 ×
+  the instrumental, residual −147 dB). Over a full horizon a multi-file object's estimate is the time-weighted
+  expectation; a first live report reflects one pick. Behaviour checks on real scenes (dump fits, same tools):
+  2951169110 = "believe in you" × 1.0 + the orchestral × 0 until `--prop-at 15 orchestralversion=1` → both × 1.0
+  from 15 s; 3276522107 (LWE can't load it — corpus `load_failed`; its sound objects in a bare scene): wind/inside
+  0.49, rain 0.25, train 0 → × 1.0 after `--prop-at 10 musictrainride1000eyes=1`; 2375914945 `musicvolume` 0.8 vs 2
+  = ×6.250 = +15.92 dB (peak 2.04: the raw scene sound goes over 0 dBFS, the worker's gain stage follows);
+  2886313155 (`random`, 1..5 s) over 480 s: gaps 1.98 / 4.85 s from each file's end.
+  *Before 0018* (the old `lwe` model vs the unpatched LWE, 53 scenes): ±0.10 LU in 46, the vocal+instrumental
+  case −2.64. Against the live learner's stored state (pre-0018 sound): 2375914945 −16.59 vs −16.58,
+  3422085307 −5.11 vs −5.12, 2371103399 −14.57 vs −15.18 — those stored states are stale for 8 of the 10
+  measured scenes now (docs/TODO.md).
+- **`lufs_if_coherent`**: tracks of equal length (± 0.5 s, ≥ 5 s) of different objects start together and may be
+  versions of one recording (since 0018 the files of ONE object never play together); `mix_with(…, coherent: true)` sums them in amplitude (`(Σ gain·√power)²`) — the upper bound; a
   `low` note says so.
 - **Tests** (units, `scene::pkg` + `scene::loudness_estimate`): `generated_pkg_round_trips`,
   `reads_an_entry_from_a_file`, `garbage_and_truncation_are_refused`; `sine_at_minus_20_dbfs_reads_minus_20_lufs`,
   `simultaneous_sounds_mix_as_a_power_sum` (vs the really summed signal ≤ 0.05 LU),
   `volume_forms_and_property_bindings`, `audio_property_changes_the_fingerprint_a_visual_one_never` (a bool bound
   to one of two sounds: fingerprint changes, the estimate drops by that sound's power; a colour: unchanged; `lwe`:
-  unchanged), `lwe_plays_every_file_at_once_and_non_loops_once`, `random_mode_is_a_time_weighted_mix` (vs the real
-  concatenation ≤ 0.05 LU), `startsilent_and_zero_volume_are_silent_under_we`, `scaled_seed_is_a_valid_learner_state`,
+  follows it the same way), `fingerprint_carries_the_sound_semantics`, `lwe_plays_like_we_and_loops_mix_over_the_horizon`
+  (equal plans; a multi-file loop is one track at volume²; `single` once; an unknown mode loops; the string form),
+  `random_mode_is_a_time_weighted_mix` (vs the real concatenation ≤ 0.05 LU), `startsilent_and_zero_volume_are_silent`, `scaled_seed_is_a_valid_learner_state`,
   `cache_reuses_stats_in_memory_and_on_disk`, `packaged_scene_end_to_end` (ffmpeg; SKIP without it: a generated
   `scene.pkg` with a stereo and a mono WAV, −20.0 LUFS, the property turning the second on, no re-decode),
   `equal_length_files_get_a_coherent_bound` (one recording twice: power sum +3.01, the bound +6.02 = the real mix);
   `tests/scene_loudness.rs::scene_loudness_cli_estimates_a_packaged_scene` (the binary: `state`/`seed.state` load as
   learner seeds, a colour keeps the fingerprint and decodes nothing in a new process — the disk cache —, the bool
-  changes it to the files' power sum, `lwe` ignores the property, exit 1 / 2).
+  changes it to the files' power sum, `lwe` follows it like `we`, exit 1 / 2).
 
 ### GPU budget and VRAM (Task 8)
 

@@ -15,28 +15,26 @@
 //! `state_json` shape the live learner continues (a seed it refines).
 //!
 //! **Models** — what the player plays a scene through decides the rules:
-//! - [`Model::Lwe`] (the default: liascape-player plays scenes through LWE `next-v2`, so this
-//!   is what the live learner measures and the owner hears). LWE's `CSound` makes one
-//!   `AudioStream` per file of a sound object, ALL playing at once from the start, each looping
-//!   iff `playbackmode == "loop"` (else once), mixed at unity gain by the host driver; it
-//!   ignores the object's `volume` (and so every user property bound to it), `visible`,
-//!   `startsilent`, `mintime`/`maxtime`. User properties therefore never change a scene's audio
-//!   under LWE.
 //! - [`Model::We`] (Wallpaper Engine 2.8.485's own rules, decompiled —
 //!   docs/player/spikes/we-sound-semantics.md): the stream's amplitude is `volume²` (WE
-//!   squares the field, × the wallpaper's own volume, 1 here), user properties bound to it apply
-//!   (a slider = its value, a bool = 1/0, a `{name, condition}` binding = 1 iff the property
-//!   equals the condition — LWE's `DynamicValue` rule; WE's conversion is not decompiled), an
-//!   absent `playbackmode` is `loop`, `loop` plays one file at a time picked at random
+//!   squares the field, unclamped, × the wallpaper's own volume, 1 here), user properties bound to
+//!   it apply (a slider = its value, a bool = 1/0, a `{name, condition}` binding = 1 iff the
+//!   property equals the condition — LWE's `DynamicValue` rule; WE's conversion is not decompiled),
+//!   an absent `playbackmode` is `loop`, `loop` plays one file at a time picked at random
 //!   back-to-back (a single file loops), `random` one random file at a time with a uniform
 //!   `mintime`..`maxtime` gap (defaults 1 / 5 s) — both time-weighted like a playlist here —
 //!   `single` ONE random file once (the first stands in), `startsilent` contributes nothing
-//!   until a script starts it. Kept for when LWE honours these (then it becomes the live
-//!   behaviour) and for the property-aware loudness design (docs/TODO.md).
+//!   until a script starts it.
+//! - [`Model::Lwe`] (the default: what liascape-player really plays — LWE `next-v2` + the fork's
+//!   patch 0018, which plays sound objects by WE's rules above). The same plan as `we`; only the
+//!   fingerprint's prefix and the scripts note differ (LWE's SceneScript has no sound methods, so
+//!   a script can't start a `startsilent` sound there). Before 0018 LWE played every file of an
+//!   object at once at unity gain and ignored `volume`/`startsilent`/`mintime`/`maxtime`: that is
+//!   [`SOUND_SEMANTICS`] 1, and why the fingerprint carries the version.
 //!
 //! **Fingerprint** ([`fingerprint`]): the active tracks + their effective gains (+ which files)
-//! — a property that doesn't touch audio never changes it; the backend keys a scene's loudness
-//! by it.
+//! + [`SOUND_SEMANTICS`] — a property that doesn't touch audio never changes it; a change of how
+//! the player plays sound objects always does; the backend keys a scene's loudness by it.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -152,20 +150,23 @@ fn parse_volume(v: Option<&Value>) -> Volume {
     }
 }
 
-/// Every sound object of a scene.json (`objects[]` with a `sound` array — LWE's
-/// `ObjectParser` rule), in file order.
+/// Every sound object of a scene.json (`objects[]` with a `sound` string or array — LWE's
+/// `ObjectParser` rule with fork patch 0018), in file order.
 pub fn parse_sounds(scene: &Value) -> Vec<SoundObject> {
     let Some(objs) = scene.get("objects").and_then(Value::as_array) else {
         return vec![];
     };
     objs.iter()
         .filter_map(|o| {
-            let files: Vec<String> = o
-                .get("sound")?
-                .as_array()?
-                .iter()
-                .filter_map(|s| s.as_str().map(str::to_string))
-                .collect();
+            // one file as a string, or a list to pick from (WE and fork patch 0018 accept both)
+            let files: Vec<String> = match o.get("sound")? {
+                Value::String(f) => vec![f.clone()],
+                Value::Array(a) => a
+                    .iter()
+                    .filter_map(|s| s.as_str().map(str::to_string))
+                    .collect(),
+                _ => return None,
+            };
             Some(SoundObject {
                 id: o.get("id").and_then(Value::as_i64).unwrap_or(-1),
                 name: o
@@ -228,8 +229,9 @@ fn cond_string(v: &Value) -> String {
     }
 }
 
-/// The effective linear gain of a `volume` under WE's rules (module doc): the bound property's
-/// value (number, bool 1/0, numeric string), `{name, condition}` → 1 iff equal, else the literal.
+/// The `volume` value under WE's rules (module doc; the stream plays at its square): the bound
+/// property's value (number, bool 1/0, numeric string), `{name, condition}` → 1 iff equal, else
+/// the literal. Not clamped (WE stores it as given: a negative value squares to a positive gain).
 pub fn eval_volume(v: &Volume, props: &Map<String, Value>) -> f64 {
     let g = match &v.user {
         None => v.value,
@@ -245,7 +247,7 @@ pub fn eval_volume(v: &Volume, props: &Map<String, Value>) -> f64 {
             None => v.value,
         },
     };
-    if g.is_finite() { g.max(0.0) } else { 0.0 }
+    if g.is_finite() { g } else { 0.0 }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -297,7 +299,8 @@ pub struct Plan {
     pub notes: Vec<(u8, String)>,
 }
 
-/// Which tracks play under `model` with the property values `props` (module doc).
+/// Which tracks play under `model` with the property values `props` (module doc: both models
+/// play WE's rules since fork patch 0018).
 pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) -> Plan {
     let mut p = Plan::default();
     for s in sounds {
@@ -305,127 +308,94 @@ pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) ->
             p.silent.push((s.id, "no files".into()));
             continue;
         }
-        let mode = s.mode.as_deref().unwrap_or("");
-        match model {
-            Model::Lwe => {
-                let looped = mode == "loop";
-                if !looped {
-                    p.notes.push((
-                        1,
-                        format!(
-                            "sound {} plays once (playbackmode {:?}): its share depends on how long the scene plays",
-                            s.id, s.mode
-                        ),
-                    ));
+        if s.volume.scripted {
+            p.notes.push((
+                2,
+                format!(
+                    "sound {}: volume is scripted — its literal value is used",
+                    s.id
+                ),
+            ));
+        }
+        if s.startsilent {
+            p.silent.push((s.id, "startsilent".into()));
+            p.notes.push(match model {
+                // LWE's SceneScript has no sound methods: nothing can start it
+                Model::Lwe => (
+                    0,
+                    format!(
+                        "sound {}: startsilent — LWE never starts it (no script sound API)",
+                        s.id
+                    ),
+                ),
+                Model::We => (
+                    2,
+                    format!(
+                        "sound {}: startsilent — silent until something starts it",
+                        s.id
+                    ),
+                ),
+            });
+            continue;
+        }
+        // WE sends volume² (× the wallpaper volume) to the stream
+        let v = eval_volume(&s.volume, props);
+        let gain = v * v;
+        if gain <= 0.0 {
+            p.silent
+                .push((s.id, format!("volume 0 ({})", describe_volume(&s.volume))));
+            continue;
+        }
+        let pattern = match s.mode.as_deref().unwrap_or("") {
+            // absent = WE's default, loop
+            "loop" | "" => Pattern::Loop(s.files.clone()),
+            "random" => {
+                p.notes.push((
+                    1,
+                    format!("sound {}: random — a time-weighted mix of its files", s.id),
+                ));
+                Pattern::Shuffle {
+                    files: s.files.clone(),
+                    gap_s: ((s.mintime + s.maxtime) / 2.0).max(0.0),
                 }
-                if s.files.len() > 1 {
-                    p.notes.push((
-                        0,
+            }
+            "single" => {
+                p.notes.push((
+                    1,
+                    if s.files.len() > 1 {
                         format!(
-                            "sound {}: LWE plays all {} files at once (WE would play them one after another)",
+                            "sound {}: single — ONE of its {} files at random, once",
                             s.id,
                             s.files.len()
-                        ),
-                    ));
-                }
-                if s.volume.user.is_some() || (s.volume.value - 1.0).abs() > 1e-6 {
-                    p.notes.push((
-                        0,
-                        format!(
-                            "sound {}: volume {} ignored by LWE (plays at 1.0)",
-                            s.id,
-                            describe_volume(&s.volume)
-                        ),
-                    ));
-                }
-                if s.startsilent {
-                    p.notes
-                        .push((0, format!("sound {}: startsilent ignored by LWE", s.id)));
-                }
-                for f in &s.files {
-                    p.tracks.push(Track {
-                        object: s.id,
-                        pattern: if looped {
-                            Pattern::Loop(vec![f.clone()])
-                        } else {
-                            Pattern::Once(vec![f.clone()])
-                        },
-                        gain: 1.0,
-                    });
-                }
+                        )
+                    } else {
+                        format!("sound {}: single — plays once", s.id)
+                    },
+                ));
+                Pattern::Once(vec![s.files[0].clone()])
             }
-            Model::We => {
-                if s.volume.scripted {
-                    p.notes.push((
-                        2,
-                        format!(
-                            "sound {}: volume is scripted — its literal value is used",
-                            s.id
-                        ),
-                    ));
-                }
-                if s.startsilent {
-                    p.silent.push((s.id, "startsilent".into()));
-                    p.notes.push((
-                        2,
-                        format!(
-                            "sound {}: startsilent — silent until something starts it",
-                            s.id
-                        ),
-                    ));
-                    continue;
-                }
-                // WE sends volume² (× the wallpaper volume) to the stream
-                let v = eval_volume(&s.volume, props);
-                let gain = v * v;
-                if gain <= 0.0 {
-                    p.silent
-                        .push((s.id, format!("volume 0 ({})", describe_volume(&s.volume))));
-                    continue;
-                }
-                let pattern = match mode {
-                    // absent = WE's default, loop
-                    "loop" | "" => Pattern::Loop(s.files.clone()),
-                    "random" => {
-                        p.notes.push((
-                            1,
-                            format!("sound {}: random — a time-weighted mix of its files", s.id),
-                        ));
-                        Pattern::Shuffle {
-                            files: s.files.clone(),
-                            gap_s: ((s.mintime + s.maxtime) / 2.0).max(0.0),
-                        }
-                    }
-                    other => {
-                        p.notes.push((
-                            1,
-                            if other == "single" && s.files.len() > 1 {
-                                format!(
-                                    "sound {}: single — WE plays ONE of its {} files at random, once",
-                                    s.id,
-                                    s.files.len()
-                                )
-                            } else {
-                                format!("sound {}: playbackmode {other:?} plays once", s.id)
-                            },
-                        ));
-                        Pattern::Once(vec![s.files[0].clone()])
-                    }
-                };
-                p.tracks.push(Track {
-                    object: s.id,
-                    pattern,
-                    gain,
-                });
+            // an unknown mode falls back to WE's default (WE's own handling is not decompiled)
+            other => {
+                p.notes.push((
+                    1,
+                    format!(
+                        "sound {}: playbackmode {other:?} unknown — played as loop",
+                        s.id
+                    ),
+                ));
+                Pattern::Loop(s.files.clone())
             }
-        }
+        };
+        p.tracks.push(Track {
+            object: s.id,
+            pattern,
+            gain,
+        });
     }
-    if model == Model::We {
-        p.notes.push((
-            1,
-            "model we: WE 2.8.485's decompiled rules; a bound property's value conversion and the non-spatial level are inferred".into(),
-        ));
-    }
+    p.notes.push((
+        1,
+        "WE 2.8.485's decompiled rules (LWE fork patch 0018 plays them); a bound property's value conversion and the non-spatial level are inferred".into(),
+    ));
     p
 }
 
@@ -449,9 +419,15 @@ pub fn fnv64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// The audio configuration's fingerprint: `<model>-<16 hex>` over the active tracks (object,
-/// pattern, files, gain to 1e-4), order-independent. Two property sets that play the same
-/// sound the same way get the same one; nothing else enters it.
+/// How the player plays sound objects, hashed into every [`fingerprint`]: 1 = LWE `next-v2` as
+/// is (every file of an object at once, unity gain, `volume` ignored); 2 = fork patch 0018 (WE's
+/// rules). Bump it whenever the player's sound semantics change, so a loudness measured under the
+/// old ones is never continued under the new ones.
+pub const SOUND_SEMANTICS: u32 = 2;
+
+/// The audio configuration's fingerprint: `<model>-<16 hex>` over [`SOUND_SEMANTICS`] and the
+/// active tracks (object, pattern, files, gain to 1e-4), order-independent. Two property sets
+/// that play the same sound the same way get the same one; nothing else enters it.
 pub fn fingerprint(plan: &Plan, model: Model) -> String {
     let mut rows: Vec<String> = plan
         .tracks
@@ -472,6 +448,7 @@ pub fn fingerprint(plan: &Plan, model: Model) -> String {
         })
         .collect();
     rows.sort();
+    rows.insert(0, format!("semantics {SOUND_SEMANTICS}"));
     format!(
         "{}-{:016x}",
         model.name(),
@@ -1413,9 +1390,9 @@ mod tests {
             });
         }
         assert!((l.integrated().unwrap() - e.lufs.unwrap()).abs() < 0.05);
-        // LWE ignores the 0.5: both at unity
-        let (_, e) = est(&sounds, &Map::new(), Model::Lwe, &st);
-        assert!((e.lufs.unwrap() - lufs_of(pa + pb)).abs() < 0.06);
+        // LWE (fork patch 0018) squares the 0.5 too
+        let (_, el) = est(&sounds, &Map::new(), Model::Lwe, &st);
+        assert_eq!(el.lufs, e.lufs);
     }
 
     #[test]
@@ -1465,7 +1442,11 @@ mod tests {
             v(json!({"user": {"name": "n", "condition": "2"}, "value": 0.0})),
             1.0
         );
-        assert_eq!(v(json!(-1.0)), 0.0, "never negative");
+        assert_eq!(
+            v(json!(-1.0)),
+            -1.0,
+            "not clamped (the stream plays its square)"
+        );
         assert!(parse_volume(Some(&json!({"script": "x", "value": 1.0}))).scripted);
     }
 
@@ -1483,7 +1464,7 @@ mod tests {
 
     /// The owner's case: a bool property disables one of two sounds → the fingerprint changes
     /// and the estimate drops by exactly that sound's power; a colour property → the same
-    /// fingerprint and estimate. Under LWE (volume ignored) neither changes anything.
+    /// fingerprint and estimate. LWE (fork patch 0018) follows the property the same way.
     #[test]
     fn audio_property_changes_the_fingerprint_a_visual_one_never() {
         let (project, scene) = two_sound_fixture();
@@ -1519,21 +1500,63 @@ mod tests {
             "drop {drop}"
         );
         assert_eq!(e_on.lufs, e_col.lufs);
-        // LWE plays both whatever the property says
+        // LWE follows the property too; its fingerprints only carry their own prefix
         let fl = |props| fingerprint(&plan(&sounds, props, Model::Lwe), Model::Lwe);
-        assert_eq!(fl(&on), fl(&off));
+        assert_ne!(fl(&on), fl(&off));
+        assert_eq!(fl(&on), fl(&recoloured));
         assert!(fl(&on).starts_with("lwe-") && f_on.starts_with("we-"));
+        assert_eq!(
+            fl(&on)[4..],
+            f_on[3..],
+            "the same plan hashes the same under both models"
+        );
     }
 
-    /// LWE's rules: every file of an object at once at unity, looping only for `loop`.
+    /// The fingerprint carries [`SOUND_SEMANTICS`]: the same plan under the pre-0018 hash (no
+    /// version row) gets another fingerprint, so a loudness measured under LWE's old sound
+    /// semantics is never continued under the new ones.
     #[test]
-    fn lwe_plays_every_file_at_once_and_non_loops_once() {
-        let sounds = parse_sounds(&json!({"objects": [
-            sound(1, &["a", "b"], "loop", json!(0.3)), sound(2, &["c"], "single", json!(1.0))]}));
+    fn fingerprint_carries_the_sound_semantics() {
+        let sounds = parse_sounds(&json!({"objects": [sound(1, &["a"], "loop", json!(1.0))]}));
         let p = plan(&sounds, &Map::new(), Model::Lwe);
+        // the pre-0018 hash: the track rows alone
+        let unversioned = format!("lwe-{:016x}", fnv64(b"1|loop|a|1.0000"));
+        let fp = fingerprint(&p, Model::Lwe);
+        assert_ne!(fp, unversioned);
+        assert_eq!(
+            fp,
+            format!(
+                "lwe-{:016x}",
+                fnv64(format!("semantics {SOUND_SEMANTICS}\n1|loop|a|1.0000").as_bytes())
+            )
+        );
+    }
+
+    /// Both models play WE's rules (fork patch 0018): a multi-file `loop` is ONE track (its files
+    /// one after another, time-weighted), at volume²; `single` plays one file once; an unknown
+    /// mode loops; `sound` may be a plain string. Loops of different lengths (separate objects)
+    /// mix over 4 × the longest, at least the 60 s window.
+    #[test]
+    fn lwe_plays_like_we_and_loops_mix_over_the_horizon() {
+        let sounds = parse_sounds(&json!({"objects": [
+            sound(1, &["a", "b"], "loop", json!(0.3)), sound(2, &["c"], "single", json!(1.0)),
+            {"id": 3, "sound": "d", "playbackmode": "sequential"}]}));
+        assert_eq!(sounds[2].files, vec!["d".to_string()]);
+        let p = plan(&sounds, &Map::new(), Model::Lwe);
+        assert_eq!(p.tracks, plan(&sounds, &Map::new(), Model::We).tracks);
         assert_eq!(p.tracks.len(), 3);
-        assert!(p.tracks.iter().all(|t| t.gain == 1.0));
-        assert_eq!(p.tracks[2].pattern, Pattern::Once(vec!["c".into()]));
+        assert_eq!(
+            p.tracks[0].pattern,
+            Pattern::Loop(vec!["a".into(), "b".into()])
+        );
+        assert!((p.tracks[0].gain - 0.09).abs() < 1e-12);
+        assert_eq!(p.tracks[1].pattern, Pattern::Once(vec!["c".into()]));
+        assert_eq!(p.tracks[2].pattern, Pattern::Loop(vec!["d".into()]));
+
+        let sounds = parse_sounds(&json!({"objects": [
+            sound(1, &["a"], "loop", json!(1.0)), sound(2, &["b"], "loop", json!(1.0)),
+            sound(3, &["c"], "single", json!(1.0))]}));
+        let p = plan(&sounds, &Map::new(), Model::Lwe);
         let mut st = HashMap::new();
         st.insert("a".to_string(), stats_of(&sine(1000.0, 0.1, 4.0)));
         st.insert("b".to_string(), stats_of(&sine(500.0, 0.1, 6.0)));
@@ -1557,7 +1580,9 @@ mod tests {
         let mut st = HashMap::new();
         st.insert("v".to_string(), stats_of(&x));
         st.insert("i".to_string(), stats_of(&x));
-        let sounds = parse_sounds(&json!({"objects": [sound(1, &["v", "i"], "loop", json!(1.0))]}));
+        // two objects (one object's files play one at a time)
+        let sounds = parse_sounds(&json!({"objects": [
+            sound(1, &["v"], "loop", json!(1.0)), sound(2, &["i"], "loop", json!(1.0))]}));
         let p = plan(&sounds, &Map::new(), Model::Lwe);
         let m = mix(&p, &st);
         assert_eq!(m.coherent_groups, 1);
@@ -1627,7 +1652,10 @@ mod tests {
             {"id": 1, "sound": ["a", "b"], "volume": 0.5},
             {"id": 2, "sound": ["c"], "playbackmode": "random"}]}));
         let p = plan(&sounds, &Map::new(), Model::We);
-        assert_eq!(p.tracks[0].pattern, Pattern::Loop(vec!["a".into(), "b".into()]));
+        assert_eq!(
+            p.tracks[0].pattern,
+            Pattern::Loop(vec!["a".into(), "b".into()])
+        );
         assert!((p.tracks[0].gain - 0.25).abs() < 1e-12);
         assert_eq!(
             p.tracks[1].pattern,
@@ -1640,13 +1668,13 @@ mod tests {
     }
 
     #[test]
-    fn startsilent_and_zero_volume_are_silent_under_we() {
+    fn startsilent_and_zero_volume_are_silent() {
         let mut s = sound(1, &["a"], "loop", json!(0.0));
         let mut t = sound(2, &["b"], "loop", json!(1.0));
         t["startsilent"] = json!(true);
         s["id"] = json!(1);
         let p = plan(
-            &parse_sounds(&json!({"objects": [s, t]})),
+            &parse_sounds(&json!({"objects": [s.clone(), t.clone()]})),
             &Map::new(),
             Model::We,
         );
@@ -1656,6 +1684,18 @@ mod tests {
             p.notes
                 .iter()
                 .any(|n| n.0 == 2 && n.1.contains("startsilent"))
+        );
+        // under LWE it is certain: no script can start it there
+        let p = plan(
+            &parse_sounds(&json!({"objects": [s, t]})),
+            &Map::new(),
+            Model::Lwe,
+        );
+        assert!(p.tracks.is_empty());
+        assert!(
+            p.notes
+                .iter()
+                .any(|n| n.0 == 0 && n.1.contains("startsilent"))
         );
     }
 
@@ -1841,9 +1881,9 @@ mod tests {
         );
         assert_eq!(r3["cache"]["decodes"], 2, "re-mix only");
         assert_eq!(r3["lufs"], r["lufs"]);
-        // LWE: both play, whatever `extra` says
+        // LWE (fork patch 0018) follows `extra` like WE: at its default 0 only the first plays
         let rl = estimate_scene(&sd, &Opts::default(), &mut cache);
-        assert!((rl["lufs"].as_f64().unwrap() - l2).abs() < 1e-9, "{rl}");
+        assert_eq!(rl["lufs"], r["lufs"], "{rl}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
