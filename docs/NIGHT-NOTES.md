@@ -121,3 +121,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   moved your 13 measured scenes to the new format (index backed up first). Adapter 281/0, UI matrix 780/0.
   ⚠ An older installed liascape (the NixOS one) writing the index would drop the new fields — reinstall/bump.
 - **Next:** Phase 3 Task 7 (the backend hands rotation to the player program) — running beside Task 6.
+- **Phase 3 Task 6 done** (`8ee525d`, `dc64641`): pause-when-covered in the player. "Covered" = a fullscreen /
+  maximized window is VISIBLE on the monitor (Hyprland: the monitor's active or open special workspace; Sway:
+  `visible`; other wlroots: foreign-toplevel; GNOME/KDE: unavailable, never pauses) — focus plays no part. Every
+  monitor showing the wallpaper must be covered for 300 ms; release at once. Checked on your Hyprland: both
+  monitors read "none" (no fullscreen/maximized window was open) — a real covered pause is checked in Task 12.
+  The setting/UI comes with Tasks 7/10.
+- **Started:** Task 14's player side (in-player auto-mute, behind a flag) — owner's bars: latency ≤ today's, delay
+  accuracy, 500 ms default, no default exclusions, MPRIS = the player's own streams. Backend switch-over after Task 7.
