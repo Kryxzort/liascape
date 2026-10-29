@@ -357,6 +357,8 @@ pub struct SceneSource {
     /// slots of that generation go once one of these latched.
     latest_set: Option<(u32, u32, u32, Vec<u8>)>,
     has_audio: Option<bool>,
+    /// Worker events read while the GL context couldn't be made current (handled next time).
+    deferred: Vec<WorkerEvent>,
     /// Report `AudioFlowing` once known (an un-pause, a load that plays).
     flow_armed: bool,
     error: Option<String>,
@@ -509,10 +511,16 @@ fn epoll_ctl_ev(ep: &OwnedFd, op: i32, fd: RawFd, events: u32) {
 }
 
 /// Consume what `ep` reports (never blocks): a one-shot fence entry that fired is disarmed,
-/// so a signalled fence wakes the loop once, never in a busy loop.
-fn epoll_drain(ep: &OwnedFd) {
+/// so a signalled fence wakes the loop once, never in a busy loop. Returns whether `fd` (the
+/// worker host's epoll — level-triggered, so reported whenever it has something) was among
+/// them; `true` when the wait failed (can't tell).
+fn epoll_drain(ep: &OwnedFd, fd: Option<RawFd>) -> bool {
     let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 16];
-    unsafe { libc::epoll_wait(ep.as_raw_fd(), evs.as_mut_ptr(), evs.len() as i32, 0) };
+    let n = unsafe { libc::epoll_wait(ep.as_raw_fd(), evs.as_mut_ptr(), evs.len() as i32, 0) };
+    if n < 0 {
+        return true;
+    }
+    fd.is_some_and(|fd| evs[..n as usize].iter().any(|e| e.u64 == fd as u64))
 }
 
 impl SceneSource {
@@ -681,6 +689,7 @@ impl SceneSource {
             format: None,
             latest_set: None,
             has_audio: None,
+            deferred: Vec::new(),
             flow_armed: !opts.paused,
             error: None,
             broken: None,
@@ -1309,7 +1318,12 @@ impl SceneSource {
                     self.gpu_ms.pop_front();
                 }
                 self.inflight = self.seq.saturating_sub(seq + 1);
-                let acquire = fds.into_iter().next();
+                // F6b: a fence that already signalled is dropped here — the frame is ready
+                // like an fdpoll one (no epoll entry to add and remove, no poll at the latch).
+                let acquire = fds
+                    .into_iter()
+                    .next()
+                    .filter(|f| !crate::worker::dmabuf::fence_signalled(f));
                 if let Some(f) = &acquire {
                     // Wake the loop when it signals (once): a frame whose fence wasn't ready
                     // at its `Frame` must not wait for the next tick — a stepped loop has none.
@@ -1344,7 +1358,14 @@ impl SceneSource {
                 self.gain_sent = None;
                 self.send_gain();
             }
-            FromWorker::HasAudio { on } => self.has_audio = Some(on),
+            FromWorker::HasAudio { on } => {
+                self.has_audio = Some(on);
+                // F6b: pushes were only recorded while it had no sound (`send_gain`).
+                if on {
+                    self.gain_sent = None;
+                    self.send_gain();
+                }
+            }
             FromWorker::AudioFlowing => {
                 self.flows += 1;
                 if self.flow_armed {
@@ -1697,17 +1718,26 @@ impl SceneSource {
         }
     }
 
-    /// Send the effective gain (the sum of the `gain.*` slots) if it changed.
+    /// Send the effective gain (the sum of the `gain.*` slots) if it changed. F6b: a loaded
+    /// scene without sound (`Ready.has_audio` false — its worker never opens a stream) only
+    /// records it for the next `Start` (a restart or a new path, which re-learns
+    /// `has_audio`): a fade's 1 kHz push train would otherwise be a message (and a worker
+    /// wake-up) per scene per millisecond for nothing. `gain_sent` stays the last value
+    /// the worker really got, so the next push after the scene turns out to have sound
+    /// goes out.
     fn send_gain(&mut self) {
         let db = self.gains.effective_db();
         if self.gain_sent == Some(db) {
             return;
         }
-        self.gain_sent = Some(db);
         if let Some(h) = self.host.as_mut() {
+            if self.has_audio == Some(false) && h.fold(&ToWorker::Gain { db }) {
+                return;
+            }
             // Not connected: folded into the restart's `Start` (resent at its `Ready`).
             let _ = h.send(&ToWorker::Gain { db }, &[]);
         }
+        self.gain_sent = Some(db);
     }
 
     /// The worker's envelope batch: `t0_ms` on `CLOCK_MONOTONIC` → the log's `t_mono_ms`
@@ -2149,16 +2179,31 @@ impl Source for SceneSource {
         if !self.keep.is_for(gfx) {
             return false;
         }
-        let keep = self.keep.clone();
-        let guard = keep.make_current();
-        if !guard.is_current() {
-            return false;
-        }
         let now = Instant::now();
-        epoll_drain(&self.wake);
-        let evs = match self.host.as_mut() {
-            Some(h) => h.poll(now),
-            None => Vec::new(),
+        // F6b: this runs on every frame and every tick — the worker's socket and output are
+        // read only when its epoll says so (`WorkerHost::poll_io`), and the GL context is made
+        // current only for what needs it (imports, the latch's fence, the preview): on NVIDIA
+        // even asking which context is current is a syscall.
+        let host_io = epoll_drain(&self.wake, self.host.as_ref().map(|h| h.wake_fd()));
+        let mut evs = std::mem::take(&mut self.deferred);
+        if let Some(h) = self.host.as_mut() {
+            evs.extend(h.poll_io(now, host_io));
+        }
+        let gl = !evs.is_empty()
+            || self.latch.queued() > 0
+            || self.preview_wanted
+            || self.preview.is_some()
+            || self.preview_dying.is_some();
+        let keep = self.keep.clone();
+        let _guard = if gl {
+            let guard = keep.make_current();
+            if !guard.is_current() {
+                self.deferred = evs; // handled once the context is back
+                return false;
+            }
+            Some(guard)
+        } else {
+            None
         };
         for ev in evs {
             self.on_event(gfx, now, ev);
@@ -2183,10 +2228,12 @@ impl Source for SceneSource {
         if self.latch_allowed()
             && let Some(mut l) = self.latch.latch(|| gfx.native_fence().ok())
         {
-            // Already signalled — a free safety net, never a wait (spike §2 step 2).
+            // The latch took it because its fence has signalled: the frame is complete, and an
+            // `eglWaitSync` on it (the spike's "free safety net") is no wait but not free
+            // either — on NVIDIA ~10 syscalls (fd dups, getpid) and a semaphore ioctl per frame
+            // (F6b). Only its epoll entry goes (the fd closes here).
             if let Some(fd) = l.acquire.take() {
                 epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, fd.as_raw_fd());
-                let _ = gfx.gpu_wait_fence(fd);
             }
             self.on_latched(now, l);
             changed = true;
