@@ -339,6 +339,181 @@ fn hang_is_detected_by_heartbeat() {
     );
 }
 
+/// A stub with a ring of 3 (`ring:3`): spawn it, wait for its three `Buffer`s, then send
+/// ticks until every slot is with the host (three `Frame`s, none released) and one more tick
+/// is waiting for a slot. Returns the host, `t0`, the time the starving tick was sent, and
+/// the three held slots.
+fn starve(id: &str, knobs: &str, hang_ms: u64) -> (WorkerHost, Instant, Instant, Vec<u8>) {
+    let mut spec = stub_spec(id, knobs);
+    spec.hang_timeout = Duration::from_millis(hang_ms);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let mut buffers = 0;
+    pump(&mut host, t0, Duration::from_secs(2), |e| {
+        buffers += matches!(e, WorkerEvent::Msg(FromWorker::Buffer { .. }, _)) as u32;
+        buffers == 3
+    });
+    assert_eq!(buffers, 3, "the stub announced its ring");
+    let mut held = Vec::new();
+    for seq in 1..=3u64 {
+        host.send(&ToWorker::Tick { seq, t: seq as f64, input: None }, &[])
+            .unwrap();
+        let evs = pump(&mut host, t0, Duration::from_secs(1), |e| {
+            matches!(e, WorkerEvent::Msg(FromWorker::Frame { .. }, _))
+        });
+        match evs.last() {
+            Some((_, WorkerEvent::Msg(FromWorker::Frame { slot, seq: s, .. }, _))) => {
+                assert_eq!(*s, seq);
+                held.push(*slot);
+            }
+            other => panic!("expected frame {seq}, got {other:?}"),
+        }
+    }
+    host.send(&ToWorker::Tick { seq: 4, t: 4.0, input: None }, &[])
+        .unwrap();
+    (host, t0, Instant::now(), held)
+}
+
+/// Incident 1 (suspend, 2026-10-29 08:16): after the resume every slot of the worker's ring
+/// was with the compositor (latched + queued frames whose fences hadn't signalled yet), so the
+/// next tick could not be rendered — the worker sat idle waiting for a `Release` (eu-stack:
+/// `Renderer::run` → `recv`) and the heartbeat killed it as hung. A worker the host starves of
+/// slots is waiting on the host, not hung: it answers pings, and renders the tick the moment
+/// a slot comes back.
+#[test]
+fn starved_worker_is_not_hung() {
+    let (mut host, t0, starved_at, held) = starve("starved", "ring:3", 300);
+    let pid = host.pid().unwrap();
+    // 4 × the hang timeout with every slot held.
+    let evs = pump(&mut host, t0, Duration::from_millis(1200), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Exited { .. })
+    });
+    assert!(
+        !evs.iter().any(|(_, e)| matches!(
+            e,
+            WorkerEvent::Hung { .. } | WorkerEvent::Exited { .. } | WorkerEvent::Msg(FromWorker::Frame { .. }, _)
+        )),
+        "a starved worker is neither hung nor framing: {evs:?}"
+    );
+    assert!(starved_at.elapsed() >= Duration::from_millis(1200));
+    assert_eq!(host.pid(), Some(pid));
+    // Give one slot back: the waiting tick is rendered at once.
+    host.send(&ToWorker::Release { slot: held[0] }, &[]).unwrap();
+    let released = Instant::now();
+    let evs = pump(&mut host, t0, Duration::from_millis(300), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Frame { .. }, _) | WorkerEvent::Hung { .. })
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Frame { seq: 4, slot, .. }, _))) if *slot == held[0]),
+        "tick 4 into the released slot: {evs:?}"
+    );
+    assert!(released.elapsed() < Duration::from_millis(300));
+    // And the heartbeat runs normally again afterwards: no stray Hung.
+    let evs = pump(&mut host, t0, Duration::from_millis(700), |e| {
+        matches!(e, WorkerEvent::Hung { .. })
+    });
+    assert!(!evs.iter().any(|(_, e)| matches!(e, WorkerEvent::Hung { .. })), "{evs:?}");
+    host.stop();
+}
+
+/// The starvation grace never hides a real hang: a starved worker that stops answering (here
+/// at 600 ms) is killed within the usual bound — its pings go unanswered.
+#[test]
+fn starved_worker_that_hangs_is_still_killed() {
+    let (mut host, t0, _, _) = starve("starved-hang", "ring:3,hang_after_ms:600", 300);
+    let evs = pump(&mut host, t0, Duration::from_secs(3), |e| {
+        matches!(e, WorkerEvent::Hung { .. })
+    });
+    let (at, ev) = evs.last().expect("events");
+    assert!(matches!(ev, WorkerEvent::Hung { .. }), "{evs:?}");
+    // Hung at ≥ 600 + 300 ms (not while it was merely starved), ≤ 600 + 1.5 × 300 (+ slack).
+    assert!(
+        (Duration::from_millis(900)..=Duration::from_millis(1150)).contains(at),
+        "Hung at {at:?} (hang_after_ms 600, hang_timeout 300)"
+    );
+}
+
+/// Starvation is bounded: slots the host never gives back (a dead GPU timeline — fences that
+/// never signal) end in a hang kill after `STARVE_LIMIT_FACTOR` × the hang timeout, so a
+/// restart (a fresh ring) recovers the scene instead of a picture frozen forever.
+#[test]
+fn starved_forever_is_killed_after_the_starve_limit() {
+    let (mut host, t0, starved_at, _) = starve("starved-forever", "ring:3", 300);
+    let limit = Duration::from_millis(300) * liascape_player::worker::STARVE_LIMIT_FACTOR;
+    let evs = pump(&mut host, t0, limit + Duration::from_secs(1), |e| {
+        matches!(e, WorkerEvent::Hung { .. })
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Hung { .. }))),
+        "{evs:?}"
+    );
+    let after = starved_at.elapsed();
+    assert!(
+        (limit..=limit + Duration::from_millis(250)).contains(&after),
+        "Hung {after:?} after the starvation began (limit {limit:?})"
+    );
+}
+
+/// Incident 2 (suspend, 2026-10-29 08:35, NVIDIA saving VRAM through its kernel suspend
+/// notifier): the compositor's own loop was blocked for ~6 s (its heartbeat ran nowhere
+/// near the 2 s deadline), and its first poll after the thaw found a tick 6438 ms old and
+/// killed the worker. Time the host itself didn't run is not the worker's: after a host stall
+/// every outstanding tick/ping gets a fresh hang timeout. (The worker here is frozen too, and
+/// comes back 150 ms after the host does — inside the timeout.)
+#[test]
+fn host_stall_is_not_a_hang() {
+    let mut spec = stub_spec("host-stall", "freeze_after_ms:200,freeze_ms:1100");
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    pump(&mut host, t0, Duration::from_secs(2), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Log { line, .. }, _) if line.contains("start position"))
+    });
+    let hello = Instant::now();
+    std::thread::sleep(Duration::from_millis(250).saturating_sub(hello.elapsed()));
+    host.send(&ToWorker::Tick { seq: 1, t: 0.0, input: None }, &[])
+        .unwrap();
+    // The host stalls: no poll for 3 × the hang timeout.
+    std::thread::sleep(Duration::from_millis(900));
+    let evs = pump(&mut host, t0, Duration::from_millis(800), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Msg(FromWorker::Frame { .. }, _))
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Frame { seq: 1, .. }, _)))),
+        "the tick is answered after the stall, no Hung: {evs:?}"
+    );
+    host.stop();
+}
+
+/// The stall grace is the host's own stall only: a worker that freezes while the host keeps
+/// polling is still hung within the usual bound.
+#[test]
+fn worker_freeze_while_the_host_polls_is_hung() {
+    let mut spec = stub_spec("worker-freeze", "freeze_after_ms:200,freeze_ms:1100");
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    pump(&mut host, t0, Duration::from_secs(2), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Log { line, .. }, _) if line.contains("start position"))
+    });
+    std::thread::sleep(Duration::from_millis(250));
+    host.send(&ToWorker::Tick { seq: 1, t: 0.0, input: None }, &[])
+        .unwrap();
+    let sent = Instant::now();
+    let evs = pump(&mut host, t0, Duration::from_secs(1), |e| {
+        matches!(e, WorkerEvent::Hung { .. })
+    });
+    assert!(matches!(evs.last(), Some((_, WorkerEvent::Hung { .. }))), "{evs:?}");
+    assert!(
+        sent.elapsed() < Duration::from_millis(400),
+        "Hung {:?} after the tick",
+        sent.elapsed()
+    );
+}
+
 #[test]
 fn restarts_three_times_then_broken() {
     let spec = stub_spec("crashy", "crash_after_ms:50");

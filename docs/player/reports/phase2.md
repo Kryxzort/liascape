@@ -294,7 +294,42 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
   `worker.hung {waited_ms: 2003}` → SIGKILL → `worker.restart {attempt: 1}` → `worker.ready` 216 ms →
   `scene.resumed` at the held frame's `t` (74.944, exact), 0.9 s after the kill. The held frame stayed on screen
   through it; no `source.broken`. Cost vs. the designed path: ~2 s more frozen frame (the hang timeout) than a
-  `context_lost` would have taken. Open: make the worker notice a purge before it blocks (TODO).
+  `context_lost` would have taken. *(Re-read after the 08:16 run below: not stuck in GL — starved of slots; the
+  heartbeat was wrong, fixed.)*
+- **Suspend, old NVIDIA config** (no VRAM preservation; `rtcwake`, 08:16 IST): the same `worker.hung {waited_ms:
+  2001}`, 2.0 s after the thaw. `eu-stack` of the worker 0.3 s and 1.2 s after the resume: the renderer idle in
+  `Renderer::run` → `mpsc recv` (no timeout), the protocol thread in `poll` — **not stuck in GL**. The renderer only
+  renders with a pending tick *and* a free slot; all three slots were with the compositor (the latched frame + two
+  queued whose acquire fences hadn't signalled while the GPU woke), so the tick sent right after the thaw waited
+  for a `Release` that only a signalled fence brings — and the heartbeat (oldest unanswered tick > 2 s) called the
+  starved worker hung. The restarted worker's first frame latched 1.0 s after the kill. 2.6 s after the kill the
+  player's Wayland connection broke (`loop.failed`, Broken pipe — the session's compositor went away); the supervisor
+  reconnected 14.6 s later and restored the scene.
+- **Suspend, new NVIDIA config** (`NVreg_UseKernelSuspendNotifiers=1`, VRAM saved to `/var/tmp`; 08:35 IST):
+  **Hyprland survived, both monitors came back at 144/240 Hz.** The scene was killed all the same: `worker.hung
+  {waited_ms: 6438}` at the thaw → restart → `scene.resumed` at the exact held `t` (46.409) 2.5 s later. Timeline
+  (the kernel's `local_clock` and the player's `t_mono_ms` both stop in S3; the journal's wall time for messages
+  read after the thaw is their *receipt* time): PM suspend entry 08:35:03.8 → freezing user space **6.7 s** later
+  (the VRAM save, processes running) → ~21 s in S3 (the player's monotonic clock lost 21 s against wall time) →
+  thaw at ~08:35:31.5. The unanswered tick was sent 0.3 s after the suspend entry; the heartbeat, which runs on the
+  compositor's loop at its tick rate, would have fired 2 s later — it fired **5 ms after the thaw** instead. So the
+  compositor's own loop was blocked for ≥ 4.4 s of the VRAM save (a driver call while the GPU was busy saving), and
+  its first heartbeat after the stall judged the worker by a deadline that ran out while the compositor itself
+  couldn't run.
+- **The false hang and its fix** (2026-10-29; player-core.md § Scene worker → WorkerHost → Heartbeat). "Hung" now
+  means the worker is the reason no frame comes: (1) **starved** — while the compositor holds every slot of the
+  worker's ring (it tracks the ring's `buffer`s and the slots between `frame` and `release`) the outstanding ticks'
+  age doesn't count and liveness is a ping, which the idle renderer answers (and, robust, checks the reset status
+  on — a purge seen while starved is a `context_lost` restart); bounded at 5 × the hang timeout (10 s) so slots
+  that never come back (a fence that never signals) still end in a restart; (2) **host stall** — a gap between two
+  heartbeat polls longer than half the hang timeout (1 s) gives every outstanding tick/ping a fresh timeout. A real
+  hang keeps its bound: `tests/api.rs::hang_is_killed_and_restarted` 303 ms at a 300 ms timeout (unchanged),
+  `tests/worker.rs::starved_worker_that_hangs_is_still_killed`. Incident 1 is (1) — RED before:
+  `starved_worker_is_not_hung` `Hung {waited_ms: 302}`, `tests/scene.rs::gpu_stall_that_starves_the_worker_is_not_a_hang`
+  (synthetic `gpu_stall`: the real renderer starved for 1.5 s) 3 restarts; incident 2 is (2) — RED before:
+  `host_stall_is_not_a_hang` `Hung {waited_ms: 900}` after a 900 ms poll gap (and (1) too if the worker was starved
+  through the save). Expected now: a suspend/resume is no restart at all unless the robust context reports a purge.
+  Not re-run on the machine yet.
 - **VT switch** (`chvt` away and back, 05:57): **Hyprland 0.56.2 aborted** on the way back — not the player.
   aquamarine's restore of both CRTCs failed (`atomic drm request: failed to commit: Invalid argument` → `drm: crtc
   64/83 failed restore`; the kernel logged `nvidia-drm … Flip event timeout on head 0`), then an app window (an

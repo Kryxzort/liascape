@@ -13,7 +13,9 @@
 //! `stub: crashing` to stderr, then `abort()`), `hang_after_ms:N` (stops answering),
 //! `exit_code:N` (exit with N — at `crash_after_ms` if given, else right after `Hello`),
 //! `ignore_quit` (ignores `Quit` and EOF; only SIGKILL ends it), `spam_stderr:N` (N stderr
-//! lines after `Hello`).
+//! lines after `Hello`), `ring:N` (announce N slots on `Start`, frame each tick into a free one,
+//! hold the newest tick while the host has them all — the renderer's slot starvation),
+//! `freeze_after_ms:N` + `freeze_ms:M` (N ms after `Hello` stop reading for M ms, then carry on).
 //!
 //! Without `--stub`: the renderer (Task 4) — a surfaceless EGL context at LOW priority, a
 //! 3-slot ring exported as dmabufs (`ring.rs`), one frame per `Tick` into a free slot, an
@@ -67,6 +69,14 @@ struct Knobs {
     exit_code: Option<i32>,
     ignore_quit: bool,
     spam_stderr: u32,
+    /// `ring:N` (stub): announce a ring of N slots on `Start` and frame each tick into a free
+    /// one, holding the newest tick while every slot is with the host — the renderer's
+    /// slot starvation, without a GPU.
+    ring: u8,
+    /// `freeze_after_ms:N` + `freeze_ms:M` (stub): N ms after `Hello` stop reading for M ms
+    /// (as if blocked in the driver by a GPU-wide stall), then carry on.
+    freeze_after_ms: Option<u64>,
+    freeze_ms: u64,
 }
 
 impl Knobs {
@@ -80,6 +90,9 @@ impl Knobs {
                 "exit_code" => k.exit_code = val.parse().ok(),
                 "ignore_quit" => k.ignore_quit = true,
                 "spam_stderr" => k.spam_stderr = val.parse().unwrap_or(0),
+                "ring" => k.ring = val.parse().unwrap_or(0),
+                "freeze_after_ms" => k.freeze_after_ms = val.parse().ok(),
+                "freeze_ms" => k.freeze_ms = val.parse().unwrap_or(0),
                 other => warn(&format!("unknown LIASCAPE_SCENE_WORKER_TEST knob {other:?}")),
             }
         }
@@ -240,6 +253,10 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
     }
     let t0 = Instant::now();
     let mut sock = Some(sock);
+    // `ring`: (slot id, held by the host); the newest tick waiting for a free slot.
+    let mut ring: Vec<(u8, bool)> = Vec::new();
+    let mut pending: Option<(u64, f64)> = None;
+    let mut freeze_at = k.freeze_after_ms;
     loop {
         let el = t0.elapsed();
         if k.crash_after_ms
@@ -252,7 +269,12 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
         {
             hang();
         }
-        let next = [k.crash_after_ms, k.hang_after_ms]
+        if freeze_at.is_some_and(|f| el >= Duration::from_millis(f)) {
+            freeze_at = None;
+            let _ = writeln!(std::io::stderr(), "stub: frozen for {} ms", k.freeze_ms);
+            std::thread::sleep(Duration::from_millis(k.freeze_ms));
+        }
+        let next = [k.crash_after_ms, k.hang_after_ms, freeze_at]
             .into_iter()
             .flatten()
             .map(|ms| Duration::from_millis(ms).saturating_sub(el))
@@ -267,6 +289,7 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
             match proto::recv::<ToWorker>(s.as_fd()) {
                 Ok(Some((m, _fds))) => match m {
                     ToWorker::Ping { seq } => send(s, &FromWorker::Pong { seq }),
+                    ToWorker::Tick { seq, t, .. } if k.ring > 0 => pending = Some((seq, t)),
                     ToWorker::Tick { seq, t, .. } => send(
                         s,
                         &FromWorker::Frame {
@@ -276,13 +299,36 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
                             gpu_ms: None,
                         },
                     ),
-                    ToWorker::Start { position, .. } => send(
-                        s,
-                        &FromWorker::Log {
-                            level: "info".into(),
-                            line: format!("stub: start position {position}"),
-                        },
-                    ),
+                    ToWorker::Release { slot } => {
+                        if let Some(r) = ring.iter_mut().find(|r| r.0 == slot) {
+                            r.1 = false;
+                        }
+                    }
+                    ToWorker::Start { position, .. } => {
+                        send(
+                            s,
+                            &FromWorker::Log {
+                                level: "info".into(),
+                                line: format!("stub: start position {position}"),
+                            },
+                        );
+                        if ring.is_empty() {
+                            for slot in 0..k.ring {
+                                ring.push((slot, false));
+                                send(
+                                    s,
+                                    &FromWorker::Buffer {
+                                        slot,
+                                        w: 64,
+                                        h: 64,
+                                        fourcc: 0x3432_4241,
+                                        modifier: 0,
+                                        planes: Vec::new(),
+                                    },
+                                );
+                            }
+                        }
+                    }
                     ToWorker::Quit if !k.ignore_quit => std::process::exit(0),
                     _ => {}
                 },
@@ -296,6 +342,21 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
                 }
                 Err(e) => warn(&format!("bad message: {e}")),
             }
+        }
+        if let (Some((seq, t)), Some(s)) = (pending, sock.as_ref())
+            && let Some(r) = ring.iter_mut().find(|r| !r.1)
+        {
+            r.1 = true;
+            pending = None;
+            send(
+                s,
+                &FromWorker::Frame {
+                    slot: r.0,
+                    seq,
+                    t,
+                    gpu_ms: None,
+                },
+            );
         }
     }
 }
@@ -446,6 +507,10 @@ struct Renderer {
     /// The context is lost (`ContextLost` sent at this instant): nothing renders again; the
     /// compositor kills us (a crash restart) — we exit ourselves after `LOST_EXIT_AFTER`.
     lost: Option<Instant>,
+    /// The synthetic `gpu_stall` window (tests): frames in it carry a stand-in acquire fence.
+    stall: Option<(Instant, Instant)>,
+    /// The stand-ins' write ends: written (signalled) when the window ends.
+    stall_fences: Vec<OwnedFd>,
 }
 
 /// Task 10: a worker whose context is lost waits this long for the compositor's kill, then
@@ -605,6 +670,10 @@ impl Renderer {
         if let Some(ms) = spec.context_lost_after_ms {
             self.lost_at = Some(now + Duration::from_millis(ms));
         }
+        if let Some([after, dur]) = spec.gpu_stall {
+            let from = now + Duration::from_millis(after);
+            self.stall = Some((from, from + Duration::from_millis(dur)));
+        }
         let native = (spec.native[0].max(1), spec.native[1].max(1));
         self.native = native;
         let (w, h) = cover_size(native, (s.max_size[0], s.max_size[1]));
@@ -738,7 +807,18 @@ impl Renderer {
                 }
             }
             ToWorker::SetProperty { name, value } if !self.dead => self.set_property(&name, &value),
-            ToWorker::Ping { seq } => self.send(&FromWorker::Pong { seq }),
+            ToWorker::Ping { seq } => {
+                // The reset status is polled after every frame — but a renderer starved of
+                // slots (every one with the compositor, e.g. right after a resume) renders
+                // none; the heartbeat pings it then, so a purge/reset is still seen here.
+                if self.robust
+                    && self.lost.is_none()
+                    && let Some(st) = self.gfx.reset_status().filter(|st| *st != 0)
+                {
+                    self.context_lost(&format!("glGetGraphicsResetStatus {st:#x} (idle)"));
+                }
+                self.send(&FromWorker::Pong { seq })
+            }
             ToWorker::Resize { max_size } if !self.dead => self.resize(max_size),
             ToWorker::Quit => self.quit(),
             _ => {}
@@ -838,7 +918,9 @@ impl Renderer {
         };
         match self.gfx.native_fence() {
             Ok(fence) if !self.fdpoll => {
-                let _ = proto::send(self.sock.as_fd(), &frame, &[fence.as_fd()]);
+                let stand_in = self.stall_fence(&fence);
+                let fd = stand_in.as_ref().unwrap_or(&fence);
+                let _ = proto::send(self.sock.as_fd(), &frame, &[fd.as_fd()]);
             }
             Ok(fence) => {
                 wait_fence_cpu(&fence, 2000);
@@ -865,9 +947,39 @@ impl Renderer {
         }
     }
 
+    /// The synthetic `gpu_stall` (tests): inside its window, a frame's acquire fence is a
+    /// pipe that becomes readable only when the window ends (the real fence is waited for
+    /// first, so the frame is complete whenever the compositor samples it).
+    fn stall_fence(&mut self, real: &OwnedFd) -> Option<OwnedFd> {
+        let (from, to) = self.stall?;
+        let now = Instant::now();
+        if now < from || now >= to {
+            return None;
+        }
+        wait_fence_cpu(real, 2000);
+        let mut p = [0i32; 2];
+        if unsafe { libc::pipe2(p.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            return None;
+        }
+        let (r, w) = unsafe { (OwnedFd::from_raw_fd(p[0]), OwnedFd::from_raw_fd(p[1])) };
+        self.stall_fences.push(w);
+        Some(r)
+    }
+
+    /// The `gpu_stall` window is over: signal every stand-in fence.
+    fn end_stall(&mut self) {
+        self.stall = None;
+        for w in self.stall_fences.drain(..) {
+            let _ = unsafe { libc::write(w.as_raw_fd(), b"s".as_ptr().cast(), 1) };
+        }
+    }
+
     fn run(mut self) -> ! {
         loop {
             let now = Instant::now();
+            if self.stall.is_some_and(|(_, to)| now >= to) {
+                self.end_stall();
+            }
             if self.crash_at.is_some_and(|t| now >= t) {
                 crash(self.exit_code);
             }
@@ -889,8 +1001,14 @@ impl Renderer {
             let timeout = if can_render {
                 Some(Duration::ZERO)
             } else {
-                [self.crash_at, self.hang_at, self.lost_at, lost_exit]
-                    .into_iter()
+                [
+                    self.crash_at,
+                    self.hang_at,
+                    self.lost_at,
+                    lost_exit,
+                    self.stall.map(|s| s.1),
+                ]
+                .into_iter()
                     .flatten()
                     .map(|t| t.saturating_duration_since(now))
                     .min()
@@ -1001,6 +1119,8 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         robust: false,
         lost_at: None,
         lost: None,
+        stall: None,
+        stall_fences: Vec::new(),
     };
     r.log(format!(
         "gfx: context priority requested low, granted {}",

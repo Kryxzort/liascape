@@ -262,6 +262,64 @@ fn killed_worker_keeps_last_frame() {
     assert!(src.pid().is_none(), "no restart with a zero budget");
 }
 
+/// The suspend false-hang (2026-10-29, `docs/player/reports/phase2.md` § 8): while the GPU
+/// finishes nothing — NVIDIA saving VRAM before a suspend, the GPU waking after it — the
+/// worker's frames' acquire fences don't signal, so the compositor latches none, releases
+/// none, and soon holds all three slots; the worker then can't render the next tick and waits
+/// for a `Release`. That is the GPU, not a hung worker: it must not be killed. Synthetic
+/// `gpu_stall: [500, 1500]` = for 1.5 s from 0.5 s after the start every frame's fence is held
+/// back (a stand-in signalled at the end) — 5 × the 300 ms hang timeout. After it the
+/// frames flow again from the same worker, never restarted.
+#[test]
+fn gpu_stall_that_starves_the_worker_is_not_a_hang() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let sp = SyntheticSpec {
+        gpu_stall: Some([500, 1500]),
+        ..spec(Pattern::FrameIndex)
+    };
+    let mut src = open_with(&gfx, "gpu-stall", &sp, |o| {
+        o.hang_timeout = Duration::from_millis(300);
+    });
+    assert!(run(&gfx, &mut src, Duration::from_secs(10), |s, _| s
+        .stats()
+        .latched
+        >= 10));
+    let pid = src.pid().expect("a worker");
+    // (time, latched) at every change, over the stall and 1.5 s past it.
+    let t0 = Instant::now();
+    let mut series = vec![(Duration::ZERO, src.stats().latched)];
+    run(&gfx, &mut src, Duration::from_millis(3500), |s, _| {
+        let l = s.stats().latched;
+        if series.last().is_some_and(|x| x.1 != l) {
+            series.push((t0.elapsed(), l));
+        }
+        false
+    });
+    let gap = series
+        .windows(2)
+        .map(|w| w[1].0 - w[0].0)
+        .max()
+        .unwrap_or_default();
+    let st = src.stats();
+    println!("longest latch gap {gap:?}, stats {st:?}");
+    assert_eq!(st.restarts, 0, "no restart: the worker was starved, not hung ({st:?})");
+    assert!(
+        gap >= Duration::from_millis(1200),
+        "the stall held every frame back (longest gap between latches {gap:?})"
+    );
+    assert_eq!(src.pid(), Some(pid), "the same worker");
+    let last = series.last().unwrap();
+    assert!(
+        last.0 >= Duration::from_millis(2500) && st.latched >= series[0].1 + 100,
+        "frames flowed again after the stall: {:?}",
+        &series[series.len().saturating_sub(3)..]
+    );
+    check_frame(&gfx, src.texture().unwrap(), src.latched_seq().unwrap()).unwrap();
+}
+
 /// A scene the VRAM guard stops (Task 8, `stop_for_vram`) gives its ring back — the worker's
 /// exported slots stay alive while the compositor holds their imports (~3 × the export size
 /// of GPU memory, for a scene stopped *because* it used too much) — keeping exactly the slot
