@@ -159,6 +159,9 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.scenes_available().is_ok() {
         caps.push("scene");
     }
+    // A scene source's `loudness_key` prop (one loudness measurement per audio configuration):
+    // the backend sends it only to a player that has it.
+    caps.push("scene_loudness_key");
     if rt.backend.kind() == "headless" {
         caps.push("headless");
     }
