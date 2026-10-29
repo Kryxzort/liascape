@@ -719,6 +719,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
   - A muted stream or one at volume 0 (its node `Props` `mute` / `channelVolumes`) is silent; the meter reads post-volume, so a song turned down below the threshold doesn't mute either.
   - Several streams of one browser: any of them audible while its player is Playing counts (a tab's stream can't be told from another tab's reliably; `media.name` ≈ the MPRIS `xesam:title` is used only to rank the probe's report, never to drop a stream).
   - A Playing player with no stream matched → it doesn't mute, and the probe says `mpris.unmatched:<identity>` so a mismatch is visible, not a silent no-op.
+  - **Measured on the owner's machine 2026-10-29** (`scripts/probe-mpris-streams.py`): mpv + `mpv-mpris` and Opera (its audio service is a direct child of the MPRIS pid) both match by the pid tree; `paplay` matches nothing. Inputs the matcher must use: a **native** PipeWire stream node carries no pid — join `client.id` → the Client object's `application.process.id`; **never `pipewire.sec.pid`** (for pulse clients it is pipewire-pulse's own pid); `DesktopEntry` may be absent (Chromium errors on it) → the name rule compares the binary with `Identity` too. Mute/volume are live in the node's `Props` (`mute`, `channelVolumes` — cubic: 0.4 reads 0.064); an empty `channelVolumes` = unknown, not silent. Browser tabs and Flatpak are untested.
 
 **Files:**
 - Create: `src/player/src/signal/automute.rs`, `src/player/src/audio/foreign.rs`
