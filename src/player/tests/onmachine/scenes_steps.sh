@@ -672,7 +672,7 @@ step_budget() {
 step_workers() {
     step_begin workers
     serve_up wayland
-    local col a b ca cb t0 n s1 s2 s3 s4 i1 i2 base2 cpu2 basef cpu4 per2 per4 w
+    local col a b ca cb t0 n s1 s2 s3 s4 i1 i2 base2 cpu2 basef cpu4 per2 per4 w ib2 kb2 ic2 kc2 ibf kbf ic4 kc4
     col=$(create_color '[40,40,40]')
     show $OUT_A "$col"; show $OUT_B "$col"
     # Real scenes, one per output, then S→S on both at once.
@@ -707,23 +707,23 @@ step_workers() {
     s1=$(mk_scene t1 "$SYN_FI"); s2=$(mk_scene t2 "$SYN_FI"); s3=$(mk_scene t3 "$SYN_FI"); s4=$(mk_scene t4 "$SYN_FI")
     ctl animate '{"path":"lay:*:main.opacity","from":1,"to":0.97,"duration_ms":9000}' >/dev/null
     sleep 1.5
-    base2=$(cpu_pct "$PLAYER_PID" 5)
+    read -r base2 ib2 kb2 < <(cpu_insns "$PLAYER_PID" 5)
     sleep 2.6
     ctl set '{"path":"lay:*:main.opacity","value":1}' >/dev/null
     i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
     show $OUT_A "$i1"; show $OUT_B "$i2"
     wait_ready "$i1" 20 && wait_ready "$i2" 20 || die "synthetic scenes never ready"
     sleep 2
-    cpu2=$(cpu_pct "$PLAYER_PID" 5)
+    read -r cpu2 ic2 kc2 < <(cpu_insns "$PLAYER_PID" 5)
     per2=$(python3 -c "print(round(($cpu2 - $base2) / 2, 2))")
-    say "transport, 2 workers: compositor $cpu2 % vs $base2 % (colour + animation) → $per2 % per worker; $(workers_json | jq -c '[.workers[] | {fps_actual}]')"
+    say "transport, 2 workers: compositor $cpu2 % vs $base2 % (colour + animation) → $per2 % per worker; Ginsn/s user (kernel) $ic2 ($kc2) vs $ib2 ($kb2); $(workers_json | jq -c '[.workers[] | {fps_actual}]')"
     check "transport per worker (2 workers at 144/240 fps)" "$per2 % ($cpu2 − $base2 baseline, / 2)" "≤ 0.6 % of a core" "$(le "$per2" 0.6)"
     # 4 workers: an 8 s full-live fade S→S on both outputs, vs the same fade colour → colour.
     show $OUT_A "$col"; show $OUT_B "$col"
     destroy "$i1"; destroy "$i2"; sleep 2
     ctl transition '{"outputs":"out:*","to":{"kind":"color","color":[60,60,60]},"effect_id":"fade","duration_ms":8000}' >/dev/null
     sleep 1.5
-    basef=$(cpu_pct "$PLAYER_PID" 5)
+    read -r basef ibf kbf < <(cpu_insns "$PLAYER_PID" 5)
     sleep 2.5
     i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
     show $OUT_A "$i1"; show $OUT_B "$i2"
@@ -733,9 +733,10 @@ step_workers() {
     ctl transition "$(jq -nc --arg o "out:$OUT_B" --arg p "$s4" '{outputs:$o, to:{kind:"scene", path:$p}, effect_id:"fade", duration_ms:8000}')" >/dev/null
     sleep 1.5
     n=$(workers_json | jq '[.workers[] | select(.pid != null)] | length')
-    cpu4=$(cpu_pct "$PLAYER_PID" 5)
+    read -r cpu4 ic4 kc4 < <(cpu_insns "$PLAYER_PID" 5)
     per4=$(python3 -c "print(round(($cpu4 - $basef) / 4, 2))")
-    say "transport, $n workers mid-fade: compositor $cpu4 % vs $basef % (colour → colour fade) → $per4 % per worker"
+    say "transport, $n workers mid-fade: compositor $cpu4 % vs $basef % (colour → colour fade) → $per4 % per worker; Ginsn/s user (kernel) $ic4 ($kc4) vs $ibf ($kbf)"
+    note "instructions (G/s, user (kernel)): 2 workers $ic2 ($kc2) vs $ib2 ($kb2); $n workers mid-fade $ic4 ($kc4) vs $ibf ($kbf)"
     check "transport per worker ($n workers, S→S full-live on both outputs)" "$per4 % ($cpu4 − $basef baseline, / 4)" "≤ 0.6 % of a core" "$([[ $n == 4 ]] && le "$per4" 0.6 || echo 0)"
     sleep 3
     serve_down
@@ -747,23 +748,48 @@ step_workers() {
 # real outputs' rates), so they need no session and can be A/B'd between builds: compositor CPU
 # per synthetic worker steady (2 workers) and mid-fade (4 workers, an S→S full-live fade on both
 # outputs), each against a decode-free baseline with the same presents. TRANSPORT_ROUNDS
-# (default 3) alternating rounds; PERF_S > 0 also records `perf` of the compositor mid-fade.
+# (default 3) alternating rounds; PERF_S > 0 also records `perf` of the compositor mid-fade
+# (PERF_CG: the call-graph mode, default dwarf — a release build has no frame pointers).
 # CPU % of the compositor over $2 s plus its user-space instructions retired in that window
 # (`perf stat`, in G/s, summed over the hybrid CPU's core + atom PMUs — far steadier than CPU
 # time on a shared, frequency-scaling machine).
+# PERF_SUDO=1 also counts kernel instructions (`instructions:k`, root only here): a third column,
+# else "null" — syscalls (worker messages, fences, epoll) are CPU time the user count misses.
 cpu_insns() {
-    local f=$SCRATCH/insns.$$ c
-    nix shell nixpkgs#perf -c perf stat -x, -e instructions:u -o "$f" -p "$1" -- sleep "$2" >/dev/null 2>&1 &
+    local f=$SCRATCH/insns.$$ c ev=instructions:u sudo=()
+    [[ ${PERF_SUDO:-0} == 1 ]] && { sudo=(sudo); ev=instructions:u,instructions:k; }
+    "${sudo[@]}" "$(nix shell nixpkgs#perf -c sh -c 'command -v perf')" stat -x, -e "$ev" -o "$f" -p "$1" -- sleep "$2" >/dev/null 2>&1 &
     local pp=$!
     c=$(cpu_pct "$1" "$2")
     wait "$pp"
-    printf '%s %s\n' "$c" "$(awk -F, -v s="$2" '$3 ~ /instructions/ {n += $1} END {printf "%.3f", n / s / 1e9}' "$f")"
+    printf '%s %s %s\n' "$c" "$(awk -F, -v s="$2" '$3 ~ /instructions(:|\/)u/ {n += $1} END {printf "%.3f", n / s / 1e9}' "$f")" \
+        "$(awk -F, -v s="$2" '$3 ~ /instructions(:|\/)k/ {n += $1; k = 1} END {if (k) printf "%.3f", n / s / 1e9; else print "null"}' "$f")"
+}
+# The loop's own counters (`probe loop`), and their rates per second between two of them.
+loop_counts() { ctl probe '{"name":"loop"}' | jq -c '{iterations, wakes, ticks, gain_ticks}'; }
+loop_rates() { jq -nc --argjson a "$1" --argjson b "$2" --argjson s "$3" '$b | with_entries(.value = ((.value - $a[.key]) / $s | round))'; }
+# PERF_S > 0: `perf record` the compositor for PERF_S s in round 1's colour fade (`basefade`) and
+# mid-fade (`midfade`) windows → <results>/transport-<name>.perf (PERF_SUDO=1: as root, with kernel
+# samples — this machine's perf_event_paranoid 2 allows user-only; PERF_TRACE=1: `perf trace -s` of the
+# main thread's syscalls instead → transport-<name>.trace).
+transport_perf() {
+    ((${PERF_S:-0} > 0 && r == 1)) || return 0
+    local o=$RESULTS/transport-$1.perf sudo=()
+    [[ ${PERF_SUDO:-0} == 1 ]] && sudo=(sudo)
+    if [[ ${PERF_TRACE:-0} == 1 ]]; then # the main thread's syscalls instead (counts, times)
+        sudo "$(nix shell nixpkgs#perf -c sh -c 'command -v perf')" trace ${PERF_TRACE_ARGS:--s} -t "$PLAYER_PID" -o "${o%.perf}.trace" \
+            -- sleep "$PERF_S" >/dev/null 2>&1 &
+    else
+        "${sudo[@]}" "$(nix shell nixpkgs#perf -c sh -c 'command -v perf')" record -q --call-graph "${PERF_CG:-dwarf}" \
+            -o "$o" -p "$PLAYER_PID" -- sleep "$PERF_S" >/dev/null 2>&1 &
+    fi
+    perf_pid=$!
 }
 step_transport() {
     step_begin transport
     local OUT_A=VIRTUAL-1 OUT_B=VIRTUAL-2 r rounds=${TRANSPORT_ROUNDS:-3}
     serve_up "headless:1920x1080@144,1920x1080@240"
-    local col s1 s2 s3 s4 i1 i2 base2 cpu2 basef cpu4 per2 per4 n perf_pid= all2=() all4=()
+    local col s1 s2 s3 s4 i1 i2 base2 cpu2 basef cpu4 per2 per4 n perf_pid= all2=() all4=() l0 l4 lbf ib2 ic2 ibf ic4 kb2 kc2 kbf kc4
     col=$(create_color '[40,40,40]')
     ctl set '{"path":"out:*.scene_fps","value":0}' >/dev/null
     s1=$(mk_scene t1 "$SYN_FI"); s2=$(mk_scene t2 "$SYN_FI"); s3=$(mk_scene t3 "$SYN_FI"); s4=$(mk_scene t4 "$SYN_FI")
@@ -771,20 +797,25 @@ step_transport() {
         show $OUT_A "$col"; show $OUT_B "$col"
         ctl animate '{"path":"lay:*:main.opacity","from":1,"to":0.97,"duration_ms":9000}' >/dev/null
         sleep 1.5
-        read -r base2 ib2 < <(cpu_insns "$PLAYER_PID" 5)
+        read -r base2 ib2 kb2 < <(cpu_insns "$PLAYER_PID" 5)
         sleep 2.6
         ctl set '{"path":"lay:*:main.opacity","value":1}' >/dev/null
         i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
         show $OUT_A "$i1"; show $OUT_B "$i2"
         wait_ready "$i1" 20 && wait_ready "$i2" 20 || die "synthetic scenes never ready"
         sleep 2
-        read -r cpu2 ic2 < <(cpu_insns "$PLAYER_PID" 5)
+        read -r cpu2 ic2 kc2 < <(cpu_insns "$PLAYER_PID" 5)
         per2=$(python3 -c "print(round(($cpu2 - $base2) / 2, 2))")
         show $OUT_A "$col"; show $OUT_B "$col"
         destroy "$i1"; destroy "$i2"; sleep 2
         ctl transition '{"outputs":"out:*","to":{"kind":"color","color":[60,60,60]},"effect_id":"fade","duration_ms":8000}' >/dev/null
         sleep 1.5
-        read -r basef ibf < <(cpu_insns "$PLAYER_PID" 5)
+        transport_perf basefade
+        l0=$(loop_counts)
+        read -r basef ibf kbf < <(cpu_insns "$PLAYER_PID" 5)
+        lbf=$(loop_rates "$l0" "$(loop_counts)" 5)
+        [[ -n $perf_pid ]] && wait "$perf_pid"
+        perf_pid=
         sleep 2.5
         i1=$(create_scene "$s1"); i2=$(create_scene "$s2")
         show $OUT_A "$i1"; show $OUT_B "$i2"
@@ -794,18 +825,20 @@ step_transport() {
         ctl transition "$(jq -nc --arg o "out:$OUT_B" --arg p "$s4" '{outputs:$o, to:{kind:"scene", path:$p}, effect_id:"fade", duration_ms:8000}')" >/dev/null
         sleep 1.5
         n=$(workers_json | jq '[.workers[] | select(.pid != null)] | length')
-        if ((${PERF_S:-0} > 0 && r == 1)); then
-            nix shell nixpkgs#perf -c perf record -q -g -o "$RESULTS/transport-midfade.perf" -p "$PLAYER_PID" -- sleep "$PERF_S" >/dev/null 2>&1 &
-            perf_pid=$!
-        fi
-        read -r cpu4 ic4 < <(cpu_insns "$PLAYER_PID" 5)
+        transport_perf midfade
+        l0=$(loop_counts)
+        read -r cpu4 ic4 kc4 < <(cpu_insns "$PLAYER_PID" 5)
+        l4=$(loop_rates "$l0" "$(loop_counts)" 5)
         [[ -n $perf_pid ]] && wait "$perf_pid"
         perf_pid=
         per4=$(python3 -c "print(round(($cpu4 - $basef) / 4, 2))")
-        say "round $r: 2 workers $cpu2 vs $base2 % → $per2 % per worker; $n workers mid-fade $cpu4 vs $basef % → $per4 % per worker; Ginsn/s: 2 workers $ic2 vs $ib2, mid-fade $ic4 vs $ibf"
+        say "round $r: 2 workers $cpu2 vs $base2 % → $per2 % per worker; $n workers mid-fade $cpu4 vs $basef % → $per4 % per worker; Ginsn/s user (kernel): 2 workers $ic2 ($kc2) vs $ib2 ($kb2), mid-fade $ic4 ($kc4) vs $ibf ($kbf); loop/s mid-fade $l4 vs $lbf"
         jq -nc --argjson r "$r" --argjson c2 "$cpu2" --argjson b2 "$base2" --argjson c4 "$cpu4" --argjson bf "$basef" \
             --argjson i2 "${ic2:-null}" --argjson ib2 "${ib2:-null}" --argjson i4 "${ic4:-null}" --argjson ibf "${ibf:-null}" \
-            '{round:$r, cpu2:$c2, base2:$b2, cpu4:$c4, basef:$bf, insn2:$i2, insn_base2:$ib2, insn4:$i4, insn_basef:$ibf}' >>"$RESULTS/transport-rounds.jsonl"
+            --argjson l4 "${l4:-null}" --argjson lbf "${lbf:-null}" \
+            --argjson k2 "${kc2:-null}" --argjson kb2 "${kb2:-null}" --argjson k4 "${kc4:-null}" --argjson kbf "${kbf:-null}" \
+            '{round:$r, cpu2:$c2, base2:$b2, cpu4:$c4, basef:$bf, insn2:$i2, insn_base2:$ib2, insn4:$i4, insn_basef:$ibf,
+              kinsn2:$k2, kinsn_base2:$kb2, kinsn4:$k4, kinsn_basef:$kbf, loop4:$l4, loop_basef:$lbf}' >>"$RESULTS/transport-rounds.jsonl"
         all2+=("$per2"); all4+=("$per4")
         sleep 7
         show $OUT_A "$col"; show $OUT_B "$col"
