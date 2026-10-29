@@ -5,7 +5,10 @@
 //!
 //! - [`transition`] — A→B with an effect (or a cut), three hold methods, `align: end`,
 //!   interrupt/cancel/failure handling (Task 11).
+//! - [`program`] — rotations (Phase 3): a `program` node's items, order and timing turned
+//!   into `transition` requests on the player clock.
 
+pub mod program;
 pub mod transition;
 
 pub use transition::{
