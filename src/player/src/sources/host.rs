@@ -11,6 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::fd::RawFd;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -495,6 +496,15 @@ impl SourceHost {
     }
 
     /// Sources whose core is still being created (probes/bounds).
+    /// F6b: whether [`sync`](Self::sync) has work of its own beyond the graph's changes and
+    /// routing — an async open to pick up, or a low-VRAM stop/resume in flight.
+    pub fn sync_pending(&self) -> bool {
+        !self.opening.is_empty()
+            || !self.suspended.is_empty()
+            || !self.resuming.is_empty()
+            || !self.resume_at.is_empty()
+    }
+
     pub fn opening(&self) -> usize {
         self.opening.len()
     }
@@ -1084,10 +1094,30 @@ impl SourceHost {
     /// source's live `paused` is then the OR'd effective value, not the node's own
     /// intention, and mirroring it back would corrupt that (`sync`'s doc).
     pub fn update(&mut self, gfx: &Gfx, graph: &mut Graph) {
+        self.update_where(gfx, graph, |_| true);
+    }
+
+    /// F6b: [`update`](Self::update) for the sources in `ids` only — the runtime's answer
+    /// to a wake: only the sources whose wake fd fired have anything new (each worker frame
+    /// is one wake; updating every hosted source on each — a `recvmsg`, an `epoll_wait`, the
+    /// mirror reads — made the loop's work per worker grow with the number of workers).
+    /// Every source still runs at least at the tick rate (`update`). Ids not hosted are
+    /// skipped.
+    pub fn update_only(&mut self, gfx: &Gfx, graph: &mut Graph, ids: &[Rc<str>]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.update_where(gfx, graph, |id| ids.iter().any(|w| **w == *id));
+    }
+
+    fn update_where(&mut self, gfx: &Gfx, graph: &mut Graph, want: impl Fn(&str) -> bool) {
         self.reap_dying(false);
         let mut new_events = Vec::new();
         let mut resumed = Vec::new();
         for (id, h) in &mut self.sources {
+            if !want(id) {
+                continue;
+            }
             if h.src.update(gfx) {
                 self.changed.insert(id.clone());
             }

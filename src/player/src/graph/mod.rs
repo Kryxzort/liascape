@@ -831,6 +831,11 @@ impl Graph {
 
     /// Drains and returns every `(PropPath, PropValue)` applied by `set` since the last
     /// call, in call order. Node creation never appears here (see the module doc comment).
+    /// Whether a change is waiting for [`Graph::drain_changes`].
+    pub fn has_changes(&self) -> bool {
+        !self.changes.is_empty()
+    }
+
     pub fn drain_changes(&mut self) -> Vec<(PropPath, PropValue)> {
         std::mem::take(&mut self.changes)
     }

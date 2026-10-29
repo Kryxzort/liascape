@@ -30,6 +30,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -439,6 +440,11 @@ pub struct Runtime {
     pub(crate) last_event: BTreeMap<String, String>,
     wake_regs: BTreeMap<String, (RawFd, RegistrationToken)>,
     pub(crate) wake_pending: bool,
+    /// F6b: the sources whose wake fd fired since the last update — `after_dispatch` updates
+    /// only these (a worker frame wakes one source, not all of them); the tick updates all.
+    woken: Vec<Rc<str>>,
+    /// F6b: the graph's `demand_rev` at the last `sync_sources` (`sync_due`).
+    synced_demand_rev: (u64, u64),
     step: Option<PendingStep>,
     step_queue: VecDeque<(u64, Value, Duration)>,
     /// `capture`'s readbacks in flight + `lia-capture` (encode + write); its replies are
@@ -482,6 +488,8 @@ pub struct Runtime {
     pub(crate) started: Instant,
     /// Which paced outputs need a frame (Task 13).
     pub(crate) redraw: Redraw,
+    /// F6b: what each output shows, cached per routing change (`redraw::Routes`).
+    routes: crate::redraw::Routes,
     /// Present timing per output (the `frames` probe).
     pub(crate) frames: BTreeMap<String, FrameStats>,
     /// The player audio bus + its meter (Task 14), or why there is none.
@@ -651,18 +659,12 @@ fn p(s: &str) -> PropPath {
 /// `1 / eff(out:<c>.scene_fps, refresh)`; `None` for any other source (never gated).
 fn scene_gate_period(
     host: &crate::sources::SourceHost,
-    graph: &Graph,
     src: &str,
-    out: &str,
+    route: &crate::redraw::OutRoute,
     frame_callbacks: bool,
 ) -> Option<Duration> {
     host.scene(src)?;
-    let num = |prop: &str| match graph.get(&p(&format!("out:{out}.{prop}"))) {
-        Ok(PropValue::F64(f)) => f,
-        Ok(PropValue::I64(i)) => i as f64,
-        _ => 0.0,
-    };
-    crate::redraw::scene_gate_period(num("scene_fps"), num("refresh_hz"), frame_callbacks)
+    crate::redraw::scene_gate_period(route.scene_fps, route.refresh_hz, frame_callbacks)
 }
 
 /// Phase 2 Task 14: output `out` (with frame callbacks) shows a playing scene that renders at
@@ -676,27 +678,20 @@ fn scene_gate_period(
 /// two clocks slip, ~once per 4 s).
 fn scene_paces_output(
     host: &crate::sources::SourceHost,
-    graph: &Graph,
-    out: &str,
+    route: &crate::redraw::OutRoute,
     frame_callbacks: bool,
 ) -> bool {
     if !frame_callbacks {
         return false;
     }
-    let refresh = match graph.get(&p(&format!("out:{out}.refresh_hz"))) {
-        Ok(PropValue::F64(f)) => f,
-        Ok(PropValue::I64(i)) => i as f64,
-        _ => return false,
-    };
-    crate::redraw::shown_by(graph, &format!("lay:{out}:main"))
-        .iter()
-        .any(|s| {
-            host.scene(s).is_some_and(|sc| {
-                sc.clock_running()
-                    && sc.tick_hz() + 0.5 >= refresh
-                    && scene_gate_period(host, graph, s, out, true).is_none()
-            })
+    let refresh = route.refresh_hz;
+    route.shown.iter().any(|s| {
+        host.scene(s).is_some_and(|sc| {
+            sc.clock_running()
+                && sc.tick_hz() + 0.5 >= refresh
+                && scene_gate_period(host, s, route, true).is_none()
         })
+    })
 }
 
 impl Runtime {
@@ -1196,7 +1191,13 @@ impl Runtime {
     fn record_scene_envelopes(&mut self) {
         let Some(now) = log::mono_now() else { return };
         let ids = self.host.scene_ids();
-        for id in &ids {
+        self.record_scene_envelopes_of(ids.iter().map(String::as_str));
+        self.scene_envelopes.retain_live(&ids, now);
+    }
+
+    fn record_scene_envelopes_of<'a>(&mut self, ids: impl Iterator<Item = &'a str>) {
+        let Some(now) = log::mono_now() else { return };
+        for id in ids {
             if let Some(sc) = self.host.scene_mut(id) {
                 let env = sc.take_envelope();
                 if !env.is_empty() {
@@ -1204,7 +1205,6 @@ impl Runtime {
                 }
             }
         }
-        self.scene_envelopes.retain_live(&ids, now);
     }
 
     /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
@@ -1298,7 +1298,7 @@ impl Runtime {
         self.anim.retain_targets(alive);
         self.teardown_anim.retain_targets(alive);
         self.setting_anim.retain_targets(alive);
-        self.redraw.mark_nodes(&self.graph, &moved);
+        self.redraw.mark_nodes(self.routes.of(&self.graph), &moved);
         let done: Vec<_> = self
             .anim
             .finished()
@@ -1485,6 +1485,7 @@ impl Runtime {
             exclude.insert(pk.id.clone());
         }
         self.host.set_pause_exclusions(exclude);
+        self.synced_demand_rev = self.graph.demand_rev();
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);
         self.sync_wake_regs();
@@ -1696,8 +1697,12 @@ impl Runtime {
             }
             let owned = unsafe { OwnedFd::from_raw_fd(dup) };
             let src = Generic::new(owned, Interest::READ, Mode::Level);
-            match self.handle.insert_source(src, |_, _, rt: &mut Runtime| {
+            let woke: Rc<str> = Rc::from(id.as_str());
+            match self.handle.insert_source(src, move |_, _, rt: &mut Runtime| {
                 rt.wake_pending = true;
+                if !rt.woken.iter().any(|w| Rc::ptr_eq(w, &woke)) {
+                    rt.woken.push(woke.clone());
+                }
                 rt.stats.wakes += 1;
                 Ok(PostAction::Continue)
             }) {
@@ -1717,18 +1722,40 @@ impl Runtime {
 
     /// Update every source (render pending frames, never blocks), log + collect events.
     pub(crate) fn update_sources(&mut self) {
+        self.woken.clear();
         self.feed_visualisers();
         self.host.update(&self.gfx, &mut self.graph);
         self.record_scene_envelopes();
+        self.after_update(true);
+    }
+
+    /// F6b: a wake's update — only the sources whose wake fd fired (`woken`); the
+    /// per-source bookkeeping of every other source waits for the next tick.
+    fn update_woken_sources(&mut self) {
+        let woken = std::mem::take(&mut self.woken);
+        self.feed_visualisers_of(Some(&woken));
+        self.host.update_only(&self.gfx, &mut self.graph, &woken);
+        self.record_scene_envelopes_of(woken.iter().map(|w| &**w));
+        self.woken = woken;
+        self.woken.clear();
+        self.after_update(false);
+    }
+
+    /// What follows a source update: the redraw marks of the sources that changed, their
+    /// events (logged, queued for the recipes); `all` = a full pass (also forgets the
+    /// per-source state of sources that are gone).
+    fn after_update(&mut self, all: bool) {
         let changed = self.host.take_changed();
         // Phase 2 Task 8: a scene's new frame wakes each output at most at that output's
         // `eff(scene_fps, refresh)` (one worker serves every output showing it, D1).
-        let (host, graph) = (&self.host, &self.graph);
+        let host = &self.host;
         let callbacks = self.backend.kind() == "wayland";
-        self.redraw
-            .mark_shown_gated(graph, &changed, Instant::now(), |src, out| {
-                scene_gate_period(host, graph, src, out, callbacks)
-            });
+        self.redraw.mark_shown_gated(
+            self.routes.of(&self.graph),
+            &changed,
+            Instant::now(),
+            |src, _, route| scene_gate_period(host, src, route, callbacks),
+        );
         let mut errored = false;
         for (id, ev) in self.host.events() {
             let (kind, level, fields) = match &ev {
@@ -1768,10 +1795,12 @@ impl Runtime {
         if errored {
             self.snapshot_dirty();
         }
-        self.last_event
-            .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
-        self.fade_in
-            .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
+        if all {
+            self.last_event
+                .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
+            self.fade_in
+                .retain(|id, _| self.graph.kind_of(id) == Some(NodeKind::Source));
+        }
     }
 
     /// I6 (final review): resolve this iteration's held onsets — the runtime's own
@@ -2167,8 +2196,9 @@ impl Runtime {
             if !self.backend.frame_state(&o.name).is_some_and(|f| f.ready) {
                 continue;
             }
-            let animating = redraw::animating_on(&self.anim, now, &self.graph, &o.name)
-                || scene_paces_output(&self.host, &self.graph, &o.name, callbacks);
+            let route = self.routes.of(&self.graph).get(&o.name);
+            let animating = redraw::animating_on(&self.anim, now, route)
+                || route.is_some_and(|r| scene_paces_output(&self.host, r, callbacks));
             let stats = self
                 .frames
                 .entry(o.name.clone())
@@ -2289,17 +2319,34 @@ impl Runtime {
     /// at least one does; the last one gone drops it on a helper thread (its PipeWire thread
     /// is joined there, never on the loop).
     pub(crate) fn feed_visualisers(&mut self) {
-        let want: Vec<String> = self
-            .host
-            .scene_ids()
-            .into_iter()
-            .filter(|id| {
-                self.host
-                    .scene(id)
-                    .is_some_and(crate::sources::scene::SceneSource::wants_audio_input)
-            })
-            .collect();
+        self.feed_visualisers_of(None);
+    }
+
+    /// `only` = a wake's update (F6b): just those sources get the latest samples (the
+    /// monitor keeps running — the tick's full pass decides whether anyone still wants it).
+    fn feed_visualisers_of(&mut self, only: Option<&[Rc<str>]>) {
+        let wants = |id: &str| {
+            self.host
+                .scene(id)
+                .is_some_and(crate::sources::scene::SceneSource::wants_audio_input)
+        };
+        let want: Vec<String> = match only {
+            Some(ids) => ids
+                .iter()
+                .filter(|id| wants(id))
+                .map(|id| id.to_string())
+                .collect(),
+            None => self
+                .host
+                .scene_ids()
+                .into_iter()
+                .filter(|id| wants(id))
+                .collect(),
+        };
         if want.is_empty() {
+            if only.is_some() {
+                return;
+            }
             if let Some(m) = self.sysmon.take() {
                 let _ = std::thread::Builder::new()
                     .name("lia-sysmon-stop".into())
@@ -3985,10 +4032,14 @@ impl Runtime {
         let t = Instant::now();
         self.stats.iterations += 1;
         // Changes from handlers reach the sources promptly; mpv wakes update textures.
-        self.sync_sources();
+        if self.sync_due() {
+            self.sync_sources();
+        } else {
+            self.arm_gain_timer_if_needed();
+        }
         if self.wake_pending {
             self.wake_pending = false;
-            self.update_sources();
+            self.update_woken_sources();
         }
         self.advance_step();
         if self.capture.in_flight() > 0 {
@@ -4021,6 +4072,24 @@ impl Runtime {
         }
         self.tap.set_topics(self.server.topics());
         self.snapshot_maybe();
+    }
+
+    /// F6b: whether this iteration's `sync_sources` could do anything the tick's own (every
+    /// tick, at the highest refresh) wouldn't — a change to forward (a handler's `set`, a
+    /// recipe's step), a node created or destroyed or re-routed, an async open finished, a
+    /// low-VRAM stop/resume, a pause gate, a retire or a park in flight. Not on an iteration
+    /// that only brought a worker frame (each one is a wake) or a fast gain push (which
+    /// forwards its own changes): those `sync_sources` walked every source for nothing, and
+    /// each worker frame paid for every worker. The stepped clock always syncs.
+    fn sync_due(&self) -> bool {
+        self.stepped()
+            || self.graph.has_changes()
+            || self.graph.picture_rev() != self.snap.seen_rev
+            || self.graph.demand_rev() != self.synced_demand_rev
+            || self.host.sync_pending()
+            || !self.pause_gates.is_empty()
+            || !self.pending_destroy.is_empty()
+            || self.parked.as_ref().is_some_and(|pk| pk.settle_at.is_some())
     }
 
     fn has_more_input(&self) -> bool {
@@ -4315,6 +4384,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         last_event: BTreeMap::new(),
         wake_regs: BTreeMap::new(),
         wake_pending: false,
+        woken: Vec::new(),
+        synced_demand_rev: (0, 0),
         step: None,
         step_queue: VecDeque::new(),
         capture: crate::api::capture::Capturer::new(Arc::new(move || capture_ping.ping())),
@@ -4332,6 +4403,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         tap_dropped_seen: 0,
         started: Instant::now(),
         redraw: Redraw::new(),
+        routes: crate::redraw::Routes::default(),
         frames: BTreeMap::new(),
         audio,
         out_props: BTreeMap::new(),
