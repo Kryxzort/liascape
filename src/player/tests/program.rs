@@ -1814,6 +1814,58 @@ fn live_max_change_applies_next_tick() {
     assert_eq!(currents(&c)[1]["reason"], "max");
 }
 
+/// A rule edit that is already met (a maximum below the time played) while the clocks stand
+/// (a user pause) switches nothing: the switch waits for the resume. UI matrix `programHeld ×
+/// prog:maxPlay` — before, the program started its `max` switch under the pause (the picture
+/// frozen on A while `/current` and the UI already said B).
+#[test]
+fn live_max_edit_while_paused_waits_for_the_resume() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("lp_a", 10.0), clip("lp_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end"}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    step_for(&mut c, 50, 5000);
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    c.step(20);
+    let n = scheduled(&c).len();
+    let p0 = c.get("prog:main.played_ms").as_f64().unwrap();
+    c.ok("set", json!({"path": "prog:main.max_ms", "value": 4000}));
+    for _ in 0..50 {
+        c.step(20);
+    }
+    assert_eq!(scheduled(&c).len(), n, "a switch under the pause: {:?}", scheduled(&c));
+    assert_eq!(currents(&c).len(), 1, "the program moved under the pause");
+    close(c.get("prog:main.played_ms").as_f64().unwrap(), p0, 1.0, "played");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    step_until(&mut c, 16, 2000, "the max switch after the resume", n_currents(2));
+    assert_eq!(currents(&c)[1]["reason"], "max");
+}
+
+/// `can_prev` in the program's status tells whether `program.prev` would switch — counting a switch that is
+/// still on its way (the backend's `previous` must not lift a user pause for a no-op, and must not drop a real
+/// one: a `next` then a `previous` 250 ms apart).
+#[test]
+fn can_prev_counts_a_switch_on_its_way() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("cp_a", 10.0), clip("cp_b", 10.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 60000}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    assert_eq!(prog(&mut c)["can_prev"], json!(false), "at the first item");
+    verb(&mut c, "next", json!({}));
+    assert_eq!(prog(&mut c)["can_prev"], json!(true), "next requested, not started");
+    step_until(&mut c, 16, 3000, "the next", n_currents(2));
+    assert_eq!(prog(&mut c)["can_prev"], json!(true), "on the second item");
+    verb(&mut c, "prev", json!({}));
+    step_until(&mut c, 16, 3000, "the prev", n_currents(3));
+    assert_eq!(prog(&mut c)["can_prev"], json!(false), "back at the first item");
+}
+
 #[test]
 fn live_mode_toggle_keeps_played_time() {
     let Some(srv) = Serve::start() else { return };

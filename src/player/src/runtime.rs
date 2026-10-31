@@ -1344,6 +1344,7 @@ impl Runtime {
         }
         let parked = self.graph.ids_of(NodeKind::Output).is_empty();
         let active: Vec<CorrId> = self.tr.status().into_iter().map(|s| s.corr).collect();
+        let held = self.player_paused() || self.held();
         let cat = &self.cat;
         let acts = self.programs.tick(
             &mut self.graph,
@@ -1352,6 +1353,7 @@ impl Runtime {
             now,
             parked,
             &active,
+            held,
             &|id| cat.defaults(id),
         );
         self.run_program_actions(acts);

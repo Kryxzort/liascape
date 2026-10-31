@@ -34,6 +34,9 @@ SCENE='[sS]cene|vram|next:[sv]→[sv]'
 # keys while a slider is held (hooks/rangeDrag.ts) / numeric fields that snap on blur (components/NumInput.tsx)
 KEYS='keys:'
 NUM='num:|plTr'
+# Phase 3 Task 11 — programs at the seams: the cover Signal, the start choice, parked rotation, the expert tier, a backend
+# that comes and goes, the keybinds (program/ = the states programArmed / programHeld / coverHeld)
+PROG='program|cover|plStart|parked|expert|restart:backend|cli:'
 
 full=0; parts=()
 add() { parts+=("$1"); echo "  $2 → $1" >&2; }
@@ -43,7 +46,7 @@ for f in $FILES; do
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
-    src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET" "$f" ;;
+    src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET|cover|plStart|parked|expert" "$f" ;;
     src/backend/Helpers/AudioMonitor.cs) add "$AUTOMUTE" "$f" ;;
     src/backend/Helpers/AtomicFile.cs) add "race:|$LIB|$PL|$SET" "$f" ;;
     src/backend/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
@@ -53,13 +56,13 @@ for f in $FILES; do
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
-    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM" "$f" ;;
+    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
     # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
     app/ui/src/components/CardSettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
-    app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL" "$f" ;;
+    app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f" ;;
     app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx|\
@@ -90,6 +93,10 @@ print("FULL" if "FULL" in out or not out else "|".join(sorted(out)))
 ' "$f")
       if [ "$names" = FULL ] || [ -z "$names" ]; then full=1; echo "  $f → FULL (runner/oracle/helpers changed)" >&2
       else add "$names" "$f (cells in the diff)"; fi ;;
+    # the player's rotation program + the covered Signal, and the backend adapter that feeds the program: every rotation, every
+    # keybind, every user switch runs through them — the whole matrix (the PROG families alone would miss the plain cells)
+    src/player/src/recipes/program/*|src/player/src/signal/*|src/backend/Player/LiascapePlayerProgram.cs)
+      full=1; echo "  $f → FULL (the program / the Signals: all rotation runs in them; the $PROG cells above all)" >&2 ;;
     *) full=1; echo "  $f → FULL (central or unmapped)" >&2 ;;
   esac
 done

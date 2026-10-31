@@ -664,7 +664,9 @@ computed for the playing item at request time landed on whatever played when it 
   fresh, playing mpvpaper; a rotation keeps it. **A user switch while paused** (next / previous /
   random — keybind, CLI, `/next` `/prev` `/random`; owner's call 2026-10-25): `StayPausedWhenSwitching` off
   (default) → `BeforeUserSwitch` resumes first (`QueueNewSession` + the timed countdown via
-  `SetTimerPaused`), so it switches with its transition and plays — a paused playlist's tick used to
+  `SetTimerPaused`; **not for a `previous` that cannot happen** — liascape-player: the program's `can_prev` false, i.e. the
+  rotation's first item, `LiascapePlayerProgram.PrevIsNoOp` — that leaves the pause alone, matrix `programHeld × prog:previous`),
+  so it switches with its transition and plays — a paused playlist's tick used to
   hold the action until the resume, a single one already unpaused (`Apply`); on → the pause stays, the
   switch is a **cut** (`_keepPauseNextSwitch`, consumed by `SwitchToFile`; `Apply` then skips
   `QueueNewSession`) to B's first frame, paused, and the paused tick runs a pending

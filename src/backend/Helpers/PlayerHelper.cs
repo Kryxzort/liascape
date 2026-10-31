@@ -2826,6 +2826,9 @@ public static class PlayerHelper
 
     public static void PreviousWallpaper()
     {
+        // liascape-player: previous at the rotation's first item does nothing — and leaves a user pause alone (matrix
+        // `programHeld × prog:previous`; BeforeUserSwitch below would resume for a switch that cannot happen)
+        if (PlayerEngine.IsLiascapePlayer && IsTimedPlaylistActive() && LiascapePlayerProgram.PrevIsNoOp()) return;
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {

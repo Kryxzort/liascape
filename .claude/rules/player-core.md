@@ -1855,7 +1855,11 @@ source; the transition recipe stays the one place a switch happens. The contract
     mark (a crashed scene whitelisted: the backend is the authority); a shuffled `from: index` shuffles the rest of its
     cycle; `defaults` / item `props` reach the next B only. An edit never resets the play time.
   - **Pause, holds, parking** (Task 5): the clock is `Runtime::now`, so a user pause, the low-VRAM hold and the
-    cover hold (Task 6, `cover_hold_freezes_a_program`) stop play time and the countdown. Parked (no output, R60) the program's phase is `parked` and it follows
+    cover hold (Task 6, `cover_hold_freezes_a_program`) stop play time and the countdown — and **no rule starts a
+    switch under a hold** (Task 11: `Programs::tick(…, held)`; a timer / maximum / scenes-after rule an edit made true
+    meanwhile — a maximum below the time played — waits for the resume, `live_max_edit_while_paused_waits_for_the_resume`).
+    `state.programs[].can_prev` says whether `program.prev` would switch (counting a switch on its way), so the backend's
+    `previous` at the first item leaves a user pause alone. Parked (no output, R60) the program's phase is `parked` and it follows
     `while_parked` (O2, a Program prop, live): `rotate` (default — today's backend) keeps both clocks counting,
     timer/max/scenes-after switches go through `transition_parked` (each replaces the parked wallpaper and commits at
     once; no sooner than `PARKED_MIN_PLAY_MS` = 1 s after the last commit, so an image at minimum 0 can't switch

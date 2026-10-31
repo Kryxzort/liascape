@@ -309,6 +309,41 @@ Vulkan, for the surface); if the window shows and stays up, the GPU composites t
   a compositor SIGKILL → the restored scene green; "Default" → red live (the default sent), dropped from the index.
   `allowErr(e)` lets a control's own `source.error` through (crash, VRAM). `matrix-cells-for.sh`: the scene
   worker / `scene/` / `worker/` / `vram.rs` / their probes → the scene family. Fuzz excludes them (their fixtures).
+  **Program cells (Phase 3 Task 11).** Every rotation runs inside the player's `prog:main` (`state.programs[]`: `phase`,
+  `path`, `next`, `corr`, `played_ms`, `history_index`); the matrix's opt-in states and controls put the UI through the
+  seams a program adds. States: `programArmed` (advance-on-end over k1..k4, k1 = 30 s, minimum 60 s: a switch armed for
+  k1's end that nothing reaches during a cell), `programHeld` (the `pending` program — k4 → k1 → k2 — user-paused at ≥ 2.5 s
+  of play: its clocks stand), `coverHeld` (a timed playlist with a fullscreen window over EVERY output, the hold engaged).
+  `afterControl` runs **`progCheck`** for them (the program exists, `prog:main.path` = `/current`, an armed switch goes where
+  `prog:main.next` says, phase `armed`); a control with `progOnly` also fails on any switch whose `origin` isn't
+  `program:*`. Cells: `programArmed × plTr* | plShuffle | playlistBarRemove:other | trash:other | restart:backend`
+  (an edit under the armed switch re-arms it to the bar's next; a backend killed and restarted under it leaves the program
+  alone — same item/corr, play time only grows, no switch requested by anyone — and the page resyncs to it);
+  `programHeld × prog:next|previous|random|trash:shown` (the user switch resumes the pause and goes through the program's own
+  verbs; `previous` at the first item does nothing and **leaves the pause alone**) and `prog:minPlay|maxPlay` (a limit edited
+  while held: saved, nothing switches, the play time stands; a maximum below the time played switches at the user's resume);
+  `coverHeld × cover:pause|pauseResume|next|volume|mute` (a user pause/mute/volume/switch through the hold: the user's pause
+  survives the cover leaving, the hold survives a user switch, B shows once the cover leaves).
+  **The covered Signal** is driven with `headless.cover {output|"*", state}` (what Hyprland/Sway/wlr-ft report on Wayland;
+  `reset()` uncovers): `cover:fullscreen` (single/playlist/effect/pending: engages ≥ 250 ms after, `player.cover_hold_active`,
+  every source `effective_paused`, the pause ramp down, `player.paused` never written, `time_pos` / effect `progress` /
+  the program's `played_ms` frozen, all back on release — an armed B is node-paused by design and not counted),
+  `cover:oneOfTwo`, `cover:modeLive` (Settings → "Pause when covered": fullscreen-only ignores a maximized window, Off
+  releases at once, the default counts both), `cover:default` (settings file without the key → backend restart → first
+  switch → `maximized` on the player → a maximized cover holds). **Playlist start** (`plStart:*`): `change` (choosing in the
+  modal never moves the current play, `prog:main.start_mode` live), `global` (Settings select, the "takes effect the next time"
+  hint), `startOver|resume : playAgain|stopPlay|ABA` (Play on the playing playlist; next → Stop → Play; Load/Play A → next →
+  Load/Play B → Load/Play A through the real modals — start over = A's first item, resume = where A was left).
+  **`parked:rotate|hold`** (both outputs removed on a playlist, 3 s interval: rotating invisibly by default — 2–4 `parked`
+  switches in 9.5 s, origin `program:*`, the last target shown when the outputs return; the expert "Hold until a monitor
+  returns" chosen in the UI: no switch, `played_ms` stands, the same item back). **`expert:toggle`** (idle/playlist: hidden by
+  default → toggle on → tagged row → "Hold" saved and `prog:main.while_parked` hold live → toggle off: group gone, value kept,
+  deviated marker → the marker's reset; the pure-UI cases incl. a reload stay in `probe-expert.js`). **`cli:next:backendDown`**
+  (playlist: backend stopped, two `liascape next` processes at once reach the program: it lands two items on, no switch
+  from a non-program origin, the new backend reports it). Fuzz excludes all of them (their fixtures); its keybind wait is now
+  "the program took it" (`keybindTaken`: a `program.current` since the step began, or `prog:main.path` moved) — the
+  `pending_action.txt` wait is gone with the file. `matrix-cells-for.sh`: `recipes/program/`, `signal/`, `LiascapePlayerProgram.cs`
+  → FULL; the Settings / playlist modal / AppSettings files add the `cover|plStart|parked|expert` families.
 
 ## Rotation rows (redesigned 2026-10-28)
 Settings → Rotation: "Switch when video ends", then ONE interval row — **"Switch every"** while it's off (a plain

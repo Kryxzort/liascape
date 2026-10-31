@@ -380,6 +380,25 @@ public static class LiascapePlayerProgram
         lock (_lock) { _model = null; _paths = null; _exists = false; _path = null; _index = -1; _wantKey = null; _sentItems = _sentDefaults = null; }
     }
 
+    // `previous` at the session's first item has nothing before it (the player's `can_prev` false — it counts a switch still on its
+    // way, so a `next` then a `previous` a moment later is not a no-op): the keybind must not lift a user pause
+    // (BeforeUserSwitch resumes first) for a switch that cannot happen. False when it can't tell.
+    public static bool PrevIsNoOp()
+    {
+        var client = C;
+        if (!PlayerEngine.IsLiascapePlayer || !client.SocketExists) return false;
+        try
+        {
+            var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
+            if (st.TryGetProperty("programs", out var progs) && progs.ValueKind == JsonValueKind.Array)
+                foreach (var pr in progs.EnumerateArray())
+                    if (Str(pr, "id") == Id && pr.TryGetProperty("can_prev", out var cp) && cp.ValueKind == JsonValueKind.False)
+                        return true;
+        }
+        catch (LiascapePlayerException) { }
+        return false;
+    }
+
     // ---- user switches (thin verbs; essential — a keybind's intent) -------------------------------------------
     public static void Next(bool keepPause) => Verb("next", keepPause);
     public static void Prev(bool keepPause) => Verb("prev", keepPause);

@@ -45,7 +45,8 @@
 #   last-step-only (trash without undo, plShuffle, the 4–8 s interval changers, the -keep / volume-key-mode variants —
 #   what they leave, the later controls' expectations can't follow), or gated on the starting value their drive/check
 #   assumes. Expectations (paused / muted) carry across steps through every control's exp / flipPause / flipMute.
-#   A step also waits for the page's requests and a queued keybind (pending_action.txt) — one never taken FAILs — and
+#   A step also waits for the page's requests and a keybind switch the program must take (a `program.current` since the step
+#   began, or prog:main.path moved; pending_action.txt is gone under liascape-player) — one never taken FAILs — and
 #   lets an advance-on-end switch that fired on its own land (its control's own check is then skipped: "rotated").
 #   --seed: the PRNG seed (default: random, printed); a run's picks depend only on (seed, run index), not on --jobs.
 #   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that

@@ -68,7 +68,7 @@ function subscribe() {
   const s = net.createConnection(E.LIASCAPE_PLAYER_SOCKET);
   s.setEncoding("utf8"); let buf = "";
   s.on("connect", () => s.write(JSON.stringify({ id: 1, cmd: "subscribe", args: { topics: [
-    "transition.", "source.error", "source.rejected", "anim.dropped", "output.", "supervisor.", "player.", "snapshot.invalid"] } }) + "\n"));
+    "transition.", "program.", "source.error", "source.rejected", "anim.dropped", "output.", "supervisor.", "player.", "snapshot.invalid"] } }) + "\n"));
   s.on("data", (d) => {
     buf += d; let i;
     while ((i = buf.indexOf("\n")) >= 0) {
@@ -279,6 +279,7 @@ async function reset(pl) {
   await post("/mute", { user: true, value: false });
   while (((await http("GET", "/library/undo-depth")).json?.depth ?? 0) > 0) await post("/library/undo");
   await post("/settings", BASE_SETTINGS);
+  await cover("none").catch(() => {}); // the fake cover source outlives a cell
   resetScenes();
   for (const p of K) { await post("/library/volume", { path: p, intValue: null }); await post("/library/speed", { path: p, doubleValue: null }); }
   await post("/playlist/state", { videoPaths: pl?.paths ?? [K[0], K[1], K[2]], settings: pl?.settings ?? PS(), name: null });
@@ -329,6 +330,12 @@ function sceneShown(c, p) {
 
 // advance-on-end with no minimum (the interval field IS the minimum there): k4's switch is armed for its end at once
 const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
+// Phase 3 Task 11 helpers: the player's rotation program (`prog:main`, state.programs[]) and the covered Signal's fake source
+const progOf = (st) => (st.programs || []).find((p) => p.id === "prog:main") ?? (st.programs || [])[0] ?? null;
+const cover = (state, out = "*") => ctl.call("headless.cover", { output: out, state });
+const heldNow = async () => (await ctl.call("get", { path: "player.cover_hold_active" }).catch(() => ({}))).value === true;
+// advance-on-end over all four clips, no minimum (k1, 30 s, is on screen: its switch to k2 waits for its end)
+const PROG_ARMED = () => ({ paths: [K[0], K[1], K[2], K[3]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
 const STATES = {
   // roles: which item is on screen (`shown`) and which other item is live in the state (`other`: the
   // incoming B of an effect, the pending B of an end-wait) or, with nothing else live, an off-screen one
@@ -386,6 +393,22 @@ const STATES = {
   sceneSGlobal: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS({ overrideGlobalSettings: false }) }),
     async pre() { await scenesOn({ globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
     async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS({ overrideGlobalSettings: false })); } },
+  // Phase 3 Task 11 — programs at the seams (opt-in; `prog`: afterControl also checks the player's program against /current
+  // and the armed switch). All rotation runs inside the player's `prog:main` now.
+  // an advance-on-end program armed for the end of k1 (30 s: the cells have time, a backend restart too) over [k1..k4]
+  programArmed: { optIn: true, prog: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => PROG_ARMED(),
+    async enter(c) { c.playlist = true; c.fresh = true; await post("/playlist/play", PROG_ARMED());
+      c.ok = (await waitSettled(12000, K[0])) && (await waitFor(async () => (await live()).some((t) => t.phase === "waiting_start"), 8000, 50));
+      c.pending = true; } },
+  // the `pending` program (k4 10 s → k1 → k2), user-paused once it played 2.5 s: its clocks stand still
+  programHeld: { optIn: true, prog: true, exp: { paused: true }, roles: () => [K[3], K[0]], playlist: PENDING_PL,
+    async enter(c) { await STATES.pending.enter(c); if (c.ok === false) return;
+      c.ok = await waitFor(async () => (progOf(await ctl.call("state"))?.played_ms ?? 0) >= 2500, 9000, 100);
+      if (c.ok) await post("/pause"); } },
+  // a running timed playlist, every output covered by a fullscreen window and the cover hold engaged
+  coverHeld: { optIn: true, prog: true, exp: { paused: false }, roles: () => [K[0], K[1]],
+    async enter(c) { await STATES.playlist.enter(c); if (c.ok === false) return;
+      await cover("fullscreen"); c.ok = await waitFor(heldNow, 4000, 50); c.covered = true; } },
 };
 
 // ---------------------------------------------------------------- controls
@@ -913,7 +936,7 @@ C["plAdvanceRelabel"] = { states: ["playlist"], async run(c) {
     return v;
   } };
 // order → Shuffle: no switch now; the session keeps what plays; an armed switch still goes to a playlist item
-C["plShuffle"] = { states: ["playlist", "pending"], async run(c) {
+C["plShuffle"] = { states: ["playlist", "pending", "programArmed"], async run(c) {
     await ui(`${plOpen} m.click(m.byText(".pl-modal .segbtn", "Shuffle"), "Shuffle"); ${plClose}`); await sleep(900);
   }, check(c) {
     const v = [...noSwitchNow(c), ...keptShown(c)];
@@ -943,7 +966,7 @@ const TR = {
 const fmtSw = (e) => (e ? `${TITLE(e.path)} effect ${e.effect_id} ${e.duration_ms} ms align ${e.align}` : "none");
 for (const [k, tr] of Object.entries(TR)) {
   const drive = `${plOpen} ${trOpen} ${tr.drive} ${trDone} ${plClose}`;
-  C[`plTr${k}`] = { states: ["pending"], async run(c) { await ui(drive); await sleep(900); },
+  C[`plTr${k}`] = { states: ["pending", "programArmed"], async run(c) { await ui(drive); await sleep(900); },
     check(c) {
       const v = [...armedCheck(c)];
       if (!tr.saved(c.after.ps?.settings)) v.push(`playlist settings didn't take the change (${JSON.stringify({ en: c.after.ps?.settings?.transitionEnabled, ms: c.after.ps?.settings?.transitionDurationMs, ids: c.after.ps?.settings?.transitionEffectIds })})`);
@@ -2445,6 +2468,10 @@ async function dropK5() {
   if (it) await post("/library/delete", it);
 }
 C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run(c) {
+    // programArmed: the playlist bar on disk stays as it is (the program's items are the bar; rewriting it under a running
+    // program is another cell's business) — the new backend must leave the armed program alone and the page resync to it
+    c.prog0 = STATES[c.state].prog ? progOf(c.before.st) : null;
+    c.wantBar = c.prog0 ? (c.before.ps?.videoPaths || []).map(TITLE) : ["k3", "k1"];
     const wantTitles = [...(await libTitles()), "k5"].sort();
     await stopBackend(3000);
     try {
@@ -2452,19 +2479,30 @@ C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run
       // added, the thumbnail aspect flipped, the playlist bar rewritten
       fs.mkdirSync(path.dirname(K5()), { recursive: true }); fs.copyFileSync(K[3], K5());
       editJson(path.join(CFG, "settings.json"), (s) => { const k = keyIn(s, "thumbnailAspect"); c.aspect = (s[k] ?? "1:1") === "16:9" ? "1:1" : "16:9"; s[k] = c.aspect; });
-      editJson(path.join(CFG, "playlist_state.json"), (p) => { p[keyIn(p, "videoPaths")] = [K[2], K[0]]; });
+      if (!c.prog0) editJson(path.join(CFG, "playlist_state.json"), (p) => { p[keyIn(p, "videoPaths")] = [K[2], K[0]]; });
       await sleep(500);
       c.up = await startBackend();
       c.firstLib = await libTitles(); // the new backend's first /library: whole, never an empty list while it loads
       c.recovered = await waitFor(async () => { const d = (c.page = await pageData());
-        return JSON.stringify(d.cards) === JSON.stringify(wantTitles) && JSON.stringify(d.playlistBar) === '["k3","k1"]' && d.aspect === ASPECT_CSS[c.aspect]; }, 12000, 200);
-      c.want = { cards: wantTitles, playlistBar: ["k3", "k1"], aspect: ASPECT_CSS[c.aspect] };
+        return JSON.stringify(d.cards) === JSON.stringify(wantTitles) && JSON.stringify(d.playlistBar) === JSON.stringify(c.wantBar) && d.aspect === ASPECT_CSS[c.aspect]; }, 12000, 200);
+      c.want = { cards: wantTitles, playlistBar: c.wantBar, aspect: ASPECT_CSS[c.aspect] };
     } finally { await dropK5(); }
   }, check(c) {
     const v = [];
     if (!c.up) v.push("the restarted backend didn't answer /health");
     if (JSON.stringify(c.firstLib) !== JSON.stringify(c.want?.cards)) v.push(`the restarted backend's first /library: ${JSON.stringify(c.firstLib)}, expected ${JSON.stringify(c.want?.cards)}`);
     if (!c.recovered) v.push(`the open page didn't take the restarted backend's data within 12 s (no reload): shows ${JSON.stringify(c.page)}, expected ${JSON.stringify(c.want)}`);
+    if (c.prog0) {
+      // an armed program rides out the backend: the same item, the same armed switch, a play time that kept counting, and no
+      // switch requested by anybody (noSwitch) — the page then shows what prog:main plays
+      const p1 = progOf(c.after.st);
+      if (!p1) v.push("the player's program is gone after the backend restart");
+      else {
+        if (p1.path !== c.prog0.path) v.push(`prog:main moved ${TITLE(c.prog0.path)} → ${TITLE(p1.path)} across the backend restart`);
+        if (p1.played_ms < c.prog0.played_ms) v.push(`prog:main's play time ${c.prog0.played_ms} → ${p1.played_ms} ms across the backend restart (must only grow)`);
+        if (p1.corr !== c.prog0.corr) v.push(`the armed switch was replaced across the backend restart (${c.prog0.corr} → ${p1.corr})`);
+      }
+    }
     return v;
   } };
 // the page's first /library in flight when the backend dies (held at the request, the backend SIGKILLed, then let go):
@@ -2603,6 +2641,466 @@ C["sceneProp:reset"] = { states: ["scene"],
     return [...v, ...samePid(c, SC[0])];
   } };
 
+// ================================================================ Phase 3 Task 11 — programs at the seams
+// Every rotation runs inside the player's `prog:main` (state.programs[]); the backend only feeds it. These cells put the UI
+// through the seams a program adds: its clocks standing still (a user pause, the cover hold, no monitor), an armed
+// switch under edits, a backend that comes and goes, the start choice, the expert tier. The Signal's fake source is
+// `headless.cover` (what Hyprland/Sway/wlr-ft report on Wayland); the stack's baseline settings never name
+// PauseWhenCovered (default `maximized`).
+async function coverFacts() {
+  const srcs = (await ctl.call("probe", { name: "sources" }).catch(() => ({}))).sources || [];
+  const st = await ctl.call("state");
+  return { hold: await heldNow(), paused: (await ctl.call("get", { path: "player.paused" })).value === true, n: srcs.length, st,
+    // `live`: not paused by its own node (an armed B waits paused by design — its pause ramp stays up, it plays at the handoff)
+    eff: srcs.map((s) => s.effective_paused), live: srcs.map((s) => s.paused !== true), gp: srcs.map((s) => s.gains?.pause),
+    pos: Object.fromEntries(srcs.map((s) => [s.id, s.time_pos])),
+    fx: Object.entries(st.graph).filter(([, n]) => n && n.effect_id !== undefined).map(([id, n]) => [id, n.progress]), prog: progOf(st) };
+}
+const allEff = (f, want) => f.n > 0 && f.eff.every((e, i) => (want ? e === true : !f.live[i] || e === false));
+const livePause = (f) => f.gp.filter((_, i) => f.live[i]);
+const posMoved = (a, b) => Object.keys(a).some((id) => id in b && typeof a[id] === "number" && typeof b[id] === "number" && Math.abs(b[id] - a[id]) > 0.15);
+const fxMoved = (a, b) => a.fx.some(([id, p]) => b.fx.some(([id2, p2]) => id === id2 && p !== p2));
+const playedOf = (f) => f.prog?.played_ms;
+// what a covered, held player looks like (f), as the Rust tests assert it: the user's pause never written, every source
+// effectively paused with its pause ramp down
+function heldFacts(f, what) {
+  const v = [];
+  if (!f.hold) v.push(`${what}: player.cover_hold_active is false`);
+  if (!allEff(f, true)) v.push(`${what}: sources not all effective_paused ${JSON.stringify(f.eff)}`);
+  if (livePause(f).some((g) => !(g <= -60))) v.push(`${what}: gain.pause ${JSON.stringify(f.gp)} (the pause ramp should be down)`);
+  return v;
+}
+function liveFacts(f, what) {
+  const v = [];
+  if (f.hold) v.push(`${what}: player.cover_hold_active is still true`);
+  if (!allEff(f, false)) v.push(`${what}: sources effective_paused ${JSON.stringify(f.eff)}`);
+  if (livePause(f).some((g) => !(g >= -1))) v.push(`${what}: gain.pause ${JSON.stringify(f.gp)} (the pause ramp should be back up)`);
+  return v;
+}
+async function uncover(c, key = "fEnd") {
+  await cover("none"); c.released = await waitFor(async () => !(await heldNow()), 3000, 25);
+  await sleep(800); c[key] = await coverFacts();
+}
+
+// --- cover:* — a window over the wallpaper pauses it (mode maximized by default), through every state that plays
+const COVER_STATES = ["single", "playlist", "effect", "pending"];
+C["cover:fullscreen"] = { states: COVER_STATES, noSwitch: true, async run(c) {
+    c.f0 = await coverFacts();
+    await cover("fullscreen"); c.t0 = Date.now();
+    c.engaged = await waitFor(heldNow, 3000, 25); c.engMs = Date.now() - c.t0;
+    await sleep(400); c.f1 = await coverFacts(); await sleep(1000); c.f2 = await coverFacts();
+    await uncover(c, "f3");
+    await waitSettled(10000); c.mid = false;
+  }, check(c) {
+    if (!c.engaged) return ["no cover hold within 3 s of a fullscreen window over every output (mode maximized)"];
+    const v = [];
+    if (c.engMs < 250) v.push(`the hold engaged after ${c.engMs} ms, under the 300 ms debounce`);
+    v.push(...liveFacts(c.f0, "before the cover"), ...heldFacts(c.f1, "covered"));
+    if (c.f1.paused || c.f2.paused) v.push("the cover wrote the user's pause (player.paused true)");
+    if (posMoved(c.f1.pos, c.f2.pos)) v.push(`a source kept playing under the cover (${JSON.stringify(c.f1.pos)} → ${JSON.stringify(c.f2.pos)})`);
+    if (fxMoved(c.f1, c.f2)) v.push(`the running effect moved under the cover (${JSON.stringify(c.f1.fx)} → ${JSON.stringify(c.f2.fx)})`);
+    if (c.f1.prog && Math.abs(playedOf(c.f2) - playedOf(c.f1)) > 120) v.push(`the program's play time ran under the cover (${playedOf(c.f1)} → ${playedOf(c.f2)} ms)`);
+    if (!c.released) v.push("the hold didn't release within 3 s of the window leaving");
+    v.push(...liveFacts(c.f3, "uncovered"));
+    if (!posMoved(c.f2.pos, c.f3.pos)) v.push("the picture didn't move again after the cover left");
+    if (c.f3.prog && !(playedOf(c.f3) > playedOf(c.f2) + 300)) v.push(`the program's play time stayed (${playedOf(c.f2)} → ${playedOf(c.f3)} ms) after the cover left`);
+    if (c.state === "effect" && c.after.st.transitions?.some((t) => t.phase === "running")) v.push("the effect never finished after the cover left");
+    return v;
+  } };
+// one covered output of two keeps the wallpaper playing; both pause it; one leaving releases it
+C["cover:oneOfTwo"] = { states: ["playlist"], noSwitch: true, async run(c) {
+    await cover("fullscreen", "VIRTUAL-1"); await sleep(1100); c.one = await coverFacts();
+    await cover("fullscreen", "VIRTUAL-2"); c.both = await waitFor(heldNow, 3000, 25); await sleep(300); c.fBoth = await coverFacts();
+    await cover("none", "VIRTUAL-2"); c.rel = await waitFor(async () => !(await heldNow()), 3000, 25); await sleep(500); c.fOne = await coverFacts();
+    await cover("none"); await sleep(300);
+  }, check(c) {
+    const v = [];
+    if (c.one.hold || !allEff(c.one, false)) v.push(`one output of two covered: hold ${c.one.hold}, effective_paused ${JSON.stringify(c.one.eff)} (the wallpaper is still visible)`);
+    if (!c.both) v.push("both outputs covered: no hold");
+    else v.push(...heldFacts(c.fBoth, "both covered"));
+    if (!c.rel) v.push("one output uncovered: the hold stayed"); else v.push(...liveFacts(c.fOne, "one uncovered"));
+    return v;
+  } };
+// the setting live from the UI: fullscreen-only ignores a maximized window; Off releases at once; the default counts both
+C["cover:modeLive"] = { states: ["playlist"], noSwitch: true, async run(c) {
+    const pick = (opt) => ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Pause when covered"); i++) await m.sleep(100); await m.sleep(300); await m.select("Pause when covered", ${JSON.stringify(opt)}); await m.sleep(400);`);
+    await pick("A fullscreen window");
+    c.saved = await waitFor(async () => (await getSettings()).pauseWhenCovered === "fullscreen", 4000);
+    await cover("maximized"); await sleep(1100); c.maxIgnored = !(await heldNow());
+    await cover("fullscreen"); c.fsHeld = await waitFor(heldNow, 3000, 25);
+    await pick("Off"); c.offRel = await waitFor(async () => !(await heldNow()), 3000, 25);
+    await pick("A fullscreen or maximized window");
+    await cover("maximized"); c.maxHeld = await waitFor(heldNow, 3000, 25);
+    await cover("none"); c.rel = await waitFor(async () => !(await heldNow()), 3000, 25);
+    await sleep(500); c.fEnd = await coverFacts();
+  }, check(c) {
+    const v = [];
+    if (!c.saved) v.push("pauseWhenCovered not saved as fullscreen");
+    if (!c.maxIgnored) v.push("mode fullscreen: a maximized window held the wallpaper");
+    if (!c.fsHeld) v.push("mode fullscreen: a fullscreen window didn't hold it");
+    if (!c.offRel) v.push("switching the mode to Off while covered didn't release the hold (settings apply live)");
+    if (!c.maxHeld) v.push("mode maximized: a maximized window didn't hold the wallpaper");
+    if (!c.rel) v.push("the window leaving didn't release the hold");
+    return [...v, ...liveFacts(c.fEnd, "end")];
+  } };
+// a fresh settings file (no PauseWhenCovered key) pauses on a maximized cover: the backend's default asserted onto a player
+// whose prop was off — after a backend restart and the first switch (a new backend asserts its settings per player process)
+C["cover:default"] = { states: ["single"], noSwitch: false, async run(c) {
+    await ctl.call("set", { path: "player.pause_when_covered", value: "off" });
+    await win.loadURL("about:blank"); await stopBackend(3000);
+    editJson(path.join(CFG, "settings.json"), (s) => { delete s[keyIn(s, "pauseWhenCovered")]; c.hadKey = Object.keys(s).some((k) => k.toLowerCase() === "pausewhencovered"); });
+    c.up = await startBackend();
+    await post("/apply", { path: K[2] }); await waitSettled(10000, K[2]);
+    c.setting = (await getSettings()).pauseWhenCovered;
+    c.prop = await waitFor(async () => (await pget("player.pause_when_covered")) === "maximized", 5000, 100);
+    await loadUi();
+    await cover("maximized"); c.engaged = await waitFor(heldNow, 3000, 25); await sleep(300); c.f1 = await coverFacts();
+    await uncover(c);
+  }, check(c) {
+    const v = [];
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (c.hadKey) v.push("the settings file still names pauseWhenCovered (the cell's fixture failed)");
+    if (c.setting !== "maximized") v.push(`a settings file without PauseWhenCovered reads ${JSON.stringify(c.setting)}, expected maximized`);
+    if (!c.prop) v.push("the player's pause_when_covered never became maximized after the new backend's first switch");
+    if (!c.engaged) v.push("a maximized window over every output didn't hold the wallpaper with the default settings");
+    else v.push(...heldFacts(c.f1, "covered by default"));
+    return [...v, ...liveFacts(c.fEnd, "uncovered")];
+  } };
+
+// --- coverHeld: a playlist already held by the cover; the user's controls go through it
+// user pause during the hold: the hold ends, the pause stays; the user's resume plays
+C["cover:pause"] = { states: ["coverHeld"], noSwitch: true, async run(c) {
+    c.f0 = await coverFacts();
+    await cliStep(c, "toggle-pause"); await sleep(700); c.f1 = await coverFacts();
+    await uncover(c, "f2");
+    await cliStep(c, "toggle-pause"); await sleep(1000); c.f3 = await coverFacts();
+  }, check(c) {
+    const v = [...heldFacts(c.f0, "covered")];
+    if (!c.f1.paused) v.push("the user's pause while covered didn't set player.paused");
+    v.push(...heldFacts(c.f1, "paused while covered"));
+    if (!c.f2.paused) v.push("the user's pause was lost when the cover left (player.paused false)");
+    if (!allEff(c.f2, true)) v.push(`cover left: sources should stay paused by the user's pause ${JSON.stringify(c.f2.eff)}`);
+    if (c.f2.hold) v.push("the cover hold is still active after the window left");
+    if (c.f3.paused || !allEff(c.f3, false) || c.f3.hold) v.push(`the user's resume didn't play: paused ${c.f3.paused}, effective ${JSON.stringify(c.f3.eff)}`);
+    if (!posMoved(c.f2.pos, c.f3.pos)) v.push("the picture didn't move after the user's resume");
+    return v;
+  } };
+// pause then resume while still covered: the cover keeps holding; the window leaving then plays
+C["cover:pauseResume"] = { states: ["coverHeld"], noSwitch: true, async run(c) {
+    await cliStep(c, "toggle-pause"); await sleep(500); c.f1 = await coverFacts();
+    await cliStep(c, "toggle-pause"); await sleep(800); c.f2 = await coverFacts();
+    await uncover(c, "f3");
+  }, check(c) {
+    const v = [];
+    if (!c.f1.paused) v.push("pause while covered: player.paused false");
+    if (c.f2.paused) v.push("resume while covered: player.paused still true");
+    v.push(...heldFacts(c.f2, "resumed but still covered"));
+    return [...v, ...liveFacts(c.f3, "cover left")];
+  } };
+// a user switch under the cover: the hold stays (a switch is not a window leaving); B shows once the cover leaves
+C["cover:next"] = { states: ["coverHeld"], async run(c) {
+    c.want = succ(c.before.ps?.videoPaths, c.before.cur?.path);
+    c.f0 = await coverFacts();
+    await cliStep(c, "next"); await sleep(1500); c.f1 = await coverFacts();
+    c.cur1 = (await http("GET", "/current")).json?.path;
+    await uncover(c, "f2");
+    await waitSettled(10000);
+  }, check(c) {
+    const v = [...heldFacts(c.f0, "covered")];
+    if (!c.f1.hold) v.push("a next under the cover lifted the hold");
+    if (!c.cli || c.cli.code !== 0) v.push("next failed");
+    if (c.cur1 !== c.want) v.push(`/current ${TITLE(c.cur1)} 1.5 s after next under the cover, expected ${TITLE(c.want)}`);
+    v.push(...expectShown(c, c.want, { effect: true }), ...liveFacts(c.f2, "cover left"));
+    if (!c.after.st.programs?.[0] || progOf(c.after.st).path !== c.want) v.push(`prog:main is on ${TITLE(progOf(c.after.st)?.path)}, expected ${TITLE(c.want)}`);
+    return v;
+  } };
+// the volume slider under the cover: applied to the held sources at once (the oracle checks gain.user), the hold unchanged
+C["cover:volume"] = { states: ["coverHeld"], noSwitch: true, async run(c) {
+    await ui(`m.tab("Settings"); await m.sleep(500); m.setValue(m.input("Volume"), 55, "Volume");`); await sleep(1000);
+    c.f1 = await coverFacts();
+    await uncover(c);
+  }, check(c) {
+    const v = [...heldFacts(c.f1, "volume changed under the cover")];
+    if (c.after.s.volume !== 55) v.push(`settings.volume ${c.after.s.volume}, expected 55`);
+    return [...v, ...liveFacts(c.fEnd, "cover left")];
+  } };
+// mute under the cover: muted at once, still muted when the cover leaves
+C["cover:mute"] = { states: ["coverHeld"], flipMute: true, noSwitch: true, async run(c) {
+    await cliStep(c, "toggle-mute"); await sleep(600); c.f1 = await coverFacts();
+    await uncover(c);
+  }, check(c) {
+    const v = [...heldFacts(c.f1, "muted under the cover")];
+    if (!fs.existsSync(E.LIASCAPE_USER_MUTE)) v.push("the user mute isn't on");
+    return [...v, ...liveFacts(c.fEnd, "cover left")];
+  } };
+
+// --- programHeld: the pending program (k4 → k1 → k2) paused by the user at ≥ 2.5 s of play: its clocks stand still
+// user switches from the hold resume it (I1) and go through the program's own verbs
+for (const a of ["next", "previous", "random"]) C[`prog:${a}`] = { ...C[`cli:${a}`], states: ["programHeld"], progOnly: true };
+C["prog:trash:shown"] = { ...C["trash:shown"], states: ["programHeld"] };
+const holdNoSwitch = (c) => c.evs.filter((e) => e.event === "transition.scheduled" && e.align !== "end").map((e) => `a switch was requested while held (to ${TITLE(e.path)}, align ${e.align})`);
+const sameClock = (c) => {
+  const a = progOf(c.before.st), b = progOf(c.after.st), v = [];
+  if (!a || !b) return ["no program"];
+  if (Math.abs(b.played_ms - a.played_ms) > 200) v.push(`the held program's play time moved ${a.played_ms} → ${b.played_ms} ms`);
+  if (b.path !== a.path) v.push(`the held program moved ${TITLE(a.path)} → ${TITLE(b.path)}`);
+  return v;
+};
+// a new minimum while held: saved, nothing switches, the clocks stand
+C["prog:minPlay"] = { states: ["programHeld"], rearms: true, async run(c) {
+    await ui(limitDrive("playlist", "minimum", 15)); c.tChange = Date.now(); await sleep(3000);
+  }, check: (c) => [...limitSaved(c, "playlist", "intervalSeconds", 15), ...holdNoSwitch(c), ...sameClock(c)] };
+// a maximum below the time already played, while held: nothing now; the user's resume then switches at once (the program
+// saw the new maximum while its clock stood)
+C["prog:maxPlay"] = { states: ["programHeld"], rearms: true, switch: true, async run(c) {
+    await ui(limitDrive("playlist", "maximum", 2)); c.tChange = Date.now(); await sleep(3500);
+    c.heldEvs = events.filter((e) => e._t >= c.tChange && e.event === "transition.scheduled" && e.align !== "end").length;
+    c.held = await coverFacts();
+    c.exp.paused = false; await cliStep(c, "toggle-pause"); c.tResume = Date.now();
+    c.sw = await waitFor(async () => events.some((e) => e._t >= c.tResume - 200 && e.event === "transition.scheduled" && e.path === K[0] && e.align !== "end"), 6000, 100);
+  }, check(c) {
+    const v = limitSaved(c, "playlist", "maxPlaySeconds", 2);
+    if (c.heldEvs) v.push(`${c.heldEvs} switch(es) requested while the program was held`);
+    if (!c.held.paused) v.push("the user's pause was lifted by editing the maximum");
+    if (Math.abs((playedOf(c.held) ?? 0) - (progOf(c.before.st)?.played_ms ?? 0)) > 200) v.push(`the held play time moved ${progOf(c.before.st)?.played_ms} → ${playedOf(c.held)} ms`);
+    if (!c.sw) v.push("resuming past the new maximum didn't switch to k1 within 6 s");
+    return v;
+  } };
+
+// --- programArmed: an edit under the armed switch keeps prog:main's next on the playlist bar's next (afterControl's progCheck).
+// The existing edit cells also run there (an opt-in state is only entered by the controls that list it): the transition picker's
+// effect (plTrEffect), the order (plShuffle), the incoming B removed from the playlist bar, and the incoming B trashed
+const alsoIn = (name, st) => { C[name].states = [...(C[name].states ?? Object.keys(STATES).filter((n) => !STATES[n].optIn)), st]; };
+alsoIn("playlistBarRemove:other", "programArmed");
+alsoIn("trash:other", "programArmed");
+alsoIn("restart:backend", "programArmed");
+
+// --- plStart: "When the playlist starts again" (§ Playlist start)
+const START_LABEL = { start_over: "Start over", resume: "Resume where it left off" };
+const pickStart = (mode) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(START_LABEL[mode])}), "start choice"); ${plClose}`;
+const startMode = async () => (await ctl.call("get", { path: "prog:main.start_mode" }).catch(() => ({}))).value;
+const curPath = async () => (await http("GET", "/current")).json?.path;
+const playBtn = `m.click(document.querySelector(".play-btn"), "Play");`;
+const loadNamed = (name) => ui(`m.click(document.querySelector('button[title="Load playlist"]'), "load"); await m.sleep(500);
+  m.click(m.byText(".pl-modal .pl-name", ${JSON.stringify(name)}), ${JSON.stringify(name)}); await m.sleep(150); m.click(m.byText(".pl-modal button", "Load"), "Load"); await m.sleep(900);`);
+const PS_STATES = ["playlist", "pending"];
+// B shown by the switch the cell's LAST step made (since `t`) — not the setup's own switches (a next, a Stop), which expectShown would count
+function shownSince(c, want, t, { effect }) {
+  const v = [], mine = c.evs.filter((e) => e._t >= t - 100 && e.event === "transition.scheduled" && e.align !== "end");
+  if (c.after.cur?.path !== want) v.push(`expected ${TITLE(want)} on screen, /current says ${TITLE(c.after.cur?.path)}`);
+  const to = mine.filter((e) => e.path === want);
+  if (!to.length) v.push(`no switch to ${TITLE(want)} was requested by the last step (${JSON.stringify(mine.map((e) => TITLE(e.path)))})`);
+  else if (effect && to[to.length - 1].effect_id == null) v.push(`switch to ${TITLE(want)} was a cut (transitions are on)`);
+  if (mine.length > 2) v.push(`${mine.length} switches requested by the last step (storm?)`);
+  return v;
+}
+// changing the choice while a playlist plays never moves the current play
+C["plStart:change"] = { states: PS_STATES, rearms: true, noSwitch: true, async run(c) {
+    c.p0 = progOf(await ctl.call("state"));
+    await ui(pickStart("resume")); await sleep(600); c.m1 = await startMode(); c.s1 = (await http("GET", "/playlist/state")).json?.settings?.playlistStart;
+    await ui(pickStart("start_over")); await sleep(600); c.m2 = await startMode(); c.s2 = (await http("GET", "/playlist/state")).json?.settings?.playlistStart;
+  }, check(c) {
+    const v = [...keptShown(c)];
+    if (c.s1 !== "resume" || c.s2 !== "start_over") v.push(`the playlist saved ${c.s1} then ${c.s2}, expected resume then start_over`);
+    if (c.m1 !== "resume" || c.m2 !== "start_over") v.push(`prog:main.start_mode ${c.m1} then ${c.m2}, expected resume then start_over (live)`);
+    const p1 = progOf(c.after.st);
+    if (p1 && c.p0 && (p1.path !== c.p0.path || p1.played_ms < c.p0.played_ms)) v.push(`the current play jumped: ${TITLE(c.p0.path)} @${c.p0.played_ms} → ${TITLE(p1.path)} @${p1.played_ms} ms`);
+    return v;
+  } };
+// the global choice (a playlist that follows the globals): live on the program, the row says it applies next start
+C["plStart:global"] = { states: ["playlistGlobal"], noSwitch: true, async run(c) {
+    c.p0 = progOf(await ctl.call("state"));
+    await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("When the playlist starts again"); i++) await m.sleep(100); await m.sleep(300);
+      await m.select("When the playlist starts again", "Resume where it left off"); await m.sleep(600);`);
+    c.m1 = await startMode(); c.hint = await ui(`return m.row("When the playlist starts again")?.querySelector(".shint")?.textContent ?? "";`);
+    c.saved = (await getSettings()).globalPlaylistStart;
+  }, check(c) {
+    const v = [...keptShown(c)];
+    if (c.saved !== "resume") v.push(`globalPlaylistStart ${c.saved}, expected resume`);
+    if (c.m1 !== "resume") v.push(`prog:main.start_mode ${c.m1}, expected resume (live)`);
+    if (!/what's playing now carries on/.test(c.hint)) v.push(`the row's hint while a playlist plays: ${JSON.stringify(c.hint)}`);
+    const p1 = progOf(c.after.st);
+    if (p1 && c.p0 && (p1.path !== c.p0.path || p1.played_ms < c.p0.played_ms)) v.push(`the current play jumped: ${TITLE(c.p0.path)} → ${TITLE(p1.path)}`);
+    return v;
+  } };
+for (const mode of ["start_over", "resume"]) {
+  const name = mode === "start_over" ? "startOver" : "resume";
+  // next (to the 2nd item), then Play on the playlist that is playing now: start over → item 1 at 0; resume → keeps playing where it is
+  C[`plStart:${name}:playAgain`] = { states: PS_STATES, switch: true, rearms: true, async run(c) {
+      await ui(pickStart(mode)); await sleep(500);
+      c.bar = (await http("GET", "/playlist/state")).json?.videoPaths || [];
+      await cliStep(c, "next"); await sleep(400); await waitSettled(10000); await sleep(1500);
+      c.cur1 = await curPath(); c.p1 = progOf(await ctl.call("state")); c.tPlay = Date.now();
+      await ui(playBtn); await sleep(1500);
+    }, check(c) {
+      const v = [];
+      if (mode === "start_over") v.push(...shownSince(c, c.bar[0], c.tPlay, { effect: true }));
+      else {
+        v.push(...c.evs.filter((e) => e._t >= c.tPlay - 100 && e.event === "transition.scheduled" && e.align !== "end").map((e) => `Play on the playing playlist (resume) switched to ${TITLE(e.path)}`));
+        if (c.after.cur?.path !== c.cur1) v.push(`/current ${TITLE(c.after.cur?.path)}, expected ${TITLE(c.cur1)} to keep playing`);
+        const p = progOf(c.after.st);
+        if (p && c.p1 && p.played_ms < c.p1.played_ms) v.push(`resume restarted the play time (${c.p1.played_ms} → ${p.played_ms} ms)`);
+      }
+      return [...v, ...armedCheck(c)];
+    } };
+  // next, Stop, Play: start over → item 1; resume → its resume point (the item it was on)
+  C[`plStart:${name}:stopPlay`] = { states: PS_STATES, switch: true, rearms: true, async run(c) {
+      await ui(pickStart(mode)); await sleep(500);
+      c.bar = (await http("GET", "/playlist/state")).json?.videoPaths || [];
+      await cliStep(c, "next"); await sleep(400); await waitSettled(10000); await sleep(1500);
+      c.cur1 = await curPath(); c.p1 = progOf(await ctl.call("state"));
+      await ui(`m.click(m.byText(".topbar button", "Stop"), "Stop");`);
+      c.stopped = await waitFor(async () => !(await curPath()), 6000, 100);
+      c.tPlay = Date.now(); await ui(playBtn); await sleep(1500);
+    }, check(c) {
+      const want = mode === "start_over" ? c.bar[0] : c.cur1;
+      const v = [...shownSince(c, want, c.tPlay, { effect: false })];
+      if (!c.stopped) v.push("Stop didn't stop");
+      const p = progOf(c.after.st);
+      if (mode === "resume" && p && c.p1 && p.played_ms < c.p1.played_ms - 200) v.push(`resume lost the play time (${c.p1.played_ms} → ${p.played_ms} ms)`);
+      if (mode === "start_over" && p && p.played_ms > 4000) v.push(`start over began at ${p.played_ms} ms of play`);
+      return [...v, ...armedCheck(c)];
+    } };
+  // A → B → A through the Load modal + Play: start over → A's first; resume → where A was left
+  C[`plStart:${name}:ABA`] = { states: PS_STATES, switch: true, rearms: true,
+    // (names unique per cell: a playlist's resume point lives in the player's resume.json for as long as the stack does)
+    async pre(c) {
+      c.nameA = `mxA-${c.state}-${mode}`; c.nameB = `mxB-${c.state}-${mode}`;
+      await post("/playlist/save", { name: c.nameA, playlist: { videoPaths: [K[0], K[1], K[2]], settings: PS({ playlistStart: mode }), name: c.nameA } });
+      await post("/playlist/save", { name: c.nameB, playlist: { videoPaths: [K[2], K[1], K[3]], settings: PS({ playlistStart: mode, intervalSeconds: 300 }), name: c.nameB } });
+    },
+    async run(c) {
+      await loadNamed(c.nameA); await ui(playBtn); await sleep(800); await waitSettled(10000);
+      c.a1 = await curPath();
+      await cliStep(c, "next"); await sleep(400); await waitSettled(10000); await sleep(1200);
+      c.a2 = await curPath();
+      await loadNamed(c.nameB); await ui(playBtn); await sleep(800); await waitSettled(10000);
+      c.b1 = await curPath();
+      await loadNamed(c.nameA); c.tPlay = Date.now(); await ui(playBtn); await sleep(1500); await waitSettled(10000);
+    }, check(c) {
+      const v = [];
+      if (c.a1 !== K[0]) v.push(`A played from ${TITLE(c.a1)}, expected its first item k1`);
+      if (c.a2 !== K[1]) v.push(`A's next was ${TITLE(c.a2)}, expected k2`);
+      if (c.b1 !== K[2]) v.push(`B played from ${TITLE(c.b1)}, expected its first item k3`);
+      const want = mode === "start_over" ? K[0] : K[1];
+      if (c.after.cur?.path !== want) v.push(`A → B → A (${mode}): A came back on ${TITLE(c.after.cur?.path)}, expected ${TITLE(want)}`);
+      return v;
+    } };
+}
+
+// --- parked: no monitor shows the wallpaper — rotating invisibly by default, held in the expert mode
+// 3 s interval on a 3-clip timed playlist; outputs removed, then returned
+const EXPERT_HOLD = `m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Show expert options"); i++) await m.sleep(100); await m.sleep(300);
+  m.setCheck(m.row("Show expert options").querySelector("input[type=checkbox]"), true, "Show expert options"); await m.sleep(500);
+  await m.select("When no monitor shows the wallpaper", "Hold until a monitor returns"); await m.sleep(500); m.tab("Library"); await m.sleep(500);`;
+async function parkedRun(c, hold) {
+  if (hold) { await ui(EXPERT_HOLD); c.heldSet = await waitFor(async () => (await getSettings()).rotateWhileParked === false && (await pget("prog:main.while_parked")) === "hold", 5000, 100); }
+  await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" });
+  c.parked = await waitFor(async () => progOf(await ctl.call("state"))?.phase === "parked", 5000, 50);
+  const ps = (await http("GET", "/playlist/state")).json;
+  await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: null });
+  c.p0 = progOf(await ctl.call("state")); c.t0 = Date.now();
+  await sleep(hold ? 7000 : 9500);
+  c.p1 = progOf(await ctl.call("state"));
+  c.evParked = events.filter((e) => e._t >= c.t0 && e.event === "transition.scheduled");
+  c.tBack = Date.now();
+  await ctl.call("headless.add_output", { name: "VIRTUAL-1", width: 640, height: 360, hz: 60 });
+  await ctl.call("headless.add_output", { name: "VIRTUAL-2", width: 320, height: 180, hz: 60 });
+  c.shown = await waitFor(async () => { const s = Object.values(screen(await ctl.call("state"))); return s.length === 2 && s.every(Boolean); }, 8000, 100);
+  await sleep(600); await waitSettled(8000);
+  c.p2 = progOf(await ctl.call("state")); c.scr = Object.values(screen(await ctl.call("state")));
+  c.sw2 = await waitFor(async () => events.some((e) => e._t >= c.tBack + 600 && e.event === "transition.scheduled"), 8000, 100);
+  await waitSettled(8000);
+}
+C["parked:rotate"] = { states: ["playlist"], switch: true, rearms: true, async run(c) { await parkedRun(c, false); }, check(c) {
+    const v = [];
+    if (!c.parked) v.push("outputs gone: the program never reported phase parked");
+    const n = c.evParked.length;
+    if (n < 2 || n > 4) v.push(`${n} switches in 9.5 s parked at a 3 s interval, expected 2–4: ${c.evParked.map((e) => TITLE(e.path))}`);
+    if (c.evParked.some((e) => e.parked !== true)) v.push("a parked switch wasn't requested as parked");
+    if (c.evParked.some((e) => !String(e.origin).startsWith("program:"))) v.push(`a parked switch from ${c.evParked.map((e) => e.origin)}, expected the program`);
+    if (new Set(c.evParked.map((e) => e.path)).size < 2) v.push(`parked 9.5 s at a 3 s interval and it showed ${JSON.stringify([...new Set(c.evParked.map((e) => TITLE(e.path)))])}: the rotation didn't run invisibly`);
+    if (!c.shown) v.push("the outputs returned but nothing was shown");
+    const last = c.p2?.path;
+    if (c.scr.some((p) => p !== last)) v.push(`back from parked the screen shows ${c.scr.map(TITLE)}, prog:main is on ${TITLE(last)} (the last target)`);
+    if (!c.sw2) v.push("the rotation didn't carry on after the outputs returned (no switch within 8 s of a 3 s interval)");
+    return v;
+  } };
+C["parked:hold"] = { states: ["playlist"], switch: true, rearms: true, async run(c) { await parkedRun(c, true); }, check(c) {
+    const v = [];
+    if (!c.heldSet) v.push("the expert setting (Hold until a monitor returns) didn't reach prog:main.while_parked");
+    if (!c.parked) v.push("outputs gone: the program never reported phase parked");
+    if (c.evParked.length) v.push(`${c.evParked.length} switch(es) while parked in hold mode: ${c.evParked.map((e) => TITLE(e.path))}`);
+    if (c.p1?.path !== c.p0?.path) v.push(`held program moved ${TITLE(c.p0?.path)} → ${TITLE(c.p1?.path)}`);
+    if (Math.abs((c.p1?.played_ms ?? 0) - (c.p0?.played_ms ?? 0)) > 300) v.push(`the play time ran while parked in hold mode (${c.p0?.played_ms} → ${c.p1?.played_ms} ms)`);
+    if (c.scr.some((p) => p !== c.p0?.path)) v.push(`back from parked the screen shows ${c.scr.map(TITLE)}, expected the held ${TITLE(c.p0?.path)}`);
+    if (!c.sw2) v.push("the held rotation didn't resume after the outputs returned");
+    return v;
+  } };
+
+// --- expert:toggle — the tier through the UI, and what it does to the player (the pure-UI cases: probe-expert.js)
+C["expert:toggle"] = { states: ["idle", "playlist"], noSwitch: true, async run(c) {
+    const T = JSON.stringify("Show expert options"), R = JSON.stringify("When no monitor shows the wallpaper");
+    const snap = () => ui(`const sec = [...document.querySelectorAll(".settings .ssection h3")].map((h) => h.textContent.trim());
+      return { sections: sec, expertRows: document.querySelectorAll("[data-expert]").length, row: !!m.row(${R}), toggle: m.row(${T})?.querySelector("input[type=checkbox]")?.checked ?? null,
+        tag: !!m.row(${R})?.querySelector("[data-expert-tag]"), sel: m.row(${R})?.querySelector(".sel")?.textContent?.trim() ?? null, dev: !!m.row(${T})?.querySelector(".s-reset[data-deviated]") };`);
+    const wp = () => (c.state === "playlist" ? pget("prog:main.while_parked") : Promise.resolve(null));
+    await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row(${T}); i++) await m.sleep(100); await m.sleep(300);`);
+    c.s0 = await snap(); c.wp0 = await wp();
+    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), true, "toggle"); await m.sleep(500);`); c.s1 = await snap();
+    await ui(`await m.select(${R}, "Hold until a monitor returns"); await m.sleep(500);`);
+    c.saved1 = await waitFor(async () => (await getSettings()).rotateWhileParked === false, 4000, 100);
+    if (c.state === "playlist") await waitFor(async () => (await wp()) === "hold", 4000, 100);
+    c.wp1 = await wp();
+    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), false, "toggle"); await m.sleep(600);`); c.s2 = await snap();
+    c.kept = (await getSettings()).rotateWhileParked; c.wp2 = await wp();
+    await ui(`m.row(${T}).querySelector(".s-reset")?.click(); await m.sleep(600);`);
+    c.saved3 = await waitFor(async () => (await getSettings()).rotateWhileParked === true, 4000, 100);
+    if (c.state === "playlist") await waitFor(async () => (await wp()) === "rotate", 4000, 100);
+    c.s3 = await snap(); c.wp3 = await wp(); c.tog3 = (await getSettings()).showExpertOptions;
+  }, check(c) {
+    const v = [];
+    if (c.s0.sections.includes("Expert") || c.s0.expertRows || c.s0.row || c.s0.toggle !== false) v.push(`off by default: ${JSON.stringify(c.s0)}`);
+    if (c.s1.sections[c.s1.sections.length - 1] !== "Expert" || !c.s1.row || !c.s1.tag || c.s1.sel !== "Keep rotating") v.push(`on: ${JSON.stringify(c.s1)}`);
+    if (!c.saved1) v.push("Hold until a monitor returns wasn't saved");
+    if (c.state === "playlist") {
+      if (c.wp0 !== "rotate") v.push(`prog:main.while_parked ${c.wp0} by default, expected rotate`);
+      if (c.wp1 !== "hold") v.push(`prog:main.while_parked ${c.wp1} after choosing Hold, expected hold (live)`);
+      if (c.wp2 !== "hold") v.push(`prog:main.while_parked ${c.wp2} after hiding the group: hiding must not reset it`);
+      if (c.wp3 !== "rotate") v.push(`prog:main.while_parked ${c.wp3} after the marker's reset, expected rotate`);
+    }
+    if (c.s2.sections.includes("Expert") || c.s2.expertRows || c.s2.row) v.push(`hidden again: ${JSON.stringify(c.s2)}`);
+    if (c.kept !== false) v.push(`hiding the group changed rotateWhileParked to ${c.kept}`);
+    if (!c.s2.dev) v.push("no deviated marker on \"Show expert options\" while a hidden expert value differs");
+    if (!c.saved3) v.push("the marker's reset didn't restore rotateWhileParked");
+    if (c.s3.dev) v.push("the deviated marker stays after the reset");
+    if (c.tog3 !== false) v.push(`the marker's reset switched the toggle (showExpertOptions ${c.tog3})`);
+    return v;
+  } };
+
+// --- the backend away: a keybind reaches the program with no backend; a backend restart under an armed program doesn't move it
+C["cli:next:backendDown"] = { states: ["playlist"], switch: true, async run(c) {
+    c.bar = c.before.ps?.videoPaths || []; c.want = c.bar[2];
+    await win.loadURL("about:blank");
+    await stopBackend(3000); c.down = !procAlive(backendPid);
+    const rs = await Promise.all([cli("next"), cli("next")]); // two keybinds at once, no backend: each reaches the player itself
+    c.cli = rs.find((r) => r.code !== 0) ?? rs[0]; c.rs = rs;
+    c.landed = await waitFor(async () => progOf(await ctl.call("state"))?.path === c.want, 8000, 100);
+    await waitSettled(10000);
+    c.progDown = progOf(await ctl.call("state"));
+    c.up = await startBackend();
+    await loadUi(); await sleep(500);
+    await waitSettled(8000, c.want);
+  }, check(c) {
+    const v = [];
+    if (!c.down) v.push("the backend didn't stop (the fixture failed)");
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (!c.landed) v.push(`two keybinds with no backend: prog:main is on ${TITLE(c.progDown?.path)}, expected ${TITLE(c.want)} (two items on)`);
+    for (const e of c.evs) if (e.event === "transition.scheduled" && !String(e.origin).startsWith("program:")) v.push(`a switch from ${e.origin} to ${TITLE(e.path)} with no backend`);
+    if (c.after.cur?.path !== c.want) v.push(`the new backend says ${TITLE(c.after.cur?.path)} plays, expected ${TITLE(c.want)}`);
+    return v;
+  } };
+
 // Cells whose expectation waits on an owner decision: reported as KNOWN (with the reason), not FAIL.
 const KNOWN = [];
 
@@ -2649,11 +3147,36 @@ async function runCell(stateName, ctlName) {
 // `fuzz`: in a chain an armed advance-on-end switch can fire ON ITS OWN mid-step (k4 is 10 s) — `rotated`. What that makes
 // unknowable from outside is skipped: the control's own check (its before/after comparisons) and the "no switch" / "no
 // cancel" event checks; the oracle and every other check still run.
+// A keybind switch (next / previous / random) in a program is taken once the program reported a `program.current` since the step
+// began, or its prog:main.path moved off what the step started with. Not owed: a single wallpaper (no program, or < 2 items —
+// the backend's library step), `previous` at a fresh session's first item (nothing before it).
+const KEYBIND_SWITCH = /^cli:(next|previous|random)(-keep)?$/;
+async function keybindTaken(c, ctlName, t0) {
+  if (!KEYBIND_SWITCH.test(ctlName)) return true;
+  const p0 = c.before && progOf(c.before.st);
+  if (!p0 || (p0.items ?? 0) < 2 || (ctlName.startsWith("cli:previous") && c.fresh)) return true;
+  if (events.some((e) => e._t >= t0 && e.event === "program.current")) return true;
+  return progOf(await ctl.call("state"))?.path !== p0.path;
+}
+// The player's program against what the backend and the screen say (the `prog` states): it exists, it is on /current's item,
+// and the switch it armed goes where the player's transition goes
+function progCheck(c) {
+  const p = progOf(c.after.st), v = [];
+  if (!p) return ["the player has no program (prog:main): a rotation runs inside it"];
+  if (!c.noOutput && c.exp.settled && c.after.cur?.path && p.path && p.path !== c.after.cur.path) v.push(`prog:main is on ${TITLE(p.path)} but /current says ${TITLE(c.after.cur.path)}`);
+  const armed = armedTo(c.after.st);
+  if (c.pending && !c.noOutput && armed.length === 1) {
+    if (p.next && p.next !== armed[0]) v.push(`prog:main.next is ${TITLE(p.next)} but the armed switch goes to ${TITLE(armed[0])}`);
+    if (!c.exp.paused && p.phase !== "armed") v.push(`prog:main.phase ${p.phase} with a switch armed (expected armed)`);
+  }
+  return v;
+}
 async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }) {
-  // fuzz: what the page sent is answered, and a keybind's switch the playlist's tick hasn't taken yet (its
-  // pending_action.txt) is taken, before the step settles and before it looks — a cell's fixed waits assume an unloaded
-  // box; a chain runs long enough to meet a loaded one (a debounced persist still in flight, a next that "stayed")
-  const pageQuiet = () => (fuzz ? waitFor(async () => !fs.existsSync(PENDING_ACTION) && (await js("window.__mxInflight || 0")) === 0, 4000, 50) : null);
+  // fuzz: what the page sent is answered, and a keybind's switch the program hasn't taken yet (no `program.current` since the
+  // step began and prog:main.path unmoved — before Phase 3 Task 8 this waited on the timer daemon's pending_action.txt, which
+  // liascape-player never writes) is taken, before the step settles and before it looks — a cell's fixed waits assume an
+  // unloaded box; a chain runs long enough to meet a loaded one (a debounced persist still in flight, a next that "stayed")
+  const pageQuiet = () => (fuzz ? waitFor(async () => (await keybindTaken(c, ctlName, t0)) && (await js("window.__mxInflight || 0")) === 0, 4000, 50) : null);
   await pageQuiet();
   if (K_.exp) Object.assign(c.exp, K_.exp);
   if (K_.flipPause) c.exp.paused = !c.exp.paused;
@@ -2671,9 +3194,11 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   c.evs = events.filter((e) => e._t >= t0);
   const rotated = fuzz && rotatedDuring(c.before, c.evs);
   const v = [...oracle(c.after, c.exp), ...(K_.check && !rotated ? K_.check(c, c.before, c.after) : [])];
-  // a keybind's next/prev/random in a timed playlist is a file the session's 100 ms tick takes — still there after the
-  // waits above: no tick takes it (the keybind did nothing)
-  if (fuzz && fs.existsSync(PENDING_ACTION)) v.push(`the playlist's tick never took a keybind's "${(() => { try { return fs.readFileSync(PENDING_ACTION, "utf8").trim(); } catch { return "?"; } })()}" (pending_action.txt still there > 4 s later; /current timed=${c.after.cur?.timed})`);
+  // a keybind's next/prev/random in a program is a verb the player's program takes: no `program.current` after the waits above
+  // and prog:main.path unmoved — the program never took it (the keybind did nothing)
+  if (fuzz && !rotated && !(await keybindTaken(c, ctlName, t0))) v.push(`the program never took a keybind's "${ctlName.replace(/^cli:/, "")}" (no program.current since the step began, prog:main.path unmoved > 4 s later; /current timed=${c.after.cur?.timed})`);
+  if (STATES[c.state]?.prog && !rotated) v.push(...progCheck(c));
+  if (K_.progOnly) for (const e of c.evs) if (e.event === "transition.scheduled" && !String(e.origin).startsWith("program:")) v.push(`a switch from ${e.origin} to ${TITLE(e.path)}: the program's own verbs should drive a rotation`);
   for (const e of c.evs) {
     if (e.event === "transition.failed" && !K_.expectFail) v.push(`transition.failed ${e.corr}: ${e.reason}`);
     if (e.event === "source.error" && !K_.expectFail && !(K_.allowErr && K_.allowErr(e))) v.push(`source.error ${e.source ?? ""}: ${e.reason}`);
@@ -2764,6 +3289,7 @@ const FUZZ_RULES = [
   [/autoMute/, { exclude: "synthetic streams on the private audio server + Auto-Mute's delays outlive a step" }],
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
+  [/^(cover:|prog:|plStart:|parked:|expert:|cli:next:backendDown$)/, { exclude: "Phase 3 Task 11: the cover Signal's fake source, a program held by a pause, the start choice, outputs removed, the expert tier or a backend down — their own fixtures" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
@@ -2808,7 +3334,6 @@ function fuzzEligible(n, x, last) {
 
 // what runs now, as a control sees it (see above)
 const TIMED = path.join(path.dirname(E.LIASCAPE_USER_MUTE), "timed_state.json"); // the backend's timed-playlist session (history, mode)
-const PENDING_ACTION = path.join(path.dirname(E.LIASCAPE_USER_MUTE), "pending_action.txt"); // a next/prev/random the tick hasn't taken
 const readTimed = () => { try { return JSON.parse(fs.readFileSync(TIMED, "utf8")); } catch { return null; } };
 function fuzzContext(snap, fz) {
   const { st } = snap, trs = st.transitions || [];

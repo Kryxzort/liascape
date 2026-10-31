@@ -287,7 +287,14 @@ export const useStore = create<State>((set, get) => ({
     if (playlist.length === 0) { get().setStatus("Playlist is empty"); return; }
     const r = await api.playPlaylist(playlist, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }   // error/interval messages
-    set({ playingPath: playlist[0] }); get().refreshPlayingStatus(); // persistent now-playing line
+    // The first item is the guess for "Start over". Under "Resume where it left off" the player keeps what plays (Play on the
+    // playing playlist) or comes back at its resume point, so there /current says what it really plays — a switch's
+    // `wallpaper-changed` event follows it; without this a Play that switches nothing left item 1 marked as playing.
+    const { settings } = get();
+    const resume = playlistSettings.overrideGlobalSettings ? playlistSettings.playlistStart === "resume" : settings?.globalPlaylistStart === "resume";
+    let at = playlist[0];
+    if (resume) { const cur = await api.current().catch(() => null); if (cur?.path && playlist.includes(cur.path)) at = cur.path; }
+    set({ playingPath: at }); get().refreshPlayingStatus(); // persistent now-playing line
   },
   async playFrom(index) {
     const { playlist, playlistSettings } = get();

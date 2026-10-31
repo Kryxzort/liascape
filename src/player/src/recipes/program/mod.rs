@@ -144,6 +144,9 @@ pub struct ProgramStatus {
     pub order: Vec<String>,
     pub history: Vec<String>,
     pub history_index: usize,
+    /// Whether `program.prev` would switch (the history reaches back — counting a switch still on its way,
+    /// where the verb goes on from): `false` = previous is a no-op and must not lift a user pause.
+    pub can_prev: bool,
     pub played_ms: f64,
     pub remaining_ms: f64,
     pub backoff_ms: u64,
@@ -773,6 +776,10 @@ impl Prog {
             order: self.order.items().to_vec(),
             history: history.to_vec(),
             history_index: hi,
+            can_prev: match self.pending.as_ref().filter(|x| x.align == Align::Now) {
+                Some(prev) => self.order.plan_after(&prev.step, |o| o.plan_back()).is_some(),
+                None => self.order.plan_back().is_some(),
+            },
             played_ms: self.played_ms.round(),
             remaining_ms: self.remaining_ms.round(),
             backoff_ms: self.backoff_ms,
@@ -793,6 +800,7 @@ impl Prog {
         now: Duration,
         parked: bool,
         foreign_busy: bool,
+        held: bool,
         defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Vec<ProgramAction> {
         let mut acts = Vec::new();
@@ -981,7 +989,7 @@ impl Prog {
             let played = self.played_ms.max(0.0) as u64;
             if !self.cfg.on_end {
                 // the plain timer ("Switch every"): align now, even mid-video
-                if self.cfg.interval_ms > 0 && self.remaining_ms <= 0.0 {
+                if self.cfg.interval_ms > 0 && self.remaining_ms <= 0.0 && !held {
                     if !can_rotate {
                         self.remaining_ms = self.cfg.interval_ms as f64;
                     } else if self.pending.is_none()
@@ -1007,7 +1015,10 @@ impl Prog {
                     self.cfg.separate_scenes,
                     self.cfg.scenes_after_ms,
                 );
-                if rule::max_reached(true, can_rotate, played, rule.max_ms) {
+                if held && rule::max_reached(true, can_rotate, played, rule.max_ms) {
+                    // the clocks stand (a user pause, the low-VRAM or cover hold): a rule an edit made true meanwhile
+                    // switches when they run again — a rotation never switches under a hold
+                } else if rule::max_reached(true, can_rotate, played, rule.max_ms) {
                     // the cap: now, with its transition; an armed end switch's B is taken
                     let armed = self.pending.take();
                     let step = match armed {
@@ -1026,6 +1037,7 @@ impl Prog {
                     }
                 } else if kind != PlayKind::Video {
                     if self.pending.is_none()
+                        && !held
                         && rule::still_min_reached(true, can_rotate, kind, played, rule.min_ms)
                         && let Some(step) = self.take_next(id, now)
                     {
@@ -1768,7 +1780,8 @@ impl Programs {
 
     /// One tick, after `Transitions::tick` (R47): the transitions' and sources' events, the
     /// clocks (`now` = the player clock), the rules. `parked` = no output exists;
-    /// `active` = every in-flight transition's corr.
+    /// `active` = every in-flight transition's corr; `held` = the clocks stand (a user pause or
+    /// a rule's hold) — no rule starts a switch then ("a rotation never switches under a hold").
     #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
@@ -1778,6 +1791,7 @@ impl Programs {
         now: Duration,
         parked: bool,
         active: &[CorrId],
+        held: bool,
         defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Vec<ProgramAction> {
         self.issued.retain(|c| active.contains(c));
@@ -1792,6 +1806,7 @@ impl Programs {
                 now,
                 parked,
                 foreign_busy,
+                held,
                 defaults_of,
             ));
         }
