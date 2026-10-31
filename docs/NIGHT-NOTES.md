@@ -140,4 +140,19 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   Open: a 341 ms p95 tail for a brand-new stream at quantum 1024 with all cores saturated (cause unknown); CPU
   criterion 9 — 5 streams cost 23–45 ms/s in the player + 14–30 in the `parec`s it starts (+33–74 in pipewire-pulse):
   **your call** whether the criterion counts the helpers. Not yet tried on your real session / a real browser.
-- **Started:** Task 8 (retire timer/restart daemons) and Task 9 (player outbox), each in its own worktree.
+- **Task 8 done** (`810b2c1`): under liascape-player no timer/restart daemon, pid file, `pending_action.txt` or
+  `timed_state.json` is ever written; `liascape restore` starts the player with `--restore --session-start`.
+  Adapter IT 345/0. Only tested through a headless stand-in — a real boot/restore on your session is still Task 12's
+  owner-run step. Decisions: `play` while a single wallpaper shows does nothing; a restored paused rotation stays paused.
+- **Task 9 done** (`f98f398`): the player keeps an outbox of crashes / loudness / VRAM stops while the app is closed;
+  the backend stores them on its next start (37 ms after connecting). IT 353/0 merged.
+- **Task 10 done** (`7c14964`): Settings → "Pause when covered" (default: fullscreen or maximized), "When the playlist
+  starts again" (Start over / Resume, also per playlist), Advanced → "Show expert options" with the expert row "When no
+  monitor shows the wallpaper". "Resume from last on launch" removed. Matrix 780/0, IT 363/0.
+- **Task 11 done** (`d3752fd`): 47 new UI-matrix cells, full matrix 827/0. Fixed 3 real bugs it found: a max-play
+  switch could start under a pause (picture stayed on A while the UI said B); `previous` at the first item un-paused;
+  Play on the playing playlist under Resume marked item 1. ⚠ One old fuzz sequence (playlist-bar drag + next on a
+  2-item bar) fails on `lp-player` too — handed to Task 12 as optional.
+- **Running:** Task 12, the on-machine battery on your real session (monitors briefly disabled for the no-monitor
+  check with an auto-re-enable watchdog; backend unit stopped for the app-closed hour; your "Full?" playlist restarted
+  at the end).
