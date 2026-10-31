@@ -24,8 +24,10 @@
 //!
 //! See `.claude/rules/player-core.md` § Signals.
 
+pub mod automute;
 pub mod covered;
 pub mod hypr;
+pub mod mpris;
 pub mod sway;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

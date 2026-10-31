@@ -175,6 +175,11 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.cover.source != "unavailable" {
         caps.push("cover");
     }
+    // Phase 3 Task 14: the in-player auto-mute Signal runs here (`LIASCAPE_PLAYER_AUTOMUTE=1`
+    // and the audio bus up); without it the backend keeps `AudioMonitor`.
+    if rt.automute_capable() {
+        caps.push("automute");
+    }
     if rt.stepped() {
         caps.push("stepped");
     }

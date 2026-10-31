@@ -10,6 +10,7 @@
 //! is down, and the meter reports itself unavailable.
 
 pub mod bus;
+pub mod foreign;
 pub mod loudness;
 pub mod meter;
 pub mod sysmon;

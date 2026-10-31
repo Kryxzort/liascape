@@ -481,7 +481,7 @@ pub struct Runtime {
     /// I4: an `align: end` request made while no output exists, waiting for one.
     parked_req: Option<ParkedReq>,
     /// I7: the bus route (`Bus::route`) the sources were last pointed at.
-    bus_route: (bool, u64),
+    pub(crate) bus_route: (bool, u64),
     /// `quit` requested: exit once the ramps are done (or this instant passes).
     quit_at: Option<Instant>,
     /// R60: the wallpaper parked while no output exists.
@@ -568,6 +568,9 @@ pub struct Runtime {
     pub(crate) vram: VramState,
     /// Phase 3 Task 6: the covered Signal and the cover hold (`crate::signal`).
     pub(crate) cover: crate::signal::CoverRt,
+    /// Phase 3 Task 14: the in-player auto-mute Signal (`crate::signal::automute`; behind
+    /// `LIASCAPE_PLAYER_AUTOMUTE=1`).
+    pub(crate) automute: crate::signal::automute::AutoMuteRt,
 }
 
 /// Phase 2 Task 8: the runtime's side of `crate::vram` (`Runtime::vram_tick`).
@@ -832,6 +835,7 @@ impl Runtime {
     pub(crate) fn tick(&mut self) {
         let t = Instant::now();
         self.cover_tick();
+        self.automute_tick();
         self.update_player_paused();
         self.track_bus_route();
         let now = self.now();
@@ -1436,6 +1440,11 @@ impl Runtime {
     /// Forward graph changes to the live sources (and keep the wake-fd registrations in
     /// line with the hosted sources).
     pub(crate) fn sync_sources(&mut self) {
+        // Task 14: a source created while auto-muted (a handler's `create`, a program's or a
+        // transition's B) comes up at −96 — set before its first sync opens it.
+        if self.automute.muted {
+            self.automute_enforce();
+        }
         // R75: catch a `player.paused` change promptly even between ticks/steps — this
         // runs after every dispatch (`after_dispatch`), not only on a timer/`step`, so a
         // plain `set` pushes the effective pause to every source at once (a no-op if
@@ -1511,7 +1520,7 @@ impl Runtime {
     /// (`Transitions::tick`, one loop iteration later) is armed promptly. Cheap when
     /// it's a no-op: one bounded scan of the `Animator`'s own (small) entry list plus
     /// one of `pause_gates` (equally small), no allocation.
-    fn arm_gain_timer_if_needed(&mut self) {
+    pub(crate) fn arm_gain_timer_if_needed(&mut self) {
         if self.gain_timer_armed || self.stepped() || !self.gain_work_pending() {
             return;
         }
@@ -2353,6 +2362,13 @@ impl Runtime {
             if only.is_some() {
                 return;
             }
+            // the auto-mute Signal (Task 14) shares the capture: it keeps it running
+            if self.automute_wants_monitor() {
+                if let Some(m) = &self.sysmon {
+                    m.set_visual(false);
+                }
+                return;
+            }
             if let Some(m) = self.sysmon.take() {
                 let _ = std::thread::Builder::new()
                     .name("lia-sysmon-stop".into())
@@ -2360,10 +2376,11 @@ impl Runtime {
             }
             return;
         }
-        let frame = self
+        let mon = self
             .sysmon
-            .get_or_insert_with(crate::audio::sysmon::SysMon::start)
-            .frame();
+            .get_or_insert_with(crate::audio::sysmon::SysMon::start);
+        mon.set_visual(true);
+        let frame = mon.frame();
         for id in want {
             if let Some(s) = self.host.scene_mut(&id) {
                 s.set_input(frame.clone());
@@ -3818,6 +3835,7 @@ impl Runtime {
             c.step(dt);
         }
         self.cover_tick();
+        self.automute_tick();
         self.update_player_paused();
         let now = self.now();
         self.run_anims(now);
@@ -4607,9 +4625,13 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             pids: Vec::new(),
         },
         cover: crate::signal::CoverRt::idle(),
+        automute: crate::signal::automute::AutoMuteRt::new(
+            crate::signal::automute::env_enabled(),
+        ),
     };
     rt.update_scene_assets();
     rt.start_cover();
+    rt.start_automute();
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
     }
