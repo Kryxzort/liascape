@@ -87,10 +87,15 @@ public static class ServerHost
         // BOTH own mpvpaper and the daemon keeps cycling its own (stale) playlist over ours ("creep") —
         // and CLAIM ownership (WriteGuiTimerPid) so SpawnTimerDaemon's IsGuiTimerAlive guard skips while we
         // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
-        PlayerHelper.KillTimerDaemon();
-        PlayerHelper.WriteGuiTimerPid();
-        // load the engine NOW (cached): /settings compares against what actually runs when it changes
-        _ = Liascape.Player.PlayerEngine.IsLiascapePlayer;
+        // liascape-player (Phase 3 Task 8): the player's program rotates by itself — no timer to own (no gui_timer.pid),
+        // only a timer-daemon / restart-daemon a legacy session left behind to stop.
+        // (This also loads the engine NOW, cached: /settings compares against what actually runs when it changes.)
+        if (Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.KillLegacyDaemons();
+        else
+        {
+            PlayerHelper.KillTimerDaemon();
+            PlayerHelper.WriteGuiTimerPid();
+        }
         // a player left running by an older build (it outlives the backend) restarts onto the current one
         Liascape.Player.LiascapePlayerMedia.StartUpgradeWatch();
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
@@ -113,9 +118,10 @@ public static class ServerHost
             // doesn't run `liascape restore`). Stop our own ticking first: this process may live on for a while
             // (Kestrel waits for open WebSockets), and two owners supersede each other's switches.
             // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
-            PlayerHelper.ReleaseTimer();
+            // liascape-player: the player rotates on its own with the app closed — nothing to release or hand over
+            // (Tasks 7–8). Our own gui_timer.pid claim goes either way (a serve started on legacy, switched live).
+            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.ReleaseTimer();
             PlayerHelper.ClearGuiTimerPid();
-            // liascape-player: the player rotates on its own with the app closed — nothing to hand over (Task 7)
             if (!Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
         });
 

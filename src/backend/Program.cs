@@ -55,7 +55,9 @@ sealed class Program
                 PlayerHelper.Stop();
                 DrainLiascapePlayerBeforeExit();
                 return;
-            // internal: the daemons a closing app hands its work to (setsid-spawned by the backend itself)
+            // internal: the daemons a closing app hands its work to (setsid-spawned by the backend itself).
+            // timer-daemon / restart-daemon are legacy-only: under liascape-player the player's program rotates by
+            // itself (Phase 3 Task 8) and both return at once; monitor-daemon (AudioMonitor) serves both engines.
             case "monitor-daemon":
                 AudioMonitor.RunDaemon();
                 return;

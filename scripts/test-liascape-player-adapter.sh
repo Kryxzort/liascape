@@ -11,7 +11,10 @@
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
 #   engine liascape-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
 #   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker) ·
-#   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse).
+#   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse) ·
+#   Phase 3 Task 8: the app closed (the program rotates alone, no timer/restart daemon, none of legacy's daemon files
+#   ever written), keybinds as one-shot CLI processes with no backend (a 10× `next` storm, every action), `liascape
+#   restore` × the playlist start mode (it starts the player `serve --restore --session-start` through a headless shim).
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
 # XDG_STATE_HOME (so its own settings.json, library, liascape-player socket + event log) and its own random
@@ -96,6 +99,8 @@ cleanup() {
   [ -n "$CP" ] && kill -CONT "$CP" 2>/dev/null
   [ -n "$SP" ] && kill -CONT "$SP" 2>/dev/null
   [ -n "${WSP:-}" ] && kill "$WSP" 2>/dev/null
+  [ -n "${FWP:-}" ] && kill "$FWP" 2>/dev/null
+  [ -n "${SMP:-}" ] && kill "$SMP" 2>/dev/null
   for bp in "$BP" ${BP_OLD:-}; do [ -n "$bp" ] && { kill "$bp" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$bp" 2>/dev/null || break; sleep 0.1; done; kill -9 "$bp" 2>/dev/null; }; done
   # a `timer-daemon` a stopping backend handed the playlist to (the restart test below)
   [ -s "$XDG_CONFIG_HOME/liascape/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/liascape/timer.pid")" 2>/dev/null
@@ -134,6 +139,17 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
  "RestartMpvpaperEverySeconds":600}
 EOF
 
+# Phase 3 Task 8: under liascape-player legacy's daemon files are never written (no timer-daemon / restart-daemon, no
+# pending-action IPC, no timer ownership) — sampled every 0.2 s for the whole run, checked before the engine switch at
+# the end. The legacy timed_state.json the Task 7 section plants itself is exempt while its marker exists.
+LEGACY_FILES_LOG=$T/legacy-files.log; : > "$LEGACY_FILES_LOG"
+( while :; do
+    for f in pending_action.txt timer.pid gui_timer.pid restart.pid timed_state.json; do
+      [ -e "$XDG_CONFIG_HOME/liascape/$f" ] && [ ! -e "$T/planted-$f" ] && echo "$(date +%T.%N) $f" >> "$LEGACY_FILES_LOG"
+    done
+    [ -e "$XDG_CACHE_HOME/liascape/playlist_observer_paths.json" ] && echo "$(date +%T.%N) playlist_observer_paths.json" >> "$LEGACY_FILES_LOG"
+    sleep 0.2
+  done ) & FWP=$!
 start_player() { (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve$1.log" 2>&1) & SP=$!; }
 # A fresh player in place of the running one (`ctl quit` — its final snapshot may take seconds), with extra
 # env for it: `restart_player <n> VAR=value …`. The backend finds the new pid at its next request.
@@ -1424,6 +1440,7 @@ stop_now
 post /playlist/state '{"videoPaths":[],"settings":{"order":0},"name":null}' >/dev/null
 
 # a backend restart under a legacy rotation (timed_state.json — a backend before Task 7): the player's program takes over at its item
+touch "$T/planted-timed_state.json"   # planted on purpose: the legacy-files watch ignores it until the takeover removed it
 printf '{"Paths":["%s","%s","%s"],"Index":1,"Options":"","Shuffle":false,"IntervalSeconds":3,"History":["%s","%s"],"HistoryIndex":1,"TimerPaused":false,"TimerStopped":false,"RemainingMs":2000,"SwitchWhenVideoEnds":false,"WaitingForVideoEnd":false,"ItemPlayedMs":0,"PlayedSavedAtMs":0}' \
   "$A" "$Bc" "$C" "$A" "$Bc" > "$XDG_CONFIG_HOME/liascape/timed_state.json"
 port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP; c10=$(ncur)
@@ -1433,6 +1450,7 @@ waitfor 60000 eval '[ "$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
 waitfor 15000 eval '[ "$(curs_after "$c10" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
 [ "$(curs_after "$c10" | jq -c 'map(select(.r == "play"))[0] | {p, r}')" = '{"p":"b.mp4","r":"play"}' ] && prog_is mode '"timer"' && [ ! -e "$XDG_CONFIG_HOME/liascape/timed_state.json" ] \
   && ok "a legacy timed_state.json at serve start → the player's program at its item (b.mp4), the file gone" || bad "legacy takeover: $(curs_after "$c10"), mode $(prog mode), file $(ls "$XDG_CONFIG_HOME/liascape/timed_state.json" 2>&1)"
+waitfor $WAIT eval '[ ! -e "$XDG_CONFIG_HOME/liascape/timed_state.json" ]'; mv "$T/planted-timed_state.json" "$T/planted-done"
 stop_now
 kill "$WSP" 2>/dev/null; WSP=""
 setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .GlobalPlaylistStart = "start_over" | .Volume = 100'
@@ -1616,7 +1634,8 @@ e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one alig
 [ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
-[ "$(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null)" = "$BP" ] && ok "the new backend owns the timer (gui_timer.pid)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
+# Phase 3 Task 8: no backend owns a timer under liascape-player (the player's program rotates) — no gui_timer.pid
+[ ! -e "$XDG_CONFIG_HOME/liascape/gui_timer.pid" ] && ok "no backend claims the timer (no gui_timer.pid: the player's program rotates)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
 tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no timer-daemon left running" || bad "a timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
 for _ in $(seq 1 50); do kill -0 "$OLD1" 2>/dev/null || break; sleep 0.1; done
@@ -1792,6 +1811,178 @@ sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
 case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "started with the gone supervisor's arguments + --restore" ;; *) bad "the new supervisor ($SP) runs: $sa" ;; esac
 stop_now
 
+echo "== Phase 3 Task 8: the app closed — the player rotates alone, no timer/restart daemon; the CLI drives the player itself"
+# Under liascape-player the backend starts no timer-daemon / restart-daemon and owns no timer: the player's program
+# rotates with no backend at all, a keybind with no app sends the program verb straight to the player, and
+# `liascape restore` starts the player with its snapshot as a session start (`serve --restore --session-start`).
+# every process running this run's private backend DLL (the backend, a daemon it spawned, a CLI) — by /proc cmdline,
+# never `pgrep -f` (the owner's own backend runs on this machine); grep's own argv (the pattern) is not one
+our_cmds() {
+  local f a0
+  for f in $(grep -laF -- "$DLL" /proc/[0-9]*/cmdline 2>/dev/null); do
+    a0=$(tr '\0' '\n' < "$f" 2>/dev/null | head -1)
+    case "$a0" in *dotnet*|*liascape-backend*) tr '\0' ' ' < "$f" 2>/dev/null; echo ;; esac
+  done
+}
+legacy_daemons() { our_cmds | grep -E 'timer-daemon|restart-daemon'; }
+backend_down() {   # TERM the backend and wait it out; the port file is voided so no CLI ever forwards to a port reused since
+  local old=$BP; kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"
+  waitfor 30000 eval '! kill -0 "$old" 2>/dev/null' || bad "the backend $old outlived its TERM by 30 s"
+  echo 0 > "$XDG_CONFIG_HOME/liascape/serve.port"
+}
+backend_up() {   # $1 = its log
+  "$DOTNET" "$DLL" serve > "$T/$1" 2>&1 & BP=$!
+  waitfor 60000 port_moved 0 || bad "the new backend never wrote its port"
+  U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); waitfor 30000 healthy || bad "the new backend never answered /health"
+}
+cli() { "$DOTNET" "$DLL" "$@" >> "$T/cli.log" 2>&1; }
+set_file() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf.json" && mv "$T/sf.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }   # the app is closed: its settings file
+base() { basename "$1"; }
+at_cur() { [ "$(last_cur | jq -r .p)" = "$1" ] && settled; }   # the program's last switch is to $1 (a basename) and done
+# `liascape restore` starts a player the way autostart does — but this test has no Wayland: the binary the CLI is given
+# runs it headless and logs what the backend asked for. Its `.<name>-wrapped` sibling tells the backend which binary it
+# really runs (makeWrapper's naming), so the player it starts never reads as out of date.
+HB=$T/hb; mkdir -p "$HB"
+cat > "$HB/liascape-player" <<EOF
+#!/bin/sh
+echo "\$*" >> "$HB/spawned.log"
+if [ "\$1" = serve ]; then shift; exec "$T/bin/liascape-player" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null "\$@"; fi
+exec "$T/bin/liascape-player" "\$@"
+EOF
+chmod +x "$HB/liascape-player"; ln -s "$T/bin/liascape-player" "$HB/.liascape-player-wrapped"; : > "$HB/spawned.log"
+restore_cli() { LIASCAPE_PLAYER_BIN=$HB/liascape-player "$DOTNET" "$DLL" restore >> "$T/cli.log" 2>&1; SP=$(sup_pid); CP=$(comp_pid); }
+player_quit() {   # the player quits (its final snapshot + resume points) — no backend runs to start it again
+  local sp; sp=$(sup_pid); ctl quit >/dev/null 2>&1
+  waitfor 60000 eval '! kill -0 "$sp" 2>/dev/null' || { echo "  note: supervisor $sp outlived its quit by 60 s — SIGKILL"; kill -9 "$sp"; }
+}
+first_cur() { ctl logs '{"kind_prefix":"program.current","limit":10000}' | jq -c '.events[0] // {} | {p: ((.path // "") | split("/") | .[-1]), r: .reason, resumed}'; }
+
+# 11 still images (they never end): a timer moves them, else only a user switch
+NI=(); for i in $(seq 0 10); do f=$T/n$i.png
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=0x$(printf '%02x%02x40' $((i * 20)) $((255 - i * 20))):size=64x36" -frames:v 1 "$f"; NI+=("$f"); done
+NIJ=$(printf '%s\n' "${NI[@]}" | jq -R . | jq -sc .)
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = false | .GlobalPlaylistStart = "start_over" | .Volume = 50 | .NormalizeAudio = false | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 300 | .TransitionMethod = "full-live" | .AutoMute = false'
+post /playlist/state "{\"videoPaths\":$NIJ,\"settings\":{\"order\":0},\"name\":null}" >/dev/null
+post /playlist/play "{\"paths\":$NIJ,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT eval '[ -n "$(pst)" ]' || bad "precondition: no prog:main after /playlist/play"
+backend_down
+c0=$(ncur); sleep 10; n=$(( $(ncur) - c0 )); procs=$(our_cmds)
+[ "$n" -ge 2 ] && [ -z "$procs" ] && ok "app closed: the program rotates on its own ($n program.current in 10 s, no backend process)" || bad "app closed: $n program.current in 10 s, this run's processes: $procs"
+[ -z "$(legacy_daemons)" ] && ok "app closed: no timer-daemon / restart-daemon" || bad "legacy daemons: $(legacy_daemons)"
+
+# Review Focus 1: 10 × `liascape next` at once (each its own process, no backend) → ten items on, ≤ 2 playing sources
+# (a source is shared by every output it shows on) at every 100 ms sample, every superseded B gone
+ctl set '{"path":"prog:main.interval_ms","value":600000}' >/dev/null   # only the storm moves it now
+waitfor $WAIT settled
+p0=$(pst | jq -r .path); i0=-1; for i in "${!NI[@]}"; do [ "${NI[$i]}" = "$p0" ] && i0=$i; done
+want=${NI[$(( (i0 + 10) % 11 ))]}
+echo 0 > "$T/storm-max"
+( mx=0; while [ ! -e "$T/storm-done" ]; do
+    n=$(ctl probe '{"name":"sources"}' 2>/dev/null | jq '[.sources[] | select(.effective_paused == false and ((.gains.anticlick // 0) > -90))] | length')
+    [ -n "$n" ] && [ "$n" -gt "$mx" ] && { mx=$n; echo "$mx" > "$T/storm-max"; }; sleep 0.1; done ) & SMP=$!
+c1=$(ncur); pids=""
+for _ in $(seq 1 10); do cli next & pids="$pids $!"; done
+for p in $pids; do wait "$p"; done
+waitfor $WAIT eval '[ "$(pst | jq -r .path)" = "$want" ] && settled'
+sleep 0.5; touch "$T/storm-done"; wait "$SMP" 2>/dev/null; SMP=""
+lp=$(pst | jq -r .path); mx=$(cat "$T/storm-max"); srcp=$(ctl probe '{"name":"sources"}' | jq -c '[.sources[].path] | unique')
+[ "$i0" -ge 0 ] && [ "$lp" = "$want" ] && ok "CLI storm, no backend: 10 × next → ten items on ($(base "$p0") → $(base "$lp"))" || bad "CLI storm: $(base "$p0") (index $i0) → $(base "$lp"), want $(base "$want"); $(( $(ncur) - c1 )) program.current; $(tail -3 "$T/cli.log" | tr '\n' ' ')"
+[ "$mx" -le 2 ] && ok "CLI storm: at most $mx playing sources at any sample" || bad "CLI storm: $mx playing sources at once"
+[ "$srcp" = "$(jq -nc --arg p "$want" '[$p]')" ] && ok "CLI storm: every superseded B destroyed (only $(base "$want") left)" || bad "CLI storm: sources left $srcp"
+
+# A backend started again (the app reopened): what it reports is the program's at once, and it switches nothing itself
+m0=$(nsched_all)
+backend_up backend-t8a.log
+cur_is_prog() { [ "$(curl -sf -m 2 "$U/current" | jq -r .path)" = "$(prog path | jq -r .)" ]; }
+waitfor 1000 cur_is_prog && ok "app reopened: /current = prog:main.path within 1 s" || bad "app reopened: /current $(curl -sf -m 2 "$U/current" | jq -c '{path, timed}'), prog:main.path $(prog path)"
+sleep 5
+[ "$(api_after "$m0")" = 0 ] && ok "app reopened: no backend switch (origin api) within 5 s" || bad "app reopened: $(api_after "$m0") switches not from the program"
+
+# Every keybind with the app closed reaches the player: an item with its own volume plays (QB, 30 %), the timer is off
+setting '.GlobalIntervalSeconds = 60 | .Volume = 50 | .VolumeKeyTarget = "auto"'
+post /library/volume "{\"path\":\"$QB\",\"intValue\":30}" >/dev/null
+PQ="[\"$QA\",\"$QB\",\"$L1\"]"
+post /playlist/state "{\"videoPaths\":$PQ,\"settings\":{\"order\":0},\"name\":null}" >/dev/null
+post /playlist/play-from "{\"paths\":$PQ,\"startIndex\":1,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT at_cur "$(base "$QB")" || bad "precondition: play-from QB → $(last_cur)"
+backend_down
+cli volume up
+waitfor $WAIT eval 'near "$(item_props "$QB" | jq -r ".\"gain.user\" // 99")" "$(dB 35)" 0.01' && ok "CLI volume up on an item with its own volume → its props gain.user $(item_props "$QB" | jq -r '."gain.user"') (35 %)" || bad "CLI volume up × override: qb props $(item_props "$QB"), $(tail -2 "$T/cli.log" | tr '\n' ' ')"
+cli next; waitfor $WAIT at_cur "$(base "$L1")" && ok "CLI next → $(base "$L1") (reason $(last_cur | jq -r .r))" || bad "CLI next → $(last_cur)"
+cli volume up
+waitfor $WAIT eval 'near "$(prog defaults | jq -r ".\"gain.user\"")" "$(dB 55)" 0.01' && ok "CLI volume up on the global → prog:main.defaults gain.user $(prog defaults | jq -r '."gain.user"') (55 %)" || bad "CLI volume up × global: defaults $(prog defaults | jq -c '{"gain.user"}')"
+cli previous; waitfor $WAIT eval '[ "$(last_cur | jq -c "{p, r}")" = "{\"p\":\"$(base "$QB")\",\"r\":\"prev\"}" ] && settled' && ok "CLI previous → back to $(base "$QB")" || bad "CLI previous → $(last_cur)"
+c2=$(ncur); cli random; waitfor $WAIT eval '[ "$(ncur)" -gt "$c2" ] && settled'
+[ "$(last_cur | jq -r .r)" = random ] && [ "$(last_cur | jq -r .p)" != "$(base "$QB")" ] && ok "CLI random → $(last_cur | jq -r .p)" || bad "CLI random → $(last_cur)"
+cli toggle-pause; waitfor $WAIT paused_is true && ok "CLI toggle-pause → player.paused" || bad "CLI toggle-pause → $(playerPaused)"
+cli toggle-pause; waitfor $WAIT paused_is false && ok "CLI toggle-pause again → playing" || bad "CLI toggle-pause again → $(playerPaused)"
+c3=$(ncur); cli play; sleep 1
+[ "$(ncur)" = "$c3" ] && [ -n "$(pst)" ] && ok "CLI play while the program plays → nothing" || bad "CLI play while playing: $(curs_after "$c3")"
+cli stop; waitfor $WAIT eval 'nothing_shown && [ -z "$(pst)" ]' && ok "CLI stop → nothing shown, no program" || bad "CLI stop: cur $(cur path), program $(pst)"
+c4=$(ncur); cli play; waitfor $WAIT eval '[ "$(ncur)" -gt "$c4" ]'
+[ "$(curs_after "$c4" | jq -c '.[0]')" = "{\"p\":\"$(base "$QA")\",\"r\":\"play\",\"resumed\":false}" ] && ok "start over: CLI stop → play → LastSession from item 1 ($(base "$QA"))" || bad "start over × stop → play: $(curs_after "$c4")"
+cli toggle-play; waitfor $WAIT eval 'nothing_shown && [ -z "$(pst)" ]' && ok "CLI toggle-play while playing → stopped" || bad "CLI toggle-play → cur $(cur path), program $(pst)"
+c5=$(ncur); cli toggle-play; waitfor $WAIT eval '[ "$(ncur)" -gt "$c5" ]' && [ "$(curs_after "$c5" | jq -r '.[0].r')" = play ] && ok "CLI toggle-play while stopped → the program plays ($(curs_after "$c5" | jq -r '.[0].p'))" || bad "CLI toggle-play while stopped: $(curs_after "$c5")"
+set_file '.GlobalPlaylistStart = "resume"'
+waitfor $WAIT settled; cli next; waitfor $WAIT at_cur "$(base "$QB")" || bad "precondition: next → $(last_cur)"
+cli stop; waitfor $WAIT nothing_shown
+c6=$(ncur); cli play; waitfor $WAIT eval '[ "$(ncur)" -gt "$c6" ]'
+[ "$(curs_after "$c6" | jq -c '.[0] | {p, resumed}')" = "{\"p\":\"$(base "$QB")\",\"resumed\":true}" ] && ok "resume: CLI stop → play → its resume point ($(base "$QB"))" || bad "resume × stop → play: $(curs_after "$c6")"
+
+# `liascape restore` (boot): the player is started with `--restore --session-start`; the player applies the start mode
+set_file '.GlobalPlaylistStart = "start_over"'
+cli stop; waitfor $WAIT nothing_shown; cli play; waitfor $WAIT at_cur "$(base "$QA")" || bad "precondition: play → $(last_cur)"
+cli next; waitfor $WAIT at_cur "$(base "$QB")" || bad "precondition: next → $(last_cur)"
+player_quit; restore_cli
+tail -1 "$HB/spawned.log" | grep -q -- '^serve --restore --session-start$' && ok "restore: the player started as \`serve --restore --session-start\`" || bad "restore started: $(tail -1 "$HB/spawned.log")"
+waitfor $WAIT eval '[ "$(ncur)" -gt 0 ] && settled'
+nqb=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq --arg p "$QB" '[.events[] | select(.path == $p)] | length')
+[ "$(first_cur)" = "{\"p\":\"$(base "$QA")\",\"r\":\"play\",\"resumed\":false}" ] && [ "$nqb" = 0 ] && [ -n "$(pst)" ] \
+  && ok "restore × start over (sequential): item 1 ($(base "$QA")), the item it was on ($(base "$QB")) never shown" || bad "restore × start over: first $(first_cur), $nqb switches to qb, program $(pst)"
+ctl set '{"path":"prog:main.order","value":"shuffle"}' >/dev/null
+cli next; waitfor $WAIT eval '[ "$(ncur)" -gt 1 ] && settled'; was=$(last_cur | jq -r .p)
+player_quit; restore_cli; waitfor $WAIT eval '[ "$(ncur)" -gt 0 ] && settled'
+[ "$(first_cur | jq -r .r)/$(first_cur | jq -r .resumed)" = play/false ] && [ "$(first_cur | jq -r .p)" != "$was" ] && prog_is order '"shuffle"' \
+  && ok "restore × start over (shuffle): a fresh shuffle ($was → $(first_cur | jq -r .p))" || bad "restore × start over × shuffle: first $(first_cur) (was $was), order $(prog order)"
+ctl set '{"path":"prog:main.order","value":"sequential"}' >/dev/null; ctl set '{"path":"prog:main.start_mode","value":"resume"}' >/dev/null
+ctl program.play '{"id":"prog:main","from":"index","index":2}' >/dev/null
+waitfor $WAIT at_cur "$(base "$L1")" || bad "precondition: program.play index 2 → $(last_cur)"
+waitfor 15000 eval 'ge "$(cur time_pos)" 9'; tq=$(cur time_pos)   # far enough in that a restart from 0 can't pass for it
+# a restored source reads 0 until it is ready (its position once it plays again) — reading sooner failed 1 run in 2
+player_quit; tr0=$(ms_now); restore_cli; waitfor $WAIT eval '[ "$(ncur)" -gt 0 ]'; waitfor $WAIT cur_is ready true; tr=$(cur time_pos); el=$(( $(ms_now) - tr0 ))
+# at its position ± 2 s: it played on from there once started (at most the time since the restore began)
+at_pos() { python3 -c "import sys; sys.exit(0 if $tq - 2 <= float('$tr') <= $tq + 2 + $el / 1000 else 1)" 2>/dev/null; }
+[ "$(first_cur | jq -c '{p, resumed}')" = "{\"p\":\"$(base "$L1")\",\"resumed\":true}" ] && at_pos && [ -n "$(pst)" ] \
+  && ok "restore × resume: the same item at its position ($(base "$L1") $tq s → $tr s), still a program" || bad "restore × resume: first $(first_cur), time $tq → $tr, program $(pst)"
+waitfor $WAIT settled
+player_quit; mv "$SNAP" "$T/snapshot-aside.json"; restore_cli; waitfor $WAIT eval '[ "$(ncur)" -gt 0 ]'
+[ "$(first_cur)" = "{\"p\":\"$(base "$QA")\",\"r\":\"play\",\"resumed\":false}" ] && [ -n "$(pst)" ] \
+  && ok "restore × no snapshot × start over: LastSession from item 1 ($(base "$QA"))" || bad "restore × no snapshot × start over: first $(first_cur), program $(pst)"
+set_file '.GlobalPlaylistStart = "resume"'
+waitfor $WAIT settled; cli next; waitfor $WAIT at_cur "$(base "$QB")" || bad "precondition: next → $(last_cur)"
+player_quit; mv "$SNAP" "$T/snapshot-aside2.json"; restore_cli; waitfor $WAIT eval '[ "$(ncur)" -gt 0 ]'
+[ "$(first_cur | jq -c '{p, resumed}')" = "{\"p\":\"$(base "$QB")\",\"resumed\":true}" ] \
+  && ok "restore × no snapshot × resume: LastSession at its resume point ($(base "$QB"))" || bad "restore × no snapshot × resume: first $(first_cur)"
+[ -z "$(legacy_daemons)" ] && [ "$(grep -c . "$HB/spawned.log")" = 5 ] && ok "5 restores: one player start each, no timer-daemon / restart-daemon" || bad "restores: $(grep -c . "$HB/spawned.log") player starts, daemons: $(legacy_daemons)"
+set_file '.GlobalPlaylistStart = "start_over"'
+# `serve` start stops a daemon a legacy session left (its cmdline says it is one) — and never what a stale pid file
+# names by now (a pid file outlives a reboot): an unrelated process lives on, both pid files go
+touch "$T/planted-timer.pid" "$T/planted-restart.pid"
+python3 -c 'import time; time.sleep(300)' liascape-backend.dll timer-daemon & FAKED=$!
+sleep 300 & INNOCENT=$!
+waitfor $WAIT eval 'grep -qa timer-daemon "/proc/$FAKED/cmdline"' || bad "precondition: the fake timer-daemon never started"
+echo "$FAKED" > "$XDG_CONFIG_HOME/liascape/timer.pid"; echo "$INNOCENT" > "$XDG_CONFIG_HOME/liascape/restart.pid"
+backend_up backend-t8b.log
+SP=$(sup_pid); CP=$(comp_pid)
+waitfor $WAIT eval '! kill -0 "$FAKED" 2>/dev/null' && ok "serve start stops a leftover timer-daemon" || bad "the leftover timer-daemon $FAKED outlived serve start"
+kill -0 "$INNOCENT" 2>/dev/null && ok "…and never an unrelated process a stale restart.pid names" || bad "serve start killed the unrelated process a stale restart.pid named"
+[ ! -e "$XDG_CONFIG_HOME/liascape/timer.pid" ] && [ ! -e "$XDG_CONFIG_HOME/liascape/restart.pid" ] && ok "…both pid files gone" || bad "pid files left: $(ls "$XDG_CONFIG_HOME/liascape" | grep -E '^(timer|restart)\.pid$' | tr '\n' ' ')"
+kill "$FAKED" "$INNOCENT" 2>/dev/null
+mv "$T/planted-timer.pid" "$T/planted-timer-done"; mv "$T/planted-restart.pid" "$T/planted-restart-done"
+post /library/volume "{\"path\":\"$QB\",\"intValue\":null}" >/dev/null
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .Volume = 100'
+stop_now
+
 echo "== auto-mute never hears our own switches (a private PipeWire + pipewire-pulse; the player on its real audio bus)"
 # Owner report: with AutoMute on (both delays 0) every switch muted the wallpaper for a hitch — for the whole
 # "unmute after" delay when that's > 0. The incoming source's own stream (mpv's `liascape-player` node / a scene worker's
@@ -1890,6 +2081,11 @@ EOF
 else
   echo "  SKIP (pipewire / pipewire-pulse / wireplumber / pactl / paplay / parec not all found)"
 fi
+
+echo "== Phase 3 Task 8: legacy's daemon files never existed under liascape-player (the whole run, sampled every 0.2 s)"
+kill "$FWP" 2>/dev/null; wait "$FWP" 2>/dev/null; FWP=""
+[ ! -s "$LEGACY_FILES_LOG" ] && ok "no pending_action.txt / timer.pid / gui_timer.pid / restart.pid / timed_state.json / playlist_observer_paths.json at any sample" \
+  || bad "legacy files seen: $(awk '{print $2}' "$LEGACY_FILES_LOG" | sort | uniq -c | tr -s ' \n' ' ') (first: $(head -1 "$LEGACY_FILES_LOG"))"
 
 echo "== engine switch liascape-player → legacy with nothing playing (no legacy media starts)"
 mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1

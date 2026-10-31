@@ -749,20 +749,33 @@ public sealed class LiascapePlayerClient
     private static List<string>? ServeArgs(int pid)
     {
         if (!IsPlayerProcess(pid)) return null;
-        try
-        {
-            var argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0', StringSplitOptions.RemoveEmptyEntries).Skip(1).ToList();
-            if (argv.Count == 0 || argv[0] != "serve") return null;
-            var keep = new List<string>();
-            for (int i = 0; i < argv.Count; i++)
-            {
-                if (argv[i] is "--restore" or "--supervised") continue;
-                if (argv[i] == "--restarted") { i++; continue; }
-                keep.Add(argv[i]);
-            }
-            return keep;
-        }
+        try { return UserServeArgs(File.ReadAllText($"/proc/{pid}/cmdline").Split('\0', StringSplitOptions.RemoveEmptyEntries).Skip(1).ToList()); }
         catch { return null; }
+    }
+
+    // `argv` (after the binary) minus the restart plumbing — `--restore`, `--supervised`, `--restarted <spec>` and
+    // (Task 8) `--session-start`: a restart or an upgrade is recovery, never a session start. null = not a `serve`.
+    internal static List<string>? UserServeArgs(IReadOnlyList<string> argv)
+    {
+        if (argv.Count == 0 || argv[0] != "serve") return null;
+        var keep = new List<string>();
+        for (int i = 0; i < argv.Count; i++)
+        {
+            if (argv[i] is "--restore" or "--supervised" or "--session-start") continue;
+            if (argv[i] == "--restarted") { i++; continue; }
+            keep.Add(argv[i]);
+        }
+        return keep;
+    }
+
+    // What EnsureRunning starts: the last player's own arguments + `--restore` (it went away — recovery), else a first
+    // start's defaults (+ `--restore [--session-start]` for `liascape restore` / `play`, Task 8).
+    internal static List<string> StartArgs(IReadOnlyList<string>? known, string socket, bool defaultSocket, bool restore, bool sessionStart)
+    {
+        if (known != null) return [.. known, "--restore"];
+        List<string> args = defaultSocket ? ["serve"] : ["serve", "--socket", socket];
+        if (restore) { args.Add("--restore"); if (sessionStart) args.Add("--session-start"); }
+        return args;
     }
 
     // `setsid <bin> <args>` with stdio → the serve log (never a pipe: the player outlives this backend —
@@ -789,7 +802,13 @@ public sealed class LiascapePlayerClient
     // Connect, or `setsid liascape-player serve` (no --headless: real outputs, inheriting the session env —
     // WAYLAND_DISPLAY etc.) and wait ≤ 3 s for its socket. "Already running" counts as success: a
     // second `serve` exits 1 on the instance lock and we connect to the winner.
-    public bool EnsureRunning()
+    public bool EnsureRunning() => EnsureRunning(restore: false, sessionStart: false);
+
+    // Phase 3 Task 8: `restore` — a FIRST start (no earlier player's arguments known: `liascape restore`, `play`) brings
+    // back the player's snapshot (`--restore`), `sessionStart` marks it a session start (`--session-start`: each
+    // restored program starts per its start mode, § Playlist start), and its first answer is waited for ≤ 30 s (a
+    // restore creates a source per output first). A player that went away always comes back with `--restore` alone.
+    public bool EnsureRunning(bool restore, bool sessionStart)
     {
         if (Reachable()) { LastError = null; return true; }
         if (!AutoSpawn) return false;
@@ -819,17 +838,17 @@ public sealed class LiascapePlayerClient
             // the last player's own arguments + --restore (it went away: a failed upgrade, its supervisor gave up
             // or was killed) — the same outputs/socket/audio, showing what it showed until the switch lands; a
             // first start: the defaults
-            List<string> args = _serveArgs is { } known ? [.. known, "--restore"]
-                : SocketPath == DefaultSocketPath() ? ["serve"] : ["serve", "--socket", SocketPath];
+            var args = StartArgs(_serveArgs, SocketPath, SocketPath == DefaultSocketPath(), restore, sessionStart);
+            int waitMs = _serveArgs == null && restore ? StartWaitMs : 3000;
             // requests made meanwhile (another thread: the tick, the monitor) wait for this player's socket and first
             // answer instead of failing — or tripping the stall breaker on a player that is only starting
-            BeginStarting(3000);
+            BeginStarting(waitMs);
             try
             {
                 try { p = Spawn(bin, args); }
                 catch (Exception e) { Fail($"could not start {bin}: {e.Message}"); return false; }
                 var sw = Stopwatch.StartNew();
-                while (sw.ElapsedMilliseconds < 3000)
+                while (sw.ElapsedMilliseconds < waitMs)
                 {
                     if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
                     if (p is { HasExited: true } && p.ExitCode != 1) break; // 1 = "already running" → keep connecting
@@ -840,7 +859,7 @@ public sealed class LiascapePlayerClient
             finally { EndStarting(); }
             string why = p is { HasExited: true }
                 ? $"`liascape-player serve` exited {p.ExitCode}{ExitHint(p.ExitCode)}"
-                : "`liascape-player serve` did not open its socket within 3 s";
+                : $"`liascape-player serve` did not open its socket within {waitMs / 1000} s";
             Fail($"{why} — see ~/.cache/liascape/liascape-player-serve.log, or run `{bin} serve` in a terminal");
             return false;
         }
