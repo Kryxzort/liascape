@@ -1147,9 +1147,9 @@ C["race:settingsDuringApply"] = { states: ["idle", "single"], switch: true, asyn
     c.lost = [];
     for (let i = 0; i < 8; i++) {
       const want = i % 2 === 0;
-      await Promise.all([post("/apply", { path: K[i % 3] }), (async () => { await sleep([10, 40, 80][i % 3]); await post("/settings", { resumeFromLast: want }); })()]);
-      const got = (await getSettings()).resumeFromLast;
-      if (got !== want) c.lost.push(`#${i} resumeFromLast ${got}, posted ${want}`);
+      await Promise.all([post("/apply", { path: K[i % 3] }), (async () => { await sleep([10, 40, 80][i % 3]); await post("/settings", { replaceDirectWithWorkshop: want }); })()]);
+      const got = (await getSettings()).replaceDirectWithWorkshop;
+      if (got !== want) c.lost.push(`#${i} replaceDirectWithWorkshop ${got}, posted ${want}`);
     }
     c.target = K[7 % 3];
   }, check: (c) => c.lost.length ? [`${c.lost.length}/8 settings saves reverted by an apply: ${c.lost.join("; ")}`] : [] };

@@ -49,8 +49,11 @@ public static class LiascapePlayerProgram
         var defaults = LiascapePlayerMedia.DesiredGlobal(s);
         return new Spec(BuildItems(paths, s, defaults), defaults, shuffle ? "shuffle" : "sequential", advance ? "on_end" : "timer",
             Ms(intervalSeconds), Ms(rot.Max), rot.SeparateScenes, Ms(rot.ScenesAfter), TransitionMap(s, p),
-            key ?? KeyOf(PlaylistService.LoadCurrentState()?.Name), PlayerHelper.EffectiveStart(s, p), "rotate");
+            key ?? KeyOf(PlaylistService.LoadCurrentState()?.Name), PlayerHelper.EffectiveStart(s, p), WhileParkedOf(s));
     }
+
+    // "When no monitor shows the wallpaper" (Expert, O2): RotateWhileParked → the program's `while_parked`.
+    public static string WhileParkedOf(AppSettings s) => s.RotateWhileParked ? "rotate" : "hold";
 
     // The playlist's identity (§ Playlist start): `name:<saved name>` for a loaded/saved playlist, else `bar`.
     public static string KeyOf(string? playlistName) =>
@@ -444,6 +447,14 @@ public static class LiascapePlayerProgram
         string sm = AppSettings.PlaylistStartMode(mode);
         Update(m => m with { StartMode = sm });
         SetProps("program:start", [("start_mode", sm)]);
+    }
+
+    // "When no monitor shows the wallpaper" — live: both clocks keep counting (rotate) or stop until an output returns (hold).
+    public static void SetWhileParked(bool rotate)
+    {
+        string wp = rotate ? "rotate" : "hold";
+        Update(m => m with { WhileParked = wp });
+        SetProps("program:parked", [("while_parked", wp)]);
     }
 
     // The playlist bar changed (a reorder, an add/remove, a trash/undo, another playlist loaded into it): the items,

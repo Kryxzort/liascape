@@ -27,7 +27,7 @@ function applyThemeVars(t: Theme) {
 
 const DEFAULT_PS: PlaylistSettings = {
   order: 0, overrideGlobalSettings: false, intervalSeconds: 0, switchWhenVideoEnds: true, maxPlaySeconds: 0,
-  separateSceneTiming: true, switchScenesAfterSeconds: 1800,
+  separateSceneTiming: true, switchScenesAfterSeconds: 1800, playlistStart: "start_over",
   transitionEnabled: false, transitionEffectIds: [], transitionDurationMs: 600, transitionDurationMaxMs: 0, transitionShuffle: true,
 };
 
@@ -127,7 +127,9 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
-  resumeFromLast: true, theme: "Catppuccin Mocha",
+  theme: "Catppuccin Mocha",
+  // Phase 3 Task 10: pause when covered, the playlist start, the Expert tier (+ its first setting)
+  pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", showExpertOptions: false, rotateWhileParked: true,
 };
 
 export const useStore = create<State>((set, get) => ({

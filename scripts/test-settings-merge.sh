@@ -9,6 +9,11 @@
 # before incl. the backend-owned fields kept from disk, and a partial body still applies live: Volume /
 # Speed / NoAudio / VideoScale on the playing wallpaper, override ?? global, a running rotation's
 # interval, the engine switch. Also: a settings.json that still carries LweSilent loads.
+# Phase 3 Task 10: PauseWhenCovered (default maximized) / GlobalPlaylistStart (start_over) / RotateWhileParked (true) /
+# ShowExpertOptions (false) — the defaults on a file without the keys, partial bodies keep them, bad values are
+# normalized, an old file's ResumeFromLast loads and is gone from GET and the next save, each is live on the player
+# (`player.pause_when_covered`, `prog:main.start_mode` / `.while_parked`, the current play untouched), and a playlist's
+# own PlaylistStart beats the global one only with its override on.
 #
 # Hermetic like scripts/test-liascape-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
 # player socket), a private `liascape-player serve --headless --clock real --ao null`, its own backend port;
@@ -80,7 +85,7 @@ cat > "$SJ" <<EOF
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,
  "GlobalIntervalSeconds":600,"GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
- "TransitionMethod":"full-live","AdvancedSettings":true,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
+ "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
  "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","SteamRefreshToken":"test-refresh-token","SteamAccessToken":"test-access-token",
  "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd"}
 EOF
@@ -128,6 +133,13 @@ snap s0
   && ok "a file without the scene-timing keys: globalSeparateSceneTiming true, globalSwitchScenesAfterSeconds 1800 (the defaults)" \
   || bad "scene-timing fields after loading a file without them: $(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)"
 
+# Phase 3 Task 10: a file without the new keys loads their defaults; the folded-in ResumeFromLast (designer call 13) is
+# an unknown key now — no migration, gone from GET and from the next save
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' s0)" = '["maximized","start_over",true,false]' ] \
+  && ok "a file without the Task 10 keys: pauseWhenCovered maximized, globalPlaylistStart start_over, rotateWhileParked true, showExpertOptions false" \
+  || bad "Task 10 defaults after loading an old file: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' s0)"
+[ "$(f 'has("resumeFromLast")' s0)" = false ] && ok "GET /settings has no resumeFromLast (the old file's key is an unknown one)" || bad "GET /settings still has resumeFromLast"
+
 echo "== a partial body changes only its own fields (nothing playing)"
 post /settings '{"Theme":"Nord"}' >/dev/null && ok "POST {\"Theme\":\"Nord\"} → 200" || bad "POST {\"Theme\":\"Nord\"} failed"
 snap s1
@@ -139,6 +151,9 @@ c=$(changed s0 s1 '["theme"]')
 [ "$(disk 'has("LweSilent")')" = false ] && ok "the save dropped LweSilent from settings.json" || bad "settings.json still has LweSilent after a save"
 [ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
   && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"
+[ "$(disk 'has("ResumeFromLast")')" = false ] && ok "the save dropped ResumeFromLast from settings.json" || bad "settings.json still has ResumeFromLast after a save"
+[ "$(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .ShowExpertOptions] == ["maximized","start_over",true,false]')" = true ] \
+  && ok "…and wrote the Task 10 keys with their defaults" || bad "settings.json after the save: $(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .ShowExpertOptions]' | tr -d '\n ')"
 if [ "$(engine)" != liascape-player ]; then
   bad "the partial body switched the engine to $(engine) — stopping here (every check below plays on liascape-player)"
   echo "RESULT pass=$pass fail=$fail"; exit 1
@@ -163,6 +178,28 @@ snap s6
 [ "$(f .volume s6)" = 65 ] && [ "$(f 'has("noSuchSetting") or has("NoSuchSetting") or has("lweSilent")' s6)" = false ] \
   && ok "unknown keys (incl. LweSilent) ignored, volume 65 applied" || bad "unknown keys: volume $(f .volume s6), keys kept: $(f 'has("noSuchSetting") or has("lweSilent")' s6)"
 same s5 s6 '["volume"]' "{NoSuchSetting, LweSilent, Volume}"
+
+echo "== Phase 3 Task 10: the cover / playlist start / parked / expert settings — partial bodies keep them, bad values are normalized"
+snap t0
+post /settings '{"PauseWhenCovered":"fullscreen","GlobalPlaylistStart":"resume","RotateWhileParked":false,"ShowExpertOptions":true}' >/dev/null; snap t1
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t1)" = '["fullscreen","resume",false,true]' ] \
+  && ok "the four keys set by one partial body (PascalCase)" || bad "Task 10 keys after a partial body: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t1)"
+same t0 t1 '["pauseWhenCovered","globalPlaylistStart","rotateWhileParked","showExpertOptions"]' "{PauseWhenCovered, GlobalPlaylistStart, RotateWhileParked, ShowExpertOptions}"
+post /settings '{"theme":"Nord"}' >/dev/null; snap t2
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t2)" = '["fullscreen","resume",false,true]' ] \
+  && ok "an unrelated partial body keeps them" || bad "an unrelated partial body changed them: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t2)"
+for pair in 'PauseWhenCovered:OFF:off' 'pauseWhenCovered:Maximized:maximized' 'pauseWhenCovered:bogus:maximized' 'pauseWhenCovered::maximized'; do
+  IFS=: read -r k v want <<< "$pair"
+  post /settings "{\"$k\":\"$v\"}" >/dev/null; snap t3
+  [ "$(f .pauseWhenCovered t3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .pauseWhenCovered t3), want $want"
+done
+for pair in 'GlobalPlaylistStart:RESUME:resume' 'globalPlaylistStart:nonsense:start_over' 'globalPlaylistStart::start_over'; do
+  IFS=: read -r k v want <<< "$pair"
+  post /settings "{\"$k\":\"$v\"}" >/dev/null; snap t3
+  [ "$(f .globalPlaylistStart t3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .globalPlaylistStart t3), want $want"
+done
+post /settings '{"PauseWhenCovered":"maximized","GlobalPlaylistStart":"start_over","RotateWhileParked":true,"ShowExpertOptions":false,"Theme":"Nord"}' >/dev/null; snap t4
+same t0 t4 '["theme"]' "the Task 10 keys back to their defaults"
 
 echo "== a bad value is a 400 and saves nothing"
 for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"SceneMonitors":5}' '[1,2]' '"x"'; do
@@ -227,6 +264,16 @@ post /apply "{\"path\":\"$PLAYER\"}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$PLAYER" ] && break; sleep 0.1; done
 [ "$(cur path)" = "$PLAYER" ] && ok "/apply → playing" || bad "/apply → cur $(cur path)"
 [ "$(engine)" = liascape-player ] || { bad "not on liascape-player any more — stopping"; echo "RESULT pass=$pass fail=$fail"; exit 1; }
+# Phase 3 Task 10: the cover setting is a player prop — asserted on this fresh player (its own default is off), then live
+pcov() { ctl get '{"path":"player.pause_when_covered"}' | jq -r .value; }
+for _ in $(seq 1 30); do [ "$(pcov)" = maximized ] && break; sleep 0.1; done
+[ "$(pcov)" = maximized ] && ok "a fresh player was given player.pause_when_covered = maximized (the setting's default)" || bad "player.pause_when_covered = $(pcov) on a fresh player, want maximized"
+for v in fullscreen off maximized; do
+  post /settings "{\"PauseWhenCovered\":\"$v\"}" >/dev/null
+  for _ in $(seq 1 30); do [ "$(pcov)" = "$v" ] && break; sleep 0.1; done
+  [ "$(pcov)" = "$v" ] && ok "{PauseWhenCovered:$v} → player.pause_when_covered $v live" || bad "{PauseWhenCovered:$v} → player.pause_when_covered $(pcov)"
+done
+[ "$(cur path)" = "$PLAYER" ] && [ "$(ctl get '{"path":"player.paused"}' | jq -r .value)" = false ] && ok "…the playing wallpaper untouched, not paused" || bad "the cover setting disturbed the play: cur $(cur path)"
 post /settings '{"Volume":45}' >/dev/null; sleep 0.3
 near "$(cur gain.user)" "$(dB 45)" && ok "{Volume:45} → gain.user $(cur gain.user)" || bad "{Volume:45} → gain.user $(cur gain.user), want $(dB 45)"
 post /settings '{"speed":1.5}' >/dev/null; sleep 0.3
@@ -273,6 +320,46 @@ snap r0; post /settings '{"GlobalIntervalSeconds":3}' >/dev/null; snap r1
 same r0 r1 '["globalIntervalSeconds"]' "{GlobalIntervalSeconds:3}"
 for _ in $(seq 1 60); do [ "$(cur path)" = "$C2" ] && break; sleep 0.1; done
 [ "$(cur path)" = "$C2" ] && ok "{GlobalIntervalSeconds:3} → switched to c2 within 6 s (no replay needed)" || bad "the rotation didn't retime: cur $(cur path)"
+post /stop '{}' >/dev/null; sleep 0.6
+
+echo "== Phase 3 Task 10: the playlist start / while-parked settings reach the running program live; a playlist's own start beats the global one only under its override"
+prog() { ctl get "{\"path\":\"prog:main.$1\"}" 2>/dev/null | jq -r '.value'; }
+nsched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
+playedms() { ctl state | jq -r '.programs[]? | select(.id=="prog:main") | .played_ms // 0'; }
+post /settings '{"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600,"GlobalPlaylistStart":"start_over","RotateWhileParked":true}' >/dev/null
+post /playlist/state '{"videoPaths":[],"settings":{"order":0,"overrideGlobalSettings":false},"name":null}' >/dev/null
+post /playlist/play "{\"paths\":[\"$C1\",\"$C2\"],\"settings\":{\"Order\":0}}" >/dev/null
+for _ in $(seq 1 40); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
+for _ in $(seq 1 30); do [ "$(prog start_mode)" = start_over ] && break; sleep 0.1; done
+[ "$(prog start_mode)" = start_over ] && [ "$(prog while_parked)" = rotate ] && ok "a new program starts with the settings: start_mode start_over, while_parked rotate" || bad "program: start_mode $(prog start_mode), while_parked $(prog while_parked)"
+n_pt=$(nsched); pl_pt=$(playedms)
+waitprog() { local i; for i in $(seq 1 40); do [ "$(prog "$1")" = "$2" ] && return 0; sleep 0.1; done; return 1; }
+post /settings '{"GlobalPlaylistStart":"resume"}' >/dev/null
+waitprog start_mode resume && ok "{GlobalPlaylistStart:resume} → prog:main.start_mode resume live" || bad "start_mode $(prog start_mode), want resume"
+post /settings '{"RotateWhileParked":false}' >/dev/null
+waitprog while_parked hold && ok "{RotateWhileParked:false} → prog:main.while_parked hold live" || bad "while_parked $(prog while_parked), want hold"
+post /settings '{"RotateWhileParked":true}' >/dev/null
+waitprog while_parked rotate && ok "{RotateWhileParked:true} → rotate" || bad "while_parked $(prog while_parked), want rotate"
+[ "$(nsched)" = "$n_pt" ] && [ "$(cur path)" = "$C1" ] && python3 -c "import sys; sys.exit(0 if $(playedms) >= $pl_pt - 1 else 1)" \
+  && ok "…the current play untouched (no switch scheduled, still c1, played_ms $pl_pt → $(playedms), monotone)" || bad "the settings disturbed the play: switches $n_pt → $(nsched), cur $(cur path), played_ms $pl_pt → $(playedms)"
+# the playlist's own start beats the global one only with its override on
+ps_body() { echo "{\"videoPaths\":[\"$C1\",\"$C2\"],\"settings\":{\"order\":0,\"overrideGlobalSettings\":$1,\"playlistStart\":\"$2\",\"intervalSeconds\":600,\"switchWhenVideoEnds\":false,\"separateSceneTiming\":false,\"switchScenesAfterSeconds\":1800},\"name\":null}"; }
+post /playlist/state "$(ps_body false start_over)" >/dev/null
+post /settings '{"GlobalPlaylistStart":"start_over"}' >/dev/null
+waitprog start_mode start_over && ok "playlist playlistStart start_over, no override, global start_over → start_over" || bad "start_mode $(prog start_mode)"
+post /playlist/state "$(ps_body false resume)" >/dev/null; sleep 0.5
+[ "$(prog start_mode)" = start_over ] && ok "its own resume without the override is ignored (the global start_over stays)" || bad "an un-overridden playlist's playlistStart reached the program: $(prog start_mode)"
+post /playlist/state "$(ps_body true resume)" >/dev/null
+waitprog start_mode resume && ok "the override on → the playlist's own resume beats the global start_over" || bad "start_mode $(prog start_mode), want resume (override on)"
+post /settings '{"GlobalPlaylistStart":"start_over","Theme":"Nord"}' >/dev/null; sleep 0.5
+[ "$(prog start_mode)" = resume ] && ok "a global change under the override leaves the playlist's own resume" || bad "a global change moved an overriding playlist: $(prog start_mode)"
+post /playlist/state "$(ps_body true start_over)" >/dev/null
+post /settings '{"GlobalPlaylistStart":"resume"}' >/dev/null; sleep 0.5
+[ "$(prog start_mode)" = start_over ] && ok "an overriding playlist's own start_over holds against a global resume" || bad "start_mode $(prog start_mode), want start_over"
+post /playlist/state "$(ps_body false start_over)" >/dev/null
+waitprog start_mode resume && ok "the override off → the global resume applies again" || bad "start_mode $(prog start_mode), want resume (override off)"
+[ "$(nsched)" = "$n_pt" ] && [ "$(cur path)" = "$C1" ] && ok "…and none of it switched anything" || bad "the start-mode edits scheduled switches: $n_pt → $(nsched), cur $(cur path)"
+post /settings '{"GlobalPlaylistStart":"start_over"}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
 echo "== a partial body sets a maximum play time on a running advance-on-end rotation (live)"

@@ -375,6 +375,8 @@ public static class ServerHost
                 if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
                 // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
                 Liascape.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
+                // pause when covered: a player-level prop, live (diffed)
+                Liascape.Player.LiascapePlayerMedia.ApplyCoverSetting(prev, s);
             }
             else
             {
@@ -423,6 +425,9 @@ public static class ServerHost
             // "When the playlist starts again" (the global one, when the playlist follows it) → the program, for its next start
             if (onPlayer && PlayerHelper.EffectiveStart(prev, plS) != PlayerHelper.EffectiveStart(s, plS) && Liascape.Player.LiascapePlayerProgram.IsActive)
                 Liascape.Player.LiascapePlayerProgram.SetStartMode(PlayerHelper.EffectiveStart(s, plS));
+            // "When no monitor shows the wallpaper" (Expert): the running program's while_parked, live
+            if (onPlayer && prev.RotateWhileParked != s.RotateWhileParked && Liascape.Player.LiascapePlayerProgram.IsActive)
+                Liascape.Player.LiascapePlayerProgram.SetWhileParked(s.RotateWhileParked);
             if (prev.TransitionMethod != s.TransitionMethod
                 || !TransitionService.SameConfig(TransitionService.Effective(prev, plS), TransitionService.Effective(s, plS)))
                 PlayerHelper.RearmAlignedSwitch();

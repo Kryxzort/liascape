@@ -234,6 +234,7 @@ public static class LiascapePlayerMedia
     {
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
+        SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
         _sceneFpsGen = client.Generation;
     }
 
@@ -254,6 +255,14 @@ public static class LiascapePlayerMedia
         var had = GpuProps(prev);
         foreach (var (prop, v) in GpuProps(cur))
             if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
+    }
+
+    // Pause when covered (Phase 3 Task 10): `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new
+    // player process gets it from AssertSceneFps (the prop's own default is off).
+    public static void ApplyCoverSetting(AppSettings prev, AppSettings cur)
+    {
+        if (AppSettings.CoverMode(prev.PauseWhenCovered) != AppSettings.CoverMode(cur.PauseWhenCovered))
+            QueuePlayerProp("pause_when_covered", AppSettings.CoverMode(cur.PauseWhenCovered));
     }
 
     private static void QueuePlayerProp(string prop, object v) =>
