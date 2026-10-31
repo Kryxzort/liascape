@@ -24,6 +24,9 @@
 //! - `cover` (Phase 3 Task 6, `crate::signal`) — the covered Signal: its source (`hyprland` |
 //!   `sway` | `wlr-foreign-toplevel` | `headless` | `unavailable`) and status, per output
 //!   `covered`/`app_id`/`pid`/`showing`/`since_ms`, the rule, the hold, its last decisions.
+//! - `automute` (Phase 3 Task 14, `crate::signal::automute`) — the in-player auto-mute: settings,
+//!   state, each captured stream's verdict (`foreign` / `own:<why>`), level and MPRIS owner, the
+//!   MPRIS players (`unmatched`: Playing with no stream), decisions with `t_mono_ms` timestamps.
 //! - `programs` (`programs.rs`, Phase 3) — every program: `state.programs` plus each item's
 //!   `skip`/`broken`/`failed` flags.
 
@@ -92,6 +95,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
          malloc_trim(0) and reports what it gave back",
     ),
     (
+        "automute",
+        automute,
+        "the in-player auto-mute Signal (Phase 3 Task 14): settings, state, every captured \
+         stream with its verdict and level, MPRIS, recent decisions with timestamps",
+    ),
+    (
         "cover",
         cover,
         "the covered Signal (Phase 3): source + status, per output covered/app_id/pid/showing, \
@@ -127,6 +136,10 @@ pub fn run(rt: &mut Runtime, name: &str, args: &Value) -> Result<Value, ApiError
             hint: "`liascape-player ctl probe '{\"name\":\"list\"}'` lists the probes".into(),
         }),
     }
+}
+
+fn automute(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
+    Ok(rt.automute_probe())
 }
 
 fn cover(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
