@@ -129,3 +129,15 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   The setting/UI comes with Tasks 7/10.
 - **Started:** Task 14's player side (in-player auto-mute, behind a flag) — owner's bars: latency ≤ today's, delay
   accuracy, 500 ms default, no default exclusions, MPRIS = the player's own streams. Backend switch-over after Task 7.
+
+## 2026-10-31 night
+
+- **Phase 3 Task 7 done** (`db77cb1`, `670b12e`): rotation runs as the player's program `prog:main`. Your bar
+  playlist "Full?" is rotating through it (left running). Local scene 3276522107 never loads — the program skips it.
+  Adapter IT 314/0, UI matrix 778/2 (both load-only, pass alone).
+- **Task 14 player side done** (`e62c9ea`, `288000b`, still behind `LIASCAPE_PLAYER_AUTOMUTE=1`): on an idle machine
+  p50 mute 32 ms vs today's 53, a new stream 36 vs 79; a set delay lands within ~3 ms (today 32–47 ms late).
+  Open: a 341 ms p95 tail for a brand-new stream at quantum 1024 with all cores saturated (cause unknown); CPU
+  criterion 9 — 5 streams cost 23–45 ms/s in the player + 14–30 in the `parec`s it starts (+33–74 in pipewire-pulse):
+  **your call** whether the criterion counts the helpers. Not yet tried on your real session / a real browser.
+- **Started:** Task 8 (retire timer/restart daemons) and Task 9 (player outbox), each in its own worktree.
