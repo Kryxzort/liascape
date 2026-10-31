@@ -72,6 +72,8 @@ happen regardless of timing.
   for and restarts the compositor child (Task 16). § Supervisor.
 - `src/snapshot.rs` — the persisted state snapshot (`<state>/snapshot.json`, `--restore`)
   + its writer thread (Task 16). § Snapshot.
+- `src/outbox.rs` — the backend's outbox (`<state>/outbox.jsonl`, Phase 3 Task 9): the facts the backend must store
+  even when it isn't listening, appended where they're logged, read/acked over the API. § Outbox.
 - `src/mem.rs` — process memory (`/proc/self/status`, glibc `mallinfo2`/`malloc_info`)
   and the allocator policy `serve` applies first thing (Task 20b). § Memory.
 - `src/onset.rs` — invariant #8's one onset helper (`PendingOnset`/`Onsets`: ramp-ins held
@@ -2390,7 +2392,7 @@ note on stderr and exits 0 (or stdout closes).
 
 | verb | args | result | errors (besides `bad_request`) | `ctl` example |
 |---|---|---|---|---|
-| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, program, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?], clock, backend, verbs, health {effects, vram, hwdec_interop, scenes} (each `{ok, reason, …}`, `crate::health`)}` | — | `ctl hello` |
+| `hello` | — | `{version, pid (the compositor — the supervisor's child when supervised), supervisor_pid (null unsupervised), restart (the `supervisor.restart` fields this child logged, or null), protocol: 1, capabilities: [video, image, color, transition, program, scene? (the worker resolves — Task 5 — and WE's assets dir does, or synthetic scenes are allowed — Task 7), headless?, stepped?, outbox (Phase 3 Task 9)], clock, backend, verbs, health {effects, vram, hwdec_interop, scenes} (each `{ok, reason, …}`, `crate::health`)}` | — | `ctl hello` |
 | `create` | `{kind: source\|layer\|effect\|program, id?, props?}` (a program without `seed` gets the wall clock's nanos) | `{id}` | graph codes; `no_such_effect` (an effect's `effect_id`); `unsupported` (output/player) | `ctl create '{"kind":"source","props":{"path":"/w/a.mp4","loop":true}}'` |
 | `destroy` | `{id}` | `{ramp_ms}` — an audible source is ramped out first (30), else gone now (0) | `no_such_node`; `unsupported` (an output or main layer) | `ctl destroy '{"id":"src3"}'` |
 | `set` | `{path, value}` (aliases: every match) | `{targets: [ids]}` | graph codes; `no_such_effect` (`<fx>.effect_id`) | `ctl set '{"path":"srcs:*.gain.user","value":-6}'` |
@@ -2409,6 +2411,8 @@ note on stderr and exits 0 (or stdout closes).
 | `stop` | — | `{stopping: [ids]}` | — | `ctl stop` |
 | `quit` | — | `{}` (then the process exits 0) | — | `ctl quit` |
 | `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in; the client's later requests wait for it) | `unsupported` (real clock), `timeout`, `busy` (64 queued) | `ctl step '{"ms":16}'` |
+| `outbox.read` | `{after?: u64, limit?: 500 (1–2000)}` (Phase 3 Task 9, § Outbox) | `{events: [{seq, t_wall, kind, fields}] (unacked, seq > after, oldest first), last_seq (the newest ever appended, 0 = none), dropped_before: u64\|null (entries past `after` were dropped by the bound: everything before this seq)}` | `bad_request` (`after`/`limit` not a non-negative integer, `limit` 0) | `ctl outbox.read '{"after":12,"limit":100}'` |
+| `outbox.ack` | `{seq}` — the backend stored every entry ≤ seq (a seq past the newest acks all) | `{}` (reads skip them at once; the file is compacted on `lia-snapshot`) | `bad_request` (no/bad `seq`) | `ctl outbox.ack '{"seq":14}'` |
 | `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
 | `headless.pointer` | `{output, x, y, buttons? (0)}` — surface px from the top-left (Task 7) | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
@@ -2423,7 +2427,9 @@ full), `io` (capture write, ctl connect).
 cancelled|failed|graph_error` (the recipe's outbox, R37), `source.ready|ended|position`
 (runtime, `position` is debug-level ~10 Hz, every change in stepped mode),
 `source.retire|parked|unparked` (runtime), `source.error|rejected|open|teardown|drop`
-(host), `source.broken` (a scene past its restart budget, § Scene worker), `scene.context_lost|resuming|
+(host), `source.broken` (a scene past its restart budget, § Scene worker; it, `scene.loudness` and
+`scene.vram_exceeded` carry `outbox_seq` — § Outbox), `outbox.dropped|write_failed|write_recovered|compacted (debug)`
+(§ Outbox), `scene.context_lost|resuming|
 resumed|preview|preview_failed|restored_broken` (Task 10, § Scene worker → "Crash policy"),
 `worker.killed`, `gfx.context_robust`, `transition.output_adopted`, `output.added|removed|changed|layer_failed|
 present_failed`, `wl.connected|surface_ready|surface_closed|surface_recreated|layer|
@@ -3166,6 +3172,47 @@ same place.
   nothing); parking cancels it (unpark ramps from −96).
 - **`snapshot` probe:** `{path, writes, failures, last_write_ms, since_last_write_ms,
   due_in_ms, frozen, current}` — `current` is what would be written now.
+- **Other jobs on `lia-snapshot`:** `Writer::runner()` hands out a `Runner` that queues a closure on the writer thread
+  (the outbox's compaction, § Outbox); a batch runs them first, then the state files, then the snapshot. `finish` sends
+  a `Stop` job (a `Runner` keeps the channel open, so the thread can't wait for every sender to go).
+
+## Outbox
+
+`src/outbox.rs` (Phase 3 Task 9, plan designer call 6). What the backend must persist even when it isn't
+listening — with the app closed (the player rotates by itself, Phase 3), or in a reconnect gap — is kept in
+`<state>/outbox.jsonl` until the backend acks it: `source.broken` (→ the item is marked crashed), `scene.loudness` (→ the
+index) and `scene.vram_exceeded` (UI text only). The backend drains it on every (re)subscription (player-adapter.md
+§ Event flow → "Outbox").
+
+- **Where:** `crate::outbox::with_seq(kind, &mut fields)` at the three points that log them (`SceneSource::log_broken`,
+  `report_loudness`, `stop_for_vram`) appends the event's fields, then adds `outbox_seq` to the live event (and the log
+  record) — the backend acks what it handled live by it. The outbox is process-global (`outbox::install`, once in
+  `serve`, after the snapshot writer exists); without one (a harness) `append` is a no-op and no `outbox_seq` appears.
+  `hello.capabilities` has `outbox`.
+- **Lines:** `{"seq":N,"t_wall":…,"kind":…,"fields":{…}}` — `seq` written first by hand (serde_json sorts keys) so a
+  read skips lines without parsing them. `seq` is monotonic across restarts: at open it continues after the last
+  line, `outbox.state.json`'s `last_seq` or its `acked`, whichever is newest (an acked, compacted-empty file still
+  continues). A failed append uses no seq (`outbox.write_failed {op: append}` once per streak, `write_recovered`).
+- **Appends:** `O_APPEND`, one `write` per line, any thread, one mutex; never `fsync`ed (a crash keeps it in the page
+  cache; a power loss can lose the newest lines). A torn last line found at open is ended with `\n` and never read.
+- **Bound:** `OUTBOX_MAX` = 2000 unacked entries. A read never returns an older one; `dropped_before` = the first seq
+  kept when one past `after` (and the ack) was lost — the bound applied exactly at read time, plus `dropped_through`
+  (persisted) for what a compaction dropped. The file is compacted once it holds `COMPACT_SLACK` = 200 lines more than
+  the bound (no rewrite per append past it), and at open when it is past the bound or holds acked lines;
+  `outbox.dropped {n, before, max}` (warn) when unacked entries go.
+- **`outbox.read {after?, limit?}`** (§ Command API): reads the file on the loop (≤ 2200 lines; only the backend's
+  drain calls it), the entries with seq > max(after, acked), ≤ `limit` (500 by default, at most 2000).
+- **`outbox.ack {seq}`:** `acked` moves at once (reads skip ≤ seq), then a compaction is queued on `lia-snapshot` (one
+  at a time; another after it when asked meanwhile): the unacked entries (newest 2000) to `outbox.jsonl.tmp` + `fsync`,
+  `outbox.state.json` `{last_seq, acked, dropped_through}` atomically, then **under the lock** the lines appended since
+  the read are copied over, the temp renamed over the file and the append handle reopened (no `fsync` under the lock —
+  the loop may append meanwhile), the dir `fsync`ed after. A crash before the rename leaves the old file and the new
+  state: the acked lines are skipped at open and compacted then. `outbox.compacted {kept, acked, carried, ms}` (debug).
+- **Idempotence is the contract:** a fact can be delivered twice (live and drained, or drained again after a crash
+  before its ack) — every backend handler of it must be idempotent.
+- Tests: units in `outbox.rs` (order + reopen, ack + an empty file's seq, a lost compaction, 2500 appends past the
+  bound, a torn line, a queued compaction), api `outbox_persists_across_restart_and_acks`, `outbox_is_bounded`,
+  `live_events_carry_outbox_seq`, and `scene_over_vram_limit_is_stopped_not_crashed` (its `outbox_seq`).
 
 ## Memory
 

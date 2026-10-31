@@ -8244,6 +8244,11 @@ fn scene_over_vram_limit_is_stopped_not_crashed() {
     assert_eq!(ev["id"], json!(id));
     assert_eq!(ev["used_mib"], json!(1800.0));
     assert_eq!(ev["limit_mib"], json!(1536.0));
+    // Phase 3 Task 9: kept in the outbox for a backend that's away
+    let seq = ev["outbox_seq"].as_u64().unwrap_or_else(|| panic!("{ev}"));
+    let r = c.ok("outbox.read", json!({"after": seq - 1, "limit": 1}));
+    assert_eq!(r["events"][0]["kind"], json!("scene.vram_exceeded"), "{r}");
+    assert_eq!(r["events"][0]["fields"]["used_mib"], json!(1800.0), "{r}");
     let err = wait_event(&mut c, &mut seen, "source.error", Duration::from_secs(2));
     let reason = err["reason"].as_str().unwrap();
     assert!(
@@ -9921,4 +9926,259 @@ fn cover_from_a_fake_hyprland() {
             .all(|r| r == "[[BATCH]]j/monitors;j/clients"),
         "read-only requests only"
     );
+}
+
+// ---------------------------------------------- Phase 3 Task 9: the player outbox
+
+/// A real-clock synthetic-scene server in `root` whose scene loudness window is 1 s of audible
+/// play (`--ao null`: the worker's real-time pull timer is the stream).
+fn outbox_serve(root: PathBuf, serial: Option<MutexGuard<'static, ()>>) -> Serve {
+    Serve::spawn_env(
+        root,
+        &["--clock", "real", "--log-level", "debug"],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_LOUDNESS_WINDOW_S", Path::new("1")),
+        ],
+        serial,
+    )
+}
+
+/// `quit` `srv` (its final writes land) and keep its root for the next process.
+fn quit_keep_root(mut srv: Serve) -> (PathBuf, Option<MutexGuard<'static, ()>>) {
+    srv.client().ok("quit", json!({}));
+    assert!(srv.wait_exit(Duration::from_secs(10)).is_some(), "quit");
+    let root = srv.root.clone();
+    let serial = srv._serial.take();
+    srv.child = None;
+    std::mem::forget(srv); // keep the state dir; the last server's drop removes it
+    (root, serial)
+}
+
+/// `<root>/state/…/outbox.jsonl`.
+fn outbox_file(root: &Path) -> PathBuf {
+    root.join("state/liascape/liascape-player/outbox.jsonl")
+}
+
+fn outbox_events(r: &Value) -> Vec<Value> {
+    r["events"].as_array().cloned().unwrap_or_default()
+}
+
+fn outbox_seqs(r: &Value) -> Vec<u64> {
+    outbox_events(r)
+        .iter()
+        .map(|e| e["seq"].as_u64().expect("seq"))
+        .collect()
+}
+
+/// A scene that crashes past its restart budget (`source.broken`) on every output.
+fn break_a_scene(c: &mut Client, name: &str) -> (String, PathBuf) {
+    let spec = SyntheticSpec {
+        crash_after_ms: Some(100),
+        ..synth(Pattern::Solid)
+    };
+    let dir = common::synthetic_scene(name, &spec);
+    let id = create_src(c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(c, &id);
+    wait_for(Duration::from_secs(20), "source.broken", || {
+        logs_of(c, "source.broken")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    (id, dir)
+}
+
+/// A tone scene on every output until its first `scene.loudness` → that event.
+fn learn_a_loudness(c: &mut Client, name: &str) -> (String, Value) {
+    let id = create_scene(c, name, &tone_scene(1000.0), json!({}));
+    show_all(c, &id);
+    let ev = wait_for(Duration::from_secs(15), "scene.loudness", || {
+        loudness_events(c, Some(&id)).into_iter().next()
+    });
+    (id, ev)
+}
+
+/// Phase 3 Task 9 (plan designer call 6): what the backend must store while it is away —
+/// `source.broken` and `scene.loudness` — goes to `<state>/outbox.jsonl` too. A restarted player
+/// still has it (`outbox.read`, the same seqs); `outbox.ack` empties it, the ack survives a
+/// restart, and the seq continues across one even with the file empty.
+#[test]
+fn outbox_persists_across_restart_and_acks() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let srv = outbox_serve(new_root(), Some(serial));
+    let mut c = srv.client();
+    let (_, broken_dir) = break_a_scene(&mut c, "api-outbox-broken-900000011");
+    let (_, loud) = learn_a_loudness(&mut c, "api-outbox-tone-1");
+    c.ok("stop", json!({}));
+    let before = c.ok("outbox.read", json!({}));
+    println!("before: {before}");
+    let evs = outbox_events(&before);
+    let seqs = outbox_seqs(&before);
+    assert!(evs.len() >= 2, "{before}");
+    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>(), "seq from 1, contiguous");
+    let b = evs
+        .iter()
+        .find(|e| e["kind"] == "source.broken")
+        .unwrap_or_else(|| panic!("no source.broken: {before}"));
+    assert_eq!(b["fields"]["path"], json!(s(&broken_dir)), "{b}");
+    assert_eq!(b["fields"]["restarts"], json!(3), "{b}");
+    assert!(b["t_wall"].as_str().is_some_and(|t| t.ends_with('Z')), "{b}");
+    let l = evs
+        .iter()
+        .find(|e| e["kind"] == "scene.loudness")
+        .unwrap_or_else(|| panic!("no scene.loudness: {before}"));
+    assert_eq!(l["fields"]["path"], loud["path"], "{l}");
+    assert_eq!(l["fields"]["lufs"], loud["lufs"], "{l}");
+    assert!(l["fields"]["state"]["counts"].is_array(), "the state to store: {l}");
+    assert!(l["fields"].get("outbox_seq").is_none(), "{l}");
+    let last = *seqs.last().unwrap();
+    assert_eq!(before["last_seq"], json!(last));
+    assert_eq!(before["dropped_before"], Value::Null);
+    drop(c);
+
+    // A restart (the backend away all along): the same entries.
+    let (root, serial) = quit_keep_root(srv);
+    let srv = outbox_serve(root, serial);
+    let mut c = srv.client();
+    let caps = c.ok("hello", json!({}))["capabilities"].clone();
+    assert!(caps.as_array().unwrap().contains(&json!("outbox")), "{caps}");
+    let after = c.ok("outbox.read", json!({}));
+    assert_eq!(after["events"], before["events"], "the same entries after a restart");
+    assert_eq!(after["last_seq"], json!(last));
+    // Paging: `after` + `limit`.
+    let page = c.ok("outbox.read", json!({"after": 1, "limit": 1}));
+    assert_eq!(outbox_seqs(&page), vec![2], "{page}");
+    assert_eq!(page["dropped_before"], Value::Null, "{page}");
+    assert_eq!(c.err("outbox.read", json!({"limit": 0}))["code"], json!("bad_request"));
+    assert_eq!(c.err("outbox.ack", json!({}))["code"], json!("bad_request"));
+    // The ack: nothing left to read, the file compacted (on lia-snapshot).
+    assert_eq!(c.ok("outbox.ack", json!({"seq": last})), json!({}));
+    let empty = c.ok("outbox.read", json!({}));
+    assert!(outbox_events(&empty).is_empty(), "{empty}");
+    assert_eq!(empty["last_seq"], json!(last));
+    let file = outbox_file(&srv.root);
+    wait_for(Duration::from_secs(5), "the compaction", || {
+        std::fs::read_to_string(&file)
+            .is_ok_and(|t| t.trim().is_empty())
+            .then_some(())
+    });
+    drop(c);
+
+    // The ack survives a restart, and the seq continues with the file empty.
+    let (root, serial) = quit_keep_root(srv);
+    let srv = outbox_serve(root, serial);
+    let mut c = srv.client();
+    let r = c.ok("outbox.read", json!({}));
+    assert!(outbox_events(&r).is_empty(), "acked before the restart: {r}");
+    assert_eq!(r["last_seq"], json!(last), "{r}");
+    let (_, loud2) = learn_a_loudness(&mut c, "api-outbox-tone-1");
+    assert_eq!(loud2["outbox_seq"], json!(last + 1), "{loud2}");
+    let r = c.ok("outbox.read", json!({}));
+    assert_eq!(outbox_seqs(&r).first(), Some(&(last + 1)), "{r}");
+}
+
+/// Phase 3 Task 9: the outbox keeps at most `OUTBOX_MAX` = 2000 entries — the oldest unacked
+/// ones are dropped (`outbox.dropped {n}`) and a read says so (`dropped_before`: everything
+/// before that seq past `after` is gone). A read returns ≤ `limit` (500 by default) per page.
+#[test]
+fn outbox_is_bounded() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    // 2499 entries a previous process left (the file format is the contract) …
+    let file = outbox_file(&root);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let mut seed = String::new();
+    for i in 1..=2499u64 {
+        seed.push_str(
+            &json!({"seq": i, "t_wall": "2026-10-31T00:00:00Z", "kind": "test.seed",
+                    "fields": {"i": i}})
+            .to_string(),
+        );
+        seed.push('\n');
+    }
+    std::fs::write(&file, seed).unwrap();
+    let srv = outbox_serve(root, Some(serial));
+    let mut c = srv.client();
+    // … and the 2500th, appended live.
+    let (id, dir) = break_a_scene(&mut c, "api-outbox-bound-900000012");
+    let r = c.ok("outbox.read", json!({}));
+    let seqs = outbox_seqs(&r);
+    assert_eq!(seqs.len(), 500, "a page is 500 by default");
+    assert_eq!(seqs[0], 501, "the oldest 500 dropped: {:?}", &seqs[..3]);
+    assert_eq!(r["dropped_before"], json!(501));
+    assert_eq!(r["last_seq"], json!(2500));
+    let all = c.ok("outbox.read", json!({"limit": 5000}));
+    let seqs = outbox_seqs(&all);
+    assert_eq!(seqs.len(), 2000, "OUTBOX_MAX entries kept");
+    assert_eq!(seqs, (501..=2500).collect::<Vec<_>>());
+    let last = outbox_events(&all).pop().unwrap();
+    assert_eq!(last["kind"], json!("source.broken"), "{last}");
+    assert_eq!(last["fields"]["id"], json!(id), "{last}");
+    assert_eq!(last["fields"]["path"], json!(s(&dir)), "{last}");
+    // Nothing lost past `after` = 1000.
+    let r = c.ok("outbox.read", json!({"after": 1000, "limit": 1}));
+    assert_eq!(outbox_seqs(&r), vec![1001]);
+    assert_eq!(r["dropped_before"], Value::Null, "{r}");
+    let dropped = wait_for(Duration::from_secs(5), "outbox.dropped", || {
+        logs_of(&mut c, "outbox.dropped").into_iter().next()
+    });
+    assert!(dropped["n"].as_u64().is_some_and(|n| n >= 499), "{dropped}");
+    // The file itself is bounded: compacted at start (on lia-snapshot) to the newest 2000, then
+    // the live append (a compaction waits for 200 more: no rewrite per append past the bound).
+    wait_for(Duration::from_secs(5), "a bounded file", || {
+        let n = std::fs::read_to_string(&file).unwrap().lines().count();
+        (n == 2001).then_some(())
+    });
+    c.ok("outbox.ack", json!({"seq": 2500}));
+    let r = c.ok("outbox.read", json!({}));
+    assert!(outbox_events(&r).is_empty(), "{r}");
+    assert_eq!(r["dropped_before"], Value::Null, "an ack past the loss clears it: {r}");
+}
+
+/// Phase 3 Task 9: a live `source.broken` / `scene.loudness` carries `outbox_seq` — the seq of
+/// the outbox entry holding the same fields (the backend acks what it handled live).
+#[test]
+fn live_events_carry_outbox_seq() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let srv = outbox_serve(new_root(), Some(serial));
+    let mut c = srv.client();
+    c.ok(
+        "subscribe",
+        json!({"topics": ["source.broken", "scene.loudness"]}),
+    );
+    let mut seen = Vec::new();
+    let (loud_id, _) = learn_a_loudness(&mut c, "api-outbox-tone-2");
+    let ev = wait_event(&mut c, &mut seen, "scene.loudness", Duration::from_secs(5));
+    assert_eq!(ev["id"], json!(loud_id));
+    let seq = ev["outbox_seq"].as_u64().unwrap_or_else(|| panic!("{ev}"));
+    let r = c.ok("outbox.read", json!({"after": seq - 1, "limit": 1}));
+    let entry = &outbox_events(&r)[0];
+    assert_eq!(entry["seq"], json!(seq), "{r}");
+    assert_eq!(entry["kind"], json!("scene.loudness"));
+    for k in ["path", "key", "lufs", "seconds", "complete", "state"] {
+        assert_eq!(entry["fields"][k], ev[k], "{k}: {entry} vs {ev}");
+    }
+    // The log record carries it too (`ctl logs`).
+    let logged = loudness_events(&mut c, Some(&loud_id));
+    assert_eq!(logged[0]["outbox_seq"], json!(seq), "{}", logged[0]);
+    c.ok("destroy", json!({"id": loud_id}));
+    let (broken_id, _) = break_a_scene(&mut c, "api-outbox-broken-900000013");
+    let ev = wait_event(&mut c, &mut seen, "source.broken", Duration::from_secs(5));
+    assert_eq!(ev["id"], json!(broken_id));
+    let bseq = ev["outbox_seq"].as_u64().unwrap_or_else(|| panic!("{ev}"));
+    assert!(bseq > seq, "{bseq} after {seq}");
+    let r = c.ok("outbox.read", json!({"after": bseq - 1, "limit": 1}));
+    let entry = &outbox_events(&r)[0];
+    assert_eq!(entry["seq"], json!(bseq));
+    assert_eq!(entry["kind"], json!("source.broken"));
+    assert_eq!(entry["fields"]["record"], ev["record"], "{entry}");
 }
