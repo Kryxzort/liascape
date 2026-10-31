@@ -21,7 +21,8 @@ paths:
 - liascape-player GPU / VRAM (live; `player-adapter.md` § Scenes): `AutoThrottleScenes` (true), `LimitVramPerScene` (false) + `SceneVramLimitMib` (1536, 64–1048576), `VramLowMode` (`stop` | `pause` | `off`)
 - UI: `ThumbnailAspect` ("Default"), `CardSize` ("Medium"), `LibrarySortIndex` (5 = newest first), `Theme` ("Catppuccin Mocha")
 - Advanced/UI toggles: `AdvancedSettings` (false — reveal power-user rows), `LiveWallpaperBehindAllTabs` (false — play the live wallpaper behind Browse/Library too), `DebugMode` (false — `liascapeDbg` bridge + metrics), `DebugOverlay` (true — on-screen debug HUD when DebugMode is on)
-- `LastSession`: tracks last applied mode for `liascape restore`
+- `LastSession`: tracks last applied mode for `liascape restore` (under liascape-player: replayed only when the
+  restored player shows nothing — first boot, after `stop`, no snapshot)
 
 `CustomPlaylist` (JSON at `~/.config/liascape/playlist_state.json` for in-progress; named files in `~/.local/share/liascape/playlists/`):
 - `VideoPaths`, `Name` (nullable; only set after Save or Load)
@@ -36,6 +37,15 @@ paths:
 **`LastSession` upkeep:** the `/settings` POST merges its body over the saved settings (PATCH — keys it leaves out keep their values, `web-backend.md`) and **preserves** `LastSession` (+ the Steam sign-in: tokens, `SteamId`) from disk whatever the body says (the UI re-POSTs a stale cached copy — clobbering would lose it). `LastSession` is (re)written by `AppOps` on `apply`/`random`/`next`/`PlayPlaylist`; `--restore` replays whatever it last held.
 
 ## Timed Playlist
+
+**Legacy engine only.** Under `PlayerEngine=liascape-player` a rotation is the player's program (`prog:main`,
+`player-adapter.md` § Rotation) and keeps rotating with the app closed: none of the machinery below runs there — no
+tick, no `timer-daemon`, no `restart-daemon`, no pending-action IPC, no timer ownership. `pending_action.txt`,
+`timer.pid`, `gui_timer.pid`, `restart.pid`, `timed_state.json` and `playlist_observer_paths.json` are never written
+(Phase 3 Task 8; each entry point is a no-op logged once — `PlayerHelper.RetiredUnderPlayer`). A legacy
+`timed_state.json` is read once (at `serve` start / the engine switch) as the program to load, then removed; a leftover
+legacy daemon is stopped at `serve` start, by `restore` and by `stop`. `liascape restore` starts the player `serve
+--restore --session-start` and replays `LastSession` only when the player shows nothing (§ Rotation "Restore").
 
 `PlayerHelper.ApplyTimedPlaylist`: `System.Threading.Timer` ticks every 100ms. Decrement uses `DateTime.UtcNow` deltas (no jitter drift). On shuffle, `AdvanceToNext` re-randomizes at end of each cycle with do/while guarantee new cycle's first ≠ old cycle's last. State written to `~/.config/liascape/timed_state.json` only on significant events (not every tick) — in-memory `_timedRemainingMs` is authoritative.
 
