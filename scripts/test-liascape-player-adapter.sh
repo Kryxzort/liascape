@@ -1710,6 +1710,53 @@ apis1=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.
 kill "$first" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$first" 2>/dev/null || break; sleep 0.1; done
 stop_now
 
+echo "== Phase 3 Task 9: the player outbox — what the backend stores, kept while it is away (a scene breaks, another learns its loudness)"
+# The backend TERMed; the player alone (a fresh one, its loudness window 3 s) plays a scene that breaks and one that
+# learns its loudness. A new backend drains the outbox when it subscribes: the index has both ≤ 2 s after, then acks.
+S9=$LIB/workshop/900000009; S10=$LIB/workshop/900000010
+mk_scene "$S9" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":400}'
+mk_scene "$S10" '{"pattern":"solid","rgb":[255,128,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-20}'
+OB=$XDG_STATE_HOME/liascape/liascape-player/outbox.jsonl
+obread() { ctl outbox.read '{"limit":2000}' 2>/dev/null; }
+ob_n() { obread | jq --arg a "$S9" --arg b "$S10" '[.events[]? | select(.fields.path == $a or .fields.path == $b)] | length'; }
+ob_empty() { obread | jq -e '.events | length == 0' >/dev/null; }
+port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP
+kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+kill -0 "$old" 2>/dev/null && bad "precondition: the backend outlived its TERM by 10 s"
+restart_player 11 LIASCAPE_PLAYER_LOUDNESS_WINDOW_S=3
+ctl transition "{\"outputs\":\"out:*\",\"to\":{\"kind\":\"scene\",\"path\":\"$S9\"}}" >/dev/null
+s9_broke() { [ -n "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S9" '.events[] | select(.path==$p) | .id')" ]; }
+waitfor 30000 s9_broke && ok "backend away: s9 broke (source.broken)" || bad "backend away: no source.broken for s9"
+ctl transition "{\"outputs\":\"out:*\",\"to\":{\"kind\":\"scene\",\"path\":\"$S10\"}}" >/dev/null
+s10_learned() { [ "$(ctl logs '{"kind_prefix":"scene.loudness","limit":1000}' | jq --arg p "$S10" '[.events[] | select(.path==$p)] | length')" -ge 1 ]; }
+waitfor 15000 s10_learned && ok "backend away: s10 learned its loudness (scene.loudness)" || bad "backend away: no scene.loudness for s10"
+ctl stop >/dev/null
+nob=$(ob_n)
+[ "${nob:-0}" -ge 2 ] && [ -s "$OB" ] && ok "…both kept in the player's outbox ($nob entries, $(grep -c . "$OB") lines in outbox.jsonl)" || bad "outbox: $nob entries for s9/s10: $(obread | head -c 400)"
+jq -e '(."900000009".crashed // false | not) and (."900000010".loudnessI == null)' "$IDX" >/dev/null \
+  && ok "…and nothing in the index yet (no backend)" || bad "index before the backend: $(jq -c '{s9: ."900000009", s10: ."900000010"}' "$IDX")"
+drains0=$(grep -c "outbox: drained" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true)
+"$DOTNET" "$DLL" serve > "$T/backend-outbox.log" 2>&1 & BP=$!
+new_backend_up "$port0"
+drained() { [ "$(grep -c "outbox: drained" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true)" -gt "${drains0:-0}" ]; }
+waitfor 30000 drained || bad "the new backend never drained the outbox: $(tail -3 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log")"
+dline=$(grep "outbox: drained" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)
+dms=$(printf '%s' "$dline" | sed -n 's/.* in \([0-9]*\) ms after subscribing.*/\1/p')
+jq -e '."900000009".crashed == true' "$IDX" >/dev/null && [ -n "$(jq -r '."900000010".loudnessI // empty' "$IDX")" ] && [ -n "$dms" ] && [ "$dms" -le 2000 ] \
+  && ok "drained on subscribing (${dms} ms): s9 crashed true, s10 loudnessI $(jq -r '."900000010".loudnessI' "$IDX") — ${dline#*] }" \
+  || bad "after the drain (${dms:-?} ms): index $(jq -c '{s9: ."900000009".crashed, s10: ."900000010".loudnessI}' "$IDX"), log: $dline"
+waitfor $WAIT ob_empty && ok "…acked: the outbox is empty" || bad "outbox after the drain: $(obread | head -c 400)"
+waitfor $WAIT eval '[ ! -s "$OB" ]' && ok "…and outbox.jsonl compacted" || bad "outbox.jsonl after the ack: $(grep -c . "$OB") lines"
+# with the backend listening, a live report is acked as it is handled (never kept for the next drain)
+setting '.AllowScenes = true'
+nl0=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq '.events|length')
+post /apply "{\"path\":\"$S10\"}" >/dev/null
+waitfor 15000 eval '[ "$(ctl logs "{\"kind_prefix\":\"scene.loudness\",\"limit\":10000}" | jq ".events|length")" -gt "$nl0" ]' || bad "no live scene.loudness for s10"
+lseq=$(ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq -r '.events[-1].outbox_seq // empty')
+[ -n "$lseq" ] && waitfor $WAIT ob_empty && ok "a live scene.loudness (outbox_seq $lseq) is acked once handled: the outbox stays empty" || bad "live report: outbox_seq ${lseq:-none}, outbox $(obread | head -c 400)"
+stop_now
+setting '.AllowScenes = false'
+
 echo "== a crash while an end-of-video switch is armed: A comes back where it was, the switch re-armed for A's end"
 # The snapshot saved an armed align:end switch as its B — the restart showed B at once, cutting A's rest — and
 # the backend's wait ended "failed:player restarted" → its fallback switched NOW (align:now) after a 1 s back-off.

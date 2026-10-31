@@ -35,13 +35,18 @@ public static class LiascapePlayerMedia
                     c.Event += OnEvent;
                     c.Restarted += OnRestarted;
                     c.Recovered += OnRecovered;
-                    c.Subscribed += () => InvalidateSources(); // events in the reconnect gap are lost
+                    c.Subscribed += () => InvalidateSources(); // events in the reconnect gap are lost (bar the outbox's)
+                    c.OutboxEvent += OnOutboxEvent;
                     _hooked = c;
                 }
             }
             return c;
         }
     }
+
+    // The event handlers on the shared client — before anything subscribes it (LiascapePlayerProgram.Sync at serve start):
+    // an event or an outbox drain with no handler would be lost.
+    internal static void Hook() => _ = C;
 
     // ---- the command queue: every liascape-player MUTATION from PlayerHelper runs here ------------------
     // PlayerHelper calls its primitives while holding its _lock; nothing under that lock may wait on the
@@ -293,16 +298,7 @@ public static class LiascapePlayerMedia
         {
             // a scene's loudness report (the first after ~60 s of audible play, then refined) — no source changed;
             // store + apply off this callback
-            var lp = Str(e, "path");
-            double? Num(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
-            if (lp.Length > 0 && Num("lufs") is double lufs && Num("seconds") is double secs)
-            {
-                bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
-                var peak = Num("peak_dbfs");
-                JsonElement? state = e.TryGetProperty("state", out var sv) && sv.ValueKind == JsonValueKind.Object ? sv.Clone() : null;
-                var key = Str(e, "key"); // the source's `loudness_key` (its audio configuration; "" = none)
-                _ = Task.Run(() => { try { OnSceneLoudness(lp, key, lufs, peak, secs, complete, state); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneLoudness threw: {ex.Message}"); } });
-            }
+            StoreLive(e, "OnSceneLoudness", () => { if (SceneLoudnessOf(e) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State); });
             return;
         }
         // every subscribed kind (LiascapePlayerClient.Topics) may change which sources show which file
@@ -313,7 +309,7 @@ public static class LiascapePlayerMedia
             // whitelisted, D6), tell the UI, advance a rotation playing it — off this callback
             var broken = Str(e, "path");
             LiascapePlayerClient.Log($"scene {Path.GetFileName(broken)} is broken ({Str(e, "reason")}; record {Str(e, "record")})");
-            if (broken.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneBroken(broken); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneBroken threw: {ex.Message}"); } });
+            StoreLive(e, "OnSceneBroken", () => { if (broken.Length > 0) PlayerHelper.OnSceneBroken(broken); });
             return;
         }
         if (kind == "scene.vram_exceeded")
@@ -324,7 +320,7 @@ public static class LiascapePlayerMedia
             double used = e.TryGetProperty("used_mib", out var u) && u.ValueKind == JsonValueKind.Number ? u.GetDouble() : 0;
             double limit = e.TryGetProperty("limit_mib", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetDouble() : 0;
             LiascapePlayerClient.Log($"scene {Path.GetFileName(stopped)} stopped by the VRAM guard ({used:0} MiB > {limit:0} MiB)");
-            if (stopped.Length > 0) _ = Task.Run(() => { try { PlayerHelper.OnSceneVramStopped(stopped, used, limit); } catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneVramStopped threw: {ex.Message}"); } });
+            StoreLive(e, "OnSceneVramStopped", () => { if (stopped.Length > 0) PlayerHelper.OnSceneVramStopped(stopped, used, limit); });
             return;
         }
         TrackIntent(kind, e);
@@ -339,6 +335,53 @@ public static class LiascapePlayerMedia
         // Tell them what's really there; off this callback, which must never block on a request.
         if (kind == "transition.failed" && corr == _lastCorr)
             _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
+    }
+
+    // A live outbox fact (Phase 3 Task 9): stored off the event thread, its `outbox_seq` acked only once that returned.
+    private static void StoreLive(JsonElement e, string what, Action store) =>
+        _ = Task.Run(() =>
+        {
+            try { store(); C.OutboxHandled(e); }
+            catch (Exception ex) { LiascapePlayerClient.Log($"{what} threw: {ex.Message}"); }
+        });
+
+    // a `scene.loudness` report's fields (live or from the outbox); null = not a usable one
+    private sealed record LoudnessReport(string Path, string Key, double Lufs, double? Peak, double Seconds, bool Complete, JsonElement? State);
+    private static LoudnessReport? SceneLoudnessOf(JsonElement e)
+    {
+        var lp = Str(e, "path");
+        double? Num(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+        if (lp.Length == 0 || Num("lufs") is not double lufs || Num("seconds") is not double secs) return null;
+        bool complete = e.TryGetProperty("complete", out var cv) && cv.ValueKind == JsonValueKind.True;
+        JsonElement? state = e.TryGetProperty("state", out var sv) && sv.ValueKind == JsonValueKind.Object ? sv.Clone() : null;
+        // `key`: the source's `loudness_key` (its audio configuration; "" = none)
+        return new LoudnessReport(lp, Str(e, "key"), lufs, Num("peak_dbfs"), secs, complete, state);
+    }
+
+    // Phase 3 Task 9: an entry of the player's outbox — a fact it recorded while no backend listened (or one this backend
+    // also saw live: every handler here is idempotent), drained on (re)subscribing, on the drain's thread. It is acked
+    // once this returns, so it stores synchronously. The player already did what playback needed (a rotation advanced);
+    // only what the library keeps is done here: `source.broken` → marked crashed (+ the UI told, the program's item
+    // skipped) unless it already is; `scene.loudness` → the index (MergeSceneLoudness keeps the longest measurement) and
+    // the live normalization; `scene.vram_exceeded` → logged only (UI text of a moment that has passed).
+    private static void OnOutboxEvent(string kind, JsonElement f)
+    {
+        var path = Str(f, "path");
+        switch (kind)
+        {
+            case "source.broken":
+                if (path.Length == 0 || LibraryStore.GetMeta(path)?.Crashed == true) return;
+                LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} broke while the backend was away ({Str(f, "reason")}) — marking it crashed");
+                PlayerHelper.OnSceneBroken(path);
+                return;
+            case "scene.loudness":
+                if (SceneLoudnessOf(f) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State);
+                return;
+            case "scene.vram_exceeded":
+                double Num(string k) => f.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0;
+                LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} was stopped by the VRAM guard while the backend was away ({Num("used_mib"):0} MiB > {Num("limit_mib"):0} MiB)");
+                return;
+        }
     }
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —

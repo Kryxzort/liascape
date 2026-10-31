@@ -179,6 +179,7 @@ public static class LiascapePlayerProgram
             lock (_lock) { _known = true; _gen = client.Generation; _exists = false; _path = null; _index = -1; }
             return;
         }
+        LiascapePlayerMedia.Hook();
         client.StartEvents();
         JsonElement st;
         try { st = client.Call("state", null, LiascapePlayerClient.QuickMs); }

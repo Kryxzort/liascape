@@ -6,7 +6,7 @@
 //! them (`recipes`), the running player (`runtime`) with its outputs (`headless`, `wl`) and
 //! their redraw policy (`redraw`), command API (`api`), probes (`probe`), Signals (`signal`, Phase 3), socket/state paths
 //! (`paths`), shell client (`ctl`), the supervisor (`supervise`), the state snapshot
-//! (`snapshot`) and the scene worker's compositor side (`worker`, Phase 2). Later tasks
+//! (`snapshot`), the backend's outbox (`outbox`, Phase 3) and the scene worker's compositor side (`worker`, Phase 2). Later tasks
 //! append modules here — see
 //! `.claude/rules/player-core.md` for the map.
 
@@ -23,6 +23,7 @@ pub mod log;
 pub mod mem;
 pub mod mpv;
 pub mod onset;
+pub mod outbox;
 pub mod paths;
 pub mod probe;
 pub mod recipes;

@@ -864,14 +864,10 @@ impl SceneSource {
         if self.vram_stopped.is_some() || self.host.is_none() {
             return;
         }
-        log::event(
-            "scene",
-            Level::Warn,
-            "scene.vram_exceeded",
-            None,
-            json!({"id": self.opts.id, "path": self.opts.path, "pid": self.pid(),
-                   "used_mib": used_mib, "limit_mib": limit_mib}),
-        );
+        let mut ev = json!({"id": self.opts.id, "path": self.opts.path, "pid": self.pid(),
+                            "used_mib": used_mib, "limit_mib": limit_mib});
+        crate::outbox::with_seq("scene.vram_exceeded", &mut ev); // Phase 3 Task 9
+        log::event("scene", Level::Warn, "scene.vram_exceeded", None, ev);
         if let Some(h) = self.host.as_mut() {
             h.stop();
         }
@@ -1476,7 +1472,7 @@ impl SceneSource {
     /// `source.broken {id, path, scene_id, reason, signal|code, restarts, record,
     /// total_restarts, uptime_ms, shows}` — the fields from the crash record the host just
     /// wrote (a small file; read once, at the break); `shows` (Task 10) = what stays on screen:
-    /// `last_frame` | `preview` | `nothing`.
+    /// `last_frame` | `preview` | `nothing`. Kept in the outbox too (Phase 3 Task 9: `outbox_seq`).
     fn log_broken(&self, record: &std::path::Path) {
         let rec: Value = std::fs::read(record)
             .ok()
@@ -1503,6 +1499,7 @@ impl SceneSource {
         } else {
             "preview"
         });
+        crate::outbox::with_seq("source.broken", &mut ev); // Phase 3 Task 9
         log::event("source", Level::Error, "source.broken", None, ev);
     }
 
@@ -1802,21 +1799,18 @@ impl SceneSource {
     /// complete, capped, window_s, cap_s, state}` — the integration over every play so far of
     /// the configuration `key` (`seconds` audible, `session_s` of them this source's); the
     /// backend stores it in the item's index under `key` (`state` seeds the next play) and
-    /// normalizes the scene by it.
+    /// normalizes the scene by it. Kept in the outbox too (Phase 3 Task 9: `outbox_seq`), so a
+    /// report made with no backend listening still reaches the index.
     fn report_loudness(&self, l: Learned, key: &str) {
-        log::event(
-            "scene",
-            Level::Info,
-            "scene.loudness",
-            None,
-            json!({"id": self.opts.id, "path": self.opts.path, "key": key, "lufs": l.lufs,
-                   "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
-                   "seconds": l.seconds, "session_s": l.session_s,
-                   "seed_s": l.seed_s, "played_s": l.played_s,
-                   "complete": l.complete, "capped": l.capped,
-                   "window_s": l.window_s, "cap_s": l.cap_s,
-                   "state": l.state}),
-        );
+        let mut ev = json!({"id": self.opts.id, "path": self.opts.path, "key": key, "lufs": l.lufs,
+                            "peak_dbfs": l.peak_dbfs.is_finite().then_some(l.peak_dbfs),
+                            "seconds": l.seconds, "session_s": l.session_s,
+                            "seed_s": l.seed_s, "played_s": l.played_s,
+                            "complete": l.complete, "capped": l.capped,
+                            "window_s": l.window_s, "cap_s": l.cap_s,
+                            "state": l.state});
+        crate::outbox::with_seq("scene.loudness", &mut ev); // Phase 3 Task 9
+        log::event("scene", Level::Info, "scene.loudness", None, ev);
     }
 
     /// Join the current path's measurement in the book: continue it (a reopen, a second source
