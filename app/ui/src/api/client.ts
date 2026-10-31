@@ -100,6 +100,8 @@ export interface PlaylistSettings {
   // maxPlaySeconds the maximum, and separateSceneTiming gives scenes + still images their own
   // switchScenesAfterSeconds (wall-clock seconds, 0 = off everywhere) — player-adapter.md § Rotation
   switchWhenVideoEnds: boolean; maxPlaySeconds: number; separateSceneTiming: boolean; switchScenesAfterSeconds: number;
+  // "When the playlist starts again" (gated by overrideGlobalSettings; else the globalPlaylistStart setting) — plan § Playlist start
+  playlistStart: "start_over" | "resume";
   // WE-style transitions (gated by overrideGlobalSettings; else the globalTransition* fallbacks).
   transitionEnabled: boolean; transitionEffectIds: string[];
   transitionDurationMs: number; transitionDurationMaxMs: number; transitionShuffle: boolean;

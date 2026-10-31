@@ -60,6 +60,7 @@ public static class FeatureHealth
         "scenes" => s.AllowScenes,
         "transitions" => s.GlobalTransitionEnabled,
         "vram" => s.LimitVramPerScene || !string.Equals(s.VramLowMode, "off", StringComparison.OrdinalIgnoreCase),
+        "cover" => !string.Equals(AppSettings.CoverMode(s.PauseWhenCovered), "off", StringComparison.Ordinal),
         "hwdec-interop" => !string.Equals(s.HwDec, "no", StringComparison.OrdinalIgnoreCase),
         "auto-mute" => s.AutoMute,
         "mpris" => s.AutoMute && s.AutoMuteOnlyIfMprisActive,
@@ -100,6 +101,9 @@ public static class FeatureHealth
                     ["limitVramPerScene", "sceneVramLimitMib", "vramLowMode"]));
                 var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
                 f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
+                // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause when covered" can't act
+                var (cok, cwhy) = Part(i.PlayerHealth, "cover");
+                f.Add(new("cover", "Pause when covered", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
             }
         }
         else

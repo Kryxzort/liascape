@@ -491,6 +491,16 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   DoVideoEndWait fallback then skips it (row above). From then on `IsSkippedPath` skips it — unless
   whitelisted (`/library/whitelist`) — and `Apply` refuses it. A missing / half-downloaded folder is a load
   error (`transition.failed`), never marked.
+- **Cover / start / parked settings (Phase 3 Task 10; all live, re-asserted per player process).** `PauseWhenCovered` (`off` |
+  `fullscreen` | `maximized`, default `maximized`) → `player.pause_when_covered`: `LiascapePlayerMedia.ApplyCoverSetting(prev,
+  cur)` is the `/settings` diff (coalescible `player:pause_when_covered`) and `AssertSceneFps` sets it with the GPU props on a
+  fresh player (the prop's own default is `off`, so a raw player never pauses by itself; the snapshot keeps it across a crash
+  restart). `GlobalPlaylistStart` / `PlaylistSettings.PlaylistStart` → `prog:main.start_mode` (`SetStartMode`, `program:start`;
+  `/settings` and `/playlist/state` diffs of the *effective* value — a playlist's own start beats the global one only with its
+  override on); `RotateWhileParked` (Expert, default true) → `prog:main.while_parked` `rotate` | `hold`
+  (`LiascapePlayerProgram.SetWhileParked`, `program:parked`; `BuildSpec` writes it into every load via `WhileParkedOf`). None of
+  them touch the current play (no switch scheduled, `played_ms` monotone: IT § "Phase 3 Task 10"). `FeatureHealth` gains a `cover`
+  row from `hello.health.cover` (`affects pauseWhenCovered`, in use unless `off`). `ResumeFromLast` is gone.
 - **GPU / VRAM settings (Phase 2 Task 8, wired 2026-10-28; player side: player-core.md § Scene worker → "GPU budget
   and VRAM").** Three `AppSettings` → three player props, all live: `AutoThrottleScenes` (bool, default true) →
   `player.scene_throttle`; `LimitVramPerScene` (default false) + `SceneVramLimitMib` (default 1536, clamped

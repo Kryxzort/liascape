@@ -327,6 +327,32 @@ after Z" (", scenes stay" for 0). Semantics: `player-adapter.md` § Rotation. Ma
 (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`); `playlist:sceneTiming` /
 `global:sceneTiming` the toggle + "Switch scenes after".
 
+## Expert options (Phase 3 Task 10, designer call 12)
+A UI tier for settings most users should never touch. **`AppSettings.ShowExpertOptions`** (default false, saved) is the
+checkbox row **"Show expert options"** in Settings → Advanced, directly under "Advanced settings" and **not** gated on it.
+- **Mark a row expert:** give `Row` (`views/Settings.tsx`) the `expert` prop — it renders nothing unless the toggle is on,
+  and when shown carries a small "Expert" tag (`.s-expert`, `data-expert-tag`; the row has `data-expert`). Put it in the
+  page's `<ExpertSection>` (last on the page, rendered only while the toggle is on; heading "Expert"). Add its settings key
+  to **`EXPERT_KEYS`** (same file) so its deviated marker works, and to `SETTINGS_DEFAULTS` (`store/index.ts`) with its default.
+- **Expert settings are ordinary:** the backend knows nothing of the tier — saved and applied live whether or not the group
+  is shown; **hiding never resets a value**. While the group is hidden, a non-default expert value shows the existing reset
+  marker on the "Show expert options" row (`.s-reset[data-deviated]`, tooltip "Some hidden expert settings differ…"); its click
+  resets the expert values to their defaults (never the toggle). With the toggle on, that row's reset is the plain one.
+- **The first expert setting:** `rotateWhileParked` — "When no monitor shows the wallpaper": Keep rotating (default) | Hold until
+  a monitor returns (`prog:main.while_parked`, `player-adapter.md`). Probe: `scripts/test-ui-matrix.sh --probe probe-expert.js`
+  (off → absent; on → present + tagged + persisted across a reload; hidden keeps the value + the marker; the start choice;
+  Pause when covered).
+
+## Pause when covered, playlist start (Phase 3 Task 10)
+- **Playback → "Pause when covered"** (liascape-player only, `liascapeActive`): Off / A fullscreen window / A fullscreen or
+  maximized window (default, `pauseWhenCovered`); hint `ROT_HINT.cover`; the health icon comes from `/health/features` →
+  `cover` (`hello.health.cover`, `affects: ["pauseWhenCovered"]`: no window-state source here, e.g. GNOME/KDE).
+- **Rotation → "When the playlist starts again"** (`globalPlaylistStart`): Start over / Resume where it left off; hint per value
+  (`ROT_HINT.startOver|startResume`) + `ROT_HINT.startLive` ("Takes effect the next time the playlist starts — what's playing
+  now carries on") while a playlist plays (`playlist.length > 1 && playlist.includes(playingPath)`). The playlist modal has the
+  same choice as a segment control (`data-playlist-start`) under its override block (disabled without the override), with a
+  line beside it naming the global value it overrides (`data-playlist-start-hint`). **"Resume from last on launch" is gone.**
+
 ## Settings page under liascape-player (Phase 2 scenes)
 `views/Settings.tsx` reads `GET /player-engine` on mount and after an engine or "Allow scene support" change;
 while `active === "liascape-player"` (`liascapeActive`): "Scene transition delay" is hidden (the player switches once the

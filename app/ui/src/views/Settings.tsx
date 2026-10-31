@@ -1,7 +1,7 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
-  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge,
+  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, FlaskConical,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
 import { api, type FeatureHealth } from "../api/client";
@@ -83,23 +83,26 @@ function SceneLoudnessRow() {
 // value deviates from its default (SETTINGS_DEFAULTS), and resets that one setting. `onReset`/`deviated`
 // cover non-settings-backed rows (e.g. Theme, applied via applyTheme not setSetting). `wk` = the key whose
 // feature warnings (WarnIcon) the row shows, when it has no `rk`.
-function Row({ label, hint, disabled, rk, wk, def, deviated, onReset, children }: {
+function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onReset, expert, children }: {
   label: string; hint?: string; disabled?: boolean;
-  rk?: string; wk?: string; def?: unknown; deviated?: boolean; onReset?: () => void; children: React.ReactNode;
+  rk?: string; wk?: string; def?: unknown; deviated?: boolean; deviatedTitle?: string; onReset?: () => void; expert?: boolean; children: React.ReactNode;
 }) {
   const cur = useStore((s) => (rk ? s.settings?.[rk] : undefined));
   const set = useStore((s) => s.setSetting);
+  const showExpert = useStore((s) => !!s.settings?.showExpertOptions);
+  if (expert && !showExpert) return null; // an expert row renders nothing unless "Show expert options" is on (its value is untouched)
   const d = rk !== undefined ? (def ?? SETTINGS_DEFAULTS[rk]) : undefined;
   const show = onReset
     ? !!deviated
     : (rk !== undefined && cur !== undefined && JSON.stringify(cur) !== JSON.stringify(d));
   const reset = onReset ?? (() => { if (rk !== undefined) set(rk, d); });
   return (
-    <div className={`srow${disabled ? " disabled" : ""}`}>
+    <div className={`srow${disabled ? " disabled" : ""}`} data-expert={expert ? "" : undefined}>
       <div className="slabel">
         <span className="slabel-row">{label}
+          {expert && <span className="s-expert" data-expert-tag title="An expert setting — shown because Show expert options is on">Expert</span>}
           <WarnIcon k={wk ?? rk} />
-          {show &&<button className="s-reset" title="Reset to default" onClick={reset}><RotateCcw size={12} /></button>}
+          {show &&<button className="s-reset" title={(deviated && onReset && deviatedTitle) || "Reset to default"} data-deviated={deviated ? "" : undefined} onClick={reset}><RotateCcw size={12} /></button>}
         </span>
         {hint && <span className="shint">{hint}</span>}
       </div>
@@ -113,6 +116,22 @@ const Section = ({ title, icon, children }: { title: string; icon?: React.ReactN
     {children}
   </div>
 );
+// The Expert tier (plan 2026-10-29 designer call 12, web-ui.md § "Expert options"): settings most users should never touch.
+// A row opts in with `expert` (renders nothing, + a small "Expert" tag when shown); the <ExpertSection> wraps them (last
+// on the page) and renders only while Advanced → "Show expert options" is on. Expert settings are ordinary ones: saved
+// and applied live whether or not the group is shown, and hiding never resets a value. EXPERT_KEYS lists their settings
+// keys, so a non-default value shows the "deviated" marker on the "Show expert options" row while the group is hidden.
+const EXPERT_KEYS = ["rotateWhileParked"];
+const expertDeviatedKeys = (settings: Record<string, unknown>) =>
+  EXPERT_KEYS.filter((k) => settings[k] !== undefined && JSON.stringify(settings[k]) !== JSON.stringify(SETTINGS_DEFAULTS[k]));
+function ExpertSection({ children }: { children: React.ReactNode }) {
+  const on = useStore((s) => !!s.settings?.showExpertOptions);
+  if (!on) return null;
+  return <Section title="Expert" icon={<FlaskConical size={15} />}>
+    <Help>For settings most people never need. Shown because "Show expert options" is on (Advanced); a hidden one keeps its value and keeps working.</Help>
+    {children}
+  </Section>;
+}
 const Help = ({ children }: { children: React.ReactNode }) => <p className="help">{children}</p>;
 
 // COOL: the global Volume/Speed sliders drag-preview LIVE like the per-wallpaper modal's: a throttled
@@ -225,6 +244,12 @@ export const Settings = memo(function Settings() {
   const sepScenes = g("globalSeparateSceneTiming", true);
 
   const adv = g("advancedSettings", false); // gates demuxer / hw-decode / cache / copy-files / live previews
+  const showExpert = g("showExpertOptions", false); // gates the Expert tier (Row `expert`, <ExpertSection>)
+  const settingsAll = useStore((s) => s.settings) ?? {};
+  const expertDeviated = expertDeviatedKeys(settingsAll);
+  // a playlist is playing now → the start-mode hint says a change waits for its next start
+  const playlistPlaying = useStore((s) => s.playlist.length > 1 && !!s.playingPath && s.playlist.includes(s.playingPath));
+  const plStart = g<string>("globalPlaylistStart", "start_over");
   type Mon = { name: string; fps: number; isPrimary: boolean };
   const monitors = g<Mon[]>("sceneMonitors", []);
   const setMonitors = (m: Mon[]) => set("sceneMonitors", m);
@@ -287,6 +312,9 @@ export const Settings = memo(function Settings() {
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
         {liascapeActive && <SceneLoudnessRow />}
         <Row label="Speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
+        {liascapeActive && <Row label="Pause when covered" hint={ROT_HINT.cover} rk="pauseWhenCovered">
+          <Select value={g("pauseWhenCovered", "maximized")} onChange={(v) => set("pauseWhenCovered", v)}
+            options={[{ value: "off", label: "Off" }, { value: "fullscreen", label: "A fullscreen window" }, { value: "maximized", label: "A fullscreen or maximized window" }]} /></Row>}
         {adv && <Row label="Stay paused when switching" hint="next / previous / random while paused — off: playback resumes and the switch plays its transition; on: it stays paused, the switch is a cut to the new wallpaper's first frame" rk="stayPausedWhenSwitching">
           <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>}
         <Row label="Restart mpvpaper every (s)" hint="0 = off" rk="restartMpvpaperEverySeconds"><NumInput min={0} max={3600} value={g("restartMpvpaperEverySeconds", 600)} onChange={(v) => set("restartMpvpaperEverySeconds", v)} /></Row>
@@ -307,6 +335,9 @@ export const Settings = memo(function Settings() {
             <PlayTimeInput label="Switch scenes after" zeroText="off" value={g("globalSwitchScenesAfterSeconds", 1800)} onChange={(v) => set("globalSwitchScenesAfterSeconds", v)} /></Row>}
         </> : <Row label="Switch every" hint={ROT_HINT.every} rk="globalIntervalSeconds">
           <PlayTimeInput label="Switch every" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>}
+        <Row label="When the playlist starts again" hint={(plStart === "resume" ? ROT_HINT.startResume : ROT_HINT.startOver) + (playlistPlaying ? ` · ${ROT_HINT.startLive}` : "")} rk="globalPlaylistStart">
+          <Select value={plStart} onChange={(v) => set("globalPlaylistStart", v)}
+            options={[{ value: "start_over", label: "Start over" }, { value: "resume", label: "Resume where it left off" }]} /></Row>
         <Row label="Auto-add new library items to playlist" rk="autoAddLibraryToPlaylist"><input type="checkbox" checked={g("autoAddLibraryToPlaylist", false)} onChange={(e) => set("autoAddLibraryToPlaylist", e.target.checked)} /></Row>
         <Row label="Transitions" hint="animated effect between wallpaper switches" rk="globalTransitionEnabled">
           <button className="btn ghost ico" onClick={() => setTrPicker(true)}><Sparkles size={14} />
@@ -440,6 +471,15 @@ export const Settings = memo(function Settings() {
 
       <Section title="Advanced" icon={<Wrench size={15} />}>
         <Row label="Advanced settings" hint="show disable-cache, hardware decoding, demuxer, copy-files & the live command previews" rk="advancedSettings"><input type="checkbox" checked={adv} onChange={(e) => set("advancedSettings", e.target.checked)} /></Row>
+        {/* always visible (not gated on Advanced): the Expert tier's switch. While the group is hidden, a non-default expert
+            value shows the reset marker here (hiding never resets a value; the marker resets them) */}
+        <Row label="Show expert options" hint="show settings most people never need — they keep working, and keep their values, while hidden"
+          rk="showExpertOptions"
+          {...(!showExpert && expertDeviated.length ? {
+            deviated: true, deviatedTitle: "Some hidden expert settings differ from their defaults — reset them",
+            onReset: () => expertDeviated.forEach((k) => set(k, SETTINGS_DEFAULTS[k])),
+          } : {})}>
+          <input type="checkbox" checked={showExpert} onChange={(e) => set("showExpertOptions", e.target.checked)} /></Row>
         {adv && (() => {
           const wantPlayer = g<string>("playerEngine", "legacy") === "liascape-player";
           // status not read yet → disabled ("checking…"); binary missing → disabled with the reason
@@ -498,7 +538,6 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Library" icon={<LibraryIcon size={15} />}>
-        <Row label="Resume from last on launch" rk="resumeFromLast"><input type="checkbox" checked={g("resumeFromLast", true)} onChange={(e) => set("resumeFromLast", e.target.checked)} /></Row>
         <Row label="Clear cache" hint="thumbnail/preview cache (re-downloads as needed)">
           <button className="btn ghost" onClick={() => clearCache()}>Clear Cache</button>
         </Row>
@@ -519,6 +558,13 @@ export const Settings = memo(function Settings() {
           </div>
         </Row>
       </Section>
+
+      {/* the Expert tier — last on the page, only while "Show expert options" is on (add a setting here: Row `expert` + EXPERT_KEYS) */}
+      <ExpertSection>
+        <Row expert label="When no monitor shows the wallpaper" hint={ROT_HINT.parked} rk="rotateWhileParked">
+          <Select value={g("rotateWhileParked", true) ? "rotate" : "hold"} onChange={(v) => set("rotateWhileParked", v === "rotate")}
+            options={[{ value: "rotate", label: "Keep rotating" }, { value: "hold", label: "Hold until a monitor returns" }]} /></Row>
+      </ExpertSection>
     </div>
     </HealthCtx.Provider>
   );

@@ -456,6 +456,9 @@ body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim {
 /* per-setting reset: bare icon (no box), glow on the icon itself. Only rendered when value deviates. */
 .s-reset { display: inline-flex; padding: 0; background: none; border: 0; outline: none; line-height: 0;
   color: var(--subtext); transition: color .12s, filter .2s; }
+/* the "Expert" tag on an expert row (Settings.tsx Row `expert`) */
+.s-expert { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; padding: 0 5px; border-radius: 4px; line-height: 15px;
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .s-reset:hover { color: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
 .sctl { display: flex; align-items: center; gap: 8px; }
 .settings input[type=range] { width: 200px; accent-color: var(--accent); transition: filter .2s; }

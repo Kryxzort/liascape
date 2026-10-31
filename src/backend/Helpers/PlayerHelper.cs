@@ -3146,7 +3146,7 @@ public static class PlayerHelper
             bool started = IsPlaying && ResumeTimedTimer();
             if (!started)
             {
-                if (settings.ResumeFromLast && RestoreTimedPlaylist()) { }
+                if (RestoreTimedPlaylist()) { }   // legacy always resumed its timed playlist (the "Resume from last" row folded into the playlist start, Task 10)
                 else if (session.IsTimedPlaylist)
                 {
                     var paths = session.Shuffle

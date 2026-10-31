@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import type { PlaylistSettings } from "../api/client";
+import { useStore } from "../store";
 import { TransitionPicker } from "./TransitionPicker";
 import { PlayTimeInput, ROT_HINT } from "./PlayTimeInput";
 
@@ -9,7 +10,8 @@ import { PlayTimeInput, ROT_HINT } from "./PlayTimeInput";
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
 // override) its own rotation: "Switch when video ends" off → "Switch every" (H-M-S); on → the same field as
 // "Minimum play time" + "Maximum play time" + "Separate timing for scenes" (→ "Switch scenes after"; player-adapter.md
-// § Rotation; every limit 0 = off), and its transitions.
+// § Rotation; every limit 0 = off), "When the playlist starts again" (start over | resume; beside the global one it
+// overrides) and its transitions.
 export function PlaylistSettingsModal({
   open, ps, setPS, autoAdd, setAutoAdd, onClose,
 }: {
@@ -20,6 +22,11 @@ export function PlaylistSettingsModal({
   const aoe = ps.switchWhenVideoEnds;
   const sep = ps.separateSceneTiming ?? true;
   const [picker, setPicker] = useState(false);
+  // "When the playlist starts again": the playlist's own choice under its override; the global one it overrides is shown beside it
+  const globalStart = useStore((s) => (s.settings?.globalPlaylistStart as string | undefined) === "resume" ? "resume" : "start_over");
+  const playing = useStore((s) => s.playlist.length > 1 && !!s.playingPath && s.playlist.includes(s.playingPath));
+  const start = ps.playlistStart === "resume" ? "resume" : "start_over";
+  const startLabel = (v: string) => v === "resume" ? "Resume where it left off" : "Start over";
   const trN = ps.transitionEffectIds?.length ?? 0;
   return (
     <AnimatePresence>
@@ -59,6 +66,16 @@ export function PlaylistSettingsModal({
                       value={ps.switchScenesAfterSeconds ?? 1800} onChange={(v) => setPS({ switchScenesAfterSeconds: v })} />
                   </>}
                 </>}
+
+                <div className="field-label" title={ROT_HINT.startOver + " · " + ROT_HINT.startResume}>WHEN THE PLAYLIST STARTS AGAIN</div>
+                <div className="seg" data-playlist-start={start}>
+                  <button className={`segbtn${start === "start_over" ? " on" : ""}`} disabled={!ovr} onClick={() => setPS({ playlistStart: "start_over" })}>Start over</button>
+                  <button className={`segbtn${start === "resume" ? " on" : ""}`} disabled={!ovr} onClick={() => setPS({ playlistStart: "resume" })}>Resume where it left off</button>
+                </div>
+                <div className="shint" data-playlist-start-hint>
+                  {ovr ? (start === "resume" ? ROT_HINT.startResume : ROT_HINT.startOver) : `Global setting: ${startLabel(globalStart)}`}
+                  {ovr ? ` · global: ${startLabel(globalStart)}` : ""}{playing ? ` · ${ROT_HINT.startLive}` : ""}
+                </div>
 
                 <div className="field-label">TRANSITIONS</div>
                 <button className="btn ghost ico tr-open" disabled={!ovr} onClick={() => setPicker(true)}>

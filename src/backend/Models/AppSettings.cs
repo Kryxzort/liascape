@@ -42,7 +42,6 @@ public class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".local/share/Steam/steamapps/workshop/content/431960");
     public bool CopyFilesInsteadOfSymlinking { get; set; } = false;
-    public bool ResumeFromLast { get; set; } = true;
     public bool AllowScenes { get; set; } = false;
     public int LweVolume { get; set; } = 100;
     public List<SceneMonitor> SceneMonitors { get; set; } = [];
@@ -92,12 +91,25 @@ public class AppSettings
     // "When the playlist starts again" (plan 2026-10-29 § Playlist start, O4; liascape-player — the program's
     // `start_mode`): "start_over" (default — sequential from the first wallpaper, shuffle shuffles anew) | "resume"
     // (the exact item, time and play time). A playlist's own PlaylistSettings.PlaylistStart beats it under its
-    // override. Read at the next start only (a change never jumps the current play). Task 7 adds the key; its UI
-    // row is Task 10.
+    // override. Read at the next start only (a change never jumps the current play). Folds in the old
+    // "Resume from last on launch" (ResumeFromLast, removed — an old file's key loads as an unknown one).
     private string _globalPlaylistStart = "start_over";
     public string GlobalPlaylistStart { get => _globalPlaylistStart; set => _globalPlaylistStart = PlaylistStartMode(value); }
     public static string PlaylistStartMode(string? v) => v?.Trim().ToLowerInvariant() is "resume" ? "resume" : "start_over";
     public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields
+    // Pause when covered (Phase 3 Task 6/10; liascape-player — `player.pause_when_covered`, live): the wallpaper (picture and
+    // sound) pauses while every monitor showing it is covered. "off" | "fullscreen" (a fullscreen window) | "maximized"
+    // (default — a fullscreen or maximized window). An unknown value reads as the default. The player prop's own default
+    // is off; the backend asserts this one on every player process.
+    private string _pauseWhenCovered = "maximized";
+    public string PauseWhenCovered { get => _pauseWhenCovered; set => _pauseWhenCovered = CoverMode(value); }
+    public static string CoverMode(string? v) => v?.Trim().ToLowerInvariant() switch { "off" => "off", "fullscreen" => "fullscreen", _ => "maximized" };
+    // Expert tier (designer call 12, Settings → Advanced "Show expert options"): a UI tier for settings most users should
+    // never touch. Hidden rows keep their values and stay live; RotateWhileParked is the first one (O2) — "When no monitor
+    // shows the wallpaper": true = keep rotating invisibly (default, today's behaviour), false = hold both clocks until a
+    // monitor returns (`prog:main.while_parked` rotate | hold).
+    public bool ShowExpertOptions { get; set; } = false;
+    public bool RotateWhileParked { get; set; } = true;
 
     // Global transition fallbacks (used when a playlist's OverrideGlobalSettings is off). See
     // PlaylistSettings.Transition* + TransitionService. Empty/!Enabled => instant cut.

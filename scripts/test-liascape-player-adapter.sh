@@ -1811,6 +1811,44 @@ sa=$([ -n "$SP" ] && tr '\0' ' ' < "/proc/$SP/cmdline" 2>/dev/null)
 case "$sa" in *"serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null --restore"*) ok "started with the gone supervisor's arguments + --restore" ;; *) bad "the new supervisor ($SP) runs: $sa" ;; esac
 stop_now
 
+echo "== Phase 3 Task 10: pause when covered / when the playlist starts again / while no monitor shows it — live on the player, re-applied onto a fresh one"
+# Three settings the player holds: `player.pause_when_covered` (the cover rule), `prog:main.start_mode` (read at the next
+# start only) and `prog:main.while_parked`. Each /settings change is one coalescible set; the current play is untouched.
+# A fresh player process (not restored: its own defaults — off / start_over / rotate) gets the backend's values back.
+pcov() { ctl get '{"path":"player.pause_when_covered"}' | jq -r .value; }
+pcov_is() { [ "$(pcov)" = "$1" ]; }
+setting '.globalSwitchWhenVideoEnds = false | .globalIntervalSeconds = 600 | .globalMaxPlaySeconds = 0 | .globalSeparateSceneTiming = false | .pauseWhenCovered = "fullscreen" | .globalPlaylistStart = "resume" | .rotateWhileParked = false'
+post /playlist/state '{"videoPaths":[],"settings":{"order":0,"overrideGlobalSettings":false},"name":null}' >/dev/null
+stop_now
+restart_player 10
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\",\"$C\"],\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT pcov_is fullscreen && ok "a fresh player (not restored) gets player.pause_when_covered = fullscreen re-applied" || bad "fresh player: pause_when_covered $(pcov), want fullscreen"
+waitfor $WAIT prog_is start_mode '"resume"' && waitfor $WAIT prog_is while_parked '"hold"' && ok "…and its new program starts with start_mode resume, while_parked hold" || bad "fresh program: start_mode $(prog start_mode), while_parked $(prog while_parked)"
+waitfor $WAIT eval '[ "$(cur path)" = "$A" ]' || bad "play [a, b, c] → cur $(basename "$(cur path)")"
+n10=$(nsched_all); pl10=$(pplayed); c10=$(ncur)
+setting '.pauseWhenCovered = "maximized"'
+waitfor $WAIT pcov_is maximized && ok "PauseWhenCovered maximized → player.pause_when_covered maximized live" || bad "pause_when_covered $(pcov), want maximized"
+setting '.pauseWhenCovered = "off"'
+waitfor $WAIT pcov_is off && ok "…off → off" || bad "pause_when_covered $(pcov), want off"
+setting '.pauseWhenCovered = "maximized" | .globalPlaylistStart = "start_over"'
+waitfor $WAIT prog_is start_mode '"start_over"' && ok "GlobalPlaylistStart start_over → prog:main.start_mode start_over live" || bad "start_mode $(prog start_mode)"
+setting '.rotateWhileParked = true'
+waitfor $WAIT prog_is while_parked '"rotate"' && ok "RotateWhileParked true → prog:main.while_parked rotate live" || bad "while_parked $(prog while_parked)"
+setting '.globalPlaylistStart = "resume" | .rotateWhileParked = false'
+waitfor $WAIT prog_is start_mode '"resume"' && waitfor $WAIT prog_is while_parked '"hold"' && ok "…and back (resume, hold)" || bad "start_mode $(prog start_mode), while_parked $(prog while_parked)"
+[ "$(nsched_all)" = "$n10" ] && [ "$(ncur)" = "$c10" ] && [ "$(cur path)" = "$A" ] && ge "$(pplayed)" "$pl10" && [ "$(playerPaused)" = false ] \
+  && ok "none of it touched the play (no switch scheduled, still a.mp4, played_ms $pl10 → $(pplayed), not paused)" \
+  || bad "the settings disturbed the play: scheduled $n10 → $(nsched_all), program.current $c10 → $(ncur), cur $(basename "$(cur path)"), played_ms $pl10 → $(pplayed), paused $(playerPaused)"
+# a playlist that overrides carries its own start; a fresh program is created from the effective one
+post /playlist/state "{\"videoPaths\":[\"$A\",\"$Bc\",\"$C\"],\"settings\":{\"order\":0,\"overrideGlobalSettings\":true,\"playlistStart\":\"start_over\",\"intervalSeconds\":600,\"switchWhenVideoEnds\":false,\"separateSceneTiming\":false},\"name\":null}" >/dev/null
+waitfor $WAIT prog_is start_mode '"start_over"' && ok "a playlist that overrides: its own start_over beats the global resume" || bad "override: start_mode $(prog start_mode)"
+stop_now
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"order\":0,\"overrideGlobalSettings\":true,\"playlistStart\":\"start_over\",\"intervalSeconds\":600,\"switchWhenVideoEnds\":false,\"separateSceneTiming\":false}}" >/dev/null
+waitfor $WAIT prog_is start_mode '"start_over"' && ok "…and a program created for it starts with start_over (the global is resume)" || bad "created for an overriding playlist: start_mode $(prog start_mode)"
+stop_now
+post /playlist/state '{"videoPaths":[],"settings":{"order":0,"overrideGlobalSettings":false},"name":null}' >/dev/null
+setting '.pauseWhenCovered = "maximized" | .globalPlaylistStart = "start_over" | .rotateWhileParked = true | .globalSwitchWhenVideoEnds = true | .globalIntervalSeconds = 0'
+
 echo "== Phase 3 Task 8: the app closed — the player rotates alone, no timer/restart daemon; the CLI drives the player itself"
 # Under liascape-player the backend starts no timer-daemon / restart-daemon and owns no timer: the player's program
 # rotates with no backend at all, a keybind with no app sends the program verb straight to the player, and

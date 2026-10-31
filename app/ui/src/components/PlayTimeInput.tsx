@@ -37,4 +37,11 @@ export const ROT_HINT = {
   maxScenes: " · with neither set, a scene plays until you switch",
   separate: "scenes and still images never end — give them their own time; the minimum / maximum then apply to videos only",
   scenesAfter: "a scene or still image switches after this · 0 = off: it stays until you switch",
+  // "When the playlist starts again" (plan § Playlist start): what a Play, a boot or a return to the playlist does
+  startOver: "Sequential starts from the first wallpaper, shuffle shuffles anew",
+  startResume: "The same wallpaper, at the same moment",
+  startLive: "Takes effect the next time the playlist starts — what's playing now carries on",
+  // Pause when covered (Task 6) / the Expert "while parked" rule (O2)
+  cover: "Pauses picture and sound while every monitor showing the wallpaper is covered",
+  parked: "Keep rotating: the playlist carries on unseen, as it always did · Hold: its timers stop until a monitor shows the wallpaper again",
 };

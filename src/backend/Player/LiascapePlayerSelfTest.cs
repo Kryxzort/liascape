@@ -86,6 +86,11 @@ public static class LiascapePlayerSelfTest
             Want("key of a saved playlist / the bar", (LiascapePlayerProgram.KeyOf("Chill"), LiascapePlayerProgram.KeyOf(null), LiascapePlayerProgram.KeyOf(" ")), ("name:Chill", "bar", "bar"));
             Want("start mode normalized", (AppSettings.PlaylistStartMode("RESUME"), AppSettings.PlaylistStartMode("whatever"), new PlaylistSettings().PlaylistStart, new AppSettings().GlobalPlaylistStart),
                 ("resume", "start_over", "start_over", "start_over"));
+            Want("cover mode normalized", (AppSettings.CoverMode("OFF"), AppSettings.CoverMode(" Fullscreen "), AppSettings.CoverMode("bogus"), AppSettings.CoverMode(null), new AppSettings().PauseWhenCovered),
+                ("off", "fullscreen", "maximized", "maximized", "maximized"));
+            g.RotateWhileParked = false;
+            Want("while_parked (RotateWhileParked off)", LiascapePlayerProgram.BuildSpec([a, b], g, follows, shuffle: false, intervalSeconds: 30, advance: true, key: "bar").WhileParked, "hold");
+            g.RotateWhileParked = true;
 
             // defaults = DesiredGlobal: the globals' values, kind video, Loop; no af (loudnorm is per item)
             var d = sp.Defaults;
@@ -230,8 +235,8 @@ public static class LiascapePlayerSelfTest
     // ---- /health/features (FeatureHealth.Build): every missing piece → its feature not ok, with a reason ----------
     private static void FeatureHealthAssertions(List<string> fails)
     {
-        using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"scenes":{"ok":true,"reason":null}}""");
-        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null}}""");
+        using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null}}""");
+        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause when covered\" can't act","source":"unavailable"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
         var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
@@ -247,6 +252,7 @@ public static class LiascapePlayerSelfTest
         Want("transitions", false, "no catalogue", "globalTransitionEnabled");
         Want("vram", false, "VRAM", "limitVramPerScene");
         Want("hwdec-interop", null, null, "hwDec");
+        Want("cover", false, "Pause when covered", "pauseWhenCovered");
         Want("auto-mute", false, "pactl", "autoMute");
         Want("mpris", false, "playerctl", "autoMuteOnlyIfMprisActive");
         Want("ffmpeg", false, "ffprobe", "normalizeAudio");
@@ -255,7 +261,7 @@ public static class LiascapePlayerSelfTest
         var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, true, false));
         if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
         var d = new AppSettings();
-        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true) })
+        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
     }
 
@@ -1015,6 +1021,12 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.ApplyGpuSettings(g1, g0); LiascapePlayerMedia.Drain().Wait(2000);
                 if (Gpu() != "true 0.0 stop" && Gpu() != "true 0 stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 stop");
                 else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / vram_low_mode live and back");
+                // Task 10: pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
+                LiascapePlayerMedia.ApplyCoverSetting(g0, new AppSettings { PauseWhenCovered = "fullscreen" }); LiascapePlayerMedia.Drain().Wait(2000);
+                if (PlayerProp("pause_when_covered") != "fullscreen") fails.Add($"ApplyCoverSetting(fullscreen) → {PlayerProp("pause_when_covered")}");
+                LiascapePlayerMedia.ApplyCoverSetting(new AppSettings { PauseWhenCovered = "fullscreen" }, g0); LiascapePlayerMedia.Drain().Wait(2000);
+                if (PlayerProp("pause_when_covered") != "maximized") fails.Add($"ApplyCoverSetting back to the default → {PlayerProp("pause_when_covered")}, want maximized");
+                else Phase("ApplyCoverSetting: pause_when_covered live and back");
                 using (var to = new CancellationTokenSource(20000))
                 {
                     bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: false, to.Token).GetAwaiter().GetResult();

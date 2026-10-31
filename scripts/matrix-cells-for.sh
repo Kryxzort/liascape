@@ -65,7 +65,7 @@ for f in $FILES; do
     app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx|\
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx)
       echo "  $f → nothing here — run scripts/test-ui-matrix.sh --probe probe-morph.js (the morph probe)" >&2 ;;
-    app/shell/probe-morph.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js)
+    app/shell/probe-morph.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must
