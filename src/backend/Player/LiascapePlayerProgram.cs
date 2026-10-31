@@ -464,19 +464,25 @@ public static class LiascapePlayerProgram
     public static void PushItem(string path)
     {
         lock (_lock)
-            if (_paths == null || !_paths.Any(x => SamePath(x, path))) return;
+            if (_paths != null ? !_paths.Any(x => SamePath(x, path)) : !Unseeded()) return; // unseeded: PushItemsNow reads them
         PushItems();
     }
 
     public static void PushItems()
     {
         if (!PlayerEngine.IsLiascapePlayer) return;
-        lock (_lock) if (!_exists && _model == null) return;
+        lock (_lock) if (!_exists && _model == null && !Unseeded()) return;
         LiascapePlayerMedia.QueueSet("program:items", PushItemsNow);
     }
 
+    // Task 8: the mirror isn't seeded for this player process yet — a one-shot CLI (`liascape volume up` with the app
+    // closed) has asked nothing before its push. The push is queued anyway; on the queue's worker it seeds the mirror
+    // first (EnsureSynced) and drops out when the player has no program. Under `_lock`.
+    private static bool Unseeded() => !_known || _gen != C.Generation;
+
     private static void PushItemsNow()
     {
+        EnsureSynced();
         var client = C;
         List<string>? paths; string? wantKey;
         lock (_lock) { if (!_exists) return; paths = _paths; wantKey = _wantKey; }
@@ -505,9 +511,10 @@ public static class LiascapePlayerProgram
     public static void PushDefaults()
     {
         if (!PlayerEngine.IsLiascapePlayer) return;
-        lock (_lock) if (!_exists && _model == null) return;
+        lock (_lock) if (!_exists && _model == null && !Unseeded()) return;
         LiascapePlayerMedia.QueueSet("program:defaults", () =>
         {
+            EnsureSynced();
             var client = C;
             lock (_lock) if (!_exists) return;
             if (!client.SocketExists) return;

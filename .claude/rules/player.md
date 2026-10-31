@@ -190,6 +190,10 @@ constrained** — it can't be a live GL texture: a scene **A** → LWE `--screen
 
 ## Restart Daemon
 
+**Legacy engine only** (mpvpaper's leak). Under `liascape-player` the restart timer, `restart-daemon` and
+`restart.pid` never exist: every entry point is a no-op logged once, and a leftover legacy daemon is stopped at
+`serve` start, by `restore` and by `stop` (Phase 3 Task 8, `player-adapter.md` § Dispatch points).
+
 mpvpaper has a frame-buffer memory leak (~1.3 MB/s). `restart-daemon` periodically kills and relaunches mpvpaper to work around it. Interval configured via `RestartMpvpaperEverySeconds` (default 600s, min 5, max 3600) in Settings → Playback.
 
 **In-process (GUI open)**: `UpdateRestartTimer()` starts a `System.Threading.Timer`. No-op when `_daemonMode = true` so the timer daemon doesn't start a competing in-process timer. Timer stops in `TeardownTimer()` (called by `Stop()` and before each new session). Restarted via `UpdateRestartTimer()` after every `Apply`/`ApplyPlaylist`/`ApplyTimedPlaylist`/`ResumeTimedTimer`/`RestoreTimedPlaylist`.
@@ -232,9 +236,10 @@ both engines. Guard: matrix `seq:random+next` / `seq:random+prev` (`playlist`, `
 
 **`UpdateTimedSettings(shuffle, interval, advance)`**: called when interval/mode settings change mid-session. Preserves proportional remaining: `elapsed = max(0, oldIntervalMs - _timedRemainingMs)`, `newRemaining = max(tickInterval, newIntervalMs - elapsed)`. Advance toggled → cancel / re-arm the end-of-video wait; a new minimum under advance-on-end (liascape-player) → re-arm the armed one to the same B. Never restarts current wallpaper. (`SwitchFromTimedToAdvanceOnEnd` / `SwitchFromAdvanceOnEndToTimed` had no caller — removed 2026-10-28.)
 
-**App close**: the Electron shell (`app/shell/main.js`, `window-all-closed` / `before-quit`) kills `liascape serve`. The backend's ASP.NET `app.Lifetime.ApplicationStopping` hook (`Web/ServerHost.cs`) is the close handler: it `AudioMonitor.Stop()`s and hands mute back to a detached `monitor-daemon` when AutoMute + playing.
+**App close**: the Electron shell (`app/shell/main.js`, `window-all-closed` / `before-quit`) kills `liascape serve`. The backend's ASP.NET `app.Lifetime.ApplicationStopping` hook (`Web/ServerHost.cs`) is the close handler: it `AudioMonitor.Stop()`s and hands mute back to a detached `monitor-daemon` when AutoMute + playing (both engines). Under `liascape-player` that is all: the player's program rotates on with the app closed — no timer to release, no `timer-daemon` (Phase 3 Task 8).
 
-**One timer owner (`ReleaseTimer`, `OtherTimerOwner`).** The stopping backend `ReleaseTimer()`s FIRST —
+**One timer owner (`ReleaseTimer`, `OtherTimerOwner`) — legacy engine only** (under `liascape-player` no backend
+owns a timer: no `gui_timer.pid`, `ReleaseTimer` is a no-op, Phase 3 Task 8). The stopping backend `ReleaseTimer()`s FIRST —
 saves the timed state, disposes the tick, cancels its armed end-of-video wait (the new owner arms its
 own), without touching the session (`TeardownTimer` would clear it) — then clears `gui_timer.pid` (only
 its OWN pid: deleting the next backend's let `SpawnTimerDaemon`'s guard spawn a daemon next to it) and

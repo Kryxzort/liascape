@@ -66,6 +66,8 @@ public static class AudioMonitor
     private static CancellationTokenSource? _cts;
     private static volatile bool _isMuted;
     public static bool IsMuted => _isMuted;
+    // this process runs the monitor itself (a `serve` backend with AutoMute on, a `monitor-daemon`)
+    public static bool RunsHere => _cts != null;
     private static int _aboveThresholdCount;
     private static volatile bool _onlyIfMprisActive;
 
