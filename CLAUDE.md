@@ -44,18 +44,24 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
 `liascape` with **no command opens the app**; `liascape <command>` runs headless (the launcher hands every command but
 `ctl` to `liascape-backend`, whose `Program.cs` parses it — `liascape-backend` with no command = `serve`):
 
-- `restore` — re-applies the last session without a UI (autostart). Timed playlists: `setsid`-spawns `timer-daemon` and returns.
+- `restore` — re-applies the last session without a UI (autostart). `liascape-player`: starts the player `serve --restore
+  --session-start` (its snapshot back, a playlist per its "When the playlist starts again"), replays `LastSession` only
+  when it shows nothing; the player rotates on its own. Legacy: timed playlists `setsid`-spawn `timer-daemon` and return.
 - `random` — a random library wallpaper. Saves the pick so `restore` replays it.
 - `kill` — stops playback without asking a running app, exits.
-- Keybind actions — handed to the running app's backend (`ActionForward` → `POST /action`), else run here:
+- Keybind actions — handed to the running app's backend (`ActionForward` → `POST /action`), else run here (under
+  `liascape-player` straight to the player — a playlist's next/previous/random are its program's verbs):
   `next`, `previous`, `random`, `play`, `stop`, `toggle-play`, `toggle-pause`, `toggle-mute`,
   `volume up` / `volume down` (±5, clamped 0–100, persisted; a multi-word command is its words joined by `-`, so
   `volume-up` works too).
 - `ctl <verb> ['<json>']` — the running player's control socket (`liascape-player ctl`: `state`, `logs`, `probe`, …).
 - `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`.
-- `monitor-daemon` / `timer-daemon` / `restart-daemon` *(internal)* — `AudioMonitor`, the timed-playlist tick loop,
-  the mpvpaper relauncher (frame-buffer leak workaround); spawned detached when the app closes / by `restore`; killed by
-  `kill` and on app open.
+- `monitor-daemon` *(internal)* — `AudioMonitor` with the app closed (both engines); spawned detached when the app
+  closes / by `restore`, killed on app open.
+- `timer-daemon` / `restart-daemon` *(internal, **legacy engine only**)* — the timed-playlist tick loop, the mpvpaper
+  relauncher (frame-buffer leak workaround); spawned detached when the app closes / by `restore`; killed by `kill` and
+  on app open. Under `liascape-player` neither is ever started (the player's program rotates with the app closed) and
+  a leftover one is stopped.
 - `player-selftest` *(hidden)* — MpvPropertyMap + protocol round-trip against a private headless player (PASS/FAIL).
 
 ## Architecture
