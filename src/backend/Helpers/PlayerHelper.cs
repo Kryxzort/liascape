@@ -287,6 +287,49 @@ public static class PlayerHelper
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".config", "liascape", "pending_action.txt");
 
+    // ── Phase 3 Task 8: under liascape-player the player's program rotates by itself (with the app closed too) ───────
+    // No timer-daemon, no restart-daemon, no pending-action IPC, no timer ownership (`timer.pid` / `gui_timer.pid` /
+    // `restart.pid`), no `timed_state.json` / `playlist_observer_paths.json`: every entry point that reaches one is a
+    // no-op there, logged once per entry point. A stale file from a legacy run is ignored (`timed_state.json` is read
+    // once, at `serve` start / the engine switch, as the program to load — designer call 10 — then removed).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _retiredLogged = new();
+    private static bool RetiredUnderPlayer(string what)
+    {
+        if (!PlayerEngine.IsLiascapePlayer) return false;
+        if (_retiredLogged.TryAdd(what, 0))
+            LiascapePlayerClient.Log($"{what}: legacy-only — under liascape-player the player's program rotates by itself (skipped)");
+        return true;
+    }
+
+    // A timer-daemon / restart-daemon left by a legacy session (the engine switched since, an older build) — stopped at
+    // `serve` start, by `restore` and by `stop`/`kill` under liascape-player. Verified by its command line (a pid file
+    // outlives a reboot: its number may belong to anything by now); its pid file goes with it.
+    public static void KillLegacyDaemons()
+    {
+        foreach (var (pidFile, verb) in new[] { (TimerDaemonPidPath, "timer-daemon"), (RestartDaemonPidPath, "restart-daemon") })
+        {
+            try
+            {
+                if (!File.Exists(pidFile)) continue;
+                if (int.TryParse(File.ReadAllText(pidFile).Trim(), out int pid) && pid != Environment.ProcessId)
+                {
+                    string[] argv = [];
+                    try { argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0'); } catch { }
+                    if (argv.Contains(verb) && argv.Any(a => a.Contains("liascape")))
+                        try
+                        {
+                            using var p = Process.GetProcessById(pid);
+                            p.Kill();
+                            LiascapePlayerClient.Log($"stopped a leftover {verb} (pid {pid}) — the player's program rotates by itself");
+                        }
+                        catch { }
+                }
+                File.Delete(pidFile);
+            }
+            catch { }
+        }
+    }
+
     public static void KillTimerDaemon()
     {
         try
@@ -304,6 +347,7 @@ public static class PlayerHelper
 
     public static void WriteGuiTimerPid()
     {
+        if (RetiredUnderPlayer("gui_timer.pid")) return; // no backend owns a timer: the player rotates
         try
         {
             var path = GuiTimerPidPath;
@@ -345,6 +389,7 @@ public static class PlayerHelper
     private static DateTime _ownerCheckedAt;
     public static void ReleaseTimer()
     {
+        if (RetiredUnderPlayer("ReleaseTimer")) return; // nothing to release: this backend never ticks a rotation
         lock (_lock)
         {
             SaveTimedState();
@@ -371,6 +416,7 @@ public static class PlayerHelper
 
     public static void SpawnTimerDaemon()
     {
+        if (RetiredUnderPlayer("timer-daemon")) return;
         // Defensive guard: if a GUI is alive it owns the in-process timer.
         // Spawning a daemon would create two competing owners of mpvpaper.
         if (IsGuiTimerAlive()) return;
@@ -480,11 +526,11 @@ public static class PlayerHelper
 
     public static void SpawnRestartDaemon()
     {
+        if (RetiredUnderPlayer("restart-daemon")) return; // mpvpaper leak workaround — legacy only
         // Mirror the timer-daemon guard: if the GUI is alive it owns the
         // in-process restart timer, so don't spawn a competing daemon.
         if (IsGuiTimerAlive()) return;
         if (SettingsService.Load().RestartMpvpaperEverySeconds <= 0) return;
-        if (PlayerEngine.IsLiascapePlayer) return; // mpvpaper leak workaround — legacy only
 
         KillRestartDaemon();
         try
@@ -516,7 +562,7 @@ public static class PlayerHelper
         _restartTimer?.Dispose();
         _restartTimer = null;
         if (_daemonMode) return;
-        if (PlayerEngine.IsLiascapePlayer) return; // the leak-restart is an mpvpaper workaround — legacy only
+        if (RetiredUnderPlayer("the mpvpaper restart timer")) return; // the leak-restart is an mpvpaper workaround — legacy only
         var settings = SettingsService.Load();
         if (settings.RestartMpvpaperEverySeconds <= 0) return;
         int intervalMs = settings.RestartMpvpaperEverySeconds * 1000;
@@ -607,6 +653,7 @@ public static class PlayerHelper
     // restarting mpvpaper every RestartMpvpaperEverySeconds. Killed when the GUI opens.
     public static void RunRestartDaemon()
     {
+        if (RetiredUnderPlayer("restart-daemon")) return; // started by hand, or by an older build: nothing to do here
         _daemonMode = true;
         InstallShutdownReaper();
         WriteRestartDaemonPid();
@@ -663,6 +710,7 @@ public static class PlayerHelper
     private static void SaveTimedState()
     {
         if (_timedPaths == null || _history == null) return;
+        if (RetiredUnderPlayer("timed_state.json")) return; // the player's program persists itself (program.json + snapshot)
         try
         {
             var state = new TimedState(
@@ -717,6 +765,7 @@ public static class PlayerHelper
     // never clobbered by external mutators.
     private static void WritePendingAction(string action)
     {
+        if (RetiredUnderPlayer("pending_action.txt")) return; // the program verbs go straight to the player
         try
         {
             var path = PendingActionPath;
@@ -2004,7 +2053,7 @@ public static class PlayerHelper
                 var newObserverPaths = new List<string> { currentPath };
                 newObserverPaths.AddRange(rest);
                 StartPlaylistObserver(newObserverPaths);
-                try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
+                SavePlaylistObserverPaths(newObserverPaths);
             }
         }
     }
@@ -2048,7 +2097,7 @@ public static class PlayerHelper
                     // Extend observer paths with appended items
                     var extendedPaths = _currentObserverPaths.Concat(appendedPaths).ToList();
                     StartPlaylistObserver(extendedPaths);
-                    try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(extendedPaths)); } catch { }
+                    SavePlaylistObserverPaths(extendedPaths);
                     return;
                 }
             }
@@ -2091,7 +2140,7 @@ public static class PlayerHelper
             var newObserverPaths = new List<string> { currentPath };
             newObserverPaths.AddRange(rest);
             StartPlaylistObserver(newObserverPaths);
-            try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(newObserverPaths)); } catch { }
+            SavePlaylistObserverPaths(newObserverPaths);
         }
     }
 
@@ -2955,35 +3004,25 @@ public static class PlayerHelper
             SignalTimerStop();
             ClearPlaylistObserverPaths();
         }
-        KillRestartDaemon();
+        if (PlayerEngine.IsLiascapePlayer) KillLegacyDaemons(); // only a legacy leftover can run (verified, Task 8)
+        else KillRestartDaemon();
         // any in-flight transition died with its players — a stale InProgress marker would delay the
         // NEXT session's first video-end sample (late transition on a short first clip)
         TransitionService.ClearInProgress();
     }
 
     // Re-apply the last saved session: timed playlist, mpv-native playlist,
-    // or single video. For timed playlists, delegates to a detached daemon.
+    // or single video. For timed playlists, delegates to a detached daemon (legacy).
     public static void Restore()
     {
         var settings = SettingsService.Load();
+        if (PlayerEngine.IsLiascapePlayer) { RestoreOnPlayer(settings); return; }
         var session = settings.LastSession;
         if (session == null) return;
 
         if (settings.AutoMute)
             AudioMonitor.SpawnDetachedMonitor();
 
-        if (PlayerEngine.IsLiascapePlayer && (session.IsTimedPlaylist || session.IsPlaylist) && session.Paths.Count > 0)
-        {
-            // Task 7: the player's program, loaded here (no timer-daemon: the player rotates on its own) — unless one
-            // already plays (`play` while it rotates: nothing to do). Waited for: `liascape restore` exits right after.
-            if (LiascapePlayerProgram.IsActive) return;
-            if (session.IsPlaylist && session.Paths.Count == 1 && !IsScenePath(session.Paths[0])) { Apply(session.Paths[0], settings.BuildMpvOptions()); return; }
-            var ps = PlaylistService.LoadCurrentState()?.Settings;
-            var task = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
-                session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null);
-            try { task?.Wait(15_000); } catch { }
-            return;
-        }
         if (session.IsTimedPlaylist && session.Paths.Count > 0)
             SpawnTimerDaemon();
         else if (session.IsPlaylist && session.Paths.Count > 0)
@@ -2995,6 +3034,51 @@ public static class PlayerHelper
             Apply(session.Paths[0], settings.BuildMpvOptions());
 
         SpawnRestartDaemon();
+    }
+
+    // Phase 3 Task 8: `liascape restore` (boot / autostart), the `play` key, `toggle-play` from stopped — under
+    // liascape-player. A player that isn't running is started with its snapshot as a SESSION START (`serve --restore
+    // --session-start`): the player brings back what it showed, and each restored program starts per its "When the
+    // playlist starts again" by itself (plan § Playlist start: start over → item 1 / a fresh shuffle, the old item never
+    // shown; resume → the exact item and position). Whatever the player then shows — a wallpaper (on screen, coming or
+    // parked) or a program — IS the session: done (`play` while something plays does nothing). Nothing (first boot,
+    // after `stop`, no snapshot) → LastSession replayed: a playlist as the program (`from` = its effective start mode —
+    // a Resume finds its point in the player's resume.json), a single wallpaper applied. No timer-daemon, no
+    // restart-daemon; a legacy leftover of either is stopped.
+    private static void RestoreOnPlayer(AppSettings settings)
+    {
+        // the auto-mute monitor with the app closed (O3: unchanged) — not next to a running app's own (a forwarded `play`)
+        if (settings.AutoMute && !AudioMonitor.RunsHere) AudioMonitor.SpawnDetachedMonitor();
+        KillLegacyDaemons();
+        if (!LiascapePlayerClient.Shared.EnsureRunning(restore: true, sessionStart: true))
+            throw new InvalidOperationException($"liascape-player could not start: {LiascapePlayerClient.Shared.LastError ?? "unknown reason"}");
+        if (LiascapePlayerProgram.IsActive)
+        {
+            LiascapePlayerClient.Log($"restore: the player's rotation plays ({Path.GetFileName(LiascapePlayerProgram.CurrentPath ?? "")}) — nothing to replay");
+            return;
+        }
+        switch (LiascapePlayerMedia.ShowsAnything())
+        {
+            case true:
+                LiascapePlayerClient.Log("restore: the player shows its restored wallpaper — nothing to replay");
+                return;
+            case null:
+                LiascapePlayerClient.Log("restore: the player didn't answer what it shows — not replaying over it");
+                return;
+        }
+        var session = settings.LastSession;
+        if (session == null || session.Paths.Count == 0) { LiascapePlayerClient.Log("restore: nothing shown, no last session to replay"); return; }
+        LiascapePlayerClient.Log($"restore: nothing shown — replaying the last session ({session.Paths.Count} item(s))");
+        bool playlist = session.IsTimedPlaylist || session.IsPlaylist;
+        if (!playlist || (session.IsPlaylist && session.Paths.Count == 1 && !IsScenePath(session.Paths[0])))
+        {
+            Apply(session.Paths[0], settings.BuildMpvOptions());
+            return;
+        }
+        var ps = PlaylistService.LoadCurrentState()?.Settings;
+        var task = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
+            session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null);
+        try { task?.Wait(15_000); } catch { } // `liascape restore` exits right after
     }
 
     // Pick a random video and apply it as a single wallpaper. If a timed
@@ -3043,6 +3127,7 @@ public static class PlayerHelper
     // until the timer is signalled to stop.
     public static void RunTimerDaemon()
     {
+        if (RetiredUnderPlayer("timer-daemon")) return; // started by hand, or by an older build: the player rotates
         _daemonMode = true;
         InstallShutdownReaper();
         var settings = SettingsService.Load();
@@ -3125,6 +3210,7 @@ public static class PlayerHelper
 
     private static void UpdateTimerPaused(Func<bool, bool> f)
     {
+        if (PlayerEngine.IsLiascapePlayer) return; // the pause is the player's (`player.paused`), never timed_state.json
         try
         {
             if (!File.Exists(TimedStatePath)) return;
@@ -3676,6 +3762,13 @@ public static class PlayerHelper
         try { File.Delete(TimedStatePath); } catch { }
     }
 
+    // mpv's playlist order for a `timer-daemon` to re-observe (legacy's advance-on-end playlist) — never under liascape-player
+    private static void SavePlaylistObserverPaths(List<string> paths)
+    {
+        if (RetiredUnderPlayer("playlist_observer_paths.json")) return;
+        try { AtomicFile.WriteAllText(PlaylistObserverPathsPath, JsonSerializer.Serialize(paths)); } catch { }
+    }
+
     private static void ClearPlaylistObserverPaths()
     {
         try { File.Delete(PlaylistObserverPathsPath); } catch { }
@@ -3683,6 +3776,7 @@ public static class PlayerHelper
 
     private static void SignalTimerStop()
     {
+        if (RetiredUnderPlayer("SignalTimerStop")) return; // `stop` destroys the player's programs itself
         lock (_lock)
         {
             try

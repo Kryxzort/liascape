@@ -145,10 +145,17 @@ back to Legacy always stays possible).
   § Threading "A STARTING player"). **Arguments:** the first start runs `serve` (`--socket` when not
   the default); once this client has talked to a player, it runs **that player's own arguments + `--restore`**
   (`_serveArgs`, read from its supervisor's cmdline when a new player pid answers `hello`, minus
-  `--supervised/--restore/--restarted`) — a player that went away (a failed upgrade, a killed or given-up
+  `--supervised/--restore/--restarted/--session-start` — `UserServeArgs`) — a player that went away (a failed upgrade, a killed or given-up
   supervisor) comes back with the same `--headless/--outputs/--socket/--ao`, showing what it showed. Before
   (2026-10-28), a failed upgrade under I/O load fell back to a plain `serve`: no `--headless`, no `--restore`. Exit 1 ("already running" on the instance lock) keeps
   connecting to the winner. A failed start isn't retried for 10 s (`LastError` → `/player-engine`).
+  **`EnsureRunning(restore: true, sessionStart: true)`** (Phase 3 Task 8 — `PlayerHelper.Restore`: `liascape restore`,
+  the `play` key, `toggle-play` from stopped): a FIRST start (no earlier player's arguments known) runs `serve
+  --restore --session-start` (`StartArgs`; `--socket` first when not the default) and waits ≤ 30 s for its first
+  answer (a restore creates a source per output first) — the player brings back its snapshot, each program per its
+  start mode (§ Rotation "Restore"). Known arguments always come back with `--restore` alone, and `--session-start`
+  never survives into an upgrade's or a restart's arguments (it would start a playlist over). Self-test
+  `StartArgsAssertions`.
   **Item 4, before any of that**: if the last-known supervisor pid is still alive (`ProcIdentity`-
   checked), a switch landing mid-supervised-restart must NOT race it to spawn a second `serve` into the
   ~150-260 ms gap where the socket/instance-lock are briefly unheld (the dying child's bind goes with
@@ -191,7 +198,8 @@ back to Legacy always stays possible).
   some wrapper must not restart the player every 10 s). **When**: before every switch (`Switch`, after
   `EnsureRunning`), and from a 10 s check in `serve` only while **no transition is pending** — an
   armed align:end switch would be dropped by the restart and the rotation would switch early (failure
-  path), so an advance-on-end playlist upgrades at its next switch. `AutoSpawn=false` (self-test) never
+  path), so an advance-on-end playlist upgrades at its next switch (Task 8: a program in phase `armed` /
+  `switching` counts as pending too; a program's own commit upgrades it — `UpgradeAfterCommit`, § Rotation). `AutoSpawn=false` (self-test) never
   upgrades. `/player-engine` → `running {pid, supervisor, exe, started, stale}`.
 - Socket: `$LIASCAPE_PLAYER_SOCKET` → `$XDG_RUNTIME_DIR/liascape/liascape-player.sock` (mirrors `paths.rs`).
 - `Stop()` = a queued `stop` (the process stays up); switching the engine AWAY from liascape-player =
@@ -239,6 +247,8 @@ code below it is unchanged)
 | `StepBackAndLaunch` (timed `prev`) | the item before `PlayingHistoryIndex`; none (a fresh session's first item) → nothing at all. With an advance-on-end pre-fetch it used to undo only the pre-fetch and relaunch the playing item — restarted, its armed switch cancelled |
 | `AppOps.Trash` | `LiascapePlayerMedia.ShownOrIncomingPaths()` (one `state` read after a bounded `Drain`): every layer's content (an effect's `to`, never its leaving `from`) + each requested switch's B unless it's an aligned one in `waiting_start` — so trashing an item whose switch was requested but not yet running still stops/advances (web-backend.md § Trash) |
 | restart daemon / timer (`UpdateRestartTimer`, `SpawnRestartDaemon`, `RunRestartDaemon`, `RestartCurrentAndLaunch`) | no-op — the leak-restart is an mpvpaper workaround |
+| the timer daemon + its files (Phase 3 Task 8: `SpawnTimerDaemon`, `RunTimerDaemon`, `WriteGuiTimerPid`, `ReleaseTimer`, `SignalTimerStop`, `WritePendingAction`, `SaveTimedState`, `UpdateTimerPaused`, the playlist-observer paths) | no-op, logged once per entry point (`RetiredUnderPlayer`) — the player's program rotates by itself. `serve` start / `restore` / `stop` stop a legacy leftover daemon (`KillLegacyDaemons`: the pid file's process only when its cmdline is that daemon); `pending_action.txt`, `timer.pid`, `gui_timer.pid`, `restart.pid`, `timed_state.json`, `playlist_observer_paths.json` are never written (a legacy `timed_state.json` is read once as the program to load, then removed — § Rotation) |
+| `Restore` (`liascape restore`, `play`, `toggle-play` from stopped) | § Rotation "Restore" |
 
 `AudioMonitor.GetNonMpvStreamIdsAsync` (legacy auto-mute, still used in Phase 1): under liascape-player
 `LiascapePlayerMedia.OwnStreamFilter()` excludes the player's own streams **by ownership (R69)** —
@@ -273,7 +283,7 @@ liascape-player` if anything reaches it. The backend's half is `Player/LiascapeP
 - **Load** (`BuildSpec` + `Load`, essential on the media queue): `AppOps.PlayPlaylist` / `PlayFrom` (`from` = the
   effective "When the playlist starts again" — `GlobalPlaylistStart` / `PlaylistSettings.PlaylistStart` under its
   override, `PlayerHelper.EffectiveStart` — or `index` for a play-from), `ApplyTimedPlaylist` / `ApplyPlaylist` (> 1
-  item or a scene) / `Restore` (no timer-daemon: loaded directly, waited ≤ 15 s) / a legacy `timed_state.json` at
+  item or a scene) / `Restore` (no timer-daemon: below) / a legacy `timed_state.json` at
   `serve` start or on the engine switch (`PlayerHelper.LoadFromTimedState`: the item it was on, as a play-from; the
   file removed). The spec: items in the playlist bar's order (the player shuffles; a shuffled play-from shuffles the
   rest of its cycle), `defaults` = `LiascapePlayerMedia.DesiredGlobal` (the resolver's values with no item + kind
@@ -303,8 +313,21 @@ liascape-player` if anything reaches it. The backend's half is `Player/LiascapeP
   down while a program owns the screen. A backend that didn't load the program (it restarted) leaves the player's
   program as it is.
 - **Trash** of the playing / incoming item: the bar's survivors → `SetItems`, then `program.next` (web-backend.md § Trash).
-- With the app closed the player rotates on its own: under `liascape-player` the stopping backend hands nothing to a
-  `timer-daemon` (Task 8 retires the rest — `gui_timer.pid`, the restart daemon).
+- **With the app closed** the player rotates on its own (Task 8): under `liascape-player` no backend owns a timer —
+  `serve` writes no `gui_timer.pid` and hands nothing to a `timer-daemon` when it stops; no `restart-daemon` either.
+  A keybind with no app (`ActionForward` finds no backend → `AppOps.RunAction` in the one-shot CLI) sends the program
+  verb straight to the player; the mirror seeds itself on the first question (`IsActive`), and a push from a process
+  that hasn't asked yet (`volume up` → `PushDefaults` / `PushItem`) is queued anyway and seeds the mirror on the
+  queue's worker first (`Unseeded`), so the global volume reaches `defaults` and an item's own volume its props.
+- **Restore** (`PlayerHelper.RestoreOnPlayer` — `liascape restore` at boot, the `play` key, `toggle-play` from
+  stopped): a player that isn't running is started `serve --restore --session-start` (§ Lifecycle) — the player
+  brings back its snapshot and starts each program per its start mode itself (start over → item 1 / a fresh shuffle,
+  the item it was on never shown; resume → the exact item and position). A program, or anything on screen / coming /
+  parked (`LiascapePlayerMedia.ShowsAnything`) → done (`play` while something plays does nothing). Nothing (first
+  boot, after `stop`, no snapshot) → `LastSession`: a playlist `Load`ed with `from` = its effective start mode (a
+  Resume finds its point in the player's `resume.json`; waited ≤ 15 s), a single wallpaper `Apply`ed. A player that
+  can't start → `restore` prints why, exit 1. AutoMute → `monitor-daemon` (O3), not next to a running app's own
+  monitor (a forwarded `play`: `AudioMonitor.RunsHere`).
 
 The rules themselves (unchanged, now the player's):
 Owner-approved model (the play-time limits added the same day were folded into it; "Separate timing for scenes" + 0 =
@@ -756,8 +779,8 @@ A's values landed on B); `/preview {global:true}` during a running 8 s fade from
 follows the global to one with its own override 30 / 0.8× moves A only, persists nothing, answers < 100 ms
 and a volume-only drag keeps A's speed (RED before: `global` was ignored → `cur:*` = the overridden B moved); **backend restarts** (`LIASCAPE_PLAYER_BIN` is a link into `$T/bin`, replaced by a
 copy to stand in for a rebuild): a backend TERMed while a WebSocket client holds it open (like the UI) +
-a new one started → no failed/superseded switch, no align:now, one advance at A's end, the new backend
-owns `gui_timer.pid`, no `timer-daemon` left (RED before: 7 superseded switches); a second backend
+a new one started → no failed/superseded switch, no align:now, one advance at A's end, no `gui_timer.pid`
+(Task 8 — before: the new backend owned it), no `timer-daemon` left (RED before: 7 superseded switches); a second backend
 started while the first runs → the first yields ("stops ticking"); **a crash while an aligned switch is
 armed** (E1 → E2): E1 comes back at its position (not E2), the switch is re-armed `align:end`, no `align:now`,
 one handoff at E1's end (RED before: E2 restored at once + an `align:now` switch after the 1 s back-off); **a crash
@@ -840,6 +863,24 @@ program moved on (no backend switch), undo → back; § Playlist start: start ov
 Alpha → Beta → Alpha (the bar's key `name:Alpha` / `name:Beta`), a play-from; a legacy `timed_state.json` at a backend
 start → the program at its item, the file gone. The scene / upgrade / two-backend sections check the program too
 (`srcIdForPath` reads sources only — a program node has a `path`; two backends → no `origin: api` switch).
+**Phase 3 Task 8** (§ Rotation "With the app closed" / "Restore"): a background watch samples the IT's config/cache
+dirs every 0.2 s for the whole run → none of `pending_action.txt` / `timer.pid` / `gui_timer.pid` / `restart.pid` /
+`timed_state.json` / `playlist_observer_paths.json` ever exists (the Task 7 section's planted `timed_state.json`
+exempt by a marker); the backend TERMed mid-rotation (11 stills, 3 s timer) → ≥ 2 `program.current` in 10 s with no
+process of this run's backend DLL alive (`/proc/*/cmdline`, never `pgrep -f` — the owner's backend runs too) and no
+`timer-daemon` / `restart-daemon`; **CLI storm** (Review Focus 1): 10 × `liascape next` at once, each its own process,
+no backend → exactly ten items on, ≤ 2 playing sources at every 100 ms sample (one source serves every output),
+every superseded B gone; the app reopened → `/current` = `prog:main.path` within 1 s, no `origin: api` switch in 5 s;
+every keybind with the app closed (the port file voided: a CLI never forwards to a reused port) — `volume up` on an
+item with its own volume (→ its props) and on the global (→ `defaults.gain.user`), `next`, `previous`, `random`,
+`toggle-pause` ×2, `play` while playing (nothing), `stop`, `play` (start over → item 1), `toggle-play` ×2, Resume ×
+stop → play; **`liascape restore`** through a headless shim binary (`$T/hb/liascape-player` + its
+`.liascape-player-wrapped` sibling, so the started player never reads as stale) after a `ctl quit`: it ran `serve
+--restore --session-start`; start over × sequential → item 1, the item it was on never scheduled; × shuffle → a fresh
+shuffle (first ≠ the last played); resume → the same item at its position (± 2 s + the restore's own time), still a
+program; no snapshot (moved aside) × start over → `LastSession` from item 1, × resume → its resume point; one player
+start per restore, no legacy daemon; `serve` start with planted pid files → a fake leftover `timer-daemon` stopped, an
+unrelated process named by a stale `restart.pid` left alive, both files gone.
 `LIASCAPE_IT_DLL=<liascape-backend.dll>` runs another backend build against it (a RED run of new checks on an older commit).
 
 ## Self-test
