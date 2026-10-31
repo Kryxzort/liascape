@@ -2021,6 +2021,43 @@ fn removing_the_armed_b_rearms_to_the_new_next() {
 }
 
 #[test]
+fn reordering_under_the_armed_b_rearms_to_the_new_next() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [
+        clip("ro_a", 10.0),
+        clip("ro_b", 10.0),
+        clip("ro_c", 10.0),
+        clip("ro_d", 10.0),
+    ];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items[..3], json!({"mode": "on_end"}));
+    verb(&mut c, "play", json!({}));
+    let armed = wait_armed(&mut c, 1);
+    assert_eq!(armed["next"], json!(items[1]));
+    // c moved right after a: b is no longer next (`ReorderPlaylist` re-armed the bar's next)
+    c.ok(
+        "set",
+        json!({"path": "prog:main.items",
+               "value": [{"path": items[0]}, {"path": items[2]}, {"path": items[1]}]}),
+    );
+    let re = wait_armed(&mut c, 2);
+    assert_eq!(re["next"], json!(items[2]), "{re}");
+    assert_ne!(re["corr"], armed["corr"]);
+    // an edit that leaves the next item next leaves the armed switch alone
+    c.ok(
+        "set",
+        json!({"path": "prog:main.items",
+               "value": [{"path": items[0]}, {"path": items[2]}, {"path": items[1]}, {"path": items[3]}]}),
+    );
+    c.step(100);
+    let p = prog(&mut c);
+    assert_eq!(p["corr"], re["corr"], "same switch: {p}");
+    assert_eq!(p["next"], json!(items[2]));
+    assert_eq!(currents(&c).len(), 1);
+}
+
+#[test]
 fn undo_regrows_a_one_item_session() {
     let Some(srv) = Serve::start() else { return };
     let mut c = srv.client();

@@ -1403,16 +1403,16 @@ waitfor $WAIT prog_is start_mode '"resume"' && ok "the start setting → prog:ma
 at_item b.mp4; c4=$(ncur); m4=$(nsched_all); pb=$(pplayed); pl '"Alpha"' "$PA"; sleep 1
 [ "$(curs_after "$c4" | jq -c 'map(select(.r == "play"))')" = "[]" ] && ge "$(pplayed)" "$pb" && [ "$(last_cur | jq -r .p)" = b.mp4 ] \
   && ok "resume: Play on the playing playlist keeps playing where it is (b.mp4, played_ms $pb → $(pplayed))" || bad "resume × play again: $(curs_after "$c4"), played $pb → $(pplayed)"
-at_item c.mp4; stop_now; c5=$(ncur); pl '"Alpha"' "$PA"
+at_item c.mp4; stop_now; was=$(last_cur | jq -r .p); c5=$(ncur); pl '"Alpha"' "$PA"
 waitfor $WAIT eval '[ "$(curs_after "$c5" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
-[ "$(curs_after "$c5" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = '{"p":"c.mp4","resumed":true}' ] && ok "resume: stop → Play → its resume point (c.mp4, resumed)" || bad "resume × stop → play: $(curs_after "$c5")"
-at_item a.mp4; c6=$(ncur)
+[ "$(curs_after "$c5" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = "{\"p\":\"$was\",\"resumed\":true}" ] && ok "resume: stop → Play → its resume point ($was, resumed)" || bad "resume × stop → play: $(curs_after "$c5") (stopped on $was)"
+at_item a.mp4; was=$(last_cur | jq -r .p)
 post /playlist/state "{\"videoPaths\":$PB,\"settings\":{\"order\":0},\"name\":\"Beta\"}" >/dev/null   # Beta loaded into the bar
 waitfor $WAIT prog_is key '"name:Beta"' && ok "another playlist loaded into the bar → key name:Beta (Alpha's point kept)" || bad "key after loading Beta: $(prog key)"
 pl '"Beta"' "$PB"; waitfor $WAIT eval '[ "$(last_cur | jq -r .p)" = p1.mp4 ]' && ok "resume × Beta never played → its item 1 (p1.mp4)" || bad "Beta: $(last_cur)"
 c7=$(ncur); pl '"Alpha"' "$PA"
 waitfor $WAIT eval '[ "$(curs_after "$c7" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
-[ "$(curs_after "$c7" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = '{"p":"a.mp4","resumed":true}' ] && ok "resume: Alpha → Beta → Alpha → Alpha's own point (a.mp4, resumed)" || bad "A → B → A × resume: $(curs_after "$c7") (Alpha was at a.mp4)"
+[ "$(curs_after "$c7" | jq -c 'map(select(.r == "play"))[0] | {p, resumed}')" = "{\"p\":\"$was\",\"resumed\":true}" ] && ok "resume: Alpha → Beta → Alpha → Alpha's own point ($was, resumed)" || bad "A → B → A × resume: $(curs_after "$c7") (Alpha was at $was)"
 setting '.GlobalPlaylistStart = "start_over"'
 pl '"Beta"' "$PB"; at_item p1.mp4; c8=$(ncur); pl '"Alpha"' "$PA"
 waitfor $WAIT eval '[ "$(curs_after "$c8" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'

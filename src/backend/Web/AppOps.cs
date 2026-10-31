@@ -449,6 +449,7 @@ public static class AppOps
             {
                 if (pl != null) SavePlaylistState(new CustomPlaylist { VideoPaths = keep, Settings = pl.Settings, Name = pl.Name });
                 else LiascapePlayerProgram.SetItems(keep);
+                LiascapePlayerMedia.QueueNewSession(); // I1, as the legacy play-from of the survivors: it plays on
                 LiascapePlayerProgram.Next(false);
                 return;
             }

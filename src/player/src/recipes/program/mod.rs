@@ -1551,12 +1551,23 @@ impl Programs {
                     // an armed B that is no longer a playable item: cancelled, re-planned
                     // by the next tick (A's loop comes back with the abort)
                     let gone = |p: &Prog, path: &str| p.index_of(path) < 0 || p.skipped(path);
+                    // …or one the new order no longer plays next (a reorder, an add or an undo
+                    // put another item after the current one — `ReorderPlaylist` re-armed the
+                    // playlist bar's next): cancelled too, the next tick arms the new next
+                    let reordered = p.started && (list_changed || old.shuffle != p.cfg.shuffle);
+                    let stale = |p: &Prog, path: &str| {
+                        reordered && {
+                            let (skips, broken, failed) = (&p.skips, &p.broken, &p.failed);
+                            let skip = |x: &str| skips.contains(x) || broken.contains(x) || failed.contains(x);
+                            p.order.plan_next(&skip, &mut p.rng.clone()).is_some_and(|s| s.path != path)
+                        }
+                    };
                     if let Some(armed) = p.pending.as_ref().filter(|x| x.align == Align::End)
-                        && gone(p, &armed.step.path.clone())
+                        && (gone(p, &armed.step.path.clone()) || stale(p, &armed.step.path.clone()))
                     {
                         p.cancel_armed(id, "items", &mut acts);
                     }
-                    if p.rearm.as_ref().is_some_and(|s| gone(p, &s.path)) {
+                    if p.rearm.as_ref().is_some_and(|s| gone(p, &s.path) || stale(p, &s.path)) {
                         p.rearm = None;
                     }
                 }
