@@ -28,7 +28,8 @@ player can play them — § Scenes). Settings → Advanced → "Player engine". 
   map: no source changed) — a handful
   per switch; `source.` as a whole used to stream every debug `source.position` (~10 Hz per source)
   only to be discarded, and restarts are detected by `hello.pid`, not events — reconnect with backoff
-  250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now).
+  250 ms → 5 s; each (re)subscription fires `Subscribed` (`EventsLive` = subscribed now) and drains the player's
+  outbox (`OutboxEvent`, Phase 3 Task 9 — § Event flow "Outbox"); a live event's `outbox_seq` is acked once stored.
   `RequestCount` = requests sent so far (round-trip evidence).
   **Two pids from `hello`** (player-core.md § Supervisor / § Command API `hello`): `PlayerPid` = the
   COMPOSITOR (`hello.pid`, what every `cur:`/`srcs:`/mpv-ownership query is really about) and
@@ -744,6 +745,31 @@ ready) leaves A on screen, but every client was told B when it was requested (`w
 `OnEvent` re-broadcasts `wallpaper-changed` with `CurrentPath()` (off the event thread). Matrix
 `apply:broken` (a garbage `.mp4`; RED: the UI kept marking the file that never showed).
 
+**Outbox (Phase 3 Task 9; player-core.md § Outbox).** The facts the backend stores — `source.broken`,
+`scene.loudness`, `scene.vram_exceeded` — happen with the app closed now (the player rotates by itself), and an event
+in a reconnect gap is lost. The player keeps them in its outbox until acked; the backend drains it:
+- **On every `subscribe` ack** (`LiascapePlayerClient.EventLoop` → `DrainOutbox`, off the event thread, one drain at a
+  time): `outbox.read {after, limit: 500}` page by page, each entry → `OutboxEvent(kind, fields)` in seq order, then
+  `outbox.ack` of the last seq (or the last page's `last_seq`) — after every handler returned, so a handler **stores
+  synchronously**. A handler that throws stops the drain: the ack covers only the entries before it, and the next
+  subscription retries from there. The adapter log: `outbox: drained N entries (#a…), acked #b in X ms after subscribing`
+  (+ "the player dropped entries before #n" when `dropped_before` was set). An older player (`no_such_verb`) is skipped
+  silently. No `OutboxEvent` handler → no drain (the ack would lose them): `LiascapePlayerProgram.Sync` subscribes at
+  serve start, so it calls `LiascapePlayerMedia.Hook()` first.
+- **Live acks, at least once:** a live event's store runs off the event thread (`StoreLive`); when it returned,
+  `OutboxHandled` records its `outbox_seq`, and the ack covers only an unbroken run after this subscription's last ack
+  (`AdvanceAcked`, self-test `OutboxAckAssertions`) — so a store still running, or one that threw, holds the later ones
+  back for the next drain. What was stored live during a drain is acked when it ends. With the backend listening the
+  outbox stays empty.
+- **The handlers are idempotent** (an entry can come live and drained, or drained twice after a crash before its ack) —
+  `LiascapePlayerMedia.OnOutboxEvent`: `source.broken` → `PlayerHelper.OnSceneBroken` (MarkCrashed, WS `scene-crashed`,
+  the program's item skipped — `PushItem`) unless the index already has `crashed: true`; the player already advanced
+  the rotation. `scene.loudness` → `OnSceneLoudness` (`MergeSceneLoudness` keeps the measurement covering the most
+  audible play; the live normalization follows). `scene.vram_exceeded` → logged only (a past moment's UI text).
+- IT § "Phase 3 Task 9": the backend TERMed, a fresh player (3 s loudness window) breaks a scene and learns another's
+  loudness → both in `outbox.jsonl`, nothing in the index; a new backend → `crashed: true` + `loudnessI` stored by the
+  drain ≤ 2 s after subscribing, the outbox empty and the file compacted; a live report then is acked at once.
+
 ## Debugging
 - Adapter log: `~/.cache/liascape/liascape-player-adapter.log` (+ stderr → the serve unit's journal),
   rate-limited (an identical line ≤ once / 10 s): every refused request with its **hint**, start
@@ -873,6 +899,8 @@ program moved on (no backend switch), undo → back; § Playlist start: start ov
 Alpha → Beta → Alpha (the bar's key `name:Alpha` / `name:Beta`), a play-from; a legacy `timed_state.json` at a backend
 start → the program at its item, the file gone. The scene / upgrade / two-backend sections check the program too
 (`srcIdForPath` reads sources only — a program node has a `path`; two backends → no `origin: api` switch).
+**Phase 3 Task 9 outbox** (§ Event flow "Outbox"): facts made with the backend TERMed reach the index at its next
+start (drained ≤ 2 s after subscribing, then acked: the outbox empty); a live one is acked as it's handled.
 **Phase 3 Task 8** (§ Rotation "With the app closed" / "Restore"): a background watch samples the IT's config/cache
 dirs every 0.2 s for the whole run → none of `pending_action.txt` / `timer.pid` / `gui_timer.pid` / `restart.pid` /
 `timed_state.json` / `playlist_observer_paths.json` ever exists (the Task 7 section's planted `timed_state.json`

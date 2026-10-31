@@ -33,6 +33,7 @@ public static class LiascapePlayerSelfTest
             ScenePropertyAssertions(fails);
             PlayLimitAssertions(fails);
             ProgramSpecAssertions(fails);
+            OutboxAckAssertions(fails);
             StaleThroughWrapperAssertions(fails);
             StartupGraceAssertions(fails);
             StartArgsAssertions(fails);
@@ -43,6 +44,23 @@ public static class LiascapePlayerSelfTest
         if (fails.Count == 0) { Console.WriteLine("PASS"); return 0; }
         Console.WriteLine("FAIL " + string.Join("; ", fails));
         return 1;
+    }
+
+    // ---- Phase 3 Task 9: what a live ack may cover: only an unbroken run of handled seqs after the last ack ------------
+    private static void OutboxAckAssertions(List<string> fails)
+    {
+        void Check(string what, long done, long[] handled, long want, long[] left)
+        {
+            var set = new SortedSet<long>(handled);
+            long got = LiascapePlayerClient.AdvanceAcked(set, done);
+            if (got != want || !set.SetEquals(left))
+                fails.Add($"outbox ack {what}: {got} left [{string.Join(",", set)}], want {want} left [{string.Join(",", left)}]");
+        }
+        Check("the next seq", 5, [6], 6, []);
+        Check("a run, handled out of order", 5, [8, 6, 7], 8, []);
+        Check("a gap holds (#7 not handled: its store is running or threw)", 5, [6, 8], 6, [8]);
+        Check("nothing next", 5, [7], 5, [7]);
+        Check("already covered by the drain", 5, [3, 5], 5, []);
     }
 
     // ---- Phase 3 Task 7: a rotation session → the player's program spec (LiascapePlayerProgram.BuildSpec) -------------

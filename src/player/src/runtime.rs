@@ -4629,6 +4629,12 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             crate::signal::automute::env_enabled(),
         ),
     };
+    // Phase 3 Task 9: the backend's outbox (`<state>/outbox.jsonl`), compacted on `lia-snapshot`
+    let runner = rt.snap.writer.runner();
+    crate::outbox::install(crate::outbox::Outbox::open(
+        &opts.state_dir,
+        runner.map(|r| Box::new(move |f| r.run(f)) as crate::outbox::Spawner),
+    ));
     rt.update_scene_assets();
     rt.start_cover();
     rt.start_automute();

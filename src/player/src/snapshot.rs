@@ -496,13 +496,34 @@ pub struct WriterStats {
 /// Never set it outside tests.
 pub const TEST_WRITE_DELAY_ENV: &str = "LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS";
 
-/// One queued write: `None` = `snapshot.json`, else another state file by name.
-type Job = (Option<&'static str>, Vec<u8>);
+/// One queued job of the writer thread.
+enum Job {
+    /// `snapshot.json`.
+    Snap(Vec<u8>),
+    /// Another state file by name.
+    File(&'static str, Vec<u8>),
+    /// Other state-dir I/O that must stay off the loop (the outbox's compaction,
+    /// `crate::outbox`), run in order.
+    Run(Box<dyn FnOnce() + Send>),
+    /// `finish`: write what is queued, then stop (a [`Runner`] keeps the channel open).
+    Stop,
+}
+
+/// A handle that queues work on the writer thread from anywhere ([`Writer::runner`]):
+/// `run` is false once the writer has stopped (the job is dropped).
+#[derive(Clone)]
+pub struct Runner(mpsc::Sender<Job>);
+
+impl Runner {
+    pub fn run(&self, f: Box<dyn FnOnce() + Send>) -> bool {
+        self.0.send(Job::Run(f)).is_ok()
+    }
+}
 
 /// The snapshot writer thread: the latest snapshot sent wins (older pending ones are
 /// skipped), each written atomically. Other state files (`program.json`, `resume.json`)
 /// go through the same thread — the latest of each wins too — and are written before the
-/// snapshot queued with them.
+/// snapshot queued with them; [`Runner`] jobs (the outbox's compaction) run first.
 pub struct Writer {
     tx: Option<mpsc::Sender<Job>>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -539,20 +560,27 @@ impl Writer {
     /// Queue `bytes` for writing (replacing anything not written yet).
     pub fn send(&self, bytes: Vec<u8>) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send((None, bytes));
+            let _ = tx.send(Job::Snap(bytes));
         }
     }
 
     /// Queue another state file (`name` in the state dir), written before the next snapshot.
     pub fn send_file(&self, name: &'static str, bytes: Vec<u8>) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send((Some(name), bytes));
+            let _ = tx.send(Job::File(name, bytes));
         }
+    }
+
+    /// A handle that queues jobs on this thread (`None` without a writer thread).
+    pub fn runner(&self) -> Option<Runner> {
+        self.tx.clone().map(Runner)
     }
 
     /// Write whatever is queued and stop the thread (clean exit).
     pub fn finish(&mut self) {
-        self.tx = None;
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(Job::Stop);
+        }
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -571,16 +599,23 @@ fn writer_loop(rx: mpsc::Receiver<Job>, dir: &Path, st: &WriterStats) {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_millis);
-    while let Ok(first) = rx.recv() {
+    let mut stop = false;
+    while !stop && let Ok(first) = rx.recv() {
         let mut snap: Option<Vec<u8>> = None;
         let mut files: BTreeMap<&'static str, Vec<u8>> = BTreeMap::new();
-        for (name, b) in std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok())) {
-            match name {
-                None => snap = Some(b),
-                Some(n) => {
+        let mut runs: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
+        for job in std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok())) {
+            match job {
+                Job::Snap(b) => snap = Some(b),
+                Job::File(n, b) => {
                     files.insert(n, b);
                 }
+                Job::Run(f) => runs.push(f),
+                Job::Stop => stop = true,
             }
+        }
+        for f in runs {
+            f();
         }
         for (name, b) in files {
             match write_atomic_named(dir, name, &b) {
