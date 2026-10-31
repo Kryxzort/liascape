@@ -1001,3 +1001,7 @@ Two bug classes kept recurring; fix the class, not the instance:
         `tests/api.rs::capture_encodes_off_the_loop`.
 - [ ] Optionally offer our LWE patches upstream as PRs, with AI assistance disclosed. Upstream merged nothing since
       2026-06-20.
+- [ ] Player: with loop off, an item resumed while on its last frame comes back at position 0.0 and stays there (loop on
+      restores correctly). Found by Phase 3 Task 8's restore probes.
+- [ ] Legacy: a forwarded `play` spawns `monitor-daemon` next to the backend's own monitor (fixed for liascape-player
+      only, Phase 3 Task 8).

@@ -748,14 +748,17 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return true; }
     }
 
-    // any transition not yet done (armed, waiting, running, handing off); unknown → treated as yes
+    // any transition not yet done (armed, waiting, running, handing off), or (Task 8) a program armed for its end or
+    // switching; unknown → treated as yes
     private static bool Switching(LiascapePlayerClient client)
     {
         try
         {
             var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
-            return st.TryGetProperty("transitions", out var t) && t.ValueKind == JsonValueKind.Array
-                && t.EnumerateArray().Any(x => Str(x, "phase") != "done");
+            return (st.TryGetProperty("transitions", out var t) && t.ValueKind == JsonValueKind.Array
+                    && t.EnumerateArray().Any(x => Str(x, "phase") != "done"))
+                || (st.TryGetProperty("programs", out var pr) && pr.ValueKind == JsonValueKind.Array
+                    && pr.EnumerateArray().Any(x => Str(x, "phase") is "armed" or "switching"));
         }
         catch (LiascapePlayerException) { return true; }
     }
@@ -1459,6 +1462,15 @@ public static class LiascapePlayerMedia
 
     // ---- queries -----------------------------------------------------------------------------------
     public static bool IsPlaying() => CurrentPath() != null;
+
+    // Task 8 (`restore`): anything on screen, coming or parked (no output: what the next one shows) — a restored
+    // snapshot's content. null = no answer.
+    public static bool? ShowsAnything()
+    {
+        var client = C;
+        if (!client.SocketExists) return false;
+        return ShownOrIncoming(client, parked: true) is { } shown ? shown.Count > 0 : null;
+    }
 
     public static string? CurrentPath() =>
         GetCur("path") is JsonElement { ValueKind: JsonValueKind.String } v && v.GetString() is { Length: > 0 } s ? s : null;

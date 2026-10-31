@@ -36,6 +36,7 @@ public static class LiascapePlayerSelfTest
             OutboxAckAssertions(fails);
             StaleThroughWrapperAssertions(fails);
             StartupGraceAssertions(fails);
+            StartArgsAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -274,6 +275,27 @@ public static class LiascapePlayerSelfTest
         var d = new AppSettings();
         foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
+    }
+
+    // ---- Phase 3 Task 8: what a player is started with (`liascape restore` = a session start; a restart never is) -----
+    private static void StartArgsAssertions(List<string> fails)
+    {
+        static string J(IEnumerable<string>? a) => a == null ? "null" : string.Join(" ", a);
+        void Want(string what, IEnumerable<string>? got, string want) { if (J(got) != want) fails.Add($"{what}: `{J(got)}`, want `{want}`"); }
+        const string sock = "/run/user/1/x/liascape-player.sock";
+        Want("first start", LiascapePlayerClient.StartArgs(null, sock, true, false, false), "serve");
+        Want("first start, own socket", LiascapePlayerClient.StartArgs(null, sock, false, false, false), $"serve --socket {sock}");
+        Want("restore (boot)", LiascapePlayerClient.StartArgs(null, sock, true, true, true), "serve --restore --session-start");
+        Want("restore, own socket", LiascapePlayerClient.StartArgs(null, sock, false, true, true), $"serve --socket {sock} --restore --session-start");
+        Want("restore, no session start", LiascapePlayerClient.StartArgs(null, sock, true, true, false), "serve --restore");
+        // a player that went away comes back with its own arguments + --restore, never as a session start
+        var known = new List<string> { "serve", "--headless", "--ao", "null" };
+        Want("known args", LiascapePlayerClient.StartArgs(known, sock, true, false, false), "serve --headless --ao null --restore");
+        Want("known args × restore", LiascapePlayerClient.StartArgs(known, sock, true, true, true), "serve --headless --ao null --restore");
+        // the restart plumbing (and a boot's --session-start) never survives into an upgrade's / a restart's arguments
+        Want("supervisor argv", LiascapePlayerClient.UserServeArgs(["serve", "--headless", "--restore", "--session-start"]), "serve --headless");
+        Want("child argv", LiascapePlayerClient.UserServeArgs(["serve", "--supervised", "--restarted", "3:1", "--ao", "null", "--session-start"]), "serve --ao null");
+        Want("not serve", LiascapePlayerClient.UserServeArgs(["ctl", "state"]), "null");
     }
 
     // ---- transition duration floor (0 = a cut; 1–49 ms allowed — the floor was 50) ----------------
