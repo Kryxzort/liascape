@@ -410,7 +410,8 @@ fn open_fresh_events_file(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-fn wall_time_rfc3339() -> String {
+/// Now as RFC3339 wall time (the records' `t_wall`; the outbox's too).
+pub fn wall_time_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())

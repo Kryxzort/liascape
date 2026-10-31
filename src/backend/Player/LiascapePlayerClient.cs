@@ -876,6 +876,11 @@ public sealed class LiascapePlayerClient
     // Phase 3 Task 7: `program.` — the player's rotation (LiascapePlayerProgram's mirror; `program.current` → the UI)
     public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "program."];
     public event Action<string, JsonElement>? Event;
+    // Phase 3 Task 9: an entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
+    // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in
+    // seq order; the ack follows once every handler returned, so a handler stores synchronously (and idempotently), and
+    // throws when it couldn't: the entry stays for the next subscription.
+    public event Action<string, JsonElement>? OutboxEvent;
     // a connection reached a DIFFERENT player process than before (it restarted)
     public event Action? Restarted;
     // the event connection's `subscribe` was acknowledged (again) — events in a reconnect gap are lost
@@ -940,6 +945,9 @@ public sealed class LiascapePlayerClient
                             backoff = 250;
                             try { Subscribed?.Invoke(); } catch (Exception e) { Log($"subscribed handler threw: {e.Message}"); }
                             _subscribed.Set();
+                            lock (_ackLock) { _drainedSeq = -1; _liveHandled.Clear(); } // live acks wait for this subscription's drain
+                            var subAt = Stopwatch.StartNew();
+                            _ = System.Threading.Tasks.Task.Run(() => DrainOutbox(subAt));
                             // pid / Generation after a restart — off this thread (it may wait behind a long request)
                             _ = System.Threading.Tasks.Task.Run(() => { try { Call("hello", null, 1000); } catch (LiascapePlayerException) { } });
                         }
@@ -954,6 +962,102 @@ public sealed class LiascapePlayerClient
             Thread.Sleep(backoff);
             backoff = Math.Min(backoff * 2, 5000);
         }
+    }
+
+    // ---- the player's outbox (Phase 3 Task 9; player-core.md § Outbox) -------------------------
+    // What the backend must store happened while it wasn't listening (the app closed, a reconnect gap): the player
+    // keeps those facts in `<state>/outbox.jsonl` until acked. At least once: an ack only ever covers what was stored.
+    // On every subscription: read every unacked entry (pages of 500), hand each to OutboxEvent in seq order, then ack.
+    // A live event's `outbox_seq` is acked once its store returned (OutboxHandled), and only as part of an unbroken run
+    // after the last ack (AdvanceAcked): a store still running or one that threw holds everything after it back for the
+    // next drain, which repeats them (the handlers are idempotent).
+    private readonly object _drainLock = new(); // one drain at a time
+    private readonly object _ackLock = new();   // the two below (never held across a request: the event thread takes it)
+    private long _drainedSeq = -1; // the last seq acked since this subscription's drain; -1 = drain not done yet
+    private readonly SortedSet<long> _liveHandled = new(); // live entries stored, not acked yet
+
+    private void DrainOutbox(Stopwatch subAt)
+    {
+        if (OutboxEvent == null) return; // nobody to hand them to: an ack would lose them
+        lock (_drainLock)
+        {
+            long after = 0, first = 0, last = 0; int n = 0; long? lost = null; string? threw = null;
+            try
+            {
+                while (threw == null)
+                {
+                    var r = Call("outbox.read", new Dictionary<string, object?> { ["after"] = after, ["limit"] = 500 });
+                    if (r.TryGetProperty("dropped_before", out var db) && db.ValueKind == JsonValueKind.Number && db.TryGetInt64(out var d)) lost ??= d;
+                    if (r.TryGetProperty("last_seq", out var ls) && ls.ValueKind == JsonValueKind.Number && ls.TryGetInt64(out var l)) last = l;
+                    int page = 0;
+                    foreach (var e in r.GetProperty("events").EnumerateArray())
+                    {
+                        page++;
+                        long seq = e.GetProperty("seq").GetInt64();
+                        var kind = e.GetProperty("kind").GetString() ?? "";
+                        if (first == 0) first = seq;
+                        // not stored (a full disk…): the ack stops before it, the next subscription retries it
+                        try { OutboxEvent?.Invoke(kind, e.GetProperty("fields")); }
+                        catch (Exception ex) { threw = $"{kind} #{seq}: {ex.Message}"; break; }
+                        after = seq; n++;
+                    }
+                    if (page < 500) break;
+                }
+                // every entry ≤ the last page's `last_seq` was handled here or acked before (or lost to the bound)
+                if (threw == null) after = Math.Max(after, last);
+                if (after > 0 && (n > 0 || lost != null)) Call("outbox.ack", new Dictionary<string, object?> { ["seq"] = after });
+            }
+            catch (LiascapePlayerException e)
+            {
+                // an older player (no outbox) or one gone again: the next subscription drains
+                if (e.Code != "no_such_verb") Log($"outbox: drain failed after {n} entr{(n == 1 ? "y" : "ies")} — {e}");
+                return;
+            }
+            catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or FormatException)
+            {
+                Log($"outbox: an unreadable outbox.read reply after {n} entr{(n == 1 ? "y" : "ies")} — {e.Message}");
+                return;
+            }
+            if (threw != null)
+            {
+                Log($"outbox: stopped after {n} entr{(n == 1 ? "y" : "ies")}, the next subscription retries — the handler of {threw}");
+                return; // no live acks either: they would cover the entry that failed
+            }
+            lock (_ackLock) _drainedSeq = after;
+            Log($"outbox: drained {n} entr{(n == 1 ? "y" : "ies")}{(n > 0 ? $" (#{first}…), acked #{after}" : "")} in {subAt.ElapsedMilliseconds} ms after subscribing"
+                + (lost is long lb ? $" — the player dropped entries before #{lb} unacked (its bound)" : ""));
+            AckHandled(); // what was stored live while this drain ran
+        }
+    }
+
+    // A live event's fact is stored (its `outbox_seq`, if it has one): ack it when the run reaches it.
+    public void OutboxHandled(JsonElement e)
+    {
+        if (!e.TryGetProperty("outbox_seq", out var o) || o.ValueKind != JsonValueKind.Number || !o.TryGetInt64(out var seq)) return;
+        lock (_ackLock) _liveHandled.Add(seq);
+        AckHandled();
+    }
+
+    private void AckHandled()
+    {
+        long ack;
+        lock (_ackLock)
+        {
+            if (_drainedSeq < 0) return;
+            ack = AdvanceAcked(_liveHandled, _drainedSeq);
+            if (ack == _drainedSeq) return;
+            _drainedSeq = ack;
+        }
+        // off the caller's thread (a request may wait behind a slow one); a lost ack is covered by the next one or drain
+        _ = System.Threading.Tasks.Task.Run(() => TryCall("outbox.ack", new Dictionary<string, object?> { ["seq"] = ack }, QuickMs));
+    }
+
+    // The newest seq an ack may cover: `done` extended by the unbroken run in `handled` (which keeps only what is past it).
+    internal static long AdvanceAcked(SortedSet<long> handled, long done)
+    {
+        handled.RemoveWhere(s => s <= done);
+        while (handled.Remove(done + 1)) done++;
+        return done;
     }
 
     private static string? Prop(JsonElement e, string name) =>

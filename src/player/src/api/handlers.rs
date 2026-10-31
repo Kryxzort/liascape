@@ -1,6 +1,7 @@
 //! The verbs (spec §4.2 "Command API"): generic graph verbs (`create`/`destroy`/`set`/
 //! `get`/`animate`), thin recipe verbs (`transition`/`cancel`, `program.*`), queries (`state`/`logs`/
-//! `probe`/`effects`/`hello`), `capture`, lifecycle (`stop`/`quit`), and the headless-only
+//! `probe`/`effects`/`hello`), the backend's outbox (`outbox.read`/`outbox.ack`), `capture`,
+//! lifecycle (`stop`/`quit`), and the headless-only
 //! `step` + `headless.*`. Each verb is documented, with a `ctl` example, in
 //! `.claude/rules/player-core.md` § Command API — keep [`VERBS`] and that table in step.
 
@@ -103,6 +104,16 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
         "advance the stepped clock {ms} (stepped clock only)",
     ),
     (
+        "outbox.read",
+        outbox_read,
+        "the facts kept for the backend {after?, limit? (500)} → {events, last_seq, dropped_before}",
+    ),
+    (
+        "outbox.ack",
+        outbox_ack,
+        "the backend stored every outbox entry ≤ {seq} (compacted on lia-snapshot)",
+    ),
+    (
         "headless.add_output",
         add_output,
         "add a virtual output {name, width, height, hz}",
@@ -157,6 +168,41 @@ fn hint(s: &str) -> String {
 
 // ---------------------------------------------------------------- queries
 
+/// A non-negative integer arg (`None` when absent or null).
+fn opt_u64(args: &Value, key: &str) -> Result<Option<u64>, ApiError> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or_else(|| {
+            bad_request(format!("`{key}` must be a non-negative integer, got {v}"))
+        }),
+    }
+}
+
+/// Phase 3 Task 9: `outbox.read {after?, limit? (500, 1–2000)}` → `{events, last_seq,
+/// dropped_before}` (`crate::outbox`).
+fn outbox_read(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    let after = opt_u64(args, "after")?;
+    let limit = opt_u64(args, "limit")?.unwrap_or(crate::outbox::READ_LIMIT as u64);
+    if limit == 0 {
+        return Err(bad_request("`limit` must be ≥ 1".into()));
+    }
+    let limit = (limit as usize).min(crate::outbox::OUTBOX_MAX);
+    let Some(o) = crate::outbox::global() else {
+        return Ok(json!({"events": [], "last_seq": 0, "dropped_before": null}));
+    };
+    let p = o.read(after, limit);
+    Ok(json!({"events": p.events, "last_seq": p.last_seq, "dropped_before": p.dropped_before}))
+}
+
+/// Phase 3 Task 9: `outbox.ack {seq}` → `{}`: everything ≤ seq is stored by the backend.
+fn outbox_ack(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
+    let seq = opt_u64(args, "seq")?.ok_or_else(|| bad_request("`seq` is required".into()))?;
+    if let Some(o) = crate::outbox::global() {
+        o.ack(seq);
+    }
+    Ok(json!({}))
+}
+
 fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     let mut caps = vec!["video", "image", "color", "transition", "program"];
     // Phase 2: scenes play when the worker binary resolves (Task 5) and WE's assets dir does
@@ -182,6 +228,10 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     }
     if rt.stepped() {
         caps.push("stepped");
+    }
+    // Phase 3 Task 9: `outbox.read` / `outbox.ack` (the backend drains on every subscription)
+    if crate::outbox::global().is_some() {
+        caps.push("outbox");
     }
     let hwdec = {
         let w = rt.host.render_worker();
