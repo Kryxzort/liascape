@@ -1843,8 +1843,11 @@ source; the transition recipe stays the one place a switch happens. The contract
     cancels the armed switch and starts the countdown in full; `timer → on_end` arms per the rule on the next tick;
     `max_ms` / `separate_scenes` / `scenes_after_ms` are read by the next tick; `items` / `order` →
     `Order::reorder` (the current item kept, or finishing without a replay; history `[current]`; play time and
-    countdown kept), and an armed B that is no longer a playable item is cancelled (the abort restores A's loop)
-    and re-planned; `defaults` / item `props` reach the next B only. An edit never resets the play time.
+    countdown kept), and an armed B that is no longer a playable item, or no longer the new order's next (a reorder, an
+    undo), is cancelled (the abort restores A's loop) and re-planned; an edit that changes only items' `props` or `skip`
+    never re-orders or touches the history, and a `skip` going true → false clears that item's own broken / failed
+    mark (a crashed scene whitelisted: the backend is the authority); a shuffled `from: index` shuffles the rest of its
+    cycle; `defaults` / item `props` reach the next B only. An edit never resets the play time.
   - **Pause, holds, parking** (Task 5): the clock is `Runtime::now`, so a user pause, the low-VRAM hold and the
     cover hold (Task 6, `cover_hold_freezes_a_program`) stop play time and the countdown. Parked (no output, R60) the program's phase is `parked` and it follows
     `while_parked` (O2, a Program prop, live): `rotate` (default — today's backend) keeps both clocks counting,

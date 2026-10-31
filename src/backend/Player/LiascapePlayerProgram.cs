@@ -221,6 +221,15 @@ public static class LiascapePlayerProgram
         catch (LiascapePlayerException) { return null; }
     }
 
+    // Whether the player has prog:main: false only on its own `no_such_node`; null = no answer (a slow or stalled player
+    // is not a player that lost the rotation — re-creating or re-playing on a timeout would restart what plays).
+    private static bool? Exists(LiascapePlayerClient client, int timeoutMs)
+    {
+        try { client.Call("get", new Dictionary<string, object?> { ["path"] = $"{Id}.key" }, timeoutMs); return true; }
+        catch (LiascapePlayerException e) when (e.Code == "no_such_node") { return false; }
+        catch (LiascapePlayerException) { return null; }
+    }
+
     private static string Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
@@ -292,7 +301,11 @@ public static class LiascapePlayerProgram
         }
         LiascapePlayerMedia.ForgetIntent();
         var props = Props(spec);
-        bool exists = Get(client, "key") is { } curKey;
+        if (Exists(client, 2000) is not bool exists)
+        {
+            LiascapePlayerClient.Log("program: the player didn't answer — the rotation isn't loaded (R81 re-applies when it does)");
+            return;
+        }
         try
         {
             if (!exists)
@@ -321,7 +334,7 @@ public static class LiascapePlayerProgram
         catch (LiascapePlayerException e)
         {
             LiascapePlayerClient.Log($"program: loading the rotation failed — {e}");
-            if (!exists) lock (_lock) _exists = Get(client, "key") != null;
+            if (!exists) lock (_lock) _exists = Exists(client, LiascapePlayerClient.QuickMs) == true;
         }
         finally { LiascapePlayerMedia.InvalidateSources(); }
     }
@@ -548,7 +561,9 @@ public static class LiascapePlayerProgram
         var defaults = LiascapePlayerMedia.DesiredGlobal(s);
         model = model with { Defaults = defaults, Items = BuildItems(paths ?? model.Items.Select(i => i.Path).ToList(), s, defaults) };
         lock (_lock) _model = model;
-        if (Get(client, "key") is null)
+        var has = Exists(client, 2000);
+        if (has == null) return; // no answer: the breaker closing runs this again
+        if (has == false)
         {
             int at = path != null ? model.Items.FindIndex(i => SamePath(i.Path, path)) : -1;
             LiascapePlayerClient.Log($"program: liascape-player has no rotation any more (restarted without its snapshot) — loading it again"
