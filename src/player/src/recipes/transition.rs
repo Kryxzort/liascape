@@ -778,11 +778,15 @@ impl Transitions {
 
         let sides = build_sides(g, &outputs);
         let lead = sides.iter().position(|s| s.a.is_some());
+        // From nothing there is nothing to transition from: whatever effect was asked for, B just
+        // appears (a cut). `sides` is what's left after the supersede above, so a request that
+        // replaced a still-opening first one is from nothing too; an A on any output keeps the effect.
+        let effect_id = if lead.is_some() { req.effect_id } else { None };
         let mut tr = Tr {
             corr: corr.clone(),
             method: req.method,
             align: req.align,
-            effect_id: req.effect_id.clone(),
+            effect_id: effect_id.clone(),
             params: req.params.clone(),
             dur: Duration::from_millis(req.duration_ms as u64),
             outputs: outputs.clone(),
@@ -838,7 +842,7 @@ impl Transitions {
                 path: b_path,
                 method: req.method,
                 align: req.align,
-                effect_id: req.effect_id,
+                effect_id,
                 duration_ms: req.duration_ms,
                 origin: req.origin,
             },
@@ -3105,5 +3109,58 @@ mod tests {
 
         h.tick(20, &[]); // now = 83: past ANTICLICK + AUDIO_SETTLE_TAIL (77)
         assert!(h.bool(&a, "paused"), "settle tail elapsed: paused now");
+    }
+
+    /// Owner's list: "it probably shouldn't do transition when there was no wallpaper playing
+    /// before". With nothing on any requested output there is no A to go from: the requested
+    /// effect is dropped (a cut — B appears on its first frame, 30 ms audio ramp) and every
+    /// event says so. Any A at all keeps the effect (the next test).
+    #[test]
+    fn effect_from_nothing_is_a_cut() {
+        let mut h = H::new(&["V1", "V2"]);
+        let t = h.start(req("/b.mkv", "full-live", "now", Some("fade")));
+        let scheduled = h.events.iter().find_map(|e| match &e.kind {
+            TransitionEventKind::Scheduled { effect_id, .. } => Some(effect_id.clone()),
+            _ => None,
+        });
+        assert_eq!(scheduled, Some(None), "scheduled as a cut");
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let started = h.events.iter().find_map(|e| match &e.kind {
+            TransitionEventKind::Started { effect_id, .. } => Some(effect_id.clone()),
+            _ => None,
+        });
+        assert_eq!(started, Some(None), "started as a cut");
+        assert!(h.g.ids_of(NodeKind::Effect).is_empty(), "no effect node");
+        assert_eq!(get_str(&h.g, "lay:V1:main", "content"), b, "on screen at once");
+        assert_eq!(get_str(&h.g, "lay:V2:main", "content"), b, "on every output");
+        h.tick(40, &[]);
+        assert!(h.has(&t, "transition.done"), "done after the 30 ms ramp");
+    }
+
+    /// The other side of that rule: an A on any requested output keeps the effect; after a
+    /// stop-like empty the next one is from nothing again; a superseded first request leaves
+    /// nothing, so its successor is from nothing too.
+    #[test]
+    fn effect_stays_with_any_a_and_superseding_from_nothing_stays_a_cut() {
+        let mut h = H::new(&["V1", "V2"]);
+        let _a = h.video(&["V1"], 10.0, 1.0); // V2 shows nothing
+        let t = h.start(req("/b.mkv", "full-live", "now", Some("fade")));
+        let eff = |h: &H, c: &CorrId| {
+            h.events.iter().find_map(|e| match &e.kind {
+                TransitionEventKind::Scheduled { effect_id, .. } if &e.corr == c => {
+                    Some(effect_id.clone())
+                }
+                _ => None,
+            })
+        };
+        assert_eq!(eff(&h, &t), Some(Some("fade".into())), "A on V1: the effect stays");
+
+        let mut h = H::new(&["V1"]);
+        let t1 = h.start(req("/b.mkv", "full-live", "now", Some("fade")));
+        let t2 = h.start(req("/c.mkv", "full-live", "now", Some("fade")));
+        assert!(h.has(&t1, "transition.cancelled"), "the first one was superseded");
+        assert_eq!(eff(&h, &t2), Some(None), "still from nothing: a cut");
     }
 }

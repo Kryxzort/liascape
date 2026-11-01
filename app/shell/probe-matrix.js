@@ -569,14 +569,39 @@ for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demux
 // switches
 // (neither side of a running effect: a fuzz chain's incoming B can be k3)
 C["cardApply"] = { switch: true, async run(c) { c.target = [K[2], K[1], K[3]].find((p) => p !== c.shown && p !== c.before.cur?.path); await ui(`m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".thumb-wrap"), "card");`); },
-  exp: { paused: false }, check: (c) => expectShown(c, c.target, { effect: true }) };
+  exp: { paused: false }, check: (c) => expectShown(c, c.target, { effect: !!c.before.cur?.path }) };
 C["playlistBarClick"] = { switch: true, async run(c) {
     for (const k of [K[2], K[1], K[0]]) if (k !== c.shown && (await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(k))});`))) { c.target = k; break; }
     if (!c.target) return c.skip = "no other item in the playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}), "playlistBar item");`); },
-  exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: true }), ...psKept(c)] };
+  exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: !!c.before.cur?.path }), ...psKept(c)] };
 C["playlistBarPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.after.ps?.videoPaths?.[0], { effect: !!c.before.cur?.path }), ...psKept(c)] };
+// a wallpaper starting from nothing just appears: a card, the Play button, a stop in between. No effect (owner's list: "it
+// probably shouldn't do transition when there was no wallpaper playing before"); the switch after it, over a real A, has its effect
+C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
+    c.steps = [];
+    const step = async (label, drive, wantEffect) => {
+      const t0 = Date.now(); if (typeof drive === "function") await drive(); else await ui(drive); await sleep(400); await waitSettled(10000);
+      const evs = events.filter((e) => e._t >= t0);
+      c.steps.push({ label, wantEffect, sched: evs.filter((e) => e.event === "transition.scheduled").map((e) => e.effect_id ?? null), started: evs.filter((e) => e.event === "transition.started").map((e) => e.effect_id ?? null) });
+    };
+    await step("card from nothing", `m.click(m.card("k1")?.querySelector(".thumb-wrap"), "card");`, false);
+    await step("card over k1", `m.click(m.card("k2")?.querySelector(".thumb-wrap"), "card");`, true);
+    await post("/stop"); await sleep(300);
+    await step("Play after a stop", `m.click(document.querySelector(".play-btn"), "Play");`, false);
+    await step("next over the playlist", () => cliStep(c, "next"), true);
+  }, async pre() { await post("/playlist/state", { videoPaths: [K[2], K[3]], settings: PS(), name: null }); },
+  check(c) {
+    const v = [];
+    for (const s of c.steps) {
+      if (!s.sched.length || !s.started.length) { v.push(`${s.label}: no switch (scheduled ${JSON.stringify(s.sched)}, started ${JSON.stringify(s.started)})`); continue; }
+      const eff = s.started[s.started.length - 1];
+      if (s.wantEffect && eff == null) v.push(`${s.label}: a cut, expected its effect`);
+      if (!s.wantEffect && eff != null) v.push(`${s.label}: ran effect ${eff} with nothing on screen before it`);
+    }
+    return v;
+  } };
 C["stopButton"] = { switch: true, async run(c) { const has = await ui(`return !!m.byText(".topbar button", "Stop");`); if (!has) return c.skip = "no Stop button (nothing playing)"; await ui(`m.click(m.byText(".topbar button", "Stop"), "Stop");`); },
   exp: { paused: false }, check: (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after Stop`] : []) };
 // playlist edits

@@ -1579,6 +1579,12 @@ Running      ── new start on an overlapping output ──▶ commit (→ Han
 Running      ── cancel / B failed ──▶ snap back to A
 ```
 
+**From nothing** (owner's list, `Transitions::start`): no A on any requested output, once the
+supersede above has run → the request's effect is dropped and it runs as a cut, whichever client or
+program asked (the events carry `effect_id: null`): B appears on its first frame with the 30 ms audio
+ramp. An A on any one requested output keeps the effect. `effect_from_nothing_is_a_cut`,
+`effect_stays_with_any_a_and_superseding_from_nothing_stays_a_cut`; matrix `fromNothing:noEffect`.
+
 **Per method** (t0 = effect start; D = duration; all gains in linear amplitude,
 `AnimUnit::GainLinear`):
 

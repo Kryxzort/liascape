@@ -1116,11 +1116,13 @@ fn effect_pick_reaches_the_request() {
     c.ok("program.play", json!({"id": "prog:main"}));
     step_until(&mut c, 16, 6000, "4 currents", n_currents(4));
     let sch = scheduled(&c);
-    let effects: Vec<&str> = sch[..3]
+    // the first switch is from nothing: a cut, whatever was picked for it
+    assert_eq!(sch[0]["effect_id"], Value::Null, "{}", sch[0]);
+    let effects: Vec<&str> = sch[1..3]
         .iter()
         .map(|e| e["effect_id"].as_str().unwrap())
         .collect();
-    assert_eq!(effects, ["fade", "wipeLeft", "fade"]);
+    assert_eq!(effects, ["wipeLeft", "fade"]);
     for e in &sch {
         let d = e["duration_ms"].as_u64().unwrap();
         assert!((400..=600).contains(&d), "{e}");
