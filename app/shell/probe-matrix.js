@@ -806,7 +806,7 @@ for (const [name, fromIdx, toIdx] of [["lastToSecond", -1, 1], ["firstToEnd", 0,
 }
 // drag, then next: the next item is the new order's (not the old one's)
 C["seq:playlistBarDrag+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
-    const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
+    const s = c.before.ps?.videoPaths || []; if (s.length < 3) return c.skip = "last to second needs 3 items (on 2 the drag is a click: play that item)"; c.want = moved(s, s.length - 1, 1);
     await playlistBarDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
     c.target = succ(c.want, c.before.cur?.path);
     await cliStep(c, "next");
@@ -1858,7 +1858,7 @@ C["shuffle:prev+next"] = { states: ["playlist4"], switch: true, async run(c) {
 // --- three or more controls in a row (each in the states where all of them share state)
 // drag → next → pause → resume → next: both nexts follow the dragged order, the pause in between holds and ends
 C["seq5:playlistBarDrag+next+pause+resume+next"] = { states: ["playlist", "effect"], switch: true, async run(c) {
-    const s = c.before.ps?.videoPaths || []; c.want = moved(s, s.length - 1, 1);
+    const s = c.before.ps?.videoPaths || []; if (s.length < 3) return c.skip = "last to second needs 3 items (on 2 the drag is a click: play that item)"; c.want = moved(s, s.length - 1, 1);
     await playlistBarDrag(TITLE(s[s.length - 1]), TITLE(s[1]));
     c.t1 = succ(c.want, c.before.cur?.path); c.t2 = succ(c.want, c.t1);
     c.first = (await nexts(c, 1))[0];
