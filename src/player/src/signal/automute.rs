@@ -19,6 +19,10 @@
 //!   `autounmute_delay_ms` → the ramp back **starts at the delay**. A new source created while
 //!   muted comes up at −96 (enforced before its first sync); `player.automute_active` mirrors
 //!   the state; `automute.muted` / `automute.unmuted` log each edge with its timing.
+//! - **The user's unmute** (`automute.release`, criterion 6 — `toggle-mute` while auto-muted):
+//!   audible at once, and no mute until the unmute delay's silence ends the release (what
+//!   `AudioMonitor` does when `toggle-mute` calls `SetMute(false)`: its own state stays "muted" until
+//!   the silence). So the stream the user just overrode can't mute again a tick later.
 //! - **Timing:** a counted stream's rising edge pings the loop from the RT thread; every
 //!   deadline is a calloop timer at that instant (no polling tick). Times are the buffers'
 //!   cycle times (CLOCK_MONOTONIC), so the delay counts from the first audible sample.
@@ -179,6 +183,8 @@ pub struct AutoMuteRt {
     ping: Option<calloop::ping::Ping>,
     timer: Option<(calloop::RegistrationToken, i64)>,
     pub muted: bool,
+    /// The user unmuted (`automute.release`): audible, and the rule waits for silence as if muted.
+    released: bool,
     since_ns: i64,
     settings: Settings,
     mpris: Option<Arc<MprisFeed>>,
@@ -196,6 +202,7 @@ impl AutoMuteRt {
             ping: None,
             timer: None,
             muted: false,
+            released: false,
             since_ns: mono_ns(),
             settings: Settings::default(),
             mpris: None,
@@ -359,7 +366,7 @@ impl Runtime {
         };
         let ramp_ns = ANTICLICK.as_nanos() as i64;
         match decide(
-            self.automute.muted,
+            self.automute.muted || self.automute.released,
             &s,
             now,
             &runs,
@@ -391,6 +398,22 @@ impl Runtime {
                 d["unix_ms"] = json!(unix_ms());
                 self.automute.decide_log(d);
             }
+            // silence (or off) ends a release: nothing to ramp, the sources are audible already
+            Decision::Unmute { last_ns } if self.automute.released => {
+                self.automute.released = false;
+                self.automute.since_ns = now;
+                let fields = json!({
+                    "last_audible_ms": round3(t_ms(last_ns)),
+                    "silent_ms": round3((now - last_ns) as f64 / 1e6),
+                    "delay_ms": s.unmute_delay_ms,
+                    "reason": if s.on { "silence" } else { "off" },
+                });
+                log::event("signal", Level::Info, "automute.release_ended", None, fields.clone());
+                let mut d = fields;
+                d["decision"] = json!("release_ended");
+                d["unix_ms"] = json!(unix_ms());
+                self.automute.decide_log(d);
+            }
             Decision::Unmute { last_ns } => {
                 self.automute_ramp(false);
                 self.automute.muted = false;
@@ -414,6 +437,26 @@ impl Runtime {
         if s.on || self.automute.muted {
             self.automute_enforce();
         }
+    }
+
+    /// `automute.release`: the user unmutes an auto-mute. False (a no-op) when it isn't muted.
+    pub(crate) fn automute_release(&mut self) -> bool {
+        if !self.automute.env || !self.automute.muted {
+            return false;
+        }
+        let now = mono_ns();
+        self.automute_ramp(false);
+        self.automute.muted = false;
+        self.automute.released = true;
+        self.automute.since_ns = now;
+        let fields = json!({ "ramp_start_ms": round3(t_ms(now)) });
+        log::event("signal", Level::Info, "automute.released", None, fields.clone());
+        let mut d = fields;
+        d["decision"] = json!("released");
+        d["unix_ms"] = json!(unix_ms());
+        self.automute.decide_log(d);
+        self.automute_tick(); // arms the silence deadline
+        true
     }
 
     fn automute_counting(&self) -> Vec<Value> {
@@ -599,6 +642,7 @@ impl Runtime {
                 "min_level_db": s.min_level_db, "only_if_mpris": s.only_mpris,
             },
             "active": self.automute.muted,
+            "released": self.automute.released,
             "since_ms": round3(t_ms(self.automute.since_ns)),
             "now_ms": round3(t_ms(now)),
             "monitor": self.sysmon.as_ref().map(|m| json!({

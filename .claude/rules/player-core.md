@@ -1956,8 +1956,8 @@ can read them later, and one built-in rule uses the first.
 
 **Auto-mute** (Task 14, `signal/automute.rs` + `signal/mpris.rs` + `audio/foreign.rs` + `audio/sysmon.rs`;
 spec §4.4). **Behind `LIASCAPE_PLAYER_AUTOMUTE=1`** until it passes the plan's parity bar against the
-backend's `AudioMonitor` (which stays the engine meanwhile; the backend switch-over — `AutoMuteInPlayer`,
-`ApplyAutoMuteSettings`, retiring `monitor-daemon` — is a separate step). Without the env var nothing runs:
+backend's `AudioMonitor` (which stays the engine meanwhile; the backend's side, `AudioMonitor.AutoMuteInPlayer`
+behind its parity flag, off: player-adapter.md § Auto-mute). Without the env var nothing runs:
 no thread, no capability, the props are inert.
 - **Props** (Player, live, kept by the snapshot): `automute` (false), `automute_delay_ms` (**500**),
   `autounmute_delay_ms` (2000), `automute_min_level_db` (−70, a 10 ms slice's peak dBFS),
@@ -2014,6 +2014,12 @@ no thread, no capability, the props are inert.
   quantum cost 73 ms at quantum 1024). Silence counts from the mute on (a restored mute too).
   `automute.muted {run_start_ms, ramp_start_ms, end_ms, target_end_ms, late_ms, delay_ms, streams}` /
   `automute.unmuted {last_audible_ms, ramp_start_ms, silent_ms, delay_ms, reason}`.
+- **The user's unmute** (verb `automute.release`, `toggle-mute` while auto-muted, criterion 6): the ramp back
+  now, `automute_active` false, and `released` (probe) until the rule's own unmute condition holds — the
+  unmute delay's silence, or auto-mute off — so the stream the user overrode can't mute again a tick later
+  (what `AudioMonitor` does: its state stays "muted" until the silence). `{released: false}`, a no-op, when not
+  muted. `automute.released` / `automute.release_ended {silent_ms, delay_ms, reason}`. Not in the snapshot: a
+  crash restart forgets it, and a stream still playing mutes again.
 - **New sources:** while muted, `sync_sources` first sets `gain.automute = −96` on every source without a
   ramp on the slot (a `create`, a program's or a transition's B comes up muted — criterion 7); unmuted, a
   source left at −96 (a crash restart's snapshot) ramps back. A restart whose snapshot restored sources at
@@ -2034,7 +2040,7 @@ no thread, no capability, the props are inert.
   pipewire-pulse: its own pid, not the server's), `_spawns_no_processes` — 20 streams, 0
   children —, `_mpris_hears_only_the_playing_players_own_streams` — a private `dbus-daemon` and a fake
   MPRIS player (zbus) owning the test's pid tree —, `_mpris_mode_without_a_session_bus_never_mutes`,
-  `_absent_without_the_env_gate`, `_absent_with_the_bus_down`; ignored `measure_automute_latency`, `measure_automute_cpu`).
+  `_absent_without_the_env_gate`, `_absent_with_the_bus_down`, `_release_holds_until_silence`; ignored `measure_automute_latency`, `measure_automute_cpu`).
 - **Measured** (`scripts/measure-automute-latency.py --engine both`, the ignored `measure_automute_latency`:
   both engines in one hermetic harness — private PipeWire + pipewire-pulse, an in-test observer on both sink
   monitors (same graph cycles, 1 ms blocks); `AudioMonitor` is a faithful Rust port, so a lower bound for the
@@ -2406,6 +2412,7 @@ note on stderr and exits 0 (or stdout closes).
 | `cancel` | `{corr}` | `{}` | `no_such_node`, `unsupported` (after handoff) | `ctl cancel '{"corr":"tr-12"}'` |
 | `program.play` | `{id, from?: "start"\|"resume"\|"index", index?, keep_pause?: false}` (§ Programs "Playlist start"; no `from` = `index` with an index, else `start`) | `{corr, path, index, resumed}` — `corr` null + `resumed: true` = the same key's playlist already plays (nothing switched) | `no_such_node` (no such program), `unsupported` (empty program — hint: the `programs` probe), `out_of_range` (index), `bad_request` (`from`) | `ctl program.play '{"id":"prog:main","from":"resume"}'` |
 | `program.next` / `program.prev` / `program.random` | `{id, keep_pause?: false}` | `{corr, path, index}` — `corr`/`path` null = nothing to do (previous at the session's first item, nothing playable) | `no_such_node`, `unsupported` (empty) | `ctl program.next '{"id":"prog:main"}'` |
+| `automute.release` | — | `{released}` — § Signals → Auto-mute; false = not auto-muted, nothing done | — | `ctl automute.release` |
 | `state` | — | `{graph (Graph::snapshot), transitions (status), programs (§ Programs, `ProgramStatus`), clock {mode, now_ms}, outputs [{name,width,height,hz,refresh_mhz}], backend (headless\|wayland), sources (hosted ids), parked, workers (the `workers` probe's entries, Task 5)}` | — | `ctl state` |
 | `subscribe` | `{topics: [kind prefix…]}` (`""` = all; additive) | `{topics}` | — | `ctl subscribe transition. source.` |
 | `capture` | `{target: out:<n> \| lay:<n>:main \| <source id>, path (absolute)}` | `{path, width, height}` — deferred until the file is written (the client's later requests wait, like `step`'s); the picture is the one at the request | `no_such_node`, `unsupported` (no frame yet), `io` | `ctl capture '{"target":"out:DP-1","path":"/tmp/dp1.png"}'` |

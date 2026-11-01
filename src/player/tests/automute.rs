@@ -490,6 +490,53 @@ fn automute_mutes_on_a_foreign_stream() {
     assert!(!active(&mut c));
 }
 
+// The user's unmute (criterion 6, `automute.release`): auto-muted → audible at once with the foreign
+// stream still playing, and it stays audible through that stream; only silence for the unmute delay
+// ends the release, so the next stream mutes again. Not muted: a no-op that releases nothing.
+#[test]
+fn automute_release_holds_until_silence() {
+    let Some(mut rig) = Rig::start(&[("LIASCAPE_PLAYER_AUTOMUTE", "1")]) else {
+        return;
+    };
+    let mut c = rig.client();
+    let id = wallpaper(&mut c, RED_10S, "am_rel_red_10s");
+    automute_on(&mut c, 0.0, 300.0);
+    assert_eq!(c.ok("automute.release", json!({}))["released"], json!(false));
+    assert_eq!(c.probe()["released"], json!(false));
+    let long = rig.wav("rel_tone2500", 0, 2500, -20.0);
+    rig.play(&long, "", &[]);
+    wait_for(Duration::from_secs(3), "auto-muted", || active(&mut c).then_some(()));
+    assert_eq!(c.ok("automute.release", json!({}))["released"], json!(true));
+    assert!(!active(&mut c), "automute_active drops at the release");
+    wait_for(Duration::from_secs(1), "the source back at 0", || {
+        (c.get(&format!("{id}.gain.automute")).as_f64() == Some(0.0)).then_some(())
+    });
+    // still audible while the same stream plays on (a mute would land within a ramp)
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(!active(&mut c), "the released stream re-muted: {}", c.probe());
+    assert_eq!(c.get(&format!("{id}.gain.automute")).as_f64(), Some(0.0));
+    assert_eq!(c.probe()["released"], json!(true));
+    // the stream ends, the unmute delay passes → the release is over; a new stream mutes
+    wait_for(Duration::from_secs(5), "the release ended by silence", || {
+        (c.probe()["released"] == json!(false)).then_some(())
+    });
+    assert!(!active(&mut c));
+    let short = rig.wav("rel_tone800", 0, 800, -20.0);
+    rig.play(&short, "", &[]);
+    wait_for(Duration::from_secs(3), "the next stream auto-muted", || {
+        active(&mut c).then_some(())
+    });
+    wait_for(Duration::from_secs(4), "auto-unmuted", || (!active(&mut c)).then_some(()));
+    // a released stream with auto-mute switched off: the release goes with it
+    rig.play(&long, "", &[]);
+    wait_for(Duration::from_secs(3), "auto-muted again", || active(&mut c).then_some(()));
+    assert_eq!(c.ok("automute.release", json!({}))["released"], json!(true));
+    c.set("player.automute", json!(false));
+    wait_for(Duration::from_secs(1), "off ends the release", || {
+        (c.probe()["released"] == json!(false)).then_some(())
+    });
+}
+
 #[test]
 fn automute_ignores_own_switches_every_combo() {
     use liascape_player::scene::synthetic::{Pattern, SyntheticSpec};

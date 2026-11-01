@@ -67,6 +67,11 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
         "a program's random item {id, keep_pause?} → {corr, path}",
     ),
     (
+        "automute.release",
+        automute_release,
+        "the user unmutes an auto-mute until the foreign audio ends → {released}",
+    ),
+    (
         "state",
         state,
         "the live graph, transitions, clock, outputs",
@@ -768,6 +773,10 @@ fn program_prev(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiErro
 
 fn program_random(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     program_verb(rt, "random", args)
+}
+
+fn automute_release(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
+    Ok(json!({ "released": rt.automute_release() }))
 }
 
 // ---------------------------------------------------------------- capture
