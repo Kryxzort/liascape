@@ -1762,6 +1762,54 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// "Autoplay video thumbnails": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
+// k2..k4 here; k1 has a gif) play it without a hover — only the ones on screen, at most 4 at a time across the page
+// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Autoplay GIF thumbnails".
+const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
+  return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
+    cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
+    gifCard: !!([...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === "k1")?.querySelector("video, img.thumb.anim")) }; })()`;
+C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
+    const count = () => js(VT_COUNT);
+    const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
+    c.off = await settle((r) => r.total === 0, 1500);
+    await sleep(600); c.off = await count();                      // the default: nothing plays by itself
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), true, "Autoplay video thumbnails"); await m.sleep(300);`);
+    c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
+    await ui(`m.tab("Library"); await m.sleep(400);`);
+    c.on = await settle((r) => r.total >= 4 && r.playing >= 1, 6000);
+    await sleep(700); c.on2 = await count();                      // stays at the cap, nothing stacks up
+    // scrolled away: the cards leave the screen, the slots go to what is still on it (the playlist bar)
+    await ui(`const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(200);`);
+    c.away = await settle((r) => r.cards === 0, 4000);
+    await ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(200);`);
+    c.back = await settle((r) => r.total >= 4, 4000);
+    // a settings modal open: nothing plays behind it; closed again: it resumes
+    await ui(`await m.cardMenu("k2", "Settings (volume / speed)"); await m.sleep(900);`);
+    c.modal = await settle((r) => r.total === 0, 3000);
+    await ui(`m.closeModal(); await m.sleep(900);`);
+    c.closed = await settle((r) => r.total >= 4, 4000);
+    await loadUi(); await sleep(600);
+    c.reloaded = await settle((r) => r.total >= 4, 6000);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), false, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Library"); await m.sleep(300);`);
+    c.offAgain = await settle((r) => r.total === 0, 3000);
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (c.off.total) v.push(`off (the default): ${c.off.total} preview videos mounted without a hover`);
+    if (!c.saved) v.push("turning Autoplay video thumbnails on wasn't saved");
+    if (c.on.total < 4 || !c.on.playing) v.push(`on: expected 4 videos, ≥ 1 playing — ${J(c.on)}`);
+    if (c.on.total > 4 || c.on2.total > 4) v.push(`on: more than the cap (4) play at once — ${J(c.on)} / ${J(c.on2)}`);
+    if (c.on.gifCard) v.push("on: the gif item (k1) got a video/animated layer — it follows the GIF setting");
+    if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
+    if (c.back.total < 4) v.push(`on, cards back on screen: only ${c.back.total} videos ${J(c.back)}`);
+    if (c.modal.total) v.push(`on, a settings modal open: ${c.modal.total} videos still mounted behind it`);
+    if (c.closed.total < 4) v.push(`on, modal closed: only ${c.closed.total} videos ${J(c.closed)}`);
+    if (c.reloaded.total < 4) v.push(`on, page reloaded: only ${c.reloaded.total} videos ${J(c.reloaded)}`);
+    if (c.offAgain.total) v.push(`turned off again: ${c.offAgain.total} videos still mounted`);
+    return v;
+  } };
+
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
 // parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.

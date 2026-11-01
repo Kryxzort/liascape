@@ -403,6 +403,7 @@ export const Settings = memo(function Settings() {
         <Row label="Glow effects" hint="the accent glows on hover, active and playing items, the pulses and the Settings backdrop — off keeps every state readable, minus the glow" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
         <Row label="Morph animations" hint="the card-to-modal morph (Browse preview, wallpaper and playlist-item settings) — off fades the window in place instead" rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
         <Row label="Autoplay GIF thumbnails" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
+        <Row label="Autoplay video thumbnails" hint="wallpapers with no animated thumbnail (a still image only) play their video preview without a hover — only the items on screen, at most 4 at a time" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>
       </Section>
 
       <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
