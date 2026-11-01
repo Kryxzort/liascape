@@ -161,3 +161,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   suspend, VT switch (report § 6).
 - **Task 13 done**, and the old fuzz failure is explained: the test's own (on a 2-item bar its "drag" was a click).
 - Your wallpaper is off: you stopped it at 20:11:46 yesterday (the backend logged it), so I did not restart it.
+- **Task 14, backend half merged, switch off** (`4b25588`): nothing changes for you until `AutoMuteParityPassed` is
+  flipped. Tests on a private PipeWire, not your session: IT 389/0 off and 398/0 on, settings 104/0, matrix `autoMute`
+  21/0 both ways. Added a player verb, `automute.release`, because no prop could lift a mute while the stream plays.
+  **Still yours:** the ten criteria on your session (a real browser, `mpv`, Spotify) and CPU criterion 9, which only
+  meets the bar if pipewire-pulse's cost is counted. A flaky stall test is logged as TODO F5; not caused by this.

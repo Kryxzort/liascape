@@ -1014,3 +1014,6 @@ Two bug classes kept recurring; fix the class, not the instance:
     `source.ended`. Passes as one 30 fps clip frame, fails as one output frame. **Owner:** which was meant?
   - F4: `--debug` only: the dropout probe costs 161 whole graph cycles of full-level silence in 460 s, right after each
     analysis; 0 without it. Find the cause before trusting a recording taken under `--debug`.
+  - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
+    3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
+    `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.

@@ -869,7 +869,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 9. **CPU:** the player's added CPU ≤ today's `parec` total with 5 foreign streams.
 10. **No silent degrade:** with the bus down, `automute` capability absent → the backend keeps `AudioMonitor`.
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - unit `foreign_streams_are_classified_by_ownership` (synthetic node props: own pid, a worker pid, the bus target → own; a `paplay`, an `mpv` → foreign).
   - unit `mpris_streams_match_by_pid_tree_then_app_id_then_name` (child pid of the player → match; Flatpak app id = `DesktopEntry` → match; unrelated `paplay` → no match; a matched stream muted / volume 0 → silent).
   - api (private PipeWire, `tests/common/pw.rs`): `automute_mutes_on_a_foreign_stream`, `automute_ignores_own_switches_every_combo`, `automute_delays_and_threshold`, `automute_new_source_comes_up_muted`, `automute_survives_a_crash_restart`, `automute_spawns_no_processes`.
