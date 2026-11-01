@@ -602,6 +602,37 @@ C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: fal
     }
     return v;
   } };
+// a right click on a card or bar item whose hover preview plays: the same <video> keeps playing under the menu (the menu's
+// backdrop takes the pointer off the card), and through a dismiss with the pointer still on it; off the item it stops
+for (const [name, find, menu] of [["card", `m.card("k3")?.querySelector(".thumb-wrap")`, ".lib-ctx"], ["bar", `m.playlistBar("k3")`, ".pl-ctx"]]) {
+  C[`hoverPreview:rightClick:${name}`] = { states: ["idle"], noSwitch: true,
+    async pre() { await post("/playlist/state", { videoPaths: [K[2], K[0]], settings: PS(), name: null }); },
+    async run(c) {
+      const r = await ui(`const e = ${find}; if (!e) throw new Error("no ${name}"); e.scrollIntoView({ block: "center" }); await m.sleep(200); const b = e.getBoundingClientRect(); window.__mxE = e; return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      const send = (e) => win.webContents.sendInputEvent(e);
+      const move = async (x, y) => { send({ type: "mouseMove", x, y }); await sleep(400); };
+      const right = async () => { send({ type: "mouseDown", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(40); send({ type: "mouseUp", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(400); };
+      const left = async (x, y) => { send({ type: "mouseDown", x, y, button: "left", clickCount: 1 }); await sleep(40); send({ type: "mouseUp", x, y, button: "left", clickCount: 1 }); await sleep(400); };
+      const look = () => ui(`const v = window.__mxE.querySelector("video.thumb.anim"), was = window.__mxV; const t0 = v?.currentTime; await m.sleep(350);
+        return { video: !!v, same: !!v && v === was, paused: v?.paused ?? null, moved: v ? v.currentTime !== t0 : null, menu: !!document.querySelector(${JSON.stringify(menu)}) };`);
+      await move(r.x, r.y);
+      for (let i = 0; i < 30 && !(await ui(`return (window.__mxV = window.__mxE.querySelector("video.thumb.anim"))?.currentTime > 0;`)); i++) await sleep(100);
+      c.hover = await look();
+      await right();                   c.open = await look();     // the menu is up, the pointer hasn't moved
+      await left(r.x, r.y);            c.closedOn = await look(); // dismissed with the pointer still on the item
+      await right(); await move(4, 4); c.openOff = await look();  // the menu up, pointer gone: still the menu's preview
+      await left(4, 4);                c.closedOff = await look(); // dismissed off the item: it stops
+    }, check(c) {
+      const v = [];
+      if (!c.hover.video || c.hover.paused || !c.hover.moved) v.push(`hovering: no playing preview ${JSON.stringify(c.hover)} (the cell proves nothing)`);
+      const playing = (l, s, menu) => { if (!s.same || s.paused || !s.moved) v.push(`${l}: the preview stopped or restarted ${JSON.stringify(s)}`); if (s.menu !== menu) v.push(`${l}: menu ${s.menu}, expected ${menu}`); };
+      playing("right-clicked", c.open, true);
+      playing("dismissed on the item", c.closedOn, false);
+      playing("menu open, pointer off the item", c.openOff, true);
+      if (c.closedOff.video) v.push(`dismissed off the item: the preview still plays ${JSON.stringify(c.closedOff)}`);
+      return v;
+    } };
+}
 C["stopButton"] = { switch: true, async run(c) { const has = await ui(`return !!m.byText(".topbar button", "Stop");`); if (!has) return c.skip = "no Stop button (nothing playing)"; await ui(`m.click(m.byText(".topbar button", "Stop"), "Stop");`); },
   exp: { paused: false }, check: (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after Stop`] : []) };
 // playlist edits

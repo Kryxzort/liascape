@@ -4,7 +4,7 @@ import { Trash2, AlertTriangle } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { PlaylistToggle } from "./PlaylistToggle";
-import { MotionThumb, hasGifAsset } from "./MotionThumb";
+import { MotionThumb, hasGifAsset, pointerOver } from "./MotionThumb";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
@@ -19,17 +19,20 @@ export const LibraryCard = memo(function LibraryCard({
   onClick: (e: React.MouseEvent) => void; onTrash: () => void; onToggle: () => void;
   onDeleteSource: () => void; onReveal: () => void; onSettings: () => void;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; thumb: HTMLElement } | null>(null);
   const [hover, setHover] = useState(false);
+  // Closing says where the pointer is now: on the card the preview goes on without a restart, off it, it stops.
+  const closeMenu = (e: React.MouseEvent) => { if (menu) setHover(pointerOver(menu.thumb, e)); setMenu(null); };
   // its settings modal plays the preview meanwhile (this card's own animated layer would be hidden anyway)
   const settingsOpen = useStore((s) => s.cardSettingsItem?.videoPath === item.videoPath);
   // COOL: the modal morphed out of THIS card → it's lifted out (hidden) until the modal morphs back in
   const lifted = useStore((s) => s.cardSettingsMorphId === `lib-${item.videoPath}`);
-  const active = !settingsOpen && (hover || (autoPlayGifs && hasGifAsset(item)));
+  // an open menu holds the preview: right-clicking a card doesn't stop what its hover started
+  const active = !settingsOpen && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
-      <div className={`thumb-wrap${lifted ? " lifted" : ""}`} data-morph-id={`lib-${item.videoPath}`} onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      <div className={`thumb-wrap${lifted ? " lifted" : ""}`} data-morph-id={`lib-${item.videoPath}`} onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, thumb: e.currentTarget }); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         title="Click: apply · Ctrl/Shift: select · Right-click: menu">
         <MotionThumb item={item} active={active} />
@@ -44,9 +47,9 @@ export const LibraryCard = memo(function LibraryCard({
 
       {menu && createPortal(
         <>
-          <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div className="ctx-backdrop" onClick={closeMenu} onContextMenu={(e) => { e.preventDefault(); closeMenu(e); }} />
           {/* portal'd to body (the card's paint containment would otherwise trap position:fixed) */}
-          <div className="ctx-menu lib-ctx" style={{ left: menu.x, top: menu.y }} onClick={() => setMenu(null)}>
+          <div className="ctx-menu lib-ctx" style={{ left: menu.x, top: menu.y }} onClick={closeMenu}>
             <button onClick={onSettings}>Settings (volume / speed)</button>
             <button onClick={onReveal}>Open in file manager</button>
             <button onClick={onTrash}>Delete</button>

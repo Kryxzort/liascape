@@ -8,6 +8,13 @@ export function hasGifAsset(item: LibraryItem): boolean {
   return !!item.animatedThumbnailPath && !VIDEO_RE.test(item.animatedThumbnailPath);
 }
 
+// Whether a mouse event happened over `el`. A context menu's backdrop covers the window, so at its close the browser's hover
+// state is stale (the card's mouseleave came when the menu opened; a bar item, the menu's React parent, never got one).
+export function pointerOver(el: HTMLElement, e: React.MouseEvent): boolean {
+  const r = el.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
+}
+
 // COOL: animated library/playlist preview. Reuses the source's preview gif/webp when present;
 // otherwise plays the local wallpaper video on hover (moewalls-type sources ship no gif).
 // Browsers autoplay gif/webp <img> and decode off-thread → no special gif decode machinery is

@@ -103,6 +103,11 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Open-in-FM + duration** are backend (need FS): `AppOps.RevealLibraryItem` (resolve symlink/scene
   dir) + `GET /library/duration` (ffprobe). Frontend passes `isScene/workshopId/copiedSceneDir`.
 
+- **A context menu holds its item's hover preview** (`LibraryCard`, `PlItem`): `active` includes the open menu (its
+  backdrop takes the pointer off a card, `mouseleave`), and closing sets the hover from the closing click's coordinates
+  (`pointerOver`) — on the item the same `<video>` goes on, off it, it stops (a bar item, the menu's React parent, gets no
+  leave of its own). Guard: matrix `hoverPreview:rightClick:card|bar`, real input events.
+
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
   `LiveWallpaperBehindAllTabs` advanced setting. A **single persistent `<video>`** (no crossfade — `src` swap is

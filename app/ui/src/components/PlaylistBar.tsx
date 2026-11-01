@@ -14,7 +14,7 @@ import { type LibraryItem } from "../api/client";
 import { SavePlaylistModal } from "./SavePlaylistModal";
 import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
-import { MotionThumb, hasGifAsset } from "./MotionThumb";
+import { MotionThumb, hasGifAsset, pointerOver } from "./MotionThumb";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 
 function PlItem({ path, item, index, playing }: { path: string; item?: LibraryItem; index: number; playing: boolean }) {
@@ -25,7 +25,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const openCardSettings = useStore((s) => s.openCardSettings);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; el: HTMLElement } | null>(null);
   const [hover, setHover] = useState(false);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
   // a position:fixed layer portal'd to <body> at the item's rect → it floats OVER the playlist bar chrome with
@@ -37,10 +37,13 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const onEnter = (e: React.MouseEvent<HTMLDivElement>) => { setHover(true); place(e.currentTarget); };
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => { const el = e.currentTarget; if (rafRef.current) return; rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; place(el); }); };
   const onLeave = () => { setHover(false); setGlow(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } };
+  // The portal'd menu is this item's React child, so going from it to elsewhere fires no leave here: closing off the item is the leave.
+  const closeMenu = (e: React.MouseEvent) => { if (menu && !pointerOver(menu.el, e)) onLeave(); setMenu(null); };
   // COOL: this playlist bar item's settings modal morphed out of it (pl- ≠ the library card's lib- for the same
   // wallpaper) → lifted out (hidden) until the modal morphs back in; the modal plays the preview meanwhile
   const lifted = useStore((s) => s.cardSettingsMorphId === `pl-${path}`);
-  const active = !!item && !lifted && (hover || (autoPlayGifs && hasGifAsset(item)));
+  // an open menu holds the preview, as on a library card
+  const active = !!item && !lifted && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
@@ -48,7 +51,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
     <div ref={setNodeRef} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
-      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
       {item && <MotionThumb item={item} active={active} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
@@ -62,9 +65,9 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
         <div style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}>
-          <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div className="ctx-backdrop" onClick={closeMenu} onContextMenu={(e) => { e.preventDefault(); closeMenu(e); }} />
           {/* portal'd: the playlist bar's backdrop-filter would otherwise trap position:fixed */}
-          <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={() => setMenu(null)}>
+          <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={closeMenu}>
             <button onClick={() => removeFromPlaylist(path)}>Remove from playlist</button>
             <button onClick={() => openCardSettings(item, [item], `pl-${path}`)}>Settings (volume / speed)</button>
             <button onClick={() => openExternal({ path: item.videoPath, reveal: true, isScene: item.isScene, workshopId: item.workshopId, copiedSceneDir: item.copiedSceneDir })}>Open in file manager</button>
