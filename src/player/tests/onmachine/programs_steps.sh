@@ -101,6 +101,11 @@ step_dropout() {
     t1=$(mk_clip tone30a testsrc2 30 30 330 640x360); t2=$(mk_clip tone30b testsrc 30 30 440 640x360); t3=$(mk_clip tone30c smptebars 30 30 550 640x360)
     e1=$(mk_clip tone4a testsrc2 30 4 330 640x360); e2=$(mk_clip tone4b testsrc 30 4 440 640x360); e3=$(mk_clip tone4c smptebars 30 4 550 640x360)
     m1=$(mk_clip tone10a testsrc2 30 10 330 640x360); m2=$(mk_clip tone10b testsrc 30 10 440 640x360); m3=$(mk_clip tone10c smptebars 30 10 550 640x360)
+    local rec_pid=
+    if [[ -n ${P3_RECORD:-} ]]; then # an independent recording of the private sink (a micro-gap: real or the meter's?)
+        env "${PW_ENV[@]}" pw-record --target hermetic-sink -P '{ stream.capture.sink = true }' --rate 48000 --channels 2 --format f32 "$P3_RECORD" &
+        rec_pid=$!
+    fi
     IFS=, read -ra cells <<<"$CELLS"
     IFS=, read -ra meths <<<"$METHODS"
     for cell in "${cells[@]}"; do
@@ -114,6 +119,7 @@ step_dropout() {
             esac
         done
     done
+    [[ -n $rec_pid ]] && { kill -INT "$rec_pid"; wait "$rec_pid" 2>/dev/null; }
     serve_down
     step_end
 }

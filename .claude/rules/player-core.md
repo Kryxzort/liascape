@@ -2569,10 +2569,13 @@ worst reply stays < 500 ms during a 40 000-request flood).
    (`probe dropout`, Task 15) found in the legacy engine, plus `meter.window`/`bus`.
 
 ## Wayland
-
 `src/wl.rs` + `src/redraw.rs` + `src/probe/frames.rs` (spec §4.2 "Output", §5.1
 "Graphics"; Task 13). `liascape-player serve` without `--headless` draws the wallpaper on every
 monitor of `$WAYLAND_DISPLAY` (a `wlr-layer-shell` compositor: Hyprland, Sway, …).
+
+**Hyprland's `FALLBACK` output is not an output** (`wl::is_placeholder_output`, Phase 3 Task 12): with every monitor
+disabled Hyprland advertises a headless `FALLBACK` `wl_output` within ~100 ms. It is logged (`wl.placeholder_output`) and
+ignored, so the player parks (R60) and `while_parked: hold` holds.
 
 **Backend.** `Wayland::connect()` (sctk 0.21, `default-features = false, features =
 ["calloop"]` — no xkbcommon, a keyboard is never used) binds `wl_compositor`,

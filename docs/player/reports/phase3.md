@@ -1,7 +1,7 @@
 # Phase 3 on-machine battery
 
 Run 2026-11-01 to 02 on the owner's machine: Hyprland 0.57 (Lua config), NVIDIA, DP-1 143.98 Hz + DP-2 239.76 Hz,
-the release build of `26efde8`. Script: `src/player/tests/onmachine/programs.sh` (+ `programs_steps.sh`,
+the release build of `26efde8` (step 4b: + its fix). Script: `src/player/tests/onmachine/programs.sh` (+ `programs_steps.sh`,
 `programs_report.py`). Every number comes from the player's own event file. Audio went to a private PipeWire, so
 nothing reached the speakers.
 
@@ -15,7 +15,7 @@ Raw results: `src/player/tests/onmachine/results/phase3-night/` (gitignored).
 | 2 app closed | PASS (14/14) | 1 h, 118 of 118 switches, no backend process, every keybind works |
 | 3 crash and restore | PASS (19/19) | 5 SIGSEGVs, all back at their item in ~1.1 s; all 3 start modes correct |
 | 4 cover | **FAIL on latency only** (21/24) | paused in 374–401 ms against a 350 ms bound; everything else correct (§ 4) |
-| 4b no monitor | see § 4b | |
+| 4b no monitor | PASS after a fix (10/10; first run 7/10) | a real bug: `FALLBACK` counted as an output (§ 4b) |
 | 5 soak | PASS (5/5) | 2 h, 238 switches, RSS 0.065 MiB/min, VRAM flat |
 | 6 owner checklist | **not run** | needs the owner (§ 6) |
 
@@ -115,7 +115,26 @@ reason), and a shorter scratch path fixed it. A `jq` `// true` default also trea
 
 ## 4b. No monitor
 
-NOMONITOR_RESULTS
+Both outputs disabled during a 6 s timer rotation, restored by the script (a watchdog stood by).
+
+**RED, first run (7/10).** With both monitors disabled Hyprland 0.57 advertises a headless `FALLBACK` `wl_output` about
+100 ms later, and the player made it `out:FALLBACK`. So it never parked: 0 parked switches, every switch rendered for
+nobody, and the Expert "Hold until a monitor returns" did not hold (4 commits in 25 s). The earlier tests could not
+see this, because they remove outputs in a headless player.
+
+**Fix:** `wl::is_placeholder_output` ignores that output (`wl.placeholder_output` is logged); test
+`the_compositors_placeholder_output_is_not_an_output`.
+
+**GREEN (10/10):**
+
+| Check | Value | Bound |
+|---|---|---|
+| Parked | `parked` | parked |
+| Rotating invisibly | 7 parked switches in 40 s | 5–7 |
+| Re-enabled | shows the program's current item | same |
+| Hold: switches while off | 0 in 25 s | 0 |
+| Hold: on re-enable | the same item resumes, then the timer goes on | same |
+| Monitors and workspaces afterwards | identical to before | identical |
 
 ## 5. Soak
 
@@ -141,7 +160,7 @@ of a switch.
 
 ## Findings
 
-Fixed: none in the player or backend; only the two script bugs above.
+Fixed: `FALLBACK` counted as an output (§ 4b). The two script bugs in § 4 were the test's own.
 
 Open, in `docs/TODO.md`:
 

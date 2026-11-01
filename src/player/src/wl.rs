@@ -102,6 +102,13 @@ pub fn output_name(name: Option<&str>, global_id: u32) -> String {
     }
 }
 
+/// Hyprland's stand-in while no monitor is enabled (headless, shown to nobody). It is not an
+/// output: with it the player would render for no one and never park (R60), and a program's
+/// `while_parked: hold` would keep rotating (found by Phase 3 Task 12, step 4b).
+pub fn is_placeholder_output(name: &str) -> bool {
+    name == "FALLBACK"
+}
+
 /// Whole Hz from a mode's mHz (143 981 → 144, 239 760 → 240); unknown (≤ 0) → 60.
 pub fn hz_from_mhz(mhz: i32) -> u32 {
     if mhz <= 0 {
@@ -945,6 +952,16 @@ impl OutputHandler for WlState {
         let Some((info, scale)) = self.info_of(&output) else {
             return;
         };
+        if is_placeholder_output(&info.name) {
+            log::event(
+                "wl",
+                Level::Info,
+                "wl.placeholder_output",
+                None,
+                json!({ "output": info.name }),
+            );
+            return;
+        }
         if self.outs.iter().any(|o| o.info.name == info.name) {
             log::event(
                 "wl",
@@ -1298,6 +1315,14 @@ sctk::delegate_dispatch2!(WlState);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_compositors_placeholder_output_is_not_an_output() {
+        assert!(is_placeholder_output("FALLBACK"));
+        for name in ["DP-1", "HDMI-A-1", "WL-7", "HEADLESS-1", "fallback"] {
+            assert!(!is_placeholder_output(name), "{name}");
+        }
+    }
 
     #[test]
     fn explicit_sync_policy_keeps_the_callers_value() {
