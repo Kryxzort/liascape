@@ -132,6 +132,19 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", showExpertOptions: false, rotateWhileParked: true,
 };
 
+// `wallpaper-changed` events seen so far (setPlaying). A Play's reply can come before or after the event of what it started.
+let playingEvents = 0;
+// After a Play / play-from: the UI never guesses what plays (under Shuffle it's the player's pick, not item 1; under Resume it
+// may be what already plays). The player's `program.current` → `wallpaper-changed` says, when B starts; if none came yet, ask
+// /current for the Play that switches nothing — unless the event lands meanwhile: it is newer than this answer can be.
+async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) => void, seen: number) {
+  if (playingEvents === seen) {
+    const cur = await api.current().catch(() => null);
+    if (playingEvents === seen && cur?.path) set({ playingPath: cur.path });
+  }
+  get().refreshPlayingStatus(); // persistent now-playing line
+}
+
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
   browseFilter: { ...DEFAULT_FILTER, ...LS.get<Partial<WorkshopFilter>>("browseFilter", {}) }, browseSort: LS.get("browseSort", 0),
@@ -285,22 +298,17 @@ export const useStore = create<State>((set, get) => ({
   async playPlaylist() {
     const { playlist, playlistSettings } = get();
     if (playlist.length === 0) { get().setStatus("Playlist is empty"); return; }
+    const seen = playingEvents;
     const r = await api.playPlaylist(playlist, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }   // error/interval messages
-    // The first item is the guess for "Start over". Under "Resume where it left off" the player keeps what plays (Play on the
-    // playing playlist) or comes back at its resume point, so there /current says what it really plays — a switch's
-    // `wallpaper-changed` event follows it; without this a Play that switches nothing left item 1 marked as playing.
-    const { settings } = get();
-    const resume = playlistSettings.overrideGlobalSettings ? playlistSettings.playlistStart === "resume" : settings?.globalPlaylistStart === "resume";
-    let at = playlist[0];
-    if (resume) { const cur = await api.current().catch(() => null); if (cur?.path && playlist.includes(cur.path)) at = cur.path; }
-    set({ playingPath: at }); get().refreshPlayingStatus(); // persistent now-playing line
+    await markPlayingAfterPlay(get, set, seen);
   },
   async playFrom(index) {
     const { playlist, playlistSettings } = get();
+    const seen = playingEvents;
     const r = await api.playFrom(playlist, index, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }
-    set({ playingPath: playlist[index] }); get().refreshPlayingStatus();
+    await markPlayingAfterPlay(get, set, seen);
   },
   setPlaylistSettings(p) {
     set({ playlistSettings: { ...get().playlistSettings, ...p } }); savePlaylistDebounced(get);
@@ -379,7 +387,7 @@ export const useStore = create<State>((set, get) => ({
     const s = { ...(get().settings ?? {}), theme: name };
     set({ settings: s }); api.saveSettings(s).catch(() => {});
   },
-  setPlaying(p) { set({ playingPath: p }); get().refreshPlayingStatus(); },
+  setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
   // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
   setStatus(s, timed = true, hold = false) {

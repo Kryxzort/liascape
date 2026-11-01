@@ -602,6 +602,33 @@ C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: fal
     }
     return v;
   } };
+// the playlist bar's border is on what plays, not on item 1: Shuffle's first pick is the player's, known to the UI by the
+// `wallpaper-changed` event, which can beat the POST's own reply (a slow reply here makes that the case every time) or come
+// after it. Rounds from nothing and over a playing shuffled session; each Play over one must leave what played (first ≠ last).
+C["playlistMark:shufflePlay"] = { states: ["idle"], switch: true, exp: { paused: false },
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, order: 1 }), name: null }); },
+  async run(c) {
+    c.rounds = [];
+    const slow = (re) => `const f = window.__mxF = window.__mxF || window.fetch; window.fetch = ${re ? `async (u, o) => { const r = await f(u, o); if (${re}.test(String(u))) await new Promise((d) => setTimeout(d, 400)); return r; }` : "f"};`;
+    for (const [how, re] of [["as it comes", null], ["reply after the event", "/playlist\\/play$/"], ["/current's reply late", "/\\/current$/"]]) {
+      for (let i = 0; i < 4; i++) {
+        if (i % 2 === 0 && (await http("GET", "/current")).json?.path) { await ui(`m.click(m.byText(".topbar button", "Stop"), "Stop");`); await sleep(400); }
+        const prev = (await http("GET", "/current")).json?.path ?? null;
+        // every mark the bar shows from the click on: the old item until the new one starts, never a guess in between
+        await ui(`${slow(re)} window.__mxSeen = new Set(); clearInterval(window.__mxPoll); window.__mxPoll = setInterval(() => { for (const t of m.playing().playlistBar) window.__mxSeen.add(t); }, 10); m.click(document.querySelector(".play-btn"), "Play");`);
+        await sleep(300); await waitSettled(10000); await sleep(re ? 800 : 400);
+        const cur = (await http("GET", "/current")).json?.path, marks = await ui(`clearInterval(window.__mxPoll); return m.playing().playlistBar;`);
+        c.rounds.push({ how, from: i % 2 === 0 ? "nothing" : "playing", cur: TITLE(cur), marks, prev: prev && TITLE(prev), seen: await ui(`return [...window.__mxSeen];`) });
+      }
+    }
+    await ui(slow(null));
+  }, check(c) {
+    const v = [];
+    for (const r of c.rounds) if (JSON.stringify(r.marks) !== JSON.stringify([r.cur])) v.push(`Play (${r.how}, from ${r.from}): ${r.cur} plays, the bar marks ${JSON.stringify(r.marks)}`);
+    for (const r of c.rounds) { const odd = r.seen.filter((t) => t !== r.cur && t !== r.prev); if (odd.length) v.push(`Play (${r.how}, from ${r.prev ?? "nothing"}, to ${r.cur}): the bar marked ${JSON.stringify(odd)} on the way`); }
+    if (c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
+    return v;
+  } };
 // a right click on a card or bar item whose hover preview plays: the same <video> keeps playing under the menu (the menu's
 // backdrop takes the pointer off the card), and through a dismiss with the pointer still on it; off the item it stops
 for (const [name, find, menu] of [["card", `m.card("k3")?.querySelector(".thumb-wrap")`, ".lib-ctx"], ["bar", `m.playlistBar("k3")`, ".pl-ctx"]]) {

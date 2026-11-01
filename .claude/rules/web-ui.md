@@ -107,6 +107,10 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   backdrop takes the pointer off a card, `mouseleave`), and closing sets the hover from the closing click's coordinates
   (`pointerOver`) — on the item the same `<video>` goes on, off it, it stops (a bar item, the menu's React parent, gets no
   leave of its own). Guard: matrix `hoverPreview:rightClick:card|bar`, real input events.
+- **The UI never guesses which playlist item plays** (`markPlayingAfterPlay`): the bar's border and the card's mark come from
+  `wallpaper-changed` (the player's `program.current`, at B's start: until then the old item stays marked) and, for the Play
+  that switches nothing, `/current` — dropped if an event landed meanwhile, which is newer. It used to set item 1 after the
+  POST: wrong under Shuffle until the event, and for good when the event beat the reply. Guard: matrix `playlistMark:shufflePlay`.
 
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
