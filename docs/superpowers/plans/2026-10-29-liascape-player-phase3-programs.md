@@ -794,16 +794,18 @@ public static class LiascapePlayerProgram {
 
 **Files:** `src/player/tests/onmachine/programs.sh` (+ `battery.sh programs`), `docs/player/reports/phase3.md`
 
-- [ ] **Step 1 — dropout across program switches:** for each method (full-live, reveal, frozen) × {timer 6 s, on_end 4 s clips, on_end + max 3 s on 10 s clips, separate timing with SFW 431960 scenes}, 50 consecutive switches each, on DP-1 (144 Hz) and DP-2 (240 Hz). Expected: the detector `drops 0`, `micro_gaps 0`, handoff vs A's end ≤ 1 frame for full-live align:end.
-- [ ] **Step 2 — app closed:** `liascape kill`, start the program through the app, close the app (Electron; the backend exits). Run a 1 h rotation: no `liascape-backend` process, every expected switch present (`ctl logs '{"kind_prefix":"program."}'`), CLI keybinds work (next/prev/random/toggle-pause/volume).
-- [ ] **Step 3 — crash and restore:** 5 × `kill -SEGV` of the compositor mid-rotation (2 while armed) → each comes back at its item, armed ones re-armed, 0 `align:now` origins after a restart. Then, for each start mode (Start over sequential / Start over shuffle / Resume), `ctl quit` + `liascape restore` → the § Playlist start row "boot".
-- [ ] **Step 4 — cover:** a fullscreen game-like window (kitty fullscreen, then a real fullscreen app if one is installed) over both outputs → paused ≤ 350 ms, `probe sources` all paused, CPU/GPU of the compositor drop; a rotation does not advance meanwhile; uncover → resumes. One output covered → keeps playing. Default settings (no `PauseWhenCovered` key) pause on a maximized window too (O1).
-- [ ] **Step 4b — no monitor:** both outputs disabled (`hyprctl keyword monitor DP-1,disable`, then DP-2; re-enabled after) during a timer rotation → it keeps rotating invisibly (one `transition.scheduled {parked: true}` per interval) and the last target shows on re-enable; with the Expert "Hold until a monitor returns" → nothing switches, and the same item resumes.
-- [ ] **Step 5 — soak:** 2 h of a mixed program (videos, images, SFW scenes; timer 30 s; methods rotating) with the app closed. Expected: compositor RSS slope ≤ 0.5 MiB/min, worker count ≤ 2 + dying, VRAM flat ± 10 %, `programs` probe bounded (history ≤ 100). (The §11 8 h soak stays the switch-over bar's.)
+- [x] **Step 1 — dropout across program switches:** for each method (full-live, reveal, frozen) × {timer 6 s, on_end 4 s clips, on_end + max 3 s on 10 s clips, separate timing with SFW 431960 scenes}, 50 consecutive switches each, on DP-1 (144 Hz) and DP-2 (240 Hz). Expected: the detector `drops 0`, `micro_gaps 0`, handoff vs A's end ≤ 1 frame for full-live align:end.
+- [x] **Step 2 — app closed:** `liascape kill`, start the program through the app, close the app (Electron; the backend exits). Run a 1 h rotation: no `liascape-backend` process, every expected switch present (`ctl logs '{"kind_prefix":"program."}'`), CLI keybinds work (next/prev/random/toggle-pause/volume).
+- [x] **Step 3 — crash and restore:** 5 × `kill -SEGV` of the compositor mid-rotation (2 while armed) → each comes back at its item, armed ones re-armed, 0 `align:now` origins after a restart. Then, for each start mode (Start over sequential / Start over shuffle / Resume), `ctl quit` + `liascape restore` → the § Playlist start row "boot".
+- [x] **Step 4 — cover:** a fullscreen game-like window (kitty fullscreen, then a real fullscreen app if one is installed) over both outputs → paused ≤ 350 ms, `probe sources` all paused, CPU/GPU of the compositor drop; a rotation does not advance meanwhile; uncover → resumes. One output covered → keeps playing. Default settings (no `PauseWhenCovered` key) pause on a maximized window too (O1).
+- [x] **Step 4b — no monitor:** both outputs disabled (`hyprctl keyword monitor DP-1,disable`, then DP-2; re-enabled after) during a timer rotation → it keeps rotating invisibly (one `transition.scheduled {parked: true}` per interval) and the last target shows on re-enable; with the Expert "Hold until a monitor returns" → nothing switches, and the same item resumes.
+- [x] **Step 5 — soak:** 2 h of a mixed program (videos, images, SFW scenes; timer 30 s; methods rotating) with the app closed. Expected: compositor RSS slope ≤ 0.5 MiB/min, worker count ≤ 2 + dying, VRAM flat ± 10 %, `programs` probe bounded (history ≤ 100). (The §11 8 h soak stays the switch-over bar's.)
 - [ ] **Step 6 — owner-run checklist** (documented, not automated): a cold boot via `claude-reboot` (tell the owner first) with a timer program → restored at its item and rotating, before and without opening the app; a suspend/resume during a timer rotation → no catch-up switch (Review Focus 5); a VT switch.
-- [ ] **Step 7:** Write `docs/player/reports/phase3.md` (every number, RED→GREEN for anything fixed). File each product finding as a follow-up in `docs/TODO.md`. Commit `Report Phase 3 On-Machine Battery`.
+- [x] **Step 7:** Write `docs/player/reports/phase3.md` (every number, RED→GREEN for anything fixed). File each product finding as a follow-up in `docs/TODO.md`. Commit `Report Phase 3 On-Machine Battery`.
 
 **Size: L.**
+
+> **Done 2026-11-02:** `docs/player/reports/phase3.md` (`programs.sh`, results in `results/phase3-night/`). Steps 2, 3, 4b, 5 pass; step 4b found and fixed Hyprland's `FALLBACK` output counting as an output. Open with the owner: F1 (`frozen` onsets 2–5 ms late), F2 (cover 374–401 ms against 350), F3 (what "1 frame" means). Step 6 is the owner's and has not run.
 
 ### Task 13: Docs sweep
 
@@ -819,7 +821,7 @@ public static class LiascapePlayerProgram {
 - `CLAUDE.md`: the CLI section, the architecture note.
 - `docs/TODO.md`: tick Phase 3; add the deferred items below.
 
-- [ ] **Step 1:** Update; `cargo test -q --test credits` PASS. **Step 2:** Commit `Document Programs And Signals`.
+- [x] **Step 1:** Update; `cargo test -q --test credits` PASS. **Step 2:** Commit `Document Programs And Signals`.
 
 **Size: S.**
 

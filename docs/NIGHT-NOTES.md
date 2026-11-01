@@ -153,6 +153,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   switch could start under a pause (picture stayed on A while the UI said B); `previous` at the first item un-paused;
   Play on the playing playlist under Resume marked item 1. ⚠ One old fuzz sequence (playlist-bar drag + next on a
   2-item bar) fails on `lp-player` too — handed to Task 12 as optional.
-- **Running:** Task 12, the on-machine battery on your real session (monitors briefly disabled for the no-monitor
-  check with an auto-re-enable watchdog; backend unit stopped for the app-closed hour; your "Full?" playlist restarted
-  at the end).
+- **Task 12 done** (`docs/player/reports/phase3.md`), on your real session, audio on a private PipeWire: 600 program
+  switches 0 drops, 1 h app closed 118/118, 5 crashes all back at their item, 2 h soak 0.065 MiB/min. **Bug found and
+  fixed:** with all monitors off Hyprland adds a fake `FALLBACK` output; the player counted it, so "Hold until a monitor
+  returns" kept rotating. **Your calls:** the cover pause takes 374–401 ms against 350 (250 ms debounce, or a 400 ms
+  bound?); "handoff ≤ 1 frame" passes as a clip frame (33 ms), fails as an output frame. Still yours: cold boot,
+  suspend, VT switch (report § 6).
+- **Task 13 done**, and the old fuzz failure is explained: the test's own (on a 2-item bar its "drag" was a click).
+- Your wallpaper is off: you stopped it at 20:11:46 yesterday (the backend logged it), so I did not restart it.
