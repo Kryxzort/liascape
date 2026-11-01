@@ -184,6 +184,7 @@ Fixed: `FALLBACK` counted as an output (§ 4b). The two script bugs in § 4 were
 Open, in `docs/TODO.md`:
 
 - F1: `frozen`: B's ramp starts 2–5 ms late in about 1 of 15 onsets, audibly at most a faint tick (§ 1).
-- F2: pause when covered takes 374–401 ms against 350 ms (§ 4).
+- F2, closed: pause when covered takes 374–401 ms against 350 ms (§ 4). Owner left the call to me: the bound is now
+  450 ms, the 300 ms debounce stays, so a brief cover does not pause. The table above is the run against 350.
 - F3: the "≤ 1 frame" handoff bound is ambiguous (§ 1).
 - F4: the debug-only dropout probe loses whole graph cycles just after each analysis (§ 1).
