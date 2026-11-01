@@ -91,12 +91,12 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
         check "$n handoff vs A's end" "$m ms (p95 $(jq -r .handoff_vs_a_end_pred_p95_ms <<<"$c"), n $(jq -r .align_end_n <<<"$c"))" "≤ $FRAME_MS ms" "$(pyb "$m <= $FRAME_MS")"
     fi
 }
-serve_ready_for_cell() { kill -0 "${SERVE_PID:-0}" 2>/dev/null || serve_up --debug; }
+serve_ready_for_cell() { kill -0 "${SERVE_PID:-0}" 2>/dev/null || serve_up ${P3_SERVE_ARGS---debug}; }
 step_dropout() {
     step_begin dropout
     : >"$RESULTS/dropout-records.jsonl"
     : >"$RESULTS/dropout-cells.jsonl"
-    serve_up --debug
+    serve_up ${P3_SERVE_ARGS---debug}
     local t1 t2 t3 e1 e2 e3 m1 m2 m3 s1 cell method
     t1=$(mk_clip tone30a testsrc2 30 30 330 640x360); t2=$(mk_clip tone30b testsrc 30 30 440 640x360); t3=$(mk_clip tone30c smptebars 30 30 550 640x360)
     e1=$(mk_clip tone4a testsrc2 30 4 330 640x360); e2=$(mk_clip tone4b testsrc 30 4 440 640x360); e3=$(mk_clip tone4c smptebars 30 4 550 640x360)

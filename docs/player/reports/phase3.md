@@ -43,7 +43,26 @@ switch cancelled `superseded`, which is the designed path.
 
 **Micro-gaps.** All 6 are `frozen`, 2–4 ms, 58–61 dB under, at `at_ms` 1506–1509, right at the handoff. 4 of them are
 one direction, S→V from Emilia (4 of the 25 such switches). This matches Phase 2's finding F7, whose residual was
-left open (`phase2.md` § F7). See `docs/TODO.md`.
+left open (`phase2.md` § F7).
+
+An independent recording of the private sink settled what they are (`P3_RECORD=<wav>`; 50 scene + 50 maximum switches,
+`frozen`, 88 onsets after ≥ 200 ms of silence):
+
+- **They are real, and small.** At all 3 switches the detector flagged in that run, B's onset stays at −119 dB for
+  2–4 ms, then enters at −34 to −38 dB, where the 30 ms ramp has reached by then. Only the first few ms of a ramp from
+  silence are missing, so the most it can be is a faint tick. Not fixed.
+- **The probe does not cause them.** Time until an onset passes −60 dB, with and without `--debug`:
+
+| | 0 ms | 1 ms | 2 ms | 4 ms | 5 ms | never in 12 ms (quiet content) |
+|---|---:|---:|---:|---:|---:|---:|
+| `--debug` (the dropout probe on) | 65 | 2 | 1 | 5 | 2 | 13 |
+| no `--debug` | 67 | 2 | 2 | 3 | 1 | 13 |
+
+**The probe has a cost of its own.** With `--debug`, the same recording has **161 runs of exact silence at full level**
+(−23 dB either side), whole graph cycles of 64–576 samples (1.3–12 ms), nearly all within ~60 ms after a
+`probe.dropout` / `probe.dropout_decode_failed` event, none at a switch. Without `--debug`: **0**. So the app's normal
+run is clean, but the detector punches holes in the audio it measures once it finishes, and it can't see them because
+they land outside its window. Cause not looked for.
 
 **Handoff against A's end** (`align: end`, full-live; the plan's bound is "≤ 1 frame"):
 
@@ -164,6 +183,7 @@ Fixed: `FALLBACK` counted as an output (§ 4b). The two script bugs in § 4 were
 
 Open, in `docs/TODO.md`:
 
-- F1: `frozen` micro-gaps at the handoff, 6 in 150 frozen switches (§ 1).
+- F1: `frozen`: B's ramp starts 2–5 ms late in about 1 of 15 onsets, audibly at most a faint tick (§ 1).
 - F2: pause when covered takes 374–401 ms against 350 ms (§ 4).
 - F3: the "≤ 1 frame" handoff bound is ambiguous (§ 1).
+- F4: the debug-only dropout probe loses whole graph cycles just after each analysis (§ 1).

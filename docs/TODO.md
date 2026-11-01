@@ -1005,3 +1005,12 @@ Two bug classes kept recurring; fix the class, not the instance:
       restores correctly). Found by Phase 3 Task 8's restore probes.
 - [ ] Legacy: a forwarded `play` spawns `monitor-daemon` next to the backend's own monitor (fixed for liascape-player
       only, Phase 3 Task 8).
+- [ ] Phase 3 battery findings (`docs/player/reports/phase3.md`):
+  - F1: `frozen`: B's ramp-in starts 2–5 ms late in about 1 of 15 onsets (recorded on the sink; mostly S→V). At most a
+    faint tick. Probably the same graph change as "F7 residual".
+  - F2: pause when covered takes 374–401 ms against the plan's 350 ms (300 ms debounce + 30 ms batch + the rest).
+    **Owner:** a 250 ms debounce, or a 400 ms bound?
+  - F3: the plan's "handoff vs A's end ≤ 1 frame": measured 33 ms against the nominal end, 19.7 ms against
+    `source.ended`. Passes as one 30 fps clip frame, fails as one output frame. **Owner:** which was meant?
+  - F4: `--debug` only: the dropout probe costs 161 whole graph cycles of full-level silence in 460 s, right after each
+    analysis; 0 without it. Find the cause before trusting a recording taken under `--debug`.
