@@ -65,7 +65,7 @@ SOAK_MIN=120
 while (($#)); do
     case $1 in
         dropout|appclosed|crash|cover|nomonitor|soak) STEPS+=("$1") ;;
-        all) STEPS+=(dropout appclosed crash cover nomonitor soak) ;;
+        all) STEPS+=(dropout appclosed crash cover soak nomonitor) ;; # no monitor last: the one step that can upset the session
         --results) RESULTS=$2; shift ;;
         --bin) BINDIR=$2; shift ;;
         --dll) DLL=$2; shift ;;
@@ -88,7 +88,7 @@ DOTNET_ROOT_=${DOTNET_ROOT:-$( [[ -n $DOTNET ]] && cd "$(dirname "$(readlink -f 
 RESULTS=${RESULTS:-$HERE/results/phase3-$(date +%Y%m%dT%H%M%S)}
 mkdir -p "$RESULTS"
 RESULTS=$(cd "$RESULTS" && pwd -P)
-SCRATCH=$(mktemp -d /tmp/liascape-p3.XXXXXX) # short: a unix socket path must stay < 108 bytes
+SCRATCH=$(mktemp -d /tmp/lp3.XXXXXX) # short: a unix socket path (be/rt/hypr/<sig>/.socket2.sock) must stay < 108 bytes
 MEDIA=$RESULTS/media
 mkdir -p "$MEDIA"
 REAL_RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -413,7 +413,7 @@ source_playing() { # the shown source's time_pos advances over 1 s and it is not
     a=$(ctl get "{\"path\":\"$id.time_pos\"}" | jq -r .value)
     sleep 1
     b=$(ctl get "{\"path\":\"$id.time_pos\"}" | jq -r .value)
-    jq -n --argjson ep "$(ctl probe '{"name":"sources"}' | jq --arg id "$id" '[(.sources // .)[] | select(.id == $id) | .effective_paused][0] // true')" \
+    jq -n --argjson ep "$(ctl probe '{"name":"sources"}' | jq --arg id "$id" '[(.sources // .)[] | select(.id == $id) | .effective_paused][0] | if . == null then true else . end')" \
         --arg a "$a" --arg b "$b" '($ep | not) and ($a != $b) and ($a != "null")'
 }
 
