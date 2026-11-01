@@ -1693,6 +1693,75 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// "Morph animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
+// settings modal). On: the panel flies (a transform animation, `data-morph` set) out of its source, which is lifted
+// (hidden) meanwhile. Off: no flight at all, nothing lifted — the panel fades in where it is, and closing (backdrop or
+// Escape, even mid-open) fades it out and unmounts it; no animation left running, no box that moves after it appeared.
+const MORPH_SAMPLE = String.raw`(() => { const p = document.querySelector(".morph-panel"); if (!p) return null;
+  const run = document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target && (p === a.effect.target || p.contains(a.effect.target)));
+  const b = p.getBoundingClientRect(), cs = getComputedStyle(p);
+  return { flying: !!p.dataset.morph, anims: run.length,
+    flights: run.filter((a) => a.effect.getKeyframes().some((k) => k.transform && k.transform !== "none")).length,
+    lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length, opacity: +cs.opacity, hidden: cs.visibility === "hidden",
+    rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
+async function morphOpen(c, via, { full = false, esc = false } = {}) {
+  const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
+  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings (volume / speed)");` : `await m.cardMenu(${JSON.stringify(t)}, "Settings (volume / speed)");`;
+  const r = {};
+  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(${esc ? 40 : 60});`); // Escape: mid-open
+  r.early = await js(MORPH_SAMPLE);
+  if (full) {
+    await sleep(400); r.mid = await js(MORPH_SAMPLE);
+    await sleep(750); r.late = await js(MORPH_SAMPLE);
+  }
+  // close (a backdrop click, or Escape): time until the modal is gone and nothing is left lifted / running
+  const close = esc ? `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));` : `m.closeModal();`;
+  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".modal-backdrop")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
+  await sleep(250);
+  r.after = await ui(`return { backdrops: document.querySelectorAll(".modal-backdrop").length, lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length,
+    running: document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target?.closest?.(".modal-backdrop")).length };`);
+  return r;
+}
+C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
+    const inBar = (p) => (c.before.ps?.videoPaths || []).includes(p);
+    const cands = K.filter((p) => p !== c.shown && inBar(p));
+    c.cardItem = cands[0]; c.barItem = cands[1] ?? cands[0];
+    if (!c.cardItem) return c.skip = "no non-playing item in the playlist bar";
+    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Morph animations"), ${b}, "Morph animations"); await m.sleep(400);`);
+      return waitFor(async () => (await getSettings()).morphs === b, 4000, 100); };
+    c.onCard = await morphOpen(c, "card", { full: true }); c.onBar = await morphOpen(c, "bar");
+    c.savedOff = await flip(false);
+    c.offCard = await morphOpen(c, "card", { full: true }); c.offBar = await morphOpen(c, "bar", { full: true }); c.offEsc = await morphOpen(c, "card", { esc: true });
+    await loadUi(); await sleep(400);
+    c.reloaded = await morphOpen(c, "card");
+    c.savedOn = await flip(true);
+    c.back = await morphOpen(c, "card");
+  }, check(c) {
+    const v = [];
+    for (const [n, r] of [["card", c.onCard], ["playlist-bar item", c.onBar]]) {
+      if (!r.early?.flying || !r.early.flights || !r.early.lifted) v.push(`morphs on (the default), ${n}: no flight at +60 ms ${JSON.stringify(r.early)}`);
+      if (r.closeMs < 0 || r.after.backdrops || r.after.lifted) v.push(`morphs on, ${n}: the modal didn't close cleanly ${JSON.stringify([r.closeMs, r.after])}`);
+    }
+    if (!c.savedOff) v.push("turning Morph animations off wasn't saved (morphs !== false)");
+    const off = (n, r) => {
+      for (const k of ["early", "mid", "late"]) {
+        const x = r[k]; if (!x) continue;
+        if (x.flying || x.flights) v.push(`morphs off, ${n}: a flight at ${k} ${JSON.stringify(x)}`);
+        if (x.lifted) v.push(`morphs off, ${n}: the source is lifted (hidden) at ${k}`);
+      }
+      if (r.mid && (r.mid.anims || r.mid.hidden || r.mid.opacity < 1)) v.push(`morphs off, ${n}: not settled at +460 ms ${JSON.stringify(r.mid)}`);
+      if (r.mid && r.late && JSON.stringify(r.mid.rect) !== JSON.stringify(r.late.rect)) v.push(`morphs off, ${n}: the panel moved after it appeared ${JSON.stringify(r.mid.rect)} → ${JSON.stringify(r.late.rect)}`);
+      if (r.closeMs < 0 || r.closeMs > 450) v.push(`morphs off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      if (r.after.backdrops || r.after.lifted || r.after.running) v.push(`morphs off, ${n}: left behind after closing ${JSON.stringify(r.after)}`);
+    };
+    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape mid-open", c.offEsc);
+    off("card, page reloaded", c.reloaded);
+    if (!c.savedOn) v.push("turning Morph animations back on wasn't saved");
+    if (!c.back.early?.flying || !c.back.early.flights) v.push(`morphs back on: no flight at +60 ms ${JSON.stringify(c.back.early)}`);
+    if (c.back.closeMs < 0 || c.back.after.backdrops || c.back.after.lifted) v.push(`morphs back on: the modal didn't close cleanly ${JSON.stringify([c.back.closeMs, c.back.after])}`);
+    return v;
+  } };
+
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
 // parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
-import { SETTINGS_MORPH } from "./morph";
+import { openMs } from "./morph";
+import { useStore } from "../store";
 
 // "Scene properties" in the card settings modal: a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
@@ -30,17 +31,18 @@ export function ScenePropsEditor({ path }: { path: string }) {
   const prevRef = useRef<{ pending: Record<string, unknown>; last: number; tm: number | null }>({ pending: {}, last: 0, tm: null });
   const persistRef = useRef<Record<string, { tm: number; fn: () => void }>>({});
   const alive = useRef(true);
+  const morphs = useStore((s) => s.settings?.morphs !== false);
 
   useEffect(() => {
     alive.current = true; // a new item remounts (key={path} in the modal): its state starts empty
     // defer past the open-morph (its re-render mid-flight jumps the panel — like the duration row)
-    const t = setTimeout(() => { api.sceneProps(path).then((r) => alive.current && setData(r)).catch(() => {}); }, SETTINGS_MORPH.open.duration + 40);
+    const t = setTimeout(() => { api.sceneProps(path).then((r) => alive.current && setData(r)).catch(() => {}); }, openMs(morphs) + 40);
     return () => {
       alive.current = false; clearTimeout(t);
       for (const d of Object.values(persistRef.current)) { clearTimeout(d.tm); d.fn(); }
       persistRef.current = {};
     };
-  }, [path]);
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data || data.props.length === 0) return null;
 

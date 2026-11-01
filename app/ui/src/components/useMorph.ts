@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PREVIEW_MORPH, restPose, sourceEl, sourcePose, type Flight, type MorphTiming, type Pose, type Rest } from "./morph";
+import { useStore } from "../store";
+import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PLAIN_FADE_MS, PREVIEW_MORPH, restPose, sourceEl, sourcePose, type Flight, type MorphTiming, type Pose, type Rest } from "./morph";
 
 // COOL: a modal that morphs out of the surface carrying `data-morph-id={morphId}` and back into it
 // (components/morph.ts has the geometry and why it's transform-only). Wire the returned refs: `panelRef` on
@@ -10,9 +11,12 @@ import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PREVIEW_MORPH
 // picture's aspect is known (the flight waits for it, ≤ 300 ms, panel hidden — a box re-laid out mid-flight
 // jumps); `landed` turns true once its open flight finished (mount heavy layers after it — a decode
 // mid-flight hitches the animation, worst in the software-rendered UI). `timing` = the flight durations +
-// easings (morph.ts: the Browse preview's by default, SETTINGS_MORPH slower).
+// easings (morph.ts: the Browse preview's by default, SETTINGS_MORPH slower). Settings → "Morph animations" off: no
+// flight and no source to fly out of — the panel fades in where it is and fades out on close, both on PLAIN_FADE_MS
+// timers (the fade is only the look: `landed` / the unmount never wait for its end event).
 export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVIEW_MORPH }: { open: unknown; ready: boolean; morphId: string | null; aspect: number; onClose: () => void; timing?: MorphTiming }) {
   const { open: OPEN, close: CLOSE } = timing;
+  const morphs = useStore((s) => s.settings?.morphs !== false);
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -62,8 +66,13 @@ export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVI
     const panel = panelRef.current;
     if (panel) panel.style.visibility = go ? "" : "hidden"; // waiting for the aspect
     if (!go) return;
-    const src = sourceEl(morphId);
+    const src = morphs ? sourceEl(morphId) : null;
     const S = src ? boxOf(src) : null;
+    if (!morphs) { // a plain fade in place
+      panel?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: PLAIN_FADE_MS, easing: "ease-out" });
+      const t = setTimeout(() => setLandedFor(open), PLAIN_FADE_MS);
+      return () => clearTimeout(t);
+    }
     if (!src || !S || !onScreen(S) || !panel) {
       panel?.animate([{ opacity: 0, transform: "scale(0.97)" }, { opacity: 1, transform: "scale(1)" }], { duration: 200, easing: "ease-out" })
         .finished.then(() => setLandedFor(open), () => {});
@@ -95,9 +104,15 @@ export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVI
   const requestClose = () => {
     if (closingRef.current) return;
     closingRef.current = true;
+    const panel = panelRef.current;
+    if (!morphs) { // a plain fade out in place, then unmount on a timer
+      stop();
+      panel?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: PLAIN_FADE_MS, easing: "ease-in", fill: "both" });
+      setTimeout(onClose, PLAIN_FADE_MS);
+      return;
+    }
     const src = sourceEl(morphId);
     const S = src ? boxOf(src) : null;
-    const panel = panelRef.current;
     if (!panel || !src || !S || !onScreen(S) || !mediaRef.current || !bodyRef.current) {
       if (!panel) { onClose(); return; }
       stop();
