@@ -284,8 +284,8 @@ public static class AppOps
                 case "toggle-mute":
                     if (PlayerHelper.IsUserMuted)
                         PlayerHelper.SetUserMute(false);
-                    else if (PlayerHelper.IsMuted)
-                        PlayerHelper.SetMute(false);
+                    else if (PlayerHelper.IsMuted || PlayerHelper.AutoMutedInPlayer)
+                        PlayerHelper.UnmuteAuto();
                     else
                         PlayerHelper.SetUserMute(true);
                     break;

@@ -106,13 +106,15 @@ public static class ServerHost
         if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
         else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
         var startup = SettingsService.Load();
-        if (startup.AutoMute)
+        // (Task 14's flag on: the player's Signal when it can, this monitor when it can't — AudioMonitor.ReconcileEngine)
+        if (AudioMonitor.AutoMuteParityPassed) AudioMonitor.ReconcileEngine();
+        else if (startup.AutoMute)
             AudioMonitor.Start(startup.AutoMuteDelayMs, startup.AutoUnmuteDelayMs, startup.AutoMuteMinLevelDb, startup.AutoMuteOnlyIfMprisActive);
         app.Lifetime.ApplicationStopping.Register(() =>
         {
             var s = SettingsService.Load();
             AudioMonitor.Stop();
-            if (s.AutoMute && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
+            if (s.AutoMute && PlayerHelper.IsPlaying && !AudioMonitor.AutoMuteInPlayer) AudioMonitor.SpawnDetachedMonitor();
             // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
             // so it keeps cycling after the app closes (the Electron shell only kills the backend — it
             // doesn't run `liascape restore`). Stop our own ticking first: this process may live on for a while
@@ -438,7 +440,8 @@ public static class ServerHost
                 || prev.AutoUnmuteDelayMs != s.AutoUnmuteDelayMs
                 || prev.AutoMuteMinLevelDb != s.AutoMuteMinLevelDb
                 || prev.AutoMuteOnlyIfMprisActive != s.AutoMuteOnlyIfMprisActive;
-            if (amChanged)
+            if (amChanged && AudioMonitor.AutoMuteParityPassed) AudioMonitor.ReconcileEngine(settingChanged: true);
+            else if (amChanged)
             {
                 if (s.AutoMute)
                     AudioMonitor.Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteMinLevelDb, s.AutoMuteOnlyIfMprisActive);
@@ -654,7 +657,7 @@ public static class ServerHost
         });
         app.MapPost("/mute", (MuteReq r) =>
         {
-            if (r.User) PlayerHelper.SetUserMute(r.Value); else PlayerHelper.SetMute(r.Value);
+            if (r.User) PlayerHelper.SetUserMute(r.Value); else if (r.Value) PlayerHelper.SetMute(true); else PlayerHelper.UnmuteAuto();
             return Results.Ok();
         });
         app.MapGet("/current", () => Results.Json(new

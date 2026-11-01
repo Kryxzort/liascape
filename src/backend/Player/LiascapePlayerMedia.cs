@@ -240,6 +240,7 @@ public static class LiascapePlayerMedia
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
         SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
+        if (AudioMonitor.AutoMuteInPlayer) foreach (var (prop, v) in AutoMuteProps(s)) SetPlayerProp(client, prop, v);
         _sceneFpsGen = client.Generation;
     }
 
@@ -269,6 +270,35 @@ public static class LiascapePlayerMedia
         if (AppSettings.CoverMode(prev.PauseWhenCovered) != AppSettings.CoverMode(cur.PauseWhenCovered))
             QueuePlayerProp("pause_when_covered", AppSettings.CoverMode(cur.PauseWhenCovered));
     }
+
+    // The in-player auto-mute (Phase 3 Task 14, behind AudioMonitor.AutoMuteInPlayer): the AutoMute settings → the player's
+    // five props, live (coalescible per prop); a new player process gets them from AssertSceneFps. The player keeps them in
+    // its snapshot, so they hold with the app closed and across a crash restart.
+    public static IReadOnlyList<(string prop, object value)> AutoMuteProps(AppSettings s) =>
+    [
+        ("automute", s.AutoMute),
+        ("automute_delay_ms", (double)s.AutoMuteDelayMs),
+        ("autounmute_delay_ms", (double)s.AutoUnmuteDelayMs),
+        ("automute_min_level_db", s.AutoMuteMinLevelDb),
+        ("automute_only_if_mpris", s.AutoMuteOnlyIfMprisActive),
+    ];
+
+    public static void ApplyAutoMuteSettings(AppSettings s)
+    {
+        foreach (var (prop, v) in AutoMuteProps(s)) QueuePlayerProp(prop, v);
+    }
+
+    // `player.automute_active` — one quick `get`; a stalled or absent player: not auto-muted.
+    public static bool AutoMuteActive()
+    {
+        var c = C;
+        if (!c.SocketExists) return false;
+        try { return c.Call("get", new Dictionary<string, object?> { ["path"] = "player.automute_active" }, LiascapePlayerClient.QuickMs).GetProperty("value").ValueKind == JsonValueKind.True; }
+        catch (LiascapePlayerException) { return false; }
+    }
+
+    // The user unmutes an auto-mute (toggle-mute): audible now, and the player holds off until the foreign audio ended.
+    public static void ReleaseAutoMute() => QueueEssential(() => { C.TryCall("automute.release", null, LiascapePlayerClient.QuickMs); });
 
     private static void QueuePlayerProp(string prop, object v) =>
         QueueSet("player:" + prop, () => SetPlayerProp(C, prop, v));
@@ -707,6 +737,7 @@ public static class LiascapePlayerMedia
 
     private static void UpgradeWatchTick()
     {
+        AudioMonitor.ReconcileEngine();
         if (!PlayerEngine.IsLiascapePlayer) return;
         var client = C;
         if (client.PlayerPid == null && !client.Reachable()) return; // a player started before this backend: learn its pid

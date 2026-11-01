@@ -57,6 +57,58 @@ public static class AudioMonitor
         catch { }
     }
 
+    // The engine gate (plan Phase 3 Task 14). Under liascape-player the player can run auto-mute itself (the `automute`
+    // Signal, player-core.md § Signals); it replaces this monitor only once every parity criterion passed on the owner's
+    // machine — then this constant is flipped. Off, everything below runs as it always did. Capability absent (the
+    // player's env gate off, its audio bus down) → this monitor keeps the job (criterion 10).
+    private const bool ParityPassedShipped = false;
+    // LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1 stands in for the flip in scripts/test-liascape-player-adapter.sh only.
+    public static bool AutoMuteParityPassed { get; } =
+        ParityPassedShipped || Environment.GetEnvironmentVariable("LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED") == "1";
+    public static bool AutoMuteInPlayer =>
+        AutoMuteParityPassed && Liascape.Player.PlayerEngine.IsLiascapePlayer && Liascape.Player.LiascapePlayerClient.Shared.HasCapability("automute");
+    // …asking the player again: `automute` comes and goes with its process and its bus
+    private static bool AutoMuteInPlayerNow =>
+        AutoMuteParityPassed && Liascape.Player.PlayerEngine.IsLiascapePlayer && Liascape.Player.LiascapePlayerClient.Shared.HasCapability("automute", fresh: true);
+
+    private static readonly object _engineLock = new();
+    private static bool? _engineInPlayer;
+
+    // `serve`, while the flag is on (off: never called, the callers run today's Start / Stop): who runs auto-mute is decided
+    // at start, on an AutoMute setting and every 10 s (the upgrade watch) — a player process or its bus coming or going,
+    // the engine switch. A handover can leave ≤ 10 s of both, which only mutes on either's word.
+    public static void ReconcileEngine(bool settingChanged = false)
+    {
+        if (!AutoMuteParityPassed) return;
+        lock (_engineLock)
+        {
+            var s = SettingsService.Load();
+            bool inPlayer = AutoMuteInPlayerNow;
+            if (inPlayer)
+            {
+                if (RunsHere) Stop();
+                if (settingChanged || _engineInPlayer != true) Liascape.Player.LiascapePlayerMedia.ApplyAutoMuteSettings(s);
+            }
+            else if (s.AutoMute && (settingChanged || !RunsHere))
+                Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteMinLevelDb, s.AutoMuteOnlyIfMprisActive);
+            else if (!s.AutoMute && RunsHere)
+                Stop();
+            if (_engineInPlayer != inPlayer)
+                Liascape.Player.LiascapePlayerClient.Log($"auto-mute engine: {(inPlayer ? "the player's Signal" : "AudioMonitor")}");
+            _engineInPlayer = inPlayer;
+        }
+    }
+
+    // `restore` while the flag is on, the player just started: its Signal (its bus gets ≤ 3 s to come up), else a
+    // `monitor-daemon`. Not next to a running app's own monitor (a forwarded `play`).
+    public static void AfterRestore(Liascape.Models.AppSettings s)
+    {
+        if (!AutoMuteParityPassed) return;
+        for (int i = 0; s.AutoMute && i < 30 && !AutoMuteInPlayerNow; i++) Thread.Sleep(100);
+        if (AutoMuteInPlayerNow) Liascape.Player.LiascapePlayerMedia.ApplyAutoMuteSettings(s);
+        else if (s.AutoMute && !RunsHere) SpawnDetachedMonitor();
+    }
+
     // 8000 Hz, 160 samples = 20ms per poll tick per stream
     private const int SampleRateHz = 8000;
     private const int ChunkSamples = 160;
@@ -79,6 +131,16 @@ public static class AudioMonitor
         var settings = SettingsService.Load();
         if (settings.AutoMute)
             Start(settings.AutoMuteDelayMs, settings.AutoUnmuteDelayMs, settings.AutoMuteMinLevelDb, settings.AutoMuteOnlyIfMprisActive);
+        // the flag on: a daemon started while the player couldn't (its bus not up yet at login) ends when it can
+        while (AutoMuteParityPassed && !AutoMuteInPlayerNow) Thread.Sleep(10_000);
+        if (AutoMuteParityPassed)
+        {
+            Stop();
+            Liascape.Player.LiascapePlayerMedia.ApplyAutoMuteSettings(SettingsService.Load());
+            Liascape.Player.LiascapePlayerMedia.Drain().Wait(3000);
+            try { File.Delete(MonitorPidPath); } catch { }
+            return;
+        }
         Thread.Sleep(Timeout.Infinite);
     }
 

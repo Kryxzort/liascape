@@ -3051,10 +3051,12 @@ public static class PlayerHelper
     private static void RestoreOnPlayer(AppSettings settings)
     {
         // the auto-mute monitor with the app closed (O3: unchanged) — not next to a running app's own (a forwarded `play`)
-        if (settings.AutoMute && !AudioMonitor.RunsHere) AudioMonitor.SpawnDetachedMonitor();
+        // (Task 14's flag on: decided once the player answers — AfterRestore)
+        if (settings.AutoMute && !AudioMonitor.RunsHere && !AudioMonitor.AutoMuteParityPassed) AudioMonitor.SpawnDetachedMonitor();
         KillLegacyDaemons();
         if (!LiascapePlayerClient.Shared.EnsureRunning(restore: true, sessionStart: true))
             throw new InvalidOperationException($"liascape-player could not start: {LiascapePlayerClient.Shared.LastError ?? "unknown reason"}");
+        AudioMonitor.AfterRestore(settings);
         if (LiascapePlayerProgram.IsActive)
         {
             LiascapePlayerClient.Log($"restore: the player's rotation plays ({Path.GetFileName(LiascapePlayerProgram.CurrentPath ?? "")}) — nothing to replay");
@@ -3257,6 +3259,18 @@ public static class PlayerHelper
         SendCommand("set_property", "mute", _isMuted);
         SendOverlayCtl(_isMuted ? "mute 1" : "mute 0");
         if (IsLweRunning) ApplyLweMute(_isMuted);
+    }
+
+    // The in-player auto-mute has every source muted (Task 14): `gain.automute`, the player's own slot — `_autoMuted` and
+    // `gain.mute` stay the user's there. Asked of the player, so a one-shot CLI process (the keybind, app closed) knows too.
+    public static bool AutoMutedInPlayer => AudioMonitor.AutoMuteInPlayer && LiascapePlayerMedia.AutoMuteActive();
+
+    // The user unmutes an auto-mute (toggle-mute, `POST /mute`): holds until the foreign audio ended, under either engine
+    // (AudioMonitor's own state stays "muted" until then; the player's `automute.release`).
+    public static void UnmuteAuto()
+    {
+        if (AudioMonitor.AutoMuteInPlayer) LiascapePlayerMedia.ReleaseAutoMute();
+        SetMute(false);
     }
 
     // User-initiated mute (keybind, UI toggle). Always applies; sets _userMuted so automute can't undo it.

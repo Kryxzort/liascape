@@ -29,6 +29,8 @@
 #   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
 #   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
+#   LIASCAPE_IT_AUTOMUTE_ENGINE=signal …                # the auto-mute section with the player's Signal as the engine
+#                                                 # (plan Phase 3 Task 14 — without it, today's AudioMonitor)
 # Needs: dotnet (or DOTNET=/path/to/dotnet), ffmpeg, jq, curl, python3. Exit 0 = all pass.
 # Last line: `RESULT pass=N fail=M`.
 set -u
@@ -87,6 +89,12 @@ export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=$ROOT/
 export LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 unset PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
+# No session bus: the MPRIS checks (AudioMonitor's playerctl, the player's lia-mpris) never read the machine's players.
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
+# The auto-mute engine under test: the player's env gate + the backend's parity flag (a test-only stand-in), or neither.
+unset LIASCAPE_PLAYER_AUTOMUTE LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED
+AM_SIGNAL=0
+[ "${LIASCAPE_IT_AUTOMUTE_ENGINE:-}" = signal ] && { AM_SIGNAL=1; export LIASCAPE_PLAYER_AUTOMUTE=1 LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1; }
 # Audio: every libpulse client (the backend's auto-mute pactl/parec, this script's own) and PipeWire client can only
 # ever reach THIS test's private servers — the auto-mute section's PipeWire + pipewire-pulse in $XDG_RUNTIME_DIR. An
 # explicit PULSE_SERVER also means libpulse never falls back to another server or autospawns one while none runs.
@@ -2109,21 +2117,79 @@ EOF
   pwd_start "$PW/pipewire-pulse.log" pipewire-pulse
   waitfor 5000 test -S "$XDG_RUNTIME_DIR/pulse/native" || bad "the private pipewire-pulse never made its socket"
   # a player WITH audio (no --ao null): its bus + mpv/scene streams on the private PipeWire
-  "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
-  for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
-  kill -0 "$SP" 2>/dev/null && kill -9 "$SP"
-  (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real > "$T/serve-am.log" 2>&1) & SP=$!
-  waitfor $WAIT eval 'ctl hello >/dev/null 2>&1'; CP=$(comp_pid)
+  player_with_audio() {   # $1 = its LIASCAPE_PLAYER_AUTOMUTE
+    "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
+    for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
+    kill -0 "$SP" 2>/dev/null && kill -9 "$SP"
+    (cd /tmp && exec env LIASCAPE_PLAYER_AUTOMUTE="$1" "$B" serve --headless --outputs 640x360@60 --clock real > "$T/serve-am.log" 2>&1) & SP=$!
+    waitfor $WAIT eval 'ctl hello >/dev/null 2>&1'; CP=$(comp_pid)
+  }
   bus_up() { [ "$(ctl probe '{"name":"bus"}' | jq -r .state)" = up ]; }
+  am_caps() { ctl hello | jq -c .capabilities; }
+  am_cap() { ctl hello | jq -e '.capabilities | index("automute") != null' >/dev/null; }
+  am_log() { grep -c "auto-mute engine: $1" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null; }
+  am_clients() { pactl list clients 2>/dev/null | grep -c 'application.process.binary = "pactl"'; }   # this one + the backend's subscribe
+  am_ready() { [ "$(am_clients)" -ge 2 ]; }
+  # every source, by both mute slots (`gain.mute` = the user's + AudioMonitor's, `gain.automute` = the Signal's)
+  am_gains() { ctl state | jq -c '[.graph | to_entries[] | select(.value.gain.mute != null) | {id: .key, m: .value.gain.mute, a: (.value.gain.automute // 0)}]'; }
+  eff_muted() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain] | length > 0 and all(.mute < -90 or (.automute // 0) < -90)' >/dev/null; }
+  eff_open() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain] | length > 0 and all(.mute > -1 and (.automute // 0) > -1)' >/dev/null; }
+  user_slot_muted() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain.mute] | length > 0 and all(. < -90)' >/dev/null; }
+  am_set() { setting ".AutoMute = true | .AutoMuteDelayMs = $1 | .AutoUnmuteDelayMs = $2 | .AutoMuteMinLevelDb = ${3:--70} | .AutoMuteOnlyIfMprisActive = false"; }
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=20" -af volume=-12dB "$PW/long.wav"
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=1" -af volume=-12dB "$PW/short.wav"
+  TP=""
+  foreign() { paplay --property=application.name="${2:-it-foreign}" "$1" & TP=$!; }
+  foreign_stop() { [ -n "$TP" ] && { kill "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; TP=""; }; }
+  if [ "$AM_SIGNAL" = 1 ]; then
+    # Criterion 10 (no silent degrade). So far this run's player had no bus: no capability → AudioMonitor's job.
+    setting '.AutoMute = true | .AutoMuteDelayMs = 0 | .AutoUnmuteDelayMs = 0'
+    ! am_cap && [ "$(am_log AudioMonitor)" -ge 1 ] && [ "$(ctl get '{"path":"player.automute"}' | jq -r .value)" = false ] \
+      && ok "no bus → no automute capability, the engine is AudioMonitor, player.automute stays off" || bad "no bus: capabilities $(am_caps), AudioMonitor lines $(am_log AudioMonitor), player.automute $(ctl get '{"path":"player.automute"}' | jq -r .value)"
+    setting '.AutoMute = false'
+    # The bus up but the player's env gate off: still no capability, and AudioMonitor does mute.
+    player_with_audio 0
+    waitfor $WAIT bus_up || bad "env gate off: the bus never came up"
+    setting '.AutoMute = true | .NoAudio = false | .Volume = 100'
+    waitfor $WAIT am_ready && ok "env gate off: no capability ($(am_caps)) → the backend keeps AudioMonitor (its pactl subscribe is up)" || bad "env gate off: no pactl subscribe, capabilities $(am_caps)"
+    post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a (env gate off) → $(cur path)"
+    sleep 0.5; foreign "$PW/long.wav"
+    waitfor 3000 eval 'user_slot_muted' && ok "…and a foreign stream mutes through it (gain.mute −96)" || bad "env gate off: nothing muted: $(am_gains)"
+    foreign_stop; waitfor 3000 eff_open || bad "env gate off: still muted after the stream: $(am_gains)"
+    setting '.AutoMute = false'; stop_now
+    # back on: the watch hands over (≤ 10 s), its stream watch gone
+    player_with_audio 1
+  else
+    # shipped behaviour: the player has the capability, the flag is off → nothing reaches its props, AudioMonitor runs
+    player_with_audio 1
+    waitfor $WAIT am_cap || bad "env gate on: no automute capability: $(am_caps)"
+    setting '.AutoMute = true | .AutoMuteDelayMs = 700 | .AutoUnmuteDelayMs = 900'
+    waitfor $WAIT am_ready && [ "$(ctl state | jq -c '.graph.player | [.automute, .automute_delay_ms, .autounmute_delay_ms]')" = '[false,500.0,2000.0]' ] \
+      && [ "$(am_log "the player's Signal")" = 0 ] && [ "$(am_log AudioMonitor)" = 0 ] \
+      && ok "the parity flag off, the capability present: AudioMonitor runs, no prop sent, no engine line" \
+      || bad "flag off: pactl clients $(am_clients), props $(ctl state | jq -c '.graph.player | [.automute, .automute_delay_ms, .autounmute_delay_ms]'), lines $(am_log "the player's Signal")/$(am_log AudioMonitor)"
+    setting '.AutoMute = false | .AutoMuteDelayMs = 500 | .AutoUnmuteDelayMs = 2000'
+    player_with_audio ""
+  fi
   waitfor $WAIT bus_up && ok "the player's audio bus is up on the private PipeWire ($(ctl probe '{"name":"bus"}' | jq -r .target))" \
     || bad "bus: $(ctl probe '{"name":"bus"}' | jq -c '{state, reason}')"
   setting '.AutoMute = true | .AutoMuteDelayMs = 0 | .AutoUnmuteDelayMs = 0 | .AutoMuteMinLevelDb = -70 | .AutoMuteOnlyIfMprisActive = false
            | .AllowScenes = true | .NoAudio = false | .Volume = 100 | .Speed = 1 | .NormalizeAudio = false
            | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 600'
-  # the backend's stream watch (`pactl subscribe`) is a client of the private server
-  am_ready() { [ "$(pactl list clients 2>/dev/null | grep -c 'application.process.binary = "pactl"')" -ge 2 ]; }
-  waitfor $WAIT am_ready && ok "auto-mute watches the private server" || bad "auto-mute's pactl subscribe never connected: $(pactl list short clients 2>&1 | head -3)"
-  amutes() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)] | length'; }
+  if [ "$AM_SIGNAL" = 1 ]; then
+    # the player's Signal runs it: the capability, the five props, and the backend's stream watch gone
+    am_signal_on() { am_cap && [ "$(ctl get '{"path":"player.automute"}' | jq -r .value)" = true ] && [ "$(am_clients)" -le 1 ] && [ "$(am_log "the player's Signal")" -ge 1 ]; }
+    waitfor 25000 am_signal_on && ok "bus + env gate → the Signal is the engine; no pactl subscribe, no monitor" || bad "no Signal: capabilities $(am_caps), player.automute $(ctl get '{"path":"player.automute"}' | jq -r .value), pactl clients $(am_clients), log lines $(am_log "the player's Signal")"
+    p5=$(ctl state | jq -c '.graph.player | [.automute, .automute_delay_ms, .autounmute_delay_ms, .automute_min_level_db, .automute_only_if_mpris]')
+    [ "$p5" = '[true,0,0,-70,false]' ] || [ "$p5" = '[true,0.0,0.0,-70.0,false]' ] && ok "the settings reached the player's props: $p5" || bad "player props $p5"
+    amutes() { ctl logs '{"kind_prefix":"automute.muted","limit":100000}' | jq '.events | length'; }
+    am_last_wall() { ctl logs '{"kind_prefix":"automute.muted","limit":100000}' | jq -r '.events[-1].t_wall'; }
+  else
+    # the backend's stream watch (`pactl subscribe`) is a client of the private server
+    waitfor $WAIT am_ready && ok "auto-mute watches the private server" || bad "auto-mute's pactl subscribe never connected: $(pactl list short clients 2>&1 | head -3)"
+    amutes() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)] | length'; }
+    am_last_wall() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq -r '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)][-1].t_wall'; }
+  fi
   sinks_log() { pactl list sink-inputs 2>/dev/null | grep -E 'Sink Input #|node.name|application.name|application.process.id|target.object' | tr -s ' \t' ' ' | paste -sd' ' | sed 's/Sink Input/\n     Sink Input/g'; }
   post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → $(cur path)"
   sleep 1
@@ -2145,13 +2211,104 @@ EOF
   paplay --property=application.name=it-foreign "$PW/tone.wav" & TP=$!
   muted_now() { [ "$(amutes)" -gt "$m0" ]; }
   if waitfor 3000 muted_now; then
-    tm=$(ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq -r '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)][-1].t_wall')
+    tm=$(am_last_wall)
     lat=$(python3 -c "import datetime,sys; t=datetime.datetime.fromisoformat(sys.argv[1][:26]+'+00:00'); print(int(t.timestamp()*1000)-$t0)" "$tm")
     [ "$lat" -le 1000 ] && ok "a foreign stream (paplay) auto-mutes in ${lat} ms (paplay start → the player's mute ramp)" || bad "a foreign stream muted only after ${lat} ms"
   else bad "a foreign stream played but nothing was auto-muted; streams:$(sinks_log)"; fi
   wait "$TP" 2>/dev/null
-  unmuted_now() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain.mute] | length > 0 and all(. > -1)' >/dev/null; }
-  waitfor 3000 unmuted_now && ok "…and unmutes when it ends" || bad "still muted after the foreign stream ended: $(ctl state | jq -c '[.graph[] | select(.gain.mute != null) | .gain.mute]')"
+  waitfor 3000 eff_open && ok "…and unmutes when it ends" || bad "still muted after the foreign stream ended: $(am_gains)"
+
+  # ---- Parity criteria 1, 5, 6, 7 (plan Phase 3 Task 14): the same checks on either engine ----
+  # the matrix's `autoMute*` cells at the backend level, with a real stream
+  echo "  -- every setting, live"
+  am_set 0 300 -6
+  sleep 0.5
+  m0=$(amutes); foreign "$PW/long.wav"; sleep 1.5
+  [ "$(amutes)" = "$m0" ] && eff_open && ok "Min level −6 dB vs a −12 dBFS stream: not muted" || bad "a stream under the threshold muted: $(am_gains)"
+  t0=$(ms_now); setting '.AutoMuteMinLevelDb = -70'
+  waitfor 3000 eff_muted && ok "…the threshold back to −70 while it plays: muted in $(( $(ms_now) - t0 )) ms" || bad "threshold back to −70: not muted: $(am_gains)"
+  foreign_stop; waitfor 3000 eff_open || bad "still muted after the threshold stream: $(am_gains)"
+  am_set 1500 300; sleep 0.3
+  t0=$(ms_now); foreign "$PW/long.wav"; sleep 0.8
+  ! eff_muted && ok "Mute after 1500 ms: not muted 0.8 s in" || bad "muted 0.8 s into a stream with a 1500 ms mute delay"
+  waitfor 3000 eff_muted && { el=$(( $(ms_now) - t0 )); [ "$el" -ge 1400 ] && ok "…muted at $el ms (paplay start → seen muted)" || bad "muted early, at $el ms"; } || bad "not muted 3.8 s in (delay 1500 ms): $(am_gains)"
+  foreign_stop; waitfor 3000 eff_open || bad "still muted after the delay stream: $(am_gains)"
+  am_set 0 3000; sleep 0.3
+  foreign "$PW/long.wav"; waitfor 3000 eff_muted || bad "unmute delay: never muted: $(am_gains)"
+  foreign_stop; t0=$(ms_now); sleep 1.5
+  eff_muted && ok "Unmute after 3000 ms: still muted 1.5 s after the stream ended" || bad "unmuted < 1.5 s after the stream with a 3000 ms unmute delay"
+  waitfor 4000 eff_open && { el=$(( $(ms_now) - t0 )); [ "$el" -ge 2900 ] && ok "…unmuted at $el ms" || bad "unmuted early, at $el ms"; } || bad "still muted 5.5 s after the stream (delay 3000 ms): $(am_gains)"
+  am_set 0 300; sleep 0.3
+  foreign "$PW/long.wav"; waitfor 3000 eff_muted || bad "off-while-muted: never muted: $(am_gains)"
+  t0=$(ms_now); setting '.AutoMute = false'
+  waitfor 1500 eff_open && ok "AutoMute off while muted, the stream playing: unmuted in $(( $(ms_now) - t0 )) ms" || bad "AutoMute off while muted: still muted: $(am_gains)"
+  t0=$(ms_now); setting '.AutoMute = true'
+  waitfor 3000 eff_muted && ok "AutoMute on while a stream plays: muted in $(( $(ms_now) - t0 )) ms" || bad "AutoMute on while a stream plays: not muted: $(am_gains)"
+  foreign_stop; waitfor 3000 eff_open || bad "still muted after the on/off stream: $(am_gains)"
+  setting '.AutoMuteOnlyIfMprisActive = true'; sleep 0.3
+  m0=$(amutes); foreign "$PW/long.wav"; sleep 1.5
+  [ "$(amutes)" = "$m0" ] && eff_open && ok "Only if MPRIS player active, no player (no session bus): a stream doesn't mute" || bad "MPRIS-only with no player muted: $(am_gains)"
+  foreign_stop; setting '.AutoMuteOnlyIfMprisActive = false'; sleep 0.3
+  # the one intended difference (criterion 2, owner 2026-10-29): a stream calling itself mpv is heard by the Signal
+  m0=$(amutes); foreign "$PW/short.wav" mpv; waitfor 3000 eval '[ "$(amutes)" -gt "$m0" ]'; heard=$?; foreign_stop
+  if [ "$AM_SIGNAL" = 1 ]; then [ "$heard" = 0 ] && ok "a user's mpv is heard (the intended difference)" || bad "a stream named mpv never muted under the Signal"
+  else [ "$heard" != 0 ] && ok "a stream named mpv is filtered out (AudioMonitor's name filter)" || bad "AudioMonitor muted on a stream named mpv"; fi
+  waitfor 3000 eff_open || bad "still muted after the mpv stream: $(am_gains)"
+
+  echo "  -- a B created while auto-muted comes up muted (criterion 7)"
+  foreign "$PW/long.wav"; waitfor 3000 eff_muted || bad "B muted: never auto-muted: $(am_gains)"
+  n0=$(nsch); post /apply "{\"path\":\"$Bc\"}" >/dev/null
+  waitfor $WAIT eval 'shows "$Bc" && switched_to "$Bc" "$n0"' || bad "B muted: never switched to b ($(basename "$(cur path)"))"
+  eff_muted && ok "a switch while auto-muted: the new source is muted too" || bad "a switch while auto-muted: $(am_gains)"
+  foreign_stop; waitfor 3000 eff_open && ok "…the stream ends: it unmutes" || bad "the new source stayed muted: $(am_gains)"
+
+  echo "  -- user mute vs auto-mute (criterion 6)"
+  UMF=$XDG_CONFIG_HOME/liascape/user_mute.state
+  foreign "$PW/long.wav"; waitfor 3000 eff_muted && ok "auto-muted by the stream" || bad "toggle: never auto-muted: $(am_gains)"
+  cli toggle-mute; waitfor 2000 eff_open && ok "toggle-mute while auto-muted: unmuted now, the stream still playing" || bad "toggle-mute while auto-muted: still muted: $(am_gains)"
+  sleep 1; eff_open && kill -0 "$TP" 2>/dev/null && ok "…and stays unmuted while the stream plays on" || bad "toggle-mute while auto-muted: muted again with the stream playing: $(am_gains)"
+  [ ! -e "$UMF" ] && ok "…not a user mute (no user_mute.state)" || bad "toggle-mute while auto-muted wrote user_mute.state"
+  cli toggle-mute; waitfor 2000 eff_muted && [ -e "$UMF" ] && ok "toggle-mute again: muted (the user's)" || bad "toggle-mute again: $(am_gains), user_mute.state $(ls "$UMF" 2>&1)"
+  foreign_stop; sleep 1.5
+  user_slot_muted && [ -e "$UMF" ] && ok "the stream ended + the unmute delay: still muted (a user mute survives an auto-unmute)" || bad "a user mute didn't survive the auto-unmute: $(am_gains)"
+  cli toggle-mute; waitfor 2000 eff_open && [ ! -e "$UMF" ] && ok "toggle-mute: unmuted" || bad "toggle-mute back: $(am_gains), user_mute.state $(ls "$UMF" 2>&1)"
+  # a user mute first, an auto-mute over it: toggle lifts the user's, the stream's mute stays until it ends
+  cli toggle-mute; waitfor 2000 user_slot_muted || bad "user mute first: $(am_gains)"
+  foreign "$PW/short.wav"; wait "$TP" 2>/dev/null; TP=""; sleep 1
+  user_slot_muted && ok "a user mute holds through a whole auto-mute" || bad "a user mute dropped through an auto-mute: $(am_gains)"
+  cli toggle-mute; waitfor 2000 eff_open && ok "…toggle-mute lifts it" || bad "user mute lift: $(am_gains)"
+
+  echo "  -- the app closed (criterion 5, 6's keybind)"
+  backend_down
+  if [ "$AM_SIGNAL" = 1 ]; then
+    [ ! -e "$XDG_CONFIG_HOME/liascape/monitor.pid" ] && [ "$(am_clients)" -le 1 ] && ok "app closed under the Signal: no monitor-daemon" || bad "a monitor-daemon runs next to the Signal: $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid" 2>/dev/null), pactl clients $(am_clients)"
+    foreign "$PW/long.wav"; waitfor 3000 eff_muted && ok "app closed: a foreign stream mutes" || bad "app closed: nothing muted: $(am_gains)"
+    cli toggle-mute; waitfor 2000 eff_open && ok "app closed: the toggle-mute keybind unmutes" || bad "app closed: toggle-mute: $(am_gains)"
+    sleep 1; eff_open && ok "…and it holds with the stream playing" || bad "app closed: muted again after toggle-mute: $(am_gains)"
+    foreign_stop; sleep 1
+    foreign "$PW/short.wav"; waitfor 3000 eff_muted && ok "app closed: the next stream mutes again" || bad "app closed: the next stream: $(am_gains)"
+    wait "$TP" 2>/dev/null; TP=""; waitfor 3000 eff_open && ok "…and it unmutes when that ends" || bad "app closed: still muted: $(am_gains)"
+  else
+    waitfor $WAIT test -s "$XDG_CONFIG_HOME/liascape/monitor.pid" && ok "app closed under AudioMonitor: a monitor-daemon took over" || bad "no monitor.pid after the app closed"
+    waitfor $WAIT am_ready || bad "monitor-daemon: no pactl subscribe"
+    foreign "$PW/short.wav"; waitfor 5000 eff_muted && ok "app closed: a foreign stream mutes (the daemon)" || bad "app closed: the daemon didn't mute: $(am_gains)"
+    wait "$TP" 2>/dev/null; TP=""; waitfor 5000 eff_open && ok "…and it unmutes when that ends" || bad "app closed: still muted: $(am_gains)"
+  fi
+  backend_up backend-am.log
+  [ ! -e "$XDG_CONFIG_HOME/liascape/monitor.pid" ] && ok "the app opens: no monitor-daemon left" || bad "monitor.pid after the app opened: $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid")"
+  if [ "$AM_SIGNAL" = 1 ]; then
+    # a crash: the snapshot holds the settings, the reapply asserts them, the Signal hears on
+    kill -9 "$(comp_pid)"; p0=$CP
+    waitfor 20000 eval 'CP=$(comp_pid); [ -n "$CP" ] && [ "$CP" != "$p0" ] && am_cap'
+    [ "$(ctl get '{"path":"player.automute"}' | jq -r .value)" = true ] && ok "a compositor crash: player.automute still on" || bad "after a crash: player.automute $(ctl get '{"path":"player.automute"}' | jq -r .value)"
+    waitfor $WAIT shows "$Bc" || bad "after a crash: shows $(cur path)"
+    foreign "$PW/short.wav"; waitfor 3000 eff_muted && ok "…and a foreign stream still mutes" || bad "after a crash: nothing muted: $(am_gains)"
+    wait "$TP" 2>/dev/null; TP=""; waitfor 3000 eff_open || bad "after a crash: still muted: $(am_gains)"
+    # the bus goes away live (PipeWire dies): the capability drops, AudioMonitor takes over within the watch's period
+    al0=$(am_log AudioMonitor)
+    for p in $PWP; do kill "$p" 2>/dev/null; done
+    waitfor 25000 eval '! am_cap && [ "$(am_log AudioMonitor)" -gt "$al0" ]' && ok "PipeWire gone: the capability drops, the engine is AudioMonitor again" || bad "PipeWire gone: capabilities $(am_caps), AudioMonitor lines $(am_log AudioMonitor) (were $al0)"
+  fi
   setting '.AutoMute = false'
   stop_now
   # back to the --ao null player the rest of the test expects; the audio daemons go

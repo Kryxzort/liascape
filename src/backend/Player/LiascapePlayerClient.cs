@@ -90,6 +90,17 @@ public sealed class LiascapePlayerClient
         return _capsKnown || (IsStalled && _capsEver) ? Capabilities.Contains("scene") : null;
     }
 
+    // Phase 3 Task 14: the running player's word on a capability (the `FromPlayer` rule; no player answering → no).
+    // `fresh` greets it again: `automute` comes and goes with the audio bus, so a connection's first `hello` — a
+    // player just started, its bus not up yet — isn't its last word on it.
+    public bool HasCapability(string cap, bool fresh = false)
+    {
+        if (!SocketExists) return false;
+        if (fresh && !IsStalled) { try { Call("hello", null, QuickMs); } catch (LiascapePlayerException) { } }
+        for (int i = 0; i < 2 && !_capsKnown && !IsStalled; i++) { try { Call("hello", null, QuickMs); } catch (LiascapePlayerException) { } }
+        return (_capsKnown || (IsStalled && _capsEver)) && Capabilities.Contains(cap);
+    }
+
     // (available, why not, WE's assets dir) — `/player-engine.scenes`. `withAssets` reads the running
     // player's resolved assets dir too (one more quick `get`; the status endpoint only).
     public (bool Available, string? Reason, string? AssetsDir) SceneStatus(bool withAssets)

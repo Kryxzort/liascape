@@ -52,6 +52,8 @@
 #   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that
 #   reruns exactly that sequence on one stack. --jobs defaults to 2 here (LIASCAPE_FUZZ_JOBS), capped at the run count.
 #   Results: <out>/fuzz.jsonl, one record per run (seed, run, start, sequence, replay, per-step phases + violations).
+# LIASCAPE_MATRIX_AUTOMUTE=signal: the auto-mute cells with the player's Signal as the engine (a private PipeWire stack in place of
+# PulseAudio; plan Phase 3 Task 14). Run it with `--only autoMute`.
 # LIASCAPE_MATRIX_SCREEN=<w>x<h> (default 1400x900): the private Xvfb's screen size (a probe that measures at the owner's 1080p).
 # LIASCAPE_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
@@ -258,7 +260,7 @@ SP=""; BP=""; XP=""; PA=""
 cleanup() {
   trap - EXIT INT TERM HUP
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
-  [ -n "$PA" ] && kill "$PA" 2>/dev/null
+  [ -n "$PA" ] && kill $PA 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
   # a backend the probe started in place of $BP (restore:scene restarts it) — only one whose HOME is this stack's
   if [ -s "$T/backend2.pid" ]; then
@@ -305,7 +307,41 @@ EOF
 mkdir -p "$T/home/.config/pulse"; printf 'autospawn = no\n' >"$T/home/.config/pulse/client.conf"
 PULSEAUDIO=${PULSEAUDIO:-$(command -v pulseaudio || ls /nix/store/*-pulseaudio-*/bin/pulseaudio 2>/dev/null | head -1)}
 LIASCAPE_PULSE=0
-if [ -n "$PULSEAUDIO" ] && [ -x "$PULSEAUDIO" ] && command -v pactl >/dev/null && command -v paplay >/dev/null && command -v parec >/dev/null; then
+if [ "${LIASCAPE_MATRIX_AUTOMUTE:-}" = signal ]; then
+  # The auto-mute cells with the player's Signal as the engine (plan Phase 3 Task 14; `--only autoMute`): it hears PipeWire
+  # streams only, so here the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse (no device, no D-Bus; the
+  # same null sink name, so the probe's paplay is unchanged). The env gate + the backend's test-only parity flag.
+  export LIASCAPE_PLAYER_AUTOMUTE=1 LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
+  unset PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
+  PW=$T/pw; mkdir -p "$PW/cfg/wireplumber/wireplumber.conf.d" "$PW/state"
+  cat > "$PW/pw.conf" <<'PWEOF'
+context.properties = { core.daemon = true core.name = pipewire-0
+  default.clock.rate = 48000 support.dbus = false log.level = 1 }
+context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
+context.modules = [
+  { name = libpipewire-module-protocol-native } { name = libpipewire-module-profiler }
+  { name = libpipewire-module-access } { name = libpipewire-module-metadata }
+  { name = libpipewire-module-spa-device-factory } { name = libpipewire-module-spa-node-factory }
+  { name = libpipewire-module-client-node } { name = libpipewire-module-client-device }
+  { name = libpipewire-module-adapter } { name = libpipewire-module-link-factory } ]
+context.objects = [
+  { factory = spa-node-factory args = { factory.name = support.node.driver node.name = Dummy-Driver
+      node.group = pipewire.dummy priority.driver = 20000 } }
+  { factory = adapter args = { factory.name = support.null-audio-sink node.name = mx_null
+      node.description = "mx null" media.class = Audio/Sink audio.position = [ FL FR ]
+      monitor.channel-volumes = true node.group = pipewire.dummy priority.driver = 21000 } } ]
+PWEOF
+  echo 'wireplumber.profiles = { policy = { support.reserve-device = disabled monitor.alsa.reserve-device = disabled support.portal-permissionstore = disabled script.client.access-portal = disabled support.logind = disabled monitor.bluez.seat-monitoring = disabled hooks.device.profile.state = disabled hooks.device.routes.state = disabled } }' \
+    > "$PW/cfg/wireplumber/wireplumber.conf.d/99-hermetic.conf"
+  pw_daemon() { local log=$1; shift
+    (exec env XDG_CONFIG_HOME="$PW/cfg" XDG_STATE_HOME="$PW/state" "$@" > "$log" 2>&1) & PA="$PA $!"; }
+  pw_daemon "$PW/pipewire.log" pipewire -c "$PW/pw.conf"
+  for _ in $(seq 1 50); do [ -e "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
+  pw_daemon "$PW/wireplumber.log" wireplumber -p policy
+  pw_daemon "$PW/pipewire-pulse.log" pipewire-pulse
+  for _ in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/pulse/native" ] && break; sleep 0.1; done
+  [ -S "$XDG_RUNTIME_DIR/pulse/native" ] && LIASCAPE_PULSE=1 || echo "(no private pipewire-pulse — the auto-mute cells skip)"
+elif [ -n "$PULSEAUDIO" ] && [ -x "$PULSEAUDIO" ] && command -v pactl >/dev/null && command -v paplay >/dev/null && command -v parec >/dev/null; then
   (unset DBUS_SESSION_BUS_ADDRESS; exec "$PULSEAUDIO" -n --daemonize=no --exit-idle-time=-1 --use-pid-file=no --disable-shm=yes \
      -L "module-native-protocol-unix auth-anonymous=1" -L "module-null-sink sink_name=mx_null" >"$T/pulse.log" 2>&1) & PA=$!
   for _ in $(seq 1 50); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
@@ -337,7 +373,9 @@ mk_scene "$SLIB/900000003" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360
 printf '{"900000001":{"title":"s1","isScene":true,"workshopId":"900000001"},"900000002":{"title":"s2","isScene":true,"workshopId":"900000002"},"900000003":{"title":"s3","isScene":true,"workshopId":"900000003"}}' > "$SLIB/index.json"
 SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
 
-(cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
+# `--ao null` means no bus (so no `automute` capability): under the Signal it plays on the private PipeWire
+AO=(--ao null); [ "${LIASCAPE_MATRIX_AUTOMUTE:-}" = signal ] && AO=()
+(cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real "${AO[@]}" > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done

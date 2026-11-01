@@ -276,6 +276,27 @@ PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/
 full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
 unmutes when it ends.
 
+**The in-player engine, behind its parity flag (Phase 3 Task 14; off in shipped behaviour).** `AudioMonitor.AutoMuteInPlayer` =
+`AutoMuteParityPassed` (a constant, **false** until all ten plan criteria pass on the owner's machine) && liascape-player
+&& the running player's `automute` capability (its `LIASCAPE_PLAYER_AUTOMUTE=1`, its bus up). `LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1`
+stands in for the flip in the adapter IT only. **Flag off, every path below is skipped and nothing is sent to the player.**
+- `LiascapePlayerMedia.ApplyAutoMuteSettings` → `player.automute`, `automute_delay_ms`, `autounmute_delay_ms`,
+  `automute_min_level_db`, `automute_only_if_mpris` (coalescible, `player:<prop>`); re-asserted per player process in
+  `AssertSceneFps` (a switch, R81's reapply). The player's snapshot keeps them (app closed, crash restart).
+- `AudioMonitor.ReconcileEngine` (flag on): serve start, an AutoMute setting, every 10 s from the upgrade watch —
+  `HasCapability("automute", fresh: true)` greets the player again, since the capability follows the bus. Capable → monitor stopped,
+  settings sent; not (no player yet, env gate off, bus down, legacy engine) → **`AudioMonitor` runs** (criterion 10). A handover can
+  overlap ≤ 10 s (each mutes its own slot). Adapter log: `auto-mute engine: the player's Signal | AudioMonitor`.
+- No `AudioMonitor.Start` / `SpawnDetachedMonitor` while the gate is on: `ApplicationStopping` spawns no daemon; `restore`
+  decides after the player answers (`AfterRestore`, the bus gets ≤ 3 s); a `monitor-daemon` started without the capability (the bus not
+  up at login) ends itself once the player has it, handing it the settings. `monitor-daemon` stays.
+- **User vs auto:** the Signal mutes `gain.automute`, so `gain.mute`, `_autoMuted` and `PlayerHelper.IsMuted` stay the user's alone.
+  `toggle-mute` asks `PlayerHelper.AutoMutedInPlayer` (`player.automute_active`, one quick `get`, so a one-shot CLI knows too) and
+  `UnmuteAuto` sends `automute.release` (player-core.md § Auto-mute): audible until the foreign audio ended, as under `AudioMonitor`.
+- `FeatureHealth`'s `auto-mute` / `mpris` rows still ask for `pactl` / `parec` / `playerctl`: for the flip.
+- IT: `LIASCAPE_IT_AUTOMUTE_ENGINE=signal` runs § auto-mute with the Signal; the live-settings, B-while-muted, toggle, app-closed checks
+  run on either engine, the capability / handover / crash / PipeWire-gone checks on the Signal only.
+
 ## Rotation (advance-on-end minimum / maximum / separate scene timing; redesigned 2026-10-28)
 **Where it runs (Phase 3 Task 7, 2026-10-30): under `liascape-player` every rule below lives in the player's program**
 (`prog:main` on `out:*`, `recipes/program/` — player-core.md § Programs); the C# rotation (`Tick`, `DoVideoEndWait`,

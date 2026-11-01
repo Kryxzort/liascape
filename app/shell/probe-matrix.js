@@ -1630,11 +1630,15 @@ function tone(ms, name) {
   return p;
 }
 async function stopTones() { for (const p of tones) p.kill("SIGTERM"); await waitFor(() => tones.size === 0, 3000, 50); }
-const muteOf = (st) => sourcesOf(st).map(([id, n]) => `${id}(${TITLE(n.path)}) ${Math.round(n.gain?.mute ?? 0)}`);
-const allMuted = (st, want) => { const s = sourcesOf(st); return s.length > 0 && s.every(([, n]) => near(n.gain?.mute ?? 0, want ? -96 : 0, 0.5)); };
+// a source's mute: AudioMonitor's and the user's slot, or the in-player Signal's (`gain.automute`, LIASCAPE_MATRIX_AUTOMUTE=signal)
+const AM_SIGNAL = E.LIASCAPE_MATRIX_AUTOMUTE === "signal";
+const amLevel = (n) => Math.min(n.gain?.mute ?? 0, n.gain?.automute ?? 0);
+const muteOf = (st) => sourcesOf(st).map(([id, n]) => `${id}(${TITLE(n.path)}) ${Math.round(amLevel(n))}`);
+const allMuted = (st, want) => { const s = sourcesOf(st); return s.length > 0 && s.every(([, n]) => near(amLevel(n), want ? -96 : 0, 0.5)); };
 const muteNow = async (want) => allMuted(await ctl.call("state"), want);
 // the backend's stream watch is up: its `pactl subscribe` is a client of the private server (besides this check's own pactl)
 async function amReady() {
+  if (AM_SIGNAL) return waitFor(async () => (await ctl.call("state")).graph.player?.automute === true, 5000, 100);
   return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
     res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
 }
@@ -1711,7 +1715,9 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(2500, "mpv"); const stop = sampler(c, 40); await waitFor(() => tones.size === 0, 5000, 50); await stop();
-  }, check(c) { const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => (n.gain?.mute ?? 0) < -1));
+  }, check(c) { const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => amLevel(n) < -1));
+    // the one intended difference under the Signal (plan Task 14 criterion 2, owner 2026-10-29): a user's mpv is heard
+    if (AM_SIGNAL) return [...amReadyCheck(c), ...(m.length ? [] : ["an mpv stream never auto-muted under the Signal"])];
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
@@ -1723,7 +1729,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
     await stopTones(); await waitFor(() => muteNow(false), 5000, 50);
   }, check(c) {
     const v = [...amReadyCheck(c)];
-    const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => (n.gain?.mute ?? 0) < -1));
+    const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => amLevel(n) < -1));
     if (m.length) v.push(`a −12 dBFS stream under a −6 dB threshold auto-muted (${m.length}/${c.samples.length} samples)`);
     if (c.mutedMs == null) v.push(`the threshold back to −70 while the stream plays: not muted within 4 s${c.duringTone ? "" : " (the stream had ended)"}`);
     if (c.after.s.autoMuteMinLevelDb !== -70) v.push(`autoMuteMinLevelDb ${c.after.s.autoMuteMinLevelDb}`);
