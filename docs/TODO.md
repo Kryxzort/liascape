@@ -195,7 +195,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal is PARKED; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
-  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md` — not started; the owner's answers (2026-10-29) are folded in, incl. an optional in-player auto-mute task.
+  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md` — Tasks 1–13 done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): the player side is behind `LIASCAPE_PLAYER_AUTOMUTE=1`, the backend switch-over waits on its parity bar.
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`): **all tasks
     done** (Tasks 1–15, the Task 8 backend wiring, the properties editor and loudness learning). Task 14 — the
     on-machine battery — ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,

@@ -482,3 +482,28 @@ drops/micro-gaps), `scene_pause_park_and_destroy_on_the_bus`, `scene_reroutes_af
 and `--ao null` `scene_audio_flowing_gates_every_onset` (each `onset.started` is `reason: flowed`;
 RED with the worker's `AudioFlowing` suppressed: `reason: timeout`). See `.claude/rules/player-core.md`
 § Scene worker → "Scene audio (Task 6)".
+
+## 12. A rotation's clock is the player's: it never advances while the picture is paused or held
+
+While no output shows the picture, it does exactly what `while_parked` says.
+
+**Why:** the legacy tick ran on wall time in another process, so it had to be told about every pause, and a switch
+could land on a paused screen or a monitor that was off (the adapter's retry storm, I4). A rotation counted on
+`Runtime::now` (monotonic, pause-excised) can't see a user pause, a low-VRAM hold, a cover hold, a suspend or a
+wall-clock jump as time passing, and no rule starts a switch under a hold. With no output the owner chose the
+behaviour (O2): `rotate` (default) keeps counting and each switch replaces the parked wallpaper, `hold` stops both
+clocks until an output returns.
+
+**Enforced by:** `tests/program.rs` `pause_freezes_the_rotation`, `cover_hold_freezes_a_program`,
+`parked_keeps_rotating_invisibly_by_default`, `parked_hold_mode_holds_and_resumes`,
+`live_max_edit_while_paused_waits_for_the_resume`; `src/player/tests/onmachine/programs.sh` steps `cover` and `nomonitor`.
+
+## 13. One owner of a session's schedule: the player; the backend only requests
+
+**Why:** two schedulers are how the legacy engine got double switches (a daemon next to the next backend, a
+`pending_action.txt` read twice). The backend may load a program, edit its properties and send verbs, and it mirrors
+`program.current`; it never decides that a switch is due. So closing the app changes nothing about a rotation.
+
+**Enforced by:** the adapter IT's origin check (every switch of a session is `origin: program:prog:main`, none
+`api`, across two backends and an app close) and the `legacy rotation path reached` guard in `PlayerHelper`, which
+logs and refuses if the C# rotation is ever reached under `liascape-player`; `programs.sh` step `appclosed`.

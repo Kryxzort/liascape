@@ -6,8 +6,9 @@ every monitor, with every transition. Design authority:
 `docs/superpowers/specs/2026-10-20-utopia-player-design.md` (read for *why*; this doc is the map
 for *where* and *how to debug*). Status: **Phase 1 core implemented** (compositor, video/image/
 colour sources, all three transition methods, Wayland outputs, audio bus, supervisor + snapshot,
-the C# backend adapter) and **Phase 2 implemented** (WE scenes in `liascape-scene-worker` processes; only
-its on-machine battery, plan Task 14, is still to run) — see `docs/TODO.md` → "liascape-player" for
+the C# backend adapter), **Phase 2 implemented** (WE scenes in `liascape-scene-worker` processes) and
+**Phase 3 implemented** (the rotation is a Program in the player, pause-when-covered a Signal; on-machine
+numbers in `docs/player/reports/phase3.md`) — see `docs/TODO.md` → "liascape-player" for
 exactly what's done vs pending.
 The backend's `AppSettings.PlayerEngine` defaults to `legacy`; `liascape-player` is opt-in and
 experimental until the switch-over bar (§6 below) is met.
@@ -127,7 +128,8 @@ feature-specific plumbing anywhere else in the crate:
 | **Gain** | a source's audio level in dB; slots (`user`/`override`/`normalize`/`mute`/`automute`/`xfade`/`anticlick`) sum in dB | `src/player/src/units.rs` (`Gains`), `src/player/src/graph/props.rs` |
 | **Animator** | move any property over time along a curve (linear/smoothstep/equal-power/step) | `src/player/src/anim.rs` |
 | **Clock** | a time base; pausable per-output or globally | `src/player/src/clock.rs`, `Runtime`'s player-pause fields |
-| **Program / Recipe** | the only place policy lives, built only from the blocks above; today: the transition A→B recipe | `src/player/src/recipes/transition.rs` |
+| **Program / Recipe** | the only place policy lives, built only from the blocks above: the transition A→B recipe, and the rotation (`prog:<name>`, a graph node whose properties are its settings; it only *requests* transitions) | `src/player/src/recipes/transition.rs`, `src/player/src/recipes/program/` |
+| **Signal** | an observed fact about the world outside the player: `out:<c>.covered` (Hyprland / Sway / wlr-foreign-toplevel), read by the built-in pause-when-covered rule | `src/player/src/signal/` |
 | **Command API** | create/destroy/set/get/animate/subscribe/probe/capture | `src/player/src/api/{proto,server,handlers}.rs`, `src/player/src/ctl.rs` |
 | **Probe** | measure: live sources, loop health, frame pacing, the audio bus/meter, the snapshot writer, scene workers, VRAM | `src/player/src/probe/{mod,frames,audio,snapshot,memory,workers,vram}.rs` |
 
@@ -150,18 +152,21 @@ dispatches libwayland's default queue every iteration, because upstream's driver
 the buffers there (`src/player/src/wl.rs`, `.claude/rules/player-core.md` § Wayland → NVIDIA
 notes).
 
-**Signal** (spec §4.2: "other audio playing" → auto-mute, "window fullscreen" → auto-pause) is
-specified but **not implemented yet** — it is Phase 3 (§6), and its auto-mute half is **PARKED**
-(owner, 2026-10-28). Today the equivalent decisions (auto-mute) are made by the C# `AudioMonitor`,
-outside the player, for both engines.
+**Signal** (spec §4.2): "window fullscreen" → auto-pause is live (`cover.engaged`, invariant #12's hold).
+"Other audio playing" → auto-mute exists in the player behind `LIASCAPE_PLAYER_AUTOMUTE=1` (Phase 3 Task 14) and
+stays off until it passes its parity bar; until then the C# `AudioMonitor` decides, for both engines.
 
 ---
 
 ## 3. One wallpaper switch, end to end
 
 Every switch — a manual next/prev, a timed tick, a video-end advance, `liascape restore` — goes through
-the exact same path: the backend never talks to a source directly, only to the recipe via the
-Command API.
+the exact same recipe. A single wallpaper is the backend's `transition` request; a rotation is the player's own:
+`Programs::tick` decides (timer / end of video / maximum / scene timing), `Runtime::run_program_actions` calls the
+same `Transitions::start` with `origin: "program:prog:main"`, and `transition.started` of that corr commits the item
+(`program.current {index, path, reason}`). The backend only loads the program, edits its properties live, sends the
+`program.next|prev|random|play` verbs and follows `program.current` (`player-adapter.md` § Rotation), so a rotation
+runs the same with the app closed (invariant #13).
 
 ```
 C# backend (PlayerHelper → LiascapePlayerMedia.Switch, player-adapter.md § Dispatch points)
@@ -352,13 +357,12 @@ audio bus, crash recovery, and the backend adapter; Phase 2 added WE scenes — 
 - **Web wallpapers** (WE `web` items via CEF/LWE's `webhelper`) are not started. **Phase 4**,
   optional build module (CEF is hundreds of MB), gated on resolving the NVIDIA LINEAR-dmabuf
   external-only risk the design spec flags for it.
-- **Programs and Signals stay in the C# backend.** Rotation, advance/wait-on-end, shuffle,
-  history, `liascape restore` replay and auto-mute are still driven by the backend adapter
-  (`.claude/rules/player-adapter.md`) over the Command API, not by an in-process `Program`/`Signal`. **Phase 3**
-  moves them into the player (retiring the backend's timer/monitor/restart daemons,
-  `pending_action.txt`, pid-file ownership). The in-player auto-mute Signal (per-stream metering, the player's
-  own bus excluded by *ownership*, ≤ 100 ms) is **PARKED** (owner, 2026-10-28): auto-mute stays the backend's
-  `AudioMonitor` for both engines, and is not part of the switch-over bar while parked.
+- **Phase 3 — Programs and Signals: done** (`docs/player/reports/phase3.md`). Rotation, advance/wait-on-end, shuffle,
+  history, playlist start and pause-when-covered live in the player; under `liascape-player` the backend's
+  `timer-daemon`, `restart-daemon`, `pending_action.txt` and timer pid files are never used (the legacy engine
+  keeps them until Phase 5). **Still the backend's:** auto-mute. The in-player Signal (per-stream metering, the
+  player's own bus excluded by *ownership*, ≤ 100 ms) is built behind `LIASCAPE_PLAYER_AUTOMUTE=1`; `AudioMonitor` +
+  `monitor-daemon` stay until it passes its parity bar on the owner's machine (plan Task 14).
 - **Per-monitor is a player capability, not a user-facing feature yet.** The graph already
   supports independent per-output content (`out:<connector>`, its own main layer) and this is
   provable today via `ctl`/headless tests; nothing in the Electron UI exposes assigning different
