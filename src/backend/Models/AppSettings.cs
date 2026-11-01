@@ -54,6 +54,7 @@ public class AppSettings
     public string ThumbnailAspect { get; set; } = "1:1";
     public string CardSize { get; set; } = "Medium";
     public bool AutoPlayGifs { get; set; } = false;
+    public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
     public bool AdvancedSettings { get; set; } = false;      // UI: reveal power-user settings rows
     public bool LiveWallpaperBehindAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics

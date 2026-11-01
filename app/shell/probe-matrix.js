@@ -1606,6 +1606,93 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
+// --- Settings → Appearance → "Glow effects" / "Morph animations" / "Autoplay video thumbnails": UI-only toggles. Each cell
+// turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
+// there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
+const GLOW_JS = String.raw`window.__glow = {
+  // does a computed box-shadow / filter value hold a coloured, blurred glow? (black shadows are depth, not glow)
+  glowy(v) {
+    if (!v || v === "none") return false;
+    const shadows = [];
+    if (v.includes("drop-shadow(")) for (const m of v.matchAll(/drop-shadow\(((?:[^()]|\([^()]*\))*)\)/g)) shadows.push(m[1]);
+    else { let d = 0, cur = ""; for (const ch of v) { if (ch === "(") d++; if (ch === ")") d--; if (ch === "," && d === 0) { shadows.push(cur); cur = ""; } else cur += ch; } shadows.push(cur); }
+    return shadows.some((x) => {
+      x = x.trim();
+      const col = (x.match(/^(rgba?\([^)]*\)|color\([^)]*\)|\w+)/) || [""])[0];
+      const nums = [...x.slice(col.length).matchAll(/(-?[\d.]+)px/g)].map((m) => +m[1]);
+      const ch = (col.match(/[\d.]+/g) || []).map(Number);
+      const unit = col.startsWith("color(") ? 0.16 : 40;
+      const alpha = col.startsWith("color(") ? (ch.length > 3 ? ch[3] : 1) : (col.startsWith("rgba") && ch.length > 3 ? ch[3] : 1);
+      return (nums[2] || 0) > 0 && alpha > 0.02 && ch.slice(0, 3).some((n) => n >= unit);
+    });
+  },
+};
+true`;
+// each measure: the element (an expression), what to read, and whether the mouse has to be over it
+const GLOW_SPECS = [
+  { name: "active tab", tab: "Library", el: `document.querySelector(".tab.active")`, read: "boxShadow" },
+  { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
+  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
+  { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
+  { name: "hovered card's playlist toggle", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing) .pl-toggle")`, read: "filter" },
+  { name: "hovered playlist-bar item", tab: "Library", hover: true, el: `document.querySelector(".pl-item:not(.playing)")`, read: "layer" },
+  { name: "settings section edge", tab: "Settings", el: `document.querySelector(".ssection")`, read: "boxShadow", pseudo: "::before" },
+  { name: "settings section icon", tab: "Settings", el: `document.querySelector(".ssection-ico")`, read: "boxShadow" },
+  { name: "settings corner pools", tab: "Settings", el: `document.querySelector(".settings")`, read: "gradient" },
+  { name: "hovered settings row bar", tab: "Settings", hover: true, el: `document.querySelectorAll(".settings .srow")[2]`, read: "boxShadow", pseudo: "::before" },
+  { name: "hovered settings checkbox", tab: "Settings", hover: true, el: `document.querySelector(".settings input[type=checkbox]")`, read: "filter" },
+];
+async function glowLook(c) {
+  await js(GLOW_JS);
+  const send = (e) => win.webContents.sendInputEvent(e);
+  const out = {};
+  for (const tab of ["Library", "Settings"]) {
+    await ui(`m.tab(${JSON.stringify(tab)}); await m.sleep(450);`);
+    for (const sp of GLOW_SPECS.filter((x) => x.tab === tab)) {
+      if (sp.hover) {
+        const r = await ui(`const e = ${sp.el}; if (!e) return null; e.scrollIntoView({ block: "center" }); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+        if (!r) { out[sp.name] = "missing"; continue; }
+        send({ type: "mouseMove", x: r.x - 3, y: r.y }); await sleep(60); send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(450);
+      }
+      out[sp.name] = await ui(`const e = ${sp.el}; if (!e) return "missing"; const cs = getComputedStyle(e, ${JSON.stringify(sp.pseudo ?? null)});
+        ${sp.read === "animation" ? `return cs.animationName !== "none";`
+          : sp.read === "layer" ? `return document.querySelectorAll(".pl-hover-glow").length > 0;`
+          : sp.read === "gradient" ? `return cs.backgroundImage.includes("radial-gradient");`
+          : `return window.__glow.glowy(cs.${sp.read});`}`);
+      if (sp.hover) { send({ type: "mouseMove", x: 700, y: 4 }); await sleep(120); }
+    }
+  }
+  out.rootClass = await ui(`return document.documentElement.classList.contains("no-glow");`);
+  return out;
+}
+const glowing = (look) => Object.entries(look).filter(([k, v]) => k !== "rootClass" && v === true).map(([k]) => k);
+const glowless = (look) => Object.entries(look).filter(([k, v]) => k !== "rootClass" && v === false).map(([k]) => k);
+C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
+    c.on = await glowLook(c);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Glow effects"), false, "Glow effects"); await m.sleep(500);`);
+    c.savedOff = await waitFor(async () => (await getSettings()).glows === false, 4000, 100);
+    c.off = await glowLook(c);
+    await loadUi(); await sleep(400);
+    c.reloaded = await glowLook(c);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Glow effects"), true, "Glow effects"); await m.sleep(500);`);
+    c.savedOn = await waitFor(async () => (await getSettings()).glows === true, 4000, 100);
+    c.back = await glowLook(c);
+  }, check(c) {
+    const v = [];
+    const missing = Object.entries(c.on).filter(([, x]) => x === "missing").map(([k]) => k);
+    if (missing.length) v.push(`probe: no element for ${missing.join(", ")}`);
+    const idle = GLOW_SPECS.map((x) => x.name).filter((n) => c.on[n] === false);
+    if (idle.length) v.push(`glows on (the default): no glow on ${idle.join(", ")}`);
+    if (c.on.rootClass) v.push("glows on: <html> has no-glow");
+    if (!c.savedOff) v.push("turning Glow effects off wasn't saved (glows !== false)");
+    if (glowing(c.off).length) v.push(`glows off: still glowing: ${glowing(c.off).join(", ")}`);
+    if (!c.off.rootClass) v.push("glows off: <html> lacks no-glow");
+    if (glowing(c.reloaded).length || !c.reloaded.rootClass) v.push(`glows off, page reloaded: still glowing: ${glowing(c.reloaded).join(", ")}${c.reloaded.rootClass ? "" : " (no no-glow class)"}`);
+    if (!c.savedOn) v.push("turning Glow effects back on wasn't saved");
+    if (glowless(c.back).length || c.back.rootClass) v.push(`glows back on: no glow on ${glowless(c.back).join(", ")}${c.back.rootClass ? " (no-glow still set)" : ""}`);
+    return v;
+  } };
+
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
 // parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.
@@ -3296,6 +3383,7 @@ const FUZZ_RULES = [
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
   [/^(cover:|prog:|plStart:|parked:|expert:|cli:next:backendDown$)/, { exclude: "Phase 3 Task 11: the cover Signal's fake source, a program held by a pause, the start choice, outputs removed, the expert tier or a backend down — their own fixtures" }],
+  [/^appear:(glows|morphs|videoThumbs)$/, { exclude: "real mouse hovers + a reload of the page, and they leave the page's look toggled" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],

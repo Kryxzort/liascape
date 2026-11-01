@@ -400,6 +400,7 @@ export const Settings = memo(function Settings() {
           <Select value={g("cardSize", "Medium")} onChange={(v) => set("cardSize", v)}
             options={["Small", "Medium", "Large"].map((x) => ({ value: x, label: x }))} />
         </Row>
+        <Row label="Glow effects" hint="the accent glows on hover, active and playing items, the pulses and the Settings backdrop — off keeps every state readable, minus the glow" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
         <Row label="Autoplay GIF thumbnails" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
       </Section>
 

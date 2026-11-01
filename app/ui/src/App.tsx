@@ -121,6 +121,12 @@ export default function App() {
     document.documentElement.classList.toggle("bg-live", !!s.settings?.liveWallpaperBehindAllTabs);
   }, [s.settings?.liveWallpaperBehindAllTabs]);
 
+  // Settings → Appearance → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
+  // the class is set only once the saved settings say `false`)
+  useEffect(() => {
+    document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
+  }, [s.settings?.glows]);
+
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] as (File & { path?: string }) | undefined;

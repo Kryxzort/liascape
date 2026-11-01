@@ -25,6 +25,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const openCardSettings = useStore((s) => s.openCardSettings);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
+  const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState(false);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
@@ -54,7 +55,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {glow && !playing && !isDragging && !lifted && createPortal(
+      {glow && glows && !playing && !isDragging && !lifted && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
