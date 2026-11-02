@@ -226,8 +226,8 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.cover.source != "unavailable" {
         caps.push("cover");
     }
-    // Phase 3 Task 14: the in-player auto-mute Signal runs here (`LIASCAPE_PLAYER_AUTOMUTE=1`
-    // and the audio bus up); without it the backend keeps `AudioMonitor`.
+    // Phase 3 Task 14: the in-player auto-mute Signal runs here (on unless
+    // `LIASCAPE_PLAYER_AUTOMUTE=0`, and the audio bus up); without it the backend keeps `AudioMonitor`.
     if rt.automute_capable() {
         caps.push("automute");
     }
@@ -260,6 +260,7 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
             "hwdec_interop": hwdec,
             "scenes": crate::health::scenes_json(rt.scenes_available()),
             "cover": rt.cover.health(),
+            "automute": crate::health::automute_json(rt.automute.env, rt.automute_capable()),
         },
     }))
 }

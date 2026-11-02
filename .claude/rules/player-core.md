@@ -30,9 +30,11 @@ happen regardless of timing.
   none / empty / unloadable → every switch is a cut), `vram` (one sample of `vram::probe_from_env` — none →
   the VRAM limit and low-VRAM rule can't act; run once at serve start on the `lia-health` thread, `hello`
   never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
-  none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`), and in `hello.health` only `cover`
-  (`{ok, reason, source}` — the covered Signal's source, § Signals). `hello.health` carries all five;
-  `liascape-player health` prints `{effects, vram}` (no render worker without a GL context) for when no player runs —
+  none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`), `automute` (the auto-mute Signal's
+  capability: `LIASCAPE_PLAYER_AUTOMUTE=0` or the audio bus down → false with the reason), and in `hello.health` only
+  `cover` (`{ok, reason, source}` — the covered Signal's source, § Signals). `hello.health` carries all six;
+  `liascape-player health` prints `{effects, vram, automute}` (no render worker without a GL context; `automute` knows
+  only the env gate: `ok: null` when on) for when no player runs —
   the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
@@ -51,8 +53,8 @@ happen regardless of timing.
 - `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
 - `src/signal/` — Signals (Phase 3): `covered.rs` (the pure cover rules per source + the hold's
   debounce), `hypr.rs` / `sway.rs` (the IPC cover sources on `lia-cover`), `mod.rs` (the feed, source
-  choice, the runtime's `cover_tick`, the `cover` probe); `automute.rs` (the in-player auto-mute, behind
-  `LIASCAPE_PLAYER_AUTOMUTE=1`: the rule, `automute_tick`, the `automute` probe) + `mpris.rs`
+  choice, the runtime's `cover_tick`, the `cover` probe); `automute.rs` (the in-player auto-mute, on unless
+  `LIASCAPE_PLAYER_AUTOMUTE=0`: the rule, `automute_tick`, the `automute` probe) + `mpris.rs`
   (`lia-mpris`, zbus). § Signals.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
   `handlers.rs` (the verbs), `capture.rs` (`capture`'s readback + encode off the loop). `src/ctl.rs` — the shell client. `src/paths.rs` — socket
@@ -1961,10 +1963,12 @@ can read them later, and one built-in rule uses the first.
   `cover_hold_freezes_a_program`.
 
 **Auto-mute** (Task 14, `signal/automute.rs` + `signal/mpris.rs` + `audio/foreign.rs` + `audio/sysmon.rs`;
-spec §4.4). **Behind `LIASCAPE_PLAYER_AUTOMUTE=1`** until it passes the plan's parity bar against the
-backend's `AudioMonitor` (which stays the engine meanwhile; the backend's side, `AudioMonitor.AutoMuteInPlayer`
-behind its parity flag, off: player-adapter.md § Auto-mute). Without the env var nothing runs:
-no thread, no capability, the props are inert.
+spec §4.4). **The shipped auto-mute under liascape-player** since it passed the plan's parity bar against the
+backend's `AudioMonitor` on the owner's machine (2026-11-02, `docs/player/reports/phase3.md` § 7; the backend's side,
+`AudioMonitor.AutoMuteInPlayer`: player-adapter.md § Auto-mute). **On by default**; `LIASCAPE_PLAYER_AUTOMUTE=0` is
+the escape hatch (`signal::automute::enabled_for`: unset or anything but `0` = on): then nothing runs — no thread,
+no capability, the props are inert, `hello.health.automute` false — and the backend's `AudioMonitor` mutes while
+the app is open. With the setting off (`player.automute` false) the Signal costs nothing: no capture, no `lia-mpris`.
 - **Props** (Player, live, kept by the snapshot): `automute` (false), `automute_delay_ms` (**500**),
   `autounmute_delay_ms` (2000), `automute_min_level_db` (−70, a 10 ms slice's peak dBFS),
   `automute_only_if_mpris` (false); observed `automute_active`. Capability `automute` = the env gate and

@@ -209,6 +209,7 @@ fn main() -> ExitCode {
             let out = serde_json::json!({
                 "effects": liascape_player::health::effects_here(),
                 "vram": liascape_player::health::vram_here(),
+                "automute": liascape_player::health::automute_here(),
             });
             println!("{out}");
             ExitCode::SUCCESS

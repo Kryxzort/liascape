@@ -231,8 +231,8 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "cover_hold_active",
                 def(PropType::Bool, true, PropValue::Bool(false)),
             ),
-            // Phase 3 Task 14, the in-player auto-mute (`crate::signal::automute`; runs only with
-            // `LIASCAPE_PLAYER_AUTOMUTE=1`): foreign audio continuously present for
+            // Phase 3 Task 14, the in-player auto-mute (`crate::signal::automute`; off only with
+            // `LIASCAPE_PLAYER_AUTOMUTE=0`): foreign audio continuously present for
             // `automute_delay_ms` mutes every source (`gain.automute`), silence for
             // `autounmute_delay_ms` unmutes. A slice counts above `automute_min_level_db` (peak
             // dBFS). `automute_only_if_mpris`: only a Playing MPRIS player's own streams count.

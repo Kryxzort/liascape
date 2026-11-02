@@ -1,6 +1,8 @@
-//! The in-player **auto-mute** Signal (Phase 3 Task 14, spec §4.4) — behind
-//! `LIASCAPE_PLAYER_AUTOMUTE=1` until it passes its parity bar against the backend's
-//! `AudioMonitor` (plan Task 14; `docs/TODO.md` records which criterion is open).
+//! The in-player **auto-mute** Signal (Phase 3 Task 14, spec §4.4) — the shipped auto-mute
+//! under `liascape-player` since it passed its parity bar against the backend's `AudioMonitor`
+//! (plan Task 14, on the owner's machine 2026-11-02). On by default; `LIASCAPE_PLAYER_AUTOMUTE=0`
+//! turns it off (no thread, no `automute` capability — the backend's `AudioMonitor` then keeps the
+//! job while the app is open).
 //!
 //! - **Input:** `audio::sysmon`'s per-stream captures (one per application playback stream, on
 //!   PipeWire's RT thread, metered in 10 ms slices as each buffer arrives) and the verdicts
@@ -46,7 +48,7 @@ use crate::recipes::transition::ANTICLICK;
 use crate::runtime::Runtime;
 use crate::units::{SILENT_DB, db_to_lin};
 
-/// The env gate (`1` = the Signal runs; anything else = it never starts).
+/// The env gate: the Signal runs unless it is `0` (the escape hatch; tests that need it off).
 pub const ENV: &str = "LIASCAPE_PLAYER_AUTOMUTE";
 /// The probe's `audible`: a last audible slice this recent (the gap rule + a 1024-frame buffer
 /// and some margin). The rule itself uses the run gap + the measured buffer period.
@@ -57,7 +59,12 @@ pub const DEFAULT_BUF_NS: i64 = 21_333_333;
 const DECISIONS: usize = 32;
 
 pub fn env_enabled() -> bool {
-    std::env::var(ENV).as_deref() == Ok("1")
+    enabled_for(std::env::var(ENV).ok().as_deref())
+}
+
+/// [`ENV`]'s value → on: unset or anything but `0`.
+pub fn enabled_for(v: Option<&str>) -> bool {
+    v != Some("0")
 }
 
 /// The player props it reads (`player.automute*`).
@@ -670,6 +677,16 @@ fn unix_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_signal_is_on_unless_the_env_says_0() {
+        use super::enabled_for;
+        assert!(enabled_for(None), "unset = on (shipped default)");
+        assert!(enabled_for(Some("1")));
+        assert!(enabled_for(Some("")));
+        assert!(enabled_for(Some("yes")));
+        assert!(!enabled_for(Some("0")), "0 = the escape hatch");
+    }
+
     use super::*;
 
     const MS: i64 = 1_000_000;

@@ -568,8 +568,8 @@ pub struct Runtime {
     pub(crate) vram: VramState,
     /// Phase 3 Task 6: the covered Signal and the cover hold (`crate::signal`).
     pub(crate) cover: crate::signal::CoverRt,
-    /// Phase 3 Task 14: the in-player auto-mute Signal (`crate::signal::automute`; behind
-    /// `LIASCAPE_PLAYER_AUTOMUTE=1`).
+    /// Phase 3 Task 14: the in-player auto-mute Signal (`crate::signal::automute`; on unless
+    /// `LIASCAPE_PLAYER_AUTOMUTE=0`).
     pub(crate) automute: crate::signal::automute::AutoMuteRt,
 }
 

@@ -2,7 +2,7 @@
 //! PipeWire + WirePlumber (`common::pw`; the owner's audio is never touched) with a second null
 //! sink, `foreign-sink`, that every "foreign" test stream plays to (synthetic tones, `pw-cat`).
 //! The player runs `serve --headless --clock real --ao pipewire` with
-//! `LIASCAPE_PLAYER_AUTOMUTE=1`; its wallpaper plays a −20 dBFS tone on the bus, which forwards
+//! `LIASCAPE_PLAYER_AUTOMUTE=1` (the default; set explicitly); its wallpaper plays a −20 dBFS tone on the bus, which forwards
 //! to `hermetic-sink`.
 //!
 //! `measure_automute_latency` (ignored; `scripts/measure-automute-latency.py` runs it) times
@@ -1050,9 +1050,26 @@ fn automute_hears_a_pulse_client() {
     let _ = pulse.wait();
 }
 
+/// The shipped default: no `LIASCAPE_PLAYER_AUTOMUTE` at all → the Signal runs (the bus is up).
 #[test]
-fn automute_absent_without_the_env_gate() {
+fn automute_on_by_default() {
     let Some(rig) = Rig::start(&[]) else {
+        return;
+    };
+    let mut c = rig.client();
+    wallpaper(&mut c, RED_10S, "am_red_10s");
+    let caps = c.ok("hello", json!({}))["capabilities"].clone();
+    assert!(caps.as_array().unwrap().contains(&json!("automute")), "{caps}");
+    assert_eq!(c.probe()["env"], json!(true));
+    let h = c.ok("hello", json!({}))["health"]["automute"].clone();
+    assert_eq!(h["ok"], json!(true), "hello.health.automute: {h}");
+}
+
+/// The escape hatch: `LIASCAPE_PLAYER_AUTOMUTE=0` → no thread, no capability (the backend keeps
+/// `AudioMonitor`, criterion 10).
+#[test]
+fn automute_absent_with_the_env_gate_off() {
+    let Some(rig) = Rig::start(&[("LIASCAPE_PLAYER_AUTOMUTE", "0")]) else {
         return;
     };
     let mut c = rig.client();
@@ -1060,6 +1077,9 @@ fn automute_absent_without_the_env_gate() {
     let caps = c.ok("hello", json!({}))["capabilities"].clone();
     assert!(!caps.as_array().unwrap().contains(&json!("automute")), "{caps}");
     assert_eq!(c.probe()["env"], json!(false));
+    let h = c.ok("hello", json!({}))["health"]["automute"].clone();
+    assert_eq!(h["ok"], json!(false), "hello.health.automute: {h}");
+    assert!(h["reason"].as_str().unwrap_or("").contains("LIASCAPE_PLAYER_AUTOMUTE=0"), "{h}");
 }
 
 /// Criterion 10: no bus → no capability, so the backend keeps `AudioMonitor`.
@@ -1075,6 +1095,9 @@ fn automute_absent_with_the_bus_down() {
     let caps = c.ok("hello", json!({}))["capabilities"].clone();
     assert!(!caps.as_array().unwrap().contains(&json!("automute")), "{caps}");
     assert_eq!(c.probe()["env"], json!(true));
+    let h = c.ok("hello", json!({}))["health"]["automute"].clone();
+    assert_eq!(h["ok"], json!(false), "hello.health.automute: {h}");
+    assert!(h["reason"].as_str().unwrap_or("").contains("audio bus"), "{h}");
 }
 
 // ---------------------------------------------------------------- measurement

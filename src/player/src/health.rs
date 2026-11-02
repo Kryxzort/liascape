@@ -9,6 +9,10 @@
 //! - `hwdec_interop` — the render worker's GL interop for hardware-decoded frames (running player only):
 //!   none → hardware decoding copies every frame through the CPU.
 //! - `scenes` — the `scene` capability's rule (`Runtime::scenes_available` / `scene-check`).
+//! - `automute` — the `automute` capability (the in-player auto-mute Signal): its env gate
+//!   (`LIASCAPE_PLAYER_AUTOMUTE=0` turns it off) and the audio bus up. Without it the backend's
+//!   `AudioMonitor` mutes only while the app is open. `liascape-player health` knows only the gate
+//!   (`ok: null` when on: the bus is known once a player runs).
 //!
 //! `hello.health` carries them for a running player; `liascape-player health` prints the same (minus the
 //! interop, which needs the render worker's GL context) when none runs.
@@ -86,6 +90,26 @@ pub fn hwdec_json(has_worker: bool, interop: Option<&str>) -> Value {
     }
 }
 
+/// `automute` from the env gate and whether the audio bus is up.
+pub fn automute_json(env: bool, bus_up: bool) -> Value {
+    match (env, bus_up) {
+        (false, _) => json!({ "ok": false,
+            "reason": "LIASCAPE_PLAYER_AUTOMUTE=0 — the in-player auto-mute is off" }),
+        (true, true) => json!({ "ok": true, "reason": null }),
+        (true, false) => json!({ "ok": false,
+            "reason": "the player's audio bus is down (no PipeWire / session manager reachable, or --ao null) — no in-player auto-mute" }),
+    }
+}
+
+/// `automute` for `liascape-player health` (no player running): the env gate only.
+pub fn automute_here() -> Value {
+    if crate::signal::automute::env_enabled() {
+        json!({ "ok": null, "reason": null })
+    } else {
+        automute_json(false, false)
+    }
+}
+
 /// `scenes` from the scene rule's outcome.
 pub fn scenes_json(r: Result<(), String>) -> Value {
     match r {
@@ -121,6 +145,17 @@ mod tests {
         assert_eq!(hwdec_json(true, Some("cuda"))["ok"], true);
         assert_eq!(hwdec_json(true, None)["ok"], false);
         assert!(hwdec_json(false, None)["ok"].is_null());
+    }
+
+    #[test]
+    fn automute_cases() {
+        assert_eq!(automute_json(true, true)["ok"], true);
+        let off = automute_json(false, true);
+        assert_eq!(off["ok"], false);
+        assert!(off["reason"].as_str().unwrap().contains("LIASCAPE_PLAYER_AUTOMUTE=0"), "{off}");
+        let down = automute_json(true, false);
+        assert_eq!(down["ok"], false);
+        assert!(down["reason"].as_str().unwrap().contains("audio bus"), "{down}");
     }
 
     #[test]
