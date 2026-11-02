@@ -770,6 +770,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         restore sets. Not reproduced in a 4 min re-run once the trip got its own log line (`no reply to …
         (waited …; gen2 GCs …, thread-pool queue …)`) and the `loop` probe got `max_request_ms/cmd` (handler
         time used to be outside `max_busy_ms`). Next trip: read that line first.
+        **Re-run 2026-11-03 03:59–04:25** (`speedstorm.py`, drag 540 s / global 540 s / flood 420 s, live, 315
+        items): **no trip** (no `no reply to` line) — not reproduced in 25 min either. But the command queue hit its
+        256 cap twice (04:08:45 at the drag → global edge, 04:24:57 in the 50/s flood) and dropped one queued
+        command each time, despite the per-key coalescing — so ≥ 256 non-coalesced commands were pending: find
+        which (switches/barriers from `/next` every 8 s? keys that differ per value?) before trusting the cap.
   - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
         — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one
