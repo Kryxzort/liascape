@@ -800,12 +800,12 @@ public static class LiascapePlayerProgram {
 - [x] **Step 4 — cover:** a fullscreen game-like window (kitty fullscreen, then a real fullscreen app if one is installed) over both outputs → paused ≤ 450 ms (owner's call 2026-11-02, was 350), `probe sources` all paused, CPU/GPU of the compositor drop; a rotation does not advance meanwhile; uncover → resumes. One output covered → keeps playing. Default settings (no `PauseWhenCovered` key) pause on a maximized window too (O1).
 - [x] **Step 4b — no monitor:** both outputs disabled (`hyprctl keyword monitor DP-1,disable`, then DP-2; re-enabled after) during a timer rotation → it keeps rotating invisibly (one `transition.scheduled {parked: true}` per interval) and the last target shows on re-enable; with the Expert "Hold until a monitor returns" → nothing switches, and the same item resumes.
 - [x] **Step 5 — soak:** 2 h of a mixed program (videos, images, SFW scenes; timer 30 s; methods rotating) with the app closed. Expected: compositor RSS slope ≤ 0.5 MiB/min, worker count ≤ 2 + dying, VRAM flat ± 10 %, `programs` probe bounded (history ≤ 100). (The §11 8 h soak stays the switch-over bar's.)
-- [ ] **Step 6 — owner-run checklist** (documented, not automated): a cold boot via `claude-reboot` (tell the owner first) with a timer program → restored at its item and rotating, before and without opening the app; a suspend/resume during a timer rotation → no catch-up switch (Review Focus 5); a VT switch.
+- [x] **Step 6 — owner-run checklist** (documented, not automated): a cold boot via `claude-reboot` (tell the owner first) with a timer program → restored at its item and rotating, before and without opening the app; a suspend/resume during a timer rotation → no catch-up switch (Review Focus 5); a VT switch.
 - [x] **Step 7:** Write `docs/player/reports/phase3.md` (every number, RED→GREEN for anything fixed). File each product finding as a follow-up in `docs/TODO.md`. Commit `Report Phase 3 On-Machine Battery`.
 
 **Size: L.**
 
-> **Done 2026-11-02:** `docs/player/reports/phase3.md` (`programs.sh`, results in `results/phase3-night/`). Steps 2, 3, 4b, 5 pass; step 4b found and fixed Hyprland's `FALLBACK` output counting as an output. Open with the owner: F1 (`frozen` onsets 2–5 ms late), F2 (cover 374–401 ms against 350), F3 (what "1 frame" means). Step 6 is the owner's and has not run.
+> **Done 2026-11-02:** `docs/player/reports/phase3.md` (`programs.sh`, results in `results/phase3-night/`). Steps 2, 3, 4b, 5 pass; step 4b found and fixed Hyprland's `FALLBACK` output counting as an output. Open with the owner: F1 (`frozen` onsets 2–5 ms late), F2 (cover 374–401 ms against 350), F3 (what "1 frame" means). Step 6 ran 2026-11-02 on the owner's session: cold boot, suspend and VT switch PASS (`phase3.md` §6; F7 found and fixed).
 
 ### Task 13: Docs sweep
 
