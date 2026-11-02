@@ -568,12 +568,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       switch 0.7 → 0.3 ms, first frame 330 → 326 ms, A's longest frame interval 34.8 → 34.3 ms; +60 MiB VRAM per
       source. `LIASCAPE_PLAYER_HWDEC_INTEROP=off` = the old behaviour. Vulkan stays copy (no GL interop; the
       X-less driver lock is process-wide).
-- [ ] **8 h soak: does glibc's free heap plateau?** The final 1 h live soak (Task 20, `phase1.md` § 4)
+- [x] **8 h soak: does glibc's free heap plateau?** The final 1 h live soak (Task 20, `phase1.md` § 4)
       passed on RSS (0.31 MiB/min) but malloc's free bytes — already trimmed, not resident — grew ~4.1 MiB/min
       (arena address space +4.6 MiB/min, ~5.7 MiB per switch). Costs no RAM; the reaper's `malloc_trim` walks it
       (1.7 ms max now). Run `battery.sh soak --minutes 480`; if it doesn't plateau, consider fewer per-core
       threads or reusing cores across switches (the Lua scripts are gone since — 6 fewer threads and their
       Lua VMs per core; re-measure the free-heap growth first).
+      **Answered 2026-11-03 — it plateaus** (`battery.sh soak --hermetic --minutes 420`, release; the PC crashed at
+      ~01:10 for an unrelated reason, so 94 min / 95 samples, results `results/20261102T235106-soak-hermetic/`):
+      malloc free bytes −0.03 MiB/min over min 5–95 (38.4 → 40.1 MiB, flat both halves; was +4.1 MiB/min),
+      arena +0.04 MiB/min (100 → 107 MiB, 30 arenas), in use +0.07, RSS −0.5 (wobbling 300–545), VRAM back to its
+      start (524 MiB). The Lua scripts' removal is the likely reason. No change needed; an 8 h run would only
+      confirm.
 - [ ] **Explicit sync back on NVIDIA once egl-wayland2 > 1.0.2 ships** — Task 20e: 1.0.2 leaks one queued
       `wl_buffer.release` (~224 B) per present with explicit sync (upstream fix 6235dd8, 2026-09-09, unreleased),
       so `serve` defaults `__NV_DISABLE_EXPLICIT_SYNC=1` (cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, loop tick
