@@ -187,3 +187,10 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   frees now happen off the player's loop, imports are documented as a driver limit. 3 full suites green.
 - **Phase 2 VT/suspend check done** (your player off ~3 min): a scene through a VT switch, a suspend and two suspends
   within a minute — no restart, never broken, PASS 12/12. The machine suspended 3 times around 23:48.
+- **Health panel:** it now reports the player's PipeWire audio bus (down = a warning; audio then falls back to mpv's
+  default device), and the playlist modal's Transitions field shows the same warning icon as Settings. IT 404/0.
+- **Scenes, batch B2 (scene-engine fork patches 0022–0023, pin `ccb545d`, pushed to your fork):** layer alpha/colour
+  reach the shader live and keyframe animations play (179 animated values in 26 scenes). Corpus ok 92 → 93, nothing
+  newly broken; e.g. Kimi's clouds now blend instead of drawing as opaque puffs. Your player runs it. B3 (particles)
+  is in progress.
+- A 7 h headless soak (glibc free-heap question) runs until ~07:00.
