@@ -1,0 +1,47 @@
+From 4c75eae22d7e608687f92f8f5a62d0441e287e02 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 01:06:33 +0530
+Subject: [PATCH 28/28] render: sprite-sheet particles cross-fade their frames
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CParticle never set SPRITESHEETBLEND, so sheet animations (fire, smoke,
+sparkles) stepped from frame to frame. WE 2.8.485 sets it unless the
+particle flags have bit 1 or `animationmode` is randomframe
+(GH 0x1401fffb0), and genericparticle.frag then mixes the current and next
+frame by frac(lifetime · frames), which the frame encoding here already
+provides.
+
+Not done: SPRITESHEETBLENDNPOT (a padded sheet, 6 sheets in the owner's
+library). Its shader path needs g_Texture0Resolution.z to be the sheet's
+unpadded width, and an animated texture's is its frame width in LWE; the
+frame size in g_RenderVar1 would change with it.
+
+Origin: ours
+Why: sprite-sheet particles stepped instead of cross-fading in 33 of the owner's scenes (docs/player/spikes/we-lwe-gap-audit.md B3: P8)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8YtBieDNWXo3bvfKaP
+---
+ src/core/WallpaperEngine/Render/Objects/CParticle.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 082219a..2646e54 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -1818,6 +1818,13 @@ void CParticle::setupPass () {
+     }
+     if (m_spritesheetFrames > 0) {
+ 	m_passOverride->combos["SPRITESHEET"] = 1;
++	// WE cross-fades a sheet's current and next frame (genericparticle.frag) unless the particle flags have
++	// bit 1 or the frames are random (GH 0x1401fffb0); the frames stepped. SPRITESHEETBLENDNPOT (a padded
++	// sheet) is left off: it needs g_Texture0Resolution.z to be the sheet's unpadded width, and an animated
++	// texture's is its frame width here
++	if ((m_particle.flags & 2) == 0 && m_particle.animationMode != "randomframe") {
++	    m_passOverride->combos["SPRITESHEETBLEND"] = 1;
++	}
+     }
+     if (m_useTrailRenderer) {
+ 	m_passOverride->combos["TRAILRENDERER"] = 1;

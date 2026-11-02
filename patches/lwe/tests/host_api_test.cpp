@@ -881,6 +881,8 @@ struct ScriptRig {
     unsigned int fbo = 0;
     int frames = 0;
     std::string dir;
+    /** more files under `dir` to delete (B3's particle JSON and materials) */
+    std::vector<std::string> extra;
 
     bool open (const std::string& sceneDir) {
         dir = sceneDir;
@@ -947,6 +949,10 @@ struct ScriptRig {
             wp_config_destroy (cfg);
         }
         if (!dir.empty ()) {
+            for (const auto& f : extra) {
+                unlink ((dir + "/" + f).c_str ());
+            }
+            rmdir ((dir + "/particles").c_str ());
             unlink ((dir + "/project.json").c_str ());
             unlink ((dir + "/scene.json").c_str ());
             for (const char* sub : { "shaders", "materials", "models" }) {
@@ -1219,6 +1225,252 @@ static bool keyframes_move_origin () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// B3 (docs/player/spikes/we-lwe-gap-audit.md: P1, P3–P7, P38): particle maths. Particles are drawn by WE's own
+// genericparticle shader with util/white, in the 64x32 scene of the script tests on a black or green clear.
+
+// a particle material (WE's genericparticle, white texture) with the given blending
+static std::string particle_material (const char* blending) {
+    return std::string ("{\"passes\":[{\"shader\":\"genericparticle\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\",")
+         + "\"blending\":\"" + blending + "\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+}
+
+// a scene of particle objects; `systems` are (file name under particles/, its JSON). Materials: materials/add.json
+// (additive) and materials/opaque.json (translucent; the particles' alpha is 1, so they replace what's below)
+static std::string particle_scene (const std::string& objects, const char* clear,
+                                   const std::vector<std::pair<std::string, std::string>>& systems,
+                                   std::vector<std::string>& files) {
+    std::string dir = script_scene (objects);
+    if (dir.empty ()) {
+        return dir;
+    }
+    std::string scene = read_file (dir + "/scene.json");
+    const std::string from = "\"clearcolor\":\"0 0 0.5\"";
+    scene.replace (scene.find (from), from.size (), std::string ("\"clearcolor\":\"") + clear + "\"");
+    write_file (dir + "/scene.json", scene);
+    mkdir ((dir + "/particles").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/materials/add.json", particle_material ("additive"));
+    write_file (dir + "/materials/opaque.json", particle_material ("translucent"));
+    files = { "materials/add.json", "materials/opaque.json" };
+    for (const auto& [name, json] : systems) {
+        write_file (dir + "/particles/" + name, json);
+        files.push_back ("particles/" + name);
+    }
+    return dir;
+}
+
+// a particle object at (x, y) of the scene (top-left origin), with an optional instanceoverride body
+static std::string particle_object (int id, const std::string& file, int x, int y, const std::string& overrides = "") {
+    std::string o = "{\"id\":" + std::to_string (id) + ",\"name\":\"ps" + std::to_string (id) + "\",\"particle\":\"particles/"
+                  + file + "\",\"origin\":\"" + std::to_string (x) + " " + std::to_string (y) + " 0\",\"scale\":\"1 1 1\","
+                  + "\"angles\":\"0 0 0\"";
+    if (!overrides.empty ()) {
+        o += ",\"instanceoverride\":{" + overrides + "}";
+    }
+    return o + "}";
+}
+
+// a system: one sphererandom emitter (`emitter` = its extra members), `initializers` after a fixed size
+static std::string particle_system (const char* material, const std::string& top, const std::string& emitter,
+                                    const std::string& initializers) {
+    return std::string ("{\"material\":\"materials/") + material + ".json\"" + top
+         + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\"" + emitter + "}],"
+         + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":12,\"max\":12}," + initializers + "]}\n";
+}
+
+static bool particle_rig_open (ScriptRig& rig, const std::string& dir, const std::vector<std::string>& files) {
+    rig.extra = files;
+    return rig.open (dir);
+}
+
+// how many particles are stacked on a pixel: additive particles of colour 8/255 each, on black
+static double stacked (const ScriptRig& rig, int x, int y) {
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, x, y, px);
+    return px[0] / 8.0;
+}
+
+// `count` multiplies the emission rate (unpatched: it scaled the pool, the rate stayed); `rate` scales the whole
+// step, so a half-rate system also ages at half speed (unpatched: it scaled the emission only, particles of 0.6 s
+// lived 0.6 s); `starttime` prewarms the system before its first frame (unpatched: it started empty)
+static bool particle_count_rate_and_prewarm () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // every particle at the system's origin (distance 0), 8/255 grey, additive
+    const std::string grey = "{\"name\":\"colorrandom\",\"min\":\"8 8 8\",\"max\":\"8 8 8\"}";
+    const std::string still = ",\"distancemin\":0,\"distancemax\":0,\"rate\":10";
+    const std::string longLived = particle_system ("add", ",\"maxcount\":100", still,
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    const std::string shortLived = particle_system ("add", ",\"maxcount\":100", still,
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":0.6,\"max\":0.6}");
+    const std::string prewarmed = particle_system ("add", ",\"maxcount\":100,\"starttime\":1", still,
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "long.json", 8, 16) + "," + particle_object (2, "long.json", 24, 16, "\"count\":2")
+            + "," + particle_object (3, "short.json", 40, 16, "\"rate\":0.5") + "," + particle_object (4, "warm.json", 56, 16),
+        "0 0 0", { { "long.json", longLived }, { "short.json", shortLived }, { "warm.json", prewarmed } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    rig.step (); // open() drew its first frame elsewhere; this one is 1/30 s in (0.3 of a particle emitted)
+    const double warm0 = stacked (rig, 56, 16), plain0 = stacked (rig, 8, 16);
+    printf ("    before the first step: prewarmed %.1f particles, plain %.1f\n", warm0, plain0);
+    while (rig.frames < 46) {
+        rig.step ();
+    }
+    const double plain = stacked (rig, 8, 16), counted = stacked (rig, 24, 16), slow = stacked (rig, 40, 16),
+                 warm = stacked (rig, 56, 16);
+    printf ("    after 1.5 s: plain %.1f, count 2 %.1f, rate 0.5 (0.6 s lives) %.1f, prewarmed %.1f\n", plain, counted, slow,
+            warm);
+    // 10/s for 1 s of prewarm (0.05 s steps): ~10; 1.5 s at 10/s: ~15; at 20/s: ~30; at half speed 0.75 s of
+    // simulation, 7 born, those of the last 0.6 simulated s alive: ~6 (at full-speed ageing: 3); prewarm + 1.5 s: ~25
+    CHECK (warm0 >= 8.5 && warm0 <= 11.5, "prewarm: %.1f particles before the first step", warm0);
+    CHECK (plain0 < 0.5, "an unwarmed system has particles before its first step (%.1f)", plain0);
+    CHECK (plain >= 13.5 && plain <= 16.5, "rate 10 for 1.5 s: %.1f", plain);
+    CHECK (counted >= 2 * plain - 2.5 && counted <= 2 * plain + 2.5, "count 2: %.1f against %.1f", counted, plain);
+    CHECK (slow >= 5 && slow <= 7.5, "rate 0.5: %.1f alive", slow);
+    CHECK (warm >= warm0 + plain - 2 && warm <= warm0 + plain + 2, "prewarmed + 1.5 s: %.1f", warm);
+    return true;
+}
+
+// colorrandom draws one t for all three channels, raised to `exponent` (unpatched: a draw per channel, no
+// exponent): every particle of a 0 0 0 → 255 0 255 range has r = b, and with exponent 4 the mean is 1/5 of 255
+static bool particle_colorrandom_one_t () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string sys = particle_system ("opaque", ",\"maxcount\":400",
+        ",\"distancemin\":0,\"distancemax\":15,\"rate\":4000,\"instantaneous\":300",
+        "{\"name\":\"colorrandom\",\"min\":\"0 0 0\",\"max\":\"255 0 255\",\"exponent\":4},"
+        "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    // smaller particles: 2 px
+    std::string small = sys;
+    small.replace (small.find ("\"min\":12,\"max\":12"), 17, "\"min\":4,\"max\":4");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (particle_object (1, "c.json", 32, 16), "0 1 0", { { "c.json", small } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    int covered = 0, off = 0;
+    double sum = 0;
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 64; x++) {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (rig.fbo, x, y, px);
+            if (px[1] > 8) {
+                continue; // the green clear colour
+            }
+            covered++;
+            sum += px[0];
+            if (std::abs (px[0] - px[2]) > 3) {
+                off++;
+            }
+        }
+    }
+    const double mean = covered ? sum / covered : 0;
+    printf ("    %d px covered, %d with r != b, mean r %.1f (uniform: 127.5, exponent 4: 51)\n", covered, off, mean);
+    CHECK (covered > 300, "only %d px covered", covered);
+    CHECK (off * 50 <= covered, "%d of %d px have r != b: the channels are drawn apart", off, covered);
+    CHECK (mean > 35 && mean < 70, "mean r %.1f: the exponent isn't applied", mean);
+    return true;
+}
+
+// colorn shifts the colour initializers in HSV by (colorn − the system's reference colour) (unpatched: an RGB
+// multiply): a red system with colorn blue turns blue (was black); colorn equal to a grey system's own colour
+// leaves it (was grey²); a system without a colour source takes colorn as its colour
+static bool particle_colorn_hsv_shift () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string still = ",\"distancemin\":0,\"distancemax\":0,\"rate\":10";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    const std::string red = particle_system ("opaque", ",\"maxcount\":50", still,
+        "{\"name\":\"colorrandom\",\"min\":\"255 0 0\",\"max\":\"255 0 0\"}," + life);
+    const std::string grey = particle_system ("opaque", ",\"maxcount\":50", still,
+        "{\"name\":\"colorrandom\",\"min\":\"128 128 128\",\"max\":\"128 128 128\"}," + life);
+    const std::string plain = particle_system ("opaque", ",\"maxcount\":50", still, life);
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "red.json", 8, 16, "\"colorn\":\"0 0 1\"") + "," + particle_object (2, "grey.json", 24, 16, "\"colorn\":\"0.5 0.5 0.5\"")
+            + "," + particle_object (3, "plain.json", 40, 16, "\"colorn\":\"1 0 0\"") + "," + particle_object (4, "red.json", 56, 16),
+        "0 0 0", { { "red.json", red }, { "grey.json", grey }, { "plain.json", plain } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 10; i++) {
+        rig.step ();
+    }
+    unsigned char px[4][4] = {};
+    for (int i = 0; i < 4; i++) {
+        read_pixel (rig.fbo, 8 + 16 * i, 16, px[i]);
+    }
+    printf ("    red + colorn blue: %d %d %d; grey 128 + colorn 0.5: %d %d %d; no colour + colorn red: %d %d %d; red: %d %d %d\n",
+            px[0][0], px[0][1], px[0][2], px[1][0], px[1][1], px[1][2], px[2][0], px[2][1], px[2][2], px[3][0], px[3][1], px[3][2]);
+    CHECK (px[0][0] < 8 && px[0][1] < 8 && px[0][2] > 247, "red shifted to colorn blue: %d %d %d", px[0][0], px[0][1], px[0][2]);
+    CHECK (std::abs (px[1][0] - 128) <= 2 && std::abs (px[1][2] - 128) <= 2, "grey at its reference: %d %d %d", px[1][0], px[1][1], px[1][2]);
+    CHECK (px[2][0] > 247 && px[2][1] < 8 && px[2][2] < 8, "colorn as the colour: %d %d %d", px[2][0], px[2][1], px[2][2]);
+    CHECK (px[3][0] > 247 && px[3][1] < 8 && px[3][2] < 8, "untinted red: %d %d %d", px[3][0], px[3][1], px[3][2]);
+    return true;
+}
+
+// a hidden system with particles is reset (WE resets when it has any): shown again, its one-shot burst replays, with
+// new lifetimes (unpatched: it froze, and the old burst died on its old schedule); a `count` bound to a user
+// property is live (unpatched: taken once, as the pool size)
+static bool particle_hide_resets_and_overrides_live () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string grey = "{\"name\":\"colorrandom\",\"min\":\"4 4 4\",\"max\":\"4 4 4\"}";
+    const std::string burst = particle_system ("add", ",\"maxcount\":100", ",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":5",
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":2,\"max\":2}");
+    const std::string steady = particle_system ("add", ",\"maxcount\":100", ",\"distancemin\":0,\"distancemax\":0,\"rate\":10",
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    std::vector<std::string> files;
+    std::string burstObject = particle_object (1, "burst.json", 16, 16);
+    burstObject.insert (burstObject.size () - 1, ",\"visible\":{\"user\":\"show\",\"value\":true}");
+    const std::string dir = particle_scene (burstObject + "," + particle_object (2, "steady.json", 48, 16, "\"count\":{\"user\":\"cnt\",\"value\":1}"),
+        "0 0 0", { { "burst.json", burst }, { "steady.json", steady } }, files);
+    write_file (dir + "/project.json", "{\"title\":\"particles\",\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":{"
+                                       "\"show\":{\"type\":\"bool\",\"value\":true,\"text\":\"s\"},"
+                                       "\"cnt\":{\"type\":\"slider\",\"value\":1,\"min\":0,\"max\":5,\"text\":\"c\"}}}}\n");
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    auto stack = [&] (int x) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, 16, px);
+        return px[0] / 4.0;
+    };
+    rig.step ();
+    rig.step ();
+    const double burst0 = stack (16);
+    while (rig.frames < 32) {
+        rig.step ();
+    }
+    const double burstAlive = stack (16), steady1 = stack (48);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "show", false), "bool refused");
+    rig.step ();
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "show", true), "bool refused");
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cnt", 3.0f), "slider refused");
+    while (rig.frames < 63) {
+        rig.step ();
+    }
+    const double steady2 = stack (48);
+    while (rig.frames < 83) {
+        rig.step ();
+    }
+    const double burstAgain = stack (16);
+    printf ("    burst (2 s lives): %.1f, at 1 s %.1f, hidden + shown, at 2.7 s %.1f; count 1 for 1 s: %.1f, then count 3 for 1 s: %.1f\n",
+            burst0, burstAlive, burstAgain, steady1, steady2);
+    CHECK (burst0 >= 4.5 && burst0 <= 5.5, "the burst: %.1f", burst0);
+    CHECK (burstAlive >= 4.5 && burstAlive <= 5.5, "the burst at 1 s: %.1f", burstAlive);
+    CHECK (burstAgain >= 4.5 && burstAgain <= 5.5, "shown again at 1.1 s, the burst didn't replay (alive at 2.7 s: %.1f)", burstAgain);
+    CHECK (steady2 - steady1 >= 26 && steady2 - steady1 <= 33, "count 3 for ~1 s added %.1f (want ~30)", steady2 - steady1);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -1230,6 +1482,8 @@ int main (int argc, char** argv) {
     setvbuf (stdout, nullptr, _IOLBF, 0);
     // 0018: the sound objects' random picks and gaps are the same on every run
     setenv ("WPENGINE_SOUND_SEED", "1", 1);
+    // B3: the particles are the same on every run
+    setenv ("WPENGINE_PARTICLE_SEED", "1", 1);
     printf ("host_api_test: LWE core with liascape patches\n");
     // order matters: nothing before the SDL tests may initialise SDL audio
     run ("host_output_replaces_sdl", host_output_replaces_sdl);
@@ -1249,6 +1503,10 @@ int main (int argc, char** argv) {
     run ("object_uniforms_are_live", object_uniforms_are_live);
     run ("keyframes_drive_alpha", keyframes_drive_alpha);
     run ("keyframes_move_origin", keyframes_move_origin);
+    run ("particle_count_rate_and_prewarm", particle_count_rate_and_prewarm);
+    run ("particle_colorrandom_one_t", particle_colorrandom_one_t);
+    run ("particle_colorn_hsv_shift", particle_colorn_hsv_shift);
+    run ("particle_hide_resets_and_overrides_live", particle_hide_resets_and_overrides_live);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
