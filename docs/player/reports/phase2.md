@@ -343,6 +343,13 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
   the restarted Hyprland in 1.3 s and restored its snapshot. Workaround: avoid VT switches on this
   NVIDIA + Hyprland setup; a suspend is fine. Not re-run (it takes the session down).
 - (3) suspend twice and (4) video alongside: not run.
+- **Re-run 2026-11-02 23:47 (agent, `programs.sh sceneaway`, release build with the false-hang fix; Kimi 2371103399
+  on DP-2, a looping video on DP-1; results `src/player/tests/onmachine/results/sceneaway-1103/`): PASS 12/12.**
+  VT switch 15 s (Hyprland survived this time), suspend 30 s, then two suspends of 20 s within a minute: after each
+  both outputs presented again within 1.0 / 3.5 / 4.0 s, the scene's worker stayed `running` + ready with **0
+  restarts** and 0 `context_losses` (the designed path: no purge reported → no restart), never `source.broken`,
+  the compositor's pid unchanged (the video untouched). Not checked by script: the scene's sound fading back in
+  (no recording taken).
 
 ## 9. Scene corpus — fresh run + A/B against the legacy engine
 

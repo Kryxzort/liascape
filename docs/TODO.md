@@ -22,9 +22,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
 - [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
-- [ ] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
+- [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
+      **Done 2026-11-02** (`programs.sh sceneaway`, `phase2.md` § 8): VT + suspend + two suspends — 0 restarts, PASS 12/12.
 
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):

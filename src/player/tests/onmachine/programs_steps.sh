@@ -558,3 +558,77 @@ step_vt() {
     quit_player
     step_end
 }
+
+# ------------------------------------------------------------------ Phase 2 § 8 — a scene through VT switch / suspend
+# A real scene (Kimi, sound) on DP-2 and a looping video on DP-1, then: a VT switch, a suspend, two suspends within
+# a minute (the restart budget's edge). After each: never `source.broken`, both outputs present frames again, the
+# scene's worker running + ready, at most one restart per suspend/VT, the video's player untouched (same pid).
+scene_away_up() {
+    local v
+    v=$(mk_clip tone60v testsrc2 30 60 440 1280x720)
+    serve_up
+    ctl transition "$(jq -nc --arg p "$v" '{outputs:"out:DP-1", to:{path:$p, loop:true}}')" >/dev/null
+    ctl transition "$(jq -nc --arg p "$SC_KIMI" '{outputs:"out:DP-2", to:{kind:"scene", path:$p}}')" >/dev/null
+    sleep 12
+    SA_PID=$(ctl hello | jq -r .pid)
+    SA_RESTARTS=0
+    note "before: $(scene_away_state)"
+}
+scene_away_state() {
+    jq -nc --argjson w "$(ctl probe '{"name":"workers"}')" --argjson f "$(ctl probe '{"name":"frames"}')" \
+        '{workers: [$w.workers[] | {state, ready, restarts_60s, total_restarts, context_losses, fps_actual}],
+          fps: [$f.outputs[] | {name, fps: .all.fps}]}'
+}
+scene_away_suspend() { # <seconds>
+    local off0 off1 i
+    off0=$(sleep_offset)
+    sudo -n rtcwake -m no -s "$1" >/dev/null || die "rtcwake: no wake alarm, not suspending"
+    say "suspending for $1 s"
+    systemctl suspend || die "systemctl suspend"
+    for ((i = 0; i < $1 + 180; i++)); do
+        sleep 1
+        off1=$(sleep_offset)
+        (($(pyb "$off1 - $off0 > 5"))) && break
+    done
+    note "slept $(python3 -c "print(round($off1 - $off0, 1))") s"
+}
+scene_away_checks() { # <label> <restarts allowed>
+    local s i ok=0 broken pid total
+    for ((i = 0; i < 20; i++)); do # ≤ 10 s for both outputs to present again and the scene to be ready
+        sleep 0.5
+        s=$(scene_away_state)
+        jq -e '(.fps | all(.fps >= 20)) and (.workers | length == 1 and all(.state == "running" and .ready))' <<<"$s" >/dev/null && { ok=1; break; }
+    done
+    check "$1: both outputs present + the scene running" "$(jq -c . <<<"$s") after $(python3 -c "print(($i + 1) / 2)") s" "≤ 10 s" "$ok"
+    broken=$(ctl logs '{"kind_prefix":"source.broken"}' | jq '.events | length')
+    check "$1: never source.broken" "$broken" "0" "$(pyb "$broken == 0")"
+    total=$(jq '[.workers[].total_restarts] | add // 0' <<<"$s")
+    check "$1: scene restarts" "$((total - SA_RESTARTS))" "≤ $2" "$(pyb "$total - $SA_RESTARTS <= $2")"
+    SA_RESTARTS=$total
+    pid=$(ctl hello | jq -r '.pid // empty')
+    check "$1: same compositor (the video untouched)" "pid $SA_PID → ${pid:-none}" "same" "$([[ $pid == "$SA_PID" ]] && echo 1 || echo 0)"
+    note "$1: scene/worker events $(ctl logs '{"kind_prefix":"scene."}' | jq -c '[.events[-6:][] | .kind]') $(ctl logs '{"kind_prefix":"worker."}' | jq -c '[.events[-6:][] | .kind]')"
+}
+step_sceneaway() {
+    step_begin sceneaway
+    scene_away_up
+    local vt0
+    vt0=$(sudo -n fgconsole) || die "fgconsole"
+    sudo -n systemd-run --quiet --on-active=$((VT_S + 20)) --timer-property=AccuracySec=1s chvt "$vt0" || die "no watchdog, not switching"
+    say "VT $vt0 → $((vt0 + 2)) for ${VT_S} s"
+    sudo -n chvt $((vt0 + 2)) || die "chvt"
+    sleep "$VT_S"
+    sudo -n chvt "$vt0"
+    sleep 1
+    scene_away_checks "VT switch" 1
+    sleep 10
+    scene_away_suspend 30
+    scene_away_checks "suspend" 1
+    sleep 10
+    scene_away_suspend 20
+    sleep 5
+    scene_away_suspend 20
+    scene_away_checks "two suspends within a minute" 2
+    serve_down
+    step_end
+}

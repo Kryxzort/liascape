@@ -183,3 +183,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **F4 fixed:** `--debug`'s dropout analysis forked the whole player for each ffmpeg decode, and the fork cost the
   audio whole cycles of silence. It now spawns without forking. Battery re-run on your machine (your player was off
   ~50 min while you slept, then restored): 0 drops; the same 3 `frozen` micro-gap FAILs as before (handoff work).
+- **F5 settled:** the rare real stall was the NVIDIA driver's global lock (other GPU processes allocating); our image
+  frees now happen off the player's loop, imports are documented as a driver limit. 3 full suites green.
+- **Phase 2 VT/suspend check done** (your player off ~3 min): a scene through a VT switch, a suspend and two suspends
+  within a minute — no restart, never broken, PASS 12/12. The machine suspended 3 times around 23:48.
