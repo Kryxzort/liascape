@@ -2039,6 +2039,25 @@ impl SceneSource {
         self.host.as_ref().and_then(WorkerHost::pid)
     }
 
+    /// The worker is alive and still inside its load + build: spawned (or restarting), no
+    /// first frame latched yet, no error, not broken. "Alive" is the heartbeat's: while LWE
+    /// loads, the worker's `lia-scene-proto` thread answers the pings (bounded by its
+    /// `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`), and a worker that stops answering is killed within
+    /// `hang_timeout` — so this never stays true for a hung worker. Observed as `loading`;
+    /// the transition recipe waits longer for a B that reports it (corpus under load: a
+    /// heavy scene took 13–20 s to its first frame on a busy CPU, 7 s quiet).
+    pub fn loading(&self) -> bool {
+        !self.loaded
+            && self.broken.is_none()
+            && self.error.is_none()
+            && self.host.as_ref().is_some_and(|h| {
+                matches!(
+                    h.state(),
+                    WorkerState::Starting | WorkerState::Running | WorkerState::Restarting { .. }
+                )
+            })
+    }
+
     /// Readable when [`update`](Self::update) has worker input (stable across restarts and
     /// path changes: our own epoll fd over the current worker's).
     pub fn wake_fd(&self) -> RawFd {
@@ -2141,6 +2160,7 @@ impl SceneSource {
             "paused": self.paused,
             "stepped": self.opts.stepped,
             "ready": self.loaded,
+            "loading": self.loading(),
             "scene_time": self.scene_time(),
             "latched_t": self.latched_t(),
             "latched": st.latched,
@@ -2474,6 +2494,7 @@ impl Source for SceneSource {
             "paused" => Some(PropValue::Bool(self.paused)),
             // Task 10: past the restart budget (or restored so) — observed into the graph.
             "broken" => Some(PropValue::Bool(self.broken.is_some())),
+            "loading" => Some(PropValue::Bool(self.loading())),
             "color" => None,
             _ => self.props.get(prop).cloned(),
         }

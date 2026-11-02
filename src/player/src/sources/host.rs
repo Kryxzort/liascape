@@ -33,7 +33,7 @@ use crate::log::{self, Level};
 /// load), and recipes decide what is a still by it. `has_audio` (R92): what mpv actually
 /// resolved — distinct from `no_audio` (our own request) — so a video with literally no
 /// audio track is never mistaken for one that merely has audio disabled.
-const MIRRORED: [&str; 9] = [
+const MIRRORED: [&str; 10] = [
     "kind",
     "ready",
     "duration",
@@ -44,6 +44,9 @@ const MIRRORED: [&str; 9] = [
     "has_audio",
     // Phase 2 Task 10: a scene past its restart budget (the snapshot saves it).
     "broken",
+    // A scene whose live worker is inside its load + build (no first frame yet): the
+    // transition recipe waits longer for such a B (`recipes::transition::LOADING_READY_TIMEOUT`).
+    "loading",
 ];
 
 struct Hosted {

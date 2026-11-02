@@ -364,39 +364,72 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
 /// Slots in the ring (spike §2: 3 never stalled below GPU saturation).
 const RING_SLOTS: u8 = 3;
 
-/// How long a load + build may take while the reader thread still answers pings for the
-/// renderer (`LIASCAPE_SCENE_LOAD_TIMEOUT_MS`). A cold LWE build took up to 2.8 s; past this the
-/// pings go to the (stuck) renderer, so the compositor's heartbeat sees a hang.
+/// How long a load + build is covered unconditionally while the reader thread answers pings
+/// for the renderer (`LIASCAPE_SCENE_LOAD_TIMEOUT_MS`). A cold LWE build took up to 2.8 s, a
+/// heavy scene 6 s quiet. Past it the load stays covered only while it makes progress (below);
+/// once it doesn't, the pings go to the (stuck) renderer, so the compositor's heartbeat sees a
+/// hang.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Past [`LOAD_TIMEOUT`] a load is covered while the renderer thread got CPU time within the
+/// last `timeout / LOAD_PROGRESS_DIV` (10 s by default), up to `LOAD_TIMEOUT_MAX_FACTOR ×
+/// timeout` (120 s) in all. Corpus under load (2026-11-03): a heavy scene's build is this one
+/// thread on the CPU (3.5–4.9 s of it, whatever the load); with the CPU saturated it waits in
+/// the run queue — LWE's core alone took 21 s at 3 runnable threads per CPU and 28 s at 5
+/// (13.9 s queued) — a load starved, not hung, which a fixed 30 s kills as hung, restarts (from
+/// scratch, as starved) and breaks after 3 restarts. A deadlocked load sleeps (its thread's CPU
+/// time stops); a starved one keeps getting slices (its longest gap measured: 1.3 s at 5 per
+/// CPU, against the 10 s window); a load spinning forever is still bounded by the cap.
+const LOAD_PROGRESS_DIV: u32 = 3;
+const LOAD_TIMEOUT_MAX_FACTOR: u32 = 4;
 
 /// The longest a quit waits for an audible stream to fade out (its gate takes 30 ms; a stalled
 /// graph never holds the exit for longer).
 const QUIT_FADE_MAX: Duration = Duration::from_millis(200);
 
-/// What the protocol (reader) thread knows about the renderer: whether it is inside a load.
+/// What the protocol (reader) thread knows about the renderer: whether it is inside a load,
+/// and whether that load is still making progress.
 struct LoadGate {
     t0: Instant,
     /// ms since `t0` + 1 when the current load started; 0 = not loading.
     since: AtomicU64,
     timeout: Duration,
+    /// The renderer thread's `/proc/self/task/<tid>/schedstat` (its CPU time, ns, first field).
+    schedstat: Option<std::fs::File>,
+    /// Its CPU time when last read, and when (ms since `t0`) it last advanced.
+    last_run_ns: AtomicU64,
+    progress_at: AtomicU64,
 }
 
 impl LoadGate {
+    /// Made on the renderer (main) thread: it watches the calling thread's CPU time.
     fn new() -> LoadGate {
         let timeout = std::env::var("LIASCAPE_SCENE_LOAD_TIMEOUT_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .map_or(LOAD_TIMEOUT, Duration::from_millis);
+        let tid = unsafe { libc::gettid() };
         LoadGate {
             t0: Instant::now(),
             since: AtomicU64::new(0),
             timeout,
+            schedstat: std::fs::File::open(format!("/proc/self/task/{tid}/schedstat")).ok(),
+            last_run_ns: AtomicU64::new(0),
+            progress_at: AtomicU64::new(0),
         }
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.t0.elapsed().as_millis() as u64 + 1
     }
 
     fn set(&self, loading: bool) {
         let v = if loading {
-            self.t0.elapsed().as_millis() as u64 + 1
+            let now = self.now_ms();
+            self.last_run_ns
+                .store(self.run_ns().unwrap_or(0), Ordering::SeqCst);
+            self.progress_at.store(now, Ordering::SeqCst);
+            now
         } else {
             0
         };
@@ -407,10 +440,42 @@ impl LoadGate {
         self.since.load(Ordering::SeqCst) != 0
     }
 
-    /// Loading, and not for longer than the timeout.
+    /// The renderer thread's CPU time (ns), `None` if it can't be read.
+    fn run_ns(&self) -> Option<u64> {
+        use std::os::unix::fs::FileExt;
+        let f = self.schedstat.as_ref()?;
+        let mut buf = [0u8; 96];
+        let n = f.read_at(&mut buf, 0).ok()?;
+        std::str::from_utf8(&buf[..n])
+            .ok()?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    }
+
+    /// Loading, and either within the base timeout or still making progress (the renderer got
+    /// CPU time recently) within the cap. Called by the reader on every `Ping` (≥ one per
+    /// `hang_timeout / 2`), which also samples the progress.
     fn covers_ping(&self) -> bool {
         let s = self.since.load(Ordering::SeqCst);
-        s != 0 && self.t0.elapsed().as_millis() as u64 + 1 - s < self.timeout.as_millis() as u64
+        if s == 0 {
+            return false;
+        }
+        let now = self.now_ms();
+        if let Some(run) = self.run_ns()
+            && run != self.last_run_ns.swap(run, Ordering::SeqCst)
+        {
+            self.progress_at.store(now, Ordering::SeqCst);
+        }
+        let elapsed = now - s;
+        let base = self.timeout.as_millis() as u64;
+        if elapsed < base {
+            return true;
+        }
+        let window = base / LOAD_PROGRESS_DIV as u64;
+        elapsed < base * LOAD_TIMEOUT_MAX_FACTOR as u64
+            && now - self.progress_at.load(Ordering::SeqCst) < window
     }
 }
 
@@ -656,7 +721,22 @@ impl Renderer {
         if spec.load_ms > 0 {
             // A slow "load + build" (Task 7): the reader thread answers pings meanwhile.
             self.gate.set(true);
-            std::thread::sleep(Duration::from_millis(spec.load_ms));
+            let total = Duration::from_millis(spec.load_ms);
+            if spec.load_busy {
+                // starved, not stuck: short bursts of CPU work (the gate sees progress)
+                let t = Instant::now();
+                while t.elapsed() < total {
+                    let burst = Instant::now();
+                    while burst.elapsed() < Duration::from_millis(5) {
+                        std::hint::spin_loop();
+                    }
+                    std::thread::sleep(
+                        Duration::from_millis(15).min(total.saturating_sub(t.elapsed())),
+                    );
+                }
+            } else {
+                std::thread::sleep(total);
+            }
             self.gate.set(false);
         }
         if spec.fail == Some(Fail::Load) {

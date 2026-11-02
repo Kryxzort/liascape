@@ -400,6 +400,10 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             // no worker. Seeded `true` at create by a snapshot restore (read-only like `of`):
             // the scene comes back as its preview, no worker. A `path` change plays again.
             ("broken", def(PropType::Bool, true, PropValue::Bool(false))),
+            // A `scene` whose worker is alive and still loading + building (spawned, not
+            // broken, no error, no first frame yet) — observed; the transition recipe waits
+            // up to `LOADING_READY_TIMEOUT` instead of `READY_TIMEOUT` for such a B.
+            ("loading", def(PropType::Bool, true, PropValue::Bool(false))),
             ("duration", def(PropType::F64, true, PropValue::F64(0.0))),
             ("time_pos", def(PropType::F64, true, PropValue::F64(0.0))),
             ("width", def(PropType::I64, true, PropValue::I64(0))),

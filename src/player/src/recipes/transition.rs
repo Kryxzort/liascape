@@ -30,8 +30,20 @@ use crate::units::{GainSlot, SILENT_DB, db_to_lin};
 /// Every audio start/stop at a hold boundary (and every commit/snap-back ramp) takes this
 /// long (invariant #4: ≤ 30 ms).
 pub const ANTICLICK: Duration = Duration::from_millis(30);
-/// B that hasn't produced its first frame by then fails the transition (never park).
+/// B that hasn't produced its first frame by then fails the transition (never park)…
 pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// …unless B reports a load in progress (its observed `loading`: a scene whose worker is alive
+/// inside LWE's load + build — `SceneSource::loading`): such a B is waited for up to this long.
+/// A keeps playing meanwhile (its frames and gain untouched), so waiting costs nothing on screen;
+/// failing would drop the switch. Measured (docs/TODO.md "Corpus under load", 2026-11-03): a
+/// heavy scene's build is one CPU-bound thread (3.5–4.9 s of CPU), 7 s to its first frame quiet,
+/// 13 s with 24 busy threads + 3 scenes playing and 17–20 s with 48 — past the 10 s, so every
+/// such switch failed. A load that really hangs is the worker's business: its `LoadGate` stops
+/// covering it (no progress past `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, 30 s) and the heartbeat kills
+/// it (a restart; past the budget `broken` → `Error`, which fails the transition at once). 50 s:
+/// under the backend's own 60 s wait for a non-aligned switch (`WaitSwitch`), so the player's
+/// verdict (`failed: … (still loading)`) is what the backend sees, never its timeout + cancel.
+pub const LOADING_READY_TIMEOUT: Duration = Duration::from_secs(50);
 /// R85: the onset bound — one constant for every onset path (`crate::onset`, I6).
 pub use crate::onset::ONSET_TIMEOUT;
 /// M2 (final review): an `align: end` wait never outlasts A's remaining play time (at its
@@ -331,6 +343,9 @@ struct Tr {
     /// M2: when an `align: end` wait gives up on A's end and starts anyway (player clock;
     /// `None` = not computed yet / recompute — after a speed change or a new lead).
     align_deadline: Option<Duration>,
+    /// B reported `loading` past `READY_TIMEOUT` and is being waited for
+    /// (`transition.waiting_load` logged once).
+    waited_load: bool,
 }
 
 impl Tr {
@@ -817,6 +832,7 @@ impl Transitions {
             copies_made: false,
             onset: None,
             align_deadline: None,
+            waited_load: false,
         };
         // align: end — A's current iteration is its last (unless shared, R34, or it never
         // ends: a still or a scene).
@@ -1271,11 +1287,32 @@ impl Transitions {
                     .iter()
                     .any(|(id, e)| *id == tr.b && *e == SourceEvent::Ready);
             if !ready {
-                if now.saturating_sub(tr.created) >= READY_TIMEOUT {
+                let waited = now.saturating_sub(tr.created);
+                if waited >= READY_TIMEOUT {
+                    let loading = get_bool(g, &tr.b, "loading");
+                    if loading && waited < LOADING_READY_TIMEOUT {
+                        if !tr.waited_load {
+                            tr.waited_load = true;
+                            log::event(
+                                "transition",
+                                Level::Info,
+                                "transition.waiting_load",
+                                Some(tr.corr.clone()),
+                                json!({
+                                    "b": tr.b,
+                                    "path": tr.b_path,
+                                    "waited_ms": waited.as_millis() as u64,
+                                    "limit_ms": LOADING_READY_TIMEOUT.as_millis() as u64,
+                                }),
+                            );
+                        }
+                        return true;
+                    }
                     let reason = format!(
-                        "{}: no first frame within {} s",
+                        "{}: no first frame within {} s{}",
                         tr.b_path,
-                        READY_TIMEOUT.as_secs()
+                        waited.as_secs(),
+                        if loading { " (still loading)" } else { "" }
                     );
                     self.abort(tr, g, anim, now, Outcome::Failed(reason));
                     return false;
@@ -2512,6 +2549,85 @@ mod tests {
                 h.has(&t, "transition.started"),
                 "{method}/{effect:?}: a scene lead A must start at once, not wait out ALIGN_SLACK"
             );
+        }
+    }
+
+    /// Corpus under load: a B that reports `loading` (a scene whose worker is alive inside its
+    /// LWE load + build) is waited for past `READY_TIMEOUT`, up to `LOADING_READY_TIMEOUT`; a B
+    /// that doesn't still fails at 10 s, and one that stops loading without a frame fails then.
+    /// RED before: every loading case failed at 10 s ("no first frame within 10 s").
+    #[test]
+    fn loading_b_is_waited_for_past_the_ready_timeout() {
+        let failed = |h: &H, t: &CorrId| {
+            h.events.iter().find_map(|e| match &e.kind {
+                TransitionEventKind::Failed { reason, .. } if &e.corr == t => Some(reason.clone()),
+                _ => None,
+            })
+        };
+        // (loading at first, stops loading at ms, ready at ms, fails at ms with a reason ending so)
+        type Case = (bool, Option<u64>, Option<u64>, Option<(u64, &'static str)>);
+        let cases: [Case; 4] = [
+            (
+                false,
+                None,
+                None,
+                Some((10_000, "no first frame within 10 s")),
+            ),
+            (true, None, Some(25_000), None),
+            (
+                true,
+                None,
+                None,
+                Some((50_000, "no first frame within 50 s (still loading)")),
+            ),
+            (
+                true,
+                Some(14_000),
+                None,
+                Some((14_000, "no first frame within 14 s")),
+            ),
+        ];
+        for (loading, stop_at, ready_at, fail) in cases {
+            let case = format!("loading {loading}, stop {stop_at:?}, ready {ready_at:?}");
+            let mut h = H::new(&["V1"]);
+            h.video(&["V1"], 0.0, 1.0);
+            let t = h.start(req("/scenes/heavy", "full-live", "now", Some("fade")));
+            let b = h.b_of(&t);
+            h.observe(&b, "loading", PropValue::Bool(loading));
+            let mut ms = 0u64;
+            let mut failed_at = None;
+            while ms < 70_000 && failed_at.is_none() && !h.has(&t, "transition.started") {
+                ms += 100;
+                let mut ev = Vec::new();
+                if stop_at == Some(ms) {
+                    h.observe(&b, "loading", PropValue::Bool(false));
+                }
+                if ready_at == Some(ms) {
+                    h.observe(&b, "loading", PropValue::Bool(false));
+                    h.observe(&b, "ready", PropValue::Bool(true));
+                    ev.push((b.clone(), SourceEvent::Ready));
+                }
+                h.tick(100, &ev);
+                if let Some(r) = failed(&h, &t) {
+                    failed_at = Some((ms, r));
+                }
+            }
+            match fail {
+                Some((at, why)) => {
+                    let (got_at, reason) =
+                        failed_at.unwrap_or_else(|| panic!("{case}: never failed"));
+                    assert_eq!(got_at, at, "{case}: failed at");
+                    assert!(reason.ends_with(why), "{case}: reason {reason}");
+                }
+                None => {
+                    assert_eq!(failed_at, None, "{case}: must wait for the load");
+                    assert!(
+                        h.has(&t, "transition.started"),
+                        "{case}: started at its Ready"
+                    );
+                    assert_eq!(ms, ready_at.unwrap(), "{case}: started at its Ready");
+                }
+            }
         }
     }
 

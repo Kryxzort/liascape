@@ -1474,6 +1474,110 @@ fn slow_scene_load_keeps_the_heartbeat() {
     assert!(src.error().is_none() && src.broken().is_none());
 }
 
+/// Corpus under load: a load slowed by a saturated CPU outlasts the worker's base load bound
+/// (`LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, here 1 s) but keeps getting CPU time — it is covered
+/// (Ready, no restart) up to the cap (4 × the bound); one asleep past the bound (a deadlock) is
+/// still a hang, and so is one still busy at the cap. RED before (a fixed bound): the busy load
+/// was killed as hung at ~1.3 s and restarted, from scratch, every time.
+#[test]
+fn starved_scene_load_outlasts_the_load_timeout() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    // (load_ms, busy, ready without a restart?)
+    for (load_ms, busy, covered) in [
+        (2500, true, true),
+        (2500, false, false),
+        (6000, true, false),
+    ] {
+        let s = SyntheticSpec {
+            load_ms,
+            load_busy: busy,
+            ..spec(Pattern::Solid)
+        };
+        let name = format!("starved-load-{load_ms}-{busy}");
+        let mut src = open_with(&gfx, &name, &s, |o| {
+            o.hang_timeout = Duration::from_millis(300);
+            o.env
+                .push(("LIASCAPE_SCENE_LOAD_TIMEOUT_MS".into(), "1000".into()));
+        });
+        let t = Instant::now();
+        let ended = pump(&gfx, &mut src, Duration::from_secs(10), |s| {
+            s.is_ready() || s.stats().restarts > 0
+        });
+        let took = t.elapsed();
+        let restarts = src.stats().restarts;
+        println!(
+            "load {load_ms} ms busy {busy}: after {took:?} ready {} restarts {restarts}",
+            src.is_ready()
+        );
+        assert!(ended, "{name}: neither ready nor restarted in 10 s");
+        if covered {
+            assert!(
+                src.is_ready() && restarts == 0,
+                "{name}: a starved load is not a hang"
+            );
+            assert!(
+                took >= Duration::from_millis(2400),
+                "{name}: the load took its time: {took:?}"
+            );
+        } else {
+            assert!(
+                !src.is_ready() && restarts >= 1,
+                "{name}: must be killed as hung"
+            );
+            // the bound (1 s; the cap, 4 s, when busy) + the hang timeout and a ping period
+            let bound = if busy { 4000 } else { 1000 };
+            assert!(
+                took < Duration::from_millis(bound + 1200),
+                "{name}: hung only after {took:?}"
+            );
+        }
+    }
+}
+
+/// Corpus under load: the observed `loading` (what the transition recipe waits on past its 10 s)
+/// is true exactly while a live worker loads — from the open to the first frame — and false
+/// once the scene shows a frame or its load failed (a B whose load failed must fail its switch
+/// at once, not after `LOADING_READY_TIMEOUT`). RED before: no `loading` (the read is `None`).
+#[test]
+fn scene_loading_spans_the_load_only() {
+    use liascape_player::graph::PropValue;
+    use liascape_player::scene::synthetic::Fail;
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let loading = |s: &SceneSource| s.read("loading") == Some(PropValue::Bool(true));
+    for fail in [false, true] {
+        let s = SyntheticSpec {
+            load_ms: 1200,
+            fail: fail.then_some(Fail::Load),
+            ..spec(Pattern::Solid)
+        };
+        let name = format!("loading-span-{fail}");
+        let mut src = open_with(&gfx, &name, &s, |o| {
+            o.hang_timeout = Duration::from_millis(300);
+        });
+        assert!(loading(&src), "{name}: loading from the open");
+        // inside the load: still loading, no frame
+        pump(&gfx, &mut src, Duration::from_millis(600), |_| false);
+        assert!(loading(&src) && !src.is_ready(), "{name}: loading mid-load");
+        let ended = pump(&gfx, &mut src, Duration::from_secs(6), |s| {
+            s.is_ready() || s.error().is_some()
+        });
+        assert!(ended, "{name}: neither ready nor failed");
+        if fail {
+            assert!(src.error().is_some(), "{name}: the load failed");
+        } else {
+            assert!(src.is_ready(), "{name}: ready");
+        }
+        assert!(!loading(&src), "{name}: not loading after its end");
+        assert_eq!(src.stats().restarts, 0, "{name}");
+    }
+}
+
 /// The real LWE path end to end without WE's assets (D7 fixture `min-scene`, a 64×32 clear
 /// colour): load + build in the worker, blit into the ring at the cover size, alpha forced to
 /// 1, Ready.

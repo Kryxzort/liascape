@@ -1579,8 +1579,9 @@ now|end }` deserializes from the API's JSON (all but `outputs`/`to` default).
 start() → Scheduled → WaitingReady → WaitingStart → Running → Handoff → Done
           B created    B Ready /      align instant;  effect     layers → B, fx +
           paused,      graph ready    snapshots       animating  snapshots destroyed,
-          xfade −96    (10 s timeout) ready; no                  A released → graveyard
-                                      graves on outputs
+          xfade −96    (10 s timeout; ready; no                  A released → graveyard
+                       50 s while B   graves on outputs
+                       `loading`)
 pre-Running  ── superseded / cancel / B failed ──▶ abort: B destroyed, A restored exactly
 Running      ── new start on an overlapping output ──▶ commit (→ Handoff)
 Running      ── cancel / B failed ──▶ snap back to A
@@ -4087,7 +4088,22 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   renderer is inside a load + build (`LoadGate`: a cold LWE build took up to 2.8 s) the
   protocol thread answers `Ping` itself — bounded by `LIASCAPE_SCENE_LOAD_TIMEOUT_MS` (30 s), after
   which pings go to the stuck renderer and the host's heartbeat sees a hang; a `Quit`/EOF
-  during a load `_exit(0)`s at once. Nothing is exported, sent or latched before the build
+  during a load `_exit(0)`s at once. **Past the bound a load that makes progress stays covered**
+  (corpus under load, 2026-11-03): each covered `Ping` samples the renderer thread's CPU time
+  (`/proc/self/task/<tid>/schedstat`, first field; the gate is made on the renderer thread); while
+  it advanced within the last `bound / LOAD_PROGRESS_DIV` (3 → 10 s) the ping is still answered,
+  up to `LOAD_TIMEOUT_MAX_FACTOR` (4) × the bound (120 s) in all. Why: LWE's build is that one
+  thread on the CPU (a heavy scene, 2883756643: 3.5–4.9 s of CPU at any load, the worker's other
+  threads near 0 meanwhile); on a saturated CPU it waits in the run queue — LWE's core alone
+  (`--lwe-smoke`): 6.3 s wall quiet, 21 s at 3 runnable threads per CPU, 28 s at 5 (13.9 s
+  queued), so with scenes playing too a fixed 30 s killed a starved load as hung, restarted it
+  from scratch (as starved) and broke the scene. A deadlocked load sleeps (its CPU time stops),
+  a starved one keeps getting slices (longest gap measured at 5 per CPU: 1.3 s, sampled every
+  100 ms); a load spinning forever is still cut at the cap. No schedstat (`None`) = the old fixed
+  bound. Test `starved_scene_load_outlasts_the_load_timeout` (bound 1 s, hang timeout 300 ms;
+  synthetic `load_busy` — `load_ms` spent as 5 ms bursts every 20 ms: a 2.5 s busy load → Ready,
+  0 restarts; asleep 2.5 s → killed as hung within the bound + 1.2 s; busy 6 s → killed at the
+  4 s cap; RED with the fixed bound: the busy load killed at ~1.3 s, restarted). Nothing is exported, sent or latched before the build
   finished (`Buffer`s + `Ready` come after it). Messages that arrive meanwhile (`Resize`,
   `Pointer`, `SetProperty`) queue and apply after. Synthetic knob `load_ms` simulates the slow
   build. Test `slow_scene_load_keeps_the_heartbeat` (1.5 s load, 300 ms hang timeout → Ready,
@@ -4839,6 +4855,32 @@ is never a still (`is_still`) but **never ends** (`never_ends` = still | scene).
   skips it. The same rule in the runtime's parked path (`transition_parked`: a parked scene A →
   handed off at once, § Runtime "No output left"). This is what the backend's restore-aligned switches
   send when the playing item is a scene (a scene never ends: its rotation moves it on itself).
+- **A slow scene load is waited for (`LOADING_READY_TIMEOUT`, corpus under load,
+  2026-11-03).** `WaitingReady` fails a B with no first frame at `READY_TIMEOUT` (10 s) —
+  unless B's observed `loading` is true (§ "The `scene` Source kind" → `loading`): then it waits
+  up to **50 s** from the request (`transition.waiting_load {b, path, waited_ms, limit_ms}`, info,
+  once), A playing on untouched meanwhile. A B that stops loading without a frame fails at that
+  tick; past 50 s → `failed` "`<path>`: no first frame within 50 s (still loading)". 50 s sits
+  under the backend's own 60 s non-aligned wait (`LiascapePlayerMedia.WaitSwitch`), so the
+  backend gets the player's verdict, never its own timeout + `cancel`. Measured (private headless
+  player, 3 GPU-heavy scenes playing on the other outputs, Ready = create → `ready`): 2883756643
+  7.1 s quiet (6.8 s with only the GPU load; a cold page cache or a parallel read of 3 other
+  `scene.pkg` on the same NVMe: no change), 13.1 s with 24 CPU-bound threads, 16.4–19.8 s with 48
+  — every such switch failed before. End to end (same setup, 48 busy threads, a full-live fade
+  from a light scene to 2883756643, 2 runs each): HEAD `transition.failed` "no first frame within
+  10 s" at 10.2 / 10.3 s; with this, `transition.waiting_load` at 10 s then `transition.started`
+  at 17.3 / 17.6 s. 2890767643 1.5 s quiet, 2.6–3.6 s loaded (its 18.7 s in the
+  Phase 2 battery was not reproduced by CPU, GPU, cold-cache or I/O load — VRAM pressure is the
+  remaining suspect, not pushed for). **What's playing is not at stake:** the three playing scenes
+  latched 71–77 frames/s together (target 90, CPU-starved by the 48 threads) without B loading and
+  72–73 while it loaded — one more runnable thread among ~60; a `nice`/`SCHED_IDLE` build (the
+  TODO's idea) would only have stretched B's load ~10× under contention (its thread would get
+  ~1/10 of a fair share), so it is not done. Tests: unit
+  `loading_b_is_waited_for_past_the_ready_timeout` (not loading → fails at 10 s; loading, Ready at
+  25 s → starts then; loading forever → fails at 50 s "(still loading)"; stops loading at 14 s →
+  fails at 14 s), `tests/transition.rs::slow_loading_scene_b_is_waited_for` (real worker, an
+  11.5 s synthetic load: started after it, no `transition.failed`, A current and its gain
+  unchanged meanwhile, 0 restarts, `loading` false after; RED: `no first frame within 10 s`).
 - **Tests** (`tests/transition.rs`, harness, synthetic `frame_index` scenes, frame-index videos
   without audio so every B onset is immediate and every gain exact): `v_to_s_each_method`,
   `s_to_v_each_method`, `s_to_s_each_method` (`combo`: full-live — both sides keep producing
@@ -4936,6 +4978,14 @@ skip/advance applies). Other outputs, videos and audio are never touched. Code:
   `signal` 6, `restarts`/`total_restarts` 3, `uptime_ms`, `t_wall`, `log_tail` with the worker's
   `stub: crashing` and the `restart 3` marker —, `source.error`, `broken` observed, no 5th spawn,
   the last frame on the output), `source_broken_event_names_the_scene` (Task 11).
+- **`loading`** (Bool, **read-only**, observed — `SourceHost::MIRRORED`; `false` on every other
+  kind): `SceneSource::loading()` = no first frame latched, no error, not broken, and a worker
+  `Starting` / `Running` / `Restarting` — a live worker inside its load + build. It never stays
+  true for a hung worker (the heartbeat kills it within `hang_timeout` once the worker's `LoadGate`
+  stops covering it, below; past the budget it is `broken`) nor for a failed load (`error`). Also
+  in the `workers` probe. The transition recipe waits longer for a B that reports it (§ "Transitions
+  with scenes"). Test `tests/scene.rs::scene_loading_spans_the_load_only` (true from the open
+  through a 1.2 s load, false at Ready and at a fatal `fail: load`).
 - **`ContextLost` = a crash restart.** The worker's context is created **robust**
   (`OffscreenOpts::robust`: robust access + `LOSE_CONTEXT_ON_RESET`, + `EGL_GENERATE_RESET_ON_
   VIDEO_MEMORY_PURGE_NV` where listed — NVIDIA purges VRAM on suspend/resume and VT switches;

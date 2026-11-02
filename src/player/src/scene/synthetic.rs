@@ -64,6 +64,11 @@ pub struct SyntheticSpec {
     /// Task 7: the "load + build" takes this long (the worker's renderer thread sleeps, like a
     /// cold LWE build of up to 2.8 s) — the protocol must stay answered meanwhile.
     pub load_ms: u64,
+    /// Corpus under load (test-only): `load_ms` is spent working — 5 ms on the CPU every 20 ms —
+    /// instead of asleep, like a real load on a saturated CPU: slow, but its renderer thread
+    /// keeps getting CPU time (the worker's `LoadGate` keeps covering such a load past its
+    /// base timeout; a load asleep that long is a hang).
+    pub load_busy: bool,
     /// Task 8 (test-only): every `Frame` reports this GPU time instead of the measured one —
     /// drives the GPU budget deterministically without loading the GPU.
     pub report_gpu_ms: Option<f32>,
@@ -95,6 +100,7 @@ impl Default for SyntheticSpec {
             hang_after_ms: None,
             fail: None,
             load_ms: 0,
+            load_busy: false,
             report_gpu_ms: None,
             context_lost_after_ms: None,
             gpu_stall: None,

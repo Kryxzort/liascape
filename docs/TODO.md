@@ -268,10 +268,18 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           frame) — no compositor gain once a wake was cheap, +2 worker context switches per frame.
     - [ ] **F1 follow-up — tick scenes from the frame callbacks / the exact refresh** instead of a rounded-Hz grid,
           so a scene at the refresh never beats against the vblank (F1 fixed the presents, not the content clock).
-    - [ ] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet
-          machine) — the LWE load + build on the worker's main thread competes for CPU. Consider the worker's nice /
-          `SCHED_IDLE` for the build and a Ready budget that scales with load (`ready_ms` in the corpus is an upper
-          bound already).
+    - [x] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet
+          machine), and a transition waits only 10 s for its B. **Done 2026-11-03** (player-core.md § Scene worker →
+          "Real scenes" LoadGate, § "Transitions with scenes"): a heavy scene's build is ONE CPU-bound thread
+          (3.5–4.9 s of CPU) that waits in the run queue on a busy CPU — re-measured 7.1 s quiet, 13.1 s with 24
+          busy threads + 3 scenes playing, 16.4–19.8 s with 48. A scene B whose worker is alive and loading (new
+          observed `loading`) is now waited for up to 50 s (under the backend's 60 s), A untouched meanwhile (end to
+          end at 48 busy threads: failed at 10.2 / 10.3 s before, started at 17.3 / 17.6 s after); the
+          worker's load cover (30 s) stays on past its bound while the load still gets CPU time (cap 120 s), so a
+          starved load (28 s for LWE's core alone at 5 runnable threads per CPU) is no longer killed as hung. No
+          nice/`SCHED_IDLE`: B's load didn't cost the playing scenes a frame (71–77 vs 72–73 frames/s), and a
+          deprioritised build would only stretch it ~10× under load. Not reproduced: 2890767643's 18.7 s (CPU, GPU,
+          cold cache and I/O load gave ≤ 3.6 s — VRAM pressure is the remaining suspect).
     - [x] **F7 — one 3 ms micro-gap at a frozen S→S handoff at 240 Hz** (1/20 in the final run, 2/20 in run 2).
           **Fixed 2026-10-29 ("Leave The Graph Before A Scene Worker Exits"):** a REAL hole — the new
           `scenes.sh onsetrec` records the sink independently: a worker exited with its stream active in the graph
@@ -762,6 +770,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         restore sets. Not reproduced in a 4 min re-run once the trip got its own log line (`no reply to …
         (waited …; gen2 GCs …, thread-pool queue …)`) and the `loop` probe got `max_request_ms/cmd` (handler
         time used to be outside `max_busy_ms`). Next trip: read that line first.
+        **Re-run 2026-11-03 03:59–04:25** (`speedstorm.py`, drag 540 s / global 540 s / flood 420 s, live, 315
+        items): **no trip** (no `no reply to` line) — not reproduced in 25 min either. But the command queue hit its
+        256 cap twice (04:08:45 at the drag → global edge, 04:24:57 in the 50/s flood) and dropped one queued
+        command each time, despite the per-key coalescing — so ≥ 256 non-coalesced commands were pending: find
+        which (switches/barriers from `/next` every 8 s? keys that differ per value?) before trusting the cap.
   - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
         — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one
