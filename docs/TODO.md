@@ -775,6 +775,16 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         256 cap twice (04:08:45 at the drag → global edge, 04:24:57 in the 50/s flood) and dropped one queued
         command each time, despite the per-key coalescing — so ≥ 256 non-coalesced commands were pending: find
         which (switches/barriers from `/next` every 8 s? keys that differ per value?) before trusting the cap.
+        — **cap hits explained + fixed (2026-11-03, `queue-cap`)**: both hits were the storm's own loops over
+        every item's `/library/speed` (04:08:45 = drag → global edge, which clears all 315 overrides; 04:24:57 =
+        the restore after flood 420 s + settle 10 s, which re-sets them), not the drag/flood/`/next`: each
+        `ApplyOverride` was its own `override:<path>` key → 315 distinct keys, and the worker (each pass + the
+        `program:items` push of 315 items it triggers) is slower than the loop. The dropped one was some item's
+        override pass — the playing item's possible (its speed then stays wrong). Now per-item passes are a
+        **batch** (`QueueBatch`: `override`, `sceneloudness` — one pending pass over every item since it ran),
+        and a cap drop logs the pending kinds (`dropping <kind>; pending N: <kind> ×n (k keys), …; running …`).
+        Self-test "per-item override burst": 317 overrides behind a clog, the playing one last → depth 3 (the clog + the batch + the items push), its
+        speed lands (RED: depth 256, dropped, speed stuck at the preview's). The stall-breaker trips above stay open.
   - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
         — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one
