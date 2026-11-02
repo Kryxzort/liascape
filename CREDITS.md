@@ -53,3 +53,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0019-config-start-the-debug-switches-off.patch` | config: start the debug switches off | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0020-scripting-run-property-scripts-the-way-Wallpaper-Eng.patch` | scripting: run property scripts the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0021-scripting-a-layer-property-the-object-lacks-reads-un.patch` | scripting: a layer property the object lacks reads undefined quietly | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0022-render-object-alpha-and-colour-reach-the-shader-live.patch` | render: object alpha and colour reach the shader live; g_Color4 is (colour, alpha) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0023-data-play-property-keyframe-animations-the-way-Wallp.patch` | data: play property keyframe animations the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

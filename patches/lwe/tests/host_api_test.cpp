@@ -1,4 +1,4 @@
-// Tests of liascape's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016, 0018, 0019), run by
+// Tests of liascape's patches to LWE's public API (patches/lwe/0003-0006, 0012-0016, 0018-0023), run by
 // `bash scripts/lwe.sh test` against the built core. C++ only because LWE's public headers are:
 // they use `struct` tags as type names (`wp_mute_check*`), which C rejects.
 //
@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -849,6 +850,14 @@ static std::string square (int id, const std::string& props) {
          + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\"," + props + "}";
 }
 
+// the same square in white (B2 reads its red channel as alpha × 255)
+static std::string white_square (int id, const std::string& props) {
+    std::string sq = square (id, props);
+    const std::string from = "\"color\":\"1 1 1\"";
+    sq.replace (sq.find (from), from.size (), "\"color\":\"1.0 1.0 1.0\"");
+    return sq;
+}
+
 // a property value with a script, as the editor writes it: {"value": …, "script": …}
 static std::string scripted (const std::string& name, const std::string& value, const std::string& script) {
     std::string escaped;
@@ -940,6 +949,13 @@ struct ScriptRig {
         if (!dir.empty ()) {
             unlink ((dir + "/project.json").c_str ());
             unlink ((dir + "/scene.json").c_str ());
+            for (const char* sub : { "shaders", "materials", "models" }) {
+                const std::string d = dir + "/" + sub;
+                for (const char* f : { "c4.vert", "c4.frag", "c4.json" }) {
+                    unlink ((d + "/" + f).c_str ());
+                }
+                rmdir (d.c_str ());
+            }
             rmdir (dir.c_str ());
         }
     }
@@ -1055,6 +1071,154 @@ static bool undefined_leaves_the_property () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// 0022-0023 (B2): object alpha/colour reach the shader live, g_Color4 = (colour, alpha), keyframe animations
+// (docs/player/spikes/we-lwe-gap-audit.md B2: E2, E3, G01, G02). The squares are translucent white over the 0 0 0.5
+// clear colour, so a square's red channel is its alpha × 255; read at each square's centre on the centre row
+
+// the red channel at column x of the centre row
+static int red_at (const ScriptRig& rig, int x) {
+    // (the squares are white: "1.0 1.0 1.0" — a colour without a '.' is 0..255, so "1 1 1" is nearly black)
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, x, 16, px);
+    return px[0];
+}
+
+static bool near (int got, double want, int slack = 3) { return std::abs (got - static_cast<int> (std::lround (want))) <= slack; }
+
+// a property's animation object: `curves` is the c0.. members, `options` the members of options
+static std::string animated (const std::string& name, const std::string& value, const std::string& curves,
+                             const std::string& options, bool relative = false) {
+    return "\"" + name + "\":{\"value\":" + value + ",\"animation\":{" + curves + ",\"options\":{" + options + "}"
+         + (relative ? ",\"relative\":true" : "") + "}}";
+}
+
+// a curve of keys {frame, value[, front x y][, back x y][, step]} — handles are WE's {enabled, x, y}
+static std::string key (int frame, double value, const std::string& extra = "") {
+    char buf[96];
+    snprintf (buf, sizeof buf, "{\"frame\":%d,\"value\":%g", frame, value);
+    return std::string (buf) + extra + "}";
+}
+static std::string handle (const char* side, double x, double y) {
+    char buf[96];
+    snprintf (buf, sizeof buf, ",\"%s\":{\"enabled\":true,\"x\":%g,\"y\":%g}", side, x, y);
+    return buf;
+}
+
+// a script returning a constant alpha / colour reaches the shader (unpatched: g_Alpha / g_Color were copies taken at
+// setup, so the square stayed opaque white); a static alpha reaches g_Color4.w (unpatched: the colour's own w, 1)
+static bool object_uniforms_are_live () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (
+        white_square (1, "\"origin\":\"8 16 0\"," + scripted ("alpha", "1.0", "export function update(value) {\n  return 0.25;\n}"))
+        + "," + white_square (2, "\"origin\":\"24 16 0\"," + scripted ("color", "\"1.0 1.0 1.0\"", "export function update(value) {\n  return new Vec3(0, 1, 0);\n}"))
+        + ",{\"id\":3,\"name\":\"c4\",\"image\":\"models/c4.json\",\"size\":\"8 8\",\"color\":\"1.0 1.0 1.0\",\"alpha\":0.5,\"origin\":\"40 16 0\"}"
+    );
+    // a solid layer whose shader draws g_Color4 as is (genericimage2-4 multiply their texel by it)
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/shaders/c4.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                                          "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n");
+    write_file (dir + "/shaders/c4.frag", "uniform vec4 g_Color4;\nvoid main() {\n\tgl_FragColor = g_Color4;\n}\n");
+    write_file (dir + "/materials/c4.json", "{\"passes\":[{\"shader\":\"c4\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+    write_file (dir + "/models/c4.json", "{\"material\":\"materials/c4.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char green[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 24, 16, green);
+    const int a1 = red_at (rig, 8), a3 = red_at (rig, 40);
+    printf ("    alpha script: r=%d; colour script: %d %d %d; g_Color4 alpha 0.5: r=%d\n", a1, green[0], green[1], green[2], a3);
+    CHECK (near (a1, 0.25 * 255), "the alpha script's 0.25 didn't reach g_Alpha (r=%d)", a1);
+    CHECK (green[0] < 16 && green[1] > 240, "the colour script's green didn't reach g_Color (%d %d %d)", green[0], green[1], green[2]);
+    CHECK (near (a3, 0.5 * 255), "g_Color4.w isn't the layer's alpha 0.5 (r=%d)", a3);
+    return true;
+}
+
+// keyframe alpha: linear, a bezier ease, `single` holding its end, `startpaused`, a `step` key, `wraploop`
+// (unpatched: `animation` was never read, every square stayed at its value 1)
+static bool keyframes_drive_alpha () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string ease = "\"c0\":[" + key (0, 0, handle ("front", 0.6, 0)) + "," + key (30, 1, handle ("back", -0.2, 0)) + "]";
+    const std::string dir = script_scene (
+        white_square (1, "\"origin\":\"4 16 0\"," + animated ("alpha", "1.0", "\"c0\":[" + key (0, 0) + "," + key (30, 1) + "]", "\"fps\":30,\"length\":30,\"mode\":\"loop\""))
+        + "," + white_square (2, "\"origin\":\"14 16 0\"," + animated ("alpha", "1.0", ease, "\"fps\":30,\"length\":30,\"mode\":\"loop\""))
+        + "," + white_square (3, "\"origin\":\"24 16 0\"," + animated ("alpha", "1.0", "\"c0\":[" + key (0, 1) + "," + key (10, 0.2) + "]", "\"fps\":30,\"length\":10,\"mode\":\"single\""))
+        + "," + white_square (4, "\"origin\":\"34 16 0\"," + animated ("alpha", "1.0", "\"c0\":[" + key (0, 0.75) + "," + key (10, 0) + "]", "\"fps\":30,\"length\":10,\"mode\":\"loop\",\"startpaused\":true"))
+        + "," + white_square (5, "\"origin\":\"44 16 0\"," + animated ("alpha", "1", "\"c0\":[" + key (0, 0.9) + "," + key (20, 0.1, ",\"step\":true") + "]", "\"fps\":30,\"length\":40,\"mode\":\"loop\""))
+        + "," + white_square (6, "\"origin\":\"54 16 0\"," + animated ("alpha", "1.0", "\"c0\":[" + key (0, 0) + "," + key (10, 1) + "]", "\"fps\":30,\"length\":20,\"mode\":\"loop\",\"wraploop\":true"))
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 15) {
+        rig.step ();
+    }
+    int r[6];
+    for (int i = 0; i < 6; i++) {
+        r[i] = red_at (rig, 4 + 10 * i);
+    }
+    printf ("    after %d ticks: linear %d, ease %d, single %d, paused %d, step %d, wraploop %d\n", rig.frames, r[0], r[1], r[2], r[3], r[4], r[5]);
+    // frame 15 of 30: 0.5; the ease (control x 0.3 / 0.9) solved at u = 0.5: 0.4079; `single` held 0.2 since frame 10;
+    // paused at frame 0: 0.75; before the step key: 0.9; wraploop's key at 20 copies frame 0's 0: halfway back, 0.5
+    CHECK (near (r[0], 0.5 * 255), "linear: r=%d", r[0]);
+    CHECK (near (r[1], 0.4079 * 255), "bezier ease: r=%d", r[1]);
+    CHECK (near (r[2], 0.2 * 255), "single: r=%d", r[2]);
+    CHECK (near (r[3], 0.75 * 255), "startpaused: r=%d", r[3]);
+    CHECK (near (r[4], 0.9 * 255), "step: r=%d", r[4]);
+    CHECK (near (r[5], 0.5 * 255), "wraploop: r=%d", r[5]);
+    while (rig.frames < 25) {
+        rig.step ();
+    }
+    const int step = red_at (rig, 44);
+    const int loop = red_at (rig, 4);
+    printf ("    after %d ticks: step %d, linear %d\n", rig.frames, step, loop);
+    CHECK (near (step, 0.1 * 255), "step key at 20 reached: r=%d", step);
+    CHECK (near (loop, 25.0 / 30.0 * 255), "linear at 25: r=%d", loop);
+    while (rig.frames < 35) {
+        rig.step ();
+    }
+    const int wrapped = red_at (rig, 4);
+    printf ("    after %d ticks: linear %d (looped)\n", rig.frames, wrapped);
+    CHECK (near (wrapped, 5.0 / 30.0 * 255), "loop: r=%d", wrapped);
+    return true;
+}
+
+// keyframe origin: `relative` curves add to the "x y z" value; `mirror` comes back
+static bool keyframes_move_origin () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string flat0 = "\"c2\":[" + key (0, 0) + "," + key (10, 0) + "]";
+    const std::string dir = script_scene (
+        square (1, animated ("origin", "\"8 16 0\"", "\"c0\":[" + key (0, 0) + "," + key (30, 30) + "],\"c1\":[" + key (0, 0) + "," + key (30, 0) + "]," + flat0,
+                            "\"fps\":30,\"length\":30,\"mode\":\"loop\"", true))
+        + "," + square (2, animated ("origin", "\"0 0 0\"", "\"c0\":[" + key (0, 40) + "," + key (10, 50) + "],\"c1\":[" + key (0, 16) + "," + key (10, 16) + "]," + flat0,
+                                    "\"fps\":30,\"length\":10,\"mode\":\"mirror\""))
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 15) {
+        rig.step ();
+    }
+    // square 1: 8 + 15 = 23 (19..26); square 2: up to 50 at frame 10, back to 45 at 15 (41..48)
+    std::string want = covered (19, 26);
+    for (int x = 41; x <= 48; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    after %d ticks: %s\n", rig.frames, got.c_str ());
+    CHECK (got == want, "want %s", want.c_str ());
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -1082,6 +1246,9 @@ int main (int argc, char** argv) {
     run ("update_moves_the_property", update_moves_the_property);
     run ("init_runs_first_and_modules_load", init_runs_first_and_modules_load);
     run ("undefined_leaves_the_property", undefined_leaves_the_property);
+    run ("object_uniforms_are_live", object_uniforms_are_live);
+    run ("keyframes_drive_alpha", keyframes_drive_alpha);
+    run ("keyframes_move_origin", keyframes_move_origin);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

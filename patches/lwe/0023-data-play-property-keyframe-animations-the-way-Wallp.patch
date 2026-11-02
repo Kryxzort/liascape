@@ -1,0 +1,835 @@
+From ccb545d8930d04e28e1b1b569e0bd1c77494d03e Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 23:53:09 +0530
+Subject: [PATCH 23/23] data: play property keyframe animations the way
+ Wallpaper Engine does
+
+A property's `animation` (`{"c0": [keys], ..., "options": {...},
+"relative": ...}` next to its `value`) was never read, so every animated
+fade, move, spin and effect constant stood still at its value. They now
+play, as decoded from wallpaper64.exe 2.8.485 (parser 0x1401d1740, curves
+0x1401d4dd0, options 0x1401d5790/0x1401d4d00, wraploop 0x1401d5990, curve
+bake 0x1401d5c50, clock 0x1401d6a00, sampler in 0x1401a19e0):
+
+- Curves c0..c3, one per component, in order (a missing one ends the
+  list; a component without a curve keeps its value). A key is
+  {frame, value, back, front, step}; a handle is an object, enabled
+  unless `"enabled": false` (a disabled one is (0, 0)); keys whose frame
+  doesn't move forward are dropped.
+- Between keys A and B: a cubic bezier through (0, A.value),
+  (A.front.x / 2, A.value + A.front.y), (1 + B.back.x / 2,
+  B.value + B.back.y), (1, B.value) over the normalised segment, x solved
+  by up to 24 Newton steps inside a bisection bracket (tolerance
+  max(0.01 / segment frames, FLT_EPSILON)). All four handle numbers zero,
+  or both control points on the line, is linear. A `step` B holds A's
+  value; before the first key and after the last, the end values hold.
+- Evaluated at whole frames and blended linearly between frame n and
+  n + 1 by the time left over.
+- `options`: fps > 0 and length > 0 (frames) or there's no animation;
+  mode `loop` (default), `mirror` (ping-pong), `single` (plays once,
+  holds); `startpaused` never advances (nothing can play() it yet:
+  SceneScript's getAnimation is not there); `wraploop` drops keys past
+  `length` and puts a key at `length` that copies the first one (value,
+  step, its front handle mirrored as the back handle).
+- `relative`: c0..c2 are offsets added to the value when the value is an
+  "x y z" string (WE adds nothing to a numeric value).
+
+Values parsed with an animation while a scene is parsed are listed on the
+Scene (an AnimationCollector), with the value's alive flag; every frame,
+before the script tick (so a script's update(value) gets the animated
+value), CScene advances each by the frame's dt of the host clock and
+writes it (UpdateSource::Animation). Object values (alpha, origin,
+angles, scale, colour) and effect constants are covered alike.
+
+Not done: `timeofday` mode, `options.parent`/`children` shared
+timelines (each property runs its own, from the same start, so they stay
+in step until a script controls one), `random`, animation events and the
+SceneScript animation API (getAnimation, play/stop/pause, setFrame).
+
+Origin: ours
+Why: keyframe animations were ignored in lp-player: animated fades, moves, rotations and effect values static in 26 of the owner's scenes (docs/player/spikes/we-lwe-gap-audit.md B2: G01, G02)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8YtBieDNWXo3bvfKaP
+---
+ src/core/CMakeLists.txt                       |   1 +
+ .../Data/Model/DynamicValue.cpp               |   6 +
+ .../WallpaperEngine/Data/Model/DynamicValue.h |  16 ++
+ .../Data/Model/PropertyAnimation.cpp          | 237 ++++++++++++++++++
+ .../Data/Model/PropertyAnimation.h            |  92 +++++++
+ src/core/WallpaperEngine/Data/Model/Types.h   |   3 +
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |   3 +
+ .../Data/Parsers/DynamicValueParser.cpp       | 152 +++++++++++
+ .../Data/Parsers/DynamicValueParser.h         |  26 ++
+ .../Data/Parsers/WallpaperParser.cpp          |  10 +-
+ .../Render/Wallpapers/CScene.cpp              |  22 ++
+ .../Render/Wallpapers/CScene.h                |   2 +
+ 12 files changed, 569 insertions(+), 1 deletion(-)
+ create mode 100644 src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+ create mode 100644 src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 5bb5b2b..1f7b3fd 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -69,6 +69,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Data/Builders/ColorBuilder.cpp
+     WallpaperEngine/Data/Builders/VectorBuilder.cpp
+     WallpaperEngine/Data/Model/DynamicValue.cpp
++    WallpaperEngine/Data/Model/PropertyAnimation.cpp
+     WallpaperEngine/Data/Utils/BinaryReader.cpp
+     WallpaperEngine/Data/Parsers/EffectParser.cpp
+     WallpaperEngine/Data/Parsers/ProjectParser.cpp
+diff --git a/src/core/WallpaperEngine/Data/Model/DynamicValue.cpp b/src/core/WallpaperEngine/Data/Model/DynamicValue.cpp
+index 95f773c..7ccd024 100644
+--- a/src/core/WallpaperEngine/Data/Model/DynamicValue.cpp
++++ b/src/core/WallpaperEngine/Data/Model/DynamicValue.cpp
+@@ -296,6 +296,12 @@ void DynamicValue::setProperties (std::map<std::string, UserSettingUniquePtr> pr
+     this->m_properties = std::move (properties);
+ }
+ 
++void DynamicValue::setAnimation (PropertyAnimationSharedPtr animation) { this->m_animation = std::move (animation); }
++
++const PropertyAnimationSharedPtr& DynamicValue::getAnimation () const { return this->m_animation; }
++
++std::shared_ptr<const bool> DynamicValue::getAliveFlag () const { return this->m_aliveFlag; }
++
+ void DynamicValue::propagate (UpdateSource source) const {
+     for (const auto& callback : this->m_listeners) {
+ 	callback (*this, source);
+diff --git a/src/core/WallpaperEngine/Data/Model/DynamicValue.h b/src/core/WallpaperEngine/Data/Model/DynamicValue.h
+index 4843dca..d522104 100644
+--- a/src/core/WallpaperEngine/Data/Model/DynamicValue.h
++++ b/src/core/WallpaperEngine/Data/Model/DynamicValue.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "Color.h"
++#include "PropertyAnimation.h"
+ #include "Types.h"
+ 
+ #include <functional>
+@@ -46,6 +47,8 @@ public:
+ 	Initialization = 0,
+ 	Script = 1,
+ 	User = 2,
++	/** a keyframe animation's value for this frame */
++	Animation = 3,
+     };
+ 
+     DynamicValue () = default;
+@@ -136,6 +139,18 @@ public:
+      * Updates the script properties associated with this dynamic value
+      */
+     void setProperties (std::map<std::string, UserSettingUniquePtr> properties);
++    /**
++     * Attaches a keyframe animation: from then on the scene writes its value into this one every frame
++     */
++    void setAnimation (PropertyAnimationSharedPtr animation);
++    /**
++     * @return The keyframe animation driving this value (if any)
++     */
++    [[nodiscard]] const PropertyAnimationSharedPtr& getAnimation () const;
++    /**
++     * @return A flag that turns false when this value is destroyed (for holders of a plain pointer to it)
++     */
++    [[nodiscard]] std::shared_ptr<const bool> getAliveFlag () const;
+ 
+ private:
+     /**
+@@ -147,6 +162,7 @@ private:
+     std::list<std::function<void (const DynamicValue&, UpdateSource)>> m_listeners = {};
+     std::vector<std::function<void ()>> m_connections = {};
+     std::optional<std::string> m_scriptSource = std::nullopt;
++    PropertyAnimationSharedPtr m_animation = nullptr;
+ 
+     glm::vec4 m_vec4 = {};
+     glm::vec3 m_vec3 = {};
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+new file mode 100644
+index 0000000..287a187
+--- /dev/null
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+@@ -0,0 +1,237 @@
++#include "PropertyAnimation.h"
++#include "DynamicValue.h"
++
++#include <algorithm>
++#include <cfloat>
++#include <cmath>
++
++using namespace WallpaperEngine::Data::Model;
++
++PropertyAnimation::PropertyAnimation (
++    std::string name, float fps, int length, const std::string& mode, bool startPaused, bool wrapLoop,
++    std::vector<Curve> curves
++) :
++    m_name (std::move (name)), m_secondsPerFrame (1.0f / fps), m_duration (static_cast<float> (length) / fps),
++    m_length (length), m_curves (std::move (curves)) {
++    if (mode == "mirror") {
++	this->m_flags |= Mirror;
++    } else if (mode == "single") {
++	this->m_flags |= Single;
++    }
++    if (startPaused) {
++	this->m_flags |= StartPaused;
++    }
++    if (wrapLoop) {
++	this->m_flags |= WrapLoop;
++	// the key at `length` becomes a copy of the first one, so a loop comes back to where it started: keys past
++	// the end go, the value, the step and (as the mirror image of the first key's front handle) the back handle
++	// are the first key's
++	for (auto& curve : this->m_curves) {
++	    if (curve.size () < 2) {
++		continue;
++	    }
++	    while (curve.size () > 1 && curve.back ().frame > length) {
++		curve.pop_back ();
++	    }
++	    if (curve.size () < 2) {
++		continue;
++	    }
++	    if (curve.back ().frame != length) {
++		curve.push_back (Keyframe { .frame = length });
++	    }
++	    const Keyframe first = curve.front ();
++	    Keyframe& last = curve.back ();
++	    last.value = first.value;
++	    last.step = first.step;
++	    if (first.frontEnabled) {
++		last.backEnabled = true;
++		last.back = -first.front;
++	    } else {
++		last.backEnabled = false;
++	    }
++	}
++    }
++}
++
++float PropertyAnimation::evaluate (const Curve& curve, int frame) {
++    if (curve.empty ()) {
++	return 0.0f;
++    }
++    if (frame < curve.front ().frame) {
++	return curve.front ().value;
++    }
++
++    const auto next = std::ranges::find_if (curve, [frame] (const Keyframe& k) { return k.frame > frame; });
++
++    if (next == curve.end ()) {
++	return curve.back ().value;
++    }
++
++    const Keyframe& a = *std::prev (next);
++    const Keyframe& b = *next;
++
++    if (frame == a.frame || b.step) {
++	return a.value;
++    }
++
++    const float inv = 1.0f / static_cast<float> (b.frame - a.frame);
++    const float dv = b.value - a.value;
++    const float u = static_cast<float> (frame - a.frame) * inv;
++    const float linear = static_cast<float> (frame - a.frame) * inv * dv + a.value;
++
++    if (a.front.x == 0.0f && a.front.y == 0.0f && b.back.x == 0.0f && b.back.y == 0.0f) {
++	return linear;
++    }
++
++    // control points over the normalised segment: x in [0, 1] (the handles' x are half-segments), y in value units
++    const float x1 = a.front.x * 0.5f;
++    const float x2 = b.back.x * 0.5f + 1.0f;
++    const float y1 = a.value + a.front.y;
++    const float y2 = b.value + b.back.y;
++
++    if (y1 == x1 * dv + a.value && y2 == x2 * dv + a.value) {
++	return linear;
++    }
++
++    // x(t) = u: Newton steps kept inside a bisection bracket, at most 24 of them
++    const float tolerance = std::max (inv * 0.01f, FLT_EPSILON);
++    float t = u;
++    float lo = 0.0f;
++    float hi = 1.0f;
++
++    for (int i = 0; i < 24; i++) {
++	const float s = 1.0f - t;
++	const float x = 3.0f * s * s * t * x1 + 3.0f * s * t * t * x2 + t * t * t - u;
++
++	if (std::fabs (x) <= tolerance) {
++	    break;
++	}
++	if (x < 0.0f) {
++	    lo = t;
++	} else {
++	    hi = t;
++	}
++
++	float next_t = (hi + lo) * 0.5f;
++	const float dx = 6.0f * s * t * (x2 - x1) + 3.0f * s * s * x1 + 3.0f * t * t * (1.0f - x2);
++
++	if (std::fabs (dx) > FLT_EPSILON) {
++	    if (const float newton = t - x / dx; lo < newton && newton < hi) {
++		next_t = newton;
++	    }
++	}
++	if (next_t == t) {
++	    break;
++	}
++	t = next_t;
++    }
++
++    const float s = 1.0f - t;
++    return s * s * s * a.value + 3.0f * s * s * t * y1 + 3.0f * s * t * t * y2 + t * t * t * b.value;
++}
++
++void PropertyAnimation::advance (float dt) {
++    if ((this->m_flags & (StartPaused | Finished)) != 0) {
++	return;
++    }
++    if ((this->m_flags & Single) != 0 && this->m_duration <= this->m_time) {
++	return;
++    }
++    if (this->m_duration <= 0.0f) {
++	return;
++    }
++    if ((this->m_flags & Reverse) != 0) {
++	dt = -dt;
++    }
++
++    const float t = this->m_time + dt;
++    this->m_time = t;
++
++    if ((this->m_flags & Single) != 0) {
++	if (t >= this->m_duration) {
++	    this->m_flags |= Finished;
++	    this->m_time = this->m_duration;
++	}
++	return;
++    }
++
++    if ((this->m_flags & Mirror) == 0) {
++	if (this->m_time < 0.0f) {
++	    this->m_time = std::fmod (this->m_time + this->m_duration, this->m_duration);
++	}
++	if (this->m_time >= this->m_duration) {
++	    this->m_time = std::fmod (this->m_time, this->m_duration);
++	}
++	return;
++    }
++
++    if ((this->m_flags & Reverse) == 0) {
++	if (t >= this->m_duration) {
++	    this->m_flags |= Reverse;
++	    this->m_time = this->m_duration - std::fmod (t, this->m_duration);
++	}
++    } else if (t <= 0.0f) {
++	this->m_flags &= ~Reverse;
++	this->m_time = -std::fmod (t, this->m_duration);
++    }
++}
++
++float PropertyAnimation::sample (size_t component) const {
++    if (component >= this->m_curves.size ()) {
++	return 0.0f;
++    }
++
++    const float spf = this->m_secondsPerFrame;
++    const int frame = static_cast<int> (this->m_time / spf);
++    int from = std::min (frame, this->m_length - 1);
++
++    if (from < 1) {
++	from = 0;
++    }
++
++    const int to = std::min (from + 1, this->m_length);
++    const float weight = std::fmod (this->m_time, spf) / spf;
++    const auto& curve = this->m_curves [component];
++
++    return evaluate (curve, from) * (1.0f - weight) + evaluate (curve, to) * weight;
++}
++
++void PropertyAnimation::apply (DynamicValue& value) const {
++    const auto count = this->m_curves.size ();
++    const auto pick = [this, count] (size_t i, float current) { return i < count ? this->sample (i) : current; };
++
++    switch (value.getType ()) {
++	case DynamicValue::Float:
++	case DynamicValue::Int:
++	case DynamicValue::Boolean:
++	    value.update (pick (0, value.getFloat ()), DynamicValue::UpdateSource::Animation);
++	    break;
++	case DynamicValue::Vec2: {
++	    const glm::vec2 v = value.getVec2 ();
++	    value.update (glm::vec2 (pick (0, v.x), pick (1, v.y)), DynamicValue::UpdateSource::Animation);
++	    break;
++	}
++	case DynamicValue::Vec3: {
++	    const glm::vec3 v = value.getVec3 ();
++	    value.update (glm::vec3 (pick (0, v.x), pick (1, v.y), pick (2, v.z)), DynamicValue::UpdateSource::Animation);
++	    break;
++	}
++	case DynamicValue::Vec4: {
++	    const glm::vec4 v = value.getVec4 ();
++	    value.update (
++		glm::vec4 (pick (0, v.x), pick (1, v.y), pick (2, v.z), pick (3, v.w)), DynamicValue::UpdateSource::Animation
++	    );
++	    break;
++	}
++	default:
++	    break;
++    }
++}
++
++const std::string& PropertyAnimation::getName () const { return this->m_name; }
++
++size_t PropertyAnimation::getComponentCount () const { return this->m_curves.size (); }
++
++float PropertyAnimation::getTime () const { return this->m_time; }
++
++unsigned int PropertyAnimation::getFlags () const { return this->m_flags; }
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+new file mode 100644
+index 0000000..4d09e09
+--- /dev/null
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+@@ -0,0 +1,92 @@
++#pragma once
++
++#include <glm/glm.hpp>
++#include <memory>
++#include <string>
++#include <vector>
++
++namespace WallpaperEngine::Data::Model {
++class DynamicValue;
++
++/**
++ * A property's keyframe animation (`"animation": {"c0": [...], ..., "options": {...}}` next to its `value`),
++ * evaluated the way Wallpaper Engine 2.8 does it (wallpaper64.exe; docs/player/spikes/we-lwe-gap-audit.md G01/G02):
++ *
++ *  - one curve per component (`c0`..`c3`), each a list of keyframes `{frame, value, back, front, step}` whose
++ *    frames strictly increase (a key that doesn't is dropped);
++ *  - between two keys A and B the value is a cubic bezier with control points (0, A.value),
++ *    (A.front.x / 2, A.value + A.front.y), (1 + B.back.x / 2, B.value + B.back.y), (1, B.value) over the
++ *    normalised segment, solved for x by Newton steps guarded by bisection; all four handle numbers zero (or the
++ *    control points on the line) is linear; a `step` B holds A's value; before the first key / after the last the
++ *    end values hold;
++ *  - the curve is evaluated at whole frames and blended linearly between frame `n` and `n + 1` by the time left
++ *    over;
++ *  - the clock: `fps`, `length` (frames), `mode` `loop` / `mirror` (ping-pong) / `single` (plays once, holds),
++ *    `startpaused` (does not advance), `wraploop` (a last key at `length` copies the first one).
++ */
++class PropertyAnimation {
++public:
++    struct Keyframe {
++	int frame = 0;
++	float value = 0.0f;
++	bool step = false;
++	bool backEnabled = false;
++	bool frontEnabled = false;
++	glm::vec2 back = {};
++	glm::vec2 front = {};
++    };
++
++    using Curve = std::vector<Keyframe>;
++
++    enum Flags : unsigned int {
++	Mirror = 0x1,
++	Single = 0x2,
++	Random = 0x4,
++	WrapLoop = 0x10,
++	StartPaused = 0x20000000,
++	Finished = 0x40000000,
++	Reverse = 0x80000000,
++    };
++
++    /**
++     * @param fps frames per second (> 0)
++     * @param length the timeline's length in frames (> 0)
++     * @param mode "loop" (or anything else), "mirror" or "single"
++     */
++    PropertyAnimation (std::string name, float fps, int length, const std::string& mode, bool startPaused, bool wrapLoop,
++		       std::vector<Curve> curves);
++
++    /** Advances the timeline by `dt` seconds of the scene clock (honours the mode, pause and the end of `single`) */
++    void advance (float dt);
++    /** The animated value of component `component` at the current time (0 when that curve has no keys) */
++    [[nodiscard]] float sample (size_t component) const;
++    /** Writes the animated value into `value`, keeping its type; components without a curve keep their value */
++    void apply (DynamicValue& value) const;
++
++    [[nodiscard]] const std::string& getName () const;
++    [[nodiscard]] size_t getComponentCount () const;
++    [[nodiscard]] float getTime () const;
++    [[nodiscard]] unsigned int getFlags () const;
++
++    /** The value of a curve at a whole frame (exposed for tests) */
++    [[nodiscard]] static float evaluate (const Curve& curve, int frame);
++
++private:
++    std::string m_name;
++    float m_secondsPerFrame;
++    float m_duration;
++    int m_length;
++    unsigned int m_flags = 0;
++    float m_time = 0.0f;
++    std::vector<Curve> m_curves;
++};
++
++using PropertyAnimationSharedPtr = std::shared_ptr<PropertyAnimation>;
++
++/** A value with a keyframe animation, as a scene keeps it to advance it every frame */
++struct AnimatedValue {
++    DynamicValue* value;
++    /** false once `value` is destroyed */
++    std::shared_ptr<const bool> alive;
++};
++} // namespace WallpaperEngine::Data::Model
+diff --git a/src/core/WallpaperEngine/Data/Model/Types.h b/src/core/WallpaperEngine/Data/Model/Types.h
+index 891a966..fc5b8df 100644
+--- a/src/core/WallpaperEngine/Data/Model/Types.h
++++ b/src/core/WallpaperEngine/Data/Model/Types.h
+@@ -12,6 +12,8 @@ class Scene;
+ class Web;
+ class Video;
+ struct UserSetting;
++class PropertyAnimation;
++struct AnimatedValue;
+ struct ImageAnimationLayer;
+ class Object;
+ class Sound;
+@@ -40,6 +42,7 @@ struct PlaylistItem;
+ using PropertySharedPtr = std::shared_ptr<Property>;
+ using Properties = std::map<std::string, PropertySharedPtr>;
+ using DynamicValueUniquePtr = std::unique_ptr<DynamicValue>;
++using PropertyAnimationSharedPtr = std::shared_ptr<PropertyAnimation>;
+ using UserSettingUniquePtr = std::unique_ptr<UserSetting>;
+ 
+ using ShaderConstantMap = std::map<std::string, UserSettingUniquePtr>;
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index da2ad1c..29f912e 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -7,6 +7,7 @@
+ 
+ #include "../Utils/TypeCaster.h"
+ #include "Object.h"
++#include "PropertyAnimation.h"
+ #include "Types.h"
+ 
+ namespace WallpaperEngine::Data::Model {
+@@ -106,6 +107,8 @@ struct SceneData {
+     } camera;
+ 
+     ObjectList objects;
++    /** Every value in this scene with a keyframe animation (the scene advances them every frame) */
++    std::vector<AnimatedValue> animatedValues = {};
+ };
+ 
+ class Scene final : public Wallpaper, public SceneData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+index 1332e4b..391a1fa 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+@@ -1,9 +1,149 @@
+ #include "DynamicValueParser.h"
+ 
+ #include "../Model/DynamicValue.h"
++#include "../Model/PropertyAnimation.h"
+ #include "UserSettingParser.h"
+ 
++#include <climits>
++#include <sstream>
++
+ using namespace WallpaperEngine::Data::Parsers;
++using namespace WallpaperEngine::Data::Model;
++
++namespace {
++thread_local std::vector<AnimatedValue>* g_animatedValues = nullptr;
++
++// a `back`/`front` handle: an object, enabled unless `"enabled": false`; a disabled one is (0, 0)
++bool parseHandle (const JSON& key, const char* name, glm::vec2& out) {
++    const auto it = key.find (name);
++
++    if (it == key.end () || !it->is_object ()) {
++	return false;
++    }
++    if (const auto enabled = it->find ("enabled"); enabled != it->end () && enabled->is_boolean () && !enabled->get<bool> ()) {
++	return false;
++    }
++
++    const auto x = it->find ("x");
++    const auto y = it->find ("y");
++
++    out.x = x != it->end () && x->is_number () ? x->get<float> () : 0.0f;
++    out.y = y != it->end () && y->is_number () ? y->get<float> () : 0.0f;
++    return true;
++}
++
++PropertyAnimation::Curve parseCurve (const JSON& keys, float offset) {
++    PropertyAnimation::Curve curve;
++    int last = INT_MIN;
++
++    for (const auto& key : keys) {
++	if (!key.is_object ()) {
++	    continue;
++	}
++
++	const auto value = key.find ("value");
++	const auto frame = key.find ("frame");
++
++	if (value == key.end () || frame == key.end () || !value->is_number () || !frame->is_number ()) {
++	    continue;
++	}
++
++	PropertyAnimation::Keyframe keyframe {
++	    .frame = static_cast<int> (frame->get<double> ()),
++	    .value = value->get<float> () + offset,
++	};
++
++	// keys must move forward in time, one that doesn't is dropped
++	if (keyframe.frame <= last) {
++	    continue;
++	}
++
++	const auto step = key.find ("step");
++
++	keyframe.step = step != key.end () && step->is_boolean () && step->get<bool> ();
++	keyframe.backEnabled = parseHandle (key, "back", keyframe.back);
++	keyframe.frontEnabled = parseHandle (key, "front", keyframe.front);
++	last = keyframe.frame;
++	curve.push_back (keyframe);
++    }
++
++    return curve;
++}
++} // namespace
++
++DynamicValueParser::AnimationCollector::AnimationCollector (std::vector<AnimatedValue>& out) :
++    m_previous (g_animatedValues) {
++    g_animatedValues = &out;
++}
++
++DynamicValueParser::AnimationCollector::~AnimationCollector () { g_animatedValues = this->m_previous; }
++
++PropertyAnimationSharedPtr DynamicValueParser::parseAnimation (const JSON& animation, const JSON& value) {
++    if (!animation.is_object ()) {
++	return nullptr;
++    }
++
++    const auto options = animation.find ("options");
++
++    if (options == animation.end () || !options->is_object ()) {
++	return nullptr;
++    }
++
++    const auto fpsIt = options->find ("fps");
++    const auto lengthIt = options->find ("length");
++
++    if (fpsIt == options->end () || lengthIt == options->end () || !fpsIt->is_number () || !lengthIt->is_number ()) {
++	return nullptr;
++    }
++
++    const float fps = fpsIt->get<float> ();
++    const int length = static_cast<int> (lengthIt->get<double> ());
++
++    if (fps <= 0.0f || static_cast<float> (length) / fps <= 0.0f) {
++	return nullptr;
++    }
++
++    const auto flag = [&options] (const char* name) {
++	const auto it = options->find (name);
++	return it != options->end () && it->is_boolean () && it->get<bool> ();
++    };
++    const auto text = [] (const JSON& obj, const char* name) {
++	const auto it = obj.find (name);
++	return it != obj.end () && it->is_string () ? it->get<std::string> () : std::string ();
++    };
++
++    // `relative`: the curves are offsets from the property's value — WE adds an "x y z" string value to c0..c2
++    // (a value that's a number, or a string of fewer than three numbers, adds nothing)
++    float offsets [3] = { 0.0f, 0.0f, 0.0f };
++
++    if (animation.contains ("relative") && value.is_string ()) {
++	std::istringstream in (value.get<std::string> ());
++	float x, y, z;
++
++	if (in >> x >> y >> z) {
++	    offsets [0] = x;
++	    offsets [1] = y;
++	    offsets [2] = z;
++	}
++    }
++
++    std::vector<PropertyAnimation::Curve> curves;
++
++    for (const char* name : { "c0", "c1", "c2", "c3" }) {
++	const auto it = animation.find (name);
++
++	if (it == animation.end () || !it->is_array ()) {
++	    break;
++	}
++
++	curves.push_back (parseCurve (*it, curves.size () < 3 ? offsets [curves.size ()] : 0.0f));
++    }
++
++    return std::make_shared<PropertyAnimation> (
++	text (*options, "name"), fps, length, text (*options, "mode"), flag ("startpaused"), flag ("wraploop"),
++	std::move (curves)
++    );
++}
+ 
+ DynamicValueUniquePtr DynamicValueParser::parse (const JSON& data, const Properties& properties, bool expectColor) {
+     auto value = std::make_unique<DynamicValue> ();
+@@ -76,5 +216,17 @@ DynamicValueUniquePtr DynamicValueParser::parse (const JSON& data, const Propert
+ 	value->setScriptSource (scriptSource.value ());
+     }
+ 
++    if (data.is_object ()) {
++	if (const auto animation = data.optional ("animation"); animation.has_value ()) {
++	    if (auto parsed = parseAnimation (*animation, valueIt); parsed != nullptr) {
++		value->setAnimation (std::move (parsed));
++
++		if (g_animatedValues != nullptr) {
++		    g_animatedValues->push_back ({ .value = value.get (), .alive = value->getAliveFlag () });
++		}
++	    }
++	}
++    }
++
+     return value;
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+index bfb6117..57a7962 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+@@ -3,6 +3,9 @@
+ #include "../JSON.h"
+ #include "../Model/Types.h"
+ 
++#include <memory>
++#include <vector>
++
+ namespace WallpaperEngine::Data::Parsers {
+ using JSON = WallpaperEngine::Data::JSON::JSON;
+ using namespace WallpaperEngine::Data::Model;
+@@ -10,5 +13,28 @@ using namespace WallpaperEngine::Data::Model;
+ class DynamicValueParser {
+ public:
+     static Model::DynamicValueUniquePtr parse (const JSON& data, const Properties& properties, bool expectColor);
++    /**
++     * Parses a property's `animation` object (G01/G02 of docs/player/spikes/we-lwe-gap-audit.md) the way
++     * Wallpaper Engine 2.8 does: `options` needs `fps` > 0 and `length` > 0 or there is no animation; curves
++     * `c0`..`c3` in order (a missing one ends the list); `relative` offsets c0..c2 by the property's `value` when
++     * that is an "x y z" string
++     *
++     * @return The animation, or nullptr when it doesn't describe one
++     */
++    static Model::PropertyAnimationSharedPtr parseAnimation (const JSON& animation, const JSON& value);
++
++    /**
++     * While one of these lives (on this thread), every value parsed with an animation is appended to `out`
++     */
++    class AnimationCollector {
++    public:
++	explicit AnimationCollector (std::vector<Model::AnimatedValue>& out);
++	~AnimationCollector ();
++	AnimationCollector (const AnimationCollector&) = delete;
++	AnimationCollector& operator= (const AnimationCollector&) = delete;
++
++    private:
++	std::vector<Model::AnimatedValue>* m_previous;
++    };
+ };
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index b73da92..5bc2841 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "../Model/Project.h"
+ #include "../Model/Wallpaper.h"
++#include "DynamicValueParser.h"
+ #include "ObjectParser.h"
+ #include "WallpaperEngine/FileSystem/Container.h"
+ #include "WallpaperEngine/Logging/Log.h"
+@@ -33,7 +34,11 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+     // TODO: FIND IF THESE DEFAULTS ARE SENSIBLE OR NOT AND PERFORM PROPER VALIDATION WHEN CAMERA PREVIEW AND CAMERA
+     // PARALLAX ARE PRESENT
+ 
+-    return std::make_unique <Scene> (
++    // every value parsed from here on with a keyframe animation is listed for the scene to advance
++    std::vector<AnimatedValue> animatedValues;
++    DynamicValueParser::AnimationCollector collector (animatedValues);
++
++    auto result = std::make_unique <Scene> (
+         WallpaperData {
+             .filename = "",
+             .project = project
+@@ -80,6 +85,9 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+             .objects = parseObjects (objects, project),
+         }
+     );
++
++    result->animatedValues = std::move (animatedValues);
++    return result;
+ }
+ 
+ VideoUniquePtr WallpaperParser::parseVideo (const JSON& file, Project& project) {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 8202d44..2dbb74d 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -301,6 +301,26 @@ void CScene::addObjectToRenderOrder (const Object& object) {
+ }
+ 
+ Scripting::ScriptEngine& CScene::getScriptEngine () const { return *this->m_scriptEngine; }
++
++void CScene::advanceAnimations () {
++    auto& animated = const_cast<Data::Model::Scene&> (this->getScene ()).animatedValues;
++    const float dt = std::max (
++	0.0f, this->getContext ().getContext ().renderTime - this->getContext ().getContext ().renderTimeLast
++    );
++
++    std::erase_if (animated, [] (const Data::Model::AnimatedValue& cur) { return cur.alive && !*cur.alive; });
++
++    for (const auto& [value, alive] : animated) {
++	const auto& animation = value->getAnimation ();
++
++	if (animation == nullptr) {
++	    continue;
++	}
++
++	animation->advance (dt);
++	animation->apply (*value);
++    }
++}
+ Camera& CScene::getCamera () const { return *this->m_camera; }
+ 
+ void CScene::renderFrame () {
+@@ -320,6 +340,8 @@ void CScene::renderFrame () {
+ 	this->m_parallaxDisplacement
+ 	    = glm::mix (this->m_parallaxDisplacement, (this->m_mousePosition * amount) * influence, delay);
+     }
++    // keyframe animations first, so a property script's update(value) sees this frame's animated value
++    this->advanceAnimations ();
+     // run a tick in the javascript logic
+     this->getScriptEngine ().tick ();
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index fdc0b3b..8ab3ae9 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -52,6 +52,8 @@ public:
+ protected:
+     void renderFrame () override;
+     void updateMouse ();
++    /** Advances every keyframe animation by this frame's dt and writes their values (G01/G02) */
++    void advanceAnimations ();
+ 
+     friend class CWallpaper;
+ 

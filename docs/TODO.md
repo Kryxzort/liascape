@@ -935,8 +935,12 @@ Two bug classes kept recurring; fix the class, not the instance:
           25 visibly broken today. M. **Done 2026-10-29:** fork patches 0019 (solid layers' uninitialised debug
           switch) + 0020 + 0021, pin `e78d94d`; WE's JS read at run time from the user's assets (never copied). Also S8,
           S22 done; S15, S24, S25, S29, S30 partly. Result + corpus delta: the audit's "B1 result" (§ 5).
-    - [ ] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
-          `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M.
+    - [x] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
+          `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M. **Done 2026-11-02:** fork patches 0022
+          (live object uniforms, `g_Color4` = (colour, alpha)) + 0023 (keyframe animations, decoded from
+          wallpaper64.exe), pin `ccb545d`. Left: `timeofday`, shared `parent`/`children` timelines, events and the
+          SceneScript animation API (`getAnimation`, play/stop — B10), G05. Result + corpus delta: the audit's
+          "B2 result" (§ 5).
     - [ ] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
           meaning, HSV `colorn`, sprite-sheet blend, live overrides (P1–P8, P13, P14, P18, P19, P38). 61 scenes. M.
     - [ ] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on

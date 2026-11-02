@@ -73,8 +73,8 @@ These are ranked by scenes × how visible the difference is.
 |---|---|---|---|
 | 1 | S1, S2, S3, S5 | **(Fixed by B1, patch 0020.)** **Property scripts never run.** LWE keeps the Promise that quickjs-ng returns for a module eval, instead of the module, so `update`/`init`/events are never found. Each script then writes null into its property, so layers jump to (0,0) and go invisible or black. Confirmed by a smoke render: 2890767643's media widget sits at the bottom-left corner. | 40 (25 visibly broken) |
 | 2 | P1, P6, P5, P4, P3, P8 | **Particles are subtly wrong almost everywhere.** No `starttime` prewarm, so systems start empty (61). Colour randomness is per channel instead of shared (58). `colorn` multiplies instead of shifting hue (43). `count` and `rate` overrides mean different things (43, 36). Sprite-sheet frames step instead of cross-fading (33). | 61 |
-| 3 | E2, E3 | **Image alpha and colour.** `g_Color4.w` is 1 instead of the layer alpha. Alpha, colour and brightness uniforms are frozen at setup, so fades, user sliders and scripts never reach the shader. | 30 + ~22 |
-| 4 | G01, G02 | **Keyframe animations (`alpha/origin/angles/scale.animation`) are ignored**, so fades, slides and spins are static. | 20 |
+| 3 | E2, E3 | **(Fixed by B2, patch 0022.)** **Image alpha and colour.** `g_Color4.w` is 1 instead of the layer alpha. Alpha, colour and brightness uniforms are frozen at setup, so fades, user sliders and scripts never reach the shader. | 30 + ~22 |
+| 4 | G01, G02 | **(Fixed by B2, patch 0023; the SceneScript animation API is B10.)** **Keyframe animations (`alpha/origin/angles/scale.animation`) are ignored**, so fades, slides and spins are static. | 20 |
 | 5 | T1–T5, T8, G04, G13, G30 | **Text.** One line only, bytes not UTF-8, no alignment, no wrapping, no effects, no parent, no rotation, no parallax. A `systemfont_*` has no font on NixOS, so the text **vanishes**. | 45 |
 | 6 | E27, E28 | **`colorBlendMode` layers sample the framebuffer they draw into**, a GL feedback loop with undefined output. | 28 |
 | 7 | A1, A3, E8, S17, P20 | **Audio response.** u8 mono, only 0–5.4 kHz, linear bins, Right = Left. `registerAudioBuffers` is missing, so script visualisers throw. | 41 |
@@ -120,7 +120,7 @@ Batches are ordered by library usage × impact, highest first.
 | Batch | Rows | Scenes | Size | How | Verify |
 |---|---|---|---|---|---|
 | **B1 Make property scripts run** — **done 2026-10-29** (patches 0019–0021; see "B1 result" in § 5) | S1–S7, S9; S33, S34, S35, S38 by evaluating WE's own `scripts/jsclasses/baseclasses.js` + `jsmodules/*.js` as the prelude | 40 | M | `JS_EVAL_FLAG_COMPILE_ONLY` → `JS_EvalFunction` → `JS_GetModuleNamespace`. Skip the write on `undefined`. Call `init(value)`. Bind `thisLayer`/`thisObject` per call. Register scale/angles/visible on the live values. Replace the native Vec/WEMath adapters with WE's JS classes (keep the C++ side for marshalling only). | Smoke 2890767643, 3291729669, 2325974975: the widget is no longer in the corner, and stderr has no `TypeError: not a function`. Fork test: a module whose `update` returns `value+1` moves the property. Corpus: no new blank. |
-| **B2 Layer alpha, colour, keyframe animation** | E2, E3, G01, G02 (+ G05 once known) | ~50 | M | `g_Color4 = (color.rgb, alpha)`. Upload alpha/colour/brightness per draw from the live values. A keyframe evaluator for `c0..c2` bezier keys (`fps`, `length`, `mode` loop/mirror/single, `wraploop`, `startpaused`, `relative`), as decoded at GH 0x1401d1740/0x1401d4dd0/0x1401d5790. | Smoke two timestamps of 3 animated scenes: pixels change where WE animates. WE capture of 2388299037 (translucent layer). |
+| **B2 Layer alpha, colour, keyframe animation** — **done 2026-11-02** (patches 0022–0023; see "B2 result" in § 5) | E2, E3, G01, G02 (+ G05 once known) | ~50 | M | `g_Color4 = (color.rgb, alpha)`. Upload alpha/colour/brightness per draw from the live values. A keyframe evaluator for `c0..c2` bezier keys (`fps`, `length`, `mode` loop/mirror/single, `wraploop`, `startpaused`, `relative`), as decoded at GH 0x1401d1740/0x1401d4dd0/0x1401d5790. | Smoke two timestamps of 3 animated scenes: pixels change where WE animates. WE capture of 2388299037 (translucent layer). |
 | **B3 Particle core semantics** | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
 | **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
 | **B5 Parallax and camera** | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
@@ -636,6 +636,88 @@ from the vector classes.
   differs only in 2883756643 and 2890767643, which went from timeout to ok. Their first frames came in 7.8 s and 1.5 s this run.
   The report's timeouts were a slow, shared machine. B1 doesn't touch the load. No scene is newly blank, broken,
   crashed or timed out. The static (2783122117) and the 3 load failures are the same as before.
+
+### B2 result (fork patches 0022–0023, pin `ccb545d`, 2026-11-02)
+
+Rows E2, E3, G01 and G02 are done. G05 is still Unknown. The animation half of G02 (SceneScript `getAnimation`,
+play/stop, events) is left to B10.
+
+- **0022: object uniforms are live, and `g_Color4` is (colour, alpha).** `g_Brightness`, `g_UserAlpha`, `g_Alpha`,
+  `g_Color`, `g_Color4` and `g_CompositeColor` are now bound to the live values' addresses. Before, CPass stored a
+  copy taken at setup (E3). `g_Color4` is (`g_Color.rgb`, `g_Alpha`) as in WE's draw-context case 2 (E2). CImage
+  keeps it in a member that `render()` refreshes. Before, it was the colour's own w, which was 1, or 0 after a
+  script wrote a Vec3.
+- **0023: keyframe animations play.** These were decoded further from the same wallpaper64.exe. Besides
+  0x1401d1740, 0x1401d4dd0 and 0x1401d5790, which were already known:
+  - `FUN_1401d5c50` bakes a curve into one float per whole frame.
+  - `FUN_1401d6a00` is the clock.
+  - The sampler sits in `FUN_1401a19e0`.
+
+  What was settled:
+  - **Keys.** A key is 28 bytes: frame, value, flags (bit 0 back enabled, bit 1 front enabled, bit 2 `step`),
+    back x/y and front x/y. A handle is enabled unless `"enabled": false`, and a disabled handle is (0, 0). Keys
+    must move forward in frame, and one that doesn't is dropped.
+  - **Segment shape.** The control points are (A.front.x / 2, A.value + A.front.y) and (1 + B.back.x / 2,
+    B.value + B.back.y). The x handle is in half-segments, not frames, and is not divided by the segment length.
+    The y handle is in value units. x is solved by Newton steps inside a bisection bracket: at most 24 steps,
+    tolerance max(0.01 / segment frames, FLT_EPSILON).
+  - **Linear and step segments.** A segment is linear when all four handle numbers are 0, or when both control
+    points lie on the line. A `step` on B holds A's value. Before the first key and after the last, the end
+    values hold.
+  - **Sampling.** The value at time t is a linear blend of whole frames ⌊t·fps⌋ and that frame + 1, clamped to
+    [0, length].
+  - **Clock.** `loop` wraps by fmod. `mirror` reflects at both ends. `single` stops at `length` and sets a
+    finished bit. `startpaused` never advances. `wraploop` drops keys past `length`, then sets a key at `length`
+    to a copy of the first key: same value and step, with its front handle negated as the back handle.
+  - **`relative`.** It adds the value to c0..c2 only when the value is an "x y z" string. A number adds nothing,
+    as observed.
+
+  The animated values are collected while the scene is parsed (`Scene::animatedValues`). Each frame they are
+  advanced by the host clock's dt and written before the script tick. This covers object properties and effect
+  constants alike. In the library that is 179 animated values: alpha 63, origin 28, effect constants 85 (most
+  are `multiply`), angles 9, scale 3, and 3 particle instance overrides.
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). Every value below matches the decoded maths.
+  All three tests fail on e78d94d, and the whole suite is 19/19 on ccb545d.
+  - `object_uniforms_are_live`: an alpha script returning 0.25 gives r = 64 (255 before), and a colour script
+    reaches the shader. The test ships its own `gl_FragColor = g_Color4` layer, which reads alpha 0.5 as r = 127
+    (255 before).
+  - `keyframes_drive_alpha` checks white squares at tick 15:
+    - linear 0→1 over 30 frames: 127;
+    - the bezier ease (front x 0.6, back x −0.2): 104, which is 0.408 against 0.5 linear;
+    - `single`: holds 0.2 (51);
+    - `startpaused`: stays at frame 0 (191 = 0.75);
+    - `step`: holds 0.9 (229), then drops to 0.1 (25) at its key;
+    - `wraploop`: 127 on the way back;
+    - the loop wraps (42 at tick 35).
+  - `keyframes_move_origin`: a `relative` origin moves from 8 to 23 in 15 ticks. A `mirror` origin reaches 50 at
+    frame 10 and is back at 45 at tick 15.
+- **Smoke** (`--lwe-smoke`, 12 animated or translucent scenes, at 3 s and 6 s, before = e78d94d). 11 of the 12
+  differ from before (AE at 3 s, out of 2.07 M or 8.3 M px). The exception is 2134765860, with 57 px: its
+  animated `multiply` constants are `startpaused` and played by a `mediaThumbnailChanged` script (B10), and its
+  one free-running track is a small `angles` loop. Where WE animates, the 3 s→6 s difference grew:
+  - **3028473503:** its smoke failed "not animating" before, with 0 px changing from 3 s to 6 s. Now 38.8 k px
+    change and the check passes. It is a 4K video scene whose image layers fade.
+  - **3516174947:** 100 k → 430 k px change between 3 s and 6 s.
+  - **3042492564:** 27 k → 115 k px change between 3 s and 6 s.
+  - **2325974975:** a layer's alpha loop (1 → 0.52 → 1) and its origin bob now play: 66 k px differ at 3 s.
+  - **2371103399:** the cloud layer (alpha < 1, genericimage4) was drawn as opaque white puffs. It now blends into
+    the sky, and its 3 s→6 s change dropped from 60 k to 12 k px. Its scrolling clouds are translucent now, so
+    they change less.
+  - **3289734539:** the yellow "appear" panel at the bottom-left is gone. Its track is `startpaused` with alpha 0
+    at frame 0, and WE shows it only when a `cursorClick` script calls `getAnimation("appear").play()` (B10). So it
+    is correct for WE until the click exists.
+  - **2388299037:** the translucent layer (the audit's E2 example) is now translucent. The owner's WE capture is
+    still the reference.
+- **Corpus** (`scene_corpus.sh --results /tmp/sc-b2`, 96 scenes, a release player and worker on the B2 core): ok
+  93, static 0, blank 0, load_failed 3, renderer_failed 0, crashed 0, broken 0, timeout 0. Against B1 (ok 92,
+  static 1), **2783122117 went from static to ok.** It has two `origin` animations, and they now move it. The
+  same 3 scenes fail to load: 3276522107, 3477054430 and 3509243656. No scene is newly blank, broken, crashed or
+  timed out.
+- **Left of B2:** `timeofday` mode (not used in the library). `options.parent`/`children` shared timelines (29/18
+  tracks): each property runs its own clock from the same start, so they agree until a script drives one. Also
+  `random`, animation `events` (1 scene), and the SceneScript animation API. `thisObject.getAnimation()` is called
+  by 18 scenes, mostly from media/cursor events, so it belongs to B10. Particle `g_Color4` still has w = the
+  colour's own w (particles draw through CParticle). G05 parent alpha is still Unknown.
 
 ## 6. Audio after patch 0018 (A)
 

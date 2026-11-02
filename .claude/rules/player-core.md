@@ -3753,6 +3753,22 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `engine.userProperties`, `createLayer`, sound layers. `host_api_test`: `update_moves_the_property`,
   `init_runs_first_and_modules_load`, `undefined_leaves_the_property` (solid squares on a 64×32 scene, need
   `LIASCAPE_WE_ASSETS_DIR`; RED on 45ed25c); `HOST_API_TEST_ONLY=<substring>` runs a subset.
+  **0022 (2026-11-02, batch B2): object alpha/colour live, `g_Color4` = (colour, alpha)** (audit E2, E3).
+  `CPass::setupUniforms` binds `g_Brightness`/`g_UserAlpha`/`g_Alpha`/`g_Color`/`g_Color4`/`g_CompositeColor`
+  by address (passing the `const T&` getters picked the by-value overloads: frozen at setup); `CImage` keeps
+  `m_color4` = (colour, alpha), refreshed every `render()` (it was the colour value's own w: 1, or 0 after a Vec3
+  write). **0023: keyframe animations play** (G01, G02): `PropertyAnimation` (`Data/Model/`, decoded from
+  wallpaper64.exe 2.8.485 — the commit message has the addresses) parsed by `DynamicValueParser::parseAnimation`
+  for any value with `animation` (object properties and effect constants alike); the values parsed while a scene
+  is parsed are listed on `Scene::animatedValues` (an `AnimationCollector`, with each value's alive flag) and
+  `CScene::advanceAnimations` advances + writes them every frame **before** the script tick (`UpdateSource::
+  Animation`). Bezier per segment: control points (A.front.x/2, A+front.y), (1+B.back.x/2, B+back.y), x solved by
+  ≤ 24 Newton/bisection steps; `step` holds; whole frames blended linearly; `loop`/`mirror`/`single`,
+  `startpaused` (never advances — no `getAnimation` yet, B10), `wraploop`, `relative` (only an "x y z" string
+  value adds). Not done: `timeofday`, `options.parent`/`children`, `random`, events, the SceneScript animation
+  API. `host_api_test`: `object_uniforms_are_live`, `keyframes_drive_alpha`, `keyframes_move_origin` (white
+  squares — a colour string without a '.' is 0..255 — red channel = alpha × 255; the first ships its own
+  `g_Color4` shader in the scene folder; RED on e78d94d).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").
