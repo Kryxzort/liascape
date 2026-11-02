@@ -1793,7 +1793,8 @@ source; the transition recipe stays the one place a switch happens. The contract
   first ≠ the old one's last, history ≤ 100, random, `reorder` = `ReorderPlaylist`; a step is *planned* and only
   *committed* when its B starts — no C# pre-fetch), `pick.rs` (`TransitionCfg`, `pick` = `PickEffect` +
   `PickDuration`; params = the catalogue's uniform defaults, `Catalogue::defaults`). Seeded by the node's `seed`
-  (`Rng`, SplitMix64).
+  (`Rng`, SplitMix64); the snapshot keeps its state (`ProgramSnap.rng`), so a restarted player's shuffles and
+  picks go on instead of replaying from `seed` (F7).
 - **Node schema** (`graph::props`, `NodeKind::Program`, auto-id `prog<n>`): settable `outputs` (Str `out:*`, fixed
   after create), `items` (`PropValue::Items` — `[{path, props?, skip?}]`, ≤ 10 000, non-empty paths, `props` keys
   checked as `Source` create props; errors name `items[i]`), `defaults` (Source create props), `order`
