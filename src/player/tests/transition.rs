@@ -2053,6 +2053,65 @@ fn scene_b_load_error_keeps_a() {
     assert_eq!(harness_crash_records(), records0, "no crash record");
 }
 
+/// Corpus under load: a scene B whose load outlasts `READY_TIMEOUT` (10 s — a heavy scene on a
+/// busy CPU took 13–20 s) is waited for while its worker reports it loading (`loading`
+/// observed), and the switch happens at its first frame: no `transition.failed`, A untouched
+/// meanwhile, no restart. RED before: `transition.failed` "no first frame within 10 s" and the
+/// switch dropped.
+#[test]
+fn slow_loading_scene_b_is_waited_for() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let a = h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
+    let gain0 = h.gain(&a);
+    let spec = SyntheticSpec {
+        load_ms: 11_500,
+        ..scene_spec()
+    };
+    let dir = common::synthetic_scene("t-slow-load-b", &spec);
+    let corr = h.start(json!({
+        "outputs": "out:*", "to": {"kind": "scene", "path": s(&dir)},
+        "effect_id": "fade", "duration_ms": 500, "method": "full-live"
+    }));
+    let b = h.to_of(&corr);
+    let t_req = h.now();
+    let mut saw_loading = false;
+    while h.event(&corr, "transition.started").is_none() {
+        assert!(
+            h.now() < t_req + MS(30_000),
+            "never started: {:?}",
+            h.tr_events
+        );
+        assert!(
+            h.event(&corr, "transition.failed").is_none(),
+            "a loading B must be waited for: {:?}",
+            h.event(&corr, "transition.failed")
+        );
+        h.tick();
+        saw_loading |= h.bool(&format!("{b}.loading"));
+        if h.event(&corr, "transition.started").is_none() {
+            assert_eq!(h.cur("*"), vec![a.clone()], "A stays current meanwhile");
+            assert_eq!(h.gain(&a), gain0, "A's gain untouched meanwhile");
+        }
+    }
+    let waited = h.now() - t_req;
+    println!("slow scene B started after {waited:?}");
+    assert!(saw_loading, "B reported loading");
+    assert!(waited >= MS(11_500), "started after the load: {waited:?}");
+    assert!(
+        !h.bool(&format!("{b}.loading")),
+        "loading ends with the first frame"
+    );
+    assert_eq!(
+        h.scene_src(&b).stats().restarts,
+        0,
+        "a slow load is no hang"
+    );
+    h.wait_event(&corr, "transition.done", MS(5000));
+    assert_eq!(h.cur("*"), vec![b.clone()]);
+}
+
 /// B's worker killed at progress 0.5: B keeps its last frame (never None) while the worker
 /// restarts, the effect runs on and hands off as planned — no `transition.failed` — and B
 /// resumes from where it was, not from 0.
