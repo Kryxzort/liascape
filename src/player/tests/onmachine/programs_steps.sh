@@ -482,3 +482,79 @@ EOF
     serve_down
     step_end
 }
+
+# ------------------------------------------------------------------ step 6.2 / 6.3 — suspend, a VT switch (owner's checklist)
+# A 30 s timer rotation with the app closed, then the machine is taken away mid-interval and given back. The player's
+# clock (and so `at_ms`) is CLOCK_MONOTONIC: it stops while suspended, so every spacing in `at_ms` stays ~30 s — a
+# catch-up switch on wake would show as a short one (plan Review Focus 5). A VT switch doesn't stop the clock; the
+# rotation just has to carry on with no failure and no restart.
+sleep_offset() { python3 -c "import time; print(time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC))"; }
+away_rotation_up() { # a 30 s timer rotation, the app closed, one switch seen, ~20 s left in the interval
+    local c=() n
+    for n in 1 2 3; do c+=("$(mk_clip tone40$1-$n testsrc2 30 40 $((n * 110 + 220)) 640x360)"); done
+    be_up
+    be_rotation false 30
+    be_play '{"Order":0}' "${c[@]}"
+    be_down
+    AWAY_T0=$(now)
+    wait_commits "$AWAY_T0" 1 40 || note "no switch seen before taking the machine away"
+    sleep 10
+    AWAY_PID=$(ctl hello | jq -r .pid)
+    note "before: $(prog | jq -c '{index, phase, remaining_ms}')"
+}
+away_rotation_checks() { # <label> <epoch given back> <seconds away from the player clock>
+    local s pid
+    sleep 45 # the interval's rest + one more switch
+    s=$(report switches "$(evdir)" "$AWAY_T0" "$(now)")
+    echo "$s" >"$RESULTS/$STEP-switches.json"
+    check "$1: a switch after it" "$(commits_since "$2") commit(s)" "≥ 1 within 45 s" "$(pyb "$(commits_since "$2") >= 1")"
+    check "$1: spacing on the player clock" "$(jq -c .spacing_ms <<<"$s")" "min ≥ 29 s, max ≤ 31 s (no catch-up)" \
+        "$(pyb "$(jq -r '.spacing_ms.min // 0' <<<"$s") >= 29000 and $(jq -r '.spacing_ms.max // 99999' <<<"$s") <= 31000")"
+    check "$1: every switch from the program" "$(jq -c .origins <<<"$s")" "only $ROT_ORIGIN" "$(jq -e --arg o "$ROT_ORIGIN" '.origins | keys == [$o]' <<<"$s" >/dev/null && echo 1 || echo 0)"
+    check "$1: no failed switch" "$(jq -r '"\(.failed) failed, \(.program_failed) program.failed"' <<<"$s")" "0" "$(pyb "$(jq -r '.failed + .program_failed' <<<"$s") == 0")"
+    pid=$(ctl hello | jq -r '.pid // empty')
+    check "$1: same player, no restart" "pid $AWAY_PID → ${pid:-none}, $(jq -r .player_started <<<"$s") started" "same, 0" \
+        "$([[ $pid == "$AWAY_PID" && $(jq -r .player_started <<<"$s") == 0 ]] && echo 1 || echo 0)"
+    check "$1: the program plays (outputs back, not parked)" "$(prog | jq -r .phase)" "playing / holding / armed / switching" \
+        "$(prog | jq -e '.phase | IN("playing", "holding", "armed", "switching")' >/dev/null && echo 1 || echo 0)"
+    note "$1: away ${3} s; $(jq -c '{currents, reasons, warn}' <<<"$s")"
+}
+step_suspend() {
+    step_begin suspend
+    away_rotation_up s
+    local off0 off1 i tr slept
+    off0=$(sleep_offset)
+    sudo -n rtcwake -m no -s "$SUSPEND_S" >/dev/null || die "rtcwake: no wake alarm, not suspending"
+    say "suspending for ${SUSPEND_S} s (rtcwake alarm set)"
+    systemctl suspend || die "systemctl suspend"
+    for ((i = 0; i < SUSPEND_S + 180; i++)); do # resumed once CLOCK_BOOTTIME − CLOCK_MONOTONIC has grown
+        sleep 1
+        off1=$(sleep_offset)
+        (($(pyb "$off1 - $off0 > 5"))) && break
+    done
+    tr=$(now)
+    slept=$(python3 -c "print(round($off1 - $off0, 1))")
+    check "the machine slept" "$slept s" "≥ 5 s" "$(pyb "$slept >= 5")"
+    sleep 5 # outputs / GPU settle
+    away_rotation_checks "resume" "$tr" "$slept"
+    quit_player
+    step_end
+}
+step_vt() {
+    step_begin vt
+    away_rotation_up v
+    local vt0 t1
+    vt0=$(sudo -n fgconsole) || die "fgconsole"
+    # the way back never depends on this script: a detached root timer returns to the session's VT
+    sudo -n systemd-run --quiet --on-active=$((VT_S + 20)) --timer-property=AccuracySec=1s chvt "$vt0" || die "no watchdog, not switching"
+    say "VT $vt0 → $((vt0 + 2)) for ${VT_S} s"
+    sudo -n chvt $((vt0 + 2)) || die "chvt"
+    sleep "$VT_S"
+    sudo -n chvt "$vt0"
+    t1=$(now)
+    check "back on the session's VT" "$(sudo -n fgconsole)" "$vt0" "$([[ $(sudo -n fgconsole) == "$vt0" ]] && echo 1 || echo 0)"
+    sleep 3
+    away_rotation_checks "VT switch" "$t1" "$VT_S"
+    quit_player
+    step_end
+}

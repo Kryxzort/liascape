@@ -170,12 +170,18 @@ see this, because they remove outputs in a headless player.
 Spacing 30.23–31.17 s, median 30.29 s. The worker count is sampled once a minute, so it says little about the moment
 of a switch.
 
-## 6. Owner checklist, not automated
+## 6. Owner checklist
+
+Run 2026-11-02 with the owner's go-ahead, at their machine (`programs.sh vt suspend`, results in
+`results/phase3-owner-1102/`): a 30 s timer rotation, the app closed, taken away mid-interval (~19 s left).
 
 1. Cold boot via `claude-reboot` with a timer program: restored at its item per its start mode and rotating, before
-   and without opening the app.
-2. Suspend and resume during a timer rotation: no catch-up switch (plan Review Focus 5).
-3. A VT switch.
+   and without opening the app. *(below, once run)*
+2. **Suspend, PASS (7/7).** `systemctl suspend` with an `rtcwake` alarm, 60.0 s asleep. Spacing on the player clock
+   30.35–30.37 s, including the switch that straddled the sleep: no catch-up switch on wake. Same player, no restart,
+   no failed switch, the program playing after.
+3. **VT switch, PASS (7/7).** VT 1 → 3 for 15 s and back (a root timer as the way back). Spacing 30.36–30.38 s, same
+   player, no failure, playing after.
 
 ## Findings
 

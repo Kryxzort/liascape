@@ -10,6 +10,9 @@
 #   bash src/player/tests/onmachine/programs.sh nomonitor   # step 4b: both monitors disabled: rotate / hold
 #   bash src/player/tests/onmachine/programs.sh soak        # step 5: 2 h mixed program, the app closed
 #   bash src/player/tests/onmachine/programs.sh all         # every step, in that order
+#   bash src/player/tests/onmachine/programs.sh suspend     # step 6.2: suspend + rtcwake mid-interval: no catch-up switch
+#   bash src/player/tests/onmachine/programs.sh vt          # step 6.3: a VT switch and back mid-rotation
+#   (suspend and vt are not in `all`: each takes the whole machine; the owner says when)
 #
 # Options: --results DIR (default src/player/tests/onmachine/results/phase3-<stamp>, gitignored), --bin DIR
 # (liascape-player + liascape-scene-worker; default <crate>/target/release), --dll PATH (the backend,
@@ -62,9 +65,11 @@ CELLS=timer,onend,onendmax,scenes
 METHODS=full-live,reveal,frozen
 APP_MIN=60
 SOAK_MIN=120
+SUSPEND_S=60
+VT_S=15
 while (($#)); do
     case $1 in
-        dropout|appclosed|crash|cover|nomonitor|soak) STEPS+=("$1") ;;
+        dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt) STEPS+=("$1") ;;
         all) STEPS+=(dropout appclosed crash cover soak nomonitor) ;; # no monitor last: the one step that can upset the session
         --results) RESULTS=$2; shift ;;
         --bin) BINDIR=$2; shift ;;
@@ -79,7 +84,7 @@ while (($#)); do
     esac
     shift
 done
-((${#STEPS[@]})) || { echo "name a step (dropout|appclosed|crash|cover|nomonitor|soak|all)" >&2; exit 2; }
+((${#STEPS[@]})) || { echo "name a step (dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt|all)" >&2; exit 2; }
 BIN=$BINDIR/liascape-player
 WBIN=$BINDIR/liascape-scene-worker
 [[ -x $BIN && -x $WBIN ]] || { echo "no liascape-player/liascape-scene-worker in $BINDIR (build release first)" >&2; exit 2; }
