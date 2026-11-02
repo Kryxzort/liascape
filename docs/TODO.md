@@ -1025,6 +1025,13 @@ Two bug classes kept recurring; fix the class, not the instance:
     `tests/api.rs::dropout_analysis_never_skips_bus_cycles` (RED before: 28 / 44 runs). The probe no longer
     touches the audio it measures, so `--debug` recordings are trustworthy again. Only the battery's own
     re-run (`programs_steps.sh` with `P3_RECORD`, on the owner's machine) is left to confirm the 161 → 0.
+    **Battery re-run 2026-11-02 23:00 (owner's machine, `programs.sh dropout`, `P3_RECORD`, release player,
+    another agent's test suites loading the machine):** 47/50 — the same 3 `frozen` micro-gap FAILs as the first
+    battery (1 + 1 + 4, the handoff work), 0 drops. The sink recording (2874 s): 23 exact-zero runs of 64–1023
+    frames inside sound, every one exactly 64 frames; ~15 at the tone's full level (before: 161 whole cycles in
+    460 s, 64–576 frames, right after each analysis — ~67× rarer per second now). The player's meter counted none
+    of them as a micro-gap and they are one fixed 64-frame size, so most likely the recorder/sink side (under
+    load), not the player's output — unproven. Recording kept out of the repo (1.1 GB).
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.

@@ -180,3 +180,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   from other timing settings. **F5 partly:** the flaky stall test was mostly CPU contention (now measured as the
   player's own time); a rarer real ~3 ms block under GPU load is being traced tonight with bpftrace.
 - Tonight (2026-11-02 → 03): one agent on F4 (`--debug` dropout probe causing silence), one on F5's open block.
+- **F4 fixed:** `--debug`'s dropout analysis forked the whole player for each ffmpeg decode, and the fork cost the
+  audio whole cycles of silence. It now spawns without forking. Battery re-run on your machine (your player was off
+  ~50 min while you slept, then restored): 0 drops; the same 3 `frozen` micro-gap FAILs as before (handoff work).
