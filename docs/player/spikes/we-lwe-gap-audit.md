@@ -78,7 +78,7 @@ These are ranked by scenes × how visible the difference is.
 | 5 | T1–T5, T8, G04, G13, G30 | **Text.** One line only, bytes not UTF-8, no alignment, no wrapping, no effects, no parent, no rotation, no parallax. A `systemfont_*` has no font on NixOS, so the text **vanishes**. | 45 |
 | 6 | E27, E28 | **`colorBlendMode` layers sample the framebuffer they draw into**, a GL feedback loop with undefined output. | 28 |
 | 7 | A1, A3, E8, S17, P20 | **Audio response.** u8 mono, only 0–5.4 kHz, linear bins, Right = Left. `registerAudioBuffers` is missing, so script visualisers throw. | 41 |
-| 8 | G10, G11, G12, G14 | **Parallax.** `cameraparallaxdelay` is read as a bool, so 14 of 25 parallax scenes never move. The rest are off-centre, and `g_ParallaxPosition` is never fed. | 25 |
+| 8 | G10, G11, G12, G14 | **(Fixed by B5, patch 0029.)** **Parallax.** `cameraparallaxdelay` is read as a bool, so 14 of 25 parallax scenes never move. The rest are off-centre, and `g_ParallaxPosition` is never fed. | 25 |
 | 9 | P2 | **Particle `children` are ignored**, so whole sub-effects are missing. | 29 |
 | 10 | G03, G04 | **Hierarchy.** A hidden parent doesn't hide its children (12 scenes). Text and particle children ignore `parent` (19). | 12 + 19 |
 | 11 | S10, S11, S15 | **No cursor events, no media events, no `applyUserProperties`/`engine.userProperties`.** Interactive and "now playing" wallpapers are inert. | 22 / 19 / 18 |
@@ -123,7 +123,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B2 Layer alpha, colour, keyframe animation** — **done 2026-11-02** (patches 0022–0023; see "B2 result" in § 5) | E2, E3, G01, G02 (+ G05 once known) | ~50 | M | `g_Color4 = (color.rgb, alpha)`. Upload alpha/colour/brightness per draw from the live values. A keyframe evaluator for `c0..c2` bezier keys (`fps`, `length`, `mode` loop/mirror/single, `wraploop`, `startpaused`, `relative`), as decoded at GH 0x1401d1740/0x1401d4dd0/0x1401d5790. | Smoke two timestamps of 3 animated scenes: pixels change where WE animates. WE capture of 2388299037 (translucent layer). |
 | **B3 Particle core semantics** — **done 2026-11-03** (patches 0024–0028; see "B3 result" in § 5) | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
 | **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
-| **B5 Parallax and camera** | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
+| **B5 Parallax and camera** — **done 2026-11-03** (patch 0029; see "B5 result" in § 5; E6, the camera-object pan and paths left) | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
 | **B6 Hierarchy** | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
 | **B8 Audio response** | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
@@ -143,7 +143,8 @@ U5–U7 and E10.
   they need manual asm work. This settles P31–P33 (movement drag, turbulence, vortex, oscillate, colour/size change).
 - The spectrum's 16/32-band derivation, its weights and its temporal smoothing. They sit in blocks Ghidra marked
   unreachable in FUN_140103630 ([L6]); read the asm. This settles A3/A4.
-- The camera-shake algorithm (G16), the per-layer parallax offset with `cameraparallaxamount` (G12), the semantics
+- ~~The camera-shake algorithm (G16), the per-layer parallax offset with `cameraparallaxamount` (G12)~~ (settled by
+  B5), the semantics
   of `camerafade` (G23) and of `copybackground` (E30).
 
 ## Needs the owner
@@ -798,6 +799,87 @@ no change: every system in the library sets maxcount and sizerandom, and LWE's `
 - **Left of B3:** `SPRITESHEETBLENDNPOT` (P8, 6 sheets). The owner's WE captures of 1797172968 and 1155728109
   (P5, P8/P9) are still the reference for the hues and the sheet timing. The rest of the particle rows stay in
   B6 (P36), B8 (P20, P21) and B11 (child systems P2, P10, P15, P22, P24–P30, P34, P35, P37: the 0.1 s dt cap stays).
+
+### B5 result (fork patch 0029, pin `d7a9f34`, 2026-11-03)
+
+Rows G10, G11, G12, G14 (= E1), G15, G16, G18, G19 and the zoom half of G17 are done. E6 and the pan half of G17
+are left (below). Everything was decoded from the same wallpaper64.exe, with the sound spike's `all.c`:
+
+- **The camera update** (GH 0x1401b8af0), each scene tick before the render:
+  - **Shake** (`FUN_1401c7680`, when `camerashake`): `t = speed² · g_Time`, the vector is `(cos t, sin 1.333 t, sin t)`.
+    In 2D z is 0 and the scale is `amplitude · 0.01 · H` (3D: `amplitude · 0.1`). With `r = roughness³`, unless
+    `r ≤ 0.001` or `r = 1`, the vector is rescaled to `length^r`. The eye and the centre both move by it.
+    `cos`/`sin` are `FUN_14044fd70`/`FUN_140450450` (read from the Euler matrix at GH 0x14020af40), `powf` is
+    `FUN_140453e00`.
+  - **Parallax target**, while the `cameraparallax` bit is set (read every frame): `target = (W · (0.5 (1 − i) +
+    mx · i), H · (0.5 (1 − i) + (1 − my) · i)) + the camera position`, `mx`/`my` the cursor over the window, clamped
+    0..1, `i` = `cameraparallaxmouseinfluence`. A delay ≤ 0 snaps, else `k = min(1, (1 − delay/3) · 10 · dt)`. The
+    smoothed position starts at the centre (GH 0x1401b6c60). `g_ParallaxPosition = clamp(pos / (W, H), 0, 1)`,
+    initially 0.5 0.5, so **one value for the whole scene**, frozen while parallax is off. Not ported: an x
+    mirror (context flag 0x800) and influence 0 under flags 0x200200; neither source was found.
+  - **In 2D the editor camera is reset**: with an ortho projection and no camera paths the loader sets eye 0 0 0,
+    centre 0 0 −1, up 0 1 0 (GH 0x1401b6c60 at 0x1401b8171). That confirms the § 1 note: `camera.eye` pans are
+    ignored.
+- **The per-object offset** (render loop GH 0x1401b9b50, only with flags 0x100 and 0x8, parallax and ortho): every
+  object's view is translated by `(root.origin − pos) · cameraparallaxamount · root.parallaxDepth`, root being
+  its topmost ancestor (origin +0x128, depth +0x170 of the base object table). So **depth 0 stays put**, the offset
+  grows with the layer's distance from the target, and a subtree moves as one. `parallaxDepth` defaults to 1 1
+  (base constructor GH 0x14020b5d0); many layers in the library omit it.
+- **Zoom** (scene tick GH 0x1401afbf0): the 2D matrix becomes `M · T(W/2, H/2) · S(z, z, 1) · T(−W/2, −H/2)` with
+  `z = general.zoom · camera zoom`. The camera zoom is the active camera object's `zoom` (+0x2dc), else 1. The
+  active camera object is the last `"camera"` object that is visible with visible parents. Zoom < 1 shows more:
+  3490034653 calls its 0.65 camera "Panorama".
+- **Defaults** (scene constructor GH 0x1401b6c60): fov 50, perspectiveoverridefov 95, nearz 0.1, farz 10000,
+  zoom 1; parallax amount 0.5, delay 0.1, influence 0.5; shake speed 3, amplitude 0.5, roughness 1.
+
+The port (0029):
+- `CScene::updateCamera` does the above each frame and writes a view adjustment (`Camera::setViewAdjust`: scale,
+  then the shake, in world space).
+- `CScene::getParallaxOffset` is used by CImage, now translating before its rotation as WE does, and CParticle,
+  whose 0.65 minimum depth is gone.
+- `g_ParallaxPosition` is registered in every pass.
+- Camera objects are parsed (`zoom`, `visible`) instead of logged as unknown.
+- fov/nearz/farz come from `general`; the 2D ortho keeps its 0..1000 depth.
+- **The worker** keeps LWE's pointer at the scene centre until the host sends one. At (0, 0), a parallax scene in
+  the smoke mode, or before the first Wayland pointer event, sat pulled towards a corner.
+
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`, a fake `wp_mouse_input`). All three fail on
+  4c75eae, and the suite is 26/26 on d7a9f34.
+  - `parallax_follows_the_pointer`: a depth 0.5 square at x 32 with amount 1, delay 0 and influence 1 sits at 28 with
+    the pointer centred, 12 with it at the right edge and 44 at the left. A depth 0 square never moves. Turning the
+    bound `cameraparallax` off puts it back at 28. With delay 1.5 the edge follows `28 − 16 · (1 − (5/6)ⁿ)`: 25, 23,
+    21, 20, 18, 17. Before: 28 throughout.
+  - `parallax_position_uniform`: a `g_ParallaxPosition` shader reads 127 127 centred and 191 191 (0.75) top-right
+    with influence 0.5. Before: 0 0.
+  - `camera_zoom_and_shake`: `general.zoom` 2 doubles a square; a camera object's 0.5 cancels it; a later camera
+    object shown live (zoom 4) takes over; a shake at speed 0 and amplitude 50 moves the view by 16 px.
+- **Headless pointer** (a private `serve --headless`, 1920×1080, `ctl headless.pointer` then `ctl capture` after
+  2.5 s): 3289734539 (amount 0.5, delay 0.1, influence 0.5). Each corner moves about 12 % of the pixels against the
+  centred capture, and back at the centre it matches the first capture again (0.4 %, its animation). The layers
+  move against the pointer: left pointer, content right; top pointer, content down. No border shows. Before, its
+  delay of 0.1 read as false and nothing moved.
+- **Smoke** (`--lwe-smoke`, the 36 parallax, shake, zoom and camera-object scenes at 3 s, before = 4c75eae with the
+  B3 worker). The same 3 fail to load, the same 4 report "not animating", and no scene got blank. Pixel changes
+  are 0–28 %, mostly the at-rest re-centring: before, the 11 scenes with delay ≥ 1 sat displaced towards the
+  pointer at (0, 0). In these the black-pixel share stayed within 0.2 %. The exception is **3516174947**, which
+  goes from 1 % to 32 % black: its camera object's "Lens size" defaults to 0.75, and at 0.75 its 3618×1731 layers
+  no longer cover the 3440×1440 canvas. That follows the decoded formula, and 3042492564's "Zoom (lossless)"
+  0.73–1 slider (its 6000×2805 background, and its pan range growing with the zoom) agrees with it. An owner's WE
+  capture of 3516174947 settles it.
+- **Corpus** (`scene_corpus.sh --results /tmp/sc-b5`, 96 scenes, a release player and worker on the B5 core): ok
+  93, static 0, blank 0, load_failed 3, renderer_failed 0, crashed 0, broken 0, timeout 0. That is the same as B3.
+  The same 3 scenes fail to load: 3276522107, 3477054430 and 3509243656.
+- **Left of B5:**
+  - **E6** (`g_EffectTextureProjectionMatrix`): WE writes it from the image renderer (GH 0x1402176a0, image +0x384),
+    which needs its own decode.
+  - **The camera object's origin (G17 pan).** The library suggests that it is relative to the scene centre:
+    3042492564 pans by ±offset, and 3516174947/3363252053 set `x·canvasSize` with sliders from −1 to 1 that
+    default to 0. But the decode reads the plain origin as the eye, so the projection side is still open.
+  - **Camera paths** (all `paths: []` in the library).
+  - **Text** (CText) ignores the offset and the shake's y. It is redrawn in B4.
+  - The parallax x mirror and influence-off flags.
+  - The owner's WE captures of 2679248947, 2921510865, 3042492564 and 3516174947. 2679248947 has parallax off, so
+    its depthparallax now reads a fixed 0.5 0.5, centred, where it read 0 before.
 
 ## 6. Audio after patch 0018 (A)
 
