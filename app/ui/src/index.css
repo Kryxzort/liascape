@@ -683,3 +683,31 @@ input[type=range]:focus-visible { outline: none; }
   background: var(--success); box-shadow: 0 0 5px -1px var(--success); vertical-align: middle; }
 .tr-chip.on .tr-live { background: var(--accent-fg); box-shadow: none; }
 .tr-empty { text-align: center; color: var(--muted); padding: 30px; }
+
+/* ---- Settings → Appearance → "Glow effects" OFF (<html class="no-glow">, App.tsx) ----
+   Every accent/state glow goes: the --glow vars (hover/active/selected/modal chrome) become an invisible shadow, and the
+   hard-coded ones (pulses, drop-shadow hovers, the ambient corner pools, the portal'd playlist-bar hover layer) are
+   overridden here. State that is NOT glow stays: the playing item's green ring, the selected card's outline, accent
+   borders/backgrounds on hover and active, the black depth shadows. */
+:root.no-glow { --glow-sm: 0 0 #0000; --glow: 0 0 #0000; }
+:root.no-glow .card.playing { animation: none; box-shadow: 0 0 0 2px var(--success); }
+:root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
+:root.no-glow .pl-hover-glow { display: none; }
+:root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }
+:root.no-glow .btn.danger.glow-stop, :root.no-glow .btn.danger.glow-stop:hover,
+:root.no-glow .btn.danger:hover, :root.no-glow .btn.danger.solid:hover { box-shadow: none; }
+/* the Browse download glyph keeps its breath (opacity + size), minus the glow */
+:root.no-glow .dl-glyph { animation-name: dl-breath; filter: none; }
+@keyframes dl-breath { 0%, 100% { opacity: .7; transform: scale(1); } 50% { opacity: .85; transform: scale(1.022); } }
+:root.no-glow .del:hover, :root.no-glow .pl-remove:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
+:root.no-glow .pl-toggle:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
+:root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover { filter: none; }
+:root.no-glow .settings { background-image: none; }
+:root.no-glow .ssection::before, :root.no-glow .srow::before { box-shadow: none; }
+:root.no-glow .ssection-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+:root.no-glow .settings input[type=range]:hover, :root.no-glow .settings input[type=checkbox]:hover,
+:root.no-glow .settings input[type=radio]:hover, :root.no-glow:not(.range-dragging) input[type=range]:focus-visible { filter: none; }
+/* a keyboard-focused slider still shows where focus is: an outline instead of the glow (never while it's held) */
+:root.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root.no-glow .mpv { box-shadow: none; }
+:root.no-glow .tr-live { box-shadow: none; }

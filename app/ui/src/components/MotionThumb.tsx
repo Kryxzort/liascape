@@ -15,12 +15,20 @@ export function pointerOver(el: HTMLElement, e: React.MouseEvent): boolean {
   return e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
 }
 
+// True when the item's only preview is a VIDEO (no gif/webp asset; a scene has none) — what "Autoplay video thumbnails"
+// plays without a hover (components/autoplay.ts).
+export function hasVideoPreview(item: LibraryItem): boolean {
+  if (item.isScene) return false;
+  return item.animatedThumbnailPath ? VIDEO_RE.test(item.animatedThumbnailPath) : VIDEO_RE.test(item.videoPath);
+}
+
 // COOL: animated library/playlist preview. Reuses the source's preview gif/webp when present;
 // otherwise plays the local wallpaper video on hover (moewalls-type sources ship no gif).
 // Browsers autoplay gif/webp <img> and decode off-thread → no special gif decode machinery is
 // needed. PERF: the parent card has content-visibility:auto, so offscreen cards never mount the
-// animated layer at all. `active` = should-animate (hover, or AutoPlayGifs for gif assets).
-export function MotionThumb({ item, active }: { item: LibraryItem; active: boolean }) {
+// animated layer at all. `active` = should-animate (hover, or AutoPlayGifs for gif assets); `autoVideo` = this item holds an
+// autoplay slot (useAutoplayVideo): its video layer plays like a hover, a gif is not touched.
+export function MotionThumb({ item, active, autoVideo = false }: { item: LibraryItem; active: boolean; autoVideo?: boolean }) {
   const anim = item.animatedThumbnailPath;
   const animIsVideo = !!anim && VIDEO_RE.test(anim);
   const videoFallback = !anim && !item.isScene && VIDEO_RE.test(item.videoPath);
@@ -39,10 +47,10 @@ export function MotionThumb({ item, active }: { item: LibraryItem; active: boole
         <img className="thumb anim" src={animUrl(anim)} decoding="async" alt=""
           style={{ backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center" }} />
       )}
-      {active && anim && animIsVideo && (
+      {(active || autoVideo) && anim && animIsVideo && (
         <video className="thumb anim" src={media(anim)} muted loop autoPlay playsInline preload="metadata" />
       )}
-      {active && videoFallback && (
+      {(active || autoVideo) && videoFallback && (
         <video className="thumb anim" src={media(item.videoPath)} muted loop autoPlay playsInline preload="none" />
       )}
     </>

@@ -114,6 +114,9 @@ same() {   # $1 before, $2 after, $3 = JSON array of the fields that should chan
   [ -z "$c" ] && ok "$4: no other field changed" || bad "$4 also changed: $c"
 }
 
+# UI toggles (key:default, camelCase as GET /settings spells them): a file without the key loads the default, a
+# partial body sets/keeps it. Glow effects / Morph animations / Autoplay video thumbnails (Settings → Appearance).
+UI_TOGGLES=("glows:true" "morphs:true" "autoPlayVideoThumbs:false")
 echo "== a settings.json that still carries the removed LweSilent loads"
 snap s0
 [ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.sceneMonitors|length' s0)" = 2 ] \
@@ -200,6 +203,24 @@ for pair in 'GlobalPlaylistStart:RESUME:resume' 'globalPlaylistStart:nonsense:st
 done
 post /settings '{"PauseWhenCovered":"maximized","GlobalPlaylistStart":"start_over","RotateWhileParked":true,"ShowExpertOptions":false,"Theme":"Nord"}' >/dev/null; snap t4
 same t0 t4 '["theme"]' "the Task 10 keys back to their defaults"
+
+echo "== UI toggles: defaults on a file without the keys, partial bodies set / keep them, in either key spelling"
+for spec in "${UI_TOGGLES[@]}"; do
+  k=${spec%%:*}; def=${spec##*:}; K=$(python3 -c "print('$k'[0].upper()+'$k'[1:])"); inv=$([ "$def" = true ] && echo false || echo true)
+  [ "$(f ".$k" s0)" = "$def" ] && ok "a file without $k: $k $def (the default)" || bad "$k after loading a file without it: $(f ".$k" s0), want $def"
+  snap u0
+  post /settings "{\"$K\":$inv}" >/dev/null; snap u1
+  [ "$(f ".$k" u1)" = "$inv" ] && ok "{$K:$inv} → $k $inv" || bad "{$K:$inv} → $k $(f ".$k" u1)"
+  same u0 u1 "[\"$k\"]" "{$K:$inv}"
+  [ "$(disk ".$K")" = "$inv" ] && ok "$K $inv written to settings.json" || bad "settings.json $K → $(disk ".$K")"
+  post /settings '{"theme":"Nord"}' >/dev/null; snap u2
+  [ "$(f ".$k" u2)" = "$inv" ] && ok "an unrelated partial body keeps $k $inv" || bad "an unrelated partial body changed $k to $(f ".$k" u2)"
+  post /settings "{\"$k\":$def}" >/dev/null; snap u3
+  [ "$(f ".$k" u3)" = "$def" ] && ok "{$k:$def} (camelCase) → $k $def" || bad "{$k:$def} → $k $(f ".$k" u3)"
+  same u2 u3 "[\"$k\"]" "{$k:$def}"
+  code_=$(code /settings "{\"$K\":\"yes\"}"); [ "$code_" = 400 ] && ok "{$K:\"yes\"} → 400" || bad "{$K:\"yes\"} → $code_"
+  snap u4; [ "$(f ".$k" u4)" = "$def" ] && ok "…and $k stays $def" || bad "$k after the rejected body: $(f ".$k" u4)"
+done
 
 echo "== a bad value is a 400 and saves nothing"
 for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"SceneMonitors":5}' '[1,2]' '"x"'; do

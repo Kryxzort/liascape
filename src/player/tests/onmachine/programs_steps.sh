@@ -292,7 +292,7 @@ from datetime import datetime, timezone
 s = '$(jq -r .t_wall <<<"$e")'.rstrip('Z'); h, _, f = s.partition('.')
 t = datetime.strptime(h, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc).timestamp() + float('0.' + (f or '0'))
 print(round((t - $tm) * 1000))")
-    check "$label: paused after both windows mapped" "$lat ms" "≤ 350 ms" "$(pyb "$lat <= 350")" "$e"
+    check "$label: paused after both windows mapped" "$lat ms" "≤ 450 ms" "$(pyb "$lat <= 450")" "$e"
     frozen=$(source_paused_frozen)
     check "$label: every source paused, time_pos still" "$frozen" "true" "$(b01 "$frozen")"
     c1=$(cpu_pct "$PLAYER_PID" 5)

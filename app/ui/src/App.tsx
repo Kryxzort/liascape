@@ -8,7 +8,7 @@ import { Library } from "./views/Library";
 import { PlaylistBar } from "./components/PlaylistBar";
 import { PreviewModal } from "./components/PreviewModal";
 import { CardSettingsModal } from "./components/CardSettingsModal";
-import { SETTINGS_MORPH } from "./components/morph";
+import { SETTINGS_MORPH, closeMs } from "./components/morph";
 import type { Wallpaper } from "./api/client";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
@@ -104,9 +104,9 @@ export default function App() {
   // mid-morph-back → jank.
   useEffect(() => {
     if (s.cardSettingsItem || preview) { document.body.classList.add("modal-open"); return; }
-    const t = setTimeout(() => document.body.classList.remove("modal-open"), SETTINGS_MORPH.close.duration + 40);
+    const t = setTimeout(() => document.body.classList.remove("modal-open"), closeMs(s.settings?.morphs !== false, SETTINGS_MORPH) + 40);
     return () => clearTimeout(t);
-  }, [s.cardSettingsItem, preview]);
+  }, [s.cardSettingsItem, preview, s.settings?.morphs]);
 
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
@@ -120,6 +120,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("bg-live", !!s.settings?.liveWallpaperBehindAllTabs);
   }, [s.settings?.liveWallpaperBehindAllTabs]);
+
+  // Settings → Appearance → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
+  // the class is set only once the saved settings say `false`)
+  useEffect(() => {
+    document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
+  }, [s.settings?.glows]);
 
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -1,10 +1,11 @@
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { PlaylistToggle } from "./PlaylistToggle";
-import { MotionThumb, hasGifAsset, pointerOver } from "./MotionThumb";
+import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
+import { useAutoplayVideo } from "./autoplay";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
@@ -29,13 +30,16 @@ export const LibraryCard = memo(function LibraryCard({
   const lifted = useStore((s) => s.cardSettingsMorphId === `lib-${item.videoPath}`);
   // an open menu holds the preview: right-clicking a card doesn't stop what its hover started
   const active = !settingsOpen && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
+  // "Autoplay video thumbnails": a video-only item on screen plays its video without a hover (a slot, components/autoplay.ts)
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const autoVideo = useAutoplayVideo(wrapRef, !settingsOpen && !lifted && hasVideoPreview(item));
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
-      <div className={`thumb-wrap${lifted ? " lifted" : ""}`} data-morph-id={`lib-${item.videoPath}`} onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, thumb: e.currentTarget }); }}
+      <div ref={wrapRef} className={`thumb-wrap${lifted ? " lifted" : ""}`} data-morph-id={`lib-${item.videoPath}`} onClick={onClick} onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, thumb: e.currentTarget }); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         title="Click: apply · Ctrl/Shift: select · Right-click: menu">
-        <MotionThumb item={item} active={active} />
+        <MotionThumb item={item} active={active} autoVideo={autoVideo} />
         {item.isScene && <span className="badge">SCENE</span>}
         {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}

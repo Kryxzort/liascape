@@ -131,3 +131,9 @@ export const SETTINGS_MORPH: MorphTiming = {
   open: { duration: 720, bezier: SOFT },
   close: { duration: 560, bezier: SOFT },
 };
+// Settings → Appearance → "Morph animations" OFF: the modal appears / leaves with a plain fade in place (no flight, its
+// source stays put). Driven by timers of this length, never by an animation's end event.
+export const PLAIN_FADE_MS = 150;
+// how long a modal's open takes to land — what the things that wait for it (the duration row, the scene properties) wait
+export const openMs = (morphs: boolean, t: MorphTiming = SETTINGS_MORPH) => (morphs ? t.open.duration : PLAIN_FADE_MS);
+export const closeMs = (morphs: boolean, t: MorphTiming = SETTINGS_MORPH) => (morphs ? t.close.duration : PLAIN_FADE_MS);

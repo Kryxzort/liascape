@@ -1689,6 +1689,210 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
+// --- Settings → Appearance → "Glow effects" / "Morph animations" / "Autoplay video thumbnails": UI-only toggles. Each cell
+// turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
+// there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
+const GLOW_JS = String.raw`window.__glow = {
+  // does a computed box-shadow / filter value hold a coloured, blurred glow? (black shadows are depth, not glow)
+  glowy(v) {
+    if (!v || v === "none") return false;
+    const shadows = [];
+    if (v.includes("drop-shadow(")) for (const m of v.matchAll(/drop-shadow\(((?:[^()]|\([^()]*\))*)\)/g)) shadows.push(m[1]);
+    else { let d = 0, cur = ""; for (const ch of v) { if (ch === "(") d++; if (ch === ")") d--; if (ch === "," && d === 0) { shadows.push(cur); cur = ""; } else cur += ch; } shadows.push(cur); }
+    return shadows.some((x) => {
+      x = x.trim();
+      const col = (x.match(/^(rgba?\([^)]*\)|color\([^)]*\)|\w+)/) || [""])[0];
+      const nums = [...x.slice(col.length).matchAll(/(-?[\d.]+)px/g)].map((m) => +m[1]);
+      const ch = (col.match(/[\d.]+/g) || []).map(Number);
+      const unit = col.startsWith("color(") ? 0.16 : 40;
+      const alpha = col.startsWith("color(") ? (ch.length > 3 ? ch[3] : 1) : (col.startsWith("rgba") && ch.length > 3 ? ch[3] : 1);
+      return (nums[2] || 0) > 0 && alpha > 0.02 && ch.slice(0, 3).some((n) => n >= unit);
+    });
+  },
+};
+true`;
+// each measure: the element (an expression), what to read, and whether the mouse has to be over it
+const GLOW_SPECS = [
+  { name: "active tab", tab: "Library", el: `document.querySelector(".tab.active")`, read: "boxShadow" },
+  { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
+  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
+  { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
+  { name: "hovered card's playlist toggle", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing) .pl-toggle")`, read: "filter" },
+  { name: "hovered playlist-bar item", tab: "Library", hover: true, el: `document.querySelector(".pl-item:not(.playing)")`, read: "layer" },
+  { name: "settings section edge", tab: "Settings", el: `document.querySelector(".ssection")`, read: "boxShadow", pseudo: "::before" },
+  { name: "settings section icon", tab: "Settings", el: `document.querySelector(".ssection-ico")`, read: "boxShadow" },
+  { name: "settings corner pools", tab: "Settings", el: `document.querySelector(".settings")`, read: "gradient" },
+  { name: "hovered settings row bar", tab: "Settings", hover: true, el: `document.querySelectorAll(".settings .srow")[2]`, read: "boxShadow", pseudo: "::before" },
+  { name: "hovered settings checkbox", tab: "Settings", hover: true, el: `document.querySelector(".settings input[type=checkbox]")`, read: "filter" },
+];
+async function glowLook(c) {
+  await js(GLOW_JS);
+  const send = (e) => win.webContents.sendInputEvent(e);
+  const out = {};
+  for (const tab of ["Library", "Settings"]) {
+    await ui(`m.tab(${JSON.stringify(tab)}); await m.sleep(450);`);
+    for (const sp of GLOW_SPECS.filter((x) => x.tab === tab)) {
+      if (sp.hover) {
+        const r = await ui(`const e = ${sp.el}; if (!e) return null; e.scrollIntoView({ block: "center" }); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+        if (!r) { out[sp.name] = "missing"; continue; }
+        send({ type: "mouseMove", x: r.x - 3, y: r.y }); await sleep(60); send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(450);
+      }
+      out[sp.name] = await ui(`const e = ${sp.el}; if (!e) return "missing"; const cs = getComputedStyle(e, ${JSON.stringify(sp.pseudo ?? null)});
+        ${sp.read === "animation" ? `return cs.animationName !== "none";`
+          : sp.read === "layer" ? `return document.querySelectorAll(".pl-hover-glow").length > 0;`
+          : sp.read === "gradient" ? `return cs.backgroundImage.includes("radial-gradient");`
+          : `return window.__glow.glowy(cs.${sp.read});`}`);
+      if (sp.hover) { send({ type: "mouseMove", x: 700, y: 4 }); await sleep(120); }
+    }
+  }
+  out.rootClass = await ui(`return document.documentElement.classList.contains("no-glow");`);
+  return out;
+}
+const glowing = (look) => Object.entries(look).filter(([k, v]) => k !== "rootClass" && v === true).map(([k]) => k);
+const glowless = (look) => Object.entries(look).filter(([k, v]) => k !== "rootClass" && v === false).map(([k]) => k);
+C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
+    c.on = await glowLook(c);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Glow effects"), false, "Glow effects"); await m.sleep(500);`);
+    c.savedOff = await waitFor(async () => (await getSettings()).glows === false, 4000, 100);
+    c.off = await glowLook(c);
+    await loadUi(); await sleep(400);
+    c.reloaded = await glowLook(c);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Glow effects"), true, "Glow effects"); await m.sleep(500);`);
+    c.savedOn = await waitFor(async () => (await getSettings()).glows === true, 4000, 100);
+    c.back = await glowLook(c);
+  }, check(c) {
+    const v = [];
+    const missing = Object.entries(c.on).filter(([, x]) => x === "missing").map(([k]) => k);
+    if (missing.length) v.push(`probe: no element for ${missing.join(", ")}`);
+    const idle = GLOW_SPECS.map((x) => x.name).filter((n) => c.on[n] === false);
+    if (idle.length) v.push(`glows on (the default): no glow on ${idle.join(", ")}`);
+    if (c.on.rootClass) v.push("glows on: <html> has no-glow");
+    if (!c.savedOff) v.push("turning Glow effects off wasn't saved (glows !== false)");
+    if (glowing(c.off).length) v.push(`glows off: still glowing: ${glowing(c.off).join(", ")}`);
+    if (!c.off.rootClass) v.push("glows off: <html> lacks no-glow");
+    if (glowing(c.reloaded).length || !c.reloaded.rootClass) v.push(`glows off, page reloaded: still glowing: ${glowing(c.reloaded).join(", ")}${c.reloaded.rootClass ? "" : " (no no-glow class)"}`);
+    if (!c.savedOn) v.push("turning Glow effects back on wasn't saved");
+    if (glowless(c.back).length || c.back.rootClass) v.push(`glows back on: no glow on ${glowless(c.back).join(", ")}${c.back.rootClass ? " (no-glow still set)" : ""}`);
+    return v;
+  } };
+
+// "Morph animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
+// settings modal). On: the panel flies (a transform animation, `data-morph` set) out of its source, which is lifted
+// (hidden) meanwhile. Off: no flight at all, nothing lifted — the panel fades in where it is, and closing (backdrop or
+// Escape, even mid-open) fades it out and unmounts it; no animation left running, no box that moves after it appeared.
+const MORPH_SAMPLE = String.raw`(() => { const p = document.querySelector(".morph-panel"); if (!p) return null;
+  const run = document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target && (p === a.effect.target || p.contains(a.effect.target)));
+  const b = p.getBoundingClientRect(), cs = getComputedStyle(p);
+  return { flying: !!p.dataset.morph, anims: run.length,
+    flights: run.filter((a) => a.effect.getKeyframes().some((k) => k.transform && k.transform !== "none")).length,
+    lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length, opacity: +cs.opacity, hidden: cs.visibility === "hidden",
+    rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
+async function morphOpen(c, via, { full = false, esc = false } = {}) {
+  const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
+  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings (volume / speed)");` : `await m.cardMenu(${JSON.stringify(t)}, "Settings (volume / speed)");`;
+  const r = {};
+  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(${esc ? 40 : 60});`); // Escape: mid-open
+  r.early = await js(MORPH_SAMPLE);
+  if (full) {
+    await sleep(400); r.mid = await js(MORPH_SAMPLE);
+    await sleep(750); r.late = await js(MORPH_SAMPLE);
+  }
+  // close (a backdrop click, or Escape): time until the modal is gone and nothing is left lifted / running
+  const close = esc ? `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));` : `m.closeModal();`;
+  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".modal-backdrop")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
+  await sleep(250);
+  r.after = await ui(`return { backdrops: document.querySelectorAll(".modal-backdrop").length, lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length,
+    running: document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target?.closest?.(".modal-backdrop")).length };`);
+  return r;
+}
+C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
+    const inBar = (p) => (c.before.ps?.videoPaths || []).includes(p);
+    const cands = K.filter((p) => p !== c.shown && inBar(p));
+    c.cardItem = cands[0]; c.barItem = cands[1] ?? cands[0];
+    if (!c.cardItem) return c.skip = "no non-playing item in the playlist bar";
+    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Morph animations"), ${b}, "Morph animations"); await m.sleep(400);`);
+      return waitFor(async () => (await getSettings()).morphs === b, 4000, 100); };
+    c.onCard = await morphOpen(c, "card", { full: true }); c.onBar = await morphOpen(c, "bar");
+    c.savedOff = await flip(false);
+    c.offCard = await morphOpen(c, "card", { full: true }); c.offBar = await morphOpen(c, "bar", { full: true }); c.offEsc = await morphOpen(c, "card", { esc: true });
+    await loadUi(); await sleep(400);
+    c.reloaded = await morphOpen(c, "card");
+    c.savedOn = await flip(true);
+    c.back = await morphOpen(c, "card");
+  }, check(c) {
+    const v = [];
+    for (const [n, r] of [["card", c.onCard], ["playlist-bar item", c.onBar]]) {
+      if (!r.early?.flying || !r.early.flights || !r.early.lifted) v.push(`morphs on (the default), ${n}: no flight at +60 ms ${JSON.stringify(r.early)}`);
+      if (r.closeMs < 0 || r.after.backdrops || r.after.lifted) v.push(`morphs on, ${n}: the modal didn't close cleanly ${JSON.stringify([r.closeMs, r.after])}`);
+    }
+    if (!c.savedOff) v.push("turning Morph animations off wasn't saved (morphs !== false)");
+    const off = (n, r) => {
+      for (const k of ["early", "mid", "late"]) {
+        const x = r[k]; if (!x) continue;
+        if (x.flying || x.flights) v.push(`morphs off, ${n}: a flight at ${k} ${JSON.stringify(x)}`);
+        if (x.lifted) v.push(`morphs off, ${n}: the source is lifted (hidden) at ${k}`);
+      }
+      if (r.mid && (r.mid.anims || r.mid.hidden || r.mid.opacity < 1)) v.push(`morphs off, ${n}: not settled at +460 ms ${JSON.stringify(r.mid)}`);
+      if (r.mid && r.late && JSON.stringify(r.mid.rect) !== JSON.stringify(r.late.rect)) v.push(`morphs off, ${n}: the panel moved after it appeared ${JSON.stringify(r.mid.rect)} → ${JSON.stringify(r.late.rect)}`);
+      if (r.closeMs < 0 || r.closeMs > 450) v.push(`morphs off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      if (r.after.backdrops || r.after.lifted || r.after.running) v.push(`morphs off, ${n}: left behind after closing ${JSON.stringify(r.after)}`);
+    };
+    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape mid-open", c.offEsc);
+    off("card, page reloaded", c.reloaded);
+    if (!c.savedOn) v.push("turning Morph animations back on wasn't saved");
+    if (!c.back.early?.flying || !c.back.early.flights) v.push(`morphs back on: no flight at +60 ms ${JSON.stringify(c.back.early)}`);
+    if (c.back.closeMs < 0 || c.back.after.backdrops || c.back.after.lifted) v.push(`morphs back on: the modal didn't close cleanly ${JSON.stringify([c.back.closeMs, c.back.after])}`);
+    return v;
+  } };
+
+// "Autoplay video thumbnails": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
+// k2..k4 here; k1 has a gif) play it without a hover — only the ones on screen, at most 4 at a time across the page
+// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Autoplay GIF thumbnails".
+const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
+  return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
+    cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
+    gifCard: !!([...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === "k1")?.querySelector("video, img.thumb.anim")) }; })()`;
+C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
+    const count = () => js(VT_COUNT);
+    const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
+    c.off = await settle((r) => r.total === 0, 1500);
+    await sleep(600); c.off = await count();                      // the default: nothing plays by itself
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), true, "Autoplay video thumbnails"); await m.sleep(300);`);
+    c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
+    await ui(`m.tab("Library"); await m.sleep(400);`);
+    c.on = await settle((r) => r.total >= 4 && r.playing >= 1, 6000);
+    await sleep(700); c.on2 = await count();                      // stays at the cap, nothing stacks up
+    // scrolled away: the cards leave the screen, the slots go to what is still on it (the playlist bar)
+    await ui(`const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(200);`);
+    c.away = await settle((r) => r.cards === 0, 4000);
+    await ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(200);`);
+    c.back = await settle((r) => r.total >= 4, 4000);
+    // a settings modal open: nothing plays behind it; closed again: it resumes
+    await ui(`await m.cardMenu("k2", "Settings (volume / speed)"); await m.sleep(900);`);
+    c.modal = await settle((r) => r.total === 0, 3000);
+    await ui(`m.closeModal(); await m.sleep(900);`);
+    c.closed = await settle((r) => r.total >= 4, 4000);
+    await loadUi(); await sleep(600);
+    c.reloaded = await settle((r) => r.total >= 4, 6000);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), false, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Library"); await m.sleep(300);`);
+    c.offAgain = await settle((r) => r.total === 0, 3000);
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (c.off.total) v.push(`off (the default): ${c.off.total} preview videos mounted without a hover`);
+    if (!c.saved) v.push("turning Autoplay video thumbnails on wasn't saved");
+    if (c.on.total < 4 || !c.on.playing) v.push(`on: expected 4 videos, ≥ 1 playing — ${J(c.on)}`);
+    if (c.on.total > 4 || c.on2.total > 4) v.push(`on: more than the cap (4) play at once — ${J(c.on)} / ${J(c.on2)}`);
+    if (c.on.gifCard) v.push("on: the gif item (k1) got a video/animated layer — it follows the GIF setting");
+    if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
+    if (c.back.total < 4) v.push(`on, cards back on screen: only ${c.back.total} videos ${J(c.back)}`);
+    if (c.modal.total) v.push(`on, a settings modal open: ${c.modal.total} videos still mounted behind it`);
+    if (c.closed.total < 4) v.push(`on, modal closed: only ${c.closed.total} videos ${J(c.closed)}`);
+    if (c.reloaded.total < 4) v.push(`on, page reloaded: only ${c.reloaded.total} videos ${J(c.reloaded)}`);
+    if (c.offAgain.total) v.push(`turned off again: ${c.offAgain.total} videos still mounted`);
+    return v;
+  } };
+
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
 // parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.
@@ -3379,6 +3583,7 @@ const FUZZ_RULES = [
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],
   [/^(cover:|prog:|plStart:|parked:|expert:|cli:next:backendDown$)/, { exclude: "Phase 3 Task 11: the cover Signal's fake source, a program held by a pause, the start choice, outputs removed, the expert tier or a backend down — their own fixtures" }],
+  [/^appear:(glows|morphs|videoThumbs)$/, { exclude: "real mouse hovers + a reload of the page, and they leave the page's look toggled" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],

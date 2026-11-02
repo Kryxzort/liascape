@@ -124,7 +124,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
   autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
-  thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false,
+  thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false, autoPlayVideoThumbs: false, glows: true, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",
@@ -375,7 +375,8 @@ export const useStore = create<State>((set, get) => ({
   openExternal(body) { api.open(body).catch(() => {}); },
 
   openCardSettings(item, siblings, morphId) {
-    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: morphId ?? null, cardSettingsSource: captureSource(morphId ?? null) });
+    // "Morph animations" off: nothing to lift (hide) — the surface stays; the picture's aspect / video time are still read from it
+    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: get().settings?.morphs === false ? null : morphId ?? null, cardSettingsSource: captureSource(morphId ?? null) });
   },
   closeCardSettings() { set({ cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null }); get().loadLibrary(); },
 

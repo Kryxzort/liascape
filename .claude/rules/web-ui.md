@@ -40,6 +40,22 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   "Settings-modal morph" below) — not framer's `layoutId` any more. framer-motion: `AnimatePresence`
   enter/exit on other modals/toasts, spring drag (dnd-kit) on the playlist bar.
 - Re-bench Browse/Library at ≥120 visible after glow/motion changes (the `demos/` harness still works).
+- **Appearance toggles (Settings → Appearance; `AppSettings` `Glows` / `Morphs` / `AutoPlayVideoThumbs`, UI-only).**
+  - **Glow effects** (`glows`, default on): off = `<html class="no-glow">` (App.tsx effect). `index.css`'s last block zeroes
+    `--glow`/`--glow-sm` and overrides every hard-coded glow (the playing pulse, `dl-glow`, `glow-pulse`, drop-shadow hovers, the
+    Settings corner pools / section edges, the Stop/danger glows, the keyboard-focus slider glow → an outline). The playlist bar's
+    portal'd `.pl-hover-glow` isn't rendered. State that isn't glow stays (green playing ring, selected outline, accent borders).
+    **A new glow = a `var(--glow*)` shadow, or add its override to that block.** Matrix `appear:glows` reads computed styles.
+  - **Morph animations** (`morphs`, default on): off = `useMorph` skips the flight — the panel fades in/out in place on
+    `PLAIN_FADE_MS` timers (never an animation's end event; `landed` and the unmount don't wait for it), `openCardSettings` stores
+    no `cardSettingsMorphId` and Browse's `Card` isn't `.lifted` (the source stays visible). Waits keyed to the flight length use
+    `openMs()/closeMs()` (morph.ts). Other framer-motion modal enter/exit fades are not morphs and stay. Matrix `appear:morphs`.
+  - **Autoplay video thumbnails** (`autoPlayVideoThumbs`, default off): `components/autoplay.ts` `useAutoplayVideo` — a library
+    card / playlist-bar item with only a video preview (`hasVideoPreview`: no gif/webp, not a scene) mounts MotionThumb's hover
+    `<video>` without a hover. Only on-screen items (IntersectionObserver), at most `AUTOPLAY_VIDEO_CAP` = 4 at once across cards +
+    bar (a queue hands out freed slots), none while `!appActive` or a card-settings modal is open; a hovered item plays on top of
+    the cap. Gif items stay under "Autoplay GIF thumbnails". Browse cards have no video preview (remote sources ship a gif or
+    nothing), so they're unaffected. Matrix `appear:videoThumbs`.
 
 ## Icons + component patterns (parity-polish pass)
 - **Icons = `lucide-react`**, never emoji. Size 14–16px, `fill/stroke=currentColor` so theme

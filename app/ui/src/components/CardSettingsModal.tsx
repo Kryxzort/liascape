@@ -3,7 +3,7 @@ import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield, Audi
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { SETTINGS_MORPH, type MorphSource } from "./morph";
+import { SETTINGS_MORPH, openMs, type MorphSource } from "./morph";
 import { useMorph } from "./useMorph";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 
@@ -46,6 +46,7 @@ export function CardSettingsModal({
   const [dur, setDur] = useState("");
   const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
+  const morphs = useStore((s) => s.settings?.morphs !== false);
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
@@ -68,9 +69,9 @@ export function CardSettingsModal({
     if (!item || item.isScene) return;
     let alive = true;
     // defer past the open-morph (a re-render mid-flight can re-lay the panel out)
-    const t = setTimeout(() => { api.duration(item.videoPath).then((r) => alive && setDur(fmtDur(r.seconds))).catch(() => {}); }, SETTINGS_MORPH.open.duration + 40);
+    const t = setTimeout(() => { api.duration(item.videoPath).then((r) => alive && setDur(fmtDur(r.seconds))).catch(() => {}); }, openMs(morphs) + 40);
     return () => { alive = false; clearTimeout(t); };
-  }, [item]);
+  }, [item]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- the morph (components/useMorph.ts) -----------------------------------------------------------
   // the picture's own aspect: the card's still knows it at the click; else 16:9 until the image loads

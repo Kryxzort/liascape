@@ -14,7 +14,8 @@ import { type LibraryItem } from "../api/client";
 import { SavePlaylistModal } from "./SavePlaylistModal";
 import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
-import { MotionThumb, hasGifAsset, pointerOver } from "./MotionThumb";
+import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
+import { useAutoplayVideo } from "./autoplay";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 
 function PlItem({ path, item, index, playing }: { path: string; item?: LibraryItem; index: number; playing: boolean }) {
@@ -25,6 +26,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const openCardSettings = useStore((s) => s.openCardSettings);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
+  const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   const [menu, setMenu] = useState<{ x: number; y: number; el: HTMLElement } | null>(null);
   const [hover, setHover] = useState(false);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
@@ -44,20 +46,23 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const lifted = useStore((s) => s.cardSettingsMorphId === `pl-${path}`);
   // an open menu holds the preview, as on a library card
   const active = !!item && !lifted && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
+  // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const autoVideo = useAutoplayVideo(boxRef, !!item && !lifted && !isDragging && hasVideoPreview(item));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={setNodeRef} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
+    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
-      {item && <MotionThumb item={item} active={active} />}
+      {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {glow && !playing && !isDragging && !lifted && createPortal(
+      {glow && glows && !playing && !isDragging && !lifted && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
