@@ -883,6 +883,8 @@ struct ScriptRig {
     std::string dir;
     /** more files under `dir` to delete (B3's particle JSON and materials) */
     std::vector<std::string> extra;
+    /** the pointer LWE reads (B5), none by default */
+    wp_mouse_input* mouse = nullptr;
 
     bool open (const std::string& sceneDir) {
         dir = sceneDir;
@@ -895,7 +897,7 @@ struct ScriptRig {
         ctx = wp_context_create (cfg);
         wp_context_set_gl_proc_address (ctx, &g_proc);
         wp_context_set_time_counter (ctx, &g_clock);
-        p = wp_project_load_folder (ctx, nullptr, dir.c_str ());
+        p = wp_project_load_folder (ctx, mouse, dir.c_str ());
         if (p == nullptr) {
             return false;
         }
@@ -1471,6 +1473,198 @@ static bool particle_hide_resets_and_overrides_live () {
     return true;
 }
 
+// B5: parallax and camera (docs/player/spikes/we-lwe-gap-audit.md G10-G12, G14/E1, G15-G19), decoded from
+// wallpaper64.exe 2.8.485: the camera update GH 0x1401b8af0, the per-object offset in the render loop GH 0x1401b9b50,
+// the shake GH 0x1401c7680, the zoom in the scene tick GH 0x1401afbf0. The pointer is native scene px, y down
+
+static double g_mouseX = 0.0, g_mouseY = 0.0;
+static double mouse_x (void*) { return g_mouseX; }
+static double mouse_y (void*) { return g_mouseY; }
+static int mouse_pressed (void*, int) { return 0; }
+static wp_mouse_input g_mouse = { .user_parameter = nullptr, .get_x = mouse_x, .get_y = mouse_y, .is_pressed = mouse_pressed };
+
+// a 64x32 scene like script_scene, with more `general` members and the project's properties
+static std::string camera_scene (const std::string& general, const std::string& objects, const std::string& properties = "") {
+    char tmpl[] = "/tmp/lwe-camera-scene.XXXXXX";
+    const char* dir = mkdtemp (tmpl);
+    if (!dir) {
+        return {};
+    }
+    const std::string d = dir;
+    write_file (d + "/project.json", "{\"title\":\"camera\",\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":{"
+                                     + properties + "}}}\n");
+    write_file (d + "/scene.json", "{\"camera\":{\"center\":\"0 0 -1\",\"eye\":\"0 0 0\",\"up\":\"0 1 0\"},"
+                                   "\"general\":{\"clearcolor\":\"0 0 0.5\",\"orthogonalprojection\":{\"width\":64,\"height\":32},"
+                                   + general + "},\"objects\":[" + objects + "]}\n");
+    return d;
+}
+
+// the first covered column of a row, -1 when none
+static int left_edge (const std::string& row) {
+    const auto at = row.find ('#');
+    return at == std::string::npos ? -1 : static_cast<int> (at);
+}
+
+// the pointer moves a layer by (origin − target) · amount · depth, the target centred at mouse influence 0;
+// depth 0 stays; delay 0 snaps, a delay eases in by k = (1 − delay/3) · 10 · dt; the cameraparallax switch is read
+// live and off puts the layers back (unpatched: the delay was read as a bool, k = 0, nothing ever moved; with it
+// moving, a depth 0 layer moved by the amount and the target was the raw cursor)
+static bool parallax_follows_the_pointer () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // amount 1, influence 1, both squares on the centre row (the offset depends on the origin, so off the centre
+    // row a centred pointer moves a layer in y). The depth 0.5 square at x 32: a pointer at the right edge puts the
+    // target at x 64, (32 − 64) · 0.5 = −16 px. The depth 0 square at x 56 never moves
+    const std::string dir = camera_scene (
+        "\"cameraparallax\":{\"user\":\"par\",\"value\":true},\"cameraparallaxamount\":1,\"cameraparallaxdelay\":0,"
+        "\"cameraparallaxmouseinfluence\":1",
+        square (1, "\"origin\":\"56 16 0\",\"parallaxDepth\":\"0 0\"") + ","
+            + square (2, "\"origin\":\"32 16 0\",\"parallaxDepth\":\"0.5 0.5\""),
+        "\"par\":{\"type\":\"bool\",\"value\":true,\"text\":\"p\"}"
+    );
+    ScriptRig rig;
+    rig.mouse = &g_mouse;
+    g_mouseX = 32.0;
+    g_mouseY = 16.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    // the depth 0.5 square's left edge (the first covered column left of the static square) and whether the static
+    // square still covers exactly 52..59
+    auto moving = [&rig] () { return left_edge (rig.row ().substr (0, 48)); };
+    auto still = [&rig] () { return rig.row ().substr (48) == covered (52, 59).substr (48); };
+    rig.step ();
+    const int rest = moving ();
+    const bool restStill = still ();
+    g_mouseX = 64.0;
+    rig.step ();
+    const int right = moving ();
+    const bool rightStill = still ();
+    g_mouseX = 0.0;
+    rig.step ();
+    const int left = moving ();
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "par", false), "bool refused");
+    rig.step ();
+    const int off = moving ();
+    printf ("    depth 0.5: rest %d, pointer right %d, left %d, parallax off %d; depth 0 still: %d %d\n", rest, right, left, off,
+            restStill, rightStill);
+    CHECK (restStill && rightStill, "a depth 0 layer moved");
+    CHECK (rest == 28, "a centred pointer moved the layer (%d, want 28)", rest);
+    CHECK (right == 12, "a pointer at the right edge put the layer at %d, want 12 (−16 px)", right);
+    CHECK (left == 44, "a pointer at the left edge put the layer at %d, want 44 (+16 px)", left);
+    CHECK (off == 28, "turning parallax off left the layer at %d, want 28", off);
+
+    // delay 1.5: k = (1 − 0.5) · 10 / 30 = 1/6 per 30 fps frame
+    const std::string eased = camera_scene (
+        "\"cameraparallax\":true,\"cameraparallaxamount\":1,\"cameraparallaxdelay\":1.5,\"cameraparallaxmouseinfluence\":1",
+        square (1, "\"origin\":\"32 16 0\",\"parallaxDepth\":\"0.5 0.5\"")
+    );
+    ScriptRig rig2;
+    rig2.mouse = &g_mouse;
+    g_mouseX = 32.0;
+    CHECK (rig2.open (eased), "load/build of %s failed", eased.c_str ());
+    rig2.step ();
+    g_mouseX = 64.0;
+    std::vector<int> edges;
+    for (int i = 0; i < 6; i++) {
+        rig2.step ();
+        edges.push_back (left_edge (rig2.row ()));
+    }
+    printf ("    delay 1.5, pointer right: edges");
+    bool ok = true;
+    for (size_t i = 0; i < edges.size (); i++) {
+        const double want = 28.0 - 16.0 * (1.0 - std::pow (5.0 / 6.0, static_cast<double> (i + 1)));
+        printf (" %d (%.1f)", edges[i], want);
+        ok = ok && std::abs (edges[i] - want) <= 1.0;
+    }
+    printf ("\n");
+    CHECK (ok, "the layer didn't ease in at k = 1/6 per frame");
+    return true;
+}
+
+// g_ParallaxPosition = the smoothed position over the scene size, clamped 0..1 (unpatched: never fed, 0)
+static bool parallax_position_uniform () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // influence 0.5, the pointer at the right edge and the top: x = 64 · (0.25 + 0.5) = 48 → 0.75,
+    // y (up) = 32 · (0.25 + 0.5) → 0.75
+    const std::string dir = camera_scene (
+        "\"cameraparallax\":true,\"cameraparallaxamount\":1,\"cameraparallaxdelay\":0,\"cameraparallaxmouseinfluence\":0.5",
+        "{\"id\":1,\"name\":\"prlx\",\"image\":\"models/c4.json\",\"size\":\"64 32\",\"origin\":\"32 16 0\",\"parallaxDepth\":\"0 0\"}"
+    );
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/shaders/c4.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                                          "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n");
+    write_file (dir + "/shaders/c4.frag", "uniform vec2 g_ParallaxPosition;\nvoid main() {\n\tgl_FragColor = vec4(g_ParallaxPosition, 0.0, 1.0);\n}\n");
+    write_file (dir + "/materials/c4.json", "{\"passes\":[{\"shader\":\"c4\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/models/c4.json", "{\"material\":\"materials/c4.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.mouse = &g_mouse;
+    g_mouseX = 32.0;
+    g_mouseY = 16.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char centre[4] = { 0, 0, 0, 0 }, moved[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 32, 16, centre);
+    g_mouseX = 64.0;
+    g_mouseY = 0.0;
+    rig.step ();
+    read_pixel (rig.fbo, 32, 16, moved);
+    printf ("    centred pointer: %d %d; pointer top right: %d %d\n", centre[0], centre[1], moved[0], moved[1]);
+    CHECK (near (centre[0], 127.5, 2) && near (centre[1], 127.5, 2), "a centred pointer isn't 0.5 0.5 (%d %d)", centre[0], centre[1]);
+    CHECK (near (moved[0], 0.75 * 255, 2) && near (moved[1], 0.75 * 255, 2), "the top-right pointer isn't 0.75 0.75 (%d %d)",
+           moved[0], moved[1]);
+    return true;
+}
+
+// general.zoom scales the view about the centre, times the active camera object's zoom (the last visible one); the
+// shake at speed 0 sits at cos 0 = 1: x moves by amplitude · 0.01 · the scene height (unpatched: zoom, camera objects
+// and the shake were ignored)
+static bool camera_zoom_and_shake () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string zoomed = camera_scene ("\"zoom\":2", square (1, "\"origin\":\"32 16 0\""));
+    ScriptRig rig;
+    CHECK (rig.open (zoomed), "load/build of %s failed", zoomed.c_str ());
+    rig.step ();
+    const std::string z2 = rig.row ();
+
+    const std::string cams = camera_scene (
+        "\"zoom\":2",
+        square (1, "\"origin\":\"32 16 0\"") + ",{\"id\":2,\"name\":\"cam\",\"camera\":\"default\",\"zoom\":0.5}"
+            + ",{\"id\":3,\"name\":\"off\",\"camera\":\"default\",\"zoom\":4,\"visible\":{\"user\":\"c\",\"value\":false}}",
+        "\"c\":{\"type\":\"bool\",\"value\":false,\"text\":\"c\"}"
+    );
+    ScriptRig rig2;
+    CHECK (rig2.open (cams), "load/build of %s failed", cams.c_str ());
+    rig2.step ();
+    const std::string withCamera = rig2.row ();
+    CHECK (wp_project_property_set_boolean_by_name (rig2.p, "c", true), "bool refused");
+    rig2.step ();
+    const std::string lastCamera = rig2.row ();
+
+    // amplitude 50: 32 · 0.01 · 50 = 16 px; the camera moves right, the layer left
+    const std::string shaken = camera_scene (
+        "\"camerashake\":true,\"camerashakespeed\":0,\"camerashakeamplitude\":50,\"camerashakeroughness\":1",
+        square (1, "\"origin\":\"32 16 0\"")
+    );
+    ScriptRig rig3;
+    CHECK (rig3.open (shaken), "load/build of %s failed", shaken.c_str ());
+    rig3.step ();
+    const std::string shake = rig3.row ();
+    printf ("    zoom 2:         %s\n    camera 0.5:     %s\n    last camera 4:  %s\n    shake 16 px:    %s\n", z2.c_str (),
+            withCamera.c_str (), lastCamera.c_str (), shake.c_str ());
+    CHECK (z2 == covered (24, 39), "general.zoom 2 didn't double the square");
+    CHECK (withCamera == covered (28, 35), "the camera object's zoom 0.5 didn't cancel general.zoom 2");
+    CHECK (lastCamera == covered (0, 63), "the last visible camera object (zoom 4 · 2) isn't the active one");
+    CHECK (shake == covered (12, 19), "the shake didn't move the view by 16 px");
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -1507,6 +1701,9 @@ int main (int argc, char** argv) {
     run ("particle_colorrandom_one_t", particle_colorrandom_one_t);
     run ("particle_colorn_hsv_shift", particle_colorn_hsv_shift);
     run ("particle_hide_resets_and_overrides_live", particle_hide_resets_and_overrides_live);
+    run ("parallax_follows_the_pointer", parallax_follows_the_pointer);
+    run ("parallax_position_uniform", parallax_position_uniform);
+    run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
