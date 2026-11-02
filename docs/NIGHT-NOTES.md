@@ -172,3 +172,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Three bugs from your noctalia list fixed:** a wallpaper started from nothing just appears (no fade from black); a
   right-click no longer stops an mp4 hover preview; under Shuffle the bar marks the item that really plays. Merged with
   the toggles: IT 389/0, player lib 325/0 and program 69/0, full matrix 834/0. TODO F6 filed (a timer firing early once).
+- **Auto-mute now runs in the player** (Task 14 done): its Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` turns
+  it off), `monitor-daemon` is retired under liascape-player (a leftover one is stopped), no `pactl`/`parec` run. IT
+  400/0 (389/0 with the old engine), settings 131/0, full matrix 834/0, cargo all ok. Your backend and player run it now.
