@@ -1323,6 +1323,12 @@ ctl hello | jq -e '.health.scenes.ok == false and (.health.scenes.reason | test(
 hf_scenes() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "scenes") | .ok == false and (.reason | test("liascape-scene-worker")) and (.affects | index("allowScenes") != null)' >/dev/null; }
 waitfor $WAIT hf_scenes && ok "/health/features: scenes not ok with the reason, affects allowScenes" \
   || bad "/health/features: $(curl -sf -m 10 "$U/health/features" | jq -c '.features[] | select(.id == "scenes")')"
+# the player audio bus (--ao null here: no bus): hello.health.bus and /health/features' audio-bus say so, naming mpv's default device
+ctl hello | jq -e '.health.bus.ok == false and .health.bus.state == "off" and (.health.bus.reason | test("--ao null") and test("default device"))' >/dev/null \
+  && ok "hello.health.bus: off (--ao null) with the reason" || bad "hello.health.bus: $(ctl hello | jq -c .health.bus)"
+hf_bus() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "audio-bus") | .ok == false and (.reason | test("default device")) and (.affects | length == 0)' >/dev/null; }
+waitfor $WAIT hf_bus && ok "/health/features: audio-bus not ok with the reason (mpv's default device)" \
+  || bad "/health/features: $(curl -sf -m 10 "$U/health/features" | jq -c '.features[] | select(.id == "audio-bus")')"
 lib_steps_no_scene "no liascape-scene-worker"
 restart_player 10
 setting '.AllowScenes = false'
@@ -2162,6 +2168,11 @@ EOF
     # The bus up but the player's env gate off: still no capability, and AudioMonitor does mute.
     player_with_audio 0
     waitfor $WAIT bus_up || bad "env gate off: the bus never came up"
+    # the bus up: hello.health.bus + /health/features' audio-bus are ok (the gate-off part is `automute`'s alone)
+    ctl hello | jq -e '.health.bus.ok == true and .health.bus.state == "up" and .health.automute.ok == false' >/dev/null \
+      && ok "bus up: hello.health.bus ok (state up), automute not ok (the env gate)" || bad "bus up: hello.health $(ctl hello | jq -c '.health | {bus, automute}')"
+    hf_bus_up() { curl -sf -m 10 "$U/health/features" | jq -e '.features[] | select(.id == "audio-bus") | .ok == true and .reason == null' >/dev/null; }
+    waitfor $WAIT hf_bus_up && ok "/health/features: audio-bus ok with the bus up" || bad "/health/features: $(curl -sf -m 10 "$U/health/features" | jq -c '.features[] | select(.id == "audio-bus")')"
     setting '.AutoMute = true | .NoAudio = false | .Volume = 100'
     waitfor $WAIT am_ready && ok "env gate off: no capability ($(am_caps)) → the backend keeps AudioMonitor (its pactl subscribe is up)" || bad "env gate off: no pactl subscribe, capabilities $(am_caps)"
     post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a (env gate off) → $(cur path)"

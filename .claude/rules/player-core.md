@@ -32,9 +32,14 @@ happen regardless of timing.
   never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
   none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`), `automute` (the auto-mute Signal's
   capability: `LIASCAPE_PLAYER_AUTOMUTE=0` or the audio bus down → false with the reason), and in `hello.health` only
-  `cover` (`{ok, reason, source}` — the covered Signal's source, § Signals). `hello.health` carries all six;
-  `liascape-player health` prints `{effects, vram, automute}` (no render worker without a GL context; `automute` knows
-  only the env gate: `ok: null` when on) for when no player runs —
+  `cover` (`{ok, reason, source}` — the covered Signal's source, § Signals), and `bus` (`{ok, reason, state}` — the
+  player audio bus itself, `bus_json`: `Up`/`Retargeting` → ok, `state` = the bus probe's; `Down` → false with
+  `BusInfo::reason` + "sources play on mpv's default device instead (nothing stops, but no bus meter and no in-player
+  auto-mute)"; no bus at all (`Audio::down_reason`: `--ao` ≠ pipewire, `LIASCAPE_PLAYER_BUS=off`) → false, `state`
+  `off`; the first session still being set up (`BusInfo::reason == bus::CONNECTING_REASON`, generation 0) → null).
+  `hello.health` carries all seven; `liascape-player health` prints `{effects, vram, automute, bus}` (no render
+  worker without a GL context; `automute` knows only the env gate: `ok: null` when on; `bus` only
+  `LIASCAPE_PLAYER_BUS=off`, else null) for when no player runs —
   the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.

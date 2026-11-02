@@ -137,14 +137,16 @@ player: liascape-player's pieces come from the running player's `hello.health` (
 | `vram` (liascape-player) | a VRAM probe — NVML (`libnvidia-ml`), AMD DRM sysfs, or `nvidia-smi` (Intel: none) | the per-scene VRAM limit and the low-VRAM rule can't act | `limitVramPerScene`, `sceneVramLimitMib`, `vramLowMode` |
 | `hwdec-interop` (liascape-player) | the render worker's GL interop (CUDA on NVIDIA, VA-API on AMD/Intel) — running player only (null otherwise) | hardware decoding copies every frame through the CPU | `hwDec` |
 | `auto-mute` | liascape-player: the player's auto-mute Signal (`hello.health.automute`: `LIASCAPE_PLAYER_AUTOMUTE` not `0`, its audio bus up; null before a player ran) — nothing else; without it `AudioMonitor`'s `pactl` + `parec`, and the reason says it works only while the app is open. Legacy: `pactl` + `parec` | auto-mute can't hear other apps (or only with the app open) | `autoMute` |
+| `audio-bus` (liascape-player) | the player's own PipeWire audio bus (`hello.health.bus`: up / re-targeting = ok; null while the first session is set up and with no player running) | the sources play on mpv's default device instead — nothing stops, but there is no bus meter and no in-player auto-mute (the `auto-mute` row says that part) | none — no setting row of its own, so it shows in the Settings summary only (always "in use") |
 | `mpris` | liascape-player with the Signal: a D-Bus session bus (`SessionBusReachable`); else / legacy: `playerctl` | "Only if MPRIS player active" never sees a player | `autoMuteOnlyIfMprisActive` |
 | `ffmpeg` | `ffmpeg` + `ffprobe` | no loudness measurement, imports / thumbnails / durations fail | `normalizeAudio` |
 | `steamcmd` | steamcmd (`WorkshopDownloader.FindSteamCmd`) | "Download via steamcmd" can't download | `workshopDownloadMode`, `steamCmdPath` |
 
 Not listed (checked, no silent degradation to report): `wl-copy` (the UI copies with `navigator.clipboard`, no
-`wl-copy` call exists), `grim` / `mpvpaper` (legacy only — the owner runs liascape-player), the PipeWire audio bus (down → the
-sources play on mpv's default device; only the auto-mute Signal stops — the `auto-mute` row says so). Guards: `--probe probe-health.js` (matrix stack; RED on
-the base UI), the adapter IT's `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` section (`hello.health` + the endpoint).
+`wl-copy` call exists), `grim` / `mpvpaper` (legacy only — the owner runs liascape-player). The PipeWire audio bus used to be here
+("nothing stops"); it is the `audio-bus` row now (player-core.md § health) so the fallback to mpv's default device is
+visible. Guards: `--probe probe-health.js` (matrix stack; RED on
+the base UI), the adapter IT's `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` section (`hello.health` + the endpoint; the same section asserts `bus` off under `--ao null`, the private-PipeWire part asserts it up), self-test `FeatureHealthAssertions`.
 
 ## WS event types
 `wallpaper-changed {path}` (every switch — `SwitchToFile`; `null` on a keybind stop / trash stop) `· settings-changed

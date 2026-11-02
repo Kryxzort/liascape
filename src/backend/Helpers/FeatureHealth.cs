@@ -122,6 +122,11 @@ public static class FeatureHealth
                 // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause when covered" can't act
                 var (cok, cwhy) = Part(i.PlayerHealth, "cover");
                 f.Add(new("cover", "Pause when covered", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
+                // the player's own PipeWire audio bus (player-core.md § Audio bus): down → the sources play on mpv's default
+                // device (nothing stops, but no bus meter and no in-player auto-mute). No setting of its own to mark: it
+                // shows in the Settings summary only. Unknown while the first session is being set up / before a player ran.
+                var (bok, bwhy) = Part(i.PlayerHealth, "bus");
+                f.Add(new("audio-bus", "Player audio bus (PipeWire)", bok, bok == false ? bwhy : null, []));
             }
         }
         else

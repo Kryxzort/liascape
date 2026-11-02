@@ -261,6 +261,10 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
             "scenes": crate::health::scenes_json(rt.scenes_available()),
             "cover": rt.cover.health(),
             "automute": crate::health::automute_json(rt.automute.env, rt.automute_capable()),
+            "bus": crate::health::bus_json(
+                rt.audio.down_reason.as_deref(),
+                rt.audio.bus.as_ref().map(|b| b.info()).as_ref(),
+            ),
         },
     }))
 }

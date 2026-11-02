@@ -148,9 +148,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `liascape-player health`; a warning
       icon with the reason on every affected Settings row (control kept), a summary of what's broken and in use.
       Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LIASCAPE_SCENE_WORKER_BIN=/nonexistent`), self-test.
-- [ ] Health follow-ups: the playlist modal's Transitions button has no icon (the global row has); the PipeWire bus
-      being down isn't reported (nothing stops working — audio goes to mpv's default device); Intel GPUs have no VRAM
-      probe at all (an Intel-specific one would make the VRAM rules work there).
+- [ ] Health follow-ups (2 of 3 done 2026-11-02): ~~the playlist modal's Transitions field had no health icon (the global row
+      has)~~ — it has the same warning icon now (`components/FeatureWarn.tsx`, `useFeatureWarnings`; probe-health cells);
+      ~~the PipeWire bus being down isn't reported~~ — `hello.health.bus` → the `audio-bus` row of `/health/features` (ok /
+      reason "sources play on mpv's default device" / unknown; summary only, no setting row), adapter IT + self-test +
+      probe-health guard it. **Still open:** Intel GPUs have no VRAM probe at all (an Intel-specific one would make the VRAM
+      rules work there).
 - [x] **Transition duration below 50 ms + free typing in every number field** (owner todo + follow-up, 2026-10-28):
       the floor is 0 ms (0 = a cut, 1–49 ms = that fast an effect; UI, `TransitionService.PickDuration`); every numeric
       settings field is `NumInput` — empty / out-of-range while focused, nothing saved until a valid value or the blur,

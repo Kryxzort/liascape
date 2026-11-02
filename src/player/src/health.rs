@@ -13,6 +13,11 @@
 //!   (`LIASCAPE_PLAYER_AUTOMUTE=0` turns it off) and the audio bus up. Without it the backend's
 //!   `AudioMonitor` mutes only while the app is open. `liascape-player health` knows only the gate
 //!   (`ok: null` when on: the bus is known once a player runs).
+//! - `bus` — the player audio bus itself (§ Audio bus): up (or re-targeting) = ok; down = sources play on mpv's
+//!   default device instead (nothing stops working, the bus meter and the in-player auto-mute do), with the
+//!   reason (`--ao` other than pipewire, `LIASCAPE_PLAYER_BUS=off`, no PipeWire / session manager). `ok: null`
+//!   while the first session is still being set up, and in `liascape-player health` (no player: the bus is
+//!   known once one runs; `LIASCAPE_PLAYER_BUS=off` is known).
 //!
 //! `hello.health` carries them for a running player; `liascape-player health` prints the same (minus the
 //! interop, which needs the render worker's GL context) when none runs.
@@ -21,6 +26,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use serde_json::{Value, json};
+
+use crate::audio::bus::{BusInfo, BusState, CONNECTING_REASON};
 
 /// `effects` from a resolved catalogue dir (None = none resolved) and its effect count.
 pub fn effects_json(dir: Option<&Path>, count: usize) -> Value {
@@ -90,6 +97,36 @@ pub fn hwdec_json(has_worker: bool, interop: Option<&str>) -> Value {
     }
 }
 
+/// `bus` from why there is no bus at all (`Audio::down_reason`) or the bus's `BusInfo`; neither = no answer yet.
+/// `state` is the bus probe's (`up` | `retargeting` | `down` | `off`).
+pub fn bus_json(off_reason: Option<&str>, info: Option<&BusInfo>) -> Value {
+    const NOTE: &str = "sources play on mpv's default device instead (nothing stops, but there is no bus meter and no in-player auto-mute)";
+    match (off_reason, info) {
+        (Some(r), _) => json!({ "ok": false, "state": "off",
+            "reason": format!("the player's audio bus is off ({r}) — {NOTE}") }),
+        (None, Some(i)) if i.state != BusState::Down => {
+            json!({ "ok": true, "reason": null, "state": i.state })
+        }
+        // the first session is still being set up: not a failure (yet)
+        (None, Some(i)) if i.generation == 0 && i.reason.as_deref() == Some(CONNECTING_REASON) => {
+            json!({ "ok": null, "reason": null, "state": i.state })
+        }
+        (None, Some(i)) => json!({ "ok": false, "state": i.state,
+            "reason": format!("the player's audio bus is down ({}) — {NOTE}; it keeps retrying",
+                i.reason.as_deref().unwrap_or("no PipeWire / session manager reachable")) }),
+        (None, None) => json!({ "ok": null, "reason": null, "state": null }),
+    }
+}
+
+/// `bus` for `liascape-player health` (no player running): only `LIASCAPE_PLAYER_BUS=off` is known.
+pub fn bus_here() -> Value {
+    if std::env::var("LIASCAPE_PLAYER_BUS").is_ok_and(|v| v == "off") {
+        bus_json(Some("disabled by LIASCAPE_PLAYER_BUS=off"), None)
+    } else {
+        bus_json(None, None)
+    }
+}
+
 /// `automute` from the env gate and whether the audio bus is up.
 pub fn automute_json(env: bool, bus_up: bool) -> Value {
     match (env, bus_up) {
@@ -156,6 +193,47 @@ mod tests {
         let down = automute_json(true, false);
         assert_eq!(down["ok"], false);
         assert!(down["reason"].as_str().unwrap().contains("audio bus"), "{down}");
+    }
+
+    fn info(state: BusState, generation: u64, reason: Option<&str>) -> BusInfo {
+        BusInfo {
+            state,
+            device: "pipewire/liascape-player-bus".into(),
+            latency_ms: 0.0,
+            latency_samples: 0,
+            quantum_ms: 0.0,
+            target: None,
+            default_sink: None,
+            playback_node: None,
+            sink_node: None,
+            retargets: 0,
+            connecting: state == BusState::Down,
+            generation,
+            requested: None,
+            overridden: false,
+            reason: reason.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn bus_cases() {
+        assert_eq!(bus_json(None, Some(&info(BusState::Up, 1, None)))["ok"], true);
+        assert_eq!(bus_json(None, Some(&info(BusState::Retargeting, 1, None)))["ok"], true);
+        // first connect still running: unknown, not down
+        assert!(bus_json(None, Some(&info(BusState::Down, 0, Some(CONNECTING_REASON))))["ok"].is_null());
+        // a failed attempt / a lost session: down, with the reason
+        let failed = bus_json(None, Some(&info(BusState::Down, 0, Some("no session manager"))));
+        assert_eq!(failed["ok"], false);
+        assert_eq!(failed["state"], "down");
+        assert!(failed["reason"].as_str().unwrap().contains("no session manager"), "{failed}");
+        assert!(failed["reason"].as_str().unwrap().contains("default device"), "{failed}");
+        assert_eq!(bus_json(None, Some(&info(BusState::Down, 2, Some(CONNECTING_REASON))))["ok"], false);
+        // no bus at all
+        let off = bus_json(Some("--ao null"), None);
+        assert_eq!(off["ok"], false);
+        assert_eq!(off["state"], "off");
+        assert!(off["reason"].as_str().unwrap().contains("--ao null"), "{off}");
+        assert!(bus_json(None, None)["ok"].is_null());
     }
 
     #[test]

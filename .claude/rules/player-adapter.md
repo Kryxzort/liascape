@@ -306,7 +306,9 @@ and its bus up). The parity flag (`AutoMuteParityPassed`, `LIASCAPE_TEST_AUTOMUT
 - `FeatureHealth` (`/health/features`) reads the player's `hello.health.automute` (or `liascape-player health`: the env gate
   only, `ok: null` when on): ok / unknown → `auto-mute` needs nothing else (no `pactl` / `parec`), `mpris` needs a session bus
   (`SessionBusReachable`); false → `AudioMonitor`'s tools as before plus the player's reason and "works only while the app is
-  open". Legacy: `pactl` + `parec`, `playerctl`, unchanged.
+  open". Legacy: `pactl` + `parec`, `playerctl`, unchanged. `hello.health.bus` → the `audio-bus` row (`affects` none; false = the
+  reason + "sources play on mpv's default device"; null = unknown, shown nowhere) — independent of `automute`, so a bus that is down
+  makes both rows say so.
 - IT: § auto-mute runs on the Signal by default; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor` runs it with the player at
   `LIASCAPE_PLAYER_AUTOMUTE=0` (AudioMonitor while serve runs). The live-settings, B-while-muted, toggle checks run on either
   engine; app-closed, `restore` (no `monitor-daemon` either way) and a leftover `monitor-daemon` stopped at serve start on both;
