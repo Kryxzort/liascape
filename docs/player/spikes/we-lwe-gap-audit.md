@@ -124,7 +124,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B3 Particle core semantics** — **done 2026-11-03** (patches 0024–0028; see "B3 result" in § 5) | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
 | **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
 | **B5 Parallax and camera** — **done 2026-11-03** (patch 0029; see "B5 result" in § 5; E6, the camera-object pan and paths left) | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
-| **B6 Hierarchy** | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
+| **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
 | **B8 Audio response** | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
 | **B9 Small uniform, property and shader fixes** | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
@@ -880,6 +880,73 @@ The port (0029):
   - The parallax x mirror and influence-off flags.
   - The owner's WE captures of 2679248947, 2921510865, 3042492564 and 3516174947. 2679248947 has parallax off, so
     its depthparallax now reads a fixed 0.5 0.5, centred, where it read 0 before.
+
+### B6 result (fork patch 0030, pin `c959e7a`, 2026-11-03)
+
+Rows G03, G04 (the particle half), P36 and G31 are done. G04's text half stays in B4 (CText is redrawn there).
+Decoded from the same wallpaper64.exe with the sound spike's `all.c`:
+
+- **Effectively visible** (`FUN_1401b50e0`): the object's visible bit (+0x120 bit 0) AND, recursively, its parent's
+  (+0x180). About 15 sites ask it: the particle step (GH 0x140255d00, its reset of a hidden system), the scene
+  tick, the render loops, a function next to the text property table and the lights, so a hidden group or image
+  hides its whole subtree. No call site
+  found ties it to sound objects.
+- **The image model matrix** (`FUN_1402277d0`): the object's transform (`FUN_1401b5170`, T(origin) · R · S, the same
+  base transform every object type has) times a translation by the alignment offset at +0x2f8/+0x2fc. That offset
+  is set at GH 0x140230a80 from the alignment enum (+0x4b1; the table of names is built in GH 0x14023ac30: center 0,
+  top 1, topright 2, right 3, bottomright 4, bottom 5, bottomleft 6, left 7, topleft 8) as ±size/2 per side. So an
+  aligned layer turns and scales **about its origin**, its anchor point. That settles G31: the inferred pivot was
+  right.
+
+The port (0030):
+- `CScene::isEffectivelyVisible` is the one test. CImage, CText and CParticle (render, and the reset of a hidden
+  system) use it, and so does the active camera object (B5's loop). Live: a user property or script that shows the
+  parent shows the children on the next frame.
+- **A bug found on the way:** `CImage::shouldRenderFinalPass` read the visibility while the passes were built. An
+  image hidden at load, by itself or a parent, sent its last pass into an FBO for good, so showing it later never
+  drew it. render () skips a hidden image every frame, so the build no longer asks.
+- `CObject::resolveTransform`/`localTransform` moved from CImage. A particle's own scale and angles now count. CParticle
+  resolves its place every frame (`refreshTransform`): its origin, scale and z angle under its parents, so a moving,
+  animated or scripted parent (or origin) carries the system along. Before, the raw local origin was read once at
+  setup. World-space control points stay put in the world. The system's own x/y angles stay its own.
+- CImage rotates about the origin (`m_scenePivot`), not the shifted quad's centre. Centred layers are unchanged.
+
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All three fail on d7a9f34, and the suite is 29/29
+  on c959e7a.
+  - `hidden_parent_hides_children`: a hidden group's child and a hidden square's child don't draw, an unparented square
+    does. Turning the group's user property on shows its child on the next frame. Before, both children drew.
+  - `particle_follows_its_parent`: a group at 20 16 turned 90° and scaled 2 puts its system at local 0 3 at x 14 (10
+    particles after 1 s, 0 before); a square parent whose script moves it from 48 to 32 carries its system to 32 (10,
+    0 before); a hidden group's system has 0 (10 before).
+  - `aligned_layer_turns_about_its_origin`: a left-aligned square at 24 turned by π covers 16..23 (24..31 before); a
+    centred one turned by π stays put.
+- **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, the 17 playing scenes with a hidden ancestor, a
+  parented particle system or a turned aligned layer; before = d7a9f34 with the B5 worker through `LD_LIBRARY_PATH`).
+  2 are pixel-identical (3042492564, 3480481965: their hidden children are covered or text). The rest change 0.006–6 %
+  of the frame. What changed, all following the decoded rules:
+  - **3243449890:** the character is gone. She is the "simple" variant (group 2662, `visible` = combo
+    `newproperty4` == 1), whose 14 puppet parts drew under the hidden group. The combo's default is 2, "detailed",
+    whose layer (2002, a video shown by a start-delay script) is what WE shows. So WE shows the detailed variant
+    where we now show neither until that layer plays. **Unconfirmed without a WE capture.**
+  - **3326873240:** the "Media Info (ROUND)" widget at the left (its parent 131 is off by default,
+    `newproperty67` false) no longer draws. With it gone the smoke frame is nearly black, because the scene's video
+    layers (shown by a SceneScript `getVideoTexture` call, B10) don't play; the smoke check reports it "not
+    animating or blank". The scene's own toggle for the widget is off, so WE hides it too.
+  - **3490034653:** three "光束" (light beam) particle systems under image parents now sit next to their parents
+    (around x 570, y 990 of 3440×1440) instead of at the bottom-left corner: yellow shafts appear on the left.
+    **Unconfirmed without a WE capture** (the owner's capture of 3490034653 is already asked for, G17).
+  - **3414858021:** its rain systems are children of a group at the scene centre, with local origins such as
+    (−428, 507): they now sit around the centre instead of off towards the bottom-left corner.
+  - 3163060610, 3319542538, 3354740764, 3463520581, 3516106265, 3516174947: hidden-group layers (UI panels,
+    alternative variants, toggled extras) gone; 3174556087, 3233141951, 3363252053, 3479521040, 3489263099: parented
+    particles moved.
+- **Corpus** (`scene_corpus.sh --results /tmp/sc-b6`, 96 scenes, a release player and worker on the B6 core): ok
+  93, static 0, blank 0, load_failed 3, renderer_failed 0, crashed 0, broken 0, timeout 0, the same as B5. The same
+  3 scenes fail to load: 3276522107, 3477054430 and 3509243656. 3326873240 is ok there (the player's check sees
+  its animated layers over the run; only the 3 s smoke frame is near-black).
+- **Left of B6:** text parent transforms (B4, with G13/G30); whether a sound object under a hidden parent goes silent
+  (no call site found); G05 (parent alpha) is still Unknown; the owner's WE captures of 3243449890, 3163060610 or
+  3319542538, and 3490034653.
 
 ## 6. Audio after patch 0018 (A)
 

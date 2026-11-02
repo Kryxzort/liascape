@@ -982,8 +982,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           one. Headless pointer: 3289734539 moves against the pointer and returns. Corpus ok 93 as B3. Left: E6 (the
           effect projection matrix), the camera-object pan and paths, text parallax (B4), WE captures (3516174947's
           zoom 0.75 now shows borders, per the decoded formula). Result: the audit's "B5 result" (§ 5).
-    - [ ] **B6 Hierarchy.** A hidden parent hides its children; particle/text parent transforms (G03, G04, P36,
-          G31). 12 + 19 scenes. S.
+    - [x] **B6 Hierarchy.** A hidden parent hides its children; particle/text parent transforms (G03, G04, P36,
+          G31). 12 + 19 scenes. S. **Done 2026-11-03:** fork patch 0030 (decoded "effectively visible", particle
+          systems resolved under their parents every frame, aligned layers turn about their origin; also: an image
+          hidden at load now shows when turned on), pin `c959e7a`. Corpus ok 93 as B5. Left: text parent transforms (B4), a
+          sound under a hidden parent, G05; WE captures of 3243449890 (its "simple" character variant, drawn before
+          under a hidden group, is gone) and 3490034653 (parented light beams now show). Result: the audit's "B6
+          result" (§ 5).
     - [ ] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
           loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
     - [ ] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
