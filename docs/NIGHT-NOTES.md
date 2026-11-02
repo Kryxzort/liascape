@@ -202,3 +202,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Scene switch under load fixed:** on a busy machine a heavy scene could take 13–28 s to load and the switch to
   it failed at 10 s. A scene that is still loading (its worker still getting CPU) is now waited for up to 50 s
   while the old wallpaper plays on; a stuck load still fails/restarts. What's playing isn't slowed. Live.
+- **Scenes, batch B5 (fork patch 0029, pin `d7a9f34`):** parallax follows the mouse the way WE does (delay
+  smoothing — 14 of 25 parallax scenes were frozen), plus camera shake, `general.zoom` and camera-object zoom.
+  Corpus unchanged (93 ok). **Please look at 3516174947** in WE vs here: its camera "Lens size" 0.75 now zooms
+  its layers out (32 % black) per the decoded formula — a WE capture would settle whether that's right. Live.
