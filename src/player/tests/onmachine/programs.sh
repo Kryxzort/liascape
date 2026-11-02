@@ -69,7 +69,7 @@ SUSPEND_S=60
 VT_S=15
 while (($#)); do
     case $1 in
-        dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt) STEPS+=("$1") ;;
+        dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt|sceneaway) STEPS+=("$1") ;;
         all) STEPS+=(dropout appclosed crash cover soak nomonitor) ;; # no monitor last: the one step that can upset the session
         --results) RESULTS=$2; shift ;;
         --bin) BINDIR=$2; shift ;;
@@ -84,7 +84,7 @@ while (($#)); do
     esac
     shift
 done
-((${#STEPS[@]})) || { echo "name a step (dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt|all)" >&2; exit 2; }
+((${#STEPS[@]})) || { echo "name a step (dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt|sceneaway|all)" >&2; exit 2; }
 BIN=$BINDIR/liascape-player
 WBIN=$BINDIR/liascape-scene-worker
 [[ -x $BIN && -x $WBIN ]] || { echo "no liascape-player/liascape-scene-worker in $BINDIR (build release first)" >&2; exit 2; }

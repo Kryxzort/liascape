@@ -60,7 +60,8 @@ impl ImportedRing {
         table: &[(u64, bool)],
     ) -> Result<(), String> {
         validate_modifier(desc.fourcc, desc.modifier, table)?;
-        let t = gfx.import_dmabuf(desc, fds)?;
+        // TODO F5 (2): the import's sleeps are NVIDIA's global resource-manager lock.
+        let t = crate::runtime::driver_call(|| gfx.import_dmabuf(desc, fds))?;
         self.slots.retain(|(s, _)| *s != slot);
         self.slots.push((slot, t));
         Ok(())

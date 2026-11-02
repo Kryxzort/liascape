@@ -253,8 +253,8 @@ public static class LiascapePlayerSelfTest
     // ---- /health/features (FeatureHealth.Build): every missing piece → its feature not ok, with a reason ----------
     private static void FeatureHealthAssertions(List<string> fails)
     {
-        using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null}}""");
-        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause when covered\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"}}""");
+        using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null},"bus":{"ok":true,"reason":null,"state":"up"}}""");
+        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause when covered\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
         var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
@@ -271,6 +271,9 @@ public static class LiascapePlayerSelfTest
         Want("vram", false, "VRAM", "limitVramPerScene");
         Want("hwdec-interop", null, null, "hwDec");
         Want("cover", false, "Pause when covered", "pauseWhenCovered");
+        // the audio bus: down → a warning with the reason (affects no setting row: the summary only); unknown with no answer
+        if (F(none, "audio-bus").ok != false || !(F(none, "audio-bus").reason ?? "").Contains("default device") || F(none, "audio-bus").affects.Length != 0)
+            fails.Add($"health: audio-bus with the bus down: ok={F(none, "audio-bus").ok} ({F(none, "audio-bus").reason}), affects [{string.Join(",", F(none, "audio-bus").affects)}]");
         Want("auto-mute", false, "pactl", "autoMute");
         Want("mpris", false, "playerctl", "autoMuteOnlyIfMprisActive");
         Want("ffmpeg", false, "ffprobe", "normalizeAudio");
@@ -285,14 +288,16 @@ public static class LiascapePlayerSelfTest
         if (F(sigBus, "mpris").ok != true) fails.Add($"health: the Signal with a session bus, no playerctl: mpris ok={F(sigBus, "mpris").ok} ({F(sigBus, "mpris").reason})");
         using var gateOn = JsonDocument.Parse("""{"automute":{"ok":null,"reason":null}}""");
         var unk = FeatureHealth.Build(new(true, null, gateOn.RootElement, (true, null), _ => false, true, false));
+        if (F(unk, "audio-bus").ok != null || F(unk, "audio-bus").reason != null) fails.Add($"health: no bus answer: audio-bus ok={F(unk, "audio-bus").ok} ({F(unk, "audio-bus").reason}), want unknown without a reason");
         if (F(unk, "auto-mute").ok != null || F(unk, "mpris").ok != null) fails.Add($"health: no player ran (the gate on): auto-mute ok={F(unk, "auto-mute").ok}, mpris ok={F(unk, "mpris").ok}, want unknown");
         var leg = FeatureHealth.Build(new(false, null, good.RootElement, (true, null), t => t is not ("parec" or "playerctl"), true, true));
         if (F(leg, "auto-mute").ok != false || !(F(leg, "auto-mute").reason ?? "").Contains("parec") || F(leg, "mpris").ok != false)
             fails.Add($"health: legacy without parec/playerctl: auto-mute ok={F(leg, "auto-mute").ok} ({F(leg, "auto-mute").reason}), mpris ok={F(leg, "mpris").ok}");
         var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, true, false));
-        if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
+        if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram" || x.id == "audio-bus")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
+        if (leg.Any(x => x.id == "audio-bus")) fails.Add("health: the legacy engine has no player audio bus row");
         var d = new AppSettings();
-        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true) })
+        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
     }
 

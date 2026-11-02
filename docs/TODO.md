@@ -22,9 +22,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
 - [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
-- [ ] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
+- [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
+      **Done 2026-11-02** (`programs.sh sceneaway`, `phase2.md` § 8): VT + suspend + two suspends — 0 restarts, PASS 12/12.
 
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
@@ -147,9 +148,12 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `liascape-player health`; a warning
       icon with the reason on every affected Settings row (control kept), a summary of what's broken and in use.
       Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LIASCAPE_SCENE_WORKER_BIN=/nonexistent`), self-test.
-- [ ] Health follow-ups: the playlist modal's Transitions button has no icon (the global row has); the PipeWire bus
-      being down isn't reported (nothing stops working — audio goes to mpv's default device); Intel GPUs have no VRAM
-      probe at all (an Intel-specific one would make the VRAM rules work there).
+- [ ] Health follow-ups (2 of 3 done 2026-11-02): ~~the playlist modal's Transitions field had no health icon (the global row
+      has)~~ — it has the same warning icon now (`components/FeatureWarn.tsx`, `useFeatureWarnings`; probe-health cells);
+      ~~the PipeWire bus being down isn't reported~~ — `hello.health.bus` → the `audio-bus` row of `/health/features` (ok /
+      reason "sources play on mpv's default device" / unknown; summary only, no setting row), adapter IT + self-test +
+      probe-health guard it. **Still open:** Intel GPUs have no VRAM probe at all (an Intel-specific one would make the VRAM
+      rules work there).
 - [x] **Transition duration below 50 ms + free typing in every number field** (owner todo + follow-up, 2026-10-28):
       the floor is 0 ms (0 = a cut, 1–49 ms = that fast an effect; UI, `TransitionService.PickDuration`); every numeric
       settings field is `NumInput` — empty / out-of-range while focused, nothing saved until a valid value or the blur,
@@ -1039,25 +1043,50 @@ Two bug classes kept recurring; fix the class, not the instance:
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
-    **Mostly settled 2026-11-02 ("Measure Loop Stalls Without Waiting For A Core"); a rarer second cause is
-    open.** (1) The 3.25–3.56 ms readings were the loop thread waiting for a core, not loop work: the `loop`
+    **Settled 2026-11-02 ("Measure Loop Stalls Without Waiting For A Core", then "Free Imported Frames Off The Loop");
+    one driver limit remains, excluded by name.** (1) The 3.25–3.56 ms readings were the loop thread waiting for a core, not loop work: the `loop`
     probe now has opt-in scheduler accounting (`{"account": true}`: per stretch the thread's CPU clock,
     schedstat run delay and voluntary/involuntary switches → `max_busy_own_ms` = wall − run delay,
     `max_busy_at` / `max_busy_own_at` name the stretch). With the test pinned to two CPUs and four busy
     loops it reproduces: wall 3.4 ms = 0.75 ms own + 2.7 ms runnable, the stretch the test's own `probe`
     (the scene's `destroy` handler is 0.03 ms); idle, 0.5–1.4 ms. The test now bounds `max_busy_own_ms`
     ≤ 3 ms; RED with 5 ms of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle (5.76 /
-    5.52 ms) and under the hog (5.53–5.57 own at 5.6–16.8 wall). (2) **Open:** in 1 of 6 full runs the
-    own bound still failed — destroy 4.04 ms own, 0.59 ms CPU, 6 voluntary sleeps, 0 runnable wait: the loop
-    blocked ~3.4 ms in calls, in a dispatch stretch (source updates). Under a synthetic GPU load (the
-    scene harness's `gpu_work` 4000 test looping) 2 of ~77 destroy windows showed 2.4–3.3 ms blocked
-    stretches, under the CPU hog 3 of ~85 (one in a scene's update between its meter and latch, 12 ms);
-    never idle. Not pinned to a call: the per-segment timing never caught one (log/outbox writes under a
-    disk load: none). Candidates: NVIDIA driver waits in the scene's GL path (latch fence, imports) while
-    the GPU is shared, the dying scene's GL frees. Also seen: `posix_spawn` (vfork) of a worker blocks
-    the loop until the child execs — up to 2.4 ms under the hog. Next: catch the blocked stretch with
-    off-CPU stacks (`perf sched`/`offcputime`, not available here) or per-call accounting in the scene
-    path. `scene_fps_change_is_live_same_pid` (+ `per_output_scene_fps_gates_presents`): the failure was
+    5.52 ms) and under the hog (5.53–5.57 own at 5.6–16.8 wall). (2) **Caught 2026-11-02 ("Free Imported Frames Off The Loop"): NVIDIA's global driver lock.**
+    Off-CPU stacks of the loop thread (`perf record -e sched:sched_switch` filtered to the player,
+    DWARF call graphs, + `sched_wakeup`; ~100 recorded runs of the test, under the scene
+    harness's `gpu_work` 4000 loop and under a pinned CPU hog): every sleep ≥ 0.2 ms the loop took
+    in a measured window was in the NVIDIA kernel driver's resource manager, state D, in
+    `nvidia_unlocked_ioctl` → `RmIoctl` → `rmapi{Alloc,Free,Control,Map,DupObject}WithSecInfo` →
+    `serverTopLock_Prologue` → `rmapiLockAcquire` → `rwsem_down_{read,write}_slowpath` — one
+    rwsem for every process on the GPU, held by another process's allocation/free (the harness
+    loop starts and ends GL contexts every ~1.5 s; the owner's player and other tests too).
+    Our call sites: **(a) destroy** — the dying `SceneSource` dropped in `SourceHost::sync` →
+    `ImportedTex::drop` → `eglDestroyImage` (`rmapiFree`/`rmapiUnmap`, 0.2–1.4 ms per image,
+    3–6 images); **(b) create/resize** — `ImportedRing::import` → `import_dmabuf` →
+    `eglCreateImage` (`rmapiControl`) and `glEGLImageTargetTexture2DOES` (`rmapiFree`), 0.2–4 ms
+    per slot (one create: 3.99 + 2.43 + 2.09 + 0.77 ms → 11 ms own); (c) the first composite of a
+    fresh texture in a process (`BlitProgram::draw` → `rmapiMap`/`rmapiDupObject`, up to 26 ms)
+    and `clear_transparent` (`rmapiAlloc`) — seen only in the warm-up scene, outside the
+    windows. "Between the meter and the latch" was never seen; the earlier per-segment
+    attribution most likely caught an import's sleep. **Fixes:** (a) moved off the loop — the
+    image goes to one `lia-egl-free` thread (`dmabuf::free_image_off_thread`; the texture is
+    still deleted on its context first; under the display lifecycle lock, skipped after a
+    terminate via `DISPLAY_EPOCH`); 15 recorded runs after: no free on the loop, destroy
+    windows 0.2–1.6 ms. (b) stays on the loop — a **driver limit** at this design: the import
+    runs in `runtime::driver_call`, the `loop` probe reports its sleeps (`driver_blocked_ms`)
+    and `max_busy_self_ms` = own minus them; the test bounds that. **Follow-up:** an async
+    import (`eglCreateImage` on a helper thread, the ring's frames deferred until it lands;
+    `glEGLImageTargetTexture2DOES` still on the loop) would take most of it off. Also found:
+    the destroy window held the test's own `probe workers` (1.5–2.1 ms of CPU, 2.8–3.4 ms
+    with its stretch under the GPU loop — 18 of 20 unrecorded runs near the bound, several
+    over): now read before a second reset. Spawn (`posix_spawn` vfork) on the loop: 0.2–0.7 ms
+    per spawn (bpftrace on `clone`), kept — a spawner thread delays the pid every
+    kill/waitpid/reap path needs; not done. RED still: a 5 ms sleep (5.96 ms self) or a 5 ms
+    spin (5.82) in a scene's `begin_teardown`, a 5 ms sleep next to (not inside) each import
+    (15.5 ms self on create). One open trace: a single 1.8 ms voluntary sleep in a create
+    dispatch stretch (fix-12, perf recording, not driver-attributed, not caught as a stack —
+    most likely the spawn's vfork while the child waited for a core).
+    `scene_fps_change_is_live_same_pid` (+ `per_output_scene_fps_gates_presents`): the failure was
     `VIRTUAL-2 at its refresh` (60/0 step); not reproduced (CPU hogs, 7 runs: 59.4–60.5). Both now judge
     presents against `min(gate, frames the scene latched in the same window)` (latched ≥ ½ the scene's
     rate) — cause unproven, the new check prints the baseline; RED with the gate bypassed (59.95 vs 15

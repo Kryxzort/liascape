@@ -11,6 +11,10 @@
 //      reason), the control itself is still there and enabled, and the summary lists them. Auto-mute under liascape-player
 //      is the player's Signal (Task 14): pactl / parec / playerctl gone must NOT warn it; with the stack's player at
 //      `--ao null` (LIASCAPE_MATRIX_AUTOMUTE=audiomonitor: no audio bus) it warns that auto-mute works only with the app open
+//   3. the player's PipeWire audio bus (`audio-bus`): up → ok; the stack's player at `--ao null` (no bus) → ok=false with the
+//      reason (sources on mpv's default device); no player running → not false (unknown). It marks no Settings row — the
+//      summary lists it while it's down. The playlist modal's Transitions field carries the same warning icon as the
+//      global row (absent with the catalogue present, the reason when it's missing)
 // Exit 1 on any FAIL. The restarted backend is recorded in LIASCAPE_BACKEND_PID_FILE for the stack's cleanup.
 const { app, BrowserWindow } = require("electron");
 const cp = require("child_process");
@@ -69,6 +73,21 @@ const ROWS = {
   mpris: ["Only if MPRIS player active"],
   ffmpeg: ["Normalize audio"],
 };
+// the playlist modal (Library tab → "Playlist settings"): the warning icon beside its TRANSITIONS label, or null; closes it again
+async function playlistModalWarn() {
+  return js(`
+    [...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Library")?.click();
+    for (let i = 0; i < 60 && !document.querySelector('button[title="Playlist settings"]'); i++) await new Promise((r) => setTimeout(r, 100));
+    document.querySelector('button[title="Playlist settings"]')?.click();
+    for (let i = 0; i < 60 && !document.querySelector(".pl-modal"); i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 1200)); // the modal reads /health/features when it opens
+    const lab = [...document.querySelectorAll(".pl-modal .field-label")].find((e) => e.textContent.trim() === "TRANSITIONS");
+    const w = lab?.querySelector("[data-feature-warn]");
+    const out = { label: !!lab, warn: w ? w.getAttribute("title") : null, button: !!document.querySelector(".pl-modal .tr-open") };
+    document.querySelector(".modal-backdrop")?.click();
+    await new Promise((r) => setTimeout(r, 400));
+    return out;`);
+}
 const REASON = { scenes: /liascape-scene-worker not found/, transitions: /catalogue/, vram: /LIASCAPE_PLAYER_VRAM_PROBE=none/, ffmpeg: /ffmpeg and ffprobe/ };
 // the stack's player has its audio bus (the Signal) unless LIASCAPE_MATRIX_AUTOMUTE=audiomonitor (`--ao null`)
 const AM_SIGNAL = E.LIASCAPE_MATRIX_AUTOMUTE === "signal";
@@ -100,6 +119,11 @@ app.whenReady().then(async () => {
       const am = byId(f1, "auto-mute");
       if (!AM_SIGNAL && (am?.ok !== false || !/audio bus is down/.test(am?.reason || "") || !/only while the app is open/.test(am?.reason || "")))
         v.push(`auto-mute with a player at --ao null: ${JSON.stringify(am)}, want ok=false naming the audio bus and the app-open limit`);
+      const bus = byId(f1, "audio-bus");
+      if (!bus) v.push("audio-bus missing from the report");
+      else if (AM_SIGNAL ? bus.ok !== true : bus.ok !== false || !/default device/.test(bus.reason || ""))
+        v.push(`audio-bus with ${AM_SIGNAL ? "the bus up" : "a player at --ao null"}: ${JSON.stringify(bus)}, want ${AM_SIGNAL ? "ok=true" : "ok=false naming mpv's default device"}`);
+      else if (bus.affects?.length) v.push(`audio-bus affects ${JSON.stringify(bus.affects)} — no Settings row of its own`);
       return v;
     });
     const s1 = await settingsRows();
@@ -115,6 +139,12 @@ app.whenReady().then(async () => {
         }
       }
       return v;
+    });
+
+    const m1 = await playlistModalWarn();
+    await cell("present: the playlist modal's Transitions field has no warning icon", async () => {
+      if (!m1?.label || !m1.button) return [`the playlist modal's TRANSITIONS field/button didn't render: ${JSON.stringify(m1)}`];
+      return m1.warn ? [`warns although the catalogue is present: ${m1.warn}`] : [];
     });
 
     // ---- 2. pieces missing
@@ -166,8 +196,19 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+    await cell("missing: no player running → audio-bus is not reported down (unknown)", async () => {
+      const b = byId(f2, "audio-bus");
+      if (!b) return ["audio-bus missing from the report"];
+      return b.ok === false ? [`audio-bus ok=false with no player: ${b.reason}`] : [];
+    });
     await win.loadURL(U + "/");
     for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
+    const m2 = await playlistModalWarn();
+    await cell("missing: the playlist modal's Transitions field warns like the global row (the catalogue's reason)", async () => {
+      if (!m2?.label || !m2.button) return [`the playlist modal's TRANSITIONS field/button didn't render: ${JSON.stringify(m2)}`];
+      if (!m2.warn) return ["no warning icon beside TRANSITIONS"];
+      return REASON.transitions.test(m2.warn) ? [] : [`tooltip ${JSON.stringify(m2.warn)} doesn't name the catalogue`];
+    });
     const s2 = await settingsRows();
     fs.writeFileSync(path.join(OUT, "health-rows.json"), JSON.stringify({ present: s1, missing: s2, f1, f2 }, null, 1));
     await cell("missing: a warning icon with the reason on every affected row, the control kept", async () => {

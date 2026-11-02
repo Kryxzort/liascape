@@ -32,9 +32,14 @@ happen regardless of timing.
   never waits: `{ok: null, pending: true}` until it answered), `hwdec_interop` (the render worker's GL interop —
   none → copy-mode hwdec), `scenes` (`Runtime::scenes_available`), `automute` (the auto-mute Signal's
   capability: `LIASCAPE_PLAYER_AUTOMUTE=0` or the audio bus down → false with the reason), and in `hello.health` only
-  `cover` (`{ok, reason, source}` — the covered Signal's source, § Signals). `hello.health` carries all six;
-  `liascape-player health` prints `{effects, vram, automute}` (no render worker without a GL context; `automute` knows
-  only the env gate: `ok: null` when on) for when no player runs —
+  `cover` (`{ok, reason, source}` — the covered Signal's source, § Signals), and `bus` (`{ok, reason, state}` — the
+  player audio bus itself, `bus_json`: `Up`/`Retargeting` → ok, `state` = the bus probe's; `Down` → false with
+  `BusInfo::reason` + "sources play on mpv's default device instead (nothing stops, but no bus meter and no in-player
+  auto-mute)"; no bus at all (`Audio::down_reason`: `--ao` ≠ pipewire, `LIASCAPE_PLAYER_BUS=off`) → false, `state`
+  `off`; the first session still being set up (`BusInfo::reason == bus::CONNECTING_REASON`, generation 0) → null).
+  `hello.health` carries all seven; `liascape-player health` prints `{effects, vram, automute, bus}` (no render
+  worker without a GL context; `automute` knows only the env gate: `ok: null` when on; `bus` only
+  `LIASCAPE_PLAYER_BUS=off`, else null) for when no player runs —
   the backend's `/health/features` (web-backend.md). Unit tests in the module.
 - `src/lib.rs` — module wiring only (`pub mod …;` lines). Add new
   `pub mod` lines here as later tasks add files; don't put logic in this file.
@@ -2524,13 +2529,17 @@ total_ms}, max_busy_ms (longest synchronous stretch since the last
 `args: {"reset": true}` — a tick, a step, the post-dispatch sync, or one client's requests; before
 the speed storm request handlers were left out), max_busy_at (that stretch: `{site:
 tick|client|dispatch, wall_ms, open_ms, cmds?: [[verb, ms]…], phases?}`), accounting +
-max_busy_own_ms + max_busy_own_at + max_busy_cpu_ms (TODO F5 — **scheduler accounting**, off until
+max_busy_own_ms + max_busy_own_at + max_busy_self_ms + max_busy_self_at + max_busy_cpu_ms (TODO F5 —
+**scheduler accounting**, off until
 `args: {"account": true}` turns it on for the process (`false` off): each stretch also reads the loop
 thread's CPU clock (`CLOCK_THREAD_CPUTIME_ID`), its run delay (`/proc/thread-self/schedstat`, opened
 once, `pread`) and its voluntary/involuntary switches (`getrusage(RUSAGE_THREAD)`) — four syscalls
 per stretch, hence opt-in (F6b counts the loop's syscalls per frame). `own_ms` = wall − `waited_ms`
 (runnable without a core) = work + blocking calls, what an idle machine would see; `cpu_ms`,
-`preempted`, `blocked` in the `_at` objects. A stretch begun before accounting was on isn't
+`preempted`, `blocked` in the `_at` objects. `driver_blocked_ms` (TODO F5 (2)) = the
+time asleep inside `runtime::driver_call`s — only dmabuf imports, whose sleeps are NVIDIA's
+global resource-manager lock held by another process — and `self_ms` = `own_ms` minus it;
+`max_busy_self_ms`/`_at` track the longest by that. A stretch begun before accounting was on isn't
 counted. `runtime::Stretch` / `Spent`), max_request_ms + max_request_cmd (the slowest single
 request handler and its verb, same reset), max_busy_excl_open_ms + max_open_ms (the same with the
 loop's share of source opens taken out / that share alone — render context + props +
@@ -3358,7 +3367,11 @@ process end, hung or not), `Hung {waited_ms}`, `Restarted {attempt}`, `Broken {r
   page-table copy of the compositor — measured 0.24–0.35 ms per `spawn()` in the test
   binary), not `fork` on an `lia-open` pool thread as the plan had it: **`PR_SET_PDEATHSIG`
   fires when the spawning *thread* exits** (`prctl(2)`), and the pool's threads exit when
-  idle — every worker would die with them. So Task 5 spawns from the loop thread. The worker
+  idle — every worker would die with them. So Task 5 spawns from the loop thread. The vfork
+  holds the loop until the child execs: 0.2–0.7 ms per spawn measured (bpftrace on `clone`,
+  2026-11-02), more when the child waits for a core — TODO F5; a long-lived `lia-spawn` thread
+  would take it off the loop but makes the pid arrive late (every `kill`/`waitpid`/reap path
+  would have to wait for it), not done. The worker
   sets `PR_SET_PDEATHSIG(SIGKILL)` itself, first thing, then exits 3 unless `getppid()` ==
   `--parent-pid` (the parent died before the prctl). Child fds: socket end at **fd 3**
   (`--fd 3`), stdout + stderr on one pipe (the log tail), stdin `/dev/null`; the parent's
@@ -3508,7 +3521,22 @@ fds) -> ImportedTex` (`eglCreateImage(EGL_LINUX_DMA_BUF_EXT, EGL_NO_CONTEXT)` wi
 `MODIFIER_LO/HI` per plane, then `glEGLImageTargetTexture2DOES` on a fresh texture with the
 `Gfx::tex` defaults — LINEAR, CLAMP_TO_EDGE; the fds are closed after, the image holds its
 own reference; `ImportedTex` deletes its texture on its own context (`GlKeepAlive`) and then
-destroys the image). `dmabuf_modifiers(fourcc) -> [(modifier, external_only)]`
+hands the image to **`free_image_off_thread`** — TODO F5 (2): one `lia-egl-free` thread, started
+on first use, destroys it, never the loop. On NVIDIA an import's `eglDestroyImage` frees/unmaps
+the memory through the kernel driver's resource manager, whose ioctls all take **one global lock**
+(`rmapiLockAcquire`, an rwsem shared by every process on the GPU); while another process
+allocates or frees, the destroy sleeps on it — 0.2–1.4 ms per image on the loop, a dying scene
+has 3–6 (off-CPU stacks, below). A destroy never races an `eglTerminate` (both under the display
+lifecycle lock), and one queued before a terminate is skipped (`egl::DISPLAY_EPOCH`: the
+terminate freed it; its handle may name another image now). `probe workers` →
+`images_freeing`. **The import itself stays on the loop** and sleeps on the same lock
+(`eglCreateImage` → `rmapiControl`/`rmapiFree`, 0.2–4 ms per slot under contention, a ring is 3
+slots on create and on every resize); it runs in `runtime::driver_call`, whose sleeps the `loop`
+probe reports as `driver_blocked_ms` and leaves out of `max_busy_self_ms` — a driver limit, see
+TODO F5. Moving it off the loop means an async import (`eglCreateImage` on a helper thread, the
+ring's `frame`s deferred until it lands); the first composite of a fresh texture in a process
+also maps it under that lock (`BlitProgram::draw` → `rmapiMap`/`rmapiDupObject`, seen in the
+warm-up only). `dmabuf_modifiers(fourcc) -> [(modifier, external_only)]`
 (`eglQueryDmaBufModifiersEXT`; empty without it). `native_fence()` (`eglCreateSync(
 EGL_SYNC_NATIVE_FENCE_ANDROID)` + **`glFlush` before** `eglDupNativeFenceFDANDROID`; never
 waits). `gpu_wait_fence(fd)` (`eglWaitSync`: the GPU waits, never the CPU; EGL owns the fd,
@@ -3957,12 +3985,14 @@ worker's re-export). `tests/api.rs`: `scene_capability_state_and_workers_probe`,
 `player_pause_freezes_scene` (real clock), `stepped_scene_is_deterministic` (two servers, 60
 steps: byte-identical captures, `latched_t` = 59 × 0.016, 60 ticks; 60 steps < 15 s — RED
 155 s before the fence wake), `scene_create_and_destroy_never_stall_the_loop` (the longest
-stretch's **own** time ≤ 3 ms around each — `probe loop {"account": true}`'s `max_busy_own_ms`, not
+stretch's **self** time ≤ 3 ms around each — `probe loop {"account": true}`'s `max_busy_self_ms`
+(own time minus sleeps inside dmabuf imports, the NVIDIA global-lock driver limit; TODO F5 (2)) —
+and its `workers` probe outside the destroy window; `max_busy_own_ms`, not
 the wall `max_busy_ms` (TODO F5: under the parallel suite the wall maximum, 3.25–3.56 ms, was the
 loop thread runnable without a core — a pinned CPU hog reproduces it: wall 3.4 ms = 0.75 own + 2.7
 waiting, the stretch the test's own `probe`; the scene's destroy itself is 0.03 ms) —; RED with 5 ms
-of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle or hogged; still open: the loop now and then blocks ~3–4 ms in calls under a shared GPU — TODO F5; worker gone ≤ 600
-ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
+of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle or hogged, and with a 5 ms sleep next to (not in) each import;
+worker gone ≤ 600 ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
 `capture_scene_source_is_upright`. `tests/supervise.rs`: `scene_snapshot_restores_at_position`
 (SIGSEGV → restored within ±2 s, new worker, the old one gone; RED with the periodic refresh
 video-only). Units: `scene_clock_excises_pauses_and_scales_by_speed`, `eff_fps_and_demand`,

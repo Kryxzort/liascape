@@ -398,6 +398,36 @@ fn thread_usage() -> Usage {
     }
 }
 
+thread_local! {
+    /// TODO F5: this thread's time asleep inside [`driver_call`]s so far (accounting on).
+    static DRIVER_BLOCKED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// Run one GPU driver call whose sleeps are the driver's, not ours (TODO F5 (2)): with
+/// accounting on, the time the calling thread spent asleep in it (wall − CPU − runnable
+/// wait) is added to the running stretch's `driver_blocked`, which the `loop` probe's
+/// `max_busy_self_ms` leaves out. **Only** for calls the driver can block in for reasons
+/// outside the player: a dmabuf import (`eglCreateImage` + `glEGLImageTargetTexture2DOES`),
+/// whose resource-manager ioctls take NVIDIA's one global lock (`rmapiLockAcquire`, an
+/// rwsem shared by every process on the GPU) and sleep on it while another process
+/// allocates or frees — 0.2–4 ms per slot, measured as the loop thread's off-CPU stacks.
+/// The CPU it spends still counts, and so does everything else.
+pub(crate) fn driver_call<R>(f: impl FnOnce() -> R) -> R {
+    if !accounting() {
+        return f();
+    }
+    let u0 = thread_usage();
+    let t = Instant::now();
+    let r = f();
+    let wall = t.elapsed();
+    let u = thread_usage();
+    let asleep = wall
+        .saturating_sub(u.cpu.saturating_sub(u0.cpu))
+        .saturating_sub(u.run_delay.saturating_sub(u0.run_delay));
+    DRIVER_BLOCKED.with(|c| c.set(c.get() + asleep));
+    r
+}
+
 /// The start of one synchronous loop stretch: the wall clock, plus (with [`accounting`]) the
 /// loop thread's scheduler counters, so the `loop` probe can tell the loop's own time —
 /// working or blocked in a call — from the thread sitting runnable while another process
@@ -406,12 +436,14 @@ fn thread_usage() -> Usage {
 pub(crate) struct Stretch {
     wall: Instant,
     usage: Option<Usage>,
+    driver: Duration,
 }
 
 impl Stretch {
     pub(crate) fn start() -> Self {
         Self {
             usage: accounting().then(thread_usage),
+            driver: DRIVER_BLOCKED.with(|c| c.get()),
             wall: Instant::now(),
         }
     }
@@ -431,6 +463,10 @@ impl Stretch {
             waited: u.run_delay.saturating_sub(u0.run_delay).min(wall),
             preempted: (u.preempt - u0.preempt).max(0) as u64,
             blocked: (u.block - u0.block).max(0) as u64,
+            driver: DRIVER_BLOCKED
+                .with(|c| c.get())
+                .saturating_sub(self.driver)
+                .min(wall),
             accounted: true,
         }
     }
@@ -448,6 +484,8 @@ pub(crate) struct Spent {
     pub waited: Duration,
     pub preempted: u64,
     pub blocked: u64,
+    /// Asleep inside [`driver_call`]s (the GPU driver's global lock, TODO F5 (2)).
+    pub driver: Duration,
     /// Both ends were read with accounting on (else only `wall` is known).
     pub accounted: bool,
 }
@@ -457,10 +495,16 @@ impl Spent {
         self.wall.saturating_sub(self.waited)
     }
 
+    /// `own` without the sleeps inside driver calls ([`driver_call`]): the player's part.
+    fn own_self(&self) -> Duration {
+        self.own().saturating_sub(self.driver)
+    }
+
     fn json(&self) -> Value {
         json!({ "wall_ms": ms(self.wall), "own_ms": ms(self.own()), "cpu_ms": ms(self.cpu),
                 "waited_ms": ms(self.waited), "preempted": self.preempted,
-                "blocked": self.blocked })
+                "blocked": self.blocked, "driver_blocked_ms": ms(self.driver),
+                "self_ms": ms(self.own_self()) })
     }
 }
 
@@ -473,6 +517,7 @@ impl std::ops::Add for Spent {
             waited: self.waited + o.waited,
             preempted: self.preempted + o.preempted,
             blocked: self.blocked + o.blocked,
+            driver: self.driver + o.driver,
             accounted: self.accounted && o.accounted,
         }
     }
@@ -504,6 +549,10 @@ pub(crate) struct LoopStats {
     /// without a core — work plus blocking calls, what an idle machine would see) and its
     /// CPU time, since the last reset.
     pub max_busy_own_ms: f64,
+    /// TODO F5 (2): the longest stretch's own time without its sleeps inside driver calls
+    /// ([`driver_call`]: NVIDIA's global resource-manager lock), and that stretch.
+    pub max_busy_self_ms: f64,
+    pub max_busy_self_at: Value,
     pub max_busy_cpu_ms: f64,
     /// The stretch behind `max_busy_ms` / behind `max_busy_own_ms`: `{site, wall_ms, own_ms,
     /// cpu_ms, waited_ms, preempted, blocked, open_ms}` (+ `phases` for a tick, `cmds` for a
@@ -552,12 +601,16 @@ impl LoopStats {
         }
         let longest = ms(d) > self.max_busy_ms;
         let longest_own = spent.accounted && ms(spent.own()) > self.max_busy_own_ms;
+        let longest_self = spent.accounted && ms(spent.own_self()) > self.max_busy_self_ms;
         self.busy(spent, open, "tick");
         if longest {
             self.max_busy_at["phases"] = Value::Object(phases.clone());
         }
         if longest_own {
             self.max_busy_own_at["phases"] = Value::Object(phases.clone());
+        }
+        if longest_self {
+            self.max_busy_self_at["phases"] = Value::Object(phases.clone());
         }
         self.last_phases = phases;
     }
@@ -593,6 +646,10 @@ impl LoopStats {
         if account && ms(spent.own()) > self.max_busy_own_ms {
             self.max_busy_own_ms = ms(spent.own());
             self.max_busy_own_at = at(&self.stretch_cmds);
+        }
+        if account && ms(spent.own_self()) > self.max_busy_self_ms {
+            self.max_busy_self_ms = ms(spent.own_self());
+            self.max_busy_self_at = at(&self.stretch_cmds);
         }
         self.stretch_cmds.clear();
         self.max_busy_ms = self.max_busy_ms.max(ms(d));

@@ -210,6 +210,7 @@ fn main() -> ExitCode {
                 "effects": liascape_player::health::effects_here(),
                 "vram": liascape_player::health::vram_here(),
                 "automute": liascape_player::health::automute_here(),
+                "bus": liascape_player::health::bus_here(),
             });
             println!("{out}");
             ExitCode::SUCCESS

@@ -62,7 +62,9 @@ for f in $FILES; do
     # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
     app/ui/src/components/CardSettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
-    app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart" "$f" ;;
+    app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr" "$f" ;;
+    # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
+    app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f" ;;
     app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx|\

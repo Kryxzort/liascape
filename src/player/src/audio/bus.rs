@@ -106,6 +106,9 @@ const TICK: Duration = Duration::from_millis(10);
 const RECONNECT_INITIAL: Duration = Duration::from_millis(500);
 const RECONNECT_MAX: Duration = Duration::from_secs(10);
 
+/// `BusInfo::reason` while the first session is still being set up (health.rs reads that as "not known yet", not as down).
+pub const CONNECTING_REASON: &str = "connecting to PipeWire";
+
 /// `Bus::state()` (events `audio.bus.up` / `.retargeting` / `.down`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -249,7 +252,7 @@ impl Bus {
                 generation: 0,
                 requested: None,
                 overridden: false,
-                reason: Some("connecting to PipeWire".into()),
+                reason: Some(CONNECTING_REASON.into()),
             }),
             quit: AtomicBool::new(false),
             route: AtomicU64::new(0),

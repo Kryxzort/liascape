@@ -5,6 +5,7 @@ import type { PlaylistSettings } from "../api/client";
 import { useStore } from "../store";
 import { TransitionPicker } from "./TransitionPicker";
 import { PlayTimeInput, ROT_HINT } from "./PlayTimeInput";
+import { HealthCtx, WarnIcon, useFeatureWarnings } from "./FeatureWarn";
 
 // Playlist Settings overlay. Centered modal:
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
@@ -28,7 +29,10 @@ export function PlaylistSettingsModal({
   const start = ps.playlistStart === "resume" ? "resume" : "start_over";
   const startLabel = (v: string) => v === "resume" ? "Resume where it left off" : "Start over";
   const trN = ps.transitionEffectIds?.length ?? 0;
+  // /health/features → the same amber warning icon the global Transitions row has, beside the TRANSITIONS label
+  const warnings = useFeatureWarnings(open);
   return (
+    <HealthCtx.Provider value={warnings}>
     <AnimatePresence>
       {open && (
         <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -77,7 +81,7 @@ export function PlaylistSettingsModal({
                   {ovr ? ` · global: ${startLabel(globalStart)}` : ""}{playing ? ` · ${ROT_HINT.startLive}` : ""}
                 </div>
 
-                <div className="field-label">TRANSITIONS</div>
+                <div className="field-label">TRANSITIONS<WarnIcon k="globalTransitionEnabled" /></div>
                 <button className="btn ghost ico tr-open" disabled={!ovr} onClick={() => setPicker(true)}>
                   <Sparkles size={15} />
                   {ps.transitionEnabled ? `On · ${trN} effect${trN === 1 ? "" : "s"}` : "Off"}
@@ -93,5 +97,6 @@ export function PlaylistSettingsModal({
         </motion.div>
       )}
     </AnimatePresence>
+    </HealthCtx.Provider>
   );
 }

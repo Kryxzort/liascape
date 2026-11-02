@@ -444,7 +444,7 @@ cards selected, then f/F/Delete/Escape/Right: no outline/glow on the held slider
 doesn't step, nothing trashed, no keyboard ring after the release; RED on the base UI: the outline `auto` + Escape
 closed the modal).
 
-## Missing pieces warn on their rows (`views/Settings.tsx` `WarnIcon`, owner todo 2026-10-28)
+## Missing pieces warn on their rows (`components/FeatureWarn.tsx` `WarnIcon`, owner todo 2026-10-28)
 "Make missing libraries fail loudly — if a feature won't work because of something in the build, show a warning icon".
 Settings reads `api.featureHealth()` (`GET /health/features`, web-backend.md — the feature/dependency table) 300 ms
 after mount, after an engine / scene-support / steamcmd change and every 15 s; `HealthCtx` maps each settings key a
@@ -453,9 +453,14 @@ broken feature (`ok === false`) `affects` → its reasons. `Row` renders `<WarnI
 shown and usable** (never hidden or disabled for it). `wk` names the key for a row without `rk` (the steamcmd rows).
 A summary (`[data-health-summary]`, `.health-sum`) on top lists the broken features that are **in use** (`inUse`:
 switched on / selected — so a missing steamcmd for a Steam-subscription user, or playerctl with the MPRIS option off,
-is a row icon only). `ok: null` (not known — the GPU interop before a player ran) shows nothing. Not wired: the
-playlist modal's own Transitions button (the global Transitions row carries the icon). Guard: `--probe
-probe-health.js` (below in web-backend.md; RED on the base UI: 8 rows without an icon, no summary).
+is a row icon only). `ok: null` (not known — the GPU interop before a player ran) shows nothing. A feature that
+`affects` no key (`audio-bus`: the player's PipeWire bus down → sources on mpv's default device) shows in the
+summary only. `HealthCtx` / `healthWarnings` / `WarnIcon` live in `components/FeatureWarn.tsx`; the **playlist
+modal** (`PlaylistSettingsModal`) wraps itself in `<HealthCtx.Provider value={useFeatureWarnings(open)}>` (reads
+`/health/features` when it opens, every 15 s while open) and puts `<WarnIcon k="globalTransitionEnabled">` in its
+TRANSITIONS `.field-label` — the same icon as the global Transitions row (the playlist's transitions break with the
+same `transitions` feature). Guard: `--probe probe-health.js` (below in web-backend.md; RED on the base UI: 8 rows
+without an icon, no summary; the modal icon and `audio-bus` cells).
 
 ## Numeric fields (`components/NumInput.tsx`, owner todo 2026-10-28)
 Owner: "everything should let you empty out the field entirely and only snap back to minimum when you focus out".

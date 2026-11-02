@@ -1,4 +1,4 @@
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, FlaskConical,
@@ -11,6 +11,7 @@ import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
 import { PlayTimeInput, ROT_HINT } from "../components/PlayTimeInput";
+import { HealthCtx, WarnIcon, healthWarnings } from "../components/FeatureWarn";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
 const bridge = (window as unknown as { liascape?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).liascape;
@@ -21,24 +22,6 @@ function useS() {
   const setSetting = useStore((s) => s.setSetting);
   const g = <T,>(k: string, d: T): T => (settings[k] as T) ?? d;
   return { g, set: setSetting, settings };
-}
-
-// API: /health/features — a feature a missing build piece / tool breaks here puts a warning icon (its reason as the
-// tooltip) on every row whose settings key it `affects` (owner: "make missing libraries fail loudly"). The control
-// itself stays visible and usable; only `ok === false` warns (null = not known yet).
-type Warn = { label: string; reason: string };
-const HealthCtx = createContext<Map<string, Warn[]>>(new Map());
-function healthWarnings(features: FeatureHealth[]): Map<string, Warn[]> {
-  const m = new Map<string, Warn[]>();
-  for (const f of features) if (f.ok === false)
-    for (const k of f.affects) m.set(k, [...(m.get(k) ?? []), { label: f.label, reason: f.reason ?? `${f.label} can't work here` }]);
-  return m;
-}
-function WarnIcon({ k }: { k?: string }) {
-  const w = useContext(HealthCtx).get(k ?? "");
-  if (!k || !w?.length) return null;
-  const text = w.map((x) => x.reason).join("\n");
-  return <span className="s-warn" title={text} aria-label={text} data-feature-warn={k}><AlertTriangle size={13} /></span>;
 }
 
 // Settings → Playback (under "Normalize audio", liascape-player only): a scene's loudness can be ESTIMATED from its

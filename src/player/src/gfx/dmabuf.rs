@@ -98,8 +98,77 @@ impl Drop for ImportedTex {
             self.keep.delete_texture(&self.tex);
         }
         drop(guard);
-        self.image.take();
+        if let Some(image) = self.image.take() {
+            free_image_off_thread(image);
+        }
     }
+}
+
+/// An imported dmabuf's `EGLImage` on its way to [`free_image_off_thread`]'s thread.
+struct DoomedImage(EglImage, u64);
+
+// SAFETY: EGL 1.5 entry points are thread-safe (`eglDestroyImage` included), and an image
+// handed over here is never touched by its old owner again: its texture sibling was deleted
+// on the owner's context first, so nothing but this destroy names it any more.
+unsafe impl Send for DoomedImage {}
+
+/// How many images were handed to the `lia-egl-free` thread and not destroyed yet.
+static IMAGES_PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// TODO F5 (2): destroy an imported dmabuf's `EGLImage` on one background thread
+/// (`lia-egl-free`, started on first use, lives as long as the process), never on the
+/// caller's. On NVIDIA `eglDestroyImage` of an import frees and unmaps the buffer's memory
+/// through the kernel driver's resource manager, whose calls all take one **global** lock
+/// (`rmapiLockAcquire`, an rwsem shared by every process on the GPU): while another process
+/// allocates or frees (a game starting, another player's context going away) the destroy
+/// sleeps on that lock, 0.2–1 ms per image, a dying scene's ring three to six images —
+/// measured as off-CPU stacks of the loop thread (`perf` on `sched_switch`, TODO F5). The
+/// texture itself is deleted on its own context first (cheap: the image still holds the
+/// memory), so the free happens here. No context is needed. A thread that can't be started
+/// leaves the destroy on the caller (the old behaviour). A destroy never races an
+/// `eglTerminate` (both under the display lifecycle lock), and one queued before a terminate
+/// is skipped (the terminate freed it).
+pub fn free_image_off_thread(image: EglImage) {
+    use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc::{self, Sender};
+    static TX: Mutex<Option<Sender<DoomedImage>>> = Mutex::new(None);
+    let mut tx = TX.lock().unwrap_or_else(|e| e.into_inner());
+    if tx.is_none() {
+        let (t, rx) = mpsc::channel::<DoomedImage>();
+        let started = std::thread::Builder::new()
+            .name("lia-egl-free".into())
+            .spawn(move || {
+                while let Ok(DoomedImage(image, epoch)) = rx.recv() {
+                    // A display terminated since the hand-over freed the image with it
+                    // (and its handle may name another image now): never destroy it again.
+                    let mut image = Some(image);
+                    super::egl::while_display_unterminated(epoch, || drop(image.take()));
+                    std::mem::forget(image);
+                    IMAGES_PENDING.fetch_sub(1, Ordering::SeqCst);
+                }
+            })
+            .is_ok();
+        if started {
+            *tx = Some(t);
+        }
+    }
+    let Some(t) = tx.as_ref() else {
+        return drop(image);
+    };
+    IMAGES_PENDING.fetch_add(1, Ordering::SeqCst);
+    // The image's owner still holds its display (an `ImportedTex` keeps its `Gfx`): this
+    // epoch is the display's own.
+    let epoch = super::egl::display_epoch();
+    if let Err(mpsc::SendError(DoomedImage(image, _))) = t.send(DoomedImage(image, epoch)) {
+        IMAGES_PENDING.fetch_sub(1, Ordering::SeqCst);
+        drop(image);
+    }
+}
+
+/// Imported images handed to [`free_image_off_thread`] and not destroyed yet (probes, tests).
+pub fn images_pending_free() -> usize {
+    IMAGES_PENDING.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// An EGL extension function, looked up once per process.
