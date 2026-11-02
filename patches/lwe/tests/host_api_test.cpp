@@ -1665,6 +1665,113 @@ static bool camera_zoom_and_shake () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// B6 (docs/player/spikes/we-lwe-gap-audit.md G03, G04 particles, P36, G31): the hierarchy, decoded from
+// wallpaper64.exe 2.8.485: "effectively visible" GH 0x1401b50e0 (own bit AND the parent's, recursively), the image
+// model matrix GH 0x1402277d0 (the object's transform times T(the alignment offset) set at GH 0x140230a80)
+
+// a hidden parent hides its children, a group as much as an image, and live (unpatched: only the object's own
+// `visible` was read, so the children of a hidden group or image drew; and an image hidden while its passes were
+// built never reached the screen, so showing it later did nothing)
+static bool hidden_parent_hides_children () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // a hidden group (a user property) with square 1 at 8; hidden square 3 at 40 with square 4 at its −16 (24);
+    // square 5 at 56 has no parent
+    const std::string dir = camera_scene (
+        "\"zoom\":1",
+        "{\"id\":10,\"name\":\"grp\",\"origin\":\"0 0 0\",\"scale\":\"1 1 1\",\"angles\":\"0 0 0\","
+        "\"visible\":{\"user\":\"grp\",\"value\":false}},"
+            + square (1, "\"origin\":\"8 16 0\",\"parent\":10") + ","
+            + square (3, "\"origin\":\"40 16 0\",\"visible\":false") + ","
+            + square (4, "\"origin\":\"-16 0 0\",\"parent\":3") + ","
+            + square (5, "\"origin\":\"56 16 0\""),
+        "\"grp\":{\"type\":\"bool\",\"value\":false,\"text\":\"g\"}"
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const std::string hidden = rig.row ();
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "grp", true), "bool refused");
+    rig.step ();
+    const std::string shown = rig.row ();
+    printf ("    group hidden: %s\n    group shown:  %s\n", hidden.c_str (), shown.c_str ());
+    CHECK (hidden == covered (52, 59), "a child of a hidden parent drew (want only square 5)");
+    std::string want = covered (4, 11);
+    for (int x = 52; x <= 59; x++) {
+        want[x] = '#';
+    }
+    CHECK (shown == want, "showing the group live: want %s", want.c_str ());
+    return true;
+}
+
+// a particle system's origin is in its parent's space: a rotated, scaled group places it, a moving image parent
+// carries it along, and a hidden group hides it (unpatched: its own origin in the scene, frozen at setup)
+static bool particle_follows_its_parent () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string grey = "{\"name\":\"colorrandom\",\"min\":\"8 8 8\",\"max\":\"8 8 8\"}";
+    const std::string still = particle_system ("add", ",\"maxcount\":100", ",\"distancemin\":0,\"distancemax\":0,\"rate\":10",
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    // group 10 at 20 16, turned 90° and scaled 2: the system at its 0 3 sits at 20 − 6 = 14. Square 20 at 48 is moved
+    // to 32 by its script: its system (at 0 0) follows. Group 30 is hidden: its system at 56 16 never shows
+    auto child = [] (int id, int parent, const char* origin) {
+        std::string o = particle_object (id, "still.json", 0, 0);
+        const std::string from = "\"origin\":\"0 0 0\"";
+        o.replace (o.find (from), from.size (), std::string ("\"origin\":\"") + origin + "\"");
+        o.insert (o.size () - 1, ",\"parent\":" + std::to_string (parent));
+        return o;
+    };
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        "{\"id\":10,\"name\":\"turned\",\"origin\":\"20 16 0\",\"scale\":\"2 2 2\",\"angles\":\"0 0 1.5707964\"},"
+        "{\"id\":30,\"name\":\"off\",\"origin\":\"0 0 0\",\"scale\":\"1 1 1\",\"angles\":\"0 0 0\",\"visible\":false},"
+            + square (20, scripted ("origin", "\"48 16 0\"", "export function update(value) {\n  return new Vec3(32, 16, 0);\n}")) + ","
+            + child (1, 10, "0 3 0") + "," + child (2, 20, "0 0 0") + "," + child (3, 30, "56 16 0"),
+        "0 0 0", { { "still.json", still } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 31) {
+        rig.step ();
+    }
+    const double turned = stacked (rig, 14, 16), moved = stacked (rig, 32, 16), left = stacked (rig, 48, 16),
+                 hidden = stacked (rig, 56, 16), raw = stacked (rig, 0, 3);
+    printf ("    after 1 s: turned group's child at 14: %.1f; moved parent's child at 32: %.1f, at 48: %.1f; hidden "
+            "group's child: %.1f; at the raw origin 0 3: %.1f\n", turned, moved, left, hidden, raw);
+    CHECK (turned >= 8 && turned <= 12.5, "the turned, scaled group's system isn't at 14 (%.1f there)", turned);
+    CHECK (moved >= 8 && moved <= 12.5, "the system didn't follow its moving parent to 32 (%.1f there)", moved);
+    CHECK (left < 0.5, "particles left behind at the parent's first origin (%.1f)", left);
+    CHECK (hidden < 0.5, "a hidden group's system drew (%.1f)", hidden);
+    return true;
+}
+
+// an aligned image turns about its origin, its anchor point, not the centre of its quad (unpatched: the quad's
+// centre, so a left-aligned layer turned half round stayed where it was)
+static bool aligned_layer_turns_about_its_origin () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // left-aligned at 24: the quad is 24..32; turned by π about 24 it is 16..24. A centred square at 48 turned by
+    // π stays 44..52
+    const std::string dir = script_scene (
+        square (1, "\"origin\":\"24 16 0\",\"alignment\":\"left\",\"angles\":\"0 0 3.1415927\"") + ","
+            + square (2, "\"origin\":\"48 16 0\",\"angles\":\"0 0 3.1415927\"")
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const std::string got = rig.row ();
+    std::string want = covered (16, 23);
+    for (int x = 44; x <= 51; x++) {
+        want[x] = '#';
+    }
+    printf ("    turned by π: %s\n", got.c_str ());
+    CHECK (got == want, "want %s", want.c_str ());
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -1704,6 +1811,9 @@ int main (int argc, char** argv) {
     run ("parallax_follows_the_pointer", parallax_follows_the_pointer);
     run ("parallax_position_uniform", parallax_position_uniform);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
+    run ("hidden_parent_hides_children", hidden_parent_hides_children);
+    run ("particle_follows_its_parent", particle_follows_its_parent);
+    run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

@@ -1,0 +1,552 @@
+From c959e7a4a2068376b48c1cc8de1697b6a7f2f17a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:08:31 +0530
+Subject: [PATCH 30/30] render: hierarchy the way Wallpaper Engine does
+
+Decoded from wallpaper64.exe 2.8.485: the "effectively visible" test
+(GH 0x1401b50e0), the image model matrix (GH 0x1402277d0) and the
+alignment offset (GH 0x140230a80).
+
+Visibility. An object is drawn only when it and every ancestor are
+visible: WE's test is its own visible bit AND, recursively, the parent's,
+and the image, text and particle render paths (and the particle step's
+reset, GH 0x140255d00) all ask it. LWE read only the object's own
+`visible`, so the children of a hidden group or image drew (12 of the
+owner's scenes have a visible child under a hidden ancestor).
+CScene::isEffectivelyVisible is the one test, also used for the active
+camera object. Also: an image's last pass went to the screen only if the
+image was visible while its passes were built, so an image hidden at load,
+by itself or a parent, never showed when a property or script turned it
+on. The pass is now always built for the screen; render () skips a hidden
+image every frame.
+
+Particle parents. A particle system's origin, scale and z angle are in
+its parent's space, like an image's (every object shares WE's one base
+transform with a parent, GH 0x14020dcc0): CImage's parent walk moved to
+CObject (resolveTransform, localTransform, which now reads a particle's
+own scale and angles), and CParticle resolves its place every frame, so it
+follows a moving, animated or scripted parent (or origin). Its own x/y
+angles stay its own. World-space control points stay put in the world.
+Before, the origin was the raw local one, read once at setup.
+
+Rotation pivot. An aligned image turns (and scales) about its origin, its
+anchor point: WE's model matrix is the object's transform times a
+translation by the alignment offset (+-size/2 per side). LWE turned it
+about the centre of the shifted quad. Centred images are unchanged.
+
+Not done: text objects still ignore their parent's transform (CText,
+redrawn in B4); a sound object under a hidden parent keeps playing (whether
+WE silences it was not settled).
+
+Origin: ours
+Why: children of hidden groups drew, particle systems ignored their parent and stayed where they were set up, and aligned layers turned about the wrong point (docs/player/spikes/we-lwe-gap-audit.md B6: G03, G04 particles, P36, G31)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ src/core/WallpaperEngine/Render/CObject.cpp   | 76 ++++++++++++++++-
+ src/core/WallpaperEngine/Render/CObject.h     | 19 +++++
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 81 +++----------------
+ .../WallpaperEngine/Render/Objects/CImage.h   | 15 +---
+ .../Render/Objects/CParticle.cpp              | 63 ++++++++++-----
+ .../Render/Objects/CParticle.h                |  5 ++
+ .../WallpaperEngine/Render/Objects/CText.cpp  |  3 +-
+ .../Render/Wallpapers/CScene.cpp              | 34 +++++---
+ .../Render/Wallpapers/CScene.h                |  5 ++
+ 9 files changed, 181 insertions(+), 120 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/CObject.cpp b/src/core/WallpaperEngine/Render/CObject.cpp
+index e817272..c346112 100644
+--- a/src/core/WallpaperEngine/Render/CObject.cpp
++++ b/src/core/WallpaperEngine/Render/CObject.cpp
+@@ -1,7 +1,10 @@
+ #include "CObject.h"
+ 
++#include <cmath>
+ #include <utility>
+ 
++#include "WallpaperEngine/Logging/Log.h"
++
+ using namespace WallpaperEngine;
+ using namespace WallpaperEngine::Render;
+ using namespace WallpaperEngine::Render::Wallpapers;
+@@ -18,4 +21,75 @@ const Assets::AssetLocator& CObject::getAssetLocator () const { return this->get
+ 
+ int CObject::getId () const { return this->m_object.id; }
+ 
+-const Object& CObject::getObject () const { return this->m_object; }
+\ No newline at end of file
++const Object& CObject::getObject () const { return this->m_object; }
++
++namespace {
++glm::vec2 rotateVec2 (const glm::vec2& value, float angle) {
++    const float cosAngle = std::cos (angle);
++    const float sinAngle = std::sin (angle);
++    return { value.x * cosAngle - value.y * sinAngle, value.x * sinAngle + value.y * cosAngle };
++}
++} // namespace
++
++CObject::ResolvedTransform CObject::localTransform (const Object& object) {
++    glm::vec3 origin = object.origin->value->getVec3 ();
++    glm::vec3 scale = glm::vec3 (1.0f);
++    float angle = 0.0f;
++
++    if (object.is<Image> ()) {
++	const auto* image = object.as<Image> ();
++	scale = image->scale->value->getVec3 ();
++	angle = image->angles->value->getVec3 ().z;
++    } else if (object.is<Text> ()) {
++	const auto* text = object.as<Text> ();
++	scale = text->scale->value->getVec3 ();
++    } else if (object.is<Particle> ()) {
++	const auto* particle = object.as<Particle> ();
++	scale = particle->scale->value->getVec3 ();
++	angle = particle->angles->value->getVec3 ().z;
++    } else {
++	scale = object.groupScale->value->getVec3 ();
++	angle = object.groupAngles->value->getVec3 ().z;
++    }
++
++    return { origin, scale, angle };
++}
++
++CObject::ResolvedTransform CObject::resolveTransform (const Object& object) const {
++    constexpr int kMaxParentDepth = 32;
++
++    // Walk up the parent chain leaf-first, bounded by kMaxParentDepth to guard
++    // against cycles. chain[0] is the requested object; the last entry is the root.
++    const Object* chain[kMaxParentDepth + 1];
++    int count = 0;
++    const Object* current = &object;
++    chain[count++] = current;
++
++    while (current->parent.has_value ()) {
++	if (count > kMaxParentDepth) {
++	    sLog.error ("Parent transform chain is too deep; possible cycle at object id=", current->id);
++	    break;
++	}
++	const auto* parentObject = this->getScene ().getObject (current->parent.value ());
++	if (parentObject == nullptr) {
++	    break;
++	}
++	current = &parentObject->getObject ();
++	chain[count++] = current;
++    }
++
++    // Accumulate top-down: the root's local transform is already its resolved
++    // transform, then fold each child onto its already-resolved parent.
++    ResolvedTransform resolved = localTransform (*chain[count - 1]);
++    for (int i = count - 2; i >= 0; --i) {
++	ResolvedTransform local = localTransform (*chain[i]);
++	const glm::vec2 offset
++	    = rotateVec2 ({ local.origin.x * resolved.scale.x, local.origin.y * resolved.scale.y }, resolved.angle);
++	local.origin.x = resolved.origin.x + offset.x;
++	local.origin.y = resolved.origin.y + offset.y;
++	local.origin.z = resolved.origin.z + local.origin.z * resolved.scale.z;
++	resolved = { local.origin, local.scale * resolved.scale, local.angle + resolved.angle };
++    }
++
++    return resolved;
++}
+diff --git a/src/core/WallpaperEngine/Render/CObject.h b/src/core/WallpaperEngine/Render/CObject.h
+index 0985177..f310192 100644
+--- a/src/core/WallpaperEngine/Render/CObject.h
++++ b/src/core/WallpaperEngine/Render/CObject.h
+@@ -24,6 +24,25 @@ public:
+     [[nodiscard]] int getId () const;
+     [[nodiscard]] const Object& getObject () const;
+ 
++    /** An object's origin, scale and z angle in the scene (Wallpaper Engine's world: x right, y up) */
++    struct ResolvedTransform {
++	glm::vec3 origin;
++	glm::vec3 scale;
++	float angle;
++    };
++
++    /**
++     * The object's transform with its parents': every object type shares WE's one base transform with a parent
++     * (GH 0x14020dcc0), so a child's origin, scale and angle are its parent's local space. Bounded by 32 levels
++     */
++    [[nodiscard]] ResolvedTransform resolveTransform (const Object& object) const;
++
++    /**
++     * Computes the object's own transform (origin/scale/angle) without walking the
++     * parent chain. Used as the per-node step of resolveTransform.
++     */
++    [[nodiscard]] static ResolvedTransform localTransform (const Object& object);
++
+ private:
+     Wallpapers::CScene& m_scene;
+     const Object& m_object;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 8e93708..005cb01 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -19,12 +19,6 @@ using namespace WallpaperEngine::Data::Builders;
+ using namespace WallpaperEngine::Data::Utils;
+ 
+ namespace {
+-glm::vec2 rotateVec2 (const glm::vec2& value, float angle) {
+-    const float cosAngle = std::cos (angle);
+-    const float sinAngle = std::sin (angle);
+-    return { value.x * cosAngle - value.y * sinAngle, value.x * sinAngle + value.y * cosAngle };
+-}
+-
+ bool isMagentaNeonTint (const glm::vec3& color) { return color.r > 0.55f && color.g < 0.25f && color.b > 0.45f; }
+ 
+ std::optional<glm::vec3> findMagentaCompositeTint (const Image& image, const std::vector<int>& skippedEffectIds) {
+@@ -96,65 +90,6 @@ std::optional<PuppetMeshBlock> findPuppetMeshBlock (
+ }
+ }
+ 
+-CImage::ResolvedTransform CImage::localTransform (const Object& object) {
+-    glm::vec3 origin = object.origin->value->getVec3 ();
+-    glm::vec3 scale = glm::vec3 (1.0f);
+-    float angle = 0.0f;
+-
+-    if (object.is<Image> ()) {
+-	const auto* image = object.as<Image> ();
+-	scale = image->scale->value->getVec3 ();
+-	angle = image->angles->value->getVec3 ().z;
+-    } else if (object.is<Text> ()) {
+-	const auto* text = object.as<Text> ();
+-	scale = text->scale->value->getVec3 ();
+-    } else {
+-	scale = object.groupScale->value->getVec3 ();
+-	angle = object.groupAngles->value->getVec3 ().z;
+-    }
+-
+-    return { origin, scale, angle };
+-}
+-
+-CImage::ResolvedTransform CImage::resolveTransform (const Object& object) const {
+-    constexpr int kMaxParentDepth = 32;
+-
+-    // Walk up the parent chain leaf-first, bounded by kMaxParentDepth to guard
+-    // against cycles. chain[0] is the requested object; the last entry is the root.
+-    const Object* chain[kMaxParentDepth + 1];
+-    int count = 0;
+-    const Object* current = &object;
+-    chain[count++] = current;
+-
+-    while (current->parent.has_value ()) {
+-	if (count > kMaxParentDepth) {
+-	    sLog.error ("Parent transform chain is too deep; possible cycle at object id=", current->id);
+-	    break;
+-	}
+-	const auto* parentObject = this->getScene ().getObject (current->parent.value ());
+-	if (parentObject == nullptr) {
+-	    break;
+-	}
+-	current = &parentObject->getObject ();
+-	chain[count++] = current;
+-    }
+-
+-    // Accumulate top-down: the root's local transform is already its resolved
+-    // transform, then fold each child onto its already-resolved parent.
+-    ResolvedTransform resolved = localTransform (*chain[count - 1]);
+-    for (int i = count - 2; i >= 0; --i) {
+-	ResolvedTransform local = localTransform (*chain[i]);
+-	const glm::vec2 offset
+-	    = rotateVec2 ({ local.origin.x * resolved.scale.x, local.origin.y * resolved.scale.y }, resolved.angle);
+-	local.origin.x = resolved.origin.x + offset.x;
+-	local.origin.y = resolved.origin.y + offset.y;
+-	local.origin.z = resolved.origin.z + local.origin.z * resolved.scale.z;
+-	resolved = { local.origin, local.scale * resolved.scale, local.angle + resolved.angle };
+-    }
+-
+-    return resolved;
+-}
+-
+ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     CObject (scene, image), CRenderable (scene, image, *image.model->material), ScriptableObject (scene, image),
+     m_sceneSpacePosition (GL_NONE), m_copySpacePosition (GL_NONE), m_passSpacePosition (GL_NONE),
+@@ -859,7 +794,10 @@ void CImage::setupPasses () {
+ }
+ 
+ bool CImage::shouldRenderFinalPass (bool isLastPass) const {
+-    if (!isLastPass || !this->getImage ().visible->value->getBool ()) {
++    // not the visibility: this is decided once, while the passes are built, and render () skips a hidden image every
++    // frame. Asking it here sent the last pass of an image hidden at load (by itself or a parent) into an FBO for
++    // good, so a property or script showing it later never brought it to the screen
++    if (!isLastPass) {
+ 	return false;
+     }
+ 
+@@ -919,7 +857,8 @@ void CImage::render () {
+ 	return;
+     }
+ 
+-    if (!this->getImage ().visible->value->getBool ()) {
++    // a hidden ancestor hides it too (WE's "effectively visible", GH 0x1401b50e0)
++    if (!this->getScene ().isEffectivelyVisible (this->getImage ())) {
+ 	return;
+     }
+ 
+@@ -1027,6 +966,10 @@ void CImage::updateScenePosition (
+     this->m_pos.y = sceneHeight / 2.0f - this->m_pos.y;
+     this->m_pos.z -= sceneWidth / 2.0f;
+     this->m_pos.w = sceneHeight / 2.0f - this->m_pos.w;
++    // the pivot of the rotation is the origin, not the quad's centre: WE's model matrix is the object's transform
++    // (T(origin) · R · S) times T(the alignment offset ±size/2), so an aligned quad turns about its anchor point
++    // (GH 0x1402277d0; the offset is set from `alignment` at GH 0x140230a80)
++    this->m_scenePivot = glm::vec3 (origin.x - sceneWidth / 2.0f, sceneHeight / 2.0f - origin.y, 0.0f);
+ }
+ 
+ void CImage::uploadGeometryBuffers (const glm::vec2& size) {
+@@ -1114,9 +1057,9 @@ void CImage::updateScreenSpacePosition () {
+     const float angle = transform.angle;
+     glm::mat4 rotModel = glm::mat4 (1.0f);
+     if (angle != 0.0f) {
+-	rotModel = glm::translate (rotModel, this->m_sceneCenter);
++	rotModel = glm::translate (rotModel, this->m_scenePivot);
+ 	rotModel = glm::rotate (rotModel, -angle, glm::vec3 (0.0f, 0.0f, 1.0f));
+-	rotModel = glm::translate (rotModel, -this->m_sceneCenter);
++	rotModel = glm::translate (rotModel, -this->m_scenePivot);
+     }
+ 
+     // the mouse parallax moves the object in the world, after its own transform (WE: view · translate(offset), GH
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index bc3601f..ccd9469 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -60,20 +60,6 @@ protected:
+ 
+     void updateScreenSpacePosition ();
+ 
+-    struct ResolvedTransform {
+-	glm::vec3 origin;
+-	glm::vec3 scale;
+-	float angle;
+-    };
+-
+-    [[nodiscard]] ResolvedTransform resolveTransform (const WallpaperEngine::Data::Model::Object& object) const;
+-
+-    /**
+-     * Computes the object's own transform (origin/scale/angle) without walking the
+-     * parent chain. Used as the per-node step of resolveTransform.
+-     */
+-    [[nodiscard]] static ResolvedTransform localTransform (const WallpaperEngine::Data::Model::Object& object);
+-
+ private:
+     bool loadPuppetMesh (const glm::vec2& size);
+     void updatePuppetPositionBuffer (const glm::vec2& size);
+@@ -125,6 +111,7 @@ private:
+ 
+     glm::vec4 m_pos = {};
+     glm::vec3 m_sceneCenter = {};
++    glm::vec3 m_scenePivot = {};
+     glm::vec2 m_size = {};
+ 
+     bool m_initialized = false;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 357bfba..e348fe5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -104,10 +104,7 @@ void CParticle::setup () {
+     m_lastScreenWidth = getScene ().getCamera ().getWidth ();
+     m_lastScreenHeight = getScene ().getCamera ().getHeight ();
+ 
+-    glm::vec3 origin = m_particle.origin->value->getVec3 ();
+-    origin.x -= m_lastScreenWidth / 2.0f;
+-    origin.y = m_lastScreenHeight / 2.0f - origin.y;
+-    m_transformedOrigin = origin;
++    refreshTransform ();
+ 
+     // Load particle material constants
+     if (m_particle.material && m_particle.material->material && !m_particle.material->material->passes.empty ()) {
+@@ -207,8 +204,8 @@ void CParticle::render () {
+ 	return;
+     }
+ 
+-    if (!m_particle.visible->value->getBool ()) {
+-	// a hidden system is reset (GH 0x140255d00 → 0x140254f50 / 0x140255430): its particles are cleared and its
++    if (!getScene ().isEffectivelyVisible (m_particle)) {
++	// a hidden system (or one under a hidden ancestor: GH 0x140255d00 asks GH 0x1401b50e0) is reset (GH 0x140255d00 → 0x140254f50 / 0x140255430): its particles are cleared and its
+ 	// emitters reloaded, so it starts fresh when shown again (bursts replay). It doesn't advance meanwhile,
+ 	// and the clock follows so the first visible frame's dt is one frame, not the hidden time
+ 	if (m_particleCount > 0) {
+@@ -220,6 +217,9 @@ void CParticle::render () {
+ 	return;
+     }
+ 
++    // the system's place this frame: its own origin/scale/angle under its parents' (live: animated, scripted)
++    refreshTransform ();
++
+     // Initialize time on first render to avoid huge dt spike
+     if (m_time == 0.0) {
+ 	m_time = this->getContext ().getContext ().renderTime;
+@@ -350,23 +350,10 @@ void CParticle::update (float dt) {
+     float screenHeight = static_cast<float> (getScene ().getHeight ());
+ 
+     if (screenWidth != m_lastScreenWidth || screenHeight != m_lastScreenHeight) {
+-	// Resolution changed - recalculate transformed origin
+-	glm::vec3 origin = m_particle.origin->value->getVec3 ();
+-	origin.x -= screenWidth / 2.0f;
+-	origin.y = screenHeight / 2.0f - origin.y;
+-	m_transformedOrigin = origin;
+-
+-	// Update world-space control points that aren't mouse-linked
+-	for (size_t i = 0; i < m_controlPoints.size (); i++) {
+-	    auto& cp = m_controlPoints[i];
+-	    if (!cp.linkMouse && cp.worldSpace) {
+-		// Recalculate position from offset using new transformed origin
+-		cp.position = cp.offset - m_transformedOrigin;
+-	    }
+-	}
+-
++	// Resolution changed - recalculate transformed origin (and the world-space control points)
+ 	m_lastScreenWidth = screenWidth;
+ 	m_lastScreenHeight = screenHeight;
++	refreshTransform ();
+     }
+ 
+     // Update control points with mouse position
+@@ -1996,9 +1983,41 @@ void CParticle::setupParticleUniforms () {
+     }
+ }
+ 
++void CParticle::refreshTransform () {
++    // a particle system has a parent like any object (WE's shared base transform, GH 0x14020dcc0): its origin is in
++    // its parent's space, rotated and scaled by the parent's, so it follows a moving or animated parent
++    const ResolvedTransform transform = this->resolveTransform (m_particle);
++    const float width = getScene ().getCamera ().getWidth ();
++    const float height = getScene ().getCamera ().getHeight ();
++
++    // from WE's world (y up, (0,0) bottom-left) to this projection's centred, y-down space
++    glm::vec3 origin = transform.origin;
++    origin.x -= width / 2.0f;
++    origin.y = height / 2.0f - origin.y;
++
++    m_resolvedScale = transform.scale;
++    m_resolvedAngle = transform.angle;
++
++    if (origin == m_transformedOrigin && m_transformValid) {
++	return;
++    }
++
++    m_transformedOrigin = origin;
++    m_transformValid = true;
++
++    // world-space control points stay where they are in the world
++    for (auto& cp : m_controlPoints) {
++	if (!cp.linkMouse && cp.worldSpace) {
++	    cp.position = cp.offset - m_transformedOrigin;
++	}
++    }
++}
++
+ void CParticle::updateMatrices () {
+-    glm::vec3 scale = m_particle.scale->value->getVec3 ();
++    glm::vec3 scale = m_resolvedScale;
+     glm::vec3 angles = m_particle.angles->value->getVec3 ();
++    // z turns with the parents' (resolveTransform's angle is the chain's sum); x and y are the system's own
++    angles.z = m_resolvedAngle;
+ 
+     m_modelMatrix = glm::mat4 (1.0f);
+     m_modelMatrix = glm::translate (m_modelMatrix, m_transformedOrigin);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index 6e8eb12..e54e19d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -190,6 +190,8 @@ protected:
+     void setupGeometryCallbacks ();
+     void setupParticleUniforms ();
+     void updateMatrices ();
++    /** The system's origin/scale/angle this frame, with its parents' (P36/G04); moves world-space control points */
++    void refreshTransform ();
+     void applyParallaxToModelMatrix ();
+     void updateParticleViewProjection ();
+     void updateParticleRenderVars ();
+@@ -289,6 +291,9 @@ private:
+ 
+     // Transformed origin (screen space to centered space conversion)
+     glm::vec3 m_transformedOrigin { 0.0f };
++    glm::vec3 m_resolvedScale { 1.0f };
++    float m_resolvedAngle { 0.0f };
++    bool m_transformValid { false };
+ 
+     // Last known resolution for detecting changes
+     float m_lastScreenWidth { 0.0f };
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index d6600c4..c7651a6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -376,7 +376,8 @@ void CText::render () {
+     if (!m_valid) {
+ 	return;
+     }
+-    if (!m_text.visible->value->getBool ()) {
++    // a hidden ancestor hides it too (WE's "effectively visible", GH 0x1401b50e0)
++    if (!this->getScene ().isEffectivelyVisible (m_text)) {
+ 	return;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 929f23d..4be4fdf 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -472,6 +472,26 @@ glm::vec2 parallaxDepthOf (const Object& object) {
+ }
+ } // namespace
+ 
++bool CScene::isEffectivelyVisible (const Object& object) const {
++    const Object* cur = &object;
++
++    for (int depth = 0; depth <= 32; depth++) {
++	if (!ownVisible (*cur)) {
++	    return false;
++	}
++	if (!cur->parent.has_value ()) {
++	    return true;
++	}
++	const CObject* parent = this->getObject (cur->parent.value ());
++	if (parent == nullptr) {
++	    return true;
++	}
++	cur = &parent->getObject ();
++    }
++
++    return true;
++}
++
+ glm::vec2 CScene::getParallaxOffset (const Object& object) const {
+     if (!this->getScene ().camera.parallax.enabled->value->getBool ()
+ 	|| this->getContext ().getContext ().config.disableParallax) {
+@@ -534,19 +554,7 @@ void CScene::updateCamera () {
+ 	    continue;
+ 	}
+ 
+-	bool visible = ownVisible (object);
+-	const Object* cur = &object;
+-
+-	for (int depth = 0; visible && cur->parent.has_value () && depth < 32; depth++) {
+-	    const CObject* parent = this->getObject (cur->parent.value ());
+-	    if (parent == nullptr) {
+-		break;
+-	    }
+-	    cur = &parent->getObject ();
+-	    visible = ownVisible (*cur);
+-	}
+-
+-	if (visible) {
++	if (this->isEffectivelyVisible (object)) {
+ 	    zoom *= object.cameraZoom->value->getFloat ();
+ 	    break;
+ 	}
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 53aef07..9aef29d 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -54,6 +54,11 @@ public:
+      * cameraparallaxamount · root.parallaxDepth, where root is the object's topmost ancestor
+      */
+     [[nodiscard]] glm::vec2 getParallaxOffset (const Object& object) const;
++    /**
++     * Whether an object is drawn: its own `visible` and, recursively, every ancestor's (WE's "effectively visible",
++     * GH 0x1401b50e0: bit 0 of +0x120 AND the parent's at +0x180). A hidden group hides its whole subtree
++     */
++    [[nodiscard]] bool isEffectivelyVisible (const Object& object) const;
+ 
+     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */

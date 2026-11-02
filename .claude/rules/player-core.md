@@ -3836,6 +3836,19 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (`lwe::Scene::first_render`; `pointer: Option` in main.rs) — at (0,0) a parallax scene sat pulled to a corner.
   `host_api_test`: `parallax_follows_the_pointer`, `parallax_position_uniform`, `camera_zoom_and_shake` (8×8 squares
   on a 64×32 scene, a fake `wp_mouse_input`; all RED on 4c75eae).
+  **0030 (2026-11-03, batch B6): the hierarchy as in WE** (audit G03, G04 particles, P36, G31; "B6 result" in its
+  § 5; decoded: effectively visible GH 0x1401b50e0, image model matrix GH 0x1402277d0, alignment offset GH
+  0x140230a80). `CScene::isEffectivelyVisible(object)` = its own `visible` AND every ancestor's (groups read
+  `groupVisible`), live; CImage, CText, CParticle (render + the hidden-system reset) and the active camera object
+  ask it. `CImage::shouldRenderFinalPass` no longer reads the visibility: it is decided once while the passes are
+  built, so an image hidden at load (itself or a parent) sent its last pass into an FBO for good and never showed
+  when a property or script turned it on. `CObject::resolveTransform`/`localTransform` (moved from CImage; a
+  particle's own scale/angles now count) give a particle system its origin, scale and z angle under its parents,
+  resolved every frame (`CParticle::refreshTransform`: a moving, animated or scripted parent or origin carries the
+  system; world-space control points stay put); its own x/y angles stay its own. An aligned image turns and scales
+  about its origin (`m_scenePivot`), not the shifted quad's centre. Not done: text parent transforms (CText, B4), a
+  sound object under a hidden parent. `host_api_test`: `hidden_parent_hides_children`, `particle_follows_its_parent`,
+  `aligned_layer_turns_about_its_origin` (all RED on d7a9f34).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").
