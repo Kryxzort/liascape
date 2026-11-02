@@ -617,6 +617,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       video) timed out in all 6 cells. The source now confirms `AudioFlowing` when `audio-pts` is
       unavailable while the picture plays on (no audio playing: track ended or `aid` unresolved), and its
       40 ms margin on real time, not on a later `audio-pts` change (`MpvSource::confirm_flowing_by_time`).
+- [ ] **Adapter IT: the private-PipeWire auto-mute section flakes under load** (2026-11-03, 3 of ~8 runs while other
+      agents' suites ran; each passed on a rerun): once `bus never came up` (`bus: {state:null}`), once a new `serve`
+      found "already running" (another player held the socket between the test's `quit` and `serve`), once "the private
+      pipewire-pulse never made its socket" (+ `armed upgrade` precondition: stale only 5 s). Harness waits/races, not
+      product code — make the section's setup wait on what it needs (socket, bus up, the old player gone) with bounds.
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
