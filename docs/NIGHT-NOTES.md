@@ -206,3 +206,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   smoothing — 14 of 25 parallax scenes were frozen), plus camera shake, `general.zoom` and camera-object zoom.
   Corpus unchanged (93 ok). **Please look at 3516174947** in WE vs here: its camera "Lens size" 0.75 now zooms
   its layers out (32 % black) per the decoded formula — a WE capture would settle whether that's right. Live.
+- **Command-queue fix (backend):** a live speed storm on your session (wallpaper speed jumping ~03:59–04:25, audio
+  muted, settings restored) filled the backend's player queue twice. Cause: setting 315 items' speed overrides in a
+  row queued one un-mergeable command each, and the 256th dropped one (could be the playing item's speed). They now
+  batch into one pass; a cap hit logs what was pending. The stall breaker never tripped in 25 min (still open).
