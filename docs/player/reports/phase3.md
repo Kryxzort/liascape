@@ -202,3 +202,44 @@ Open, in `docs/TODO.md`:
   450 ms, the 300 ms debounce stays, so a brief cover does not pause. The table above is the run against 350.
 - F3: the "≤ 1 frame" handoff bound is ambiguous (§ 1).
 - F4: the debug-only dropout probe loses whole graph cycles just after each analysis (§ 1).
+
+## 7. Auto-mute parity on the owner's session (Task 14 step 5)
+
+2026-11-02, the fresh session after § 6's cold boot. Real apps as the foreign streams, playing to the owner's real
+sink chain (EasyEffects): Chromium playing a synthetic −20 dBFS tone clip, `mpv`, Spotify (MPRIS). Each engine in turn
+on the same session: today's `AudioMonitor` (flag off), then the player's Signal (`LIASCAPE_PLAYER_AUTOMUTE=1` +
+`LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1`; the backend logged "auto-mute engine: the player's Signal" and its `pactl`
+went away). Settings: delays 500 / 500 ms, threshold −50 dB. Times run from the command that starts or pauses the
+app (`playerctl`, mpv's IPC) to the player's mute / unmute event, so they include the app's own start-up: an
+end-to-end view, not the harness's sample-exact latency (that's criteria 3 / 4 in the plan, measured in the harness).
+
+| Scenario | AudioMonitor | Signal |
+|---|---|---|
+| Browser: play → mute / pause → unmute | 569 / 609 ms | 552 / 564 ms |
+| `mpv` (no MPRIS): play → mute / pause → unmute | **never** (its `mpv` name filter) | 474 / 502 ms |
+| Spotify at 50 %: play → mute / pause → unmute | 538 / 540 ms | 485 / 508 ms |
+| 3 of its own switches | 0 mutes | 0 mutes |
+| `toggle-mute` while muted | unmutes, no re-mute in 3 s | `automute.released`, no re-mute in 3 s |
+| …then pause, play again → mute / pause → unmute | 599 / 597 ms | 555 / 582 ms |
+| Only if MPRIS: Spotify → mute / unmute | **never** | 484 / 510 ms |
+| Only if MPRIS: browser → mute / unmute | 656 / 581 ms | 588 / 520 ms |
+| Only if MPRIS: `mpv` (no MPRIS) | no mute | no mute |
+| Delays 2000 / 1000: browser → mute / unmute | 2172 / 1096 ms | 2044 / 1067 ms |
+
+Signal only, the app closed (`liascape-watch` stopped, no backend): browser → mute 549 ms / unmute 571 ms; the
+`toggle-mute` keybind while auto-muted released it (with the flag on, as the flip would ship it; with it off the
+one-shot CLI takes the AudioMonitor path and the mute holds — expected). A SIGSEGV of the compositor while auto-muted:
+back in ~1 s, still muted, unmuted at the pause. CPU: the player 163 ms/s with nothing foreign (the wallpaper's own
+decode) → 208 ms/s with browser + `mpv` + Spotify playing: about +45 ms/s, noisy against the decode.
+
+**Reading.** The Signal is as fast or faster in every case (≈ 20–120 ms sooner end-to-end; with 2000 ms the mute lands
+44 ms after the delay against 172 ms), hears `mpv` (the intended difference), and fixes a second flaw of today's
+engine found here: with "Only if MPRIS player active", AudioMonitor never muted for Spotify even when it was playing
+and loud enough; the Signal did. Not done on the session: the threshold sweep and a new-B-while-muted switch (both
+harness-only so far).
+
+**Also found:** at the owner's Spotify volume (17 %, its stream at −46 dB) the loudest peaks reach about −46 dBFS,
+near the −50 dB default threshold, and today's engine did not mute for it at all. Not a bug either way, but a user
+with a quiet player and the default threshold gets no auto-mute.
+
+Test scripts: the session's scratchpad (`am/run.sh`); not committed, since they drive the owner's own apps.
