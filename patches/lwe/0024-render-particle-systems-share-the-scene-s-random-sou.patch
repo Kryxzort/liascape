@@ -1,0 +1,148 @@
+From 8c2253513636fb4a6d3aa58757db3470c356ddf5 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 00:57:35 +0530
+Subject: [PATCH 24/28] render: particle systems share the scene's random
+ source
+
+Every CParticle seeded its own std::mt19937 from std::random_device, and
+a `randomframe` sprite-sheet particle took its frame from a generator
+seeded by its slot's address, so a reused slot always showed the same
+frame and the frames repeated in a pattern. Wallpaper Engine 2.8.485
+draws every particle random from one scene-level generator (scene+0x1f08,
+GH 0x140223090, called throughout the spawn interpreter GH 0x140260d80).
+
+CScene now owns that generator (`getParticleRng`), every particle system
+draws from it, and a random frame is one draw from it.
+WPENGINE_PARTICLE_SEED seeds it, for tests.
+
+Origin: ours
+Why: randomframe particles repeated per pool slot (docs/player/spikes/we-lwe-gap-audit.md B3: P38)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8YtBieDNWXo3bvfKaP
+---
+ .../WallpaperEngine/Render/Objects/CParticle.cpp    | 13 +++++--------
+ src/core/WallpaperEngine/Render/Objects/CParticle.h |  4 ++--
+ .../WallpaperEngine/Render/Wallpapers/CScene.cpp    | 11 +++++++++++
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.h |  5 +++++
+ 4 files changed, 23 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 548725a..9c22b20 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -19,16 +19,13 @@ using namespace WallpaperEngine::Data::Model;
+ 
+ CParticle::CParticle (Wallpapers::CScene& scene, const Particle& particle) :
+     CObject (scene, particle), CRenderable (scene, particle, *particle.material->material),
+-    Scripting::ScriptableObject (scene, particle), m_particle (particle) {
++    Scripting::ScriptableObject (scene, particle), m_particle (particle), m_rng (scene.getParticleRng ()) {
+     this->registerProperty ("scale", *particle.scale->value);
+     this->registerProperty ("angles", *particle.angles->value);
+     this->registerProperty ("visible", *particle.visible->value);
+     this->registerProperty ("parallaxDepth", *particle.parallaxDepth->value);
+ 
+     this->detectTexture ();
+-    // Initialize random number generator with time-based seed
+-    std::random_device rd;
+-    m_rng.seed (rd ());
+ 
+     // Read renderer configuration early to determine rendering mode
+     if (!m_particle.renderers.empty ()) {
+@@ -280,11 +277,11 @@ void CParticle::update (float dt) {
+ 
+ 	    if (m_particle.animationMode == "randomframe") {
+ 		if (p.frame < 0.0f) {
+-		    std::mt19937 particleRng (
+-			static_cast<std::mt19937::result_type> (reinterpret_cast<uintptr_t> (&p))
+-		    );
++		    // one draw from the scene's random source per particle (WE: the spawn's own random value,
++		    // GH 0x140260d80); was seeded by the particle's slot address, so a reused slot always showed
++		    // the same frame
+ 		    std::uniform_int_distribution<int> dist (0, m_spritesheetFrames - 1);
+-		    p.frame = static_cast<float> (dist (particleRng));
++		    p.frame = static_cast<float> (dist (m_rng));
+ 		}
+ 	    } else if (m_particle.animationMode == "once") {
+ 		p.frame = std::min (
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index d04194a..d5fb79c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -256,8 +256,8 @@ private:
+     float m_lastScreenWidth { 0.0f };
+     float m_lastScreenHeight { 0.0f };
+ 
+-    // Random number generator
+-    std::mt19937 m_rng;
++    // The scene's random source, shared by every particle system (WE has one, at scene+0x1f08)
++    std::mt19937& m_rng;
+ 
+     bool m_initialized { false };
+ };
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 2dbb74d..ec15966 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "CScene.h"
+ 
++#include <cstdlib>
++
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+@@ -21,6 +23,13 @@ using JSON = WallpaperEngine::Data::JSON::JSON;
+ 
+ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext& audioContext, wp_mouse_input* input) :
+     CWallpaper (wallpaper, context, audioContext, input) {
++    // WPENGINE_PARTICLE_SEED: the same particles on every run (tests); else a random seed
++    if (const char* env = std::getenv ("WPENGINE_PARTICLE_SEED"); env != nullptr && *env != '\0') {
++	this->m_particleRng.seed (static_cast<std::mt19937::result_type> (std::strtoul (env, nullptr, 0)));
++    } else {
++	std::random_device device;
++	this->m_particleRng.seed (device ());
++    }
+     // caller should check this, if not a std::bad_cast is good to throw
+     auto scene = wallpaper.as<Scene> ();
+ 
+@@ -441,6 +450,8 @@ const glm::vec2* CScene::getMousePositionNormalized () const { return &this->m_m
+ 
+ const glm::vec2* CScene::getParallaxDisplacement () const { return &this->m_parallaxDisplacement; }
+ 
++std::mt19937& CScene::getParticleRng () { return this->m_particleRng; }
++
+ const std::vector<CObject*>& CScene::getObjectsByRenderOrder () const { return this->m_objectsByRenderOrder; }
+ 
+ const CObject* CScene::getObject (int id) const {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 8ab3ae9..0e975c1 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -5,6 +5,8 @@
+ #include "WallpaperEngine/Render/CWallpaper.h"
+ #include "linux-wallpaperengine/project.h"
+ 
++#include <random>
++
+ namespace WallpaperEngine::Scripting {
+ class ScriptEngine;
+ }
+@@ -47,6 +49,8 @@ public:
+     const glm::vec2* getParallaxDisplacement () const;
+ 
+     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
++    /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
++    [[nodiscard]] std::mt19937& getParticleRng ();
+     [[nodiscard]] const CObject* getObject (int id) const;
+ 
+ protected:
+@@ -71,6 +75,7 @@ private:
+     /** the sound objects, ticked on the host's clock every frame (they don't render) */
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
++    std::mt19937 m_particleRng;
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};
+     glm::vec2 m_mousePositionNormalized = {};

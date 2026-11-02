@@ -1,0 +1,480 @@
+From 2177a69dcd4d646e6ccd4a6787f195045423bd7c Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 01:01:46 +0530
+Subject: [PATCH 26/28] render: particle timing the way Wallpaper Engine does
+
+Against WE 2.8.485 (addresses are wallpaper64.exe functions):
+
+- `starttime` prewarm (GH 0x140254cc0): it was parsed as an integer and
+  never read, so every rain, snow, dust and fog system started empty and
+  filled in over seconds (up to minutes). It is a float, and on setup the
+  system is stepped in 0.05 s steps (0.2 s from maxcount 500 up) until the
+  simulated time reaches it, at least once.
+- `instanceoverride.rate` is the system's playback speed: it scales the
+  whole step, motion, ageing and emission alike, at least 0.01
+  (GH 0x140255d00, dt *= max(rate, 0.01)). It multiplied the emitters'
+  rate only, so a slowed system emitted sparsely but moved and aged at 1x.
+- `instanceoverride.count` multiplies every emitter's rate (and a
+  mapsequencearoundcontrolpoint's count) unless the system's flags have
+  0x20 (parser bindings 0x1401f3efc..0x1401f4b44). It scaled the pool
+  instead, which is `maxcount` again.
+- The overrides are read every frame, so user sliders and animations on
+  rate, count and lifetime are live (they were taken once at creation).
+- The emitters share one timer (GH 0x14025cfe0): delay, duration, the
+  random periodic windows (each "on" window reloads the instantaneous
+  burst), and the burst adds to the frame's rate emission (sphererandom
+  replaced it; it also ignored delay, duration and periodic emission).
+- A hidden system that has particles is reset (GH 0x140255d00 ->
+  0x140254f50/0x140255430): they are cleared and its emitters reloaded, so
+  it starts fresh when shown and one-shot bursts replay. It used to
+  freeze with stale particles and catch up 0.1 s on its first visible
+  frame.
+- The operators' time is the system's own clock (the sum of its steps,
+  prewarm included), not the render time.
+
+The particle alpha override is copied at spawn only in WE too
+(+0x3ec, read by the spawn interpreter alone), as here.
+
+Origin: ours
+Why: particle systems started empty and the rate/count overrides meant other things, in 61 of the owner's scenes (docs/player/spikes/we-lwe-gap-audit.md B3: P1, P3, P4, P13, P14, P18, P19)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8YtBieDNWXo3bvfKaP
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   3 +-
+ .../Data/Parsers/ObjectParser.cpp             |   4 +-
+ .../Render/Objects/CParticle.cpp              | 251 ++++++++++--------
+ .../Render/Objects/CParticle.h                |  19 ++
+ 4 files changed, 163 insertions(+), 114 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 66f98e4..e1df6c1 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -577,7 +577,8 @@ struct ParticleData {
+     std::string animationMode;
+     float sequenceMultiplier;
+     uint32_t maxCount;
+-    uint32_t startTime;
++    /** seconds simulated before the first frame (WE parses a float) */
++    float startTime;
+     uint32_t flags;
+ 
+     /** Material for rendering */
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 0a356fa..92bf2cb 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -498,7 +498,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 	// Parse numeric fields safely
+ 	float sequenceMultiplier = 1.0f;
+ 	uint32_t maxCount = 100;
+-	uint32_t startTime = 0;
++	float startTime = 0.0f;
+ 	uint32_t flags = 0;
+ 
+ 	const auto seqMultIt = particleJson.find ("sequencemultiplier");
+@@ -513,7 +513,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 
+ 	const auto startTimeIt = particleJson.find ("starttime");
+ 	if (startTimeIt != particleJson.end () && startTimeIt->is_number ()) {
+-	    startTime = startTimeIt->get<uint32_t> ();
++	    startTime = startTimeIt->get<float> ();
+ 	}
+ 
+ 	const auto flagsIt = particleJson.find ("flags");
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index c882ad0..a17dd4d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -52,12 +52,9 @@ CParticle::CParticle (Wallpapers::CScene& scene, const Particle& particle) :
+ 	}
+     }
+ 
+-    // Apply count instance override to particle pool size
+-    float countMultiplier = particle.instanceOverride.count->value->getFloat ();
+-    uint32_t adjustedMaxCount = static_cast<uint32_t> (particle.maxCount * countMultiplier);
+-
+-    // Use wallpaper's specified count, or default if maxCount is 0
+-    m_maxParticles = (adjustedMaxCount > 0) ? adjustedMaxCount : DEFAULT_MAX_PARTICLES;
++    // The pool is `maxcount`: the `count` override scales the emitters' rate, not the pool (WE binds count to
++    // every emitter's rate and maxtoemitperperiod, and nothing to maxcount; parser 0x1401f3efc..0x1401f4b44)
++    m_maxParticles = particle.maxCount > 0 ? particle.maxCount : DEFAULT_MAX_PARTICLES;
+ 
+     m_particles.resize (m_maxParticles);
+ 
+@@ -164,10 +161,45 @@ void CParticle::setup () {
+     }
+ 
+     m_initialized = true;
++
++    // `starttime` prewarm (GH 0x140254cc0): step the system in 0.05 s steps (0.2 s from maxcount 500 up)
++    // until the simulated time reaches starttime, so it starts at its steady state instead of empty. At
++    // least one step, as WE's do-while; not scaled by the `rate` override (that is applied per frame)
++    if (m_particle.startTime > 0.0f) {
++	const float step = m_particle.maxCount < 500 ? 0.05f : 0.2f;
++	float simulated = 0.0f;
++	do {
++	    update (step);
++	    simulated += step;
++	} while (simulated < m_particle.startTime);
++    }
++}
++
++void CParticle::resetSystem () {
++    m_particleCount = 0;
++    for (auto& p : m_particles) {
++	p.alive = false;
++    }
++    for (auto& [emitter, state] : m_emitterStates) {
++	resetEmitter (*emitter, *state);
++    }
+ }
+ 
+ void CParticle::render () {
+-    if (!m_initialized || !m_particle.visible->value->getBool ()) {
++    if (!m_initialized) {
++	return;
++    }
++
++    if (!m_particle.visible->value->getBool ()) {
++	// a hidden system is reset (GH 0x140255d00 → 0x140254f50 / 0x140255430): its particles are cleared and its
++	// emitters reloaded, so it starts fresh when shown again (bursts replay). It doesn't advance meanwhile,
++	// and the clock follows so the first visible frame's dt is one frame, not the hidden time
++	if (m_particleCount > 0) {
++	    resetSystem ();
++	}
++	if (m_time != 0.0) {
++	    m_time = this->getContext ().getContext ().renderTime;
++	}
+ 	return;
+     }
+ 
+@@ -192,6 +224,9 @@ void CParticle::render () {
+ 	// Cap dt to prevent simulation instability
+ 	// Also provides more consistent behavior across different FPS
+ 	dt = std::min (dt, 0.1f);
++	// the `rate` override is the system's playback speed: it scales the whole step (motion, ageing and
++	// emission alike), at least 0.01 (GH 0x140255d00: dt *= max(rate, 0.01)); read every frame
++	dt *= std::max (m_particle.instanceOverride.rate->value->getFloat (), 0.01f);
+ 	update (dt);
+     }
+ 
+@@ -206,6 +241,8 @@ void CParticle::render () {
+ }
+ 
+ void CParticle::update (float dt) {
++    m_simTime += dt;
++
+     // Detect resolution changes and recalculate transformed origin
+     float screenWidth = static_cast<float> (getScene ().getWidth ());
+     float screenHeight = static_cast<float> (getScene ().getHeight ());
+@@ -264,7 +301,7 @@ void CParticle::update (float dt) {
+ 
+     // Apply operators to living particles (including alphafade)
+     for (auto& op : m_operators) {
+-	op (m_particles, m_particleCount, m_controlPoints, static_cast<float> (m_time), dt);
++	op (m_particles, m_particleCount, m_controlPoints, m_simTime, dt);
+     }
+ 
+     // Update animation frames
+@@ -364,9 +401,84 @@ void CParticle::setupEmitters () {
+     }
+ }
+ 
+-EmitterFunc CParticle::createBoxEmitter (const ParticleEmitter& emitter) {
+-    float rate = emitter.rate * m_particle.instanceOverride.rate->value->getFloat ();
++std::shared_ptr<CParticle::EmitterState> CParticle::addEmitterState (const ParticleEmitter& emitter) {
++    auto state = std::make_shared<EmitterState> ();
++    resetEmitter (emitter, *state);
++    m_emitterStates.emplace_back (&emitter, state);
++    return state;
++}
++
++void CParticle::resetEmitter (const ParticleEmitter& emitter, EmitterState& state) {
++    // WE reloads delay, duration and the instantaneous burst and zeroes the accumulators (GH 0x140254f50)
++    state.delay = emitter.delay;
++    state.durationLeft = emitter.duration;
++    state.accumulator = 0.0f;
++    state.periodicTimer = 0.0f;
++    state.burst = emitter.instantaneous;
++}
++
++uint32_t CParticle::emitCount (const ParticleEmitter& emitter, EmitterState& state, float dt) {
++    // WE's emitter step (GH 0x14025cfe0), shared by every emitter type
++    if (state.delay > 0.0f) {
++	state.delay -= dt;
++	return 0;
++    }
++
++    // `count` scales the emitter's rate (parser binding of the override's count, 0x1401f3efc), unless the
++    // system opts out with flags bit 0x20; read every frame, so a user slider is live
++    float rate = emitter.rate;
++    if ((m_particle.flags & 0x20) == 0) {
++	rate *= m_particle.instanceOverride.count->value->getFloat ();
++    }
++
++    // random periodic emission (flags bit 2): an "on" window of minperiodicduration..maxperiodicduration, then an
++    // "off" one of minperiodicdelay..maxperiodicdelay; each "on" window reloads the instantaneous burst
++    if ((emitter.flags & 4) != 0) {
++	if (state.periodicTimer <= 0.0f) {
++	    state.periodicTimer += dt;
++	    if (state.periodicTimer < 0.0f) {
++		rate = 0.0f;
++	    } else {
++		state.periodicTimer = WallpaperEngine::Maths::randomFloat (
++		    m_rng, emitter.minPeriodicDuration, emitter.maxPeriodicDuration
++		);
++		state.burst = emitter.instantaneous;
++	    }
++	} else {
++	    state.periodicTimer -= dt;
++	    if (state.periodicTimer < 0.0f) {
++		state.periodicTimer
++		    = -WallpaperEngine::Maths::randomFloat (m_rng, emitter.minPeriodicDelay, emitter.maxPeriodicDelay);
++	    }
++	}
++    }
++
++    // the instantaneous burst adds to the frame's rate emission (sphererandom used to replace it)
++    uint32_t toEmit = state.burst;
++    state.burst = 0;
++
++    if (emitter.duration > 0.0f) {
++	state.durationLeft -= dt;
++	if (state.durationLeft <= 0.0f) {
++	    return toEmit;
++	}
++    }
+ 
++    if (rate > 0.0f) {
++	state.accumulator += dt * rate;
++	auto rateEmit = static_cast<uint32_t> (state.accumulator);
++	state.accumulator -= static_cast<float> (rateEmit);
++	// limitOnePerFrame (flags bit 1)
++	if ((emitter.flags & 2) != 0 && rateEmit > 1) {
++	    rateEmit = 1;
++	}
++	toEmit += rateEmit;
++    }
++
++    return toEmit;
++}
++
++EmitterFunc CParticle::createBoxEmitter (const ParticleEmitter& emitter) {
+     glm::vec3 transformedEmitterOrigin = emitter.origin;
+     transformedEmitterOrigin.y = -transformedEmitterOrigin.y;
+ 
+@@ -381,78 +493,11 @@ EmitterFunc CParticle::createBoxEmitter (const ParticleEmitter& emitter) {
+     glm::vec3 flippedDirections = emitter.directions;
+     flippedDirections.y = -flippedDirections.y;
+ 
+-    bool limitOnePerFrame = (emitter.flags & 2) != 0;
+-    bool randomPeriodicEmission = (emitter.flags & 4) != 0;
+-
+-    return
+-	[this, emitter, transformedEmitterOrigin, controlPointIndex, rate, flippedDirections, limitOnePerFrame,
+-	 randomPeriodicEmission, emissionTimer = 0.0f, delayTimer = emitter.delay, durationTimer = 0.0f,
+-	 periodicTimer = 0.0f, periodicDuration = 0.0f, periodicDelay = 0.0f, emitting = false,
+-	 instantaneousEmitted = false] (std::vector<ParticleInstance>& particles, uint32_t& count, float dt) mutable {
+-	    if (count >= particles.size ()) {
+-		return;
+-	    }
+-
+-	    // Handle delay
+-	    if (delayTimer > 0.0f) {
+-		delayTimer -= dt;
+-		return;
+-	    }
+-
+-	    // Handle duration
+-	    if (emitter.duration > 0.0f) {
+-		durationTimer += dt;
+-		if (durationTimer >= emitter.duration) {
+-		    return;
+-		}
+-	    }
+-
+-	    // Handle random periodic emission
+-	    if (randomPeriodicEmission) {
+-		periodicTimer += dt;
+-
+-		if (!emitting) {
+-		    if (periodicTimer >= periodicDelay) {
+-			emitting = true;
+-			periodicTimer = 0.0f;
+-			periodicDuration = WallpaperEngine::Maths::randomFloat (
+-			    m_rng, emitter.minPeriodicDuration, emitter.maxPeriodicDuration
+-			);
+-		    } else {
+-			return;
+-		    }
+-		} else {
+-		    if (periodicTimer >= periodicDuration) {
+-			emitting = false;
+-			periodicTimer = 0.0f;
+-			periodicDelay = WallpaperEngine::Maths::randomFloat (
+-			    m_rng, emitter.minPeriodicDelay, emitter.maxPeriodicDelay
+-			);
+-			return;
+-		    }
+-		}
+-	    }
+-
+-	    // TODO: Audio processing (audioProcessingMode, audioProcessingBounds, etc.)
+-
+-	    // Handle instantaneous emission
+-	    uint32_t toEmit = 0;
+-	    if (emitter.instantaneous > 0 && !instantaneousEmitted) {
+-		toEmit = emitter.instantaneous;
+-		instantaneousEmitted = true;
+-	    }
++    const auto state = addEmitterState (emitter);
+ 
+-	    // Rate-based emission with optional cap at 1 per frame
+-	    if (emitter.rate > 0.0f) {
+-		emissionTimer += dt * rate;
+-		uint32_t rateEmit = static_cast<uint32_t> (emissionTimer);
+-		emissionTimer -= static_cast<float> (rateEmit);
+-		// limitOnePerFrame (flags bit 1): cap at 1 to prevent rope artifacts
+-		if (limitOnePerFrame && rateEmit > 1) {
+-		    rateEmit = 1;
+-		}
+-		toEmit += rateEmit;
+-	    }
++    return [this, emitter, transformedEmitterOrigin, controlPointIndex, flippedDirections,
++	    state] (std::vector<ParticleInstance>& particles, uint32_t& count, float dt) {
++	    const uint32_t toEmit = emitCount (emitter, *state, dt);
+ 
+ 	    // Emit particles
+ 	    for (uint32_t i = 0; i < toEmit && count < particles.size (); i++) {
+@@ -517,9 +562,6 @@ EmitterFunc CParticle::createBoxEmitter (const ParticleEmitter& emitter) {
+ }
+ 
+ EmitterFunc CParticle::createSphereEmitter (const ParticleEmitter& emitter) {
+-    float rate = emitter.rate * m_particle.instanceOverride.rate->value->getFloat ();
+-    float lifetime = 1.0f * m_particle.instanceOverride.lifetime->value->getFloat ();
+-
+     // Convert emitter origin from screen space (Y down) to centered space (Y up)
+     glm::vec3 transformedEmitterOrigin = emitter.origin;
+     transformedEmitterOrigin.y = -transformedEmitterOrigin.y;
+@@ -534,29 +576,11 @@ EmitterFunc CParticle::createSphereEmitter (const ParticleEmitter& emitter) {
+ 	}
+     }
+ 
+-    bool limitOnePerFrame = (emitter.flags & 2) != 0;
+-
+-    return [this, emitter, transformedEmitterOrigin, controlPointIndex, rate, lifetime, limitOnePerFrame,
+-	    emissionTimer = 0.0f,
+-	    remaining
+-	    = emitter.instantaneous] (std::vector<ParticleInstance>& particles, uint32_t& count, float dt) mutable {
+-	if (count >= particles.size ()) {
+-	    return;
+-	}
+-
+-	// Rate-based emission with optional cap at 1 per frame
+-	emissionTimer += dt * rate;
+-	uint32_t toEmit = static_cast<uint32_t> (emissionTimer);
+-	emissionTimer -= static_cast<float> (toEmit);
+-	// limitOnePerFrame (flags bit 1): cap at 1 to prevent rope artifacts
+-	if (limitOnePerFrame && toEmit > 1) {
+-	    toEmit = 1;
+-	}
++    const auto state = addEmitterState (emitter);
+ 
+-	if (remaining > 0) {
+-	    toEmit = remaining;
+-	    remaining = 0;
+-	}
++    return [this, emitter, transformedEmitterOrigin, controlPointIndex,
++	    state] (std::vector<ParticleInstance>& particles, uint32_t& count, float dt) {
++	const uint32_t toEmit = emitCount (emitter, *state, dt);
+ 
+ 	for (uint32_t i = 0; i < toEmit && count < particles.size (); i++) {
+ 	    auto& p = particles[count];
+@@ -640,7 +664,7 @@ EmitterFunc CParticle::createSphereEmitter (const ParticleEmitter& emitter) {
+ 	    p.color = glm::vec3 (1.0f) * m_particle.instanceOverride.colorn->value->getVec3 ();
+ 	    p.alpha = 1.0f * m_particle.instanceOverride.alpha->value->getFloat ();
+ 	    p.size = 20.0f * m_particle.instanceOverride.size->value->getFloat ();
+-	    p.lifetime = lifetime;
++	    p.lifetime = m_particle.instanceOverride.lifetime->value->getFloat ();
+ 	    p.age = 0.0f;
+ 	    p.alive = true;
+ 	    p.frame = -1.0f;
+@@ -886,7 +910,7 @@ InitializerFunc CParticle::createTurbulentVelocityRandomInitializer (const Turbu
+ 	// times get gradually changing directions (creates smooth evolving vapor stream).
+ 	// Position component provides spatial coherence for nearby particles.
+ 	glm::vec3 noisePos = p.position * 0.1f;
+-	noisePos += glm::vec3 (static_cast<float> (m_time) * timeScale);
++	noisePos += glm::vec3 (m_simTime * timeScale);
+ 
+ 	// Phase adds per-particle randomization to noise position
+ 	float phase = WallpaperEngine::Maths::randomFloat (m_rng, phaseMin, phaseMax);
+@@ -950,15 +974,20 @@ CParticle::createMapSequenceAroundControlPointInitializer (const MapSequenceArou
+     DynamicValue* speedMinValue = init.speedMin->value.get ();
+     DynamicValue* speedMaxValue = init.speedMax->value.get ();
+     DynamicValue* speedOverride = m_particle.instanceOverride.speed->value.get ();
++    DynamicValue* countOverride = m_particle.instanceOverride.count->value.get ();
+ 
+     // Sequence counter shared across all particles spawned with this initializer
+     // This creates the circular distribution pattern
+     int sequenceIndex = 0;
+ 
+-    return [this, controlPointValue, countValue, speedMinValue, speedMaxValue, sequenceIndex,
+-	    speedOverride] (ParticleInstance& p) mutable {
++    return [this, controlPointValue, countValue, speedMinValue, speedMaxValue, sequenceIndex, speedOverride,
++	    countOverride] (ParticleInstance& p) mutable {
+ 	int controlPoint = static_cast<int> (controlPointValue->getFloat ());
+-	int count = static_cast<int> (countValue->getFloat ());
++	// the `count` override scales the sequence's count too (an int× binding in WE's parser), unless the
++	// system opts out with flags bit 0x20
++	float countScale = (m_particle.flags & 0x20) == 0 ? countOverride->getFloat () : 1.0f;
++	int count = std::max (1, static_cast<int> (countValue->getFloat () * countScale));
++	sequenceIndex %= count;
+ 
+ 	// Calculate angle for this particle in the sequence (evenly distributed around circle)
+ 	float angle = (static_cast<float> (sequenceIndex) / static_cast<float> (count)) * glm::two_pi<float> ();
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index fa31f1d..73412ea 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -133,6 +133,22 @@ protected:
+     /** a uniform draw in [0, 1) from the scene's generator, raised to `exponent` (WE's initializers) */
+     float randomT (float exponent);
+ 
++    /** an emitter's timers (WE's emitter record, GH 0x14025cfe0 / 0x140254f50) */
++    struct EmitterState {
++	float delay { 0.0f };
++	float durationLeft { 0.0f };
++	float accumulator { 0.0f };
++	/** > 0: the time left of a periodic "on" window; <= 0: minus the time left of an "off" one */
++	float periodicTimer { 0.0f };
++	uint32_t burst { 0 };
++    };
++    std::shared_ptr<EmitterState> addEmitterState (const ParticleEmitter& emitter);
++    static void resetEmitter (const ParticleEmitter& emitter, EmitterState& state);
++    /** how many particles the emitter spawns this step (rate × count, burst, delay, duration, periodic windows) */
++    uint32_t emitCount (const ParticleEmitter& emitter, EmitterState& state, float dt);
++    /** WE's hidden-system reset (GH 0x140255d00): every particle gone, every emitter reloaded */
++    void resetSystem ();
++
+     // Emitter creators
+     EmitterFunc createBoxEmitter (const ParticleEmitter& emitter);
+     EmitterFunc createSphereEmitter (const ParticleEmitter& emitter);
+@@ -182,6 +198,7 @@ private:
+     uint32_t m_maxParticles { DEFAULT_MAX_PARTICLES };
+ 
+     std::vector<EmitterFunc> m_emitters;
++    std::vector<std::pair<const ParticleEmitter*, std::shared_ptr<EmitterState>>> m_emitterStates;
+     std::vector<InitializerFunc> m_initializers;
+     std::vector<OperatorFunc> m_operators;
+ 
+@@ -191,6 +208,8 @@ private:
+     std::vector<uint32_t> m_indices;
+ 
+     double m_time { 0.0 };
++    /** the system's own clock: the sum of its (rate-scaled) steps, prewarm included (WE: system+0x3f0) */
++    float m_simTime { 0.0f };
+ 
+     // CPass-based rendering
+     Effects::CPass* m_pass { nullptr };

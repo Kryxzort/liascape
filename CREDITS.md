@@ -55,3 +55,8 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0021-scripting-a-layer-property-the-object-lacks-reads-un.patch` | scripting: a layer property the object lacks reads undefined quietly | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0022-render-object-alpha-and-colour-reach-the-shader-live.patch` | render: object alpha and colour reach the shader live; g_Color4 is (colour, alpha) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0023-data-play-property-keyframe-animations-the-way-Wallp.patch` | data: play property keyframe animations the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0024-render-particle-systems-share-the-scene-s-random-sou.patch` | render: particle systems share the scene's random source | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0025-render-particle-initializers-draw-the-way-Wallpaper-.patch` | render: particle initializers draw the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0026-render-particle-timing-the-way-Wallpaper-Engine-does.patch` | render: particle timing the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0027-render-colorn-tints-particles-the-way-Wallpaper-Engi.patch` | render: colorn tints particles the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0028-render-sprite-sheet-particles-cross-fade-their-frame.patch` | render: sprite-sheet particles cross-fade their frames | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

@@ -1,0 +1,272 @@
+From 8bbcd5124df41b888c5f04da40ac402cffc33e62 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 00:58:39 +0530
+Subject: [PATCH 25/28] render: particle initializers draw the way Wallpaper
+ Engine does
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two quiet divergences in the spawn-time initializers, against WE 2.8.485's
+spawn interpreter (GH 0x140260d80):
+
+- `colorrandom` drew R, G and B independently, so a red-to-blue range
+  also gave greens-free magentas and darks, a noisier, greyer palette.
+  WE draws one t and takes min + t·(max − min) for all three channels
+  (case 3); the result multiplies the spawn's colour.
+- `exponent` was read by sizerandom and angularvelocityrandom only. WE
+  reads it in lifetimerandom (case 1), colorrandom (3), alpharandom (6),
+  velocityrandom (7, per axis) and rotationrandom (10, per axis) as
+  well: the draw is pow(rand, exponent) unless the exponent is exactly 1.
+  Lifetimes are at least 0.001 s (case 1).
+
+Origin: ours
+Why: off-palette particle colours in 58 of the owner's scenes, lost distribution skew in 25 systems (docs/player/spikes/we-lwe-gap-audit.md B3: P6, P7)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8YtBieDNWXo3bvfKaP
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  | 30 ++++++---
+ .../Data/Parsers/ObjectParser.cpp             | 14 ++--
+ .../Render/Objects/CParticle.cpp              | 64 ++++++++++++++-----
+ .../Render/Objects/CParticle.h                |  3 +
+ 4 files changed, 79 insertions(+), 32 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 694964d..66f98e4 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -205,10 +205,12 @@ public:
+ 
+ class ColorRandomInitializer : public ParticleInitializerBase {
+ public:
+-    ColorRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max) :
+-	min (std::move (min)), max (std::move (max)) { }
++    ColorRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max, UserSettingUniquePtr exponent) :
++	min (std::move (min)), max (std::move (max)), exponent (std::move (exponent)) { }
+     UserSettingUniquePtr min;
+     UserSettingUniquePtr max;
++    /** the random draw is pow(rand, exponent) (WE spawn interpreter GH 0x140260d80) */
++    UserSettingUniquePtr exponent;
+ };
+ 
+ class SizeRandomInitializer : public ParticleInitializerBase {
+@@ -222,34 +224,42 @@ public:
+ 
+ class AlphaRandomInitializer : public ParticleInitializerBase {
+ public:
+-    AlphaRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max) :
+-	min (std::move (min)), max (std::move (max)) { }
++    AlphaRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max, UserSettingUniquePtr exponent) :
++	min (std::move (min)), max (std::move (max)), exponent (std::move (exponent)) { }
+     UserSettingUniquePtr min;
+     UserSettingUniquePtr max;
++    /** the random draw is pow(rand, exponent) (WE spawn interpreter GH 0x140260d80) */
++    UserSettingUniquePtr exponent;
+ };
+ 
+ class LifetimeRandomInitializer : public ParticleInitializerBase {
+ public:
+-    LifetimeRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max) :
+-	min (std::move (min)), max (std::move (max)) { }
++    LifetimeRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max, UserSettingUniquePtr exponent) :
++	min (std::move (min)), max (std::move (max)), exponent (std::move (exponent)) { }
+     UserSettingUniquePtr min;
+     UserSettingUniquePtr max;
++    /** the random draw is pow(rand, exponent) (WE spawn interpreter GH 0x140260d80) */
++    UserSettingUniquePtr exponent;
+ };
+ 
+ class VelocityRandomInitializer : public ParticleInitializerBase {
+ public:
+-    VelocityRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max) :
+-	min (std::move (min)), max (std::move (max)) { }
++    VelocityRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max, UserSettingUniquePtr exponent) :
++	min (std::move (min)), max (std::move (max)), exponent (std::move (exponent)) { }
+     UserSettingUniquePtr min;
+     UserSettingUniquePtr max;
++    /** the random draw is pow(rand, exponent) (WE spawn interpreter GH 0x140260d80) */
++    UserSettingUniquePtr exponent;
+ };
+ 
+ class RotationRandomInitializer : public ParticleInitializerBase {
+ public:
+-    RotationRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max) :
+-	min (std::move (min)), max (std::move (max)) { }
++    RotationRandomInitializer (UserSettingUniquePtr min, UserSettingUniquePtr max, UserSettingUniquePtr exponent) :
++	min (std::move (min)), max (std::move (max)), exponent (std::move (exponent)) { }
+     UserSettingUniquePtr min;
+     UserSettingUniquePtr max;
++    /** the random draw is pow(rand, exponent) (WE spawn interpreter GH 0x140260d80) */
++    UserSettingUniquePtr exponent;
+ };
+ 
+ class AngularVelocityRandomInitializer : public ParticleInitializerBase {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index f7d57e9..0a356fa 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -645,7 +645,7 @@ ParticleInitializerUniquePtr ObjectParser::parseParticleInitializer (const JSON&
+     if (name == "colorrandom") {
+ 	return std::make_unique<ColorRandomInitializer> (
+ 	    it.color ("min", properties, Builders::ColorBuilder::Black),
+-	    it.color ("max", properties, Builders::ColorBuilder::White)
++	    it.color ("max", properties, Builders::ColorBuilder::White), it.user ("exponent", properties, 1.0f)
+ 	);
+     } else if (name == "sizerandom") {
+ 	return std::make_unique<SizeRandomInitializer> (
+@@ -654,20 +654,24 @@ ParticleInitializerUniquePtr ObjectParser::parseParticleInitializer (const JSON&
+ 	);
+     } else if (name == "alpharandom") {
+ 	return std::make_unique<AlphaRandomInitializer> (
+-	    it.user ("min", properties, 0.05f), it.user ("max", properties, 1.0f)
++	    it.user ("min", properties, 0.05f), it.user ("max", properties, 1.0f),
++	    it.user ("exponent", properties, 1.0f)
+ 	);
+     } else if (name == "lifetimerandom") {
+ 	return std::make_unique<LifetimeRandomInitializer> (
+-	    it.user ("min", properties, 0.0f), it.user ("max", properties, 1.0f)
++	    it.user ("min", properties, 0.0f), it.user ("max", properties, 1.0f),
++	    it.user ("exponent", properties, 1.0f)
+ 	);
+     } else if (name == "velocityrandom") {
+ 	return std::make_unique<VelocityRandomInitializer> (
+-	    it.user ("min", properties, glm::vec3 (-32.0f)), it.user ("max", properties, glm::vec3 (32.0f))
++	    it.user ("min", properties, glm::vec3 (-32.0f)), it.user ("max", properties, glm::vec3 (32.0f)),
++	    it.user ("exponent", properties, 1.0f)
+ 	);
+     } else if (name == "rotationrandom") {
+ 	return std::make_unique<RotationRandomInitializer> (
+ 	    it.user ("min", properties, glm::vec3 (0.0f)),
+-	    it.user ("max", properties, glm::vec3 (0.0f, 0.0f, glm::two_pi<float> ()))
++	    it.user ("max", properties, glm::vec3 (0.0f, 0.0f, glm::two_pi<float> ())),
++	    it.user ("exponent", properties, 1.0f)
+ 	);
+     } else if (name == "angularvelocityrandom") {
+ 	return std::make_unique<AngularVelocityRandomInitializer> (
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 9c22b20..c882ad0 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -706,14 +706,24 @@ void CParticle::setupInitializers () {
+     }
+ }
+ 
++float CParticle::randomT (float exponent) {
++    // WE's spawn interpreter (GH 0x140260d80): one uniform draw from the scene's generator, raised to the
++    // initializer's `exponent` unless it is exactly 1
++    const float t = WallpaperEngine::Maths::randomFloat (m_rng, 0.0f, 1.0f);
++    return exponent == 1.0f ? t : std::pow (t, exponent);
++}
++
+ InitializerFunc CParticle::createColorRandomInitializer (const ColorRandomInitializer& init) {
+     DynamicValue* minValue = init.min->value.get ();
+     DynamicValue* maxValue = init.max->value.get ();
+-    DynamicValue* colorOverride = m_particle.instanceOverride.colorn->value.get ();
++    DynamicValue* exponentValue = init.exponent->value.get ();
+ 
+-    return [this, minValue, maxValue, colorOverride] (ParticleInstance& p) {
+-	p.color = WallpaperEngine::Maths::randomVec3 (m_rng, minValue->getVec3 (), maxValue->getVec3 ())
+-	    * colorOverride->getVec3 ();
++    return [this, minValue, maxValue, exponentValue] (ParticleInstance& p) {
++	// one t for all three channels (GH 0x140260d80 case 3): the colour lies on the line from min to max,
++	// it multiplies the spawn's colour
++	const glm::vec3 min = minValue->getVec3 ();
++	const float t = randomT (exponentValue->getFloat ());
++	p.color = (min + t * (maxValue->getVec3 () - min)) * p.color;
+ 	p.initial.color = p.color;
+     };
+ }
+@@ -740,11 +750,12 @@ InitializerFunc CParticle::createSizeRandomInitializer (const SizeRandomInitiali
+ InitializerFunc CParticle::createAlphaRandomInitializer (const AlphaRandomInitializer& init) {
+     DynamicValue* minValue = init.min->value.get ();
+     DynamicValue* maxValue = init.max->value.get ();
+-    DynamicValue* alphaOverride = m_particle.instanceOverride.alpha->value.get ();
++    DynamicValue* exponentValue = init.exponent->value.get ();
+ 
+-    return [this, minValue, maxValue, alphaOverride] (ParticleInstance& p) {
+-	p.alpha = WallpaperEngine::Maths::randomFloat (m_rng, minValue->getFloat (), maxValue->getFloat ())
+-	    * alphaOverride->getFloat ();
++    return [this, minValue, maxValue, exponentValue] (ParticleInstance& p) {
++	// multiplies the spawn's alpha, the override's (GH 0x140260d80 case 6)
++	const float min = minValue->getFloat ();
++	p.alpha = (min + randomT (exponentValue->getFloat ()) * (maxValue->getFloat () - min)) * p.alpha;
+ 	p.initial.alpha = p.alpha;
+     };
+ }
+@@ -752,11 +763,14 @@ InitializerFunc CParticle::createAlphaRandomInitializer (const AlphaRandomInitia
+ InitializerFunc CParticle::createLifetimeRandomInitializer (const LifetimeRandomInitializer& init) {
+     DynamicValue* minValue = init.min->value.get ();
+     DynamicValue* maxValue = init.max->value.get ();
++    DynamicValue* exponentValue = init.exponent->value.get ();
+     DynamicValue* lifetimeOverride = m_particle.instanceOverride.lifetime->value.get ();
+ 
+-    return [this, minValue, maxValue, lifetimeOverride] (ParticleInstance& p) {
+-	p.lifetime = WallpaperEngine::Maths::randomFloat (m_rng, minValue->getFloat (), maxValue->getFloat ())
+-	    * lifetimeOverride->getFloat ();
++    return [this, minValue, maxValue, exponentValue, lifetimeOverride] (ParticleInstance& p) {
++	// GH 0x140260d80 case 1: at least 0.001 s
++	const float min = minValue->getFloat ();
++	const float t = randomT (exponentValue->getFloat ());
++	p.lifetime = std::max (0.001f, (min + t * (maxValue->getFloat () - min)) * lifetimeOverride->getFloat ());
+ 	p.initial.lifetime = p.lifetime;
+     };
+ }
+@@ -764,11 +778,19 @@ InitializerFunc CParticle::createLifetimeRandomInitializer (const LifetimeRandom
+ InitializerFunc CParticle::createVelocityRandomInitializer (const VelocityRandomInitializer& init) {
+     DynamicValue* minValue = init.min->value.get ();
+     DynamicValue* maxValue = init.max->value.get ();
++    DynamicValue* exponentValue = init.exponent->value.get ();
+     DynamicValue* speedOverride = m_particle.instanceOverride.speed->value.get ();
+ 
+-    return [this, minValue, maxValue, speedOverride] (ParticleInstance& p) {
+-	glm::vec3 vel = WallpaperEngine::Maths::randomVec3 (m_rng, minValue->getVec3 (), maxValue->getVec3 ())
+-	    * speedOverride->getFloat ();
++    return [this, minValue, maxValue, exponentValue, speedOverride] (ParticleInstance& p) {
++	// a draw per axis, each raised to `exponent` (GH 0x140260d80 case 7)
++	const glm::vec3 min = minValue->getVec3 ();
++	const glm::vec3 range = maxValue->getVec3 () - min;
++	const float exponent = exponentValue->getFloat ();
++	glm::vec3 vel;
++	for (int i = 0; i < 3; i++) {
++	    vel[i] = min[i] + randomT (exponent) * range[i];
++	}
++	vel *= speedOverride->getFloat ();
+ 	vel.y = -vel.y;
+ 	p.velocity += vel;
+     };
+@@ -779,9 +801,17 @@ InitializerFunc CParticle::createRotationRandomInitializer (const RotationRandom
+     DynamicValue* maxValue = init.max->value.get ();
+     DynamicValue* speedOverride = m_particle.instanceOverride.speed->value.get ();
+ 
+-    return [this, minValue, maxValue, speedOverride] (ParticleInstance& p) {
+-	p.rotation = WallpaperEngine::Maths::randomVec3 (m_rng, minValue->getVec3 (), maxValue->getVec3 ())
+-	    * speedOverride->getFloat ();
++    DynamicValue* exponentValue = init.exponent->value.get ();
++
++    return [this, minValue, maxValue, exponentValue, speedOverride] (ParticleInstance& p) {
++	// a draw per axis, each raised to `exponent` (GH 0x140260d80 case 10)
++	const glm::vec3 min = minValue->getVec3 ();
++	const glm::vec3 range = maxValue->getVec3 () - min;
++	const float exponent = exponentValue->getFloat ();
++	for (int i = 0; i < 3; i++) {
++	    p.rotation[i] = min[i] + randomT (exponent) * range[i];
++	}
++	p.rotation *= speedOverride->getFloat ();
+     };
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index d5fb79c..fa31f1d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -130,6 +130,9 @@ protected:
+     void setupInitializers ();
+     void setupOperators ();
+ 
++    /** a uniform draw in [0, 1) from the scene's generator, raised to `exponent` (WE's initializers) */
++    float randomT (float exponent);
++
+     // Emitter creators
+     EmitterFunc createBoxEmitter (const ParticleEmitter& emitter);
+     EmitterFunc createSphereEmitter (const ParticleEmitter& emitter);

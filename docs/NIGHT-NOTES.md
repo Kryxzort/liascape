@@ -194,3 +194,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   newly broken; e.g. Kimi's clouds now blend instead of drawing as opaque puffs. Your player runs it. B3 (particles)
   is in progress.
 - A 7 h headless soak (glibc free-heap question) runs until ~07:00.
+- **The PC crashed ~01:10** (not ours; the journal just stops). It killed the soak and two agents; both were redone.
+  Soak answer from the 95 min it ran: glibc's free heap is flat now (was +4.1 MiB/min) — no change needed.
+- **Scenes, batch B3 (fork patches 0024–0028, pin `4c75eae`):** particle systems behave like WE — prewarmed to their
+  `starttime` (snow covers the screen at +1 s, not after a minute), one shared colour random, `count`/`rate` as WE
+  means them, HSV tints, sprite-sheet cross-fades, live overrides. Corpus still 93 ok, nothing newly broken. Live.
