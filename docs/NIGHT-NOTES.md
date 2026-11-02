@@ -166,3 +166,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   21/0 both ways. Added a player verb, `automute.release`, because no prop could lift a mute while the stream plays.
   **Still yours:** the ten criteria on your session (a real browser, `mpv`, Spotify) and CPU criterion 9, which only
   meets the bar if pipewire-pulse's cost is counted. A flaky stall test is logged as TODO F5; not caused by this.
+- **From your noctalia list, three toggles** in Settings → Appearance: Glow effects, Morph animations, Autoplay video
+  thumbnails (at most 4 play at once). Defaults keep today's look. Settings 131/0, IT 389/0. Full matrix 823 pass, 7
+  failed under load and passed when rerun alone. The off states were checked by computed style, not by eye.
