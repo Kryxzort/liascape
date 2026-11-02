@@ -874,9 +874,9 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
   - unit `mpris_streams_match_by_pid_tree_then_app_id_then_name` (child pid of the player → match; Flatpak app id = `DesktopEntry` → match; unrelated `paplay` → no match; a matched stream muted / volume 0 → silent).
   - api (private PipeWire, `tests/common/pw.rs`): `automute_mutes_on_a_foreign_stream`, `automute_ignores_own_switches_every_combo`, `automute_delays_and_threshold`, `automute_new_source_comes_up_muted`, `automute_survives_a_crash_restart`, `automute_spawns_no_processes`.
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** The crate suite in both modes PASS; the adapter IT § auto-mute PASS on both engines; `measure-automute-latency.py --engine both` → criterion 3/4 numbers.
-- [ ] **Step 5 (on-machine):** criteria 1–10 on the owner's session (a real browser video, a real `mpv`, Spotify via MPRIS if installed). Write them as a section of `docs/player/reports/phase3.md`.
-- [ ] **Step 6:** All ten pass → flip `AutoMuteParityPassed`, retire `monitor-daemon` under liascape-player (not spawned; a leftover one killed at serve start), update `player.md` § Auto-Mute + `player-adapter.md`. Any fails → leave the flag off and file the TODO.
-- [ ] **Step 7:** Commit `Add The In-Player Auto-Mute Signal` (+ `Replace AudioMonitor Under liascape-player` only when step 6 flips it).
+- [x] **Step 5 (on-machine):** criteria 1–10 on the owner's session (a real browser video, a real `mpv`, Spotify via MPRIS if installed). Write them as a section of `docs/player/reports/phase3.md`.
+- [x] **Step 6:** All ten pass → flip `AutoMuteParityPassed`, retire `monitor-daemon` under liascape-player (not spawned; a leftover one killed at serve start), update `player.md` § Auto-Mute + `player-adapter.md`. Any fails → leave the flag off and file the TODO.
+- [x] **Step 7:** Commit `Add The In-Player Auto-Mute Signal` (+ `Replace AudioMonitor Under liascape-player` only when step 6 flips it).
 
 > **Implementer note 2026-10-30 (Task 14, player side; the backend switch-over waits for Task 7):**
 > - Built behind `LIASCAPE_PLAYER_AUTOMUTE=1` (no thread, no capability without it): `audio/foreign.rs` (ownership + MPRIS matching + Props mute/volume, pure), `signal/automute.rs` (the rule, `automute_tick`, calloop timers, the `automute` probe), `signal/mpris.rs` (`lia-mpris`, zbus 5 blocking — a new crate dependency). The per-stream meter is **`audio/sysmon.rs`'s capture, shared with the visualiser** (no second capture per stream): its callbacks now run on the RT data thread, meter 10 ms slices as each buffer arrives, and ping the loop on a counted stream's audible edge and on proven silence. The visualiser's sample ring is filled only while a scene reads it.
@@ -929,6 +929,39 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
 >
 > - **Parity status — none has been run on the owner's session (Step 5), so none has passed the bar.** In the harness: **pass** 1 (except below), 2, 5, 6 (incl. the keybind with the app closed), 7, 8, 10 (no bus, env gate off, PipeWire killed live). **Not re-measured here** 3, 4 (the player-side table above stands; 3 stays open for a new stream under full saturation; the C# path wasn't put through `measure-automute-latency.py`). **Open** 9 (owner's reading).
 > - **Not run or not covered:** MPRIS with a Playing player through the backend (the IT only has no player; the positive case is player tests only), and a real browser tab, `mpv-mpris`, Flatpak. `AfterRestore` with the capability and the `monitor-daemon` ending itself (no test reaches them). `player-selftest`. The full matrix (only `autoMute` cells), the fuzz. `FeatureHealth` still names `pactl` / `parec` / `playerctl` under the gate.
+
+> **Implementer note 2026-11-02 (Task 14 steps 5–7: the flip).** Step 5 is `docs/player/reports/phase3.md` § 7 (the owner's
+> session); the owner approved the flip the same day (criterion 9 read as "reasonable"). Shipped:
+> - **Player:** the Signal is on unless `LIASCAPE_PLAYER_AUTOMUTE=0` (`signal::automute::enabled_for`). New health part
+>   `automute` in `hello.health` (env gate + bus) and `liascape-player health` (the gate only, `ok: null` when on).
+> - **Backend:** `AutoMuteParityPassed` / `LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED` removed (the branches they guarded are gone).
+>   `ReconcileEngine` runs on both engines (legacy reduces to today's Start / Stop); `AudioMonitor.Shutdown` at
+>   `ApplicationStopping`, so the 10 s watch can't restart the monitor in a dying serve. `monitor-daemon` retired under
+>   liascape-player: `SpawnDetachedMonitor` a logged no-op, none at app close / `restore`, `RunDaemon` ends at once (handing the
+>   settings to the Signal), a leftover one stopped by `KillLegacyDaemons` (serve start, `restore`, `stop`; cmdline-verified).
+>   Legacy keeps `AudioMonitor` + `monitor-daemon` unchanged.
+> - **Found and fixed:** the capability probe (`HasCapability(fresh)` every 10 s) ran on the shared client, which the flag-off
+>   base never did under liascape-player. Its `hello` discovered a new player process from the timer thread (R81's reapply then
+>   raced the user's next request) and its 300 ms timeout on a player busy quitting opened the shared stall breaker: IT
+>   § "a rebuilt player binary" lost an `/apply` in 4 of 5 runs (once also the auto-mute section's player checks). The probe now
+>   has its own client (`AudioMonitor._probe`); 3 of 3 runs clean since (both modes).
+> - **Decisions:** (1) a player without the capability (the escape hatch, a bus-down player) gets `AudioMonitor` while the app is
+>   open and **no auto-mute with the app closed** — monitor-daemon is retired as step 6 says; `/health/features` says so.
+>   (2) `FeatureHealth` reads the player's `automute` health part: ok / unknown → no `pactl` / `parec`; `mpris` needs a session
+>   bus (`SessionBusReachable`); false → AudioMonitor's tools + "works only while the app is open". (3) The matrix's default
+>   stack is now the Signal's (private PipeWire, the player with audio); `LIASCAPE_MATRIX_AUTOMUTE=audiomonitor` is the old
+>   PulseAudio + `--ao null` stack; no PipeWire binaries → falls back to it. Only `--only autoMute` and `--probe probe-health.js`
+>   were run on the new default, not the full matrix. (4) IT: the default is the Signal; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor`
+>   runs § auto-mute at `LIASCAPE_PLAYER_AUTOMUTE=0`.
+> - **Tests:** player `the_signal_is_on_unless_the_env_says_0`, `health::automute_cases`, `tests/automute.rs`
+>   `automute_on_by_default` (RED on the base binary: no capability), `automute_absent_with_the_env_gate_off`, the bus-down test
+>   checks `hello.health.automute`. Self-test `FeatureHealthAssertions` (+ the Signal / unknown / legacy cases). IT: no
+>   `monitor-daemon` at app close (both modes) or on `restore`, a leftover one stopped at serve start; matrix + `probe-health.js`
+>   updated. Results: adapter IT `RESULT pass=400 fail=0` (Signal, the default) and `RESULT pass=389 fail=0`
+>   (`LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor`); `test-settings-merge.sh` `RESULT pass=131 fail=0`; matrix `--only autoMute`
+>   `MATRIX pass=21 fail=0` in both modes; `probe-health.js` `HEALTH pass=6 fail=0` in both modes; `cargo test --no-fail-fast` every target ok (327 unit, `api` 136, `automute` 14 + 2 ignored, `program` 69, …); an earlier full run failed `program::timer_mode_switches_every_interval` once (a `step` call under suite load), 3 of 3 alone pass — not proven unrelated, the Signal is off at the props level there.
+> - **Still open:** criterion 3 for a new stream under full CPU saturation (harness only); MPRIS through the backend with a
+>   Playing player, a Flatpak player; the full matrix on the new default stack.
 
 **Size: L** (2½–3½ days; optional — Phase 3 is complete without it).
 

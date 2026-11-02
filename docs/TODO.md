@@ -175,7 +175,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       V/S-combo cells muted (frozen V→S / S→S happened not to), a foreign `paplay` muted in 54 ms; GREEN: 12/12 clean,
       the foreign stream as fast. Guard: adapter IT § "auto-mute never hears our own switches" (a private PipeWire +
       pipewire-pulse). Legacy shares `AudioMonitor` and gets the same classify-then-count (not separately tested — owner:
-      liascape-player only). The in-player auto-mute Signal stays PARKED (below).
+      liascape-player only). The in-player auto-mute Signal was PARKED then (since shipped: Phase 3 Task 14, 2026-11-02).
 - [x] Write the implementation plan (Phase 0 spikes first: LWE `next-v2` core renders offscreen; worker → compositor
       dmabuf sharing on NVIDIA proprietary; libmpv core-profile GL + `volume-gain` crossfade).
       `docs/superpowers/plans/2026-10-20-liascape-player-phase0-1.md`.
@@ -192,10 +192,10 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` — done: dropout
       0/0 everywhere, frame pacing/outputs/permonitor PASS, 4 product findings fixed (Tasks 20b–20e), final
       soak PASS (0.31 MiB/min).
-- [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal is PARKED; the web
+- [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal shipped in Phase 3 Task 14; the web
       worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
       `docs/player/architecture.md` § 6.
-  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md` — Tasks 1–13 done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): the player side is behind `LIASCAPE_PLAYER_AUTOMUTE=1`, the backend side is wired behind `AudioMonitor.AutoMuteParityPassed` (false). Before it is flipped: every parity criterion on the owner's session (none run there), the owner's reading of criterion 9 (CPU, `parec` alone or with pipewire-pulse), criterion 3 for a new stream under full CPU saturation, `FeatureHealth`'s auto-mute rows.
+  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md` — Tasks 1–14 done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): **flipped 2026-11-02** after the on-machine parity run (§ 7, owner-approved; criterion 9 read as "reasonable"): the player's Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` = off), `AudioMonitor.AutoMuteParityPassed` is gone, `monitor-daemon` is retired under liascape-player, `FeatureHealth` reports the Signal's needs. Still open: criterion 3 for a new stream under full CPU saturation (harness only, `lia-sysmon` lag, not traced); MPRIS through the backend with a Playing player and a Flatpak player untested; a player without the capability has no auto-mute with the app closed (accepted: the escape hatch / a bus-down player).
   - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`): **all tasks
     done** (Tasks 1–15, the Task 8 backend wiring, the properties editor and loudness learning). Task 14 — the
     on-machine battery — ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
@@ -890,8 +890,9 @@ Two bug classes kept recurring; fix the class, not the instance:
       while every reopen re-reads; only worth it if `resync` ever gets expensive.
 
 ## Follow-up projects (each gets its own brainstorm)
-- [ ] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
-      upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Until it passes, `AudioMonitor` stays.
+- [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
+      upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Passed on the owner's machine and
+      flipped 2026-11-02: the shipped auto-mute under liascape-player; `AudioMonitor` stays for legacy.
 - [ ] **Deferred (owner, 2026-10-29: "overengineering at this time"): the app's background vs the desktop for
       scenes** — `WallpaperBg` can only play a video, so with a scene on the desktop the app shows the last video /
       a random one (a different wallpaper entirely). Options: a transparent Electron window over the real desktop,
@@ -901,8 +902,7 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] **Deferred from Phase 2** (not Phase 2 work): web wallpapers — WE `web` items via CEF / LWE's `webhelper`,
       an optional build module, **Phase 4**, gated on the NVIDIA LINEAR-dmabuf external-only risk (spec §12); the
       `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike `lwe-core.md` §4.2; needs a host-side
-      clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below); the in-player auto-mute
-      Signal (Phase 3 Task 14, first item of this section).
+      clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below).
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
