@@ -3932,7 +3932,7 @@ stretch's **own** time ≤ 3 ms around each — `probe loop {"account": true}`'s
 the wall `max_busy_ms` (TODO F5: under the parallel suite the wall maximum, 3.25–3.56 ms, was the
 loop thread runnable without a core — a pinned CPU hog reproduces it: wall 3.4 ms = 0.75 own + 2.7
 waiting, the stretch the test's own `probe`; the scene's destroy itself is 0.03 ms) —; RED with 5 ms
-of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle or hogged; worker gone ≤ 600
+of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle or hogged; still open: the loop now and then blocks ~3–4 ms in calls under a shared GPU — TODO F5; worker gone ≤ 600
 ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
 `capture_scene_source_is_upright`. `tests/supervise.rs`: `scene_snapshot_restores_at_position`
 (SIGSEGV → restored within ±2 s, new worker, the old one gone; RED with the periodic refresh

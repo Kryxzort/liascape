@@ -1017,6 +1017,29 @@ Two bug classes kept recurring; fix the class, not the instance:
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
+    **Mostly settled 2026-11-02 ("Measure Loop Stalls Without Waiting For A Core"); a rarer second cause is
+    open.** (1) The 3.25–3.56 ms readings were the loop thread waiting for a core, not loop work: the `loop`
+    probe now has opt-in scheduler accounting (`{"account": true}`: per stretch the thread's CPU clock,
+    schedstat run delay and voluntary/involuntary switches → `max_busy_own_ms` = wall − run delay,
+    `max_busy_at` / `max_busy_own_at` name the stretch). With the test pinned to two CPUs and four busy
+    loops it reproduces: wall 3.4 ms = 0.75 ms own + 2.7 ms runnable, the stretch the test's own `probe`
+    (the scene's `destroy` handler is 0.03 ms); idle, 0.5–1.4 ms. The test now bounds `max_busy_own_ms`
+    ≤ 3 ms; RED with 5 ms of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle (5.76 /
+    5.52 ms) and under the hog (5.53–5.57 own at 5.6–16.8 wall). (2) **Open:** in 1 of 6 full runs the
+    own bound still failed — destroy 4.04 ms own, 0.59 ms CPU, 6 voluntary sleeps, 0 runnable wait: the loop
+    blocked ~3.4 ms in calls, in a dispatch stretch (source updates). Under a synthetic GPU load (the
+    scene harness's `gpu_work` 4000 test looping) 2 of ~77 destroy windows showed 2.4–3.3 ms blocked
+    stretches, under the CPU hog 3 of ~85 (one in a scene's update between its meter and latch, 12 ms);
+    never idle. Not pinned to a call: the per-segment timing never caught one (log/outbox writes under a
+    disk load: none). Candidates: NVIDIA driver waits in the scene's GL path (latch fence, imports) while
+    the GPU is shared, the dying scene's GL frees. Also seen: `posix_spawn` (vfork) of a worker blocks
+    the loop until the child execs — up to 2.4 ms under the hog. Next: catch the blocked stretch with
+    off-CPU stacks (`perf sched`/`offcputime`, not available here) or per-call accounting in the scene
+    path. `scene_fps_change_is_live_same_pid` (+ `per_output_scene_fps_gates_presents`): the failure was
+    `VIRTUAL-2 at its refresh` (60/0 step); not reproduced (CPU hogs, 7 runs: 59.4–60.5). Both now judge
+    presents against `min(gate, frames the scene latched in the same window)` (latched ≥ ½ the scene's
+    rate) — cause unproven, the new check prints the baseline; RED with the gate bypassed (59.95 vs 15
+    and vs 30).
   - F6: once under load (UI matrix `paused × playlistBarPlay`), a program loaded with "play resume → k1.mp4 (resumed)"
     and its timer switched to k2 357 ms later with a 600 s interval; rerun alone it passed 3 of 3. **Closed
     2026-11-02 ("Retime A Resumed Countdown To The Current Interval"):** a resume point (`resume.json`, key `bar`
