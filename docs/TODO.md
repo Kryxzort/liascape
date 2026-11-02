@@ -1039,7 +1039,8 @@ Two bug classes kept recurring; fix the class, not the instance:
     frames inside sound, every one exactly 64 frames; ~15 at the tone's full level (before: 161 whole cycles in
     460 s, 64–576 frames, right after each analysis — ~67× rarer per second now). The player's meter counted none
     of them as a micro-gap and they are one fixed 64-frame size, so most likely the recorder/sink side (under
-    load), not the player's output — unproven. Recording kept out of the repo (1.1 GB).
+    load), not the player's output — unproven. More likely still: the same single-cycle loss as "F7 residual" below (a
+    stream's deactivation through the bus loopback, 64 frames each, invisible to the meter) — for the handoff work. Recording kept out of the repo (1.1 GB).
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
