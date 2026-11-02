@@ -175,8 +175,16 @@ of a switch.
 Run 2026-11-02 with the owner's go-ahead, at their machine (`programs.sh vt suspend`, results in
 `results/phase3-owner-1102/`): a 30 s timer rotation, the app closed, taken away mid-interval (~19 s left).
 
-1. Cold boot via `claude-reboot` with a timer program: restored at its item per its start mode and rotating, before
-   and without opening the app. *(below, once run)*
+1. **Cold boot, PASS with one finding.** The owner's own playlist (315 items, shuffle, "Start over", 180 s minimum,
+   switch at the end), the app closed, `claude-reboot`. Hyprland's startup ran `liascape restore` at 07:00:51, 13 s
+   after boot; the player took `prog:main` back ("Start over" → a fresh start, item 138) with no app open, and it
+   rotated: the first switch at the clip's end at 07:03:50 (`reason: end`).
+   - **Finding F7:** that "fresh shuffle" was item 138 again, the same as the session before. The program's seed is
+     saved but its RNG state isn't, so every new player process replays the same shuffle (`docs/TODO.md` F7).
+   - **First attempt failed for a setup reason:** login ran the NixOS-installed `liascape`, pinned to `c256e15`
+     (Oct 29, before Task 8), which replayed an old single-wallpaper session, and its leftover `timer-daemon`
+     restarted an old player 3 min later. While the app is being built, the startup line and the keybinds now run
+     the dev tree's `scripts/dev/liascape-dev` (temporary, owner's go-ahead 2026-11-02).
 2. **Suspend, PASS (7/7).** `systemctl suspend` with an `rtcwake` alarm, 60.0 s asleep. Spacing on the player clock
    30.35–30.37 s, including the switch that straddled the sleep: no catch-up switch on wake. Same player, no restart,
    no failed switch, the program playing after.

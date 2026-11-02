@@ -1020,3 +1020,7 @@ Two bug classes kept recurring; fix the class, not the instance:
   - F6: once under load (UI matrix `paused × playlistBarPlay`), a program loaded with "play resume → k1.mp4 (resumed)"
     and its timer switched to k2 357 ms later with a 600 s interval; rerun alone it passed 3 of 3. Possibly a resumed
     program whose remaining interval is already used up. Not looked into.
+  - F7: "Start over" + shuffle restarts every boot on the same item (138 on two boots, 2026-11-02). The program's
+    `seed` is saved (`program/store.rs`) but its RNG state isn't, and `Prog::new` makes `Rng::new(seed)` each process,
+    so a session start's "fresh shuffle" (`session_start` → `plan_start`) and every later random / effect pick replay
+    the same sequence after each restart. Fix: reseed from the seed and something per process (or save the state).
