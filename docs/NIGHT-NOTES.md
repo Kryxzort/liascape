@@ -199,3 +199,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Scenes, batch B3 (fork patches 0024–0028, pin `4c75eae`):** particle systems behave like WE — prewarmed to their
   `starttime` (snow covers the screen at +1 s, not after a minute), one shared colour random, `count`/`rate` as WE
   means them, HSV tints, sprite-sheet cross-fades, live overrides. Corpus still 93 ok, nothing newly broken. Live.
+- **Scene switch under load fixed:** on a busy machine a heavy scene could take 13–28 s to load and the switch to
+  it failed at 10 s. A scene that is still loading (its worker still getting CPU) is now waited for up to 50 s
+  while the old wallpaper plays on; a stuck load still fails/restarts. What's playing isn't slowed. Live.
