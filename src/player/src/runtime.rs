@@ -275,7 +275,7 @@ struct PendingStep {
     waits: Vec<StepWait>,
     timer: Option<RegistrationToken>,
     /// Synchronous work so far (the waiting excluded) — the tick duration.
-    work: Duration,
+    work: Spent,
     /// Of that, the source sync (where dropped sources are torn down).
     sync: Duration,
 }
@@ -328,6 +328,166 @@ pub(crate) struct SnapState {
     timer: Option<RegistrationToken>,
 }
 
+/// Per-stretch scheduler accounting on (TODO F5) — off by default (it costs four syscalls
+/// per loop stretch; F6b counts the loop's syscalls per worker frame), turned on for the
+/// process by `probe loop {"account": true}`.
+static ACCOUNT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_accounting(on: bool) {
+    ACCOUNT.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn accounting() -> bool {
+    ACCOUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// What the scheduler says about the calling thread so far.
+#[derive(Clone, Copy, Default)]
+struct Usage {
+    /// CPU time (`CLOCK_THREAD_CPUTIME_ID`, ns — includes the running slice; `getrusage`'s
+    /// times lag by up to a scheduler tick).
+    cpu: Duration,
+    /// Time runnable but waiting for a core (`/proc/thread-self/schedstat`'s run delay, ns).
+    run_delay: Duration,
+    /// Involuntary / voluntary context switches (`getrusage(RUSAGE_THREAD)`).
+    preempt: i64,
+    block: i64,
+}
+
+thread_local! {
+    /// This thread's own schedstat, opened once (`thread-self` resolves at open), read with
+    /// `pread` at 0 — the file is regenerated on every read.
+    static SCHEDSTAT: Option<std::fs::File> = std::fs::File::open("/proc/thread-self/schedstat").ok();
+}
+
+fn run_delay() -> Duration {
+    use std::os::unix::fs::FileExt;
+    SCHEDSTAT.with(|f| {
+        let Some(f) = f else { return Duration::ZERO };
+        let mut buf = [0u8; 96];
+        let Ok(n) = f.read_at(&mut buf, 0) else {
+            return Duration::ZERO;
+        };
+        std::str::from_utf8(&buf[..n])
+            .ok()
+            .and_then(|s| s.split_whitespace().nth(1)?.parse::<u64>().ok())
+            .map(Duration::from_nanos)
+            .unwrap_or_default()
+    })
+}
+
+fn thread_usage() -> Usage {
+    // SAFETY: both calls only write the struct they are given.
+    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+    let cpu = if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } == 0 {
+        Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+    } else {
+        Duration::ZERO
+    };
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    let (preempt, block) = if unsafe { libc::getrusage(libc::RUSAGE_THREAD, &mut ru) } == 0 {
+        (ru.ru_nivcsw, ru.ru_nvcsw)
+    } else {
+        (0, 0)
+    };
+    Usage {
+        cpu,
+        run_delay: run_delay(),
+        preempt,
+        block,
+    }
+}
+
+/// The start of one synchronous loop stretch: the wall clock, plus (with [`accounting`]) the
+/// loop thread's scheduler counters, so the `loop` probe can tell the loop's own time —
+/// working or blocked in a call — from the thread sitting runnable while another process
+/// has its core (a loaded machine): TODO F5.
+#[derive(Clone, Copy)]
+pub(crate) struct Stretch {
+    wall: Instant,
+    usage: Option<Usage>,
+}
+
+impl Stretch {
+    pub(crate) fn start() -> Self {
+        Self {
+            usage: accounting().then(thread_usage),
+            wall: Instant::now(),
+        }
+    }
+
+    pub(crate) fn elapsed(&self) -> Spent {
+        let wall = self.wall.elapsed();
+        let Some(u0) = self.usage else {
+            return Spent {
+                wall,
+                ..Spent::default()
+            };
+        };
+        let u = thread_usage();
+        Spent {
+            wall,
+            cpu: u.cpu.saturating_sub(u0.cpu),
+            waited: u.run_delay.saturating_sub(u0.run_delay).min(wall),
+            preempted: (u.preempt - u0.preempt).max(0) as u64,
+            blocked: (u.block - u0.block).max(0) as u64,
+            accounted: true,
+        }
+    }
+}
+
+/// What one stretch (or several, summed) cost: wall time; with accounting on, the loop
+/// thread's CPU time in it, the time it sat runnable without a core (`waited`), how often the
+/// kernel took its core away (`preempted`, involuntary switches) and how often it slept in a
+/// call (`blocked`, voluntary switches). `wall − waited` is the stretch's own time: work plus
+/// any blocking call — what the loop would cost on an idle machine.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct Spent {
+    pub wall: Duration,
+    pub cpu: Duration,
+    pub waited: Duration,
+    pub preempted: u64,
+    pub blocked: u64,
+    /// Both ends were read with accounting on (else only `wall` is known).
+    pub accounted: bool,
+}
+
+impl Spent {
+    fn own(&self) -> Duration {
+        self.wall.saturating_sub(self.waited)
+    }
+
+    fn json(&self) -> Value {
+        json!({ "wall_ms": ms(self.wall), "own_ms": ms(self.own()), "cpu_ms": ms(self.cpu),
+                "waited_ms": ms(self.waited), "preempted": self.preempted,
+                "blocked": self.blocked })
+    }
+}
+
+impl std::ops::Add for Spent {
+    type Output = Spent;
+    fn add(self, o: Spent) -> Spent {
+        Spent {
+            wall: self.wall + o.wall,
+            cpu: self.cpu + o.cpu,
+            waited: self.waited + o.waited,
+            preempted: self.preempted + o.preempted,
+            blocked: self.blocked + o.blocked,
+            accounted: self.accounted && o.accounted,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Spent {
+    fn add_assign(&mut self, o: Spent) {
+        *self = *self + o;
+    }
+}
+
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1000.0
+}
+
 /// Counters for the `loop` probe.
 #[derive(Default)]
 pub(crate) struct LoopStats {
@@ -339,6 +499,20 @@ pub(crate) struct LoopStats {
     /// Longest stretch of synchronous loop work (a tick, a step, the post-dispatch
     /// source sync/update, one client's requests) since the last `probe loop {"reset": true}`.
     pub max_busy_ms: f64,
+    /// TODO F5, with accounting on (`probe loop {"account": true}`; else 0 / `null`): the
+    /// longest stretch's **own** time (wall minus the time the loop thread sat runnable
+    /// without a core — work plus blocking calls, what an idle machine would see) and its
+    /// CPU time, since the last reset.
+    pub max_busy_own_ms: f64,
+    pub max_busy_cpu_ms: f64,
+    /// The stretch behind `max_busy_ms` / behind `max_busy_own_ms`: `{site, wall_ms, own_ms,
+    /// cpu_ms, waited_ms, preempted, blocked, open_ms}` (+ `phases` for a tick, `cmds` for a
+    /// client's requests); `null` until one ran.
+    pub max_busy_at: Value,
+    pub max_busy_own_at: Value,
+    /// The requests handled in the stretch being measured (`[cmd, ms]`, at most 8) — named in
+    /// `max_busy_at.cmds` when that stretch is the longest.
+    stretch_cmds: Vec<(String, f64)>,
     /// The slowest single request handler (its verb) since the last reset — a client that
     /// waited on a reply sees this, whatever else the loop was doing (speed storm).
     pub max_request_ms: f64,
@@ -360,7 +534,8 @@ pub(crate) struct LoopStats {
 }
 
 impl LoopStats {
-    fn record(&mut self, d: Duration, open: Duration, phases: Map<String, Value>) {
+    fn record(&mut self, spent: Spent, open: Duration, phases: Map<String, Value>) {
+        let d = spent.wall;
         self.ticks += 1;
         self.last_ticks.push_back(d.as_secs_f64() * 1000.0);
         if self.last_ticks.len() > TICK_HISTORY {
@@ -375,25 +550,53 @@ impl LoopStats {
         {
             self.tick_times.pop_front();
         }
+        let longest = ms(d) > self.max_busy_ms;
+        let longest_own = spent.accounted && ms(spent.own()) > self.max_busy_own_ms;
+        self.busy(spent, open, "tick");
+        if longest {
+            self.max_busy_at["phases"] = Value::Object(phases.clone());
+        }
+        if longest_own {
+            self.max_busy_own_at["phases"] = Value::Object(phases.clone());
+        }
         self.last_phases = phases;
-        self.busy(d, open);
     }
 
-    /// One synchronous stretch `d`, of which `open` went into source opens.
-    pub(crate) fn busy(&mut self, d: Duration, open: Duration) {
-        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    /// One synchronous stretch, of which `open` went into source opens; `site` = which kind
+    /// (`tick`, `client`, `dispatch`).
+    pub(crate) fn busy(&mut self, spent: Spent, open: Duration, site: &str) {
+        let d = spent.wall;
+        let account = spent.accounted;
+        let at = |cmds: &[(String, f64)]| {
+            let mut v = if account {
+                spent.json()
+            } else {
+                json!({ "wall_ms": ms(d) })
+            };
+            v["site"] = json!(site);
+            v["open_ms"] = json!(ms(open));
+            if !cmds.is_empty() {
+                v["cmds"] = json!(cmds);
+            }
+            v
+        };
         // A stretch long enough to cost frames: on the log timeline (debug) so a hitch can be
         // lined up with what else happened then (`render_worker.attach`, `source.open`, …).
         if d >= LONG_BUSY {
-            log::event(
-                "runtime",
-                Level::Debug,
-                "loop.long_busy",
-                None,
-                json!({ "ms": ms(d), "open_ms": ms(open) }),
-            );
+            let mut v = at(&self.stretch_cmds);
+            v["ms"] = json!(ms(d));
+            log::event("runtime", Level::Debug, "loop.long_busy", None, v);
         }
+        if ms(d) > self.max_busy_ms {
+            self.max_busy_at = at(&self.stretch_cmds);
+        }
+        if account && ms(spent.own()) > self.max_busy_own_ms {
+            self.max_busy_own_ms = ms(spent.own());
+            self.max_busy_own_at = at(&self.stretch_cmds);
+        }
+        self.stretch_cmds.clear();
         self.max_busy_ms = self.max_busy_ms.max(ms(d));
+        self.max_busy_cpu_ms = self.max_busy_cpu_ms.max(ms(spent.cpu));
         self.max_busy_excl_open_ms = self.max_busy_excl_open_ms.max(ms(d.saturating_sub(open)));
         self.max_open_ms = self.max_open_ms.max(ms(open));
     }
@@ -401,6 +604,9 @@ impl LoopStats {
     /// One request handler's run time.
     pub(crate) fn request(&mut self, d: Duration, cmd: &str) {
         let ms = d.as_secs_f64() * 1000.0;
+        if self.stretch_cmds.len() < 8 {
+            self.stretch_cmds.push((cmd.to_string(), ms));
+        }
         if ms > self.max_request_ms {
             self.max_request_ms = ms;
             self.max_request_cmd = cmd.to_string();
@@ -833,7 +1039,7 @@ impl Runtime {
 
     /// One full iteration (real clock: the timer; stepped: the end of a `step`).
     pub(crate) fn tick(&mut self) {
-        let t = Instant::now();
+        let t = Stretch::start();
         self.cover_tick();
         self.automute_tick();
         self.update_player_paused();
@@ -1236,8 +1442,8 @@ impl Runtime {
 
     /// The second half of a tick: update sources, run the recipes on every source event
     /// since the last tick, compose + present every output.
-    fn finish_tick(&mut self, before: Duration, sync: Duration) {
-        let t = Instant::now();
+    fn finish_tick(&mut self, before: Spent, sync: Duration) {
+        let t = Stretch::start();
         let now = self.now();
         self.update_sources();
         let t_tr = Instant::now();
@@ -1264,7 +1470,7 @@ impl Runtime {
         phases.insert("sync_ms".into(), ms(sync));
         phases.insert("transitions_ms".into(), ms(tr_d));
         phases.insert("render_ms".into(), ms(render_d));
-        phases.insert("total_ms".into(), ms(total));
+        phases.insert("total_ms".into(), ms(total.wall));
         let open = self.host.take_open_time();
         self.stats.record(total, open, phases);
     }
@@ -3833,7 +4039,7 @@ impl Runtime {
     }
 
     fn begin_step(&mut self, client: u64, req: Value, dt: Duration) {
-        let t = Instant::now();
+        let t = Stretch::start();
         if let ClockKind::Stepped(c) = &self.clock {
             c.step(dt);
         }
@@ -3965,7 +4171,7 @@ impl Runtime {
         let Some(mut st) = self.step.take() else {
             return true;
         };
-        let t = Instant::now();
+        let t = Stretch::start();
         self.update_sources();
         let mut opened_now = false;
         for w in st.waits.iter_mut().filter(|w| !w.done) {
@@ -4200,10 +4406,10 @@ impl Runtime {
         match self
             .handle
             .insert_source(src, move |r, _, rt: &mut Runtime| {
-                let t = Instant::now();
+                let t = Stretch::start();
                 rt.client_io(cid, r.readable || r.error, r.writable);
                 let open = rt.host.take_open_time();
-                rt.stats.busy(t.elapsed(), open);
+                rt.stats.busy(t.elapsed(), open, "client");
                 Ok(PostAction::Continue)
             }) {
             Ok(tok) => c.token = Some(tok),
@@ -4214,7 +4420,7 @@ impl Runtime {
     /// After every dispatch: forward + update sources if mpv woke us, advance a pending
     /// step, read clients with input left, deliver events, drop dead clients.
     fn after_dispatch(&mut self) {
-        let t = Instant::now();
+        let t = Stretch::start();
         self.stats.iterations += 1;
         // Changes from handlers reach the sources promptly; mpv wakes update textures.
         if self.sync_due() {
@@ -4242,7 +4448,7 @@ impl Runtime {
             self.client_io(cid, true, false);
         }
         let open = self.host.take_open_time();
-        self.stats.busy(t.elapsed(), open);
+        self.stats.busy(t.elapsed(), open, "dispatch");
         self.flush_tap();
         for c in self.server.clients.values_mut() {
             c.flush();

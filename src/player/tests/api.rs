@@ -6255,6 +6255,14 @@ fn stepped_scene_is_deterministic() {
 
 /// Creating (spawn, imports) and destroying (quit, reap off the loop) a scene never stalls
 /// the loop; the worker is gone soon after the destroy.
+///
+/// The bound is on each loop stretch's **own** time (`max_busy_own_ms`: wall minus the time the
+/// loop thread sat runnable without a core — work plus any blocking call), not its wall time
+/// (TODO F5): under the parallel suite the longest wall stretch was the loop descheduled
+/// mid-stretch (3.4 ms wall = 0.75 ms own + 2.7 ms waiting for a core, the stretch being this
+/// test's own `probe`), which no code on the loop can fix. A real stall — CPU on the loop or a
+/// blocking call — still counts in full (RED with a 5 ms spin or a 5 ms sleep injected into a
+/// scene's teardown).
 #[test]
 fn scene_create_and_destroy_never_stall_the_loop() {
     let Some(mut srv) = scene_serve(&[]) else {
@@ -6268,12 +6276,22 @@ fn scene_create_and_destroy_never_stall_the_loop() {
     let warm = create_scene(&mut c, "api-stall-warm", &synth(Pattern::Solid), json!({}));
     show_all(&mut c, &warm);
     wait_playing(&mut c, &warm, 0.1);
-    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+    let l = c.ok("probe", json!({"name": "loop", "args": {"reset": true, "account": true}}));
+    assert_eq!(l["accounting"], json!(true), "{l}");
     let id = create_scene(&mut c, "api-stall", &synth(Pattern::FrameIndex), json!({}));
     show_all(&mut c, &id);
     wait_playing(&mut c, &id, 0.2);
-    let l = c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
-    let busy_create = l["max_busy_ms"].as_f64().unwrap();
+    let busy = |l: &Value| {
+        let own = l["max_busy_own_ms"].as_f64().unwrap();
+        let what = format!(
+            "own {own:.2} ms (wall {:.2}); longest own {}, longest wall {}",
+            l["max_busy_ms"].as_f64().unwrap(),
+            l["max_busy_own_at"],
+            l["max_busy_at"]
+        );
+        (own, what)
+    };
+    let (own_create, create) = busy(&c.ok("probe", json!({"name": "loop", "args": {"reset": true}})));
     let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
     c.ok("set", json!({"path": "lay:*:main.content", "value": ""}));
     c.ok("destroy", json!({"id": id}));
@@ -6283,13 +6301,11 @@ fn scene_create_and_destroy_never_stall_the_loop() {
     }
     let gone = t.elapsed();
     std::thread::sleep(Duration::from_millis(50));
-    let l = c.ok("probe", json!({"name": "loop"}));
-    let busy_destroy = l["max_busy_ms"].as_f64().unwrap();
-    println!(
-        "loop max busy: create {busy_create:.2} ms, destroy {busy_destroy:.2} ms; worker gone after {gone:?}"
-    );
-    assert!(busy_create <= 3.0, "create: max busy {busy_create} ms");
-    assert!(busy_destroy <= 3.0, "destroy: max busy {busy_destroy} ms");
+    let (own_destroy, destroy) = busy(&c.ok("probe", json!({"name": "loop"})));
+    println!("loop busy around create: {create}");
+    println!("loop busy around destroy: {destroy}; worker gone after {gone:?}");
+    assert!(own_create <= 3.0, "create: {create}");
+    assert!(own_destroy <= 3.0, "destroy: {destroy}");
     assert!(
         gone <= Duration::from_millis(600),
         "worker still there after {gone:?}"
@@ -8015,9 +8031,32 @@ fn paced_scene_serve() -> Option<Serve> {
     ))
 }
 
-/// Presents per second of VIRTUAL-1 and VIRTUAL-2 over `d` (`frames` probe totals, divided by
-/// the wall time between the two probes).
-fn presents_per_s(c: &mut Client, d: Duration) -> (f64, f64) {
+/// One window's rates, per second: each output's presents (`frames` probe totals) and the
+/// frames scene `id` latched (`workers` probe), over the wall time between the two reads.
+struct GateRates {
+    v1: f64,
+    v2: f64,
+    latched: f64,
+}
+
+impl GateRates {
+    /// Output `out` presented what its gate lets through: `gate` presents/s, or every frame the
+    /// scene delivered when that is fewer — the baseline measured in the same window (TODO F5:
+    /// on a loaded machine the worker misses ticks; the gate can't present frames that never
+    /// came). A gate that isn't applied (or applied late) still reads as the other rate.
+    fn check(&self, out: &str, presents: f64, gate: f64, tol: f64) {
+        let want = gate.min(self.latched);
+        assert!(
+            (presents - want).abs() <= tol,
+            "{out}: {presents:.2} presents/s, want {want:.2} ± {tol} (gate {gate}/s, the scene \
+             latched {:.2}/s)",
+            self.latched
+        );
+    }
+}
+
+/// [`GateRates`] over `d`.
+fn gate_rates(c: &mut Client, id: &str, d: Duration) -> GateRates {
     let presents = |f: &Value, o: &str| {
         f["outputs"]
             .as_array()
@@ -8028,15 +8067,19 @@ fn presents_per_s(c: &mut Client, d: Duration) -> (f64, f64) {
             .as_u64()
             .unwrap() as f64
     };
+    let latched = |c: &mut Client| worker_of(c, id)["latched"].as_f64().unwrap();
     let f0 = c.ok("probe", json!({"name": "frames"}));
     let t0 = Instant::now();
+    let l0 = latched(c);
     std::thread::sleep(d);
     let f1 = c.ok("probe", json!({"name": "frames"}));
+    let l1 = latched(c);
     let s = t0.elapsed().as_secs_f64();
-    (
-        (presents(&f1, "VIRTUAL-1") - presents(&f0, "VIRTUAL-1")) / s,
-        (presents(&f1, "VIRTUAL-2") - presents(&f0, "VIRTUAL-2")) / s,
-    )
+    GateRates {
+        v1: (presents(&f1, "VIRTUAL-1") - presents(&f0, "VIRTUAL-1")) / s,
+        v2: (presents(&f1, "VIRTUAL-2") - presents(&f0, "VIRTUAL-2")) / s,
+        latched: (l1 - l0) / s,
+    }
 }
 
 /// Task 8: one scene worker serves both outputs (D1) and ticks at the faster one's rate; each
@@ -8055,11 +8098,14 @@ fn per_output_scene_fps_gates_presents() {
     wait_playing(&mut c, &id, 0.5);
     let w = worker_of(&mut c, &id);
     assert_eq!(w["fps_target"], json!(60.0), "the fastest output's rate: {w}");
-    let (v1, v2) = presents_per_s(&mut c, Duration::from_secs(2));
-    let fps = worker_of(&mut c, &id)["fps_actual"].clone();
-    println!("scene at {fps}/s: VIRTUAL-1 {v1:.1} presents/s, VIRTUAL-2 {v2:.1}");
-    assert!((v1 - 60.0).abs() <= 3.0, "VIRTUAL-1 at 60: {v1:.2}");
-    assert!((v2 - 15.0).abs() <= 2.0, "VIRTUAL-2 at 15: {v2:.2}");
+    let r = gate_rates(&mut c, &id, Duration::from_secs(2));
+    println!(
+        "scene latched {:.1}/s: VIRTUAL-1 {:.1} presents/s, VIRTUAL-2 {:.1}",
+        r.latched, r.v1, r.v2
+    );
+    assert!(r.latched >= 30.0, "the scene latched only {:.2}/s", r.latched);
+    r.check("VIRTUAL-1", r.v1, 60.0, 3.0);
+    r.check("VIRTUAL-2", r.v2, 15.0, 2.0);
 }
 
 /// Task 8: `out:<c>.scene_fps` is live — the worker's tick rate and each output's presents
@@ -8080,29 +8126,39 @@ fn scene_fps_change_is_live_same_pid() {
             (worker_of(c, &id)["fps_target"].as_f64() == Some(want)).then_some(())
         });
     };
+    // Each window: the scene ticks at `rate` (its fastest output's), and each output presents
+    // what its gate lets through of the frames the scene latched in that window (TODO F5:
+    // under the parallel suite the worker loses frames — VIRTUAL-2 at 60 once fell outside
+    // 60 ± 3 on the absolute bound; a gate not applied live still reads as the other rate).
+    let window = |c: &mut Client, label: &str, rate: f64, g1: f64, g2: f64| {
+        let r = gate_rates(c, &id, Duration::from_secs(2));
+        println!(
+            "{label}: {:.1} / {:.1} presents/s, the scene latched {:.1}/s",
+            r.v1, r.v2, r.latched
+        );
+        assert!(
+            r.latched >= 0.5 * rate,
+            "{label}: the scene latched only {:.2}/s of {rate}",
+            r.latched
+        );
+        let tol = |g: f64| if g >= 60.0 { 3.0 } else { 2.0 };
+        r.check(&format!("{label} VIRTUAL-1"), r.v1, g1, tol(g1));
+        r.check(&format!("{label} VIRTUAL-2"), r.v2, g2, tol(g2));
+    };
     target(&mut c, 30.0);
-    let (a1, a2) = presents_per_s(&mut c, Duration::from_secs(2));
-    println!("default 30/30: {a1:.1} / {a2:.1} presents/s");
-    assert!((a1 - 30.0).abs() <= 2.0 && (a2 - 30.0).abs() <= 2.0, "{a1} {a2}");
+    window(&mut c, "default 30/30", 30.0, 30.0, 30.0);
     c.ok("set", json!({"path": "out:VIRTUAL-1.scene_fps", "value": 60}));
     target(&mut c, 60.0);
     std::thread::sleep(Duration::from_millis(300));
-    let (b1, b2) = presents_per_s(&mut c, Duration::from_secs(2));
-    println!("60/30: {b1:.1} / {b2:.1} presents/s");
-    assert!((b1 - 60.0).abs() <= 3.0, "VIRTUAL-1 at 60: {b1}");
-    assert!((b2 - 30.0).abs() <= 2.0, "VIRTUAL-2 still at 30: {b2}");
+    window(&mut c, "60/30", 60.0, 60.0, 30.0);
     // 0 = the output's refresh (60 here) on VIRTUAL-2; then both down to 15.
     c.ok("set", json!({"path": "out:VIRTUAL-2.scene_fps", "value": 0}));
     std::thread::sleep(Duration::from_millis(300));
-    let (c1, c2) = presents_per_s(&mut c, Duration::from_secs(2));
-    println!("60/0(=60): {c1:.1} / {c2:.1} presents/s");
-    assert!((c2 - 60.0).abs() <= 3.0, "VIRTUAL-2 at its refresh: {c2}");
+    window(&mut c, "60/0(=60)", 60.0, 60.0, 60.0);
     c.ok("set", json!({"path": "out:*.scene_fps", "value": 15}));
     target(&mut c, 15.0);
     std::thread::sleep(Duration::from_millis(300));
-    let (d1, d2) = presents_per_s(&mut c, Duration::from_secs(2));
-    println!("15/15: {d1:.1} / {d2:.1} presents/s");
-    assert!((d1 - 15.0).abs() <= 2.0 && (d2 - 15.0).abs() <= 2.0, "{d1} {d2}");
+    window(&mut c, "15/15", 15.0, 15.0, 15.0);
     assert_eq!(worker_of(&mut c, &id)["pid"], pid, "the same worker throughout");
     let evs = c.drain_events();
     let readies = evs

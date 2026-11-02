@@ -280,6 +280,9 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
 }
 
 fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
+    if let Some(on) = args.get("account").and_then(Value::as_bool) {
+        crate::runtime::set_accounting(on);
+    }
     let s = &rt.stats;
     let recent: Vec<f64> = s.last_ticks.iter().rev().take(8).copied().collect();
     let v = json!({
@@ -292,6 +295,14 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         "max_tick_ms_recent": s.last_ticks.iter().copied().fold(0.0, f64::max),
         "last_phases": s.last_phases,
         "max_busy_ms": s.max_busy_ms,
+        // TODO F5: what the longest wall-clock stretch was; with accounting on
+        // (`args: {"account": true}`, for the process), the longest stretch's own time (wall
+        // minus the time the loop thread sat runnable without a core) and the most CPU time.
+        "max_busy_at": s.max_busy_at,
+        "accounting": crate::runtime::accounting(),
+        "max_busy_own_ms": s.max_busy_own_ms,
+        "max_busy_own_at": s.max_busy_own_at,
+        "max_busy_cpu_ms": s.max_busy_cpu_ms,
         "max_busy_excl_open_ms": s.max_busy_excl_open_ms,
         "max_open_ms": s.max_open_ms,
         "max_request_ms": s.max_request_ms,
@@ -327,6 +338,10 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
     });
     if args.get("reset").and_then(Value::as_bool) == Some(true) {
         rt.stats.max_busy_ms = 0.0;
+        rt.stats.max_busy_cpu_ms = 0.0;
+        rt.stats.max_busy_own_ms = 0.0;
+        rt.stats.max_busy_at = Value::Null;
+        rt.stats.max_busy_own_at = Value::Null;
         rt.stats.max_busy_excl_open_ms = 0.0;
         rt.stats.max_open_ms = 0.0;
         rt.stats.max_request_ms = 0.0;

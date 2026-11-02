@@ -448,7 +448,7 @@ doing ~6 ms of GPU per frame: every `SceneSource::update` p99 ≤ 1 ms, max < 4 
 previous frame), `fdpoll_fallback_is_equally_correct`, `four_workers_latch_independently`,
 `killed_worker_keeps_last_frame`; units `worker::dmabuf::latch_takes_newest_signalled_and_releases_the_rest`,
 `forget_worker_keeps_the_frame_and_never_releases_it`, `external_only_modifier_is_refused`;
-`tests/api.rs::scene_create_and_destroy_never_stall_the_loop` (max loop busy ≤ 3 ms around a scene's
+`tests/api.rs::scene_create_and_destroy_never_stall_the_loop` (the loop's longest stretch ≤ 3 ms of its own time — wall minus waiting for a core — around a scene's
 creation and destruction). See `.claude/rules/player-core.md` § Scene worker → "Frame transport (Task 4)".
 
 ## 11. A worker's audio is a gain on a stream that keeps running

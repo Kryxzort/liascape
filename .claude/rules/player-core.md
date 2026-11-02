@@ -2466,8 +2466,9 @@ gl_error|duplicate_output|pointer_error|driver_env|default_queue_failed` (the la
 `api.client_connected|closed|dropped|tap_overflow`, `player.started|stopped|quitting|exit`,
 `step.timeout`, `source.frame_refetched`, `render_worker.started|unavailable|stopped|died|
 attach_failed|lane_failed|hwdec_interop|cuda_init|attach|free|first_render` (§ Sources "Render
-worker", "Hardware decoding"), `loop.long_busy {ms, open_ms}` (debug: a synchronous loop stretch
-≥ 50 ms, to line a hitch up with what else happened), `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
+worker", "Hardware decoding"), `loop.long_busy {ms, wall_ms, site, open_ms, cmds?}` (+ the
+accounting fields of `probe loop`'s `max_busy_at` when on; debug: a synchronous loop stretch ≥ 50 ms,
+to line a hitch up with what else happened), `mpv.reaped`, `mpv.trimmed` (debug, Task 20b), `mpv.reaper_stragglers`,
 `mpv.options_skipped` (a script trim this libmpv doesn't know, once per process), `effects.missing`,
 `supervisor.restart` (the restarted child, first thing) | `child_exited|giving_up|
 stop_timeout|spawn_failed` (the supervisor, appended to the shared log),
@@ -2513,7 +2514,16 @@ only); `loop` — `{clock, tick_period_ms, ticks, tick_hz_last_s, last_tick_ms,
 recent_ticks_ms, max_tick_ms_recent, last_phases {sync_ms, transitions_ms, render_ms,
 total_ms}, max_busy_ms (longest synchronous stretch since the last
 `args: {"reset": true}` — a tick, a step, the post-dispatch sync, or one client's requests; before
-the speed storm request handlers were left out), max_request_ms + max_request_cmd (the slowest single
+the speed storm request handlers were left out), max_busy_at (that stretch: `{site:
+tick|client|dispatch, wall_ms, open_ms, cmds?: [[verb, ms]…], phases?}`), accounting +
+max_busy_own_ms + max_busy_own_at + max_busy_cpu_ms (TODO F5 — **scheduler accounting**, off until
+`args: {"account": true}` turns it on for the process (`false` off): each stretch also reads the loop
+thread's CPU clock (`CLOCK_THREAD_CPUTIME_ID`), its run delay (`/proc/thread-self/schedstat`, opened
+once, `pread`) and its voluntary/involuntary switches (`getrusage(RUSAGE_THREAD)`) — four syscalls
+per stretch, hence opt-in (F6b counts the loop's syscalls per frame). `own_ms` = wall − `waited_ms`
+(runnable without a core) = work + blocking calls, what an idle machine would see; `cpu_ms`,
+`preempted`, `blocked` in the `_at` objects. A stretch begun before accounting was on isn't
+counted. `runtime::Stretch` / `Spent`), max_request_ms + max_request_cmd (the slowest single
 request handler and its verb, same reset), max_busy_excl_open_ms + max_open_ms (the same with the
 loop's share of source opens taken out / that share alone — render context + props +
 `loadfile`; the core itself is made on the `lia-open` worker, § Sources), iterations, wakes, wake_pending, wake_fds, clients,
@@ -3917,8 +3927,13 @@ jump to 100 s), `scene_tick_rate_follows_demand` (30 → 60 /s live, same pid),
 worker's re-export). `tests/api.rs`: `scene_capability_state_and_workers_probe`,
 `player_pause_freezes_scene` (real clock), `stepped_scene_is_deterministic` (two servers, 60
 steps: byte-identical captures, `latched_t` = 59 × 0.016, 60 ticks; 60 steps < 15 s — RED
-155 s before the fence wake), `scene_create_and_destroy_never_stall_the_loop` (max busy ≤ 3
-ms around each, worker gone ≤ 600 ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
+155 s before the fence wake), `scene_create_and_destroy_never_stall_the_loop` (the longest
+stretch's **own** time ≤ 3 ms around each — `probe loop {"account": true}`'s `max_busy_own_ms`, not
+the wall `max_busy_ms` (TODO F5: under the parallel suite the wall maximum, 3.25–3.56 ms, was the
+loop thread runnable without a core — a pinned CPU hog reproduces it: wall 3.4 ms = 0.75 own + 2.7
+waiting, the stretch the test's own `probe`; the scene's destroy itself is 0.03 ms) —; RED with 5 ms
+of CPU or a 5 ms sleep injected into a scene's `begin_teardown`, idle or hogged; worker gone ≤ 600
+ms), `scene_parks_and_resumes_on_hotplug` (Review Focus #4),
 `capture_scene_source_is_upright`. `tests/supervise.rs`: `scene_snapshot_restores_at_position`
 (SIGSEGV → restored within ±2 s, new worker, the old one gone; RED with the periodic refresh
 video-only). Units: `scene_clock_excises_pauses_and_scales_by_speed`, `eff_fps_and_demand`,
@@ -4674,7 +4689,11 @@ Code: `scene/budget.rs` (pure), `vram.rs` (measuring + the pure low-VRAM rule), 
   (`--redraw-policy content`, VIRTUAL-1 scene_fps 60 / VIRTUAL-2 15, one scene on both → measured
   59.9 / 15.0 presents/s; RED with the gate bypassed: 59.4 / 59.4), `scene_fps_change_is_live_same_pid`
   (30/30 → 60/30 → 60/0(=refresh 60) → 15/15, measured exactly those, `fps_target` within 0.5 s,
-  one `worker.spawned`, no restart), `scene_over_vram_limit_is_stopped_not_crashed` (fake probe:
+  one `worker.spawned`, no restart). Both judge each output's presents against `min(gate, the
+  frames the scene latched in the same window)` (`gate_rates` / `GateRates::check`, the latched
+  rate ≥ ½ the scene's) rather than the absolute gate — TODO F5: once in a parallel suite run
+  VIRTUAL-2 at 60 fell outside 60 ± 3; RED with the gate bypassed (`scene_gate_period` → `None`):
+  "VIRTUAL-2: 59.95 presents/s, want 15.00", "60/30 VIRTUAL-2: 59.95, want 30.00". `scene_over_vram_limit_is_stopped_not_crashed` (fake probe:
   no limit by default at 5000 MiB; a spike shorter than the 1 s hold ignored; over it → stopped
   after 1.11 s with the UI text, no crash record/restart, the last frame captured),
   `low_vram_stop_frees_and_resumes_every_source` (a video + a scene: `vram.low` after the hold,
