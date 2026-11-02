@@ -2716,6 +2716,46 @@ fn play_after_stop_resumes_its_point() {
     assert!(c.get("prog:main.played_ms").as_f64().unwrap() >= played);
 }
 
+/// TODO F6: a resume point carries the countdown of the settings it was saved under. Played
+/// again under other ones (the UI matrix's next cell loads the bar playlist with a 600 s timer
+/// after one that ran it under "switch when video ends" with minimum 0, or an 8 s timer), its
+/// remaining must be re-timed to the current interval — never the stale 0 (a switch at the
+/// first tick, ~357 ms under load) or a few seconds left of an old short interval.
+#[test]
+fn resume_retimes_a_countdown_saved_under_other_settings() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("rt", 3);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    let timer600 = json!({"mode": "timer", "interval_ms": 600_000});
+    let run = |c: &mut Client, saved_under: Value, play_ms: u64, want: f64, what: &str| {
+        keyed(c, "bar", "resume", &items, saved_under);
+        verb(c, "play", json!({"index": 1}));
+        step_until(c, 16, 2000, "the play", n_currents(1));
+        step_for(c, 50, play_ms);
+        c.ok("stop", json!({}));
+        c.step(16);
+        c.events.clear();
+        keyed(c, "bar", "resume", &items, timer600.clone());
+        let r = verb(c, "play", json!({"from": "resume"}));
+        assert_eq!(r["path"], json!(items[1]), "{what}: {r}");
+        step_until(c, 16, 3000, "the resume", n_currents(1));
+        assert_eq!(currents(c)[0]["resumed"], json!(true), "{what}");
+        step_for(c, 50, 2000);
+        let p = prog(c);
+        assert_eq!(currents(c).len(), 1, "{what}: switched after the resume: {:?}", currents(c));
+        let rem = p["remaining_ms"].as_f64().unwrap();
+        assert!((rem - want).abs() <= 400.0, "{what}: remaining {rem}, want ≈ {want}: {p}");
+        c.ok("stop", json!({}));
+        c.step(16);
+        c.events.clear();
+    };
+    // saved under "switch when video ends", minimum 0: no countdown ran → a full interval
+    run(&mut c, json!({"mode": "on_end", "interval_ms": 0}), 1000, 598_000.0, "on_end");
+    // saved under an 8 s timer 6 s in: the 6 s elapsed are kept (`retime_remaining`)
+    run(&mut c, json!({"mode": "timer", "interval_ms": 8000}), 6000, 592_000.0, "timer 8 s");
+}
+
 #[test]
 fn switching_playlists_and_back_resumes_each() {
     let Some(srv) = Serve::start() else { return };

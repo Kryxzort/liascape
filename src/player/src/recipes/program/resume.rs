@@ -30,8 +30,26 @@ pub struct ResumePoint {
     pub time_pos: f64,
     pub played_ms: u64,
     pub remaining_ms: u64,
+    /// The interval `remaining_ms` counted down from (the timer's `interval_ms` when saved);
+    /// `None` = no countdown ran (`on_end`, or a point saved before this field). A resume
+    /// re-times it to the interval it plays under ([`resumed_remaining`], TODO F6).
+    #[serde(default)]
+    pub countdown_ms: Option<u64>,
     pub last_effect: Option<String>,
     pub saved_unix_ms: u64,
+}
+
+/// The countdown a resumed item starts with under a timer of `interval_ms`: the saved
+/// `remaining_ms` re-timed from the interval it counted down from (`countdown_ms`) the way a
+/// live interval edit is (`rule::retime_remaining`: the elapsed time kept, an interval
+/// already used up → a full one); no countdown ran (`None`) → a full interval. TODO F6: the
+/// raw saved value made a playlist saved under "switch when video ends" (remaining 0) or a
+/// short timer switch at once when played again under a 600 s one.
+pub fn resumed_remaining(countdown_ms: Option<u64>, remaining_ms: u64, interval_ms: u64) -> u64 {
+    match countdown_ms {
+        Some(old) => super::rule::retime_remaining(old, remaining_ms, interval_ms),
+        None => interval_ms,
+    }
 }
 
 /// `resume.json`: key → point, oldest first.
@@ -256,6 +274,7 @@ mod tests {
             time_pos: 12.5,
             played_ms: 4000,
             remaining_ms: 6000,
+            countdown_ms: Some(10_000),
             last_effect: None,
             saved_unix_ms: 1,
         }
@@ -364,6 +383,25 @@ mod tests {
         assert_eq!(p.order.current(), Some("c"));
         assert!(p.resumed);
         assert_eq!(p.order.items().len(), 5);
+    }
+
+    #[test]
+    fn resumed_remaining_retimes_to_the_current_interval() {
+        // same interval: as saved
+        assert_eq!(resumed_remaining(Some(10_000), 6000, 10_000), 6000);
+        // an 8 s timer 6 s in, resumed under 600 s: the 6 s elapsed kept
+        assert_eq!(resumed_remaining(Some(8000), 2000, 600_000), 594_000);
+        // used up (0 left): never a switch at once — the 8 s elapsed kept under a longer
+        // interval, a full one when the elapsed time reaches it
+        assert_eq!(resumed_remaining(Some(8000), 0, 600_000), 592_000);
+        assert_eq!(resumed_remaining(Some(600_000), 0, 600_000), 600_000);
+        // no countdown ran (on_end / an old point): a full interval
+        assert_eq!(resumed_remaining(None, 0, 600_000), 600_000);
+        // an old point without the field reads as None
+        let mut pt = serde_json::to_value(point(&["a"], "a")).unwrap();
+        pt.as_object_mut().unwrap().remove("countdown_ms");
+        let pt: ResumePoint = serde_json::from_value(pt).unwrap();
+        assert_eq!(pt.countdown_ms, None);
     }
 
     #[test]

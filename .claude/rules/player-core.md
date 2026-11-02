@@ -1894,7 +1894,12 @@ source; the transition recipe stays the one place a switch happens. The contract
     keep_pause?}` (no `from` = `index` with an index, else `start`) applies `resume::plan_start`: `start` →
     sequential: the first playable item; shuffle: a fresh permutation whose first ≠ the last item played; `index` →
     that item at 0 (an explicit play-from beats the setting); `resume` → the key's resume point exactly (order,
-    cursor, history, `position` = its `time_pos`, play time, countdown — `program.current {resumed: true}`), a point
+    cursor, history, `position` = its `time_pos`, play time, countdown — `program.current {resumed: true}`; the
+    countdown is re-timed to the interval it plays under now: a point keeps `countdown_ms`, the timer interval its
+    `remaining_ms` counted down from (none under `on_end`), and `resume::resumed_remaining` applies
+    `retime_remaining` (elapsed kept, used up → a full interval; no countdown ran → a full interval — TODO F6:
+    the raw value switched at once after a playlist saved under on_end / a short timer, `tests/program.rs::
+    resume_retimes_a_countdown_saved_under_other_settings`), a point
     whose items changed re-anchored by the reorder rule (its item at its time if still there, else the item after
     its old place at 0), none → as `start`; `resume` while the same key's playlist plays → `{corr: null, resumed:
     true}`, nothing switched (a pause stays — the backend lifts it, I1). Resume points: `<state>/resume.json`

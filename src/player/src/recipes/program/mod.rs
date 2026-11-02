@@ -684,6 +684,7 @@ impl Prog {
             time_pos,
             played_ms: self.played_ms.max(0.0) as u64,
             remaining_ms: self.remaining_ms.max(0.0) as u64,
+            countdown_ms: (!self.cfg.on_end).then_some(self.cfg.interval_ms),
             last_effect: self.last_effect.clone(),
             saved_unix_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1408,7 +1409,13 @@ impl Programs {
         if plan.resumed
             && let Some(pd) = p.pending.as_mut()
         {
-            pd.resume = Some((plan.played_ms as f64, plan.remaining_ms.map(|r| r as f64)));
+            // the saved countdown re-timed to the interval it plays under now (TODO F6)
+            let basis = stored.as_ref().and_then(|s| s.countdown_ms);
+            let remaining = plan
+                .remaining_ms
+                .filter(|_| !p.cfg.on_end)
+                .map(|r| resume::resumed_remaining(basis, r, p.cfg.interval_ms) as f64);
+            pd.resume = Some((plan.played_ms as f64, remaining));
         }
         Ok((vec![act], None))
     }

@@ -1018,8 +1018,18 @@ Two bug classes kept recurring; fix the class, not the instance:
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
   - F6: once under load (UI matrix `paused × playlistBarPlay`), a program loaded with "play resume → k1.mp4 (resumed)"
-    and its timer switched to k2 357 ms later with a 600 s interval; rerun alone it passed 3 of 3. Possibly a resumed
-    program whose remaining interval is already used up. Not looked into.
+    and its timer switched to k2 357 ms later with a 600 s interval; rerun alone it passed 3 of 3. **Closed
+    2026-11-02 ("Retime A Resumed Countdown To The Current Interval"):** a resume point (`resume.json`, key `bar`
+    for the playlist bar) kept the timer's raw `remaining_ms` but not the interval it counted down from, and the
+    resume committed it as is. An earlier matrix cell had played the bar playlist under "switch when video ends"
+    with minimum 0 (remaining 0 — no countdown runs under `on_end`) or a short timer (`plInterval` 8 s); this
+    cell loaded it with 600 s and resumed with that stale 0 / few seconds → the timer fired on the first tick
+    after the commit (357 ms = the tick + B's load). Alone, no such point existed. Now the point saves
+    `countdown_ms` (the timer interval; none under `on_end`) and the resume re-times it like a live interval
+    edit (`resume::resumed_remaining` → `retime_remaining`; no countdown ran → a full interval). Guards
+    `tests/program.rs::resume_retimes_a_countdown_saved_under_other_settings` (RED: on_end → switched one tick
+    after the resume; 8 s timer → remaining 0 and a timer switch pending), unit
+    `resumed_remaining_retimes_to_the_current_interval`.
   - F7: "Start over" + shuffle restarts every boot on the same item (138 on two boots, 2026-11-02). The program's
     `seed` is saved (`program/store.rs`) but its RNG state isn't, and `Prog::new` makes `Rng::new(seed)` each process,
     so a session start's "fresh shuffle" (`session_start` → `plan_start`) and every later random / effect pick replay
