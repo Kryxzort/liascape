@@ -172,7 +172,13 @@ constrained** — it can't be a live GL texture: a scene **A** → LWE `--screen
 
 ## Auto-Mute (`AudioMonitor`)
 
-The engine on both players. The in-player Signal can replace it under `liascape-player` only behind the parity flag `AudioMonitor.AutoMuteParityPassed` (false; player-adapter.md § Auto-mute "The in-player engine"); this section is what runs with it off, and with it on whenever the player lacks the `automute` capability.
+**Which engine.** Under `liascape-player` the shipped auto-mute is the **player's own Signal** (Phase 3 Task 14,
+parity passed on the owner's machine 2026-11-02 — `docs/player/reports/phase3.md` § 7; player-core.md § Signals →
+Auto-mute, player-adapter.md § Auto-mute "The in-player engine"): on by default, it mutes with the app open or closed,
+and `monitor-daemon` is retired there (never spawned; a leftover one is stopped at serve start / `restore` / `stop`).
+This section (`AudioMonitor`) is the **legacy** engine's auto-mute, unchanged, and the fallback while `serve` runs
+under `liascape-player` when the player has no `automute` capability (`LIASCAPE_PLAYER_AUTOMUTE=0`, its audio bus
+down) — with the app closed there is then no auto-mute (said so in `/health/features`).
 
 `AudioMonitor.Start/Stop` called by the `/settings` handler (`Web/ServerHost.cs`) when an AutoMute field changes; started on `serve` startup, `Stop()`ped (+ handed to a detached `monitor-daemon`) on `ApplicationStopping`. Three concurrent tasks:
 
@@ -188,7 +194,7 @@ The engine on both players. The in-player Signal can replace it under `liascape-
 
 **`_aboveThresholdCount` reset**: `Interlocked.Exchange(..., 0)` at top of `WatchStreamsAsync` (not in `Stop()`), so `finally` blocks from previous run can decrement safely without racing against new monitors.
 
-**Daemon persistence**: on close with AutoMute enabled, `SpawnDetachedMonitor()` launches `liascape monitor-daemon` via `setsid`, writes PID to `~/.config/liascape/monitor.pid`. On next open, `KillDetachedMonitor()` kills it before app's own `AudioMonitor` starts.
+**Daemon persistence** (legacy only): on close with AutoMute enabled, `SpawnDetachedMonitor()` launches `liascape monitor-daemon` via `setsid`, writes PID to `~/.config/liascape/monitor.pid`. On next open, `KillDetachedMonitor()` kills it before app's own `AudioMonitor` starts.
 
 ## Restart Daemon
 

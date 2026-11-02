@@ -276,26 +276,42 @@ PipeWire + pipewire-pulse + WirePlumber, the player on its real bus, AutoMute 0/
 full-live/reveal/frozen → no `gain.mute` −96 ramp; a foreign `paplay` still mutes (latency printed, ≤ 1 s) and
 unmutes when it ends.
 
-**The in-player engine, behind its parity flag (Phase 3 Task 14; off in shipped behaviour).** `AudioMonitor.AutoMuteInPlayer` =
-`AutoMuteParityPassed` (a constant, **false** until all ten plan criteria pass on the owner's machine) && liascape-player
-&& the running player's `automute` capability (its `LIASCAPE_PLAYER_AUTOMUTE=1`, its bus up). `LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1`
-stands in for the flip in the adapter IT only. **Flag off, every path below is skipped and nothing is sent to the player.**
+**The in-player engine — the shipped auto-mute under liascape-player (Phase 3 Task 14; flipped 2026-11-02 after the
+on-machine parity run, `docs/player/reports/phase3.md` § 7).** `AudioMonitor.AutoMuteInPlayer` = liascape-player && the
+running player's `automute` capability (its Signal on — the default; `LIASCAPE_PLAYER_AUTOMUTE=0` is the escape hatch —
+and its bus up). The parity flag (`AutoMuteParityPassed`, `LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED`) is gone with the flip.
 - `LiascapePlayerMedia.ApplyAutoMuteSettings` → `player.automute`, `automute_delay_ms`, `autounmute_delay_ms`,
   `automute_min_level_db`, `automute_only_if_mpris` (coalescible, `player:<prop>`); re-asserted per player process in
   `AssertSceneFps` (a switch, R81's reapply). The player's snapshot keeps them (app closed, crash restart).
-- `AudioMonitor.ReconcileEngine` (flag on): serve start, an AutoMute setting, every 10 s from the upgrade watch —
-  `HasCapability("automute", fresh: true)` greets the player again, since the capability follows the bus. Capable → monitor stopped,
-  settings sent; not (no player yet, env gate off, bus down, legacy engine) → **`AudioMonitor` runs** (criterion 10). A handover can
-  overlap ≤ 10 s (each mutes its own slot). Adapter log: `auto-mute engine: the player's Signal | AudioMonitor`.
-- No `AudioMonitor.Start` / `SpawnDetachedMonitor` while the gate is on: `ApplicationStopping` spawns no daemon; `restore`
-  decides after the player answers (`AfterRestore`, the bus gets ≤ 3 s); a `monitor-daemon` started without the capability (the bus not
-  up at login) ends itself once the player has it, handing it the settings. `monitor-daemon` stays.
+- `AudioMonitor.ReconcileEngine` (both engines; legacy reduces to today's Start / Stop): serve start, an AutoMute setting, every
+  10 s from the upgrade watch — `HasCapability("automute", fresh: true)` greets the player again, since the capability follows the
+  bus. That probe runs on **a client of its own** (`AudioMonitor._probe`, same socket, `AutoSpawn = false`): on the shared client
+  its `hello` was what discovered a new player process from the timer thread, so R81's restart reapply raced the user's next
+  request, and its 300 ms timeout on a player busy quitting opened the shared stall breaker (an `/apply` right after a player
+  restart was lost in 4 of 5 IT runs before this — IT § "a rebuilt player binary"; once the auto-mute section's own player check too). `AutoMuteInPlayer` takes the probe's last answer when it is
+  about the shared client's player pid, else the shared client's own capabilities. Capable → monitor stopped, settings sent; not (no player yet, `LIASCAPE_PLAYER_AUTOMUTE=0`, bus down, legacy engine) →
+  **`AudioMonitor` runs while `serve` does** (criterion 10). A handover can overlap ≤ 10 s (each mutes its own slot). Adapter log
+  (liascape-player only): `auto-mute engine: the player's Signal | AudioMonitor (the player has no automute capability)`.
+  `ApplicationStopping` calls `AudioMonitor.Shutdown` (stopped for good: the 10 s watch can't start it again in a dying serve).
+- **`monitor-daemon` is retired under liascape-player:** `SpawnDetachedMonitor` is a logged no-op there; `ApplicationStopping`
+  spawns none; `restore` spawns none (`AfterRestore`: the player gets the settings once it has the capability, the bus gets
+  ≤ 3 s; without it, logged: no auto-mute until the app opens); `RunDaemon` (started by hand or by an older build) hands the
+  settings to the Signal if it can and ends. A leftover one is stopped by `PlayerHelper.KillLegacyDaemons` (serve start,
+  `restore`, `stop` / `kill`; verified by its cmdline, `monitor.pid` removed; log `stopped a leftover monitor-daemon`). Serve
+  start's unverified `KillDetachedMonitor` stays legacy's. The accepted limit: a player without the capability has no
+  auto-mute with the app closed (`/health/features` says so).
 - **User vs auto:** the Signal mutes `gain.automute`, so `gain.mute`, `_autoMuted` and `PlayerHelper.IsMuted` stay the user's alone.
   `toggle-mute` asks `PlayerHelper.AutoMutedInPlayer` (`player.automute_active`, one quick `get`, so a one-shot CLI knows too) and
   `UnmuteAuto` sends `automute.release` (player-core.md § Auto-mute): audible until the foreign audio ended, as under `AudioMonitor`.
-- `FeatureHealth`'s `auto-mute` / `mpris` rows still ask for `pactl` / `parec` / `playerctl`: for the flip.
-- IT: `LIASCAPE_IT_AUTOMUTE_ENGINE=signal` runs § auto-mute with the Signal; the live-settings, B-while-muted, toggle, app-closed checks
-  run on either engine, the capability / handover / crash / PipeWire-gone checks on the Signal only.
+- `FeatureHealth` (`/health/features`) reads the player's `hello.health.automute` (or `liascape-player health`: the env gate
+  only, `ok: null` when on): ok / unknown → `auto-mute` needs nothing else (no `pactl` / `parec`), `mpris` needs a session bus
+  (`SessionBusReachable`); false → `AudioMonitor`'s tools as before plus the player's reason and "works only while the app is
+  open". Legacy: `pactl` + `parec`, `playerctl`, unchanged.
+- IT: § auto-mute runs on the Signal by default; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor` runs it with the player at
+  `LIASCAPE_PLAYER_AUTOMUTE=0` (AudioMonitor while serve runs). The live-settings, B-while-muted, toggle checks run on either
+  engine; app-closed, `restore` (no `monitor-daemon` either way) and a leftover `monitor-daemon` stopped at serve start on both;
+  the capability / handover / crash / PipeWire-gone checks on the Signal only. Matrix: `LIASCAPE_MATRIX_AUTOMUTE=signal`
+  (default) | `audiomonitor`.
 
 ## Rotation (advance-on-end minimum / maximum / separate scene timing; redesigned 2026-10-28)
 **Where it runs (Phase 3 Task 7, 2026-10-30): under `liascape-player` every rule below lives in the player's program**
@@ -348,8 +364,8 @@ liascape-player` if anything reaches it. The backend's half is `Player/LiascapeP
   parked (`LiascapePlayerMedia.ShowsAnything`) → done (`play` while something plays does nothing). Nothing (first
   boot, after `stop`, no snapshot) → `LastSession`: a playlist `Load`ed with `from` = its effective start mode (a
   Resume finds its point in the player's `resume.json`; waited ≤ 15 s), a single wallpaper `Apply`ed. A player that
-  can't start → `restore` prints why, exit 1. AutoMute → `monitor-daemon` (O3), not next to a running app's own
-  monitor (a forwarded `play`: `AudioMonitor.RunsHere`).
+  can't start → `restore` prints why, exit 1. AutoMute → the player's Signal gets the settings (`AudioMonitor.AfterRestore`);
+  no `monitor-daemon` (retired, Task 14), a leftover one stopped.
 
 The rules themselves (unchanged, now the player's):
 Owner-approved model (the play-time limits added the same day were folded into it; "Separate timing for scenes" + 0 =

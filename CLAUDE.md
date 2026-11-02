@@ -56,8 +56,9 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
   `volume-up` works too).
 - `ctl <verb> ['<json>']` — the running player's control socket (`liascape-player ctl`: `state`, `logs`, `probe`, …).
 - `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`.
-- `monitor-daemon` *(internal)* — `AudioMonitor` with the app closed (both engines); spawned detached when the app
-  closes / by `restore`, killed on app open.
+- `monitor-daemon` *(internal, **legacy engine only**)* — `AudioMonitor` with the app closed; spawned detached when the app
+  closes / by `restore`, killed on app open. Under `liascape-player` the player's own auto-mute Signal mutes with the
+  app closed: it is never started and a leftover one is stopped (Phase 3 Task 14).
 - `timer-daemon` / `restart-daemon` *(internal, **legacy engine only**)* — the timed-playlist tick loop, the mpvpaper
   relauncher (frame-buffer leak workaround); spawned detached when the app closes / by `restore`; killed by `kill` and
   on app open. Under `liascape-player` neither is ever started (the player's program rotates with the app closed) and

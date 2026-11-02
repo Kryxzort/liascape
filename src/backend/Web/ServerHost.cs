@@ -80,8 +80,9 @@ public static class ServerHost
 
         // The serve backend owns the AudioMonitor in-process while running: take over from any detached
         // `monitor-daemon` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand
-        // back to a detached `monitor-daemon` on shutdown so mute survives app close.
-        AudioMonitor.KillDetachedMonitor();
+        // back to a detached `monitor-daemon` on shutdown so mute survives app close. Legacy only: under liascape-player
+        // the player's Signal mutes (app open or closed) and a leftover monitor-daemon is stopped below (KillLegacyDaemons).
+        if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) AudioMonitor.KillDetachedMonitor();
         // Same ownership handoff for the TIMED-PLAYLIST timer: `serve` runs the timer IN-PROCESS, so it
         // must KILL any detached `timer-daemon` (e.g. one spawned at boot by `liascape restore`) — otherwise
         // BOTH own mpvpaper and the daemon keeps cycling its own (stale) playlist over ours ("creep") —
@@ -106,15 +107,14 @@ public static class ServerHost
         if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
         else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
         var startup = SettingsService.Load();
-        // (Task 14's flag on: the player's Signal when it can, this monitor when it can't — AudioMonitor.ReconcileEngine)
-        if (AudioMonitor.AutoMuteParityPassed) AudioMonitor.ReconcileEngine();
-        else if (startup.AutoMute)
-            AudioMonitor.Start(startup.AutoMuteDelayMs, startup.AutoUnmuteDelayMs, startup.AutoMuteMinLevelDb, startup.AutoMuteOnlyIfMprisActive);
+        // auto-mute: the player's Signal when it can (liascape-player + its `automute` capability), else AudioMonitor here
+        AudioMonitor.ReconcileEngine();
         app.Lifetime.ApplicationStopping.Register(() =>
         {
             var s = SettingsService.Load();
-            AudioMonitor.Stop();
-            if (s.AutoMute && PlayerHelper.IsPlaying && !AudioMonitor.AutoMuteInPlayer) AudioMonitor.SpawnDetachedMonitor();
+            AudioMonitor.Shutdown();
+            // legacy: hand auto-mute to a detached monitor-daemon (retired under liascape-player: the player's Signal goes on)
+            if (s.AutoMute && !Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
             // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
             // so it keeps cycling after the app closes (the Electron shell only kills the backend — it
             // doesn't run `liascape restore`). Stop our own ticking first: this process may live on for a while
@@ -440,14 +440,7 @@ public static class ServerHost
                 || prev.AutoUnmuteDelayMs != s.AutoUnmuteDelayMs
                 || prev.AutoMuteMinLevelDb != s.AutoMuteMinLevelDb
                 || prev.AutoMuteOnlyIfMprisActive != s.AutoMuteOnlyIfMprisActive;
-            if (amChanged && AudioMonitor.AutoMuteParityPassed) AudioMonitor.ReconcileEngine(settingChanged: true);
-            else if (amChanged)
-            {
-                if (s.AutoMute)
-                    AudioMonitor.Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteMinLevelDb, s.AutoMuteOnlyIfMprisActive);
-                else
-                    AudioMonitor.Stop();
-            }
+            if (amChanged) AudioMonitor.ReconcileEngine(settingChanged: true);
             Mark("rest");
             if (psw.ElapsedMilliseconds > 100 || Environment.GetEnvironmentVariable("LIASCAPE_PROFILE_SETTINGS") == "1")
                 Console.WriteLine($"/settings: {psw.ElapsedMilliseconds} ms ({string.Join(", ", phases)})");

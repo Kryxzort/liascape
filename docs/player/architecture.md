@@ -153,8 +153,10 @@ the buffers there (`src/player/src/wl.rs`, `.claude/rules/player-core.md` § Way
 notes).
 
 **Signal** (spec §4.2): "window fullscreen" → auto-pause is live (`cover.engaged`, invariant #12's hold).
-"Other audio playing" → auto-mute exists in the player behind `LIASCAPE_PLAYER_AUTOMUTE=1` (Phase 3 Task 14) and
-stays off until it passes its parity bar; until then the C# `AudioMonitor` decides, for both engines.
+"Other audio playing" → auto-mute is the player's (Phase 3 Task 14; it passed its parity bar on the owner's machine,
+2026-11-02): on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` turns it off), with the app open or closed. The C#
+`AudioMonitor` is the legacy engine's, and the fallback while the app is open when the player has no `automute`
+capability (the env gate off, its audio bus down).
 
 ---
 
@@ -360,9 +362,10 @@ audio bus, crash recovery, and the backend adapter; Phase 2 added WE scenes — 
 - **Phase 3 — Programs and Signals: done** (`docs/player/reports/phase3.md`). Rotation, advance/wait-on-end, shuffle,
   history, playlist start and pause-when-covered live in the player; under `liascape-player` the backend's
   `timer-daemon`, `restart-daemon`, `pending_action.txt` and timer pid files are never used (the legacy engine
-  keeps them until Phase 5). **Still the backend's:** auto-mute. The in-player Signal (per-stream metering, the
-  player's own bus excluded by *ownership*, ≤ 100 ms) is built behind `LIASCAPE_PLAYER_AUTOMUTE=1`; `AudioMonitor` +
-  `monitor-daemon` stay until it passes its parity bar on the owner's machine (plan Task 14).
+  keeps them until Phase 5). **Auto-mute too** (plan Task 14, flipped 2026-11-02 after the on-machine parity run): the
+  in-player Signal (per-stream metering, the player's own bus excluded by *ownership*) is on by default and
+  `monitor-daemon` is retired under `liascape-player`; `AudioMonitor` stays for legacy and as the app-open fallback
+  for a player without the `automute` capability.
 - **Per-monitor is a player capability, not a user-facing feature yet.** The graph already
   supports independent per-output content (`out:<connector>`, its own main layer) and this is
   provable today via `ctl`/headless tests; nothing in the Electron UI exposes assigning different

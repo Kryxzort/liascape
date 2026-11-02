@@ -52,8 +52,11 @@
 #   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that
 #   reruns exactly that sequence on one stack. --jobs defaults to 2 here (LIASCAPE_FUZZ_JOBS), capped at the run count.
 #   Results: <out>/fuzz.jsonl, one record per run (seed, run, start, sequence, replay, per-step phases + violations).
-# LIASCAPE_MATRIX_AUTOMUTE=signal: the auto-mute cells with the player's Signal as the engine (a private PipeWire stack in place of
-# PulseAudio; plan Phase 3 Task 14). Run it with `--only autoMute`.
+# LIASCAPE_MATRIX_AUTOMUTE=signal (the default) | audiomonitor: the auto-mute engine. signal = the shipped one, the player's
+# Signal (plan Phase 3 Task 14): the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse and its player plays
+# audio (no `--ao null`). audiomonitor = the backend's AudioMonitor (what runs while the player has no `automute`
+# capability): a private PulseAudio, the player at `--ao null` (no bus). Without pipewire / wireplumber / pipewire-pulse the
+# default falls back to audiomonitor (printed).
 # LIASCAPE_MATRIX_SCREEN=<w>x<h> (default 1400x900): the private Xvfb's screen size (a probe that measures at the owner's 1080p).
 # LIASCAPE_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
@@ -307,11 +310,17 @@ EOF
 mkdir -p "$T/home/.config/pulse"; printf 'autospawn = no\n' >"$T/home/.config/pulse/client.conf"
 PULSEAUDIO=${PULSEAUDIO:-$(command -v pulseaudio || ls /nix/store/*-pulseaudio-*/bin/pulseaudio 2>/dev/null | head -1)}
 LIASCAPE_PULSE=0
-if [ "${LIASCAPE_MATRIX_AUTOMUTE:-}" = signal ]; then
+AMX=${LIASCAPE_MATRIX_AUTOMUTE:-signal}
+case "$AMX" in signal|audiomonitor) ;; *) echo "LIASCAPE_MATRIX_AUTOMUTE: signal | audiomonitor"; exit 2 ;; esac
+if [ "$AMX" = signal ] && ! { command -v pipewire && command -v wireplumber && command -v pipewire-pulse && command -v paplay; } >/dev/null; then
+  echo "(no pipewire / wireplumber / pipewire-pulse / paplay — the auto-mute engine is AudioMonitor, on a private PulseAudio)"; AMX=audiomonitor
+fi
+export LIASCAPE_MATRIX_AUTOMUTE=$AMX
+if [ "$AMX" = signal ]; then
   # The auto-mute cells with the player's Signal as the engine (plan Phase 3 Task 14; `--only autoMute`): it hears PipeWire
   # streams only, so here the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse (no device, no D-Bus; the
-  # same null sink name, so the probe's paplay is unchanged). The env gate + the backend's test-only parity flag.
-  export LIASCAPE_PLAYER_AUTOMUTE=1 LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
+  # same null sink name, so the probe's paplay is unchanged). No session bus: lia-mpris never reads the machine's players.
+  unset LIASCAPE_PLAYER_AUTOMUTE; export DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
   unset PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
   PW=$T/pw; mkdir -p "$PW/cfg/wireplumber/wireplumber.conf.d" "$PW/state"
   cat > "$PW/pw.conf" <<'PWEOF'
@@ -374,7 +383,7 @@ printf '{"900000001":{"title":"s1","isScene":true,"workshopId":"900000001"},"900
 SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
 
 # `--ao null` means no bus (so no `automute` capability): under the Signal it plays on the private PipeWire
-AO=(--ao null); [ "${LIASCAPE_MATRIX_AUTOMUTE:-}" = signal ] && AO=()
+AO=(--ao null); [ "$AMX" = signal ] && AO=()
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real "${AO[@]}" > "$T/serve.log" 2>&1) & SP=$!
 for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
 "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!

@@ -301,12 +301,13 @@ public static class PlayerHelper
         return true;
     }
 
-    // A timer-daemon / restart-daemon left by a legacy session (the engine switched since, an older build) — stopped at
-    // `serve` start, by `restore` and by `stop`/`kill` under liascape-player. Verified by its command line (a pid file
-    // outlives a reboot: its number may belong to anything by now); its pid file goes with it.
+    // A timer-daemon / restart-daemon / monitor-daemon left by a legacy session (the engine switched since, an older
+    // build) — stopped at `serve` start, by `restore` and by `stop`/`kill` under liascape-player (the player's program
+    // rotates by itself, its Signal auto-mutes: Phase 3 Tasks 8 and 14). Verified by its command line (a pid file outlives
+    // a reboot: its number may belong to anything by now); its pid file goes with it.
     public static void KillLegacyDaemons()
     {
-        foreach (var (pidFile, verb) in new[] { (TimerDaemonPidPath, "timer-daemon"), (RestartDaemonPidPath, "restart-daemon") })
+        foreach (var (pidFile, verb) in new[] { (TimerDaemonPidPath, "timer-daemon"), (RestartDaemonPidPath, "restart-daemon"), (AudioMonitor.MonitorPidPath, "monitor-daemon") })
         {
             try
             {
@@ -319,8 +320,8 @@ public static class PlayerHelper
                         try
                         {
                             using var p = Process.GetProcessById(pid);
-                            p.Kill();
-                            LiascapePlayerClient.Log($"stopped a leftover {verb} (pid {pid}) — the player's program rotates by itself");
+                            p.Kill(entireProcessTree: true);
+                            LiascapePlayerClient.Log($"stopped a leftover {verb} (pid {pid}) — {(verb == "monitor-daemon" ? "the player's Signal auto-mutes" : "the player's program rotates by itself")}");
                         }
                         catch { }
                 }
@@ -3050,9 +3051,7 @@ public static class PlayerHelper
     // restart-daemon; a legacy leftover of either is stopped.
     private static void RestoreOnPlayer(AppSettings settings)
     {
-        // the auto-mute monitor with the app closed (O3: unchanged) — not next to a running app's own (a forwarded `play`)
-        // (Task 14's flag on: decided once the player answers — AfterRestore)
-        if (settings.AutoMute && !AudioMonitor.RunsHere && !AudioMonitor.AutoMuteParityPassed) AudioMonitor.SpawnDetachedMonitor();
+        // auto-mute: no monitor-daemon (retired, Task 14) — the player's Signal gets the settings once it answers (AfterRestore)
         KillLegacyDaemons();
         if (!LiascapePlayerClient.Shared.EnsureRunning(restore: true, sessionStart: true))
             throw new InvalidOperationException($"liascape-player could not start: {LiascapePlayerClient.Shared.LastError ?? "unknown reason"}");

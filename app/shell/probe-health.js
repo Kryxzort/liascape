@@ -8,7 +8,9 @@
 //      liascape-player that has no liascape-scene-worker next to it + LIASCAPE_SCENE_WORKER_BIN=/nonexistent, LIASCAPE_PLAYER_VRAM_PROBE=none,
 //      LIASCAPE_TRANSITIONS_DIR = a catalogue that doesn't load, and a PATH without pactl/parec/playerctl/ffmpeg/ffprobe:
 //      the endpoint reports each one not ok with its reason, every affected row shows the icon (its tooltip = the
-//      reason), the control itself is still there and enabled, and the summary lists them
+//      reason), the control itself is still there and enabled, and the summary lists them. Auto-mute under liascape-player
+//      is the player's Signal (Task 14): pactl / parec / playerctl gone must NOT warn it; with the stack's player at
+//      `--ao null` (LIASCAPE_MATRIX_AUTOMUTE=audiomonitor: no audio bus) it warns that auto-mute works only with the app open
 // Exit 1 on any FAIL. The restarted backend is recorded in LIASCAPE_BACKEND_PID_FILE for the stack's cleanup.
 const { app, BrowserWindow } = require("electron");
 const cp = require("child_process");
@@ -67,7 +69,9 @@ const ROWS = {
   mpris: ["Only if MPRIS player active"],
   ffmpeg: ["Normalize audio"],
 };
-const REASON = { scenes: /liascape-scene-worker not found/, transitions: /catalogue/, vram: /LIASCAPE_PLAYER_VRAM_PROBE=none/, "auto-mute": /pactl and parec/, mpris: /playerctl/, ffmpeg: /ffmpeg and ffprobe/ };
+const REASON = { scenes: /liascape-scene-worker not found/, transitions: /catalogue/, vram: /LIASCAPE_PLAYER_VRAM_PROBE=none/, ffmpeg: /ffmpeg and ffprobe/ };
+// the stack's player has its audio bus (the Signal) unless LIASCAPE_MATRIX_AUTOMUTE=audiomonitor (`--ao null`)
+const AM_SIGNAL = E.LIASCAPE_MATRIX_AUTOMUTE === "signal";
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
@@ -87,19 +91,23 @@ app.whenReady().then(async () => {
     await cell("present: /health/features ok for what the stack has", async () => {
       const v = [];
       if (!f1) return ["no /health/features answer"];
-      for (const id of ["liascape-player", "scenes", "transitions", "vram", "auto-mute", "ffmpeg"]) {
+      for (const id of ["liascape-player", "scenes", "transitions", "vram", ...(AM_SIGNAL ? ["auto-mute"] : []), "ffmpeg"]) {
         const f = byId(f1, id);
         if (!f) v.push(`${id} missing from the report`);
         else if (f.ok !== true) v.push(`${id} ok=${f.ok}: ${f.reason}`);
       }
       for (const f of f1) if (!Array.isArray(f.affects) || typeof f.label !== "string") v.push(`${f.id}: malformed ${JSON.stringify(f)}`);
+      const am = byId(f1, "auto-mute");
+      if (!AM_SIGNAL && (am?.ok !== false || !/audio bus is down/.test(am?.reason || "") || !/only while the app is open/.test(am?.reason || "")))
+        v.push(`auto-mute with a player at --ao null: ${JSON.stringify(am)}, want ok=false naming the audio bus and the app-open limit`);
       return v;
     });
     const s1 = await settingsRows();
     await cell("present: no warning icon on their rows", async () => {
       const v = [];
       for (const [id, labels] of Object.entries(ROWS)) {
-        if (id === "mpris" && byId(f1, "mpris")?.ok === false) continue; // playerctl may be absent on this machine
+        if (id === "mpris" && byId(f1, "mpris")?.ok === false) continue; // no session bus in the stack / playerctl absent
+        if (id === "auto-mute" && !AM_SIGNAL) continue; // checked above: it warns, rightly
         for (const l of labels) {
           const r = s1.rows[l];
           if (!r) v.push(`no row "${l}"`);
@@ -149,6 +157,15 @@ app.whenReady().then(async () => {
       if (byId(f2, "liascape-player")?.ok !== true) v.push(`liascape-player: ${JSON.stringify(byId(f2, "liascape-player"))} (the copy resolves)`);
       return v;
     });
+    await cell("missing: pactl / parec / playerctl gone don't warn auto-mute (the player's Signal needs none of them)", async () => {
+      const v = [];
+      for (const id of ["auto-mute", "mpris"]) {
+        const f = byId(f2, id);
+        if (!f) { v.push(`${id} missing from the report`); continue; }
+        if (/pactl|parec|playerctl/.test(f.reason || "")) v.push(`${id} names AudioMonitor's tools: ${JSON.stringify(f)}`);
+      }
+      return v;
+    });
     await win.loadURL(U + "/");
     for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
     const s2 = await settingsRows();
@@ -156,6 +173,7 @@ app.whenReady().then(async () => {
     await cell("missing: a warning icon with the reason on every affected row, the control kept", async () => {
       const v = [];
       for (const [id, labels] of Object.entries(ROWS)) for (const l of labels) {
+        if (!REASON[id]) continue; // auto-mute / mpris: not broken by what this step removes (the cell above)
         const r = s2.rows[l];
         if (!r) { v.push(`no row "${l}" (a control must never be hidden for it)`); continue; }
         if (!r.warn) v.push(`"${l}" has no warning icon (${id} is missing)`);

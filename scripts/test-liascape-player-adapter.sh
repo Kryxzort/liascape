@@ -29,8 +29,9 @@
 #   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
 #   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
-#   LIASCAPE_IT_AUTOMUTE_ENGINE=signal …                # the auto-mute section with the player's Signal as the engine
-#                                                 # (plan Phase 3 Task 14 — without it, today's AudioMonitor)
+#   LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor …          # the auto-mute section with the backend's AudioMonitor as the
+#                                                 # engine (the player's Signal off: LIASCAPE_PLAYER_AUTOMUTE=0) —
+#                                                 # without it, the shipped engine: the player's Signal (Task 14)
 # Needs: dotnet (or DOTNET=/path/to/dotnet), ffmpeg, jq, curl, python3. Exit 0 = all pass.
 # Last line: `RESULT pass=N fail=M`.
 set -u
@@ -91,10 +92,15 @@ unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_IN
 unset PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
 # No session bus: the MPRIS checks (AudioMonitor's playerctl, the player's lia-mpris) never read the machine's players.
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
-# The auto-mute engine under test: the player's env gate + the backend's parity flag (a test-only stand-in), or neither.
-unset LIASCAPE_PLAYER_AUTOMUTE LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED
-AM_SIGNAL=0
-[ "${LIASCAPE_IT_AUTOMUTE_ENGINE:-}" = signal ] && { AM_SIGNAL=1; export LIASCAPE_PLAYER_AUTOMUTE=1 LIASCAPE_TEST_AUTOMUTE_PARITY_PASSED=1; }
+# The auto-mute engine under test: the player's Signal (the default, its env gate unset), or the backend's AudioMonitor
+# (the Signal's escape hatch LIASCAPE_PLAYER_AUTOMUTE=0 — the player has no `automute` capability).
+unset LIASCAPE_PLAYER_AUTOMUTE
+AM_SIGNAL=1
+case "${LIASCAPE_IT_AUTOMUTE_ENGINE:-signal}" in
+  signal) ;;
+  audiomonitor) AM_SIGNAL=0; export LIASCAPE_PLAYER_AUTOMUTE=0 ;;
+  *) echo "LIASCAPE_IT_AUTOMUTE_ENGINE: signal | audiomonitor"; exit 2 ;;
+esac
 # Audio: every libpulse client (the backend's auto-mute pactl/parec, this script's own) and PipeWire client can only
 # ever reach THIS test's private servers — the auto-mute section's PipeWire + pipewire-pulse in $XDG_RUNTIME_DIR. An
 # explicit PULSE_SERVER also means libpulse never falls back to another server or autospawns one while none runs.
@@ -2117,11 +2123,12 @@ EOF
   pwd_start "$PW/pipewire-pulse.log" pipewire-pulse
   waitfor 5000 test -S "$XDG_RUNTIME_DIR/pulse/native" || bad "the private pipewire-pulse never made its socket"
   # a player WITH audio (no --ao null): its bus + mpv/scene streams on the private PipeWire
-  player_with_audio() {   # $1 = its LIASCAPE_PLAYER_AUTOMUTE
+  player_with_audio() {   # $1 = its LIASCAPE_PLAYER_AUTOMUTE ("" = unset: the shipped default)
     "$B" ctl --timeout-ms 3000 quit >/dev/null 2>&1
     for _ in $(seq 1 600); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done
     kill -0 "$SP" 2>/dev/null && kill -9 "$SP"
-    (cd /tmp && exec env LIASCAPE_PLAYER_AUTOMUTE="$1" "$B" serve --headless --outputs 640x360@60 --clock real > "$T/serve-am.log" 2>&1) & SP=$!
+    (cd /tmp && if [ -n "$1" ]; then export LIASCAPE_PLAYER_AUTOMUTE="$1"; else unset LIASCAPE_PLAYER_AUTOMUTE; fi
+     exec "$B" serve --headless --outputs 640x360@60 --clock real > "$T/serve-am.log" 2>&1) & SP=$!
     waitfor $WAIT eval 'ctl hello >/dev/null 2>&1'; CP=$(comp_pid)
   }
   bus_up() { [ "$(ctl probe '{"name":"bus"}' | jq -r .state)" = up ]; }
@@ -2130,6 +2137,11 @@ EOF
   am_log() { grep -c "auto-mute engine: $1" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null; }
   am_clients() { pactl list clients 2>/dev/null | grep -c 'application.process.binary = "pactl"'; }   # this one + the backend's subscribe
   am_ready() { [ "$(am_clients)" -ge 2 ]; }
+  # `monitor-daemon` processes of THIS test (its XDG_CONFIG_HOME) — by cmdline, never a pattern kill
+  md_procs() { local n=0 p c; for p in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+      [[ "$c" == *" monitor-daemon"* ]] || continue
+      tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qxF "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" && n=$((n + 1)); done; echo "$n"; }
+  no_md() { [ ! -e "$XDG_CONFIG_HOME/liascape/monitor.pid" ] && [ "$(md_procs)" = 0 ]; }
   # every source, by both mute slots (`gain.mute` = the user's + AudioMonitor's, `gain.automute` = the Signal's)
   am_gains() { ctl state | jq -c '[.graph | to_entries[] | select(.value.gain.mute != null) | {id: .key, m: .value.gain.mute, a: (.value.gain.automute // 0)}]'; }
   eff_muted() { ctl state | jq -e '[.graph[] | select(.gain.mute != null) | .gain] | length > 0 and all(.mute < -90 or (.automute // 0) < -90)' >/dev/null; }
@@ -2157,19 +2169,11 @@ EOF
     waitfor 3000 eval 'user_slot_muted' && ok "…and a foreign stream mutes through it (gain.mute −96)" || bad "env gate off: nothing muted: $(am_gains)"
     foreign_stop; waitfor 3000 eff_open || bad "env gate off: still muted after the stream: $(am_gains)"
     setting '.AutoMute = false'; stop_now
-    # back on: the watch hands over (≤ 10 s), its stream watch gone
-    player_with_audio 1
-  else
-    # shipped behaviour: the player has the capability, the flag is off → nothing reaches its props, AudioMonitor runs
-    player_with_audio 1
-    waitfor $WAIT am_cap || bad "env gate on: no automute capability: $(am_caps)"
-    setting '.AutoMute = true | .AutoMuteDelayMs = 700 | .AutoUnmuteDelayMs = 900'
-    waitfor $WAIT am_ready && [ "$(ctl state | jq -c '.graph.player | [.automute, .automute_delay_ms, .autounmute_delay_ms]')" = '[false,500.0,2000.0]' ] \
-      && [ "$(am_log "the player's Signal")" = 0 ] && [ "$(am_log AudioMonitor)" = 0 ] \
-      && ok "the parity flag off, the capability present: AudioMonitor runs, no prop sent, no engine line" \
-      || bad "flag off: pactl clients $(am_clients), props $(ctl state | jq -c '.graph.player | [.automute, .automute_delay_ms, .autounmute_delay_ms]'), lines $(am_log "the player's Signal")/$(am_log AudioMonitor)"
-    setting '.AutoMute = false | .AutoMuteDelayMs = 500 | .AutoUnmuteDelayMs = 2000'
+    # the shipped default (no LIASCAPE_PLAYER_AUTOMUTE at all): the watch hands over (≤ 10 s), its stream watch gone
     player_with_audio ""
+  else
+    # the Signal's escape hatch: the player has no capability → AudioMonitor runs, nothing reaches the player's props
+    player_with_audio 0
   fi
   waitfor $WAIT bus_up && ok "the player's audio bus is up on the private PipeWire ($(ctl probe '{"name":"bus"}' | jq -r .target))" \
     || bad "bus: $(ctl probe '{"name":"bus"}' | jq -c '{state, reason}')"
@@ -2187,6 +2191,9 @@ EOF
   else
     # the backend's stream watch (`pactl subscribe`) is a client of the private server
     waitfor $WAIT am_ready && ok "auto-mute watches the private server" || bad "auto-mute's pactl subscribe never connected: $(pactl list short clients 2>&1 | head -3)"
+    ! am_cap && [ "$(ctl get '{"path":"player.automute"}' | jq -r .value)" = false ] && [ "$(am_log AudioMonitor)" -ge 1 ] \
+      && ok "LIASCAPE_PLAYER_AUTOMUTE=0: no capability, AudioMonitor is the engine, player.automute stays off" \
+      || bad "=0: capabilities $(am_caps), player.automute $(ctl get '{"path":"player.automute"}' | jq -r .value), AudioMonitor lines $(am_log AudioMonitor)"
     amutes() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)] | length'; }
     am_last_wall() { ctl logs '{"kind_prefix":"anim.start","limit":100000}' | jq -r '[.events[] | select((.path | test("gain\\.mute$")) and .to < -50)][-1].t_wall'; }
   fi
@@ -2289,13 +2296,26 @@ EOF
     foreign "$PW/short.wav"; waitfor 3000 eff_muted && ok "app closed: the next stream mutes again" || bad "app closed: the next stream: $(am_gains)"
     wait "$TP" 2>/dev/null; TP=""; waitfor 3000 eff_open && ok "…and it unmutes when that ends" || bad "app closed: still muted: $(am_gains)"
   else
-    waitfor $WAIT test -s "$XDG_CONFIG_HOME/liascape/monitor.pid" && ok "app closed under AudioMonitor: a monitor-daemon took over" || bad "no monitor.pid after the app closed"
-    waitfor $WAIT am_ready || bad "monitor-daemon: no pactl subscribe"
-    foreign "$PW/short.wav"; waitfor 5000 eff_muted && ok "app closed: a foreign stream mutes (the daemon)" || bad "app closed: the daemon didn't mute: $(am_gains)"
-    wait "$TP" 2>/dev/null; TP=""; waitfor 5000 eff_open && ok "…and it unmutes when that ends" || bad "app closed: still muted: $(am_gains)"
+    # monitor-daemon is retired under liascape-player: with the Signal off (=0) nothing mutes with the app closed
+    sleep 2; no_md && [ "$(am_clients)" -le 1 ] && ok "app closed, the Signal off: no monitor-daemon (retired under liascape-player)" \
+      || bad "app closed: a monitor-daemon runs: monitor.pid $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid" 2>/dev/null), procs $(md_procs), pactl clients $(am_clients)"
+    foreign "$PW/short.wav"; sleep 1.5; ! eff_muted && ok "…so a foreign stream doesn't mute with the app closed (the escape hatch's limit)" || bad "app closed, the Signal off: something muted: $(am_gains)"
+    wait "$TP" 2>/dev/null; TP=""
   fi
+  # `liascape restore` (autostart) with AutoMute on: no monitor-daemon either way (the plan's step 6); the player keeps the job
+  cli restore; sleep 2
+  no_md && ok "restore with AutoMute on: no monitor-daemon" || bad "restore spawned a monitor-daemon: monitor.pid $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid" 2>/dev/null), procs $(md_procs)"
+  if [ "$AM_SIGNAL" = 1 ]; then
+    foreign "$PW/short.wav"; waitfor 3000 eff_muted && ok "…after restore a foreign stream still mutes (the Signal)" || bad "after restore: nothing muted: $(am_gains)"
+    wait "$TP" 2>/dev/null; TP=""; waitfor 3000 eff_open || bad "after restore: still muted: $(am_gains)"
+  fi
+  # a leftover monitor-daemon (an older build, a legacy session) is stopped when the app opens — verified by its cmdline
+  (setsid bash -c 'while :; do sleep 1; done' liascape-backend monitor-daemon >/dev/null 2>&1 & echo $! > "$XDG_CONFIG_HOME/liascape/monitor.pid")
+  LMD=$(cat "$XDG_CONFIG_HOME/liascape/monitor.pid"); waitfor 2000 eval '[ "$(md_procs)" -ge 1 ]' || bad "the fake leftover monitor-daemon never ran"
   backend_up backend-am.log
-  [ ! -e "$XDG_CONFIG_HOME/liascape/monitor.pid" ] && ok "the app opens: no monitor-daemon left" || bad "monitor.pid after the app opened: $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid")"
+  waitfor 5000 eval '! kill -0 "$LMD" 2>/dev/null' && no_md && grep -q "stopped a leftover monitor-daemon (pid $LMD)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+    && ok "the app opens: a leftover monitor-daemon is stopped (pid $LMD), monitor.pid gone" \
+    || { bad "the app opened: leftover $LMD alive=$(kill -0 "$LMD" 2>/dev/null && echo y || echo n), monitor.pid $(cat "$XDG_CONFIG_HOME/liascape/monitor.pid" 2>/dev/null), procs $(md_procs)"; kill "$LMD" 2>/dev/null; }
   if [ "$AM_SIGNAL" = 1 ]; then
     # a crash: the snapshot holds the settings, the reapply asserts them, the Signal hears on
     kill -9 "$(comp_pid)"; p0=$CP

@@ -29,7 +29,8 @@ public static class FeatureHealth
         (bool ok, string? reason) Scenes,
         Func<string, bool> OnPath,
         bool SteamCmdFound,
-        bool LegacyTransitions);       // legacy: liascape-transition + the catalogue resolve
+        bool LegacyTransitions,        // legacy: liascape-transition + the catalogue resolve
+        bool SessionBus = true);       // a D-Bus session bus is reachable (the Signal's MPRIS check reads it)
 
     public static List<Feature> Report(AppSettings s)
     {
@@ -50,7 +51,8 @@ public static class FeatureHealth
         else if (onPlayer) scenes = (false, missing);
         else scenes = PlayerHelper.IsLweAvailable() ? (true, null) : (false, "linux-wallpaperengine not found in PATH — install it to use scenes");
         bool legacyTr = !onPlayer && TransitionService.ResolveDir() != null && TransitionService.ResolveBinary() != null;
-        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, WorkshopDownloader.FindSteamCmd(s.SteamCmdPath) != null, legacyTr))
+        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, WorkshopDownloader.FindSteamCmd(s.SteamCmdPath) != null, legacyTr,
+                SessionBusReachable()))
             .Select(f => f with { inUse = InUse(f.id, s) }).ToList();
     }
 
@@ -67,6 +69,22 @@ public static class FeatureHealth
         "steamcmd" => s.WorkshopDownloadMode == "steamcmd",
         _ => true, // ffmpeg: imports, thumbnails, durations — always
     };
+
+    // what zbus (the player's `lia-mpris`) connects to: DBUS_SESSION_BUS_ADDRESS, else $XDG_RUNTIME_DIR/bus. A `unix:path=`
+    // address is checked for its socket; any other form is taken as reachable.
+    public static bool SessionBusReachable()
+    {
+        var a = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        if (string.IsNullOrEmpty(a))
+            return Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") is { Length: > 0 } run && File.Exists(Path.Combine(run, "bus"));
+        foreach (var part in a.Split(';'))
+        {
+            if (!part.StartsWith("unix:")) return true;
+            var path = part["unix:".Length..].Split(',').Select(kv => kv.Split('=', 2)).FirstOrDefault(kv => kv.Length == 2 && kv[0] == "path")?[1];
+            if (path == null || File.Exists(path)) return true; // abstract / dir= forms: not checked
+        }
+        return false;
+    }
 
     public static bool OnPath(string tool) =>
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':')
@@ -110,13 +128,34 @@ public static class FeatureHealth
             f.Add(new("transitions", "Transition effects", i.LegacyTransitions,
                 i.LegacyTransitions ? null : "liascape-transition or the transitions catalogue not found (install.sh builds it) — every switch is a cut",
                 ["globalTransitionEnabled", "transitionMethod", "transitions"]));
-        var am = new[] { "pactl", "parec" }.Where(t => !i.OnPath(t)).ToArray();
-        f.Add(new("auto-mute", "Auto-mute", am.Length == 0,
-            am.Length == 0 ? null : $"{string.Join(" and ", am)} not found in PATH (libpulse / pipewire-pulse tools) — auto-mute can't hear other apps' audio",
-            ["autoMute"]));
-        bool pc = i.OnPath("playerctl");
-        f.Add(new("mpris", "MPRIS check (auto-mute)", pc, pc ? null : "playerctl not found in PATH — \"Only if MPRIS player active\" can't see any player, so auto-mute never mutes with it on",
-            ["autoMuteOnlyIfMprisActive"]));
+        // auto-mute. liascape-player (the shipped engine since Phase 3 Task 14): the player's `automute` Signal hears other
+        // apps' audio itself — no pactl / parec / playerctl; "Only if MPRIS player active" needs a session bus. Its health
+        // part `automute` false (LIASCAPE_PLAYER_AUTOMUTE=0, its audio bus down): the backend's AudioMonitor mutes while the
+        // app is open, nothing with it closed (no monitor-daemon under liascape-player) — said so, with AudioMonitor's
+        // tools. Unknown (no player ran yet, the gate on): unknown. Legacy: AudioMonitor (pactl + parec, playerctl).
+        var (amok, amwhy) = i.LiascapePlayer && i.LiascapePlayerMissing == null ? Part(i.PlayerHealth, "automute") : (false, null);
+        bool onPlayer = i.LiascapePlayer && i.LiascapePlayerMissing == null;
+        if (onPlayer && amok != false)
+        {
+            f.Add(new("auto-mute", "Auto-mute", amok, null, ["autoMute"]));
+            bool? mok = amok == true ? i.SessionBus : null;
+            f.Add(new("mpris", "MPRIS check (auto-mute)", mok,
+                mok == false ? "no D-Bus session bus — \"Only if MPRIS player active\" can't see any player, so auto-mute never mutes with it on" : null,
+                ["autoMuteOnlyIfMprisActive"]));
+        }
+        else
+        {
+            var am = new[] { "pactl", "parec" }.Where(t => !i.OnPath(t)).ToArray();
+            string? why = am.Length == 0 ? null
+                : $"{string.Join(" and ", am)} not found in PATH (libpulse / pipewire-pulse tools) — auto-mute can't hear other apps' audio";
+            if (onPlayer) // the player has no in-player auto-mute: AudioMonitor, with the app open only
+                why = $"{amwhy ?? "the player has no in-player auto-mute"}: auto-mute works only while the app is open"
+                    + (why != null ? $", and {why}" : "");
+            f.Add(new("auto-mute", "Auto-mute", why == null, why, ["autoMute"]));
+            bool pc = i.OnPath("playerctl");
+            f.Add(new("mpris", "MPRIS check (auto-mute)", pc, pc ? null : "playerctl not found in PATH — \"Only if MPRIS player active\" can't see any player, so auto-mute never mutes with it on",
+                ["autoMuteOnlyIfMprisActive"]));
+        }
         var ff = new[] { "ffmpeg", "ffprobe" }.Where(t => !i.OnPath(t)).ToArray();
         f.Add(new("ffmpeg", "ffmpeg", ff.Length == 0,
             ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Normalize audio), and imports, thumbnails and video durations fail",
