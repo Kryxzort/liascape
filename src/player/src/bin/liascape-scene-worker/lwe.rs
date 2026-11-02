@@ -118,11 +118,14 @@ extern "C" fn scene_time(user: *mut c_void) -> f32 {
 }
 
 /// The pointer LWE reads (native scene pixels, y down; buttons = `WP_MOUSE_INPUT_BUTTON_*`).
+/// `set` = the host gave one; until then it sits at the scene's centre once the size is known
+/// (a corner would pull a mouse-parallax scene off-centre while no pointer ever came).
 #[derive(Default)]
 struct Pointer {
     x: Cell<f64>,
     y: Cell<f64>,
     buttons: Cell<u32>,
+    set: Cell<bool>,
 }
 
 extern "C" fn mouse_x(user: *mut c_void) -> f64 {
@@ -280,6 +283,10 @@ impl Scene {
                 return Err(format!("renderer build failed ({w}x{h})"));
             }
             self.built = true;
+            if !self.pointer.set.get() {
+                self.pointer.x.set(f64::from(w) / 2.0);
+                self.pointer.y.set(f64::from(h) / 2.0);
+            }
             Ok((w as u32, h as u32))
         }
     }
@@ -303,6 +310,7 @@ impl Scene {
         self.pointer.x.set(x);
         self.pointer.y.set(y);
         self.pointer.buttons.set(buttons);
+        self.pointer.set.set(true);
     }
 
     /// A new visualiser frame (≤ [`INPUT_FRAME`] u8 samples, centre 128), taken by the next

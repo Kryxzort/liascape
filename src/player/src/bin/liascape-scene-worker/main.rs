@@ -487,8 +487,9 @@ struct Renderer {
     input: Option<Vec<u8>>,
     /// The synthetic `input_level` scene's current level.
     level: f32,
-    /// The pointer in native scene pixels (y down) + buttons.
-    pointer: (f64, f64, u32),
+    /// The pointer in native scene pixels (y down) + buttons; `None` until the host sends one (an
+    /// LWE scene then keeps its pointer at the centre, `lwe::Scene::first_render`).
+    pointer: Option<(f64, f64, u32)>,
     next_slot_id: u8,
     /// A fatal error was reported: idle until `Quit`.
     dead: bool,
@@ -626,8 +627,9 @@ impl Renderer {
             has_audio: scene.has_audio,
             wants_audio_input: scene.wants_audio_input,
         };
-        let (x, y, b) = self.pointer;
-        scene.set_pointer(x, y, b);
+        if let Some((x, y, b)) = self.pointer {
+            scene.set_pointer(x, y, b);
+        }
         if scene.has_audio {
             self.install_audio(Box::new(scene.audio_puller()));
         }
@@ -800,7 +802,7 @@ impl Renderer {
                 }
             }
             ToWorker::Pointer { x, y, buttons } => {
-                self.pointer = (x, y, buttons);
+                self.pointer = Some((x, y, buttons));
                 #[cfg(feature = "lwe")]
                 if let Some(SceneImpl::Lwe(s)) = self.scene.as_ref() {
                     s.set_pointer(x, y, buttons);
@@ -881,10 +883,8 @@ impl Renderer {
                 }
                 // The pointer comes in native pixels; the dot is drawn in ring pixels.
                 let (nw, nh) = (self.native.0.max(1) as f64, self.native.1.max(1) as f64);
-                let p = (
-                    (self.pointer.0 * w as f64 / nw) as f32,
-                    (self.pointer.1 * h as f64 / nh) as f32,
-                );
+                let (px, py, _) = self.pointer.unwrap_or_default();
+                let p = ((px * w as f64 / nw) as f32, (py * h as f64 / nh) as f32);
                 s.render(&self.gfx, &slot.fbo, w, h, seq, self.level, p);
                 report_gpu_ms = s.report_gpu_ms();
             }
@@ -1108,7 +1108,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         pending: None,
         input: None,
         level: 0.0,
-        pointer: (0.0, 0.0, 0),
+        pointer: None,
         next_slot_id: 0,
         dead: false,
         crash_at: k.crash_after_ms.map(|ms| now + Duration::from_millis(ms)),
