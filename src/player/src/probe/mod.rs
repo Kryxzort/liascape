@@ -302,6 +302,10 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         "accounting": crate::runtime::accounting(),
         "max_busy_own_ms": s.max_busy_own_ms,
         "max_busy_own_at": s.max_busy_own_at,
+        // TODO F5 (2): the same without the sleeps inside driver calls (NVIDIA's global
+        // resource-manager lock in a dmabuf import, `runtime::driver_call`).
+        "max_busy_self_ms": s.max_busy_self_ms,
+        "max_busy_self_at": s.max_busy_self_at,
         "max_busy_cpu_ms": s.max_busy_cpu_ms,
         "max_busy_excl_open_ms": s.max_busy_excl_open_ms,
         "max_open_ms": s.max_open_ms,
@@ -342,6 +346,8 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         rt.stats.max_busy_own_ms = 0.0;
         rt.stats.max_busy_at = Value::Null;
         rt.stats.max_busy_own_at = Value::Null;
+        rt.stats.max_busy_self_ms = 0.0;
+        rt.stats.max_busy_self_at = Value::Null;
         rt.stats.max_busy_excl_open_ms = 0.0;
         rt.stats.max_open_ms = 0.0;
         rt.stats.max_request_ms = 0.0;

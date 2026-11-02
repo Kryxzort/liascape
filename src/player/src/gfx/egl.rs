@@ -206,7 +206,7 @@ impl Drop for Shared {
         let _ = self.egl.destroy_context(self.display, self.context);
         let _life = display_lifecycle();
         if display_release(self.display) {
-            let _ = self.egl.terminate(self.display);
+            terminate_display(&self.egl, self.display);
         }
     }
 }
@@ -221,6 +221,30 @@ static DISPLAY_LIFECYCLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn display_lifecycle() -> std::sync::MutexGuard<'static, ()> {
     DISPLAY_LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Bumped by every `eglTerminate` (under [`DISPLAY_LIFECYCLE`]): an object of a display
+/// handed to another thread with the epoch of that moment is still the display's own while
+/// the epoch is unchanged — a terminate freed it, and a re-initialised display may reuse its
+/// handle (TODO F5: `dmabuf::free_image_off_thread`).
+static DISPLAY_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn display_epoch() -> u64 {
+    DISPLAY_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Run `f` with no `eglTerminate` in between, if none ran since `epoch` was read (else
+/// nothing: the terminate freed what `f` would).
+pub(crate) fn while_display_unterminated(epoch: u64, f: impl FnOnce()) {
+    let _life = display_lifecycle();
+    if display_epoch() == epoch {
+        f();
+    }
+}
+
+fn terminate_display(egl: &EglInstance, d: egl::Display) {
+    DISPLAY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let _ = egl.terminate(d);
 }
 
 /// Live [`Shared`]s per EGL display handle. **Every surfaceless `Gfx` in a process gets the
@@ -818,7 +842,7 @@ impl Drop for SharedContext {
         let _ = self.egl.destroy_context(self.display, self.context);
         let _life = display_lifecycle();
         if display_release(self.display) {
-            let _ = self.egl.terminate(self.display);
+            terminate_display(&self.egl, self.display);
         }
     }
 }

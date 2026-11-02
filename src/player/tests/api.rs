@@ -6263,6 +6263,14 @@ fn stepped_scene_is_deterministic() {
 /// test's own `probe`), which no code on the loop can fix. A real stall — CPU on the loop or a
 /// blocking call — still counts in full (RED with a 5 ms spin or a 5 ms sleep injected into a
 /// scene's teardown).
+///
+/// TODO F5 (2): it is `max_busy_self_ms` — own time minus the sleeps inside a dmabuf import
+/// (`runtime::driver_call`), and nothing else. Off-CPU stacks of the loop thread showed every
+/// remaining blocked stretch asleep in NVIDIA's kernel driver on its global resource-manager
+/// lock (`rmapiLockAcquire` → `rwsem_down_*_slowpath`), taken by every process using the GPU:
+/// the imports (`eglCreateImage`, 0.2–4 ms per slot while another process allocates) are
+/// excluded as a driver limit; the dying scene's image frees, the other site, now run off the
+/// loop (`dmabuf::free_image_off_thread`).
 #[test]
 fn scene_create_and_destroy_never_stall_the_loop() {
     let Some(mut srv) = scene_serve(&[]) else {
@@ -6282,17 +6290,22 @@ fn scene_create_and_destroy_never_stall_the_loop() {
     show_all(&mut c, &id);
     wait_playing(&mut c, &id, 0.2);
     let busy = |l: &Value| {
-        let own = l["max_busy_own_ms"].as_f64().unwrap();
+        let own = l["max_busy_self_ms"].as_f64().unwrap();
         let what = format!(
-            "own {own:.2} ms (wall {:.2}); longest own {}, longest wall {}",
+            "self {own:.2} ms (own {:.2}, wall {:.2}); longest self {}, longest own {}, longest wall {}",
+            l["max_busy_own_ms"].as_f64().unwrap(),
             l["max_busy_ms"].as_f64().unwrap(),
+            l["max_busy_self_at"],
             l["max_busy_own_at"],
             l["max_busy_at"]
         );
         (own, what)
     };
     let (own_create, create) = busy(&c.ok("probe", json!({"name": "loop", "args": {"reset": true}})));
+    // The test's own `workers` probe (a large reply: 1.5–2 ms of CPU, 2.8 ms with its client
+    // stretch under a shared machine — TODO F5) stays out of the destroy window: reset after it.
     let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
     c.ok("set", json!({"path": "lay:*:main.content", "value": ""}));
     c.ok("destroy", json!({"id": id}));
     let t = Instant::now();
