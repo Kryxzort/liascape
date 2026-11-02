@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# liascape-dev — `liascape` run from this checkout's dev builds, for the owner's session while the app is being built
+# (Hyprland's startup `restore` and the keybinds call this instead of the installed package, so login runs the same
+# code as `liascape-watch`). Same arguments as `liascape`. Needs the builds `scripts/dev.sh` makes: the backend
+# (src/backend/bin/Debug) and the release player (src/player/target/release).
+#
+# The Debug backend is framework-dependent: its .NET comes from the devShell, resolved once through `nix develop`
+# (slow) and cached in ~/.cache/liascape/dev-dotnet-root, resolved again when that store path is gone.
+set -euo pipefail
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd -P)"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/liascape/dev-dotnet-root"
+dr="$(cat "$cache" 2>/dev/null || true)"
+if [ -z "$dr" ] || [ ! -x "$dr/dotnet" ]; then
+  dr="$(env -u LD_LIBRARY_PATH nix develop "$root" -c bash -c 'echo "${DOTNET_ROOT:-}"' 2>/dev/null | tail -1)"
+  [ -x "$dr/dotnet" ] || { echo "liascape-dev: no .NET from the devShell of $root" >&2; exit 1; }
+  mkdir -p "$(dirname "$cache")"
+  printf '%s\n' "$dr" >"$cache"
+fi
+export DOTNET_ROOT="$dr"
+rel="$root/src/player/target/release"
+export LIASCAPE_BACKEND="${LIASCAPE_BACKEND:-$root/src/backend/bin/Debug/net10.0/liascape-backend}"
+export LIASCAPE_PLAYER_BIN="${LIASCAPE_PLAYER_BIN:-$rel/liascape-player}"
+export LIASCAPE_SCENE_WORKER_BIN="${LIASCAPE_SCENE_WORKER_BIN:-$rel/liascape-scene-worker}"
+export LIASCAPE_TRANSITIONS_DIR="${LIASCAPE_TRANSITIONS_DIR:-$root/transitions}"
+export LIASCAPE_UI_DIR="${LIASCAPE_UI_DIR:-$root/app/ui/dist}"
+# the shell's stray LD_LIBRARY_PATH breaks native links (player-core.md); NVIDIA's libcuda (nvdec) is outside the store
+export LD_LIBRARY_PATH=/run/opengl-driver/lib
+exec "$root/scripts/liascape" "$@"
