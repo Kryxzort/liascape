@@ -121,7 +121,7 @@ Batches are ordered by library usage × impact, highest first.
 |---|---|---|---|---|---|
 | **B1 Make property scripts run** — **done 2026-10-29** (patches 0019–0021; see "B1 result" in § 5) | S1–S7, S9; S33, S34, S35, S38 by evaluating WE's own `scripts/jsclasses/baseclasses.js` + `jsmodules/*.js` as the prelude | 40 | M | `JS_EVAL_FLAG_COMPILE_ONLY` → `JS_EvalFunction` → `JS_GetModuleNamespace`. Skip the write on `undefined`. Call `init(value)`. Bind `thisLayer`/`thisObject` per call. Register scale/angles/visible on the live values. Replace the native Vec/WEMath adapters with WE's JS classes (keep the C++ side for marshalling only). | Smoke 2890767643, 3291729669, 2325974975: the widget is no longer in the corner, and stderr has no `TypeError: not a function`. Fork test: a module whose `update` returns `value+1` moves the property. Corpus: no new blank. |
 | **B2 Layer alpha, colour, keyframe animation** — **done 2026-11-02** (patches 0022–0023; see "B2 result" in § 5) | E2, E3, G01, G02 (+ G05 once known) | ~50 | M | `g_Color4 = (color.rgb, alpha)`. Upload alpha/colour/brightness per draw from the live values. A keyframe evaluator for `c0..c2` bezier keys (`fps`, `length`, `mode` loop/mirror/single, `wraploop`, `startpaused`, `relative`), as decoded at GH 0x1401d1740/0x1401d4dd0/0x1401d5790. | Smoke two timestamps of 3 animated scenes: pixels change where WE animates. WE capture of 2388299037 (translucent layer). |
-| **B3 Particle core semantics** | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
+| **B3 Particle core semantics** — **done 2026-11-03** (patches 0024–0028; see "B3 result" in § 5) | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
 | **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
 | **B5 Parallax and camera** | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
 | **B6 Hierarchy** | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
@@ -718,6 +718,86 @@ play/stop, events) is left to B10.
   `random`, animation `events` (1 scene), and the SceneScript animation API. `thisObject.getAnimation()` is called
   by 18 scenes, mostly from media/cursor events, so it belongs to B10. Particle `g_Color4` still has w = the
   colour's own w (particles draw through CParticle). G05 parent alpha is still Unknown.
+
+### B3 result (fork patches 0024–0028, pin `4c75eae`, 2026-11-03)
+
+Rows P1, P3, P4, P5, P6, P7, P8 (without NPOT), P13, P14, P18, P19 and P38 are done. So is P16, which was in no
+batch: sphererandom now has duration, delay and periodic emission through the shared emitter timer. P41 needed
+no change: every system in the library sets maxcount and sizerandom, and LWE's `/2` default size already matches.
+
+- **0024: one particle RNG per scene** (P38). `CScene::getParticleRng` is WE's scene+0x1f08. Every system draws
+  from it, and a `randomframe` frame is one draw from it. Before, it was seeded by the particle's slot address, so
+  frames repeated per slot. `WPENGINE_PARTICLE_SEED` seeds it for tests.
+- **0025: initializers draw as in WE** (P6, P7). `colorrandom` draws one `t` for R, G and B. `exponent`
+  (`pow(rand, exponent)`) is now read by lifetimerandom, colorrandom, alpharandom, velocityrandom and
+  rotationrandom (per axis) too. Lifetimes are at least 0.001 s.
+- **0026: particle timing** (P1, P3, P4, P13, P14, P18, P19).
+  - `starttime` is a float. On setup the system steps in 0.05 s steps (0.2 s from maxcount 500) until it reaches
+    it, at least once.
+  - The `rate` override scales the system's whole step, at least 0.01: motion, ageing and emission together.
+  - `count` multiplies every emitter's rate and a mapsequence count, unless the flags have 0x20. The pool stays
+    `maxcount`.
+  - The overrides are read every frame, so sliders and animations on them are live. Alpha and size still apply
+    at spawn, which is also what WE does (P13: +0x3ec is read by the spawn interpreter only).
+  - Box and sphere emitters share one timer: delay, duration, and periodic windows that reload the
+    instantaneous burst. The burst adds to the frame's rate emission (sphere replaced it).
+  - A hidden system with particles is cleared and its emitters reloaded, so it starts fresh when shown and
+    bursts replay. Before, it froze and caught up 0.1 s on its first visible frame.
+  - The operators run on the system's own clock (prewarm included), not the render time.
+- **0027: `colorn` is an HSV shift** (P5). The reference colour is the system's first colorrandom mid-point,
+  else its colorchange startvalue, else white. A `colorn` the object sets, that differs from it by ≥ 0.9/255
+  with flags lacking 8, moves colorrandom's min and max by (colorn − reference) in H, S and V. A system without a
+  colour source spawns at colorn. It is re-evaluated every step.
+- **0028: `SPRITESHEETBLEND`** (P8) unless the particle flags have bit 1 or `animationmode` is randomframe.
+  `SPRITESHEETBLENDNPOT` (6 padded sheets) is not done: its shader path needs the sheet's unpadded width in
+  `g_Texture0Resolution.z`, which is the frame width in LWE.
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). Additive grey particles stack at fixed points
+  of a 64×32 scene, so the red channel counts them. All four fail on ccb545d (0 of 4), and the whole suite is
+  23/23 on 4c75eae.
+  - `particle_count_rate_and_prewarm`: before the first step, a starttime-1 system has 10.0 particles (0 before).
+    After 1.5 s: plain 14.0, count 2 29.0 (14.0 before), rate 0.5 with 0.6 s lives 6.0 (3.0 before), and the
+    prewarmed one 24.0.
+  - `particle_colorrandom_one_t`: a 0 0 0 → 255 0 255 range with exponent 4 gives 0 of 651 px with r ≠ b (664 of
+    680 before) and a mean r of 49.3 (51 expected, 124.6 before).
+  - `particle_colorn_hsv_shift`: red + colorn blue is 0 0 252 (black before). Grey 128 + colorn 0.5, its own
+    reference, stays 126 (63 before). No colour source + colorn red is 252 0 0.
+  - `particle_hide_resets_and_overrides_live`: a 5-particle burst hidden and shown at 1.1 s is alive again at
+    2.7 s (0 before). A `count` slider moved 1 → 3 adds 30 particles in 1 s (10 before).
+- **Smoke** (`--lwe-smoke … --seconds 60`, 10 particle scenes, before = ccb545d with the same worker through
+  `LD_LIBRARY_PATH`). The particle count came from a throwaway instrumented core of each rev (one `PSTAT` line per
+  system per frame, not committed), summed over all systems at +1 s and +60 s:
+
+  | Scene | Systems | Before +1 s / +60 s | After +1 s / +60 s |
+  |---|---|---|---|
+  | 1155728109 | 3 | 12 / 175 (0.07) | 156 / 171 (0.91) |
+  | 1174926427 | 1 | 23 / 299 (0.08) | 299 / 300 (1.00) |
+  | 1195626192 | 2 | 10 / 45 (0.22) | 38 / 42 (0.90) |
+  | 1556245028 | 7 | 12 / 33 (0.36) | 23 / 29 (0.79) |
+  | 1726902114 | 2 | 4 / 17 (0.24) | 8 / 19 (0.42) |
+  | 1797172968 | 3 | 11 / 97 (0.11) | 8 / 17 (0.47) |
+  | 1884904087 | 1 | 3 / 16 (0.19) | 7 / 8 (0.88) |
+  | 1934084447 | 2 | 36 / 461 (0.08) | 458 / 477 (0.96) |
+  | 2064316482 | 5 | 403 / 842 (0.48) | 2129 / 2130 (1.00) |
+  | 3419466417 | 12 | 289 / 1317 (0.22) | 1371 / 1436 (0.95) |
+
+  So the check "+1 s ≈ +60 s" holds for 8 of the 10. The other 2 follow WE's own rule, since the prewarm stops at
+  `starttime`:
+  - **1726902114:** leaves2 has starttime 3 and lives 8–10 s, so it starts at about a third of steady state.
+  - **1797172968:** its snow has starttime 15 and lives of 16–40 s (lifetime override 2). Its leaves (count
+    0.01) dropped from 88 to 1 at +60 s. Before, `maxcount·count` = 0 fell back to LWE's 1000 pool at the full
+    rate. WE emits 5 × 0.01 per second.
+
+  **1884904087** went from 16 to 8 at +60 s: its leaves have count 0.38, rate 0.72 and lifetime 0.5. Visually
+  (1934084447) the snow covers the frame at +1 s now, as at +60 s.
+- **Corpus** (`scene_corpus.sh --results /tmp/sc-b3`, 96 scenes, a release player and worker on the B3 core):
+  ok 91, static 0, blank 0, load_failed 3, renderer_failed 0, crashed 0, broken 0, timeout 2. The 2 timeouts,
+  2883756643 and 2921510865, ran while another agent's scene runs loaded the machine (load average ~15). Rerun
+  alone (`--only`), both are ok, Ready in 6.5 s and 5.0 s. Their smoke build time is the same on ccb545d and
+  4c75eae (3.9/3.6 s and 4.8/4.9 s), so the prewarm doesn't slow them. That makes it ok 93, the same as B2. The
+  same 3 scenes fail to load: 3276522107, 3477054430 and 3509243656. No scene is newly blank, broken or crashed.
+- **Left of B3:** `SPRITESHEETBLENDNPOT` (P8, 6 sheets). The owner's WE captures of 1797172968 and 1155728109
+  (P5, P8/P9) are still the reference for the hues and the sheet timing. The rest of the particle rows stay in
+  B6 (P36), B8 (P20, P21) and B11 (child systems P2, P10, P15, P22, P24–P30, P34, P35, P37: the 0.1 s dt cap stays).
 
 ## 6. Audio after patch 0018 (A)
 

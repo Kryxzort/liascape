@@ -3797,6 +3797,25 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   API. `host_api_test`: `object_uniforms_are_live`, `keyframes_drive_alpha`, `keyframes_move_origin` (white
   squares — a colour string without a '.' is 0..255 — red channel = alpha × 255; the first ships its own
   `g_Color4` shader in the scene folder; RED on e78d94d).
+  **0024–0028 (2026-11-03, batch B3): particle core semantics** (audit P1, P3–P8, P13, P14, P16, P18, P19, P38;
+  "B3 result" in its § 5). **0024:** one particle RNG per scene (`CScene::getParticleRng`, WE's scene+0x1f08);
+  `randomframe` = one draw from it (it was seeded by the slot address); `WPENGINE_PARTICLE_SEED` seeds it. **0025:**
+  `colorrandom` = one `t` for R, G, B; `exponent` (`pow(rand, e)`) in lifetime/size/colour/alpha/velocity/
+  rotation/angularvelocity random; lifetime ≥ 0.001 s. **0026:** `starttime` (a float) prewarms on setup in
+  0.05 s steps (0.2 s from maxcount 500), at least one step; the `rate` override = the system's playback speed
+  (`dt *= max(rate, 0.01)`: motion, ageing, emission); `count` multiplies every emitter's rate (+ a mapsequence
+  count) unless flags 0x20, and the pool stays `maxcount`; the overrides are read live (alpha and size still
+  apply at spawn, as in WE); box and sphere share one emitter timer (delay, duration, periodic windows that
+  reload the burst; the burst adds to the frame's emission); a hidden system with particles is cleared and its
+  emitters reloaded (shown again = fresh, bursts replay, no 0.1 s catch-up); operators run on the system's own
+  clock (`m_simTime`, prewarm included). The 0.1 s dt cap stays (P37, B11). **0027:** `colorn` = an HSV shift of
+  colorrandom's min/max by (colorn − the system's reference colour: first colorrandom mid-point, else colorchange
+  start, else white), only when set, flags lack 8 and it differs by ≥ 0.9/255; a system without a colour source
+  spawns at colorn; re-evaluated every step. **0028:** `SPRITESHEETBLEND` unless particle flags bit 1 or
+  `randomframe` (`SPRITESHEETBLENDNPOT` not done). `host_api_test`: `particle_count_rate_and_prewarm`,
+  `particle_colorrandom_one_t`, `particle_colorn_hsv_shift`, `particle_hide_resets_and_overrides_live` (additive
+  8/255 or 4/255 grey stacks at fixed points of a 64×32 scene, so the red channel counts particles; need
+  `LIASCAPE_WE_ASSETS_DIR`; all RED on ccb545d).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").

@@ -945,8 +945,14 @@ Two bug classes kept recurring; fix the class, not the instance:
           wallpaper64.exe), pin `ccb545d`. Left: `timeofday`, shared `parent`/`children` timelines, events and the
           SceneScript animation API (`getAnimation`, play/stop — B10), G05. Result + corpus delta: the audit's
           "B2 result" (§ 5).
-    - [ ] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
-          meaning, HSV `colorn`, sprite-sheet blend, live overrides (P1–P8, P13, P14, P18, P19, P38). 61 scenes. M.
+    - [x] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
+          meaning, HSV `colorn`, sprite-sheet blend, live overrides (P1, P3–P8, P13, P14, P18, P19, P38). 61 scenes.
+          M. **Done 2026-11-03:** fork patches 0024 (one scene RNG) + 0025 (initializers) + 0026 (prewarm, rate,
+          count, live overrides, shared emitter timer — also P16, hide = reset) + 0027 (HSV `colorn`) + 0028
+          (`SPRITESHEETBLEND`), pin `4c75eae`. Smoke: particles at +1 s / +60 s went from 0.07–0.48 to 0.79–1.00 in
+          8 of 10 scenes (the other 2 have a `starttime` shorter than their lifetimes, as in WE). Corpus ok 93 as
+          B2 (2 load timeouts under another run's load, ok alone). Left: `SPRITESHEETBLENDNPOT`, the WE captures
+          of 1797172968/1155728109. Result: the audit's "B3 result" (§ 5).
     - [ ] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
           NixOS today), drawn as an image so effects/parent/rotation/parallax apply (T1–T8, E34, G13, G30). 45
           scenes. L.
