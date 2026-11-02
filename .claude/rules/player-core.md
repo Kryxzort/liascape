@@ -2505,6 +2505,14 @@ decode is killed after 20 s (`DECODE_TIMEOUT`), and a window longer than 120 s
 (`MAX_ANALYSIS_WINDOW`, e.g. a pause gate spanning a long pause) is skipped
 (`probe.dropout {skipped: "window_too_long"}`) instead of decoded into memory; if the 1 ms-refined
 lag can't be fitted the whole coarse alignment stands (lag, capture, fit, offset together).
+**The detector must not touch what it measures (TODO F4):** each ffmpeg decode is
+`posix_spawn`ed (std `Command` with **no `pre_exec`** — a `pre_exec` hook makes std `fork()` the
+whole compositor) as `setpriv --pdeathsig KILL -- ffmpeg …` (util-linux; bare `ffmpeg` without
+it: SIGPIPE on the closed stdout + the 20 s timeout bound an orphan). The fork cost 1.9–10.5 ms
+per decode and the in-process bus (loopback + mpv's AO) missed whole graph cycles meanwhile:
+`--debug` recordings held exact-silence runs of 64–576 frames right after every analysis (161 in
+460 s on the Phase 3 battery). Guard `tests/api.rs::dropout_analysis_never_skips_bus_cycles`
+(12 re-runs of one switch's analysis, the private sink recorded: no exact-silence run; RED 28–44).
 `list`; `sources` — per hosted source `{id, kind, path, ready,
 paused, loop, speed, time_pos, duration, gain_effective_db (graph), gains (the live
 source's own slots), live_kind, size, mpv_volume_gain, mpv_pause, requests_in_flight,
@@ -2934,6 +2942,11 @@ switches, each a timestamp jump of 1–5 quanta plus silent blocks the dropout d
 call `unmeasured`. Guard `tests/api.rs::meter_capture_runs_on_the_rt_data_thread` (RED:
 `lia-bus`, `other`). `Meter::window(from, to)`,
 `Meter::available()` (streaming, newest sample ≤ 500 ms old, no error), `Meter::status()`.
+**Never `fork` the serve process** (TODO F4): copying the compositor's address space takes
+milliseconds, and the bus's in-process loopback and mpv's AOs miss graph cycles meanwhile (exact
+silence at the sink). Spawn with `posix_spawn` — std `Command` without `pre_exec`/uid/gid, or by
+hand like `WorkerHost::spawn` — and get a death signal some other way (the child sets it itself, or
+`setpriv --pdeathsig`). Only the single-threaded supervisor uses a `pre_exec` hook.
 
 **Probes.** `bus` → `{state, device, latency_ms, latency_samples, quantum_ms, target,
 default_sink, requested, overridden, playback_node, sink_node, retargets, connecting (down and

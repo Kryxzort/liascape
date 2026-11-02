@@ -73,12 +73,24 @@
 //! [`MAX_CONCURRENT_ANALYSES`] decode+analyse passes run at once (a small
 //! `Mutex<usize>` + `Condvar` gate, not a queue — a refused request is told `skipped:
 //! "busy"` immediately, synchronously, never queued); every ffmpeg child this module
-//! spawns is registered by pid (`FFMPEG_CHILDREN`) and given `PR_SET_PDEATHSIG(SIGKILL)`
-//! (same technique as `tests/api.rs`'s `die_with_parent`) so it can never outlive this
-//! process even if killed outright. [`shutdown`] (called from `Runtime`'s own shutdown,
-//! mirroring `sources::reaper::shutdown`) kills every still-tracked child immediately
-//! (no point waiting one out) then waits up to its `timeout` for every gate slot to free,
-//! logging + returning the straggler count.
+//! spawns is registered by pid (`FFMPEG_CHILDREN`) and gets `PR_SET_PDEATHSIG(SIGKILL)` so it
+//! can never outlive this process even if killed outright — set by `setpriv --pdeathsig KILL`
+//! in front of it, never in a `pre_exec` hook (TODO F4, below). [`shutdown`] (called from
+//! `Runtime`'s own shutdown, mirroring `sources::reaper::shutdown`) kills every still-tracked
+//! child immediately (no point waiting one out) then waits up to its `timeout` for every gate
+//! slot to free, logging + returning the straggler count.
+//!
+//! **F4 — a decode is `posix_spawn`ed, never `fork`ed.** A `Command` with a `pre_exec` hook
+//! makes std `fork()` the whole player (glibc's `posix_spawn` is `clone(CLONE_VM|CLONE_VFORK)`:
+//! no page-table copy). Forking the compositor took 1.9–10.5 ms per decode (bpftrace, private
+//! PipeWire, a looping tone) and stalled the in-process bus — the loopback and mpv's AO miss
+//! their graph cycles while the address space is copied and its pages turned copy-on-write —
+//! so `--debug` recordings held whole cycles of exact silence (64–576 frames) right after every
+//! analysis: 161 in 460 s on the battery, 28–44 per 12 analyses in
+//! `tests/api.rs::dropout_analysis_never_skips_bus_cycles`; 0 since. The death signal moved to
+//! `setpriv --pdeathsig KILL` (util-linux, [`SETPRIV`]); without `setpriv` on `PATH` ffmpeg
+//! runs bare: an orphan still dies on its next write to the closed stdout pipe (SIGPIPE, which
+//! std resets to default in the child) and the 20 s timeout bounds it otherwise.
 //!
 //! **R80 — the micro-gap comparison is 1 ms-accurate, not a 10 ms zero-order hold.** The
 //! frozen-method micro-gap the owner flagged (`at_ms` ≈ 35 ms after a 1000 ms effect's own
@@ -171,7 +183,6 @@
 //!    before: a 2 ms micro-gap at 132). A contiguous hole is still a micro-gap.
 
 use std::collections::{HashMap, VecDeque};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Condvar, Mutex};
@@ -814,10 +825,41 @@ fn gain_lin_interp_at(track: Option<&GainTrack>, t: Duration) -> f64 {
 /// `scripts/liascape_audiowatch.py`).
 const FFMPEG: &str = "ffmpeg";
 
+/// F4: util-linux's `setpriv`, from `PATH`, put in front of every decode for its
+/// `--pdeathsig KILL` — the death signal without a `pre_exec` hook (which would `fork` the
+/// player, the module doc's F4).
+const SETPRIV: &str = "setpriv";
+
+/// `setpriv --pdeathsig` works here (asked once: `setpriv --pdeathsig KILL true`).
+fn setpriv_available() -> bool {
+    static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OK.get_or_init(|| {
+        Command::new(SETPRIV)
+            .args(["--pdeathsig", "KILL", "--", "true"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    })
+}
+
+/// The decode command: `setpriv --pdeathsig KILL -- ffmpeg` (or bare `ffmpeg` without
+/// `setpriv`). No `pre_exec`: std `posix_spawn`s it (F4).
+fn ffmpeg_command() -> Command {
+    if setpriv_available() {
+        let mut cmd = Command::new(SETPRIV);
+        cmd.args(["--pdeathsig", "KILL", "--", FFMPEG]);
+        cmd
+    } else {
+        Command::new(FFMPEG)
+    }
+}
+
 /// R79 (review fix round): ffmpeg children this module has spawned and not yet reaped —
-/// [`shutdown`] kills every one of these outright rather than waiting it out; each is
-/// also given `PR_SET_PDEATHSIG(SIGKILL)` at spawn (same technique as `tests/api.rs`'s
-/// `die_with_parent`), so a hard-killed player can never leave one running either way.
+/// [`shutdown`] kills every one of these outright rather than waiting it out; each also
+/// runs under `PR_SET_PDEATHSIG(SIGKILL)` ([`ffmpeg_command`]), so a hard-killed player
+/// can never leave one running either way.
 static FFMPEG_CHILDREN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
 fn register_child(pid: u32) {
@@ -855,7 +897,7 @@ fn run_ffmpeg_bounded(
     path: &Path,
     timeout: Duration,
 ) -> std::io::Result<std::process::Output> {
-    let mut cmd = Command::new(FFMPEG);
+    let mut cmd = ffmpeg_command();
     cmd.arg("-v")
         .arg("error")
         .arg("-ss")
@@ -875,12 +917,7 @@ fn run_ffmpeg_bounded(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-            Ok(())
-        });
-    }
+    // F4: never a `pre_exec` hook here — it turns this spawn into a `fork` of the player.
     let mut child = cmd.spawn()?;
     let pid = child.id();
     register_child(pid);

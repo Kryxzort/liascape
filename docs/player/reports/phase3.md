@@ -62,7 +62,9 @@ An independent recording of the private sink settled what they are (`P3_RECORD=<
 (−23 dB either side), whole graph cycles of 64–576 samples (1.3–12 ms), nearly all within ~60 ms after a
 `probe.dropout` / `probe.dropout_decode_failed` event, none at a switch. Without `--debug`: **0**. So the app's normal
 run is clean, but the detector punches holes in the audio it measures once it finishes, and it can't see them because
-they land outside its window. Cause not looked for.
+they land outside its window. **Cause found and fixed 2026-11-02 (TODO F4):** every ffmpeg decode of an analysis
+`fork()`ed the whole player (a `pre_exec` hook disables `posix_spawn`), stalling the in-process bus for a cycle or
+more per fork; decodes are `posix_spawn`ed now.
 
 **Handoff against A's end** (`align: end`, full-live; the plan's bound is "≤ 1 frame"):
 
