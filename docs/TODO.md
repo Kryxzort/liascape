@@ -1017,3 +1017,6 @@ Two bug classes kept recurring; fix the class, not the instance:
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
+  - F6: once under load (UI matrix `paused × playlistBarPlay`), a program loaded with "play resume → k1.mp4 (resumed)"
+    and its timer switched to k2 357 ms later with a 600 s interval; rerun alone it passed 3 of 3. Possibly a resumed
+    program whose remaining interval is already used up. Not looked into.

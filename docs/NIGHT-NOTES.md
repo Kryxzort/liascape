@@ -169,3 +169,6 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **From your noctalia list, three toggles** in Settings → Appearance: Glow effects, Morph animations, Autoplay video
   thumbnails (at most 4 play at once). Defaults keep today's look. Settings 131/0, IT 389/0. Full matrix 823 pass, 7
   failed under load and passed when rerun alone. The off states were checked by computed style, not by eye.
+- **Three bugs from your noctalia list fixed:** a wallpaper started from nothing just appears (no fade from black); a
+  right-click no longer stops an mp4 hover preview; under Shuffle the bar marks the item that really plays. Merged with
+  the toggles: IT 389/0, player lib 325/0 and program 69/0, full matrix 834/0. TODO F6 filed (a timer firing early once).
