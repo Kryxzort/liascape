@@ -3695,6 +3695,7 @@ impl Runtime {
                 })
                 .or_else(|| self.parked.as_ref().map(|pk| pk.id.clone()));
             let saved = snap.programs.iter().find(|x| x.id == def.id);
+            self.programs.restore_rng(&def.id, saved.and_then(|s| s.rng));
             let now = self.now();
             if let Some(last) = starting_over.get(&def.id) {
                 // a session start, start over: its order only, then a fresh start (a cut)

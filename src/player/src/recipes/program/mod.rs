@@ -42,6 +42,12 @@ impl Rng {
         Rng(seed)
     }
 
+    /// Where the sequence is: `Rng::new(state)` goes on from here (kept in the snapshot, so
+    /// a restarted player's shuffles and picks carry on instead of replaying from `seed`).
+    pub fn state(&self) -> u64 {
+        self.0
+    }
+
     pub fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
@@ -1187,9 +1193,20 @@ impl Programs {
                     last_effect: p.last_effect.clone(),
                     failures: p.failures,
                     broken: p.broken.iter().cloned().collect(),
+                    rng: Some(p.rng.state()),
                 }
             })
             .collect()
+    }
+
+    /// `--restore`: `id`'s random sequence goes on where the saved player left it (`None`:
+    /// a snapshot from before it was kept — the sequence starts from `seed`). Before
+    /// [`restore`](Self::restore) / [`session_start`](Self::session_start), so a start
+    /// over's fresh shuffle differs from the last boot's.
+    pub fn restore_rng(&mut self, id: &str, state: Option<u64>) {
+        if let (Some(p), Some(st)) = (self.progs.get_mut(id), state) {
+            p.rng = Rng::new(st);
+        }
     }
 
     /// `--restore`: a program [`configure`](Self::configure)d from `program.json` gets its

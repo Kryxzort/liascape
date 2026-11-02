@@ -96,6 +96,10 @@ pub struct ProgramSnap {
     pub failures: u32,
     #[serde(default)]
     pub broken: Vec<String>,
+    /// The program's RNG state ([`super::Rng::state`]); `None` in a snapshot from before it
+    /// was kept.
+    #[serde(default)]
+    pub rng: Option<u64>,
 }
 
 impl ProgramFile {

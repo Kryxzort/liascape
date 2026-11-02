@@ -1024,3 +1024,7 @@ Two bug classes kept recurring; fix the class, not the instance:
     `seed` is saved (`program/store.rs`) but its RNG state isn't, and `Prog::new` makes `Rng::new(seed)` each process,
     so a session start's "fresh shuffle" (`session_start` → `plan_start`) and every later random / effect pick replay
     the same sequence after each restart. Fix: reseed from the seed and something per process (or save the state).
+    Closed 2026-11-02: the snapshot keeps each program's RNG state (`ProgramSnap.rng`), restored before
+    `restore` / `session_start` (`Programs::restore_rng`), so the sequence goes on across processes; a
+    snapshot from before it repeats once. `tests/program.rs::session_start_start_over_shuffles_anew_each_boot`
+    (RED: three boots, one order).

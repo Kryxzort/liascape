@@ -2652,6 +2652,34 @@ fn session_start_start_over_never_shows_the_old_item() {
     assert!(p["played_ms"].as_f64().unwrap() < 500.0, "{p}");
 }
 
+/// F7: a start over's fresh shuffle is new each boot — the program's random sequence goes on
+/// from the snapshot instead of replaying from its `seed` in every new process.
+#[test]
+fn session_start_start_over_shuffles_anew_each_boot() {
+    let Some(mut srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = pngs("ssn", 8);
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    keyed(&mut c, "name:A", "start_over", &items,
+          json!({"mode": "timer", "interval_ms": 60_000, "order": "shuffle", "seed": 42}));
+    verb(&mut c, "play", json!({}));
+    step_until(&mut c, 16, 2000, "the play", n_currents(1));
+    let mut orders = vec![prog(&mut c)["order"].clone()];
+    for _ in 0..2 {
+        // the rotation moves on before the shutdown (the boot's "avoid the last item" then
+        // doesn't change the shuffle)
+        verb(&mut c, "next", json!({}));
+        step_for(&mut c, 50, 500);
+        c.ok("quit", json!({}));
+        drop(c);
+        srv.respawn(&["--restore", "--session-start"]);
+        c = srv.client();
+        step_for(&mut c, 16, 300);
+        orders.push(prog(&mut c)["order"].clone());
+    }
+    assert_ne!(orders[1], orders[2], "two boots shuffled alike: {orders:?}");
+}
+
 #[test]
 fn play_same_key_resume_keeps_playing() {
     let Some(srv) = Serve::start() else { return };
