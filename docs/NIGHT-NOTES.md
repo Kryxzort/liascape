@@ -175,3 +175,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Auto-mute now runs in the player** (Task 14 done): its Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` turns
   it off), `monitor-daemon` is retired under liascape-player (a leftover one is stopped), no `pactl`/`parec` run. IT
   400/0 (389/0 with the old engine), settings 131/0, full matrix 834/0, cargo all ok. Your backend and player run it now.
+- **F7 fixed:** "Start over" + shuffle no longer begins every boot on the same wallpaper (the shuffle's state is kept
+  in the snapshot). **F6 fixed:** playing a playlist again no longer switches at once when its saved countdown came
+  from other timing settings. **F5 partly:** the flaky stall test was mostly CPU contention (now measured as the
+  player's own time); a rarer real ~3 ms block under GPU load is being traced tonight with bpftrace.
+- Tonight (2026-11-02 → 03): one agent on F4 (`--debug` dropout probe causing silence), one on F5's open block.
+- **F4 fixed:** `--debug`'s dropout analysis forked the whole player for each ffmpeg decode, and the fork cost the
+  audio whole cycles of silence. It now spawns without forking. Battery re-run on your machine (your player was off
+  ~50 min while you slept, then restored): 0 drops; the same 3 `frozen` micro-gap FAILs as before (handoff work).

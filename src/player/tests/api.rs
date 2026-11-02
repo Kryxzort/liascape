@@ -7666,24 +7666,7 @@ fn scene_worker_exit_never_skips_bus_cycles() {
     let srv = scene_audio_serve(&pw, root.clone(), serial);
     let mut c = srv.client();
     let wav = root.join("sink.wav");
-    let mut rec = pw.command("pw-record");
-    rec.args([
-        "--target",
-        "hermetic-sink",
-        "-P",
-        "{ stream.capture.sink = true }",
-        "--rate",
-        "48000",
-        "--channels",
-        "2",
-        "--format",
-        "f32",
-        wav.to_str().unwrap(),
-    ])
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null());
-    let mut rec = rec.spawn().expect("pw-record");
+    let rec = record_sink(&pw, &wav);
     std::thread::sleep(Duration::from_millis(500));
     let s1 = common::synthetic_scene("api-exit-s1", &tone_scene(660.0));
     let s2 = common::synthetic_scene("api-exit-s2", &tone_scene(550.0));
@@ -7715,9 +7698,54 @@ fn scene_worker_exit_never_skips_bus_cycles() {
         // A's worker is gone well within this (its stream leaves at its exit).
         std::thread::sleep(Duration::from_millis(600));
     }
+    let (left, runs) = stop_sink_recording(rec, &wav);
+    let audible = left.iter().filter(|v| v.abs() > 0.01).count();
+    println!(
+        "F7: {SWITCHES} frozen S→S, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
+        left.len() as f64 / 48_000.0,
+        audible as f64 / 48_000.0
+    );
+    assert!(audible > 48_000, "the recording holds the tones");
+    // RED: one run per switch (6 of 6, 64–192 samples). What is left after the clean leave is
+    // a rare single 64-frame cycle at the stream's deactivation (a PipeWire graph change seen
+    // through the in-process bus loopback — ~1 in 15 full-live switches, 0 in 121 frozen ones
+    // in release; once in 18 here): at most one, never longer than one cycle.
+    assert!(
+        runs.len() <= 1 && runs.iter().all(|(_, n)| *n <= 64),
+        "skipped graph cycles at the sink: {runs:?}"
+    );
+}
+
+/// An independent recording of the private sink (`pw-record` of `hermetic-sink`'s monitor,
+/// F32 stereo 48 kHz) into `wav` — what really left the bus, cycle by cycle.
+fn record_sink(pw: &PrivatePw, wav: &Path) -> std::process::Child {
+    let mut rec = pw.command("pw-record");
+    rec.args([
+        "--target",
+        "hermetic-sink",
+        "-P",
+        "{ stream.capture.sink = true }",
+        "--rate",
+        "48000",
+        "--channels",
+        "2",
+        "--format",
+        "f32",
+        wav.to_str().unwrap(),
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
+    rec.spawn().expect("pw-record")
+}
+
+/// Stops [`record_sink`] and returns the left channel and its runs of exact silence
+/// (`(start s, samples)`, ≥ 16 samples and < 100 ms) with sound on both sides — whole graph
+/// cycles the bus skipped (content never has 16 exact zeros in a row inside a tone).
+fn stop_sink_recording(mut rec: std::process::Child, wav: &Path) -> (Vec<f32>, Vec<(f64, usize)>) {
     unsafe { libc::kill(rec.id() as i32, libc::SIGINT) };
     let _ = rec.wait();
-    let raw = std::fs::read(&wav).expect("the recording");
+    let raw = std::fs::read(wav).expect("the recording");
     let k = raw
         .windows(4)
         .position(|w| w == b"data")
@@ -7726,8 +7754,6 @@ fn scene_worker_exit_never_skips_bus_cycles() {
         .chunks_exact(8)
         .map(|f| f32::from_le_bytes([f[0], f[1], f[2], f[3]]))
         .collect();
-    // Runs of exact silence (≥ 16 samples, < 100 ms: the frozen gap between A's ramp-out and
-    // B's onset is 300 ms) with sound on both sides.
     let sound = |r: std::ops::Range<usize>| left[r].iter().any(|v| *v != 0.0);
     let mut runs = Vec::new();
     let mut i = 200;
@@ -7746,20 +7772,67 @@ fn scene_worker_exit_never_skips_bus_cycles() {
         }
         i = e;
     }
+    (left, runs)
+}
+
+/// TODO F4 (`docs/player/reports/phase3.md` § 1): with `--debug` the dropout detector's own
+/// analyses punched whole graph cycles of exact silence into the bus (161 in 460 s, each
+/// right after an analysis; 0 without it). A looping tone on the bus, the detector re-run on
+/// one switch again and again, the private sink recorded throughout: no run of exact silence.
+#[test]
+fn dropout_analysis_never_skips_bus_cycles() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root.clone(), serial);
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(5), "the tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -26.0).then_some(())
+    });
+    let corr = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": blue, "loop": true}, "effect_id": "fade",
+               "duration_ms": 300, "method": "full-live"}),
+    )["corr"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(Duration::from_secs(10), "transition.done", || {
+        (!logs_of(&mut c, "transition.done").is_empty()).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(800));
+    let wav = root.join("sink.wav");
+    let rec = record_sink(&pw, &wav);
+    std::thread::sleep(Duration::from_millis(500));
+    let t0 = now_ms(&mut c);
+    const ANALYSES: usize = 12;
+    let mut done_at = Vec::new();
+    for n in 1..=ANALYSES {
+        c.ok("probe", json!({"name": "dropout", "args": {"corr": corr}}));
+        let ev = wait_for(Duration::from_secs(10), "probe.dropout", || {
+            let evs = logs_of(&mut c, "probe.dropout");
+            (evs.len() >= n).then(|| evs[n - 1].clone())
+        });
+        done_at.push(((ev["t_mono_ms"].as_f64().unwrap() - t0) / 1000.0 * 100.0).round() / 100.0);
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let (left, runs) = stop_sink_recording(rec, &wav);
     let audible = left.iter().filter(|v| v.abs() > 0.01).count();
     println!(
-        "F7: {SWITCHES} frozen S→S, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
+        "F4: {ANALYSES} analyses (done at {done_at:?} s after t0), {:.1} s recorded ({:.1} s \
+         audible): exact-silence runs {runs:?}",
         left.len() as f64 / 48_000.0,
         audible as f64 / 48_000.0
     );
-    assert!(audible > 48_000, "the recording holds the tones");
-    // RED: one run per switch (6 of 6, 64–192 samples). What is left after the clean leave is
-    // a rare single 64-frame cycle at the stream's deactivation (a PipeWire graph change seen
-    // through the in-process bus loopback — ~1 in 15 full-live switches, 0 in 121 frozen ones
-    // in release; once in 18 here): at most one, never longer than one cycle.
+    assert!(audible > 48_000, "the recording holds the tone");
     assert!(
-        runs.len() <= 1 && runs.iter().all(|(_, n)| *n <= 64),
-        "skipped graph cycles at the sink: {runs:?}"
+        runs.is_empty(),
+        "the analyses skipped graph cycles at the sink: {runs:?}"
     );
 }
 
