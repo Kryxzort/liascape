@@ -60,3 +60,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0026-render-particle-timing-the-way-Wallpaper-Engine-does.patch` | render: particle timing the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0027-render-colorn-tints-particles-the-way-Wallpaper-Engi.patch` | render: colorn tints particles the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0028-render-sprite-sheet-particles-cross-fade-their-frame.patch` | render: sprite-sheet particles cross-fade their frames | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0029-render-parallax-and-camera-the-way-Wallpaper-Engine-.patch` | render: parallax and camera the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

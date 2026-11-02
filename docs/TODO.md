@@ -985,9 +985,13 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [ ] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
           NixOS today), drawn as an image so effects/parent/rotation/parallax apply (T1–T8, E34, G13, G30). 45
           scenes. L.
-    - [ ] **B5 Parallax + camera.** Delay smoothing (read as a bool today → 14 of 25 frozen), a centred target,
-          `g_ParallaxPosition`, the effect projection matrix, `general.zoom`/fov, camera objects, then shake (G10–G19,
-          E1, E6). 25 + 8 scenes. M.
+    - [x] **B5 Parallax + camera.** Delay smoothing (read as a bool → 14 of 25 frozen), a centred target,
+          `g_ParallaxPosition`, `general.zoom`/fov, camera objects, shake (G10–G19, E1). 25 + 8 scenes. M. **Done
+          2026-11-03:** fork patch 0029 (decoded camera update, per-object offset by the root's depth, zoom × the
+          active camera object's, shake), pin `d7a9f34`; the worker keeps the pointer centred until the host sends
+          one. Headless pointer: 3289734539 moves against the pointer and returns. Corpus ok 93 as B3. Left: E6 (the
+          effect projection matrix), the camera-object pan and paths, text parallax (B4), WE captures (3516174947's
+          zoom 0.75 now shows borders, per the decoded formula). Result: the audit's "B5 result" (§ 5).
     - [ ] **B6 Hierarchy.** A hidden parent hides its children; particle/text parent transforms (G03, G04, P36,
           G31). 12 + 19 scenes. S.
     - [ ] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback

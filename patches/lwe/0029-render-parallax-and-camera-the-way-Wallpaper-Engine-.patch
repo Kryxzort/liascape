@@ -1,0 +1,598 @@
+From d7a9f34a453efad05eec9a30244ebd81446520a4 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 04:12:25 +0530
+Subject: [PATCH 29/29] render: parallax and camera the way Wallpaper Engine
+ does
+
+Decoded from wallpaper64.exe 2.8.485: the camera update (GH 0x1401b8af0),
+the per-object offset in the scene render loop (GH 0x1401b9b50), the shake
+(GH 0x1401c7680), the zoom in the scene tick (GH 0x1401afbf0) and the
+scene constructor's defaults (GH 0x1401b6c60).
+
+Mouse parallax. `cameraparallaxdelay` was read as a bool (0.1 -> k = 0:
+parallax never moved in 14 of the owner's 25 parallax scenes). Now, while
+`cameraparallax` is on (read every frame), the target is
+  W * (0.5 (1 - infl) + mx infl), H * (0.5 (1 - infl) + (1 - my) infl)
+with the pointer clamped to 0..1 (y up), plus the camera position (the
+shake). A delay <= 0 snaps to it, otherwise
+  k = min (1, (1 - delay / 3) * 10 * dt), pos += (target - pos) k.
+The position starts at the scene centre. Each object is translated in the
+world by (root.origin - pos) * cameraparallaxamount * root.parallaxDepth,
+root being its topmost ancestor, so depth 0 stays put and a subtree moves
+as one. Off = no offset (it used to keep the last one). It was
+(depth + amount) * the raw cursor * amount * influence * W. CParticle's
+0.65 minimum depth is gone. parallaxDepth defaults to 1 1, as in WE, and
+every object (groups too) has one.
+
+g_ParallaxPosition is fed: the smoothed position over the scene size,
+clamped to 0..1, 0.5 0.5 at the start (uniform 0x72, GH 0x14010a0e0).
+
+Camera. general.zoom scales the view about the scene centre, times the
+zoom of the active camera object (the last visible one whose parents are
+visible; `"camera": "default"` objects were "unknown"). camerashake moves
+the camera by (cos t, sin 1.333 t), t = speed^2 * g_Time, its length raised
+to roughness^3 (unless that is <= 0.001 or 1), times amplitude * 0.01 *
+the scene height. fov/nearz/farz are read from `general` (they were read
+from `camera`, which has none); the 2D projection keeps its 0..1000 depth.
+The parallax defaults (amount 0.5, delay 0.1, influence 0.5) and the shake
+defaults (speed 3, amplitude 0.5, roughness 1) are WE's.
+
+Not done: a camera object's origin (pan) -- the library's scenes
+disagree on whether it is relative to the scene centre; the camera paths;
+g_EffectTextureProjectionMatrix; text objects (CText) ignore the parallax
+offset.
+
+Origin: ours
+Why: mouse parallax was dead in 14 of 25 scenes and off-centre in the rest; zoom, camera shake and camera objects were ignored (docs/player/spikes/we-lwe-gap-audit.md B5: G10-G12, G14/E1, G15-G19)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   5 +
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |   3 +
+ .../Data/Parsers/ObjectParser.cpp             |  15 +-
+ .../Data/Parsers/WallpaperParser.cpp          |  23 +--
+ src/core/WallpaperEngine/Render/Camera.cpp    |  11 +-
+ src/core/WallpaperEngine/Render/Camera.h      |   4 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  19 +-
+ .../Render/Objects/CParticle.cpp              |  25 +--
+ .../Render/Objects/Effects/CPass.cpp          |   3 +
+ .../Render/Wallpapers/CScene.cpp              | 167 ++++++++++++++++--
+ .../Render/Wallpapers/CScene.h                |  15 +-
+ 11 files changed, 222 insertions(+), 68 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 61067a8..071d82c 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -31,6 +31,11 @@ struct ObjectData {
+     UserSettingUniquePtr groupScale;
+     UserSettingUniquePtr groupAngles;
+     UserSettingUniquePtr groupVisible;
++    /** Mouse parallax depth (x, y) of any object; Wallpaper Engine's default is 1 1. Images and particles also keep
++     *  their own copy (registered as a script property), which the parallax reads for them */
++    UserSettingUniquePtr groupParallaxDepth;
++    /** A camera object (`"camera": "default"`): its `zoom` (null on every other object) */
++    UserSettingUniquePtr cameraZoom;
+ };
+ 
+ /**
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index 29f912e..a5c26dc 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -104,6 +104,9 @@ struct SceneData {
+ 	    UserSettingUniquePtr farz;
+ 	    UserSettingUniquePtr fov;
+ 	} projection;
++
++	/** `general.zoom`: scales the view about the scene's centre (with an active camera object's zoom) */
++	UserSettingUniquePtr zoom;
+     } camera;
+ 
+     ObjectList objects;
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 4638785..be68a86 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -25,6 +25,9 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+     const auto lightIt = it.find ("light");
+     // use shape to refer to VolumeLight
+     const auto shapeIt = it.find ("shape");
++    // a camera object ("camera": "default"): its zoom frames the scene (CScene::updateCamera)
++    const auto cameraIt = it.find ("camera");
++    const bool isCamera = cameraIt != it.end () && cameraIt->is_string ();
+     // Only an inline definition or a file path is a particle system; other objects (text
+     // objects, for example) can carry a placeholder like "particle": "None".
+     const bool hasParticle = particleIt != it.end ()
+@@ -45,6 +48,8 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupScale = it.user ("scale", project.properties, glm::vec3 (1.0f)),
+ 	    .groupAngles = it.user ("angles", project.properties, glm::vec3 (0.0f)),
+ 	    .groupVisible = it.user ("visible", project.properties, true),
++	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
++	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	};
+     } catch (const std::exception& e) {
+ 	sLog.error ("Error parsing object base data: ", e.what ());
+@@ -68,6 +73,8 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupScale = it.user ("scale", project.properties, glm::vec3 (1.0f)),
+ 	    .groupAngles = it.user ("angles", project.properties, glm::vec3 (0.0f)),
+ 	    .groupVisible = it.user ("visible", project.properties, true),
++	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
++	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	};
+     }
+ 
+@@ -83,6 +90,8 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	sLog.error ("Light objects are not supported yet");
+     } else if (shapeIt != it.end ()) {
+ 	sLog.error ("VolumeLight objects are not supported yet");
++    } else if (isCamera) {
++	// a camera object: plain object data, read by CScene::updateCamera
+     } else {
+ 	if (!it.optional ("solid", false)) {
+ 	    // dump the object for now, might want to change later
+@@ -174,7 +183,7 @@ ObjectParser::parseImage (const JSON& it, const Project& project, ObjectData bas
+ 	    .color = it.color ("color", properties, Builders::ColorBuilder::White),
+ 	    .alignment = it.optional ("horizontalalign", it.optional ("alignment", std::string ("center"))),
+ 	    .size = it.user ("size", properties, glm::vec2 (0.0f))->value->getVec2 (),
+-	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (0.0f)),
++	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
+ 	    .colorBlendMode = it.user ("colorBlendMode", properties, 0),
+ 	    .brightness = it.user ("brightness", properties, 1.0f),
+ 	    .model = ModelParser::load (project, image),
+@@ -317,7 +326,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 		    .scale = it.user ("scale", properties, glm::vec3 (1.0f)),
+ 		    .angles = it.user ("angles", properties, glm::vec3 (0.0f)),
+ 		    .visible = it.user ("visible", properties, true),
+-		    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (0.0f)),
++		    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
+ 		    .particleFile = "",
+ 		    .animationMode = "sequence",
+ 		    .sequenceMultiplier = 1.0f,
+@@ -527,7 +536,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 		.scale = it.user ("scale", properties, glm::vec3 (1.0f)),
+ 		.angles = it.user ("angles", properties, glm::vec3 (0.0f)),
+ 		.visible = it.user ("visible", properties, true),
+-		.parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (0.0f)),
++		.parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
+ 		.particleFile = particleFile,
+ 		.animationMode = animationMode,
+ 		.sequenceMultiplier = sequenceMultiplier,
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 5bc2841..7e7262b 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -58,15 +58,16 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                 },
+                 .parallax = {
+                     .enabled = general.user ("cameraparallax", properties, false),
+-                    .amount = general.user ("cameraparallaxamount", properties, 1.0f),
+-                    .delay = general.user ("cameraparallaxdelay", properties, 0.0f),
+-                    .mouseInfluence = general.user ("cameraparallaxmouseinfluence", properties, 1.0f),
++                    // Wallpaper Engine's defaults (its scene constructor, wallpaper64.exe 2.8.485 GH 0x1401b6c60)
++                    .amount = general.user ("cameraparallaxamount", properties, 0.5f),
++                    .delay = general.user ("cameraparallaxdelay", properties, 0.1f),
++                    .mouseInfluence = general.user ("cameraparallaxmouseinfluence", properties, 0.5f),
+                 },
+                 .shake = {
+                     .enabled = general.user ("camerashake", properties, false),
+-                    .amplitude = general.user ("camerashakeamplitude", properties, 0.0f),
+-                    .roughness = general.user ("camerashakeroughness", properties, 0.0f),
+-                    .speed = general.user ("camerashakespeed", properties, 0.0f),
++                    .amplitude = general.user ("camerashakeamplitude", properties, 0.5f),
++                    .roughness = general.user ("camerashakeroughness", properties, 1.0f),
++                    .speed = general.user ("camerashakespeed", properties, 3.0f),
+                 },
+                 .configuration = {
+                     .center = camera.require <glm::vec3> ("center", "Camera must have a center position"),
+@@ -77,10 +78,12 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                     .width  = projection.optional ("auto", false) ? 0 : projection.require <int> ("width",  "Projection must have a width"),
+                     .height = projection.optional ("auto", false) ? 0 : projection.require <int> ("height", "Projection must have a height"),
+                     .isAuto = projection.optional ("auto", false),
+-                    .nearz = camera.user ("nearz", properties, 0.0f),
+-                    .farz = camera.user ("farz", properties, 1000.0f),
+-                    .fov = camera.user ("fov", properties, 50.0f)
+-                }
++                    // `general` fields in Wallpaper Engine (the camera block has none), defaults as in WE
++                    .nearz = general.user ("nearz", properties, 0.1f),
++                    .farz = general.user ("farz", properties, 10000.0f),
++                    .fov = general.user ("fov", properties, 50.0f)
++                },
++                .zoom = general.user ("zoom", properties, 1.0f)
+             },
+             .objects = parseObjects (objects, project),
+         }
+diff --git a/src/core/WallpaperEngine/Render/Camera.cpp b/src/core/WallpaperEngine/Render/Camera.cpp
+index 6655670..91e35ef 100644
+--- a/src/core/WallpaperEngine/Render/Camera.cpp
++++ b/src/core/WallpaperEngine/Render/Camera.cpp
+@@ -11,6 +11,7 @@ Camera::Camera (Wallpapers::CScene& scene, const SceneData::Camera& camera) :
+     // get the lookat position
+     // TODO: ENSURE THIS IS ONLY USED WHEN NOT DOING AN ORTOGRAPHIC CAMERA AS IT THROWS OFF POINTS
+     this->m_lookat = glm::lookAt (this->getEye (), this->getCenter (), this->getUp ());
++    this->m_view = this->m_lookat;
+ }
+ 
+ Camera::~Camera () = default;
+@@ -23,7 +24,9 @@ const glm::vec3& Camera::getUp () const { return this->m_camera.configuration.up
+ 
+ const glm::mat4& Camera::getProjection () const { return this->m_projection; }
+ 
+-const glm::mat4& Camera::getLookAt () const { return this->m_lookat; }
++const glm::mat4& Camera::getLookAt () const { return this->m_view; }
++
++void Camera::setViewAdjust (const glm::mat4& adjust) { this->m_view = this->m_lookat * adjust; }
+ 
+ bool Camera::isOrthogonal () const { return this->m_isOrthogonal; }
+ 
+@@ -43,8 +46,10 @@ void Camera::setOrthogonalProjection (const float width, const float height) {
+     this->m_width = width;
+     this->m_height = height;
+ 
+-    float nearz = this->m_camera.projection.nearz->value->getFloat ();
+-    float farz = this->m_camera.projection.farz->value->getFloat ();
++    // the 2D projection keeps the depth range it always had: general.nearz (0.1 by default) would clip the layers,
++    // which sit at z 0 (nearz/farz/fov are for perspective use, getNearZ/getFarZ/getFov)
++    constexpr float nearz = 0.0f;
++    constexpr float farz = 1000.0f;
+ 
+     this->m_projection = glm::ortho<float> (-width / 2.0, width / 2.0, -height / 2.0, height / 2.0, nearz, farz);
+     this->m_projection = glm::translate (this->m_projection, this->getEye ());
+diff --git a/src/core/WallpaperEngine/Render/Camera.h b/src/core/WallpaperEngine/Render/Camera.h
+index 79618e8..83803cc 100644
+--- a/src/core/WallpaperEngine/Render/Camera.h
++++ b/src/core/WallpaperEngine/Render/Camera.h
+@@ -25,7 +25,10 @@ public:
+     [[nodiscard]] const glm::vec3& getEye () const;
+     [[nodiscard]] const glm::vec3& getUp () const;
+     [[nodiscard]] const glm::mat4& getProjection () const;
++    /** The view: the lookAt with the frame's adjustment (zoom, camera shake) applied in world space */
+     [[nodiscard]] const glm::mat4& getLookAt () const;
++    /** Sets the frame's world-space view adjustment (CScene::updateCamera) */
++    void setViewAdjust (const glm::mat4& adjust);
+     [[nodiscard]] Wallpapers::CScene& getScene () const;
+     [[nodiscard]] bool isOrthogonal () const;
+     [[nodiscard]] float getWidth () const;
+@@ -40,6 +43,7 @@ private:
+     bool m_isOrthogonal = false;
+     glm::mat4 m_projection = {};
+     glm::mat4 m_lookat = {};
++    glm::mat4 m_view = {};
+     const SceneData::Camera& m_camera;
+     Wallpapers::CScene& m_scene;
+ };
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 8877673..8e93708 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1119,20 +1119,11 @@ void CImage::updateScreenSpacePosition () {
+ 	rotModel = glm::translate (rotModel, -this->m_sceneCenter);
+     }
+ 
+-    glm::mat4 mvp
+-	= this->getScene ().getCamera ().getProjection () * this->getScene ().getCamera ().getLookAt () * rotModel;
+-
+-    // Apply parallax displacement if enabled
+-    if (this->getScene ().getScene ().camera.parallax.enabled
+-	&& !this->getScene ().getContext ().getContext ().config.disableParallax) {
+-	const double parallaxAmount = this->getScene ().getScene ().camera.parallax.amount->value->getFloat ();
+-	const glm::vec2 depth = this->getImage ().parallaxDepth->value->getVec2 ();
+-	const glm::vec2* displacement = this->getScene ().getParallaxDisplacement ();
+-	const float referenceSize = static_cast<float> (this->getScene ().getWidth ());
+-	float x = (depth.x + parallaxAmount) * displacement->x * referenceSize;
+-	float y = (depth.y + parallaxAmount) * displacement->y * referenceSize;
+-	mvp = glm::translate (mvp, { x, y, 0.0f });
+-    }
++    // the mouse parallax moves the object in the world, after its own transform (WE: view · translate(offset), GH
++    // 0x1401b9b50); WE's y is up, this world's y is down
++    const glm::vec2 parallax = this->getScene ().getParallaxOffset (this->getImage ());
++    const glm::mat4 mvp = this->getScene ().getCamera ().getProjection () * this->getScene ().getCamera ().getLookAt ()
++	* glm::translate (glm::mat4 (1.0f), glm::vec3 (parallax.x, -parallax.y, 0.0f)) * rotModel;
+ 
+     this->m_modelViewProjectionScreen = mvp;
+     this->m_modelViewProjectionScreenInverse = glm::inverse (mvp);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 2646e54..357bfba 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2025,29 +2025,14 @@ void CParticle::updateMatrices () {
+ }
+ 
+ void CParticle::applyParallaxToModelMatrix () {
+-    if (!getScene ().getScene ().camera.parallax.enabled
+-	|| getScene ().getContext ().getContext ().config.disableParallax) {
+-	return;
+-    }
++    // as for every object (CScene::getParallaxOffset): a world translation by the root's offset, y flipped
++    const glm::vec2 parallax = getScene ().getParallaxOffset (m_particle);
+ 
+-    const float parallaxAmount = getScene ().getScene ().camera.parallax.amount->value->getFloat ();
+-    glm::vec2 depth = m_particle.parallaxDepth->value->getVec2 ();
+-    constexpr float minimumParticleDepth = 0.65f;
+-    if (std::abs (depth.x) < minimumParticleDepth) {
+-	depth.x = depth.x < 0.0f ? -minimumParticleDepth : minimumParticleDepth;
+-    }
+-    if (std::abs (depth.y) < minimumParticleDepth) {
+-	depth.y = depth.y < 0.0f ? -minimumParticleDepth : minimumParticleDepth;
++    if (parallax.x == 0.0f && parallax.y == 0.0f) {
++	return;
+     }
+ 
+-    const glm::vec2* displacement = getScene ().getParallaxDisplacement ();
+-    const float referenceSize = static_cast<float> (getScene ().getWidth ());
+-    const glm::vec3 parallaxOffset {
+-	(depth.x + parallaxAmount) * displacement->x * referenceSize,
+-	(depth.y + parallaxAmount) * displacement->y * referenceSize,
+-	0.0f,
+-    };
+-    m_modelMatrix = glm::translate (m_modelMatrix, parallaxOffset);
++    m_modelMatrix = glm::translate (glm::mat4 (1.0f), glm::vec3 (parallax.x, -parallax.y, 0.0f)) * m_modelMatrix;
+ }
+ 
+ void CParticle::updateParticleViewProjection () {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 453453d..4508ce5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -882,6 +882,9 @@ void CPass::setupUniforms () {
+     this->addUniform ("g_ViewProjectionMatrix", &this->m_viewProjectionMatrix);
+     this->addUniform ("g_PointerPosition", scene.getMousePosition ());
+     this->addUniform ("g_PointerPositionLast", scene.getMousePositionLast ());
++    // the smoothed parallax position over the scene size, 0..1 (WE uniform 0x72, GH 0x14010a0e0; written by the
++    // camera update GH 0x1401b8af0)
++    this->addUniform ("g_ParallaxPosition", scene.getParallaxPosition ());
+     this->addUniform ("g_EffectTextureProjectionMatrix", glm::mat4 (1.0));
+     this->addUniform ("g_EffectTextureProjectionMatrixInverse", glm::mat4 (1.0));
+     this->addUniform ("g_TexelSize", glm::vec2 (1.0 / scene.getWidth (), 1.0 / scene.getHeight ()));
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index ec15966..929f23d 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -4,8 +4,11 @@
+ 
+ #include "CScene.h"
+ 
++#include <cmath>
+ #include <cstdlib>
+ 
++#include <glm/gtc/matrix_transform.hpp>
++
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+@@ -74,10 +77,10 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	height = boundingBox.w - boundingBox.y;
+     }
+ 
+-    this->m_parallaxDisplacement = { 0, 0 };
+-
+     // TODO: CONVERSION
+     this->m_camera->setOrthogonalProjection (width, height);
++    // WE starts the smoothed parallax position at the centre (GH 0x1401b6c60), g_ParallaxPosition at 0.5 0.5
++    this->m_parallaxPosition = { width / 2.0f, height / 2.0f };
+ 
+     // setup framebuffers here as they're required for the scene setup
+     this->setupFramebuffers ();
+@@ -254,6 +257,9 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	}
+ 
+ 	renderObject = new Objects::CParticle (*this, particleData);
++    } else if (object.cameraZoom != nullptr) {
++	// a camera object: nothing to draw, CScene::updateCamera reads its data
++	renderObject = new CObject (*this, object);
+     } else {
+ 	sLog.error ("Unknown object type, creating placeholder, empty object: ", object.id);
+ 	renderObject = new CObject (*this, object);
+@@ -335,20 +341,9 @@ Camera& CScene::getCamera () const { return *this->m_camera; }
+ void CScene::renderFrame () {
+     // ensure the virtual mouse position is up to date
+     this->updateMouse ();
++    // the camera: shake, zoom and the mouse parallax
++    this->updateCamera ();
+ 
+-    // update the parallax position if required
+-    if (this->getScene ().camera.parallax.enabled->value->getBool ()
+-	&& !this->getContext ().getContext ().config.disableParallax) {
+-	const float influence = this->getScene ().camera.parallax.mouseInfluence->value->getFloat ();
+-	const float amount = this->getScene ().camera.parallax.amount->value->getFloat ();
+-	const float delay = glm::min (
+-	    static_cast<float> (this->getScene ().camera.parallax.delay->value->getBool ()),
+-	    this->getContext ().getContext ().renderTime - this->getContext ().getContext ().renderTimeLast
+-	);
+-
+-	this->m_parallaxDisplacement
+-	    = glm::mix (this->m_parallaxDisplacement, (this->m_mousePosition * amount) * influence, delay);
+-    }
+     // keyframe animations first, so a property script's update(value) sees this frame's animated value
+     this->advanceAnimations ();
+     // run a tick in the javascript logic
+@@ -448,7 +443,147 @@ const glm::vec2* CScene::getMousePositionLast () const { return &this->m_mousePo
+ 
+ const glm::vec2* CScene::getMousePositionNormalized () const { return &this->m_mousePositionNormalized; }
+ 
+-const glm::vec2* CScene::getParallaxDisplacement () const { return &this->m_parallaxDisplacement; }
++const glm::vec2* CScene::getParallaxPosition () const { return &this->m_parallaxPositionNormalized; }
++
++namespace {
++/** An object's own `visible` (the typed objects keep their own field) */
++bool ownVisible (const Object& object) {
++    if (object.is<Image> ()) {
++	return object.as<Image> ()->visible->value->getBool ();
++    }
++    if (object.is<Particle> ()) {
++	return object.as<Particle> ()->visible->value->getBool ();
++    }
++    if (object.is<Text> ()) {
++	return object.as<Text> ()->visible->value->getBool ();
++    }
++    return object.groupVisible == nullptr || object.groupVisible->value->getBool ();
++}
++
++/** An object's `parallaxDepth` (images and particles read their own, registered for scripts) */
++glm::vec2 parallaxDepthOf (const Object& object) {
++    if (object.is<Image> ()) {
++	return object.as<Image> ()->parallaxDepth->value->getVec2 ();
++    }
++    if (object.is<Particle> ()) {
++	return object.as<Particle> ()->parallaxDepth->value->getVec2 ();
++    }
++    return object.groupParallaxDepth == nullptr ? glm::vec2 (1.0f) : object.groupParallaxDepth->value->getVec2 ();
++}
++} // namespace
++
++glm::vec2 CScene::getParallaxOffset (const Object& object) const {
++    if (!this->getScene ().camera.parallax.enabled->value->getBool ()
++	|| this->getContext ().getContext ().config.disableParallax) {
++	return glm::vec2 (0.0f);
++    }
++
++    // the topmost ancestor's origin and depth move the whole subtree (GH 0x1401b9b50)
++    const Object* root = &object;
++    for (int depth = 0; root->parent.has_value () && depth < 32; depth++) {
++	const CObject* parent = this->getObject (root->parent.value ());
++	if (parent == nullptr) {
++	    break;
++	}
++	root = &parent->getObject ();
++    }
++
++    const float amount = this->getScene ().camera.parallax.amount->value->getFloat ();
++    const glm::vec2 origin = glm::vec2 (root->origin->value->getVec3 ());
++
++    return (origin - this->m_parallaxPosition) * amount * parallaxDepthOf (*root);
++}
++
++void CScene::updateCamera () {
++    const auto& camera = this->getScene ().camera;
++    const float width = this->m_camera->getWidth ();
++    const float height = this->m_camera->getHeight ();
++    const float dt = std::max (
++	0.0f, this->getContext ().getContext ().renderTime - this->getContext ().getContext ().renderTimeLast
++    );
++
++    // the camera position, in scene units (y up), relative to the default 2D camera. Its shake (FUN_1401c7680):
++    // a point on cos(t), sin(1.333 t) with t = speed² · g_Time, its length raised to `roughness` (unless that is
++    // ≤ 0.001 or 1), times amplitude · 0.01 · the scene height (2D: no z)
++    glm::vec2 cameraPosition (0.0f);
++
++    if (camera.shake.enabled->value->getBool ()) {
++	const float speed = camera.shake.speed->value->getFloat ();
++	const float t = speed * speed * this->getContext ().getContext ().renderTime;
++	glm::vec2 shake (std::cos (t), std::sin (t * 1.333f));
++	const float roughness = std::pow (camera.shake.roughness->value->getFloat (), 3.0f);
++
++	if (roughness > 0.001f && roughness != 1.0f) {
++	    const float length = glm::length (shake);
++
++	    if (length > 0.0f) {
++		shake *= std::pow (length, roughness) / length;
++	    }
++	}
++
++	cameraPosition += shake * (height * 0.1f * camera.shake.amplitude->value->getFloat () * 0.1f);
++    }
++
++    // the zoom: general.zoom times the active camera object's (the last visible one whose parents are visible)
++    float zoom = camera.zoom == nullptr ? 1.0f : camera.zoom->value->getFloat ();
++
++    for (auto it = this->getScene ().objects.rbegin (); it != this->getScene ().objects.rend (); ++it) {
++	const Object& object = **it;
++
++	if (object.cameraZoom == nullptr) {
++	    continue;
++	}
++
++	bool visible = ownVisible (object);
++	const Object* cur = &object;
++
++	for (int depth = 0; visible && cur->parent.has_value () && depth < 32; depth++) {
++	    const CObject* parent = this->getObject (cur->parent.value ());
++	    if (parent == nullptr) {
++		break;
++	    }
++	    cur = &parent->getObject ();
++	    visible = ownVisible (*cur);
++	}
++
++	if (visible) {
++	    zoom *= object.cameraZoom->value->getFloat ();
++	    break;
++	}
++    }
++
++    // the mouse parallax: a target from the cursor (y up), centred at mouseinfluence 0, eased in by
++    // k = min (1, (1 − delay / 3) · 10 · dt), or snapped to with a delay ≤ 0
++    if (camera.parallax.enabled->value->getBool () && !this->getContext ().getContext ().config.disableParallax) {
++	const float influence = camera.parallax.mouseInfluence->value->getFloat ();
++	const float delay = camera.parallax.delay->value->getFloat ();
++	const float mx = glm::clamp (this->m_mousePosition.x, 0.0f, 1.0f);
++	const float my = glm::clamp (this->m_mousePosition.y, 0.0f, 1.0f);
++	const glm::vec2 target = glm::vec2 (
++				     width * (0.5f * (1.0f - influence) + mx * influence),
++				     height * (0.5f * (1.0f - influence) + (1.0f - my) * influence)
++				 )
++	    + cameraPosition;
++
++	if (delay <= 0.0f) {
++	    this->m_parallaxPosition = target;
++	} else {
++	    const float k = std::min (1.0f, (1.0f - delay / 3.0f) * 10.0f * dt);
++	    this->m_parallaxPosition += (target - this->m_parallaxPosition) * k;
++	}
++
++	if (width > 0.0f && height > 0.0f) {
++	    this->m_parallaxPositionNormalized = glm::clamp (
++		this->m_parallaxPosition / glm::vec2 (width, height), glm::vec2 (0.0f), glm::vec2 (1.0f)
++	    );
++	}
++    }
++
++    // the view: zoom about the scene's centre, then the camera position. LWE's world has the centre at 0 and y down
++    glm::mat4 adjust = glm::scale (glm::mat4 (1.0f), glm::vec3 (zoom, zoom, 1.0f));
++    adjust = glm::translate (adjust, glm::vec3 (-cameraPosition.x, cameraPosition.y, 0.0f));
++    this->m_camera->setViewAdjust (adjust);
++}
+ 
+ std::mt19937& CScene::getParticleRng () { return this->m_particleRng; }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 0e975c1..53aef07 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -46,7 +46,14 @@ public:
+     const glm::vec2* getMousePosition () const;
+     const glm::vec2* getMousePositionLast () const;
+     const glm::vec2* getMousePositionNormalized () const;
+-    const glm::vec2* getParallaxDisplacement () const;
++    /** `g_ParallaxPosition`: the smoothed parallax position over the scene size, clamped to 0..1 (0.5 = centre) */
++    const glm::vec2* getParallaxPosition () const;
++    /**
++     * The mouse parallax offset of an object, in scene units (Wallpaper Engine's world: x right, y up), or zero while
++     * parallax is off. WE (GH 0x1401b9b50) translates each object's view by (root.origin − parallax position) ·
++     * cameraparallaxamount · root.parallaxDepth, where root is the object's topmost ancestor
++     */
++    [[nodiscard]] glm::vec2 getParallaxOffset (const Object& object) const;
+ 
+     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
+@@ -58,6 +65,8 @@ protected:
+     void updateMouse ();
+     /** Advances every keyframe animation by this frame's dt and writes their values (G01/G02) */
+     void advanceAnimations ();
++    /** The camera update (WE GH 0x1401b8af0): shake, the active camera object's zoom, general.zoom, the parallax */
++    void updateCamera ();
+ 
+     friend class CWallpaper;
+ 
+@@ -79,7 +88,9 @@ private:
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};
+     glm::vec2 m_mousePositionNormalized = {};
+-    glm::vec2 m_parallaxDisplacement = {};
++    /** the smoothed parallax position (WE scene+0x300) in scene units, y up; starts at the centre */
++    glm::vec2 m_parallaxPosition = {};
++    glm::vec2 m_parallaxPositionNormalized = { 0.5f, 0.5f };
+     std::shared_ptr<const CFBO> _rt_4FrameBuffer = nullptr;
+     std::shared_ptr<const CFBO> _rt_8FrameBuffer = nullptr;
+     std::shared_ptr<const CFBO> _rt_Bloom = nullptr;

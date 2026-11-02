@@ -3817,6 +3817,25 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `particle_colorrandom_one_t`, `particle_colorn_hsv_shift`, `particle_hide_resets_and_overrides_live` (additive
   8/255 or 4/255 grey stacks at fixed points of a 64×32 scene, so the red channel counts particles; need
   `LIASCAPE_WE_ASSETS_DIR`; all RED on ccb545d).
+  **0029 (2026-11-03, batch B5): parallax and camera as in WE** (audit G10–G12, G14/E1, G15–G19; "B5 result" in its
+  § 5; decoded: camera update GH 0x1401b8af0, render-loop offset GH 0x1401b9b50, shake GH 0x1401c7680, zoom in the
+  tick GH 0x1401afbf0). `CScene::updateCamera` (each frame, before animations and scripts): the parallax target
+  `(W·(0.5(1−infl) + mx·infl), H·(0.5(1−infl) + (1−my)·infl))` (pointer clamped 0..1, y up) + the camera position,
+  eased by `k = min(1, (1 − delay/3)·10·dt)` (delay ≤ 0 snaps; the delay was read as a bool → k = 0, 14 of 25
+  scenes frozen); the position starts at the centre. `CScene::getParallaxOffset(object)` = `(root.origin − pos)·
+  amount·root.parallaxDepth` (root = topmost ancestor; depth 0 stays; `parallaxDepth` defaults to 1 1 and every
+  object has one, `ObjectData::groupParallaxDepth`), zero while `cameraparallax` (live) is off; CImage/CParticle
+  translate by it in the world (y flipped: LWE's world is y down). `g_ParallaxPosition` = pos / size, clamped 0..1
+  (0.5 0.5 at the start, frozen while parallax is off). `Camera::setViewAdjust`: `getLookAt()` = the lookAt ·
+  scale(`general.zoom` × the active camera object's `zoom`) · translate(−shake); the active camera object = the last
+  `"camera"` object that is visible with visible parents (`ObjectData::cameraZoom`). Shake: `(cos t, sin 1.333t)`,
+  `t = speed²·g_Time`, length^(roughness³) unless ≤ 0.001 or 1, × amplitude·0.01·H. fov/nearz/farz come from
+  `general` (the 2D ortho keeps its 0..1000 depth); WE's defaults (amount 0.5, delay 0.1, influence 0.5; shake
+  3 / 0.5 / 1). Not done: a camera object's origin (pan), camera paths, `g_EffectTextureProjectionMatrix` (E6),
+  CText ignores the offset (B4). **The worker keeps LWE's pointer at the scene's centre until the host sends one**
+  (`lwe::Scene::first_render`; `pointer: Option` in main.rs) — at (0,0) a parallax scene sat pulled to a corner.
+  `host_api_test`: `parallax_follows_the_pointer`, `parallax_position_uniform`, `camera_zoom_and_shake` (8×8 squares
+  on a 64×32 scene, a fake `wp_mouse_input`; all RED on 4c75eae).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").
