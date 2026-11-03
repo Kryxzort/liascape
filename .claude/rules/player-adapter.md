@@ -851,7 +851,14 @@ in a reconnect gap is lost. The player keeps them in its outbox until acked; the
 ## Integration test (`scripts/test-liascape-player-adapter.sh`)
 `scripts/test-liascape-player-adapter.sh [--no-build]` (needs `dotnet` or `DOTNET=…`, ffmpeg, jq, curl,
 python3; builds liascape-player via the flake devShell + `dotnet build` unless `--no-build`; ~50 s; last line
-`RESULT pass=N fail=M`, exit 0 = all pass; `LIASCAPE_IT_KEEP=1` keeps its temp dir). **Load-proof by construction
+`RESULT pass=N fail=M`, exit 0 = all pass; `LIASCAPE_IT_KEEP=1` keeps its temp dir; `LIASCAPE_IT_ONLY=automute` runs
+only the auto-mute section (+ the final two), from the state the sections before leave: the backend's binary a copy,
+a fresh backend, a player current for it — ~1.5 min). **Every player the IT starts runs `$PBIN`** (=
+`LIASCAPE_PLAYER_BIN`, the backend's own binary path): one started from the build tree after the upgrade test made
+that path a copy read as out of date, and the backend upgraded it in place under the script (2026-11-03: the
+auto-mute flake — the env-gated player replaced, `$SP` a dead pid, the next `serve` "already running"). Player
+restarts go through `quit_player` (quits whatever answers; waits ≤ 60 s for the supervisor `hello` names and `$SP`
+to exit and the socket to answer nobody) and `serve_player` (≤ 30 s for a `hello` from ITS supervisor). **Load-proof by construction
 (2026-10-27):** a converging state is polled to a real deadline (`waitfor <ms> <cond>`), never read after a fixed
 sleep; a window is measured from the clip's own position; "what had happened by t" is judged by the events'
 own `t_mono_ms`/`t_wall` (reads after a window took seconds under load); fixed windows remain only where the
@@ -892,7 +899,8 @@ player — its old player restarted with 4 s snapshot writes, so its clean quit 
 `--restore`; RED before: SIGTERM at 1.5 s, SIGKILL at 3 s, the final snapshot lost), **the supervisor killed** → the
 next switch starts the player again with its own arguments + `--restore` and shows (RED before: a plain `serve`,
 no Wayland here → never came up), and an advance-on-end playlist is **not**
-upgraded while its switch is armed (stale > 15 s) but at its next switch, the following switch armed
+upgraded while its switch is armed (stale > 15 s; a 30 s clip, the binary copied before the play and `mv`ed right
+after one position read — 2026-11-03, a 13 s-late read left "stale only 5 s") but at its next switch, the following switch armed
 on the new player (`LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2`; RED before the fix: both cancelled + switched, the paused one
 while paused); pause during an in-flight transition (R75 final: ONE `player.paused`, checked via `ctl get
 '{"path":"player.paused"}'` + `ctl probe '{"name":"sources"}'`'s `effective_paused` for A AND the
@@ -949,7 +957,9 @@ switched away and back → a new source opens green; a compositor `kill -9` → 
 live (the default sent), dropped from the index, same worker; reset all → no `sceneProps`. RED on the base backend.
 **Auto-mute vs our own audio** (near the end, before the engine switch; SKIPs without pipewire / pipewire-pulse /
 wireplumber / pactl / paplay / parec): the only section with real audio — a private PipeWire + WirePlumber (`policy`,
-one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR`; the whole IT
+one null sink, no D-Bus, own config/state dirs) + pipewire-pulse, sockets in the IT's `$XDG_RUNTIME_DIR` — each daemon
+started once the one before ANSWERS (≤ 30 s: `pw-cli info 0`, WirePlumber's client, `pactl info`; a fixed 5 s for a
+socket file ran out under load), a daemon that exited reported with its log; the whole IT
 exports `PULSE_SERVER` at that socket (libpulse can't fall back to another server or autospawn one); a player WITHOUT
 `--ao null` (its bus on the private PipeWire), then back to the `--ao null` one. Checks § Auto-mute above.
 **Phase 3 Task 7 programs** (§ Rotation "Where it runs"): `/playlist/play` → `prog:main` (kind program), a 3 s timer
