@@ -440,7 +440,8 @@ impl Drop for Scene {
 /// A diagnostic for the build (Task 1) and the patches (Task 2); not used by liascape-player.
 /// `--prop name=value` (repeatable) sets a user property at load, like `scene_props` (the value as
 /// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
-/// `--audio-dump` (a live change, as the worker applies `SetProperty`).
+/// `--audio-dump` (a live change, as the worker applies `SetProperty`), or without `--audio-dump`
+/// `T` s into the frames, after writing the frame before it as `<out>/lwe-smoke-before-<T>s.png`.
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
@@ -564,8 +565,22 @@ fn run_smoke(
     let mut frame_ms = Vec::new();
     let mut at_1s = Vec::new();
     let mut shots = Vec::new();
+    let mut live = props_at.iter().filter(|_| audio_dump <= 0.0).peekable();
+    let mut live_errors = Vec::new();
     for f in 1..=frames {
         let t = f as f32 / 30.0;
+        if live.peek().is_some_and(|(at, _, _)| *at <= t) {
+            opaque(&gfx);
+            let path = out.join(format!("lwe-smoke-before-{}s.png", (t * 10.0).round() / 10.0));
+            gfx.write_png_source(&tex, &path)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            shots.push(path.display().to_string());
+            while let Some((_, k, v)) = live.next_if(|(at, _, _)| *at <= t) {
+                if let Err(e) = scene.set_property(k, v) {
+                    live_errors.push(e);
+                }
+            }
+        }
         let s = std::time::Instant::now();
         scene.render(t, fbo_id);
         unsafe { gfx.gl.finish() }; // a diagnostic: time the GPU too
@@ -636,6 +651,7 @@ fn run_smoke(
         "shots": shots,
         "audio_dump": dump,
         "prop_errors": prop_errors,
+        "prop_at_errors": live_errors,
     });
     drop(scene);
     if changed == 0 || lit == 0 {

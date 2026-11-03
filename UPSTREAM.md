@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`cc6f1c9`** (fork, 2026-11-03: + 0031–0036, batch B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`3eaac6e`** (fork, 2026-11-03: + 0037, E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after
@@ -114,6 +114,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0034 render: fragment gets vertex-only varyings | B9 (E19): a varying the fragment uses but only the vertex unit declares is declared in the fragment (2189783622's foliagesway built again) | candidate-for-upstream |
 | 0035 data: textinput/combo values as written | B9 (U1, U2, U4): a textinput default without JSON quotes; listed as `WP_PROPERTY_TYPE_TEXT_INPUT` (the listing threw); combo values keep non-integer numbers; `WP_PROPERTY_TYPE_FILE` = 5 (it was BOOLEAN's 4) | candidate-for-upstream |
 | 0036 render: usertextures read their property | B9 (E40, property side): a non-system usertexture is the value of the scenetexture property it names; none picked keeps the fallback quietly | candidate-for-upstream |
+| 0037 render: effect visibility live | E41: an effect whose `visible` is bound to a user property or a script is built even when hidden at load; each frame the image compares its effects' visibility with the chain's, and on a change re-picks the passes that run and sets up their targets (ping-pong, the pass that draws to the scene, the layer blending on the last running pass). A literal-false effect is still not built; a script on `visible` runs like a layer property's; a passthrough layer with no visible effect draws nothing. Not done: `getEffect()` in SceneScript | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and

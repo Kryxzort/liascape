@@ -68,3 +68,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0034-render-declare-in-the-fragment-unit-the-varyings-onl.patch` | render: declare in the fragment unit the varyings only its vertex declares | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0035-data-textinput-and-combo-values-as-written-list-text.patch` | data: textinput and combo values as written; list textinput properties | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0036-render-a-usertexture-is-the-scenetexture-property-it.patch` | render: a usertexture is the scenetexture property it names | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0037-render-an-effect-s-visible-turns-it-on-and-off-live.patch` | render: an effect's visible turns it on and off live | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

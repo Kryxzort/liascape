@@ -3866,6 +3866,17 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `host_api_test`: `engine_uniforms_are_fed`, `bloom_is_live_and_tinted`, `annotation_defaults_parse`,
   `fragment_gets_vertex_varyings`, `properties_list_as_written`, `usertexture_reads_its_property` (a solid layer with
   its own `b9` shader; all RED on c959e7a, built against the new headers).
+  **0037 (2026-11-03, E41): effect `visible` is live.** `CImage` builds every effect that can be visible
+  (`effectCanBeVisible`: true now, bound to a property, or scripted), tags each pass with its effect
+  (`m_passEffects`; base/tint/colour-blend passes nullptr) and keeps its built blending (`m_passBlending`).
+  `render ()` compares the effects' `visible` with the chain's (`effectVisibilityChanged`) and on a change calls
+  `updateActivePasses` (the running passes in `m_activePasses`, blending reset then moved first → last running pass,
+  main/sub FBO reset, `setupPasses` over them). A script on an effect's `visible` is queued as
+  `effect_<id>_<index>_visible_<object>`. A passthrough layer with no visible effect returns early. Hidden effects
+  that can't compile now log "Leaving out effect" at load (they did nothing before either). `host_api_test`:
+  `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on cc6f1c9).
+  `--lwe-smoke … --prop-at T name=value` without `--audio-dump` now sets the property `T` s into the frames and
+  writes `lwe-smoke-before-<T>s.png` first.
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").

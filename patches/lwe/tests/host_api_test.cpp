@@ -955,6 +955,10 @@ struct ScriptRig {
         if (!dir.empty ()) {
             for (const auto& f : extra) {
                 unlink ((dir + "/" + f).c_str ());
+                // and the folders it was in (E41's effects/<name>/), when empty now
+                for (auto at = f.rfind ('/'); at != std::string::npos && at > 0; at = f.rfind ('/', at - 1)) {
+                    rmdir ((dir + "/" + f.substr (0, at)).c_str ());
+                }
             }
             rmdir ((dir + "/particles").c_str ());
             unlink ((dir + "/project.json").c_str ());
@@ -1993,6 +1997,67 @@ static bool usertexture_reads_its_property () {
     return true;
 }
 
+// an effect pass of the E41 test: the previous output with channel `ch` raised to 1
+static void e41_effect (const std::string& dir, const std::string& name, const char* ch) {
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/" + name).c_str (), 0755);
+    write_file (dir + "/shaders/" + name + ".vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/" + name + ".frag",
+                std::string ("uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n\tvec4 c = texSample2D(g_Texture0, v_TexCoord);\n\tc.")
+                    + ch + " = 1.0;\n\tgl_FragColor = vec4(c.rgb, 1.0);\n}\n");
+    write_file (dir + "/materials/" + name + ".json", "{\"passes\":[{\"shader\":\"" + name + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                      "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/" + name + "/effect.json",
+                "{\"name\":\"" + name + "\",\"passes\":[{\"material\":\"materials/" + name + ".json\"}]}\n");
+}
+
+// an effect's `visible` bound to a user property turns it on and off live, the chain after it still drawn (E41;
+// unpatched: an effect hidden at load was never built, a visible one never left the chain)
+static bool effect_visible_is_live () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"g\",\"file\":\"effects/e41g/effect.json\",\"visible\":{\"user\":\"fx\",\"value\":false}},"
+              "{\"id\":3,\"name\":\"b\",\"file\":\"effects/e41b/effect.json\",\"visible\":{\"user\":\"last\",\"value\":true}}]}";
+    const std::string dir = camera_scene ("\"zoom\":1", object,
+        "\"fx\":{\"type\":\"bool\",\"value\":false,\"text\":\"f\"},\"last\":{\"type\":\"bool\",\"value\":true,\"text\":\"l\"}");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    e41_effect (dir, "e41g", "g");
+    e41_effect (dir, "e41b", "b");
+    ScriptRig rig;
+    rig.extra = { "effects/e41g/effect.json", "effects/e41b/effect.json", "shaders/e41g.vert", "shaders/e41g.frag",
+                  "shaders/e41b.vert", "shaders/e41b.frag", "materials/e41g.json", "materials/e41b.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto hidden = b9_pixel (rig);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "fx", true), "bool refused");
+    rig.step ();
+    const auto shown = b9_pixel (rig);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "last", false), "bool refused");
+    rig.step ();
+    const auto lastOff = b9_pixel (rig);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "fx", false), "bool refused");
+    rig.step ();
+    const auto none = b9_pixel (rig);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "fx", true), "bool refused");
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "last", true), "bool refused");
+    rig.step ();
+    const auto both = b9_pixel (rig);
+    printf ("    green effect off %d %d %d; on %d %d %d; blue off %d %d %d; both off %d %d %d; both on %d %d %d\n", hidden[0],
+            hidden[1], hidden[2], shown[0], shown[1], shown[2], lastOff[0], lastOff[1], lastOff[2], none[0], none[1], none[2],
+            both[0], both[1], both[2]);
+    CHECK (hidden[0] > 250 && hidden[1] < 5 && hidden[2] > 250, "hidden at load: not red + blue (%d %d %d)", hidden[0], hidden[1], hidden[2]);
+    CHECK (shown[0] > 250 && shown[1] > 250 && shown[2] > 250, "shown live: not white (%d %d %d)", shown[0], shown[1], shown[2]);
+    CHECK (lastOff[0] > 250 && lastOff[1] > 250 && lastOff[2] < 5, "last effect hidden: not yellow (%d %d %d)", lastOff[0], lastOff[1], lastOff[2]);
+    CHECK (none[0] > 250 && none[1] < 5 && none[2] < 5, "both hidden: not the red base (%d %d %d)", none[0], none[1], none[2]);
+    CHECK (both[0] > 250 && both[1] > 250 && both[2] > 250, "both back: not white (%d %d %d)", both[0], both[1], both[2]);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -2041,6 +2106,7 @@ int main (int argc, char** argv) {
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
+    run ("effect_visible_is_live", effect_visible_is_live);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
