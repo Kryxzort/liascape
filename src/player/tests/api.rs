@@ -5255,6 +5255,13 @@ fn render_worker_never_composes_a_torn_frame() {
                 json!({"path": format!("{b}.paused"), "value": false}),
             ),
         ]);
+        // The output composes on its own frame clock: right after the unpause it may not have
+        // composed B yet (a black capture, nothing torn). Wait for its first composed frame.
+        wait_for(Duration::from_secs(5), "the output's first frame", || {
+            let png = srv.path("cap-first.png");
+            c.ok("capture", json!({"target": "out:VIRTUAL-2", "path": png}));
+            flash_frame(&png).ok()
+        });
         let targets = [a.clone(), b.clone(), "out:VIRTUAL-2".to_string()];
         let mut seen: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
         let mut bad = Vec::new();
@@ -5317,10 +5324,16 @@ fn render_worker_never_composes_a_torn_frame() {
         // to what was captured — a loaded machine captures fewer times in the window (a
         // debug-build PNG encode per capture; seen: 25 rounds instead of 37), and a clip that
         // reached its last frame holds it by design; an absolute count (20, 10) flaked there.
+        // Nor more than half the frames the clip crossed: a fast machine (or a release build)
+        // captures several times per frame — 472 rounds for 56 frames — and repeats are right.
         for (i, v) in seen.iter().enumerate() {
             let last = FLASH_FRAMES - 1;
             let playing: Vec<u32> = v.iter().copied().filter(|&n| n < last).collect();
-            let want = (playing.len() / 2).max(5);
+            let crossed = match (playing.iter().min(), playing.iter().max()) {
+                (Some(lo), Some(hi)) => (hi - lo + 1) as usize,
+                _ => 0,
+            };
+            let want = (playing.len().min(crossed) / 2).max(5);
             assert!(
                 distinct(&playing) >= want,
                 "[{fault} hwdec={hw}] {}: {v:?}",
