@@ -617,11 +617,36 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       video) timed out in all 6 cells. The source now confirms `AudioFlowing` when `audio-pts` is
       unavailable while the picture plays on (no audio playing: track ended or `aid` unresolved), and its
       40 ms margin on real time, not on a later `audio-pts` change (`MpvSource::confirm_flowing_by_time`).
-- [ ] **Adapter IT: the private-PipeWire auto-mute section flakes under load** (2026-11-03, 3 of ~8 runs while other
-      agents' suites ran; each passed on a rerun): once `bus never came up` (`bus: {state:null}`), once a new `serve`
-      found "already running" (another player held the socket between the test's `quit` and `serve`), once "the private
-      pipewire-pulse never made its socket" (+ `armed upgrade` precondition: stale only 5 s). Harness waits/races, not
-      product code — make the section's setup wait on what it needs (socket, bus up, the old player gone) with bounds.
+- [x] **Adapter IT: the private-PipeWire auto-mute section flakes under load** (2026-11-03, 3 of ~8 runs while other
+      agents' suites ran; each passed on a rerun) — **fixed (2026-11-03), harness only, no product bug.**
+      Reproduced with `LIASCAPE_IT_ONLY=automute` (new: only this section, from the state the sections before leave)
+      + `stress-ng --cpu 24` (load 23–37): **5 of 8 failed** before, **0 of 8** after. Causes:
+      (a)+(b) one cause: the section's players ran `"$B"` (target/debug) while the backend starts `$T/bin/liascape-player`
+      — a COPY since the upgrade test — so the (fresh, Task 8) backend read each as out of date and upgraded it in
+      place within seconds (its 10 s check / the next switch: quit + its own `serve --restore`). `$SP` then named a
+      supervisor long gone: the next `player_with_audio` "waited" on nothing, its `serve` met the upgraded player still
+      quitting ("already running (pid …)" = the backend's), and `ctl` reached the dying one, then nobody (`bus:
+      {state:null}`; 4 of 8). It also made the "env gate off" checks run on the upgraded player — without
+      `LIASCAPE_PLAYER_AUTOMUTE=0`, the Signal on (they passed only because the backend's AudioMonitor lagged). The
+      end-of-section `start_player am2` was upgraded the same way (so the engine-switch section's `$SP`/`$CP` checks
+      looked at dead pids). Now every player the IT starts runs `$PBIN` (= `LIASCAPE_PLAYER_BIN`, current for the
+      backend); `quit_player` quits whatever answers the socket, waits (≤ 60 s) for the supervisor `hello` names AND
+      `$SP` to exit and the socket to answer nobody; `serve_player` waits (≤ 30 s) for a `hello` from ITS supervisor.
+      (c) the daemons: a fixed 5 s for pipewire-0 / pulse/native socket FILES — now each daemon waits (≤ 30 s) on what
+      the next needs (pipewire's core answers `pw-cli info 0`, WirePlumber's client is connected, `pactl info` answers),
+      a daemon that exited says so; the bus waits ≤ 30 s. The `armed upgrade` precondition ("stale only 5 s", an
+      earlier section): the 128 MB binary copy, a slow `/playlist/play` and four reads ran before L1's position read,
+      L1 was 13 s into its 20 — now the copy is made before the play (`rebuild_prep`), the stale moment is the `mv`
+      right after ONE position read, and the section plays a 30 s clip (LU; ≤ 13 s in is enough).
+      A 4th, seen in the loop (1 of 8): "the app opened: leftover … alive=n, monitor.pid still there" — `serve` stops a
+      leftover monitor-daemon after writing its port (a whole-tree kill, then the pid file), past a 5 s bound under load;
+      now ≤ 30 s on all three. A 5th (1 of 8 before, 1 of 8 after the first fix): "a switch while auto-muted: … a:0" —
+      the foreign paplay's audio stopped ARRIVING for > 300 ms mid-switch (`automute.unmuted` reason silence, 1.2 s into
+      a 20 s stream), so the Signal rightly unmuted on the section's 300 ms unmute delay; that subsection (criterion 7:
+      B's own gain when created) now runs with a 3 s unmute delay. Not a product bug (a starved stream IS silent), but
+      the criterion-6 checks that hold a release across a playing stream could meet the same dropout — watch.
+      Re-verified before commit: `LIASCAPE_IT_ONLY=automute` under `stress-ng --cpu 24` (load 22–28) 6 of 6 pass
+      (64/0 each); one full run unloaded 404/0.
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
