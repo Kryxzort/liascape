@@ -127,7 +127,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
 | **B8 Audio response** | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
-| **B9 Small uniform, property and shader fixes** — **done 2026-11-03** except E9, E11, E20, E38, E41 (patches 0031–0036; see "B9 result" in § 5) | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
+| **B9 Small uniform, property and shader fixes** — **done 2026-11-03** except E9, E11, E20, E38 (patches 0031–0036; E41 in patch 0037; see "B9 result" and "E41 result" in § 5) | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
 | **B10 SceneScript API surface** | S8, S10–S16, S19–S27, S29–S32, S36, S37 | 1–28 each | M–L | Cursor hit-test + events (`solid`). Media events from liascape's MPRIS (`wp_project_notify_*`). `applyUserProperties` + `engine.userProperties`. `getLayer` by index for all layer types. ISoundLayer `play/stop/pause` (unblocks `startsilent`, A7). Persistent `localStorage`. Layer writes. Missing engine/scene members. Needs B1. | Per feature, a fork test script. Smoke 2325974975 (sounds + menu), 2890767643 (media widget with a fake MPRIS). Headless pointer clicks for cursor events. |
 | **B11 Particles, extended** | P2, P10, P15, P22, P24–P30, P34, P35, P37 | 29 | L | Child systems (static / eventfollow / eventspawn / eventdeath). The missing initializers and operators. Control-point overrides and transforms. Rope/trail combos. Needs the operator interpreter (GH 0x140265800) read from asm first (P31–P33). | Smoke the 29 child-system scenes before/after: sub-effects present. WE captures for 2 of them. |
 | **B12 Puppet warp** | G06, G07, G08, G09 | 14 | L | Start from PR #625's MDL parsing (unmerged, so cherry-pick into our own commit). Add MDLV 0016/0017/0019. GPU skinning. Animation-layer mixing. Bone attachments. | Smoke the 14 puppet scenes at 2 timestamps: the mesh deforms. WE capture of 1 scene. |
@@ -333,7 +333,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E38 | Material `alphatocoverage` | **Observed** blending enum normal 0 / translucent 1 / additive 2 / alphatocoverage 3 (GH 0x140182410, parse GH 0x140182450) | logged and treated as `normal` (MaterialParser.cpp:73-87) | 1: 3354740764 | cutout edges opaque instead of A2C | S: alpha test or blend |
 | E39 | Material `alphawriting` | **Observed** key with values default / disabled / enabled (GH 0x140182450) | not parsed. Final pass masks alpha out; every other pass writes alpha (CImage.cpp:926, 948) | 32 have the key, "enabled" only in 1 (3184155462, cursorripple sim) | none visible beyond E4/E5 | S |
 | E40 | Non-system `usertextures` | **Inferred**: the name is a project user property of type texture, resolved to the user's file or its default | the name itself is resolved as a texture path and fails, so the slot keeps its fallback (CPass.cpp:756-805) | 3: 2388299037, 3243449890, 3516106265 (usertexture1-24) | user-picked images missing (`$mediaThumbnail` and `$mediaPreviousThumbnail` do work: RenderContext.cpp:16-32) | M |
-| E41 | Effect `visible` is evaluated once | **Inferred** live (SceneScript `getEffect().visible`, user properties; GH 0x140219c60 exposes `getEffect`) | invisible effects are not built; visible ones never skip per frame (CImage.cpp:633, 801-803 TODO) | 33 have `visible.user` (10 with condition) | toggling an effect at runtime does nothing | M: build all, skip per frame |
+| E41 | Effect `visible` is evaluated once | **Inferred** live (SceneScript `getEffect().visible`, user properties; GH 0x140219c60 exposes `getEffect`) | invisible effects are not built; visible ones never skip per frame (CImage.cpp:633, 801-803 TODO) | 33 have `visible.user` (10 with condition) | toggling an effect at runtime does nothing | **Done** (patch 0037, "E41 result" in § 5): built when it can be visible, the chain re-picked on a change; `getEffect()` is B10 |
 | E42 | Brightness under `VERSION`/genericimage4 | **Unknown** (WE has no brightness term in g_Color4 by the case-2 layout; it may premultiply the ctx colour) | `g_Brightness` only exists in non-VERSION genericimage2 | 3: 2511663284, 2542468435, 3509243656 | possible brightness mismatch | — |
 | E43 | Object `perspective` / `depthtest` / `castshadow` | **Observed** image properties (GH 0x140219c60) | ignored | perspective=true 4 (2469881470, 3354740764, 3422085307); depthtest 29; castshadow false only | mostly 3D; the effect of the 4 perspective=true images is **Unknown** | M |
 | E44 | `clearenabled` | **Observed** key (GH 0x1401c7880) | always clears with clearcolor (CScene.cpp:88, 364) | 0 (true or absent in all 96) | none | S |
@@ -1008,10 +1008,51 @@ One patch per theme:
   - **E11** `g_LayerModelMatrix` (ctx+0xa30): not decoded (1 scene).
   - **E20** `TEXnFORMAT` for samplers ≠ 0 (1 scene, only with `RENDERING=1`).
   - **E38** `alphatocoverage` (1 scene): it needs a decision for single-sampled targets.
-  - **E41** effect `visible` live (33 scenes): skipping a pass per frame changes the ping-pong targets of the chain,
-    so it needs the chain rebuilt or retargeted. That is M, not S.
+  - ~~**E41** effect `visible` live (33 scenes)~~: done in patch 0037 ("E41 result" below).
   - **E40's other half:** loading a picture the user picks (not a `.tex`), and the UI picker.
   - The 3414858021 vertex units that don't write `gl_Position`.
+
+### E41 result (fork patch 0037, pin `3eaac6e`, 2026-11-03)
+
+An effect's `visible` now turns it on and off live, from a user property or a script.
+
+- **The patch.** `CImage::setup` builds every effect that can be visible: visible now, bound to a user property, or
+  with a script on `visible` (a literal `false` with neither stays unbuilt, as before). Each pass knows its effect.
+  `render ()` compares the effects' `visible` with the values the chain was set up for. On a change it picks the
+  passes that run again and sets their targets up from the image's main FBO: the ping-pong, which pass draws to the
+  scene, and the layer's blending moved from the first to the last running pass. So a hidden last effect hands the
+  screen draw to the pass before it. A script on an effect's `visible` is queued like a layer property's
+  (`thisLayer` = the image). A passthrough layer with no visible effect draws nothing, as when none could be.
+- **What's not done.** `thisLayer.getEffect(name).visible` in SceneScript (B10; 1 scene, 2325974975, which also needs
+  cursor events). The 6 scenes with a script on an effect's `visible` (21 effects) now run it. 17 of those 21 wait
+  on media-thumbnail events (B10) and keep their literal `false`.
+- **Cost.** Hidden effects are now compiled at load. Total build time over the 29 loading scenes: 28.8 s vs 28.6 s
+  before. Hidden effects whose shaders don't compile now log "Leaving out effect" at load: 3516106265 +24,
+  3479521040 +2. These are the known "must write to gl_Position" and vec4 `?:` units, and they would fail the same
+  way when shown.
+- **Fork test** `effect_visible_is_live`: a red layer, a "green" effect (property `fx`, false at load), then a
+  "blue" effect (property `last`, true). Readings: off 255 0 255 → on 255 255 255 → blue off 255 255 0 → both off
+  255 0 0 → both on 255 255 255. On cc6f1c9 it stays 255 0 255 (RED). The suite is 36/36.
+- **Smoke, 32 of the 33 scenes** (3556794116's only binding names a deleted property, U7; `--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, a release worker on the dev
+  core vs the same worker on cc6f1c9 by `LD_LIBRARY_PATH`).
+  - Per scene, one property bound to an effect's `visible` is flipped (bool negated; a combo to a value that
+    changes which condition matches). Three runs: (B) flipped at load, (C) flipped live at 1.5 s, (A) not flipped.
+  - The metric is the % of pixels differing by > 8 at the 3 s frame.
+  - **New core, live = at load (B~C):** 0.00 % on all 28 scenes that load and draw. 3516174947 is 3.34 % only with
+    the combo set to "0": that also shows hidden ash particle layers, and a layer shown live restarts its particles
+    (B6 behaviour), so that difference isn't the effect.
+  - **Cc6f1c9 (B~C):** 0.03–99.7 % wherever the flip matters. A live flip did nothing there.
+  - **What the flips change (A~C, new core):** 2134765860 lightson 100 %; 2388299037 pulse 93 %; 3163060610 ts
+    (hidden at load, turned on) 99 %; 3354740764 nostalgia (on) 67 %; 3013489778 54 %; 3516174947 50 %;
+    3419466417 (on) 33 %; 3490034653 23 %; 3029971128 22 %; 3463520581 12 %; 3445973124 4.5 %; 3042492564 2 %;
+    3174556087 1.8 %; 3489263099 (on) 1.1 %; 3432876246 1.1 %; 2951169110 0.15 %; 2375914945 0.03 %.
+  - The rest change nothing visible in a 3 s smoke with no pointer or audio. Audio pulses and bars: 3042865984,
+    3184155462, 3233141951, 3480481965. Also 2932157836, 3219908811, 3243449890, 3363252053, 3414858021,
+    3479521040, 3516106265,.
+  - **Can't be checked here:** 3276522107 and 3477054430 fail to load (the known 3). 3046119914 and 3432999904 draw
+    black on both cores (lit 0), a separate fault.
+- **Left:** `getEffect()` (B10). The media-event scripts (B10). The black 3046119914 / 3432999904. The hidden
+  effects' shader faults (with 3414858021's `gl_Position` units).
 
 ## 6. Audio after patch 0018 (A)
 

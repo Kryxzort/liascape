@@ -1039,9 +1039,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
           tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
           2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
-          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, E41 (M: live effect
-          visibility needs the pass chain retargeted), loading a user-picked picture, 3414858021's vertex units that
+          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, loading a user-picked picture, 3414858021's vertex units that
           don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
+          **E41 done 2026-11-03** (fork patch 0037, pin `3eaac6e`): an effect's `visible` (user property or script)
+          turns it on/off live — built when it can be visible, the pass chain re-picked and retargeted on a change.
+          Smoke: live flip = flip at load (0.00 % of pixels) on all 28 of the 33 scenes that load and draw; on
+          cc6f1c9 the live flip did nothing. Left: `getEffect()` and media events for effect scripts (B10), the
+          black 3046119914/3432999904. Result: the audit's "E41 result" (§ 5).
     - [ ] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
           ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
           (S8, S10–S37). 1–28 scenes each. M–L; needs B1.

@@ -210,3 +210,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   muted, settings restored) filled the backend's player queue twice. Cause: setting 315 items' speed overrides in a
   row queued one un-mergeable command each, and the 256th dropped one (could be the playing item's speed). They now
   batch into one pass; a cap hit logs what was pending. The stall breaker never tripped in 25 min (still open).
+- **Scenes, E41 (fork patch 0037, pin `3eaac6e`):** an effect switched by a wallpaper setting (or by its script)
+  now turns on and off live, the way WE does. Before, it changed only after a reload. 33 scenes have such
+  switches, e.g. Bunk's "lights on", Retro Room's pulse, the "ts" overlay of 3163060610. On the 28 of them that
+  load and draw, flipping a setting live gives the same frame as setting it before load. Not done: script
+  `getEffect()` and the media-event scripts (batch B10).
