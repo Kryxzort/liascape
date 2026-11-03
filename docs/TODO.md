@@ -1046,9 +1046,20 @@ Two bug classes kept recurring; fix the class, not the instance:
           Smoke: live flip = flip at load (0.00 % of pixels) on all 28 of the 33 scenes that load and draw; on
           cc6f1c9 the live flip did nothing. Left: `getEffect()` and media events for effect scripts (B10), the
           black 3046119914/3432999904. Result: the audit's "E41 result" (§ 5).
-    - [ ] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
+    - [x] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
           ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
           (S8, S10–S37). 1–28 scenes each. M–L; needs B1.
+          **Done 2026-11-03** (fork patches 0038–0044, pin `c60fd2e`): the layer/scene/engine API (getLayer by
+          index for every type, getEffect, getTextureAnimation, getAnimation, sounds' play/stop/pause, sortLayer,
+          canvasSize, userProperties, applyUserProperties on change, text scripts on the real layer), media events
+          in full with the worker reading MPRIS (`media.rs`; the playing player, else the first paused one; https
+          art via curl), cursor events (enter/leave/move to every solid image layer under the cursor, clicks to
+          shown ones), persistent localStorage (`~/.local/state/liascape/scene-storage`). host_api_test 45/45;
+          script errors over 20 scripted scenes 867 → 183. Left: S16 resize/animation events, S26 getVideoTexture /
+          puppet layers / IMaterial, S37 createLayer/destroyLayer, cursor hit tests for text/particles and the
+          camera zoom, S4's instanceoverride/maxwidth/brightness scripts; S17 registerAudioBuffers (B8) is now the
+          commonest script error. 3414858021's date texts now leave the screen until text parents (G04, B4).
+          Result: the audit's "B10 result" (§ 5).
     - [ ] **B11 Particles, extended.** Child systems, the missing initializers/operators, control points, rope/trail
           combos (P2, P10, P15, P22–P35). 29 scenes. L; first read the operator interpreter from asm.
     - [ ] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,

@@ -215,3 +215,12 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   switches, e.g. Bunk's "lights on", Retro Room's pulse, the "ts" overlay of 3163060610. On the 28 of them that
   load and draw, flipping a setting live gives the same frame as setting it before load. Not done: script
   `getEffect()` and the media-event scripts (batch B10).
+- **Scenes, batch B10 (fork patches 0038–0044, pin `c60fd2e`):** wallpaper scripts now get most of Wallpaper
+  Engine's API: clicks and hovers work (2325974975's "Mute/Time/Date/Hide/Bloom" buttons light up and "Hide" hides
+  the text box), layers can be found by number, sounds can be played/paused from scripts, settings reach scripts
+  when you change them, and scripts' saved data survives a restart (`~/.local/state/liascape/scene-storage`).
+  **"Now playing" widgets** read your MPRIS player (whichever is playing; Spotify's cover is downloaded once with
+  curl): e.g. 2134765860's shelf poster shows the album art. Script errors over 20 scripted scenes dropped from 867
+  to 183; most of what's left is audio-reactive scripts (batch B8). 3414858021's date text now moves off-screen
+  because text layers don't follow their parent yet (batch B4).
+
