@@ -1,0 +1,117 @@
+From cc6f1c9544a6952efa30aca2ff3d522637f816c6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:32:46 +0530
+Subject: [PATCH 36/36] render: a usertexture is the scenetexture property it
+ names
+
+A pass's `usertextures` entry that is not a system texture names a
+project property of type scenetexture (the user's pick, or the author's
+default). LWE resolved the property's name as a texture path, which
+failed and logged, so the slot kept its fallback. The property's value is
+now the texture; with nothing picked (every default in the library is
+"") the slot keeps its fallback quietly. Resolved when the pass is built:
+a pick changed later applies on the next load. Loading a picture file the
+user picks (not a .tex) is not done.
+
+Origin: ours
+Why: user-picked textures never reached their pass (docs/player/spikes/we-lwe-gap-audit.md B9: E40, the property side)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ .../Render/Objects/Effects/CPass.cpp          | 39 ++++++++++++++++++-
+ .../Render/Objects/Effects/CPass.h            |  4 ++
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index bdff9f1..5bee749 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include "WallpaperEngine/Data/Model/Effect.h"
+ #include "WallpaperEngine/Data/Model/Material.h"
++#include "WallpaperEngine/Data/Model/Property.h"
+ 
+ #include "WallpaperEngine/Render/CFBO.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
+@@ -110,6 +111,30 @@ std::shared_ptr<const TextureProvider> CPass::resolveTexture (
+     return this->resolveFBO (it->second);
+ }
+ 
++std::optional<std::string> CPass::userTextureName (const std::string& name) const {
++    // a non-system user texture names a project property of type scenetexture: its value (a file the user picked,
++    // or the author's default) is the texture; none picked keeps the slot's fallback (it was resolved as a texture
++    // path named after the property, which failed and logged)
++    const auto& properties = this->m_renderable.getScene ().getScene ().project.properties;
++    const auto property = properties.find (name);
++
++    if (property == properties.end ()) {
++	return name;
++    }
++
++    if (const auto sceneTexture = property->second->asOrNull<Data::Model::PropertySceneTexture> ()) {
++	const std::string& value = sceneTexture->getString ();
++
++	if (value.empty ()) {
++	    return std::nullopt;
++	}
++
++	return value;
++    }
++
++    return name;
++}
++
+ std::shared_ptr<const CFBO> CPass::resolveFBO (const std::string& name) const {
+     auto fbo = this->m_fboProvider->find (name);
+ 
+@@ -753,7 +778,12 @@ void CPass::setupTextureUniforms () {
+ 	}
+     }
+ 
+-    for (const auto& [index, textureName] : this->m_pass.usertextures) {
++    for (const auto& [index, userTexture] : this->m_pass.usertextures) {
++	const auto picked = this->userTextureName (userTexture);
++	if (!picked.has_value ()) {
++	    continue;
++	}
++	const std::string& textureName = *picked;
+ 	try {
+ 	    auto texture = textureName.find ("_rt_") == 0 || textureName.find ("_alias_") == 0
+ 		? this->resolveFBO (textureName)
+@@ -790,7 +820,12 @@ void CPass::setupTextureUniforms () {
+ 	}
+     }
+ 
+-    for (const auto& [index, textureName] : this->m_override.usertextures) {
++    for (const auto& [index, userTexture] : this->m_override.usertextures) {
++	const auto picked = this->userTextureName (userTexture);
++	if (!picked.has_value ()) {
++	    continue;
++	}
++	const std::string& textureName = *picked;
+ 	try {
+ 	    auto texture = textureName.find ("_rt_") == 0 || textureName.find ("_alias_") == 0
+ 		? this->resolveFBO (textureName)
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 4c3ab16..4f34cfa 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <optional>
++
+ #include <functional>
+ #include <glm/gtc/type_ptr.hpp>
+ #include <utility>
+@@ -45,6 +47,8 @@ public:
+     void setBlendingMode (BlendingMode blendingmode);
+     [[nodiscard]] BlendingMode getBlendingMode () const;
+     [[nodiscard]] std::shared_ptr<const CFBO> resolveFBO (const std::string& name) const;
++    /** A usertexture's texture: the value of the scenetexture property it names (none picked: nullopt), else itself */
++    [[nodiscard]] std::optional<std::string> userTextureName (const std::string& name) const;
+ 
+     [[nodiscard]] std::shared_ptr<const FBOProvider> getFBOProvider () const;
+     [[nodiscard]] const CRenderable& getRenderable () const;

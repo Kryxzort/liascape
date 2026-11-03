@@ -1,0 +1,150 @@
+From 6d8c0cdeac92463810f0e27161bfd5dd2d8b3665 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:32:07 +0530
+Subject: [PATCH 32/36] render: bloom follows its settings live and is tinted
+
+WE re-applies general.bloomstrength, bloomthreshold and bloomtint to the
+bloom materials (GH 0x1401b42b0); the LDR chain's downsample shader reads
+g_BloomTint ("1 1 1" by default).
+
+The bloom passes' constants were JSON literals taken while the scene was
+built, so a user property (or animation) on them did nothing, and
+bloomtint was never parsed. They are now connected to the scene's values
+(bloomtint parsed, default 1 1 1). The bloom image is built when bloom
+is on at load or bound to a user property, and the render loop skips it
+while bloom is off (read every frame), so turning bloom on after load
+works; it used to exist only when bloom was on at load. A bloom chain
+that can't be built (no WE assets) is logged and left out.
+
+Not done: general settings driven by a SceneScript (no script host for
+them yet), HDR bloom.
+
+Origin: ours
+Why: bloom ignored its tint and every change after load (docs/player/spikes/we-lwe-gap-audit.md B9: E36, E37)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |  2 +
+ .../Data/Parsers/WallpaperParser.cpp          |  1 +
+ .../Render/Wallpapers/CScene.cpp              | 64 ++++++++++++++-----
+ 3 files changed, 50 insertions(+), 17 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index a5c26dc..4ba6d85 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -63,6 +63,8 @@ struct SceneData {
+ 	    UserSettingUniquePtr strength;
+ 	    /** Bloom's threshold to pass onto the shader */
+ 	    UserSettingUniquePtr threshold;
++	    /** Bloom's tint (`g_BloomTint` of the LDR chain, WE's default 1 1 1) */
++	    UserSettingUniquePtr tint;
+ 	} bloom;
+ 	/**
+ 	 * Parallax effect configuration
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 7e7262b..8ccea1e 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -55,6 +55,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                     .enabled = general.user ("bloom", properties, false),
+                     .strength = general.user ("bloomstrength", properties, 0.0f),
+                     .threshold = general.user ("bloomthreshold", properties, 0.0f),
++                    .tint = general.user ("bloomtint", properties, glm::vec3 (1.0f)),
+                 },
+                 .parallax = {
+                     .enabled = general.user ("cameraparallax", properties, false),
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 29a6be7..e738431 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -133,6 +133,14 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     const auto bloomOrigin = glm::vec3 { sceneWidth / 2, sceneHeight / 2, 0.0f };
+     const auto bloomSize = glm::vec2 { sceneWidth, sceneHeight };
+ 
++    // the bloom passes' constants follow general.bloomstrength/bloomthreshold/bloomtint live (GH 0x1401b42b0 re-applies
++    // them to the materials; they were literals taken at load) — connected to the scene's values below
++    const glm::vec3 tint = this->getScene ().camera.bloom.tint->value->getVec3 ();
++    const JSON constants = {
++	{ "bloomstrength", this->getScene ().camera.bloom.strength->value->getFloat () },
++	{ "bloomthreshold", this->getScene ().camera.bloom.threshold->value->getFloat () },
++	{ "bloomtint", std::to_string (tint.x) + " " + std::to_string (tint.y) + " " + std::to_string (tint.z) },
++    };
+     const JSON bloom
+ 	= { { "image", "models/wpenginelinux.json" },
+ 	    { "name", "bloomimagewpenginelinux" },
+@@ -151,27 +159,46 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 		      { "name", "" },
+ 		      { "passes",
+ 			JSON::array (
+-			    { { { "constantshadervalues",
+-				  { { "bloomstrength", this->getScene ().camera.bloom.strength->value->getFloat () },
+-				    { "bloomthreshold",
+-				      this->getScene ().camera.bloom.threshold->value->getFloat () } } } },
+-			      { { "constantshadervalues",
+-				  { { "bloomstrength", this->getScene ().camera.bloom.strength->value->getFloat () },
+-				    { "bloomthreshold",
+-				      this->getScene ().camera.bloom.threshold->value->getFloat () } } } },
+-			      { { "constantshadervalues",
+-				  { { "bloomstrength", this->getScene ().camera.bloom.strength->value->getFloat () },
+-				    { "bloomthreshold",
+-				      this->getScene ().camera.bloom.threshold->value->getFloat () } } } } }
++			    { { { "constantshadervalues", constants } },
++			      { { "constantshadervalues", constants } },
++			      { { "constantshadervalues", constants } } }
+ 			) } } }
+ 	      ) } };
+ 
+-    // create image for bloom passes
+-    if (scene->camera.bloom.enabled->value->getBool ()) {
+-	this->m_bloomObjectData = ObjectParser::parse (bloom, scene->project);
+-	this->m_bloomObject = this->createObject (*this->m_bloomObjectData);
++    // the image for the bloom passes, built when bloom is on or a user property can turn it on: `bloom` is read every
++    // frame (renderFrame). A scene whose bloom is a plain false never builds it (nor needs WE's bloom materials)
++    const auto& bloomEnabled = scene->camera.bloom.enabled;
++    if (bloomEnabled->value->getBool () || bloomEnabled->property != nullptr) {
++	try {
++	    this->m_bloomObjectData = ObjectParser::parse (bloom, scene->project);
++
++	    if (this->m_bloomObjectData->is<Image> ()) {
++		for (const auto& effect : this->m_bloomObjectData->as<Image> ()->effects) {
++		    for (const auto& pass : effect->passOverrides) {
++			const std::pair<const char*, DynamicValue*> live[] = {
++			    { "bloomstrength", this->getScene ().camera.bloom.strength->value.get () },
++			    { "bloomthreshold", this->getScene ().camera.bloom.threshold->value.get () },
++			    { "bloomtint", this->getScene ().camera.bloom.tint->value.get () },
++			};
++
++			for (const auto& [name, source] : live) {
++			    if (const auto constant = pass->constants.find (name); constant != pass->constants.end ()) {
++				constant->second->value->connect (source);
++			    }
++			}
++		    }
++		}
++	    }
++
++	    this->m_bloomObject = this->createObject (*this->m_bloomObjectData);
++	} catch (const std::exception& e) {
++	    sLog.error ("Cannot build the bloom passes, the scene renders without bloom: ", e.what ());
++	    this->m_bloomObject = nullptr;
++	}
+ 
+-	this->m_objectsByRenderOrder.push_back (this->m_bloomObject);
++	if (this->m_bloomObject != nullptr) {
++	    this->m_objectsByRenderOrder.push_back (this->m_bloomObject);
++	}
+     }
+ }
+ 
+@@ -397,6 +424,9 @@ void CScene::renderFrame () {
+ 	if (std::ranges::find (debug.skipObjects, cur->getId ()) != debug.skipObjects.end ()) {
+ 	    continue;
+ 	}
++	if (cur == this->m_bloomObject && !this->getScene ().camera.bloom.enabled->value->getBool ()) {
++	    continue;
++	}
+ 
+ 	cur->render ();
+     }

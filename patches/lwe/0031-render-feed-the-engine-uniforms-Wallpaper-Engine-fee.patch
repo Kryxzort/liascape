@@ -1,0 +1,174 @@
+From 69f06d2925cb8db0fafc524fa4561e213e799448 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:31:59 +0530
+Subject: [PATCH 31/36] render: feed the engine uniforms Wallpaper Engine feeds
+
+Decoded from wallpaper64.exe 2.8.485: the per-draw uniform switch
+(GH 0x14010a0e0), the scene tick (GH 0x1401afbf0) and the time of day
+(GH 0x14013f370).
+
+g_Frametime (case 4): the frame's dt, renderTime - renderTimeLast, never
+negative. It read 0, so cursorripple's step was 0.
+
+g_PointerState (case 0x71): xy 1 while the left button is down, z 1 on
+the frame it went down (WE's flags at ctx+0xa4: bit 0 down, bit 1 already
+seen), w 0. From the host's wp_mouse_input is_pressed. It read 0.
+
+g_Daytime (case 5) and engine.timeOfDay: the local time of day in
+[0, 1), h/24 + m/1440 + s/86400 + ms/86400000, every frame from the wall
+clock. Context::daytime was never written (0).
+
+g_Time wraps every 432000 s (5 days), as WE resets its own (constant at
+0x1404d44fc); scripts, particles and sounds keep the host clock.
+
+Origin: ours
+Why: g_Frametime, g_PointerState and g_Daytime/engine.timeOfDay read 0, g_Time never wrapped (docs/player/spikes/we-lwe-gap-audit.md B9: E4, E5, C1, C3, S18)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ src/core/WallpaperEngine/Context.cpp          | 21 ++++++++++++++++++-
+ src/core/WallpaperEngine/Context.h            |  8 +++++++
+ .../Render/Objects/Effects/CPass.cpp          |  4 +++-
+ .../Render/Wallpapers/CScene.cpp              | 13 ++++++++++++
+ .../Render/Wallpapers/CScene.h                |  7 +++++++
+ 5 files changed, 51 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Context.cpp b/src/core/WallpaperEngine/Context.cpp
+index 8433444..8ac1ac3 100644
+--- a/src/core/WallpaperEngine/Context.cpp
++++ b/src/core/WallpaperEngine/Context.cpp
+@@ -1,5 +1,10 @@
+ #include "Context.h"
+ 
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <ctime>
++
+ #include "Audio/Drivers/HostAudioDriver.h"
+ #include "Audio/Drivers/SDLAudioDriver.h"
+ #include "WallpaperEngine/Audio/AudioPlayingDetector.h"
+@@ -12,7 +17,7 @@ WallpaperEngine::Context::Context (
+ ) :
+     texture_cache (std::make_unique<TextureCache> ()), config (config), gl_proc_address (gl_proc_addresses),
+     time_counter (time_counter), audio_input_mix (audio_input_mix), isRunning (true), renderTime (0.0f),
+-    renderTimeLast (0.0f), daytime (0.0f) {
++    renderTimeLast (0.0f), frameTime (0.0f), shaderTime (0.0f), daytime (0.0f) {
+     // a host audio output replaces SDL entirely: no SDL audio subsystem, no device
+     std::unique_ptr<Audio::Drivers::AudioDriver> driver;
+ 
+@@ -33,6 +38,20 @@ WallpaperEngine::Context::Context (
+ void WallpaperEngine::Context::updateTime () {
+     this->renderTimeLast = this->renderTime;
+     this->renderTime = this->time_counter->get_time (this->time_counter->user_parameter);
++    this->frameTime = std::max (0.0f, this->renderTime - this->renderTimeLast);
++    this->shaderTime = this->renderTime >= 0.0f ? std::fmod (this->renderTime, 432000.0f) : this->renderTime;
++
++    // the local time of day (WE's FUN_14013f370: GetLocalTime → h/24 + m/1440 + s/86400 + ms/86400000)
++    const auto now = std::chrono::system_clock::now ();
++    const std::time_t seconds = std::chrono::system_clock::to_time_t (now);
++    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()).count () % 1000;
++    std::tm local {};
++
++    if (localtime_r (&seconds, &local) != nullptr) {
++	this->daytime = static_cast<float> (
++	    local.tm_hour / 24.0 + local.tm_min / 1440.0 + local.tm_sec / 86400.0 + static_cast<double> (ms) / 86400000.0
++	);
++    }
+     this->audio->getDetector ().update ();
+     this->audio->getRecorder ().update ();
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Context.h b/src/core/WallpaperEngine/Context.h
+index 0bb24bb..6ac6ea7 100644
+--- a/src/core/WallpaperEngine/Context.h
++++ b/src/core/WallpaperEngine/Context.h
+@@ -25,6 +25,14 @@ public:
+     bool isRunning;
+     float renderTime;
+     float renderTimeLast;
++    /** `g_Frametime`: this frame's delta, renderTime − renderTimeLast, never negative (WE: the tick's dt, ctx+0x14c) */
++    float frameTime;
++    /** `g_Time`: renderTime wrapped every 432000 s (5 days) as WE wraps its own (GH 0x1401afbf0, 0x1404d44fc) */
++    float shaderTime;
++    /**
++     * `g_Daytime` and `engine.timeOfDay`: the local time of day in [0, 1), h/24 + m/1440 + s/86400 + ms/86400000
++     * (GH 0x14013f370, written every frame by GH 0x140141520); wall-clock time, not the host's scene clock
++     */
+     float daytime;
+ 
+     explicit Context (
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 4508ce5..bdff9f1 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -870,7 +870,8 @@ void CPass::setupUniforms () {
+ 	this->addUniform ("g_CompositeColor", &renderable.getCompositeColor ());
+     }
+     // add some external variables
+-    this->addUniform ("g_Time", &this->getContext ().getContext ().renderTime);
++    this->addUniform ("g_Time", &this->getContext ().getContext ().shaderTime);
++    this->addUniform ("g_Frametime", &this->getContext ().getContext ().frameTime);
+     this->addUniform ("g_Daytime", &this->getContext ().getContext ().daytime);
+     // add model-view-projection matrix
+     this->addUniform ("g_ModelViewProjectionMatrixInverse", &this->m_modelViewProjectionMatrixInverse);
+@@ -882,6 +883,7 @@ void CPass::setupUniforms () {
+     this->addUniform ("g_ViewProjectionMatrix", &this->m_viewProjectionMatrix);
+     this->addUniform ("g_PointerPosition", scene.getMousePosition ());
+     this->addUniform ("g_PointerPositionLast", scene.getMousePositionLast ());
++    this->addUniform ("g_PointerState", scene.getPointerState ());
+     // the smoothed parallax position over the scene size, 0..1 (WE uniform 0x72, GH 0x14010a0e0; written by the
+     // camera update GH 0x1401b8af0)
+     this->addUniform ("g_ParallaxPosition", scene.getParallaxPosition ());
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 4be4fdf..29a6be7 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -413,8 +413,21 @@ void CScene::updateMouse () {
+     // position is already inside the background, convert it to viewport space
+     this->m_mousePosition.x = position.x / this->getWidth ();
+     this->m_mousePosition.y = position.y / this->getHeight ();
++
++    // the left button: held → xy 1; the frame it went down → z 1 (WE's flags at ctx+0xa4: bit 0 down, bit 1 already
++    // seen, so z marks the press)
++    const wp_mouse_input* handler = this->getMouseInputHandler ();
++    const bool down = handler != nullptr && handler->is_pressed != nullptr
++	&& (handler->is_pressed (handler->user_parameter, WP_MOUSE_INPUT_BUTTON_LEFT) & WP_MOUSE_INPUT_BUTTON_LEFT) != 0;
++
++    this->m_pointerState = glm::vec4 (
++	down ? 1.0f : 0.0f, down ? 1.0f : 0.0f, down && !this->m_pointerWasDown ? 1.0f : 0.0f, 0.0f
++    );
++    this->m_pointerWasDown = down;
+ }
+ 
++const glm::vec4* CScene::getPointerState () const { return &this->m_pointerState; }
++
+ const Scene& CScene::getScene () const { return *this->getWallpaperData ().as<Scene> (); }
+ 
+ int CScene::getWidth () const { return this->m_camera->getWidth (); }
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 9aef29d..6bdbbb7 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -46,6 +46,11 @@ public:
+     const glm::vec2* getMousePosition () const;
+     const glm::vec2* getMousePositionLast () const;
+     const glm::vec2* getMousePositionNormalized () const;
++    /**
++     * `g_PointerState` (WE uniform 0x71, GH 0x14010a0e0): xy 1 while the left button is down, z 1 on the frame it went
++     * down, w 0
++     */
++    const glm::vec4* getPointerState () const;
+     /** `g_ParallaxPosition`: the smoothed parallax position over the scene size, clamped to 0..1 (0.5 = centre) */
+     const glm::vec2* getParallaxPosition () const;
+     /**
+@@ -92,6 +97,8 @@ private:
+     std::mt19937 m_particleRng;
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};
++    glm::vec4 m_pointerState = {};
++    bool m_pointerWasDown = false;
+     glm::vec2 m_mousePositionNormalized = {};
+     /** the smoothed parallax position (WE scene+0x300) in scene units, y up; starts at the centre */
+     glm::vec2 m_parallaxPosition = {};

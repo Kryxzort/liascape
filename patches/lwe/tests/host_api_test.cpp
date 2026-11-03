@@ -18,10 +18,12 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -959,7 +961,7 @@ struct ScriptRig {
             unlink ((dir + "/scene.json").c_str ());
             for (const char* sub : { "shaders", "materials", "models" }) {
                 const std::string d = dir + "/" + sub;
-                for (const char* f : { "c4.vert", "c4.frag", "c4.json" }) {
+                for (const char* f : { "c4.vert", "c4.frag", "c4.json", "b9.vert", "b9.frag", "b9.json" }) {
                     unlink ((d + "/" + f).c_str ());
                 }
                 rmdir (d.c_str ());
@@ -1772,6 +1774,225 @@ static bool aligned_layer_turns_about_its_origin () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// B9 (docs/player/spikes/we-lwe-gap-audit.md): small uniform, property and shader fixes, each decoded from
+// wallpaper64.exe 2.8.485 where WE's behaviour was in question.
+
+static bool g_buttonDown = false;
+static int pressed_left (void*, int button) { return g_buttonDown ? (button & WP_MOUSE_INPUT_BUTTON_LEFT) : 0; }
+static wp_mouse_input g_clicker = { .user_parameter = nullptr, .get_x = mouse_x, .get_y = mouse_y, .is_pressed = pressed_left };
+
+// a solid layer at `x` drawing `frag` (a fragment body over the given uniforms) as models/b9.json
+static void b9_layer (const std::string& dir, const std::string& uniforms, const std::string& body,
+                      const std::string& vertexExtra = "", const std::string& vertexBody = "") {
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/shaders/b9.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n" + vertexExtra
+                                              + "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+                                              + vertexBody + "}\n");
+    write_file (dir + "/shaders/b9.frag", uniforms + "void main() {\n\t" + body + "\n}\n");
+    write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/models/b9.json", "{\"material\":\"materials/b9.json\",\"solidlayer\":true}\n");
+}
+
+static std::string b9_object (int id, int x) {
+    return "{\"id\":" + std::to_string (id) + ",\"name\":\"b9\",\"image\":\"models/b9.json\",\"size\":\"8 8\",\"origin\":\"" + std::to_string (x)
+         + " 16 0\"}";
+}
+
+// g_Frametime (the frame's dt), g_PointerState (xy held, z the press frame), g_Daytime (the local time of day) and
+// g_Time wrapped at 432000 s are fed (unpatched: the first three read 0, g_Time ran on)
+static bool engine_uniforms_are_fed () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "uniform float g_Frametime;\nuniform vec4 g_PointerState;\nuniform float g_Daytime;\nuniform float g_Time;\n",
+              "gl_FragColor = vec4(g_Frametime * 15.0, g_Daytime, g_PointerState.x * 0.5 + g_PointerState.z * 0.5, 1.0);");
+    ScriptRig rig;
+    rig.mouse = &g_clicker;
+    g_buttonDown = false;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    auto at = [&rig] () {
+        std::array<unsigned char, 4> px {};
+        read_pixel (rig.fbo, 16, 16, px.data ());
+        return px;
+    };
+    rig.step ();
+    const auto up = at ();
+    g_buttonDown = true;
+    rig.step ();
+    const auto pressed = at ();
+    rig.step ();
+    const auto held = at ();
+    g_buttonDown = false;
+    // the local time of day now, as WE computes it
+    const std::time_t now = std::time (nullptr);
+    std::tm local {};
+    localtime_r (&now, &local);
+    const double day = local.tm_hour / 24.0 + local.tm_min / 1440.0 + local.tm_sec / 86400.0;
+    printf ("    frametime 1/30 → r=%d; daytime → g=%d (local %.3f → %d); pointer up %d, pressed %d, held %d\n", up[0], up[1], day,
+            static_cast<int> (std::lround (day * 255)), up[2], pressed[2], held[2]);
+    CHECK (near (up[0], 0.5 * 255), "g_Frametime isn't 1/30 (r=%d)", up[0]);
+    CHECK (near (up[1], day * 255, 2), "g_Daytime isn't the local time of day (g=%d)", up[1]);
+    CHECK (up[2] < 3 && near (pressed[2], 255) && near (held[2], 127), "g_PointerState: up %d, pressed %d, held %d", up[2],
+           pressed[2], held[2]);
+
+    // g_Time past 5 days wraps (WE: reset to 0 above 432000 s)
+    const std::string wrap = script_scene (b9_object (1, 16));
+    b9_layer (wrap, "uniform float g_Time;\n", "gl_FragColor = vec4(g_Time * 0.1, 0.0, 0.0, 1.0);");
+    ScriptRig rig2;
+    CHECK (rig2.open (wrap), "load/build of %s failed", wrap.c_str ());
+    g_now = 432005.0f - 1.0f / 30.0f;
+    rig2.step ();
+    std::array<unsigned char, 4> px {};
+    read_pixel (rig2.fbo, 16, 16, px.data ());
+    printf ("    g_Time at 432005 s: r=%d (5 s → 127)\n", px[0]);
+    CHECK (near (px[0], 0.5 * 255, 4), "g_Time didn't wrap at 432000 s (r=%d)", px[0]);
+    return true;
+}
+
+// bloom follows its user properties live and is tinted (unpatched: strength/threshold were literals taken at load, the
+// tint was never passed, and a scene whose bloom was off at load never got the bloom passes)
+static bool bloom_is_live_and_tinted () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // a white square (28..35) on the blue clear (0.5, under the threshold 0.6); the glow at 37 is green only (tint 0 1 0)
+    const std::string dir = camera_scene (
+        "\"bloom\":{\"user\":\"bl\",\"value\":false},\"bloomstrength\":{\"user\":\"bs\",\"value\":4},\"bloomthreshold\":0.6,"
+        "\"bloomtint\":\"0 1 0\"",
+        white_square (1, "\"origin\":\"32 16 0\""),
+        "\"bl\":{\"type\":\"bool\",\"value\":false,\"text\":\"b\"},\"bs\":{\"type\":\"slider\",\"value\":4,\"min\":0,\"max\":4,\"text\":\"s\"}"
+    );
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    auto glow = [&rig] () {
+        std::array<unsigned char, 4> px {};
+        read_pixel (rig.fbo, 37, 16, px.data ());
+        return px;
+    };
+    rig.step ();
+    const auto off = glow ();
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "bl", true), "bool refused");
+    rig.step ();
+    const auto on = glow ();
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "bs", 0.0f), "slider refused");
+    rig.step ();
+    const auto none = glow ();
+    printf ("    next to the square: bloom off %d %d %d; on %d %d %d; strength 0 %d %d %d\n", off[0], off[1], off[2], on[0], on[1],
+            on[2], none[0], none[1], none[2]);
+    CHECK (off[1] < 3, "a glow with bloom off (g=%d)", off[1]);
+    CHECK (on[1] >= 6, "turning bloom on live didn't glow (g=%d)", on[1]);
+    CHECK (on[0] < 3, "the glow isn't tinted green (r=%d)", on[0]);
+    CHECK (none[1] < 3, "strength 0 still glows (g=%d)", none[1]);
+    return true;
+}
+
+// the centre pixel of the b9 layer at x 16
+static std::array<unsigned char, 4> b9_pixel (const ScriptRig& rig) {
+    std::array<unsigned char, 4> px {};
+    read_pixel (rig.fbo, 16, 16, px.data ());
+    return px;
+}
+
+// a float uniform's `default` written as a string is that float, and a vector's written as a number broadcasts
+// (unpatched: std::stoi ("0.25") = 0, and the number threw, which lost the layer's pass)
+static bool annotation_defaults_parse () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir,
+              "uniform float u_Spacing; // {\"material\":\"spacing\",\"default\":\"0.25\"}\n"
+              "uniform vec2 u_Pair; // {\"material\":\"pair\",\"default\":0.5}\n",
+              "gl_FragColor = vec4(u_Spacing, u_Pair.x, u_Pair.y, 1.0);");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = b9_pixel (rig);
+    printf ("    \"0.25\" → r=%d; 0 for a vec2 → g=%d b=%d\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], 0.25 * 255), "a string float default isn't 0.25 (r=%d)", px[0]);
+    CHECK (near (px[1], 0.5 * 255) && near (px[2], 0.5 * 255), "a number vec2 default didn't broadcast (%d %d)", px[1], px[2]);
+    return true;
+}
+
+// a fragment unit reading a varying only its vertex unit declares compiles (WE's packaged foliagesway reads v_Bounds
+// that way; unpatched: an undeclared identifier, the pass failed)
+static bool fragment_gets_vertex_varyings () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "", "gl_FragColor = vec4(v_Bounds.x, v_Bounds.y, 0.0, 1.0);", "varying vec2 v_Bounds;\n",
+              "\tv_Bounds = vec2(0.5, 0.25);\n");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = b9_pixel (rig);
+    printf ("    v_Bounds 0.5 0.25 → %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], 0.5 * 255) && near (px[1], 0.25 * 255), "the vertex-only varying didn't reach the fragment (%d %d %d)",
+           px[0], px[1], px[2]);
+    return true;
+}
+
+// the property listing: a textinput is listed with its text, without JSON quotes; a combo option 0.5 keeps its
+// value; a file property is not taken for a boolean (unpatched: "Unknown property type" ended the listing, the
+// default was "\"YOURNAME\"", 0.5 became "0" and WP_PROPERTY_TYPE_FILE was 4, the boolean's)
+static bool properties_list_as_written () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1", square (1, "\"origin\":\"16 16 0\""),
+        "\"a_flag\":{\"type\":\"bool\",\"value\":true,\"text\":\"f\"},"
+        "\"b_name\":{\"type\":\"textinput\",\"value\":\"YOURNAME\",\"text\":\"n\"},"
+        "\"c_mode\":{\"type\":\"combo\",\"value\":0.5,\"text\":\"m\",\"options\":[{\"label\":\"half\",\"value\":0.5},{\"label\":\"one\",\"value\":1}]},"
+        "\"d_file\":{\"type\":\"file\",\"value\":\"\",\"text\":\"p\"}");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    wp_project_property_list_reset (rig.p);
+    std::string name, combo, kinds;
+    for (wp_project_property* property; (property = wp_project_property_list_next (rig.p)) != nullptr;) {
+        kinds += std::string (property->name) + "=" + std::to_string (property->type) + " ";
+        if (const auto text = WP_PROPERTY_AS_TEXT_INPUT (property)) {
+            name = text->value;
+        } else if (const auto options = WP_PROPERTY_AS_COMBO (property)) {
+            for (int i = 0; i < options->value_count; i++) {
+                combo += std::string (options->values[i].key) + "/";
+            }
+        }
+    }
+    printf ("    listed: %s; textinput \"%s\"; combo keys %s\n", kinds.c_str (), name.c_str (), combo.c_str ());
+    CHECK (name == "YOURNAME", "the textinput isn't YOURNAME (\"%s\")", name.c_str ());
+    CHECK (combo.find ("0.5/") != std::string::npos, "the combo option 0.5 is listed as %s", combo.c_str ());
+    CHECK (kinds.find ("d_file=5") != std::string::npos && kinds.find ("a_flag=4") != std::string::npos,
+           "file and boolean types: %s", kinds.c_str ());
+    return true;
+}
+
+// a pass's usertexture names a scenetexture property, whose value is the texture (unpatched: the property's name
+// was resolved as a texture path, which failed, and the slot stayed unbound)
+static bool usertexture_reads_its_property () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1", b9_object (1, 16) + "," + b9_object (2, 48),
+        "\"picked\":{\"type\":\"scenetexture\",\"value\":\"util/white\",\"text\":\"t\"}");
+    b9_layer (dir, "uniform sampler2D g_Texture1;\n", "gl_FragColor = vec4(texSample2D(g_Texture1, vec2(0.5, 0.5)).rgb, 1.0);");
+    write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/black\",\"util/black\"],"
+                                            "\"usertextures\":[null,\"picked\"]}]}\n");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = b9_pixel (rig);
+    printf ("    g_Texture1 from the property's util/white: %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (px[0] > 250 && px[1] > 250 && px[2] > 250, "the picked texture isn't white (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -1814,6 +2035,12 @@ int main (int argc, char** argv) {
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
+    run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
+    run ("bloom_is_live_and_tinted", bloom_is_live_and_tinted);
+    run ("annotation_defaults_parse", annotation_defaults_parse);
+    run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
+    run ("properties_list_as_written", properties_list_as_written);
+    run ("usertexture_reads_its_property", usertexture_reads_its_property);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

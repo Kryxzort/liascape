@@ -1,0 +1,143 @@
+From d9933e821973850382498d77c97cb8abc9cf4023 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:32:46 +0530
+Subject: [PATCH 35/36] data: textinput and combo values as written; list
+ textinput properties
+
+A textinput property's default was built from the JSON value's dump (),
+so it kept its quotes ("\"YOURNAME\""), and a text bound to it showed
+them until the host sent a value. A combo option or value that is a
+non-integer number was truncated (0.5 -> "0"); numbers keep their
+written form now, integers their decimal one.
+
+The property listing (wp_project_property_list_next) threw "Unknown
+property type" at a textinput, ending the listing; it is listed as
+WP_PROPERTY_TYPE_TEXT_INPUT (8, wp_project_property_text_input with its
+value). WP_PROPERTY_TYPE_FILE was 4, the same as BOOLEAN, so a file
+property was taken for a boolean by WP_PROPERTY_AS; it is 5 (unused).
+
+Origin: ours
+Why: textinput text kept its JSON quotes and broke the property listing; combo values were truncated (docs/player/spikes/we-lwe-gap-audit.md B9: U1, U2, U4)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ include/linux-wallpaperengine/project.h       | 12 +++++++++-
+ .../Data/Parsers/PropertyParser.cpp           | 22 ++++++++++++++++---
+ src/core/WallpaperEngine/Project.cpp          |  4 ++++
+ 3 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/project.h b/include/linux-wallpaperengine/project.h
+index 847b3f7..c1c7ffa 100644
+--- a/include/linux-wallpaperengine/project.h
++++ b/include/linux-wallpaperengine/project.h
+@@ -28,9 +28,10 @@ enum wp_property_type {
+     WP_PROPERTY_TYPE_SLIDER = 2,
+     WP_PROPERTY_TYPE_COLOR = 3,
+     WP_PROPERTY_TYPE_BOOLEAN = 4,
+-    WP_PROPERTY_TYPE_FILE = 4,
++    WP_PROPERTY_TYPE_FILE = 5,
+     WP_PROPERTY_TYPE_SCENE_TEXTURE = 6,
+     WP_PROPERTY_TYPE_COMBO = 7,
++    WP_PROPERTY_TYPE_TEXT_INPUT = 8,
+ };
+ 
+ /**
+@@ -92,6 +93,12 @@ struct wp_project_property_text {
+     const char* value;
+ };
+ 
++/** A `textinput` property: the text the user typed, or its default */
++struct wp_project_property_text_input {
++    wp_project_property base;
++    const char* value;
++};
++
+ struct wp_project_property_file {
+     wp_project_property base;
+     const char* path;
+@@ -133,6 +140,7 @@ struct wp_project_property_boolean {
+ #define WP_TYPE_LOWER_FILE file
+ #define WP_TYPE_LOWER_SCENE_TEXTURE scene_texture
+ #define WP_TYPE_LOWER_COMBO combo
++#define WP_TYPE_LOWER_TEXT_INPUT text_input
+ 
+ #define WP_TYPE_EXPAND(x) x
+ #define WP_TYPE_CONCAT(a, b) a##b
+@@ -162,6 +170,8 @@ struct wp_project_property_boolean {
+ #define WP_PROPERTY_AS_SCENE_TEXTURE(property) WP_PROPERTY_AS (property, SCENE_TEXTURE)
+ #define WP_PROPERTY_IS_COMBO(property) WP_PROPERTY_IS (property, COMBO)
+ #define WP_PROPERTY_AS_COMBO(property) WP_PROPERTY_AS (property, COMBO)
++#define WP_PROPERTY_IS_TEXT_INPUT(property) WP_PROPERTY_IS (property, TEXT_INPUT)
++#define WP_PROPERTY_AS_TEXT_INPUT(property) WP_PROPERTY_AS (property, TEXT_INPUT)
+ 
+ /**
+  * Loads the given background ID from the backgrounds folder
+diff --git a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+index d09591d..06648d2 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+@@ -4,6 +4,22 @@
+ using namespace WallpaperEngine::Data::Parsers;
+ using namespace WallpaperEngine::Data::Model;
+ 
++namespace {
++/**
++ * A property value as the text WE keeps: a string as is (a textinput's default kept its JSON quotes: "\"NAME\""),
++ * an integer in decimal, any other number as written (a combo option 0.5 was truncated to "0")
++ */
++std::string textValue (const JSON& value) {
++    if (value.is_string ()) {
++	return value.get<std::string> ();
++    }
++    if (value.is_number_integer ()) {
++	return std::to_string (value.get<long long> ());
++    }
++    return value.dump ();
++}
++} // namespace
++
+ PropertySharedPtr PropertyParser::parse (const JSON& it, const std::string& name) {
+     // type might not be included, in which case means the same as a group
+     const auto type = it.optional ("type");
+@@ -62,7 +78,7 @@ PropertySharedPtr PropertyParser::parseCombo (const JSON& it, const std::string&
+ 	const auto value = cur.require ("value", "Combo option must have a value");
+ 
+ 	optionsMap.emplace (
+-	    value.is_number () ? std::to_string (value.get<int> ()) : value.get<std::string> (),
++	    textValue (value),
+ 	    cur.require ("label", "Combo option must have a label")
+ 	);
+     }
+@@ -75,7 +91,7 @@ PropertySharedPtr PropertyParser::parseCombo (const JSON& it, const std::string&
+ 	    .text = it.optional<std::string> ("text", ""),
+ 	},
+ 	ComboData { .values = optionsMap },
+-	value.is_number () ? std::to_string (value.get<int> ()) : value.get<std::string> ()
++	textValue (value)
+     );
+ }
+ 
+@@ -147,6 +163,6 @@ PropertySharedPtr PropertyParser::parseTextInput (const JSON& it, const std::str
+ 	    .name = name,
+ 	    .text = it.optional<std::string> ("text", ""),
+ 	},
+-	it.require ("value", "Property must have a value").dump ()
++	textValue (it.require ("value", "Property must have a value"))
+     );
+ }
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 7fc8ec0..3a9a5c7 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -291,6 +291,10 @@ wp_project_property* WallpaperEngine::Project::propertyListNext () {
+ 	this->current_property = reinterpret_cast<wp_project_property*> (new wp_project_property_scene_texture {
+ 	    .base = { .type = WP_PROPERTY_TYPE_SCENE_TEXTURE, .name = sceneTexture->name.c_str () },
+ 	    .value = sceneTexture->getString ().c_str () });
++    } else if (const auto textInput = property->second->asOrNull<PropertyTextInput> ()) {
++	this->current_property = reinterpret_cast<wp_project_property*> (new wp_project_property_text_input {
++	    .base = { .type = WP_PROPERTY_TYPE_TEXT_INPUT, .name = textInput->name.c_str () },
++	    .value = textInput->getString ().c_str () });
+     } else {
+ 	sLog.exception ("Unknown property type");
+     }

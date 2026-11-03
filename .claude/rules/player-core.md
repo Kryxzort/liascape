@@ -3849,6 +3849,23 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   about its origin (`m_scenePivot`), not the shifted quad's centre. Not done: text parent transforms (CText, B4), a
   sound object under a hidden parent. `host_api_test`: `hidden_parent_hides_children`, `particle_follows_its_parent`,
   `aligned_layer_turns_about_its_origin` (all RED on d7a9f34).
+  **0031–0036 (2026-11-03, batch B9): small uniform, property and shader fixes** (audit "B9 result" in its § 5).
+  **0031:** `g_Frametime` (`Context::frameTime`, the frame's dt), `g_PointerState` (`CScene::getPointerState`: xy 1
+  while the left button of the host's `wp_mouse_input` is down, z 1 on the press frame), `g_Daytime` and
+  `engine.timeOfDay` (`Context::daytime`, the local wall-clock time of day in [0, 1), every frame), `g_Time` =
+  `Context::shaderTime` (renderTime wrapped at 432000 s, as WE). **0032:** the bloom passes' `bloomstrength`/
+  `bloomthreshold`/`bloomtint` constants are `connect`ed to `general`'s values (live; `bloomtint` parsed, default
+  1 1 1); the bloom image is built when `bloom` is on or bound to a user property and the render loop skips it while
+  off (read per frame); a build failure is logged, not fatal. **0033:** uniform annotation defaults: a string float is
+  that float, a number vector broadcasts, an int string never throws; malformed `[COMBO]` JSON stays skipped (WE's
+  parser is strict too). **0034:** `ShaderUnit::applyFragmentVaryingDeclarations` declares in a fragment unit each
+  varying it uses that only its vertex unit declares. **0035:** a textinput default has no JSON quotes; the
+  property listing lists it (`WP_PROPERTY_TYPE_TEXT_INPUT` 8, `wp_project_property_text_input`); combo values keep
+  non-integer numbers; `WP_PROPERTY_TYPE_FILE` is 5 (was 4 = BOOLEAN). **0036:** `CPass::userTextureName`: a
+  non-system usertexture is its scenetexture property's value (at pass build; empty → the slot's fallback, no log).
+  `host_api_test`: `engine_uniforms_are_fed`, `bloom_is_live_and_tinted`, `annotation_defaults_parse`,
+  `fragment_gets_vertex_varyings`, `properties_list_as_written`, `usertexture_reads_its_property` (a solid layer with
+  its own `b9` shader; all RED on c959e7a, built against the new headers).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").

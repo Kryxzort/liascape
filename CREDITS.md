@@ -62,3 +62,9 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0028-render-sprite-sheet-particles-cross-fade-their-frame.patch` | render: sprite-sheet particles cross-fade their frames | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0029-render-parallax-and-camera-the-way-Wallpaper-Engine-.patch` | render: parallax and camera the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0030-render-hierarchy-the-way-Wallpaper-Engine-does.patch` | render: hierarchy the way Wallpaper Engine does | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0031-render-feed-the-engine-uniforms-Wallpaper-Engine-fee.patch` | render: feed the engine uniforms Wallpaper Engine feeds | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0032-render-bloom-follows-its-settings-live-and-is-tinted.patch` | render: bloom follows its settings live and is tinted | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0033-render-read-uniform-annotation-defaults-as-written.patch` | render: read uniform annotation defaults as written | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0034-render-declare-in-the-fragment-unit-the-varyings-onl.patch` | render: declare in the fragment unit the varyings only its vertex declares | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0035-data-textinput-and-combo-values-as-written-list-text.patch` | data: textinput and combo values as written; list textinput properties | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0036-render-a-usertexture-is-the-scenetexture-property-it.patch` | render: a usertexture is the scenetexture property it names | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

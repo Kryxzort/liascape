@@ -1,0 +1,95 @@
+From 9f918e1dc7d031af4c428730072138b433afb35f Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 05:32:29 +0530
+Subject: [PATCH 34/36] render: declare in the fragment unit the varyings only
+ its vertex declares
+
+A fragment unit that reads a varying declared only in its vertex unit
+failed to compile ("undeclared identifier"), so the effect was left out:
+the packaged foliagesway of scene 2189783622 reads v_Bounds that way. WE
+compiles it (how is not decoded; it builds the pixel shader's inputs from
+the vertex shader's outputs, inferred). Each such varying the fragment
+source uses is now declared in it, after the linked-varying fix-ups.
+
+Origin: ours
+Why: an effect whose fragment reads a vertex-only varying was dropped (docs/player/spikes/we-lwe-gap-audit.md B9: E19)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8a42pVTGcB74tx4LjJ
+---
+ .../Render/Shaders/ShaderUnit.cpp             | 38 ++++++++++++++++++-
+ .../Render/Shaders/ShaderUnit.h               |  5 +++
+ 2 files changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index b2829de..3316564 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -414,6 +414,40 @@ std::string ShaderUnit::applyLinkedVaryingCompatibility (std::string source) con
+     return source;
+ }
+ 
++std::string ShaderUnit::applyFragmentVaryingDeclarations (std::string source) const {
++    if (this->m_type != GLSLContext::UnitType_Fragment || this->m_link == nullptr) {
++	return source;
++    }
++
++    static const std::regex vertexVarying (
++	R"(\bvarying\s+(?:(?:lowp|mediump|highp|flat|smooth|noperspective)\s+)*([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)"
++    );
++    const std::string& vertex = this->m_link->m_preprocessed;
++    std::string missing;
++
++    for (auto it = std::sregex_iterator (vertex.begin (), vertex.end (), vertexVarying); it != std::sregex_iterator ();
++	 ++it) {
++	const std::string type = (*it)[1].str ();
++	const std::string name = (*it)[2].str ();
++	const std::regex declared ("\\bvarying\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + name + "\\s*;");
++	const std::regex used ("\\b" + name + "\\b");
++
++	if (std::regex_search (source, declared) || !std::regex_search (source, used)
++	    || missing.find (" " + name + ";") != std::string::npos) {
++	    continue;
++	}
++
++	missing += "varying " + type + " " + name + ";\n";
++    }
++
++    if (missing.empty ()) {
++	return source;
++    }
++
++    sLog.out ("Declaring in the fragment unit of ", this->m_file, " the varyings only its vertex unit has: ", missing);
++    return missing + source;
++}
++
+ std::string ShaderUnit::applyFragmentTexCoordCompatibility (std::string source) const {
+     if (this->m_type != GLSLContext::UnitType_Fragment) {
+ 	return source;
+@@ -747,7 +781,9 @@ const std::string& ShaderUnit::compile () {
+ 
+     // this should be the rest of the shader
+     this->m_final
+-	+= this->applyFragmentTexCoordCompatibility (this->applyLinkedVaryingCompatibility (this->m_preprocessed));
++	+= this->applyFragmentTexCoordCompatibility (this->applyFragmentVaryingDeclarations (
++	    this->applyLinkedVaryingCompatibility (this->m_preprocessed)
++	));
+ 
+     // the pass itself handles shader compilation, the unit doesn't have enough information for this step
+     return this->m_final;
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index 0a5d5d6..43f41e1 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -104,6 +104,11 @@ private:
+      * Adjusts fragment shaders that use wide texture coordinates as vec2 values in Wallpaper Engine effects.
+      */
+     [[nodiscard]] std::string applyFragmentTexCoordCompatibility (std::string source) const;
++    /**
++     * A fragment unit that reads a varying only its vertex unit declares gets the declaration (WE compiles such
++     * shaders: the packaged foliagesway reads `v_Bounds`, declared in its vertex unit only)
++     */
++    [[nodiscard]] std::string applyFragmentVaryingDeclarations (std::string source) const;
+ 
+     /**
+      * Parses a COMBO value to add the proper define to the code
