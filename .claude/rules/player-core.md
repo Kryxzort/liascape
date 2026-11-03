@@ -3877,6 +3877,30 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on cc6f1c9).
   `--lwe-smoke … --prop-at T name=value` without `--audio-dump` now sets the property `T` s into the frames and
   writes `lwe-smoke-before-<T>s.png` first.
+  **0038–0044 (2026-11-03, batch B10): the SceneScript API.** `ScriptableObjectAdapter` keeps one JS object per
+  layer (`m_instances`; unknown names go to a per-layer `extras` object) and has ILayer methods (`getEffect`,
+  `getTextureAnimation`, `getParent/getChildren`, `getAnimation`, sound `play/stop/pause/isPlaying`) plus the classes
+  IEffect, ITextureAnimation (`CRenderable::detachTextureAnimation`: the layer's own clock, `CPass` reads
+  `getTextureAnimationTime`) and IAnimation (`PropertyAnimation::play/pause/stop/…`). Groups/camera objects are
+  `Objects::CGroup`, `CSound` is a `ScriptableObject`. `CScene::getLayers` (scene.json order) backs
+  `getLayer (n)`/`enumerateLayers`/`sortLayer`. `Scene::scriptsReachEffects` (the scene JSON names `getEffect`)
+  builds every effect; `Scene::usesMedia` answers `wp_project_uses_media`. `ScriptEngine::dispatchEvent` reaches
+  property modules and text layers (`__textLayers[id]._events`); text scripts' `thisLayer` is the real layer.
+  Effect-visible scripts get `thisObject` = IEffect (`LoadedModule::effect`); shader-constant scripts are queued
+  as `effect_<id>_<i>_pass_<n>_<name>_<object>`. Cursor: `CScene::updateCursorEvents` after the script tick →
+  `CImage::hitTest` (drawing space: parallax/rotation undone, not the zoom) → `ScriptEngine::cursorFrame`
+  (enter/leave/move to all solid hits, down/up/click to the shown ones). localStorage: builtins.js over
+  `__storage.read/write`, flushed after a tick, file `<storage dir>/<workshop id>.json`. New C API:
+  `wp_project_notify_track_metadata_extra`, `wp_project_notify_media_status`, `wp_project_uses_media`,
+  `wp_config_set_storage_dir`. Worker: `media.rs` (thread `lia-scene-media`, MPRIS over the session bus once a
+  second, only for `wp_project_uses_media` scenes, `LIASCAPE_SCENE_MEDIA=0` off; http(s) art fetched once with
+  `curl` into `$XDG_CACHE_HOME/liascape/media-art`), applied in `lwe::Scene::render`; storage dir
+  `LIASCAPE_SCENE_STORAGE_DIR` else `$XDG_STATE_HOME/liascape/scene-storage` (`--lwe-smoke`: `<out>/storage`).
+  `cargo run --example fake_mpris -- <state.json>` is a fake MPRIS player for media smokes (run it under
+  `dbus-run-session`). `host_api_test`: `layer_api_reaches_layers`, `script_effect_and_property_changes`,
+  `text_script_is_a_real_layer`, `media_events_reach_scripts`, `effect_script_this_object_is_the_effect`,
+  `script_plays_a_keyframe_animation`, `cursor_events_reach_layers`, `local_storage_persists`,
+  `script_controls_a_sound` (45/45).
   `host_api_test`: `case_insensitive_asset_lookup` (a folder and a generated `scene.pkg`; RED: load NULL),
   `odd_text_fields_load` (string/number/array `padding`, `"particle": "None"`; RED: SIGABRT). These moved the
   scene corpus from 86 to 92 ok (§ "Scene corpus").

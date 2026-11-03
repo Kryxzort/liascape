@@ -1,5 +1,5 @@
-# liascape-scene-worker links these: the exports of LWE core at third_party/lwe/PIN (rev c5c2cad = next-v2 ddea3b4 + patches/lwe 0001-0006).
-# 66 upstream + 4 from 0003 (wp_config_set_audio_output, wp_context_audio_pull/_stream_count/_driver_name).
+# liascape-scene-worker links these: the exports of LWE core at third_party/lwe/PIN (rev c60fd2e = next-v2 ddea3b4 + patches/lwe 0001-0044).
+# 66 upstream + 4 from 0003 (wp_config_set_audio_output, wp_context_audio_pull/_stream_count/_driver_name) + 4 from 0039/0042 (wp_project_notify_track_metadata_extra, wp_project_notify_media_status, wp_project_uses_media, wp_config_set_storage_dir).
 # Regenerate after a pin bump: nm -D --defined-only <core>.so | awk '$2 != "A" {sub(/@.*/, "", $3); print $3}' | sort
 wp_background_list_close
 wp_background_list_next
@@ -24,6 +24,7 @@ wp_config_set_rendering_pause_check
 wp_config_set_skip_effects
 wp_config_set_skip_objects
 wp_config_set_steam_dir
+wp_config_set_storage_dir
 wp_config_set_web_fps_limit
 wp_context_audio_driver_name
 wp_context_audio_pull
@@ -46,9 +47,11 @@ wp_project_load_folder
 wp_project_load_id
 wp_project_load_id_str
 wp_project_notify_album_art_url_change
+wp_project_notify_media_status
 wp_project_notify_playback_position_and_duration_change
 wp_project_notify_playback_state_change
 wp_project_notify_track_metadata_change
+wp_project_notify_track_metadata_extra
 wp_project_property_list_next
 wp_project_property_list_reset
 wp_project_property_set_boolean
@@ -69,5 +72,6 @@ wp_project_property_set_value
 wp_project_property_set_value_by_name
 wp_project_set_mouse_input
 wp_project_set_output_framebuffer
+wp_project_uses_media
 wp_render_frame
 wp_render_update_time

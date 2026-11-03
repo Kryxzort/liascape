@@ -1,0 +1,553 @@
+From 465a473daf179f9724690f7e80c5be0137af2e77 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:17:14 +0530
+Subject: [PATCH 39/44] scripting: media events carry every field, the
+ thumbnail's colours and the status
+
+The host's media notifications now give scripts what SceneScript
+documents, and reach text-layer scripts as well as property scripts:
+
+- MediaPropertiesEvent has albumArtist, subTitle, genres and
+  contentType (new wp_project_notify_track_metadata_extra; empty when
+  unknown, contentType "music" by default), not only title, artist and
+  albumTitle.
+- MediaThumbnailEvent's colours come from the album art (a file://
+  image): the most common colour and the next distinct ones, textColor
+  with WCAG contrast >= 4.5 against the primary colour (else black or
+  white), highContrastColor black or white, whichever contrasts more.
+  WE's own extraction isn't decoded. hasThumbnail is whether the image
+  loaded. The event fires when the image changes, not per track.
+- mediaStatusChanged { enabled } (new wp_project_notify_media_status).
+- What the host reported before the scene existed reaches the scripts
+  on their first tick.
+- wp_project_uses_media: whether the scene's scripts take media events
+  (or it names $mediaThumbnail), so a host can skip reading the
+  system's media sessions for the others.
+- A replaced queued event is freed.
+
+Origin: ours
+Why: "now playing" widgets stayed empty (docs/player/spikes/we-lwe-gap-audit.md B10: S11-S14)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ include/linux-wallpaperengine/project.h       |  27 +++
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |   2 +
+ .../Data/Parsers/WallpaperParser.cpp          |   8 +-
+ src/core/WallpaperEngine/Project.cpp          |  67 +++++-
+ src/core/WallpaperEngine/Project.h            |  10 +
+ .../Scripting/ScriptEngine.cpp                | 194 +++++++++++++++---
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  19 +-
+ src/core/frontends/project.cpp                |  20 ++
+ 8 files changed, 315 insertions(+), 32 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/project.h b/include/linux-wallpaperengine/project.h
+index c1c7ffa..ee407d0 100644
+--- a/include/linux-wallpaperengine/project.h
++++ b/include/linux-wallpaperengine/project.h
+@@ -478,6 +478,33 @@ WPENGINE_API void wp_project_notify_playback_state_change (wp_project* project,
+ WPENGINE_API void
+ wp_project_notify_playback_position_and_duration_change (wp_project* project, double position, double duration);
+ 
++/**
++ * Notifies the project about the current track's metadata beyond title/artist/album (SceneScript's
++ * MediaPropertiesEvent): the album artist, a sub-title, the genres (comma-separated) and the content type
++ * ("music", "video" or "image"). NULL or empty leaves a field empty. Sends a mediaPropertiesChanged with every field
++ *
++ * @param project
++ */
++WPENGINE_API void wp_project_notify_track_metadata_extra (
++    wp_project* project, const char* album_artist, const char* sub_title, const char* genres, const char* content_type
++);
++
++/**
++ * Notifies the project whether media integration is on (SceneScript's mediaStatusChanged, MediaStatusEvent.enabled):
++ * a host that feeds the media events above says so once, and again when that changes
++ *
++ * @param project
++ * @param enabled
++ */
++WPENGINE_API void wp_project_notify_media_status (wp_project* project, bool enabled);
++
++/**
++ * @param project
++ * @return Whether the project's scripts or materials use the media events or the media thumbnail (a host may skip
++ * reading the system's media sessions for one that doesn't)
++ */
++WPENGINE_API bool wp_project_uses_media (wp_project* project);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index cabe598..6ce43a3 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -116,6 +116,8 @@ struct SceneData {
+     std::vector<AnimatedValue> animatedValues = {};
+     /** the scene's scripts call `getEffect`: every effect is built, a script may show one hidden at load */
+     bool scriptsReachEffects = false;
++    /** the scene's scripts take media events, or a material reads the media thumbnail */
++    bool usesMedia = false;
+ };
+ 
+ class Scene final : public Wallpaper, public SceneData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 65035e7..4fb1a0e 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -91,7 +91,13 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+     );
+ 
+     result->animatedValues = std::move (animatedValues);
+-    result->scriptsReachEffects = scene.dump ().find ("getEffect") != std::string::npos;
++    const std::string dump = scene.dump ();
++    result->scriptsReachEffects = dump.find ("getEffect") != std::string::npos;
++    result->usesMedia = dump.find ("mediaPlaybackChanged") != std::string::npos
++	|| dump.find ("mediaPropertiesChanged") != std::string::npos
++	|| dump.find ("mediaThumbnailChanged") != std::string::npos
++	|| dump.find ("mediaTimelineChanged") != std::string::npos
++	|| dump.find ("mediaStatusChanged") != std::string::npos || dump.find ("$mediaThumbnail") != std::string::npos;
+     return result;
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 3a9a5c7..4d45878 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -12,6 +12,20 @@ using namespace WallpaperEngine;
+ 
+ Context* active_context = nullptr;
+ 
++namespace {
++WallpaperEngine::Scripting::ScriptEngine::MediaProperties scriptMediaProperties (const WallpaperEngine::Project::MediaInfo& media) {
++    return {
++	.title = media.title.value_or (""),
++	.artist = media.artist.value_or (""),
++	.albumTitle = media.album.value_or (""),
++	.albumArtist = media.albumArtist,
++	.subTitle = media.subTitle,
++	.genres = media.genres,
++	.contentType = media.contentType,
++    };
++}
++} // namespace
++
+ void* wp_context_call_gl_proc_address (const char* name) {
+     if (active_context == nullptr) {
+ 	return nullptr;
+@@ -38,6 +52,7 @@ void* wp_context_call_gl_proc_address (const char* name) {
+  * @return
+  */
+ AssetLocatorUniquePtr wp_setup_asset_locator (
++
+     const WallpaperEngine::Project& project, const Configuration& config, const std::filesystem::path& path
+ ) {
+     auto container = std::make_unique<Container> ();
+@@ -225,6 +240,28 @@ void WallpaperEngine::Project::render () {
+ 	}
+ 	// notify current media metadata status
+ 	this->renderContext->albumArtUrlChange (this->mediaInfo.url);
++
++	// what the host reported before the scene existed reaches its scripts now (queued for their first tick)
++	if (this->wallpaper != nullptr && this->wallpaper->is<Wallpapers::CScene> ()) {
++	    auto& scripts = this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ();
++	    const auto& media = this->mediaInfo;
++
++	    if (media.enabled.has_value ()) {
++		scripts.notifyMediaStatusChange (*media.enabled);
++	    }
++	    if (media.title.has_value () || media.artist.has_value () || media.album.has_value ()) {
++		scripts.notifyTrackMetadataChange (scriptMediaProperties (media));
++	    }
++	    if (media.url.has_value ()) {
++		scripts.notifyAlbumArtUrlChange (media.url);
++	    }
++	    if (media.state.has_value ()) {
++		scripts.notifyPlaybackStateChange (media.state);
++	    }
++	    if (media.position.has_value () || media.duration.has_value ()) {
++		scripts.notifyPlaybackPositionAndDurationChange (media.position, media.duration);
++	    }
++	}
+     }
+ 
+     // the renderer failed to build on an earlier call (CWallpaper::fromWallpaper threw after the
+@@ -433,9 +470,7 @@ void WallpaperEngine::Project::trackMetadataChange (const char* title, const cha
+ 	return;
+     }
+ 
+-    this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ().notifyTrackMetadataChange (
+-	this->mediaInfo.title, this->mediaInfo.artist, this->mediaInfo.album
+-    );
++    this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ().notifyTrackMetadataChange (scriptMediaProperties (this->mediaInfo));
+ }
+ 
+ void WallpaperEngine::Project::albumArtUrlChange (const char* url) {
+@@ -497,6 +532,32 @@ void WallpaperEngine::Project::playbackStateChange (wp_media_playback_state stat
+ 
+ const WallpaperEngine::Project::MediaInfo& WallpaperEngine::Project::getMediaInfo () const { return this->mediaInfo; }
+ 
++void WallpaperEngine::Project::trackMetadataExtraChange (
++    const char* albumArtist, const char* subTitle, const char* genres, const char* contentType
++) {
++    this->mediaInfo.albumArtist = albumArtist ?: "";
++    this->mediaInfo.subTitle = subTitle ?: "";
++    this->mediaInfo.genres = genres ?: "";
++    this->mediaInfo.contentType = contentType != nullptr && *contentType != '\0' ? contentType : "music";
++
++    if (this->wallpaper != nullptr && this->wallpaper->is<Wallpapers::CScene> ()) {
++	this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ().notifyTrackMetadataChange (scriptMediaProperties (this->mediaInfo));
++    }
++}
++
++void WallpaperEngine::Project::mediaStatusChange (bool enabled) {
++    this->mediaInfo.enabled = enabled;
++
++    if (this->wallpaper != nullptr && this->wallpaper->is<Wallpapers::CScene> ()) {
++	this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ().notifyMediaStatusChange (enabled);
++    }
++}
++
++bool WallpaperEngine::Project::usesMedia () const {
++    const auto& wallpaper = this->ref->wallpaper;
++    return wallpaper != nullptr && wallpaper->is<Data::Model::Scene> () && wallpaper->as<Data::Model::Scene> ()->usesMedia;
++}
++
+ WallpaperEngine::Project*
+ WallpaperEngine::Project::loadId (Context* context, wp_mouse_input* mouse_input, const unsigned long int id) {
+     return new Project (context, mouse_input, context->config.backgrounds_dir / std::to_string (id));
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index f12ec4a..6d03575 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -22,6 +22,13 @@ public:
+ 	std::optional<wp_media_playback_state> state;
+ 	std::optional<double> duration;
+ 	std::optional<double> position;
++	/** MediaPropertiesEvent's other fields (wp_project_notify_track_metadata_extra) */
++	std::string albumArtist;
++	std::string subTitle;
++	std::string genres;
++	std::string contentType = "music";
++	/** mediaStatusChanged's `enabled`, once the host said */
++	std::optional<bool> enabled;
+     };
+ 
+     ~Project ();
+@@ -53,6 +60,9 @@ public:
+     void playbackPositionAndDurationChange (double position, double duration);
+ 
+     const MediaInfo& getMediaInfo () const;
++    void trackMetadataExtraChange (const char* albumArtist, const char* subTitle, const char* genres, const char* contentType);
++    void mediaStatusChange (bool enabled);
++    [[nodiscard]] bool usesMedia () const;
+ 
+     static Project* loadId (Context* context, wp_mouse_input* mouse_input, const unsigned long int id);
+     static Project* loadId (Context* context, wp_mouse_input* mouse_input, const std::string& id);
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 96590d0..0db3271 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -13,6 +13,9 @@
+ #include "WallpaperEngine/Scripting/Builtins.generated.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ #include "quickjs.h"
++#include "stb_image.h"
++
++#include <glm/glm.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+@@ -1073,43 +1076,180 @@ void ScriptEngine::tick () {
+     this->runPendingJobs ();
+ }
+ 
+-void ScriptEngine::notifyTrackMetadataChange (
+-    const std::optional<std::string>& title, const std::optional<std::string>& artist,
+-    const std::optional<std::string>& album
+-) {
++void ScriptEngine::notifyTrackMetadataChange (const MediaProperties& properties) {
+     JSContext* ctx = this->m_context;
++    JSValue event = JS_NewObject (ctx);
++
++    // MediaPropertiesEvent: title, artist, contentType ("music, video or image"); albumTitle, subTitle, albumArtist,
++    // genres (comma-separated) when known. Unknown ones are empty strings (a script printing one shows nothing)
++    const std::pair<const char*, const std::string*> fields[] = {
++	{ "title", &properties.title },		  { "artist", &properties.artist },
++	{ "albumTitle", &properties.albumTitle }, { "albumArtist", &properties.albumArtist },
++	{ "subTitle", &properties.subTitle },	  { "genres", &properties.genres },
++	{ "contentType", &properties.contentType },
++    };
+ 
+-    JSValue propertiesEvent = JS_NewObject (ctx);
++    for (const auto& [name, value] : fields) {
++	JS_SetPropertyStr (ctx, event, name, JS_NewString (ctx, value->c_str ()));
++    }
+ 
+-    // set properties
+-    JS_SetPropertyStr (ctx, propertiesEvent, "title", JS_NewString (ctx, title.has_value () ? title->c_str () : ""));
+-    JS_SetPropertyStr (ctx, propertiesEvent, "artist", JS_NewString (ctx, artist.has_value () ? artist->c_str () : ""));
+-    JS_SetPropertyStr (
+-	ctx, propertiesEvent, "albumTitle", JS_NewString (ctx, album.has_value () ? album->c_str () : "")
+-    );
++    if (const auto it = this->m_queuedEvents.find ("mediaPropertiesChanged"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (ctx, it->second);
++    }
++    this->m_queuedEvents.insert_or_assign ("mediaPropertiesChanged", event);
++}
++
++void ScriptEngine::notifyMediaStatusChange (bool enabled) {
++    JSContext* ctx = this->m_context;
++    JSValue event = JS_NewObject (ctx);
++
++    JS_SetPropertyStr (ctx, event, "enabled", JS_NewBool (ctx, enabled));
++
++    if (const auto it = this->m_queuedEvents.find ("mediaStatusChanged"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (ctx, it->second);
++    }
++    this->m_queuedEvents.insert_or_assign ("mediaStatusChanged", event);
++}
++
++namespace {
++float luminance (const glm::vec3& c) {
++    auto channel = [] (float v) { return v <= 0.03928f ? v / 12.92f : std::pow ((v + 0.055f) / 1.055f, 2.4f); };
++    return 0.2126f * channel (c.r) + 0.7152f * channel (c.g) + 0.0722f * channel (c.b);
++}
+ 
+-    this->m_queuedEvents.insert_or_assign ("mediaPropertiesChanged", propertiesEvent);
++/** WCAG's contrast ratio, 1..21 */
++float contrast (const glm::vec3& a, const glm::vec3& b) {
++    const float la = luminance (a), lb = luminance (b);
++    return (std::max (la, lb) + 0.05f) / (std::min (la, lb) + 0.05f);
+ }
+ 
++struct Palette {
++    glm::vec3 primary, secondary, tertiary, text, highContrast;
++};
++
++/**
++ * MediaThumbnailEvent's colours from the album art: the most common colour (4 bits per channel, averaged), then the
++ * next common ones that differ from those before. WE's own extraction isn't decoded; its documented guarantees are
++ * kept: textColor has enough contrast with the primary colour (WCAG 4.5, else black/white), highContrastColor is
++ * black or white, whichever contrasts more with the primary colour
++ */
++std::optional<Palette> paletteOf (const std::string& path) {
++    int width = 0, height = 0, channels = 0;
++    unsigned char* pixels = stbi_load (path.c_str (), &width, &height, &channels, 3);
++
++    if (pixels == nullptr || width <= 0 || height <= 0) {
++	if (pixels != nullptr) {
++	    stbi_image_free (pixels);
++	}
++	return std::nullopt;
++    }
++
++    struct Bucket {
++	glm::dvec3 sum {0.0};
++	int count = 0;
++    };
++    std::vector<Bucket> buckets (4096);
++    // at most ~128x128 samples
++    const int stepX = std::max (1, width / 128), stepY = std::max (1, height / 128);
++
++    for (int y = 0; y < height; y += stepY) {
++	for (int x = 0; x < width; x += stepX) {
++	    const unsigned char* px = pixels + (static_cast<size_t> (y) * width + x) * 3;
++	    auto& bucket = buckets[((px[0] >> 4) << 8) | ((px[1] >> 4) << 4) | (px[2] >> 4)];
++	    bucket.sum += glm::dvec3 (px[0], px[1], px[2]) / 255.0;
++	    bucket.count++;
++	}
++    }
++
++    stbi_image_free (pixels);
++
++    std::vector<const Bucket*> order;
++
++    for (const auto& bucket : buckets) {
++	if (bucket.count > 0) {
++	    order.push_back (&bucket);
++	}
++    }
++
++    std::ranges::sort (order, [] (const Bucket* a, const Bucket* b) { return a->count > b->count; });
++
++    std::vector<glm::vec3> picked;
++
++    for (const auto* bucket : order) {
++	const glm::vec3 colour = glm::vec3 (bucket->sum / static_cast<double> (bucket->count));
++	const bool distinct = std::ranges::all_of (picked, [&] (const glm::vec3& c) { return glm::distance (c, colour) > 0.25f; });
++
++	if (distinct) {
++	    picked.push_back (colour);
++	}
++	if (picked.size () == 3) {
++	    break;
++	}
++    }
++
++    if (picked.empty ()) {
++	return std::nullopt;
++    }
++
++    Palette palette {};
++    palette.primary = picked[0];
++    // a one-colour image: lighter and darker shades of it
++    palette.secondary = picked.size () > 1 ? picked[1] : glm::clamp (picked[0] * 0.6f, 0.0f, 1.0f);
++    palette.tertiary = picked.size () > 2 ? picked[2] : glm::clamp (picked[0] * 0.6f + 0.4f, 0.0f, 1.0f);
++
++    const glm::vec3 white (1.0f), black (0.0f);
++    palette.highContrast = contrast (white, palette.primary) >= contrast (black, palette.primary) ? white : black;
++    palette.text = palette.highContrast;
++
++    for (const auto& candidate : { palette.secondary, palette.tertiary }) {
++	if (contrast (candidate, palette.primary) >= 4.5f) {
++	    palette.text = candidate;
++	    break;
++	}
++    }
++
++    return palette;
++}
++} // namespace
++
+ void ScriptEngine::notifyAlbumArtUrlChange (const std::optional<std::string>& url) {
++    // "every time the thumbnail image changes, not between tracks using the same thumbnail image"
++    if (this->m_thumbnailSent && url == this->m_lastThumbnail) {
++	return;
++    }
++
++    this->m_thumbnailSent = true;
++    this->m_lastThumbnail = url;
+ 
+     JSContext* ctx = this->m_context;
++    std::optional<Palette> palette;
++
++    if (url.has_value () && url->starts_with ("file://")) {
++	palette = paletteOf (url->substr (7));
++    }
+ 
+-    // TODO: PROCESS THESE COLORS INSTEAD OF HARDCODING THEM
+-    JSValue primaryColor = this->newVec (glm::vec3 (0.12f, 0.12f, 0.12f));
+-    JSValue secondaryColor = this->newVec (glm::vec3 (0.0f, 0.0f, 0.0f));
+-    JSValue tertiaryColor = this->newVec (glm::vec3 (0.25f, 0.25f, 0.25f));
+-    JSValue highContrastColor = this->newVec (glm::vec3 (1.0f, 1.0f, 1.0f));
++    JSValue event = JS_NewObject (ctx);
+ 
+-    JSValue mediaThumbnailEvent = JS_NewObject (ctx);
++    // without an image WE's colours are unknown: the greys LWE always sent, and white text
++    const Palette colours = palette.value_or (Palette {
++	.primary = glm::vec3 (0.12f),
++	.secondary = glm::vec3 (0.0f),
++	.tertiary = glm::vec3 (0.25f),
++	.text = glm::vec3 (1.0f),
++	.highContrast = glm::vec3 (1.0f),
++    });
+ 
+-    JS_SetPropertyStr (ctx, mediaThumbnailEvent, "hasThumbnail", JS_NewBool (ctx, url.has_value ()));
+-    JS_SetPropertyStr (ctx, mediaThumbnailEvent, "primaryColor", primaryColor);
+-    JS_SetPropertyStr (ctx, mediaThumbnailEvent, "secondaryColor", secondaryColor);
+-    JS_SetPropertyStr (ctx, mediaThumbnailEvent, "tertiaryColor", tertiaryColor);
+-    JS_SetPropertyStr (ctx, mediaThumbnailEvent, "highContrastColor", highContrastColor);
++    JS_SetPropertyStr (ctx, event, "hasThumbnail", JS_NewBool (ctx, palette.has_value ()));
++    JS_SetPropertyStr (ctx, event, "primaryColor", this->newVec (colours.primary));
++    JS_SetPropertyStr (ctx, event, "secondaryColor", this->newVec (colours.secondary));
++    JS_SetPropertyStr (ctx, event, "tertiaryColor", this->newVec (colours.tertiary));
++    JS_SetPropertyStr (ctx, event, "textColor", this->newVec (colours.text));
++    JS_SetPropertyStr (ctx, event, "highContrastColor", this->newVec (colours.highContrast));
+ 
+-    this->m_queuedEvents.insert_or_assign ("mediaThumbnailChanged", mediaThumbnailEvent);
++    if (const auto it = this->m_queuedEvents.find ("mediaThumbnailChanged"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (ctx, it->second);
++    }
++    this->m_queuedEvents.insert_or_assign ("mediaThumbnailChanged", event);
+ }
+ 
+ void ScriptEngine::notifyPlaybackStateChange (const std::optional<wp_media_playback_state> state) {
+@@ -1120,6 +1260,9 @@ void ScriptEngine::notifyPlaybackStateChange (const std::optional<wp_media_playb
+ 	ctx, playbackEvent, "state", JS_NewInt32 (ctx, state.has_value () ? *state : WP_MEDIA_PLAYBACK_STATE_STOPPED)
+     );
+ 
++    if (const auto it = this->m_queuedEvents.find ("mediaPlaybackChanged"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (ctx, it->second);
++    }
+     this->m_queuedEvents.insert_or_assign ("mediaPlaybackChanged", playbackEvent);
+ }
+ 
+@@ -1132,5 +1275,8 @@ void ScriptEngine::notifyPlaybackPositionAndDurationChange (
+     JS_SetPropertyStr (ctx, mediaTimelineEvent, "position", JS_NewFloat64 (ctx, position.has_value () ? *position : 0));
+     JS_SetPropertyStr (ctx, mediaTimelineEvent, "duration", JS_NewFloat64 (ctx, duration.has_value () ? *duration : 0));
+ 
++    if (const auto it = this->m_queuedEvents.find ("mediaTimelineChanged"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (ctx, it->second);
++    }
+     this->m_queuedEvents.insert_or_assign ("mediaTimelineChanged", mediaTimelineEvent);
+ }
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 1c54eb4..d45fe49 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -171,10 +171,18 @@ public:
+     const JSObjectAdapters& getAdapters () const { return m_adapters; }
+     const Render::Wallpapers::CScene& getScene () const { return m_scene; }
+ 
+-    void notifyTrackMetadataChange (
+-	const std::optional<std::string>& title, const std::optional<std::string>& artist,
+-	const std::optional<std::string>& album
+-    );
++    /** MediaPropertiesEvent's fields (empty: unknown) */
++    struct MediaProperties {
++	std::string title;
++	std::string artist;
++	std::string albumTitle;
++	std::string albumArtist;
++	std::string subTitle;
++	std::string genres;
++	std::string contentType;
++    };
++    void notifyTrackMetadataChange (const MediaProperties& properties);
++    void notifyMediaStatusChange (bool enabled);
+     void notifyAlbumArtUrlChange (const std::optional<std::string>& url);
+     void notifyPlaybackStateChange (std::optional<wp_media_playback_state> state);
+     void notifyPlaybackPositionAndDurationChange (std::optional<double> position, std::optional<double> duration);
+@@ -232,6 +240,9 @@ private:
+     bool m_builtinsInstalled = false;
+ 
+     std::map<std::string, JSValue> m_queuedEvents;
++    /** the last thumbnail sent: mediaThumbnailChanged fires when the image changes, not per track */
++    std::optional<std::string> m_lastThumbnail;
++    bool m_thumbnailSent = false;
+ 
+     JSObjectAdapters m_adapters;
+ };
+diff --git a/src/core/frontends/project.cpp b/src/core/frontends/project.cpp
+index bc62551..a8f06e4 100644
+--- a/src/core/frontends/project.cpp
++++ b/src/core/frontends/project.cpp
+@@ -212,6 +212,26 @@ WPENGINE_API void wp_project_notify_track_metadata_change (
+     static_cast<WallpaperEngine::Project*> (project)->trackMetadataChange (title, artist, album);
+     WPENGINE_PROJECT_API_END ();
+ }
++WPENGINE_API void wp_project_notify_track_metadata_extra (
++    wp_project* project, const char* album_artist, const char* sub_title, const char* genres, const char* content_type
++) {
++    WPENGINE_PROJECT_API_BEGIN
++    static_cast<WallpaperEngine::Project*> (project)->trackMetadataExtraChange (album_artist, sub_title, genres, content_type);
++    WPENGINE_PROJECT_API_END ();
++}
++
++WPENGINE_API void wp_project_notify_media_status (wp_project* project, bool enabled) {
++    WPENGINE_PROJECT_API_BEGIN
++    static_cast<WallpaperEngine::Project*> (project)->mediaStatusChange (enabled);
++    WPENGINE_PROJECT_API_END ();
++}
++
++WPENGINE_API bool wp_project_uses_media (wp_project* project) {
++    WPENGINE_PROJECT_API_BEGIN
++    return static_cast<WallpaperEngine::Project*> (project)->usesMedia ();
++    WPENGINE_PROJECT_API_END (false);
++}
++
+ WPENGINE_API void wp_project_notify_album_art_url_change (wp_project* project, const char* url) {
+     WPENGINE_PROJECT_API_BEGIN
+     static_cast<WallpaperEngine::Project*> (project)->albumArtUrlChange (url);

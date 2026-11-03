@@ -1,0 +1,388 @@
+From 68c40c832d675fbda76ad5b48ee365950cb719a6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:28:38 +0530
+Subject: [PATCH 41/44] scripting: cursor events and the cursor in input
+
+The cursor reaches scripts the way SceneScript documents it:
+
+- cursorEnter/cursorLeave as solid layers come and go under the
+  cursor, cursorMove when it moved (to the layers under it and the
+  one it was pressed on), cursorDown on a press, cursorUp on a release
+  over a layer, then cursorClick on the layer it was pressed on.
+  Property and text-layer scripts both get them. CursorEvent has
+  worldPosition (scene pixels, y up), localPosition (0..size on the
+  layer, y up) and hitBox (null: no puppet hit boxes).
+- Which layers: every solid image layer (scene.json `solid`, default
+  true; "all mouse cursor events will only work on objects marked as
+  Solid") with a cursor handler whose quad, as last drawn (parents,
+  rotation, mouse parallax; not the camera zoom), holds the cursor,
+  shown or hidden. Hidden ones too: WE's scenes guard their handlers
+  on thisLayer.visible, and a trigger that hides itself on cursorEnter
+  would otherwise get cursorLeave on the next frame. Not topmost-only:
+  the docs don't say, and 2325974975's buttons sit under a solid
+  trigger layer. Text and particle layers are not hit-tested yet.
+- input.cursorWorldPosition is the cursor in scene pixels (y up), was
+  always 0 0 0; input.cursorLeftDown is the left button, was always
+  false; input.cursorScreenPosition read a value never written (0 0).
+
+Origin: ours
+Why: click and hover interactions did nothing (docs/player/spikes/we-lwe-gap-audit.md B10: S10, S23)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  35 ++++++
+ .../WallpaperEngine/Render/Objects/CImage.h   |   7 ++
+ .../Render/Wallpapers/CScene.cpp              |  35 ++++++
+ .../Render/Wallpapers/CScene.h                |   2 +
+ .../WallpaperEngine/Scripting/InputObject.cpp |  14 ++-
+ .../Scripting/ScriptEngine.cpp                | 109 ++++++++++++++++++
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  26 +++++
+ 7 files changed, 224 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 278b55d..b0170e5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1,5 +1,8 @@
+ #include "CImage.h"
+ 
++#include <algorithm>
++#include <cmath>
++
+ #include "CRenderable.h"
+ #include "WallpaperEngine/Context.h"
+ 
+@@ -1179,6 +1182,38 @@ void CImage::updateScreenSpacePosition () {
+ 
+ const Image& CImage::getImage () const { return this->m_image; }
+ 
++bool CImage::hitTest (const glm::vec2& world, glm::vec2& local) const {
++    const float sceneWidth = static_cast<float> (this->getScene ().getWidth ());
++    const float sceneHeight = static_cast<float> (this->getScene ().getHeight ());
++    // the drawing's space (m_pos): x from the centre, y down
++    glm::vec2 point (world.x - sceneWidth / 2.0f, sceneHeight / 2.0f - world.y);
++
++    // undo the mouse parallax and the rotation about the pivot (updateScreenSpacePosition: translate (p.x, -p.y),
++    // rotate (-angle) about the pivot)
++    const glm::vec2 parallax = this->getScene ().getParallaxOffset (this->getImage ());
++    point -= glm::vec2 (parallax.x, -parallax.y);
++
++    const float angle = this->resolveTransform (this->getImage ()).angle;
++
++    if (angle != 0.0f) {
++	const glm::vec2 pivot (this->m_scenePivot);
++	const glm::vec2 d = point - pivot;
++	const float c = std::cos (angle), sn = std::sin (angle);
++	point = pivot + glm::vec2 (c * d.x - sn * d.y, sn * d.x + c * d.y);
++    }
++
++    const float left = std::min (this->m_pos.x, this->m_pos.z), right = std::max (this->m_pos.x, this->m_pos.z);
++    const float top = std::min (this->m_pos.y, this->m_pos.w), bottom = std::max (this->m_pos.y, this->m_pos.w);
++
++    if (point.x < left || point.x > right || point.y < top || point.y > bottom || right <= left || bottom <= top) {
++	return false;
++    }
++
++    const glm::vec2 size = this->getSize ();
++    local = glm::vec2 ((point.x - left) / (right - left) * size.x, (bottom - point.y) / (bottom - top) * size.y);
++    return true;
++}
++
+ glm::vec2 CImage::getSize () const {
+     if (this->m_size.x > 0.0f && this->m_size.y > 0.0f) {
+ 	return this->m_size;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index cdde615..1b4445f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -34,6 +34,13 @@ public:
+     [[nodiscard]] const Image& getImage () const;
+     [[nodiscard]] glm::vec2 getSize () const;
+ 
++    /**
++     * Whether a point of the scene (WE's world: x right, y up, scene pixels) is on this layer as it was last drawn:
++     * its quad with its parents' transform, rotation and mouse parallax (the camera's zoom is not undone).
++     * `local` gets the point in the layer, 0..size (CursorEvent.localPosition), y up
++     */
++    [[nodiscard]] bool hitTest (const glm::vec2& world, glm::vec2& local) const;
++
+     [[nodiscard]] GLuint getSceneSpacePosition () const;
+     [[nodiscard]] GLuint getCopySpacePosition () const;
+     [[nodiscard]] GLuint getPassSpacePosition () const;
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index d1e03bd..ab76a77 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -401,6 +401,9 @@ void CScene::renderFrame () {
+     // run a tick in the javascript logic
+     this->getScriptEngine ().tick ();
+ 
++    // the cursor's events for the scripts (after their tick: their init has run)
++    this->updateCursorEvents ();
++
+     // advance the sound objects' playlists (next file, `random`'s silence) on the host's clock
+     const double soundDt = std::max (
+ 	0.0,
+@@ -475,6 +478,8 @@ void CScene::updateMouse () {
+     // position is already inside the background, convert it to viewport space
+     this->m_mousePosition.x = position.x / this->getWidth ();
+     this->m_mousePosition.y = position.y / this->getHeight ();
++    // input.cursorScreenPosition read this, never written (always 0 0)
++    this->m_mousePositionNormalized = this->m_mousePosition;
+ 
+     // the left button: held → xy 1; the frame it went down → z 1 (WE's flags at ctx+0xa4: bit 0 down, bit 1 already
+     // seen, so z marks the press)
+@@ -488,6 +493,36 @@ void CScene::updateMouse () {
+     this->m_pointerWasDown = down;
+ }
+ 
++void CScene::updateCursorEvents () {
++    auto& scripts = this->getScriptEngine ();
++    const auto& layers = scripts.cursorLayers ();
++
++    if (layers.empty () || this->getMouseInputHandler () == nullptr) {
++	return;
++    }
++
++    // WE's world: x right, y up, scene pixels (the host's pointer is y down)
++    const glm::vec2 world (
++	this->m_mousePosition.x * static_cast<float> (this->getWidth ()),
++	(1.0f - this->m_mousePosition.y) * static_cast<float> (this->getHeight ())
++    );
++    std::vector<Scripting::ScriptEngine::CursorHit> hits;
++
++    // every solid layer under the cursor gets its events, shown or hidden (WE's scenes guard on thisLayer.visible in
++    // their handlers, and a trigger layer that hides itself on cursorEnter must not get cursorLeave the next frame)
++    for (auto* object : layers) {
++	if (!object->isSolid ()) {
++	    continue;
++	}
++	glm::vec2 local {};
++	if (const auto* image = object->asOrNull<Objects::CImage> (); image != nullptr && image->hitTest (world, local)) {
++	    hits.push_back ({ .object = object, .local = local });
++	}
++    }
++
++    scripts.cursorFrame (hits, world, this->m_pointerState.x > 0.5f);
++}
++
+ const glm::vec4* CScene::getPointerState () const { return &this->m_pointerState; }
+ 
+ const Scene& CScene::getScene () const { return *this->getWallpaperData ().as<Scene> (); }
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 3bfa354..355f210 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -79,6 +79,8 @@ public:
+ protected:
+     void renderFrame () override;
+     void updateMouse ();
++    /** Hit-tests the cursor against the layers with cursor handlers and sends their events (SceneScript) */
++    void updateCursorEvents ();
+     /** Advances every keyframe animation by this frame's dt and writes their values (G01/G02) */
+     void advanceAnimations ();
+     /** The camera update (WE GH 0x1401b8af0): shake, the active camera object's zoom, general.zoom, the parallax */
+diff --git a/src/core/WallpaperEngine/Scripting/InputObject.cpp b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+index 00de7ea..b4e9533 100644
+--- a/src/core/WallpaperEngine/Scripting/InputObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+@@ -10,8 +10,13 @@ JSValue get_cursor_world_position (JSContext* ctx, JSValueConst this_val, int ar
+     JSClassID classId;
+     auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
+ 
+-    // TODO: PROPERLY IMPLEMENT THIS
+-    return input->getScene ().getScriptEngine ().newVec (glm::vec3 (0.0f));
++    // the cursor in WE's world: scene pixels, x right, y up
++    const auto& scene = input->getScene ();
++    const glm::vec2 position = *scene.getMousePositionNormalized ();
++    return scene.getScriptEngine ().newVec (glm::vec3 (
++	position.x * static_cast<float> (scene.getWidth ()), (1.0f - position.y) * static_cast<float> (scene.getHeight ()),
++	0.0f
++    ));
+ }
+ 
+ JSValue get_cursor_screen_position (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+@@ -23,8 +28,9 @@ JSValue get_cursor_screen_position (JSContext* ctx, JSValueConst this_val, int a
+ }
+ 
+ JSValue get_cursor_left_down (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    // TODO: IMPLEMENT THIS
+-    return JS_NewBool (ctx, false);
++    JSClassID classId;
++    auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
++    return JS_NewBool (ctx, input->getScene ().getPointerState ()->x > 0.5f);
+ }
+ 
+ JSValue input_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_EXCEPTION; }
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index dc90b44..e6303d8 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1042,6 +1042,115 @@ bool ScriptEngine::handlesEvent (const ScriptableObject& object, const char* nam
+     return false;
+ }
+ 
++const std::vector<ScriptableObject*>& ScriptEngine::cursorLayers () {
++    const size_t scripts = this->m_scriptModules.size () + this->m_layerObjects.size ();
++
++    if (scripts == this->m_cursorLayersFor) {
++	return this->m_cursorLayers;
++    }
++
++    this->m_cursorLayersFor = scripts;
++    this->m_cursorLayers.clear ();
++
++    constexpr const char* kCursorEvents[]
++	= { "cursorEnter", "cursorLeave", "cursorMove", "cursorDown", "cursorUp", "cursorClick" };
++    std::set<ScriptableObject*> seen;
++    auto consider = [&] (ScriptableObject* object) {
++	if (!seen.insert (object).second) {
++	    return;
++	}
++	for (const char* name : kCursorEvents) {
++	    if (this->handlesEvent (*object, name)) {
++		this->m_cursorLayers.push_back (object);
++		return;
++	    }
++	}
++    };
++
++    for (const auto& module : this->m_scriptModules) {
++	consider (&module->object);
++    }
++    for (const auto& object : this->m_layerObjects | std::views::values) {
++	consider (object);
++    }
++
++    return this->m_cursorLayers;
++}
++
++JSValue ScriptEngine::cursorEvent (const glm::vec2& world, const glm::vec2& local) {
++    JSValue event = JS_NewObject (this->m_context);
++    // CursorEvent: worldPosition (absolute), localPosition (0..size on the layer), hitBox (puppet warp only: null)
++    JS_SetPropertyStr (this->m_context, event, "worldPosition", this->newVec (glm::vec3 (world, 0.0f)));
++    JS_SetPropertyStr (this->m_context, event, "localPosition", this->newVec (glm::vec3 (local, 0.0f)));
++    JS_SetPropertyStr (this->m_context, event, "hitBox", JS_NULL);
++    return event;
++}
++
++void ScriptEngine::cursorFrame (const std::vector<CursorHit>& hits, const glm::vec2& world, bool down) {
++    const bool moved = !this->m_cursorSeen || world != this->m_cursorWorld;
++    const bool pressed = down && !this->m_cursorDown;
++    const bool released = !down && this->m_cursorDown;
++    this->m_cursorSeen = true;
++    this->m_cursorWorld = world;
++    this->m_cursorDown = down;
++
++    std::set<ScriptableObject*> under;
++    std::map<ScriptableObject*, glm::vec2> local;
++
++    for (const auto& hit : hits) {
++	under.insert (hit.object);
++	local[hit.object] = hit.local;
++    }
++
++    auto send = [&] (const char* name, ScriptableObject* object) {
++	const auto at = local.find (object);
++	JSValue event = this->cursorEvent (world, at == local.end () ? glm::vec2 (0.0f) : at->second);
++	this->dispatchEvent (name, event, object);
++	JS_FreeValue (this->m_context, event);
++    };
++
++    // the layers it left, then the ones it entered
++    for (auto* object : std::vector (this->m_hovered.begin (), this->m_hovered.end ())) {
++	if (!under.contains (object)) {
++	    send ("cursorLeave", object);
++	}
++    }
++    for (auto* object : under) {
++	if (!this->m_hovered.contains (object)) {
++	    send ("cursorEnter", object);
++	}
++    }
++    this->m_hovered = under;
++
++    if (moved) {
++	std::set<ScriptableObject*> targets = under;
++	targets.insert (this->m_pressed.begin (), this->m_pressed.end ());
++	for (auto* object : targets) {
++	    send ("cursorMove", object);
++	}
++    }
++
++    if (pressed) {
++	this->m_pressed = under;
++	for (auto* object : under) {
++	    send ("cursorDown", object);
++	}
++    }
++
++    if (released) {
++	for (auto* object : under) {
++	    send ("cursorUp", object);
++	}
++	// "pressed and released on the same object", after cursorUp
++	for (auto* object : under) {
++	    if (this->m_pressed.contains (object)) {
++		send ("cursorClick", object);
++	    }
++	}
++	this->m_pressed.clear ();
++    }
++}
++
+ void ScriptEngine::tick () {
+     this->startPendingScripts ();
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index b28dd51..47ac3c9 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -18,6 +18,7 @@
+ #include <vector>
+ 
+ #include "../Data/Model/DynamicValue.h"
++#include <glm/vec2.hpp>
+ #include "WallpaperEngine/Data/Model/Types.h"
+ #include "linux-wallpaperengine/context.h"
+ 
+@@ -149,6 +150,22 @@ public:
+     void dispatchEvent (const char* name, JSValueConst arg, const ScriptableObject* only = nullptr);
+     /** A script of `object` exports `name` (a property script's or its text-layer script's) */
+     [[nodiscard]] bool handlesEvent (const ScriptableObject& object, const char* name);
++    /** A layer under the cursor this frame, and where on it (0..size, y up) */
++    struct CursorHit {
++	ScriptableObject* object;
++	glm::vec2 local;
++    };
++    /**
++     * One frame of the cursor (SceneScript's cursor events): `hits` are the solid layers with cursor handlers under
++     * it, `world` where it is (scene pixels, y up), `down` the left button. Sends cursorEnter/Leave as layers come
++     * and go under it, cursorMove when it moved (to the layers under it and the one it was pressed on),
++     * cursorDown on a press, cursorUp on a release over a layer and cursorClick after it on the layer it was
++     * pressed on
++     */
++    void cursorFrame (const std::vector<CursorHit>& hits, const glm::vec2& world, bool down);
++    /** The layers a cursor event can reach: solid ones with a script that handles one (re-listed as scripts load) */
++    [[nodiscard]] const std::vector<ScriptableObject*>& cursorLayers ();
++
+     /** engine.userProperties: every user property, colours as Vec3 (a new object) */
+     [[nodiscard]] JSValue userProperties ();
+ 
+@@ -232,6 +249,15 @@ private:
+     /** each text-layer script's layer and its script properties (live) */
+     std::map<ScriptLayerHandle, ScriptableObject*> m_layerObjects;
+     std::map<ScriptLayerHandle, std::map<std::string, UserSettingUniquePtr>*> m_layerProps;
++    /** the cursor's state between frames */
++    std::set<ScriptableObject*> m_hovered;
++    std::set<ScriptableObject*> m_pressed;
++    glm::vec2 m_cursorWorld = {};
++    bool m_cursorDown = false;
++    bool m_cursorSeen = false;
++    std::vector<ScriptableObject*> m_cursorLayers;
++    size_t m_cursorLayersFor = static_cast<size_t> (-1);
++    JSValue cursorEvent (const glm::vec2& world, const glm::vec2& local);
+     /** the user properties changed since the last tick (applyUserProperties gets them) */
+     std::set<std::string> m_changedProperties;
+     std::vector<std::function<void ()>> m_propertyListeners;

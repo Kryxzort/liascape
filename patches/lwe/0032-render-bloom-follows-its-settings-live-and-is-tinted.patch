@@ -1,7 +1,7 @@
 From 6d8c0cdeac92463810f0e27161bfd5dd2d8b3665 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:32:07 +0530
-Subject: [PATCH 32/37] render: bloom follows its settings live and is tinted
+Subject: [PATCH 32/44] render: bloom follows its settings live and is tinted
 
 WE re-applies general.bloomstrength, bloomthreshold and bloomtint to the
 bloom materials (GH 0x1401b42b0); the LDR chain's downsample shader reads

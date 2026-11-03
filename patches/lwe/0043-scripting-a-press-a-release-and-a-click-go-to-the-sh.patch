@@ -1,0 +1,134 @@
+From 22fc6c37a7cb5f8414cd39e55ac9ea62506e1f55 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:34:08 +0530
+Subject: [PATCH 43/44] scripting: a press, a release and a click go to the
+ shown layers under the cursor
+
+cursorEnter/Leave/Move still reach every solid layer under the cursor,
+shown or hidden (a trigger layer that hides itself on cursorEnter keeps
+its hover). cursorDown, cursorUp and cursorClick now reach only the
+shown ones: 2325974975's "Hide" button shows a hidden full-width
+trigger on its click, and that trigger's own click handler (shown:
+show the UI again) took the same click, so the button undid itself. A
+headless run of 2325974975 now hides the UI on "Hide" and shows it
+again on a click over the trigger.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B10: S10 (2325974975)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ .../Render/Wallpapers/CScene.cpp              |  8 +++++---
+ .../Scripting/ScriptEngine.cpp                | 19 +++++++++++++------
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  8 +++++---
+ 3 files changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index ab76a77..69d6b88 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -508,15 +508,17 @@ void CScene::updateCursorEvents () {
+     );
+     std::vector<Scripting::ScriptEngine::CursorHit> hits;
+ 
+-    // every solid layer under the cursor gets its events, shown or hidden (WE's scenes guard on thisLayer.visible in
+-    // their handlers, and a trigger layer that hides itself on cursorEnter must not get cursorLeave the next frame)
++    // every solid layer under the cursor gets enter/leave/move, shown or hidden (a trigger layer that hides itself on
++    // cursorEnter must not get cursorLeave the next frame); presses and clicks go to the shown ones (cursorFrame)
+     for (auto* object : layers) {
+ 	if (!object->isSolid ()) {
+ 	    continue;
+ 	}
+ 	glm::vec2 local {};
+ 	if (const auto* image = object->asOrNull<Objects::CImage> (); image != nullptr && image->hitTest (world, local)) {
+-	    hits.push_back ({ .object = object, .local = local });
++	    hits.push_back (
++		{ .object = object, .local = local, .visible = this->isEffectivelyVisible (object->getObject ()) }
++	    );
+ 	}
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 509ee80..6142f14 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -37,6 +37,7 @@
+ #include <string_view>
+ #include <sys/wait.h>
+ #include <unistd.h>
++#include <utility>
+ #include <vector>
+ 
+ namespace WallpaperEngine::Render::Objects {
+@@ -1158,10 +1159,14 @@ void ScriptEngine::cursorFrame (const std::vector<CursorHit>& hits, const glm::v
+     this->m_cursorDown = down;
+ 
+     std::set<ScriptableObject*> under;
++    std::set<ScriptableObject*> shown;
+     std::map<ScriptableObject*, glm::vec2> local;
+ 
+     for (const auto& hit : hits) {
+ 	under.insert (hit.object);
++	if (hit.visible) {
++	    shown.insert (hit.object);
++	}
+ 	local[hit.object] = hit.local;
+     }
+ 
+@@ -1193,24 +1198,26 @@ void ScriptEngine::cursorFrame (const std::vector<CursorHit>& hits, const glm::v
+ 	}
+     }
+ 
++    // presses, releases and clicks go to the shown layers only: 2325974975's "Hide" button shows a hidden full-width
++    // trigger layer on its click, whose own click handler (shown → show the UI again) must not take the same click
+     if (pressed) {
+-	this->m_pressed = under;
+-	for (auto* object : under) {
++	this->m_pressed = shown;
++	for (auto* object : shown) {
+ 	    send ("cursorDown", object);
+ 	}
+     }
+ 
+     if (released) {
+-	for (auto* object : under) {
++	const auto pressedOn = std::exchange (this->m_pressed, {});
++	for (auto* object : shown) {
+ 	    send ("cursorUp", object);
+ 	}
+ 	// "pressed and released on the same object", after cursorUp
+-	for (auto* object : under) {
+-	    if (this->m_pressed.contains (object)) {
++	for (auto* object : shown) {
++	    if (pressedOn.contains (object)) {
+ 		send ("cursorClick", object);
+ 	    }
+ 	}
+-	this->m_pressed.clear ();
+     }
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 76a2468..d3283d0 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -155,13 +155,15 @@ public:
+     struct CursorHit {
+ 	ScriptableObject* object;
+ 	glm::vec2 local;
++	/** drawn now: only a shown layer takes a press, a release and a click */
++	bool visible;
+     };
+     /**
+      * One frame of the cursor (SceneScript's cursor events): `hits` are the solid layers with cursor handlers under
+      * it, `world` where it is (scene pixels, y up), `down` the left button. Sends cursorEnter/Leave as layers come
+-     * and go under it, cursorMove when it moved (to the layers under it and the one it was pressed on),
+-     * cursorDown on a press, cursorUp on a release over a layer and cursorClick after it on the layer it was
+-     * pressed on
++     * and go under it (shown or hidden), cursorMove when it moved (to the layers under it and the one it was pressed
++     * on), cursorDown on a press, cursorUp on a release and cursorClick after it to the shown layers under it (a
++     * click: the ones it was also pressed on)
+      */
+     void cursorFrame (const std::vector<CursorHit>& hits, const glm::vec2& world, bool down);
+     /** The layers a cursor event can reach: solid ones with a script that handles one (re-listed as scripts load) */

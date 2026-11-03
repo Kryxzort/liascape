@@ -59,6 +59,7 @@ unsafe extern "C" {
     fn wp_config_destroy(config: *mut c_void);
     fn wp_config_set_assets_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_backgrounds_dir(config: *mut c_void, dir: *const c_char) -> bool;
+    fn wp_config_set_storage_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_audio_output(config: *mut c_void, output: *const WpAudioOutput);
     fn wp_context_create(config: *const c_void) -> *mut c_void;
     fn wp_context_destroy(context: *mut c_void);
@@ -101,6 +102,28 @@ unsafe extern "C" {
         a: f32,
     ) -> bool;
     fn wp_render_update_time(context: *mut c_void);
+    fn wp_project_uses_media(project: *mut c_void) -> bool;
+    fn wp_project_notify_media_status(project: *mut c_void, enabled: bool);
+    fn wp_project_notify_track_metadata_change(
+        project: *mut c_void,
+        title: *const c_char,
+        artist: *const c_char,
+        album: *const c_char,
+    );
+    fn wp_project_notify_track_metadata_extra(
+        project: *mut c_void,
+        album_artist: *const c_char,
+        sub_title: *const c_char,
+        genres: *const c_char,
+        content_type: *const c_char,
+    );
+    fn wp_project_notify_album_art_url_change(project: *mut c_void, url: *const c_char);
+    fn wp_project_notify_playback_state_change(project: *mut c_void, state: c_int);
+    fn wp_project_notify_playback_position_and_duration_change(
+        project: *mut c_void,
+        position: f64,
+        duration: f64,
+    );
     fn wp_render_frame(project: *mut c_void);
 }
 
@@ -158,6 +181,19 @@ extern "C" fn input_frame(user: *mut c_void) -> *mut u8 {
     }
 }
 
+/// Where scenes' scripts keep their `localStorage` (one JSON file per project):
+/// `LIASCAPE_SCENE_STORAGE_DIR`, else `$XDG_STATE_HOME/liascape/scene-storage` (`~/.local/state/…`).
+fn storage_dir() -> Option<std::path::PathBuf> {
+    if let Some(d) = std::env::var_os("LIASCAPE_SCENE_STORAGE_DIR").filter(|d| !d.is_empty()) {
+        return Some(d.into());
+    }
+    std::env::var_os("XDG_STATE_HOME")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))
+        .map(|d| d.join("liascape/scene-storage"))
+}
+
 /// The host audio format: what Task 6's PipeWire stream plays.
 pub const SAMPLE_RATE: i32 = 48_000;
 pub const CHANNELS: i32 = 2;
@@ -178,6 +214,8 @@ pub struct Scene {
     _mix: Box<WpAudioInputMix>,
     input: Box<InputMix>,
     built: bool,
+    /// the "now playing" feed (B10), for a scene that takes media events
+    media: Option<crate::media::Media>,
 }
 
 impl Scene {
@@ -208,6 +246,13 @@ impl Scene {
             }
             if let Some(b) = &cbg {
                 wp_config_set_backgrounds_dir(config, b.as_ptr());
+            }
+            // scripts' localStorage (B10, S36): one file per project here
+            if let Some(d) = storage_dir()
+                && std::fs::create_dir_all(&d).is_ok()
+                && let Ok(cd) = CString::new(d.as_os_str().as_encoded_bytes())
+            {
+                wp_config_set_storage_dir(config, cd.as_ptr());
             }
             let out = WpAudioOutput {
                 sample_rate: SAMPLE_RATE,
@@ -260,9 +305,14 @@ impl Scene {
                 _mix: mix,
                 input,
                 built: false,
+                media: None,
             };
             if project.is_null() {
                 return Err(format!("load failed: {}", dir.display()));
+            }
+            let mut scene = scene;
+            if wp_project_uses_media(project) {
+                scene.media = crate::media::Media::start();
             }
             Ok(scene)
         }
@@ -271,6 +321,7 @@ impl Scene {
     /// Renders frame 0 into `scratch_fbo` (any size) and returns the native size; ≤ 1 = the
     /// renderer failed to build (missing assets, a broken scene) — the caller never renders again.
     pub fn first_render(&mut self, scratch_fbo: u32) -> Result<(u32, u32), String> {
+        self.apply_media();
         unsafe {
             wp_project_set_output_framebuffer(self.project, scratch_fbo);
             wp_render_update_time(self.context);
@@ -297,11 +348,47 @@ impl Scene {
             return;
         }
         self.time.set(t);
+        self.apply_media();
         unsafe {
             wp_project_set_output_framebuffer(self.project, fbo);
             wp_render_update_time(self.context);
             wp_render_frame(self.project);
         }
+    }
+
+    /// Hands what the media feed saw since the last frame to the scene's scripts.
+    fn apply_media(&mut self) {
+        let Some(media) = self.media.as_mut() else {
+            return;
+        };
+        let project = self.project;
+        let c = |s: &str| CString::new(s.replace('\0', "")).unwrap_or_default();
+        media.apply(&mut |n| unsafe {
+            use crate::media::Notify;
+            match n {
+                Notify::Status(on) => wp_project_notify_media_status(project, on),
+                Notify::Properties(t) => {
+                    let (a, b, d) = (c(&t.title), c(&t.artist), c(&t.album));
+                    wp_project_notify_track_metadata_change(project, a.as_ptr(), b.as_ptr(), d.as_ptr());
+                    let (aa, g, ct) = (c(&t.album_artist), c(&t.genres), c("music"));
+                    wp_project_notify_track_metadata_extra(
+                        project,
+                        aa.as_ptr(),
+                        c"".as_ptr(),
+                        g.as_ptr(),
+                        ct.as_ptr(),
+                    );
+                }
+                Notify::Art(url) => {
+                    let u = c(url);
+                    wp_project_notify_album_art_url_change(project, u.as_ptr());
+                }
+                Notify::State(s) => wp_project_notify_playback_state_change(project, s),
+                Notify::Timeline(p, d) => {
+                    wp_project_notify_playback_position_and_duration_change(project, p, d)
+                }
+            }
+        });
     }
 
     /// The pointer for the next frames: native scene pixels (y down), `buttons` bit 0 left,
@@ -514,6 +601,11 @@ fn run_smoke(
 
     let gfx = Gfx::new_offscreen()?;
     let t0 = std::time::Instant::now();
+    // a smoke run keeps the scene's localStorage with its PNGs, not in the user's state
+    if std::env::var_os("LIASCAPE_SCENE_STORAGE_DIR").is_none() {
+        // SAFETY: the smoke mode is single-threaded until the scene loads
+        unsafe { std::env::set_var("LIASCAPE_SCENE_STORAGE_DIR", out.join("storage")) };
+    }
     let mut scene = Scene::load(dir, assets)?;
     let load_ms = t0.elapsed().as_secs_f64() * 1e3;
     // before the renderer build, like the worker's `Start.properties`

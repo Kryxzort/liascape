@@ -1,0 +1,2705 @@
+From 8969b05068aa586c85abf51bb7737bb2a8f67bc6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:13:44 +0530
+Subject: [PATCH 38/44] scripting: layers, effects, sounds and the scene as
+ SceneScript has them
+
+Scripts reach every layer the way Wallpaper Engine documents the API:
+
+- thisScene.getLayer (n) is the n-th layer of the scene (not an object
+  id), and every type is a layer: images, texts, particles, sounds and
+  groups (a group or camera object is a CGroup now). One JS object per
+  layer, so getLayer ('a') === getLayer ('a') and what a script stores
+  on a layer stays. getLayerCount, enumerateLayers, getLayerIndex and
+  sortLayer (the draw order follows) exist; createLayer is undefined
+  and destroyLayer false (not supported).
+- ILayer: id, solid (scene.json, default true), size, getParent,
+  getChildren, getEffect (name or index) / getEffectCount, and
+  getTextureAnimation. A name the layer doesn't have is kept on it.
+  `pointsize` is pointSize.
+- IEffect: name, and `visible` written live (E41's chain). Every effect
+  is built when the scene's scripts call getEffect, so one hidden at
+  load can be shown. The material calls are no-ops.
+- ITextureAnimation: frameCount, duration, rate, play/pause/stop,
+  isPlaying, getFrame/setFrame and join. A call that changes it takes
+  the layer off the shared clock onto its own, as WE's docs say.
+- ISoundLayer: a sound object is scriptable: volume (live), play ()
+  (only if not running; resumes a pause; starts a startsilent sound),
+  stop () (rewinds; only play () restarts it), pause (), isPlaying ().
+- IScene's properties are writable, clearenabled no longer returns
+  bloom, skylightcolor no longer returns the ambient colour, and the
+  bloom strength/threshold are floats. Scripts on general's bloom
+  values run (thisLayer = the bloom image), and bloom is built for one.
+- engine.canvasSize, screenResolution (the scene's size: the core
+  doesn't know the output's), userProperties (live, colours as Vec3),
+  isDesktopDevice/isMobileDevice/isWallpaper/isScreensaver/
+  isRunningInEditor/isPortrait/isLandscape, registerAsset,
+  isObjectValid; openUserShortcut returns false.
+- applyUserProperties gets the changed user properties on every change,
+  after the first call with all of them.
+- Text-layer scripts: thisLayer is the real layer (its text is the
+  layer's text value), init gets the text and its return is adopted,
+  a combo's default is its first option, script properties are read
+  live, init and applyUserProperties run with the property scripts',
+  the script runs while its layer is hidden or has no font, and the
+  events reach it too. A text another layer's script writes is drawn.
+- console.log separates its arguments with spaces.
+
+Origin: ours
+Why: most scripted scenes call these (docs/player/spikes/we-lwe-gap-audit.md B10: S15, S16, S19, S20, S24-S27, S29-S32, S37)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   3 +
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |   2 +
+ .../Data/Parsers/ObjectParser.cpp             |   2 +
+ .../Data/Parsers/WallpaperParser.cpp          |   1 +
+ .../WallpaperEngine/Render/Objects/CGroup.h   |  28 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp |   7 +-
+ .../WallpaperEngine/Render/Objects/CImage.h   |   4 +-
+ .../Render/Objects/CRenderable.cpp            |  99 +++-
+ .../Render/Objects/CRenderable.h              |  29 +
+ .../WallpaperEngine/Render/Objects/CSound.cpp |  51 +-
+ .../WallpaperEngine/Render/Objects/CSound.h   |  13 +-
+ .../WallpaperEngine/Render/Objects/CText.cpp  |  38 +-
+ .../Render/Objects/Effects/CPass.cpp          |   2 +-
+ .../Render/Wallpapers/CScene.cpp              |  85 ++-
+ .../Render/Wallpapers/CScene.h                |   7 +
+ .../Adapters/ScriptableObjectAdapter.cpp      | 534 ++++++++++++++++--
+ .../Adapters/ScriptableObjectAdapter.h        |  33 +-
+ .../Scripting/ConsoleObject.cpp               |   4 +-
+ .../Scripting/EngineObject.cpp                |  52 +-
+ .../WallpaperEngine/Scripting/SceneObject.cpp | 346 +++++++-----
+ .../WallpaperEngine/Scripting/SceneObject.h   |   8 +-
+ .../Scripting/ScriptEngine.cpp                | 446 +++++++++++----
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  29 +-
+ .../Scripting/ScriptableObject.cpp            |   1 +
+ .../Scripting/ScriptableObject.h              |   5 +
+ .../Scripting/resources/builtins.js           |  19 +
+ 26 files changed, 1494 insertions(+), 354 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/CGroup.h
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 071d82c..ef96945 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -36,6 +36,9 @@ struct ObjectData {
+     UserSettingUniquePtr groupParallaxDepth;
+     /** A camera object (`"camera": "default"`): its `zoom` (null on every other object) */
+     UserSettingUniquePtr cameraZoom;
++    /** `solid` (default true): the object receives cursor events (WE's docs: "All mouse cursor events will only work on
++     *  objects marked as Solid") */
++    bool solid = true;
+ };
+ 
+ /**
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index 4ba6d85..cabe598 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -114,6 +114,8 @@ struct SceneData {
+     ObjectList objects;
+     /** Every value in this scene with a keyframe animation (the scene advances them every frame) */
+     std::vector<AnimatedValue> animatedValues = {};
++    /** the scene's scripts call `getEffect`: every effect is built, a script may show one hidden at load */
++    bool scriptsReachEffects = false;
+ };
+ 
+ class Scene final : public Wallpaper, public SceneData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index be68a86..1767d7b 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -50,6 +50,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupVisible = it.user ("visible", project.properties, true),
+ 	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
++	    .solid = it.optional ("solid", true),
+ 	};
+     } catch (const std::exception& e) {
+ 	sLog.error ("Error parsing object base data: ", e.what ());
+@@ -75,6 +76,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupVisible = it.user ("visible", project.properties, true),
+ 	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
++	    .solid = it.optional ("solid", true),
+ 	};
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 8ccea1e..65035e7 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -91,6 +91,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+     );
+ 
+     result->animatedValues = std::move (animatedValues);
++    result->scriptsReachEffects = scene.dump ().find ("getEffect") != std::string::npos;
+     return result;
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CGroup.h b/src/core/WallpaperEngine/Render/Objects/CGroup.h
+new file mode 100644
+index 0000000..dc85bd8
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/CGroup.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include "WallpaperEngine/Render/CObject.h"
++#include "WallpaperEngine/Scripting/ScriptableObject.h"
++
++namespace WallpaperEngine::Render::Objects {
++/**
++ * An object that draws nothing (a group, a camera object, an unsupported type): still a layer to scripts
++ * (thisScene.getLayer, enumerateLayers), with the transform and visibility its children inherit
++ */
++class CGroup final : virtual public CObject, public Scripting::ScriptableObject {
++public:
++    CGroup (Wallpapers::CScene& scene, const Object& object) : CObject (scene, object), ScriptableObject (scene, object) {
++	if (object.groupScale != nullptr) {
++	    this->registerProperty ("scale", *object.groupScale->value);
++	}
++	if (object.groupAngles != nullptr) {
++	    this->registerProperty ("angles", *object.groupAngles->value);
++	}
++	if (object.groupVisible != nullptr) {
++	    this->registerProperty ("visible", *object.groupVisible->value);
++	}
++	if (object.groupParallaxDepth != nullptr) {
++	    this->registerProperty ("parallaxDepth", *object.groupParallaxDepth->value);
++	}
++    }
++};
++} // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index be5de7f..9aba604 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -737,10 +737,11 @@ void CImage::setup () {
+     this->m_initialized = true;
+ }
+ 
+-bool CImage::effectCanBeVisible (const ImageEffect& effect) {
+-    // visible now, or bound to a user property, or driven by a script
++bool CImage::effectCanBeVisible (const ImageEffect& effect) const {
++    // visible now, or bound to a user property, or driven by a script (its own, or a layer script's
++    // getEffect (…).visible: built whenever the scene's scripts call getEffect)
+     return effect.visible->value->getBool () || effect.visible->property != nullptr
+-	|| effect.visible->value->getScriptSource ().has_value ();
++	|| effect.visible->value->getScriptSource ().has_value () || this->getScene ().scriptsReachEffects ();
+ }
+ 
+ bool CImage::effectVisibilityChanged () const {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 8246ed6..cdde615 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -61,8 +61,8 @@ protected:
+     void updateActivePasses ();
+     /** An effect's `visible` differs from the one the active chain was set up for */
+     [[nodiscard]] bool effectVisibilityChanged () const;
+-    /** Visible now, or a property or script can make it visible: it is built */
+-    [[nodiscard]] static bool effectCanBeVisible (const ImageEffect& effect);
++    /** Visible now, or a property or script can make it visible (also a layer script's getEffect ()): it is built */
++    [[nodiscard]] bool effectCanBeVisible (const ImageEffect& effect) const;
+ 
+     void updateScreenSpacePosition ();
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CRenderable.cpp b/src/core/WallpaperEngine/Render/Objects/CRenderable.cpp
+index f4efc34..acfbe60 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CRenderable.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CRenderable.cpp
+@@ -1,4 +1,8 @@
+ #include "CRenderable.h"
++#include "WallpaperEngine/Context.h"
++
++#include <algorithm>
++#include <cmath>
+ 
+ #include "WallpaperEngine/Data/Model/Material.h"
+ #include "WallpaperEngine/Data/Model/Object.h"
+@@ -38,4 +42,97 @@ void CRenderable::setup () {
+ 
+ std::shared_ptr<const TextureProvider> CRenderable::getTexture () const { return this->m_texture; }
+ 
+-double CRenderable::getAnimationTime () const { return this->m_animationTime; }
+\ No newline at end of file
++double CRenderable::getAnimationTime () const { return this->m_animationTime; }
++double CRenderable::getTextureAnimationTime () const {
++    if (this->m_textureAnimation.detached) {
++	return this->m_textureAnimation.time;
++    }
++
++    return static_cast<double> (this->getContext ().getContext ().renderTime);
++}
++
++int CRenderable::getTextureFrameCount () const {
++    const auto texture = this->getTexture ();
++
++    if (texture == nullptr || !texture->isAnimated ()) {
++	return 0;
++    }
++
++    return static_cast<int> (texture->getFrames ().size ());
++}
++
++int CRenderable::getTextureFrame () const {
++    const auto texture = this->getTexture ();
++
++    if (texture == nullptr || !texture->isAnimated () || this->m_animationTime <= 0.0) {
++	return 0;
++    }
++
++    // the same walk CPass::resolveTextureAnimationState does: the frame whose span holds the time
++    double time = std::fmod (this->getTextureAnimationTime (), this->m_animationTime);
++    int index = 0;
++
++    for (const auto& frame : texture->getFrames ()) {
++	time -= frame->frametime;
++
++	if (time <= 0.0) {
++	    return index;
++	}
++
++	index++;
++    }
++
++    return std::max (0, index - 1);
++}
++
++CRenderable::TextureAnimationState& CRenderable::detachTextureAnimation () {
++    if (!this->m_textureAnimation.detached) {
++	// carry on from where the shared animation is
++	this->m_textureAnimation.time = static_cast<double> (this->getContext ().getContext ().renderTime);
++	this->m_textureAnimation.detached = true;
++    }
++
++    return this->m_textureAnimation;
++}
++
++void CRenderable::joinTextureAnimation () { this->m_textureAnimation = {}; }
++
++const CRenderable::TextureAnimationState& CRenderable::getTextureAnimationState () const {
++    return this->m_textureAnimation;
++}
++
++void CRenderable::setTextureFrame (int frame) {
++    auto& state = this->detachTextureAnimation ();
++    const auto texture = this->getTexture ();
++
++    if (texture == nullptr || !texture->isAnimated () || this->m_animationTime <= 0.0) {
++	return;
++    }
++
++    const auto& frames = texture->getFrames ();
++    const int count = static_cast<int> (frames.size ());
++
++    frame = ((frame % count) + count) % count;
++
++    // a time inside the frame's span: its start plus a little (resolveTextureAnimationState picks the frame whose
++    // running sum first reaches the time; exactly the start would be the previous frame's end)
++    double start = 0.0;
++
++    for (int i = 0; i < frame; i++) {
++	start += frames[i]->frametime;
++    }
++
++    state.time = start + std::min (1e-4, frames[frame]->frametime * 0.5);
++}
++
++void CRenderable::advanceTextureAnimation (double dt) {
++    auto& state = this->m_textureAnimation;
++
++    if (state.detached && state.playing && dt > 0.0) {
++	state.time += dt * state.rate;
++	// keep it in one cycle (precision over a long run)
++	if (this->m_animationTime > 0.0 && state.time > this->m_animationTime) {
++	    state.time = std::fmod (state.time, this->m_animationTime);
++	}
++    }
++}
+diff --git a/src/core/WallpaperEngine/Render/Objects/CRenderable.h b/src/core/WallpaperEngine/Render/Objects/CRenderable.h
+index f9c835c..4724b22 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CRenderable.h
++++ b/src/core/WallpaperEngine/Render/Objects/CRenderable.h
+@@ -20,6 +20,34 @@ public:
+ 
+     [[nodiscard]] double getAnimationTime () const;
+ 
++    /**
++     * SceneScript's ITextureAnimation. By default a texture animation runs on the scene's clock (WE: "all instances of
++     * an animated texture share an animation state"); a script call that changes it detaches this object onto its own
++     * clock (`join ()` returns to the shared one)
++     */
++    struct TextureAnimationState {
++	bool detached = false;
++	bool playing = true;
++	double rate = 1.0;
++	/** the object's own animation time in seconds (only while detached) */
++	double time = 0.0;
++    };
++
++    /** @return The time the texture animation is at: the scene's clock, or the object's own clock once detached */
++    [[nodiscard]] double getTextureAnimationTime () const;
++    /** @return The number of frames of the texture animation (0: not animated) */
++    [[nodiscard]] int getTextureFrameCount () const;
++    /** @return The frame the texture animation shows now */
++    [[nodiscard]] int getTextureFrame () const;
++    /** Detaches the animation (from now on the object's own clock) and puts it at the start of `frame` */
++    void setTextureFrame (int frame);
++    /** play/pause/stop/rate/join: detach and change the object's own clock */
++    TextureAnimationState& detachTextureAnimation ();
++    void joinTextureAnimation ();
++    [[nodiscard]] const TextureAnimationState& getTextureAnimationState () const;
++    /** Advances the object's own animation clock by dt (scene seconds) when detached and playing */
++    void advanceTextureAnimation (double dt);
++
+     void setup () override;
+ 
+     [[nodiscard]] virtual const float& getBrightness () const = 0;
+@@ -33,6 +61,7 @@ protected:
+     void detectTexture ();
+ 
+     double m_animationTime = 0.0;
++    TextureAnimationState m_textureAnimation = {};
+ 
+     std::shared_ptr<const TextureProvider> m_texture = nullptr;
+     const Material& m_material;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CSound.cpp b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+index f69146a..27d2968 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CSound.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+@@ -25,7 +25,12 @@ uint64_t soundSeed (const int objectId) {
+ } // namespace
+ 
+ CSound::CSound (Wallpapers::CScene& scene, const Sound& sound) :
+-    CObject (scene, sound), m_sound (sound), m_random (soundSeed (sound.id)) {
++    CObject (scene, sound), ScriptableObject (scene, sound), m_sound (sound), m_random (soundSeed (sound.id)) {
++    // ISoundLayer.volume, read and written by scripts (and a script on it runs like any layer property's)
++    if (sound.volume != nullptr && sound.volume->value != nullptr) {
++	this->registerProperty ("volume", *sound.volume->value);
++    }
++
+     const auto& mode = sound.playbackmode;
+ 
+     // absent = loop (WE's constructor default); an unknown name falls back to it too
+@@ -86,7 +91,9 @@ float CSound::getGain () const {
+     return v * v;
+ }
+ 
+-bool CSound::isPlaying () const { return this->m_stream != nullptr && !this->m_stream->isPlayedOut (); }
++bool CSound::isPlaying () const {
++    return !this->m_paused && this->m_stream != nullptr && !this->m_stream->isPlayedOut ();
++}
+ 
+ void CSound::swapStream (Audio::AudioStream* stream) {
+     Audio::AudioStream* previous = this->m_stream;
+@@ -160,11 +167,45 @@ void CSound::play () {
+ 	this->m_slot = this->getScene ().getAudioContext ().addStream (nullptr);
+     }
+ 
+-    // a script's play() restarts a waiting `random` object at once
++    // paused: back into the slot where it stopped
++    if (this->m_paused) {
++	this->m_paused = false;
++	this->getScene ().getAudioContext ().replaceStream (this->m_slot, this->m_stream);
++	return;
++    }
++
++    // "if it is not already running"
++    if (this->isPlaying ()) {
++	return;
++    }
++
++    // a script's play() starts the object even when it is `startsilent`, and doesn't wait out `random`'s silence
+     this->m_gap = -1.0;
+     this->start ();
+ }
+ 
++void CSound::stop () {
++    if (!this->m_audio || this->m_slot < 0) {
++	return;
++    }
++
++    this->m_paused = false;
++    this->swapStream (nullptr);
++    this->m_gap = -1.0;
++    // nothing restarts it (the playlist, a volume rise) but play ()
++    this->m_neverStarted = true;
++}
++
++void CSound::pause () {
++    if (!this->m_audio || this->m_slot < 0 || this->m_paused || !this->isPlaying ()) {
++	return;
++    }
++
++    this->m_paused = true;
++    // out of the slot, kept: its decoder waits where it is
++    this->getScene ().getAudioContext ().replaceStream (this->m_slot, nullptr);
++}
++
+ void CSound::onVolumeChanged () {
+     if (!this->m_audio || this->m_slot < 0) {
+ 	return;
+@@ -179,13 +220,13 @@ void CSound::onVolumeChanged () {
+ 
+     // a rise from 0 starts an object that isn't playing — never a `single` one, never one that hasn't
+     // had its first start (startsilent)
+-    if (gain > 0.0f && !this->isPlaying () && this->m_mode != Mode::Single && !this->m_neverStarted) {
++    if (gain > 0.0f && !this->isPlaying () && !this->m_paused && this->m_mode != Mode::Single && !this->m_neverStarted) {
+ 	this->start ();
+     }
+ }
+ 
+ void CSound::tick (const double dt) {
+-    if (!this->m_audio || this->m_slot < 0 || this->m_neverStarted || this->m_mode == Mode::Single) {
++    if (!this->m_audio || this->m_slot < 0 || this->m_neverStarted || this->m_paused || this->m_mode == Mode::Single) {
+ 	return;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CSound.h b/src/core/WallpaperEngine/Render/Objects/CSound.h
+index 691fcc1..dac14ce 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CSound.h
++++ b/src/core/WallpaperEngine/Render/Objects/CSound.h
+@@ -5,6 +5,7 @@
+ 
+ #include "WallpaperEngine/Audio/AudioStream.h"
+ #include "WallpaperEngine/Render/CObject.h"
++#include "WallpaperEngine/Scripting/ScriptableObject.h"
+ 
+ using namespace WallpaperEngine;
+ 
+@@ -32,7 +33,7 @@ using namespace WallpaperEngine::Data::Model;
+  * the picked file into it. Picks come from a per-object RNG, seeded from WPENGINE_SOUND_SEED when set
+  * (deterministic tests), else from std::random_device.
+  */
+-class CSound final : public CObject {
++class CSound final : virtual public CObject, public Scripting::ScriptableObject {
+ public:
+     enum class Mode { Loop, Random, Single };
+ 
+@@ -50,10 +51,14 @@ public:
+     void tick (double dt);
+ 
+     /**
+-     * A script's play(): starts the object even if `startsilent` (SceneScript has no sound methods
+-     * yet; the entry point exists for when it does)
++     * ISoundLayer.play(): "starts audio playback if it is not already running" (WE's SceneScript docs). Resumes a
++     * paused object; starts a stopped (or `startsilent`) one
+      */
+     void play ();
++    /** ISoundLayer.stop(): "stops the sound and resets the internal playback timer"; only play() starts it again */
++    void stop ();
++    /** ISoundLayer.pause(): "pauses the sound at the current playback time" (play() resumes it) */
++    void pause ();
+ 
+     /** @return The playback mode in use */
+     [[nodiscard]] Mode getMode () const;
+@@ -79,6 +84,8 @@ private:
+     /** the stream in the slot (nullptr between files / before the first start) */
+     Audio::AudioStream* m_stream = nullptr;
+ 
++    /** paused by a script: the stream is out of the driver slot, kept where it was */
++    bool m_paused = false;
+     /** a start was never attempted (WE's "stopped" bit): volume changes don't start the object */
+     bool m_neverStarted = true;
+     /** `random`: seconds of silence still to wait once the current file played out (< 0: none pending) */
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index c7651a6..730449a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -121,11 +121,11 @@ void CText::setup () {
+ 	return;
+     }
+ 
+-    if (!initFreeType ()) {
+-	return;
+-    }
+-
+-    if (!loadEmbeddedFont () && !loadSystemFont ()) {
++    // without a font nothing draws, but a script still runs (it may drive other layers)
++    if (!initFreeType () || (!loadEmbeddedFont () && !loadSystemFont ())) {
++	if (scripted) {
++	    initScriptLayer ();
++	}
+ 	return;
+     }
+ 
+@@ -222,7 +222,7 @@ void CText::initScriptLayer () {
+     }
+ 
+     m_layerHandle = this->getScene ().getScriptEngine ().createLayerScript (
+-	*script, m_text.text->value->getProperties (), m_text.text->value->getString ()
++	*script, m_text.text->value->getProperties (), m_text.text->value->getString (), *this
+     );
+ 
+     if (m_layerHandle == Scripting::kInvalidLayerHandle) {
+@@ -373,6 +373,21 @@ void CText::uploadQuadVertices () {
+ }
+ 
+ void CText::render () {
++    // the script runs while the layer is hidden too (it may be what shows it again), and before the font check
++    std::string renderedText = m_lastRenderedText;
++    if (m_layerHandle != Scripting::kInvalidLayerHandle) {
++	auto& se = this->getScene ().getScriptEngine ();
++	se.tickLayer (
++	    m_layerHandle, static_cast<double> (getScene ().getTime ()),
++	    static_cast<double> (getScene ().getDeltaTime ()), static_cast<double> (getScene ().getFps ())
++	);
++	const std::string current = se.layerText (m_layerHandle);
++	renderedText = current.empty () ? std::string (" ") : current;
++    } else if (m_text.text->value->getType () == DynamicValue::String && !m_text.text->value->getString ().empty ()) {
++	// a text another layer's script (or a user property) writes
++	renderedText = m_text.text->value->getString ();
++    }
++
+     if (!m_valid) {
+ 	return;
+     }
+@@ -385,17 +400,6 @@ void CText::render () {
+     std::string str = "Text " + this->getObject ().name + " (" + std::to_string (this->getObject ().id) + ")";
+     glPushDebugGroup (GL_DEBUG_SOURCE_APPLICATION, 0, -1, str.c_str ());
+ #endif /* DEBUG */
+-    std::string renderedText = m_lastRenderedText;
+-    if (m_layerHandle != Scripting::kInvalidLayerHandle) {
+-	auto& se = this->getScene ().getScriptEngine ();
+-	se.tickLayer (
+-	    m_layerHandle, static_cast<double> (getScene ().getTime ()),
+-	    static_cast<double> (getScene ().getDeltaTime ()), static_cast<double> (getScene ().getFps ())
+-	);
+-	const std::string current = se.layerText (m_layerHandle);
+-	renderedText = current.empty () ? std::string (" ") : current;
+-    }
+-
+     const unsigned int pixelSize = computeEffectivePixelSize ();
+     if (pixelSize != m_lastPixelSize) {
+ 	m_lastPixelSize = pixelSize;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 5bee749..27c103b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -279,7 +279,7 @@ CPass::resolveTextureAnimationState (const std::shared_ptr<const TextureProvider
+     }
+ 
+     double currentRenderTime = fmod (
+-	static_cast<double> (this->getContext ().getContext ().renderTime), this->m_renderable.getAnimationTime ()
++	this->m_renderable.getTextureAnimationTime (), this->m_renderable.getAnimationTime ()
+     );
+ 
+     for (const auto& frameCur : texture->getFrames ()) {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index e738431..d1e03bd 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1,9 +1,11 @@
++#include "WallpaperEngine/Render/Objects/CGroup.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
+ #include "WallpaperEngine/Render/Objects/CParticle.h"
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+ 
+ #include "CScene.h"
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <cstdlib>
+ 
+@@ -109,6 +111,13 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	this->addObjectToRenderOrder (*object);
+     }
+ 
++    // the layers scripts see (thisScene.getLayer (index), enumerateLayers, sortLayer): the scene's objects in order
++    for (const auto& object : scene->objects) {
++	if (const auto it = this->m_objects.find (object->id); it != this->m_objects.end ()) {
++	    this->m_layers.push_back (it->second);
++	}
++    }
++
+     // create extra framebuffers for the bloom effect
+     this->_rt_4FrameBuffer = this->create (
+ 	"_rt_4FrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth / 4, sceneHeight / 4 },
+@@ -168,7 +177,9 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     // the image for the bloom passes, built when bloom is on or a user property can turn it on: `bloom` is read every
+     // frame (renderFrame). A scene whose bloom is a plain false never builds it (nor needs WE's bloom materials)
+     const auto& bloomEnabled = scene->camera.bloom.enabled;
+-    if (bloomEnabled->value->getBool () || bloomEnabled->property != nullptr) {
++    const auto& bloomCamera = scene->camera.bloom;
++    const bool bloomScripted = bloomEnabled->value->getScriptSource ().has_value ();
++    if (bloomEnabled->value->getBool () || bloomEnabled->property != nullptr || bloomScripted) {
+ 	try {
+ 	    this->m_bloomObjectData = ObjectParser::parse (bloom, scene->project);
+ 
+@@ -198,6 +209,20 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 
+ 	if (this->m_bloomObject != nullptr) {
+ 	    this->m_objectsByRenderOrder.push_back (this->m_bloomObject);
++
++	    // scripts on general's bloom values (e.g. a hover toggling bloom) run like a layer property's, with
++	    // thisLayer = the bloom image
++	    if (auto* owner = this->m_bloomObject->asOrNull<Scripting::ScriptableObject> ()) {
++		const std::pair<const char*, DynamicValue*> scripted[] = {
++		    { "general_bloom", bloomCamera.enabled->value.get () },
++		    { "general_bloomstrength", bloomCamera.strength->value.get () },
++		    { "general_bloomthreshold", bloomCamera.threshold->value.get () },
++		};
++
++		for (const auto& [key, value] : scripted) {
++		    this->m_scriptEngine->queueScript (key, *value, *owner);
++		}
++	    }
+ 	}
+     }
+ }
+@@ -286,10 +311,10 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	renderObject = new Objects::CParticle (*this, particleData);
+     } else if (object.cameraZoom != nullptr) {
+ 	// a camera object: nothing to draw, CScene::updateCamera reads its data
+-	renderObject = new CObject (*this, object);
++	renderObject = new Objects::CGroup (*this, object);
+     } else {
+-	sLog.error ("Unknown object type, creating placeholder, empty object: ", object.id);
+-	renderObject = new CObject (*this, object);
++	// a group (or a type LWE doesn't draw): nothing to draw, but a layer to scripts
++	renderObject = new Objects::CGroup (*this, object);
+     }
+ 
+     try {
+@@ -386,6 +411,13 @@ void CScene::renderFrame () {
+ 	sound->tick (soundDt);
+     }
+ 
++    // texture animations a script took off the shared clock (ITextureAnimation) run on their own
++    for (const auto& cur : this->m_objectsByRenderOrder) {
++	if (cur->is<Objects::CImage> ()) {
++	    cur->as<Objects::CImage> ()->advanceTextureAnimation (soundDt);
++	}
++    }
++
+     // update main textures for images
+     for (const auto& cur : this->m_objectsByRenderOrder) {
+ 	if (!cur->is<Objects::CImage> ()) {
+@@ -640,6 +672,51 @@ std::mt19937& CScene::getParticleRng () { return this->m_particleRng; }
+ 
+ const std::vector<CObject*>& CScene::getObjectsByRenderOrder () const { return this->m_objectsByRenderOrder; }
+ 
++bool CScene::scriptsReachEffects () const { return this->getScene ().scriptsReachEffects; }
++
++const std::vector<CObject*>& CScene::getLayers () const { return this->m_layers; }
++
++bool CScene::sortLayer (CObject* layer, int index) {
++    const auto from = std::ranges::find (this->m_layers, layer);
++
++    if (from == this->m_layers.end () || this->m_layers.empty ()) {
++	return false;
++    }
++
++    index = std::clamp (index, 0, static_cast<int> (this->m_layers.size ()) - 1);
++    this->m_layers.erase (from);
++    this->m_layers.insert (this->m_layers.begin () + index, layer);
++
++    // the draw order follows: the layer goes right before the layer that now comes after it (or after the one
++    // before it, when it is last)
++    const auto drawn = std::ranges::find (this->m_objectsByRenderOrder, layer);
++
++    if (drawn == this->m_objectsByRenderOrder.end ()) {
++	return true;
++    }
++
++    this->m_objectsByRenderOrder.erase (drawn);
++
++    auto at = this->m_objectsByRenderOrder.end ();
++
++    if (static_cast<size_t> (index) + 1 < this->m_layers.size ()) {
++	at = std::ranges::find (this->m_objectsByRenderOrder, this->m_layers[index + 1]);
++    } else if (index > 0) {
++	at = std::ranges::find (this->m_objectsByRenderOrder, this->m_layers[index - 1]);
++	if (at != this->m_objectsByRenderOrder.end ()) {
++	    ++at;
++	}
++    }
++
++    // the bloom object stays last
++    if (at == this->m_objectsByRenderOrder.end () && this->m_bloomObject != nullptr) {
++	at = std::ranges::find (this->m_objectsByRenderOrder, this->m_bloomObject);
++    }
++
++    this->m_objectsByRenderOrder.insert (at, layer);
++    return true;
++}
++
+ const CObject* CScene::getObject (int id) const {
+     const auto object = this->m_objects.find (id);
+     return object == this->m_objects.end () ? nullptr : object->second;
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 6bdbbb7..3bfa354 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -69,6 +69,12 @@ public:
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
+     [[nodiscard]] std::mt19937& getParticleRng ();
+     [[nodiscard]] const CObject* getObject (int id) const;
++    /** The layers scripts index (thisScene.getLayer (n), enumerateLayers): the scene's objects in their order */
++    [[nodiscard]] const std::vector<CObject*>& getLayers () const;
++    /** IScene.sortLayer: moves a layer to `index` in the layer list, and in the draw order with it */
++    bool sortLayer (CObject* layer, int index);
++    /** The scene's scripts call `getEffect`: every effect is built, a script may show it (SceneScript IEffect.visible) */
++    [[nodiscard]] bool scriptsReachEffects () const;
+ 
+ protected:
+     void renderFrame () override;
+@@ -91,6 +97,7 @@ private:
+     CObject* m_bloomObject = nullptr;
+     std::map<int, CObject*> m_objects = {};
+     std::vector<CObject*> m_objectsByRenderOrder = {};
++    std::vector<CObject*> m_layers = {};
+     /** the sound objects, ticked on the host's clock every frame (they don't render) */
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index c3d2be2..d26a809 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -1,8 +1,12 @@
+ #include "ScriptableObjectAdapter.h"
+ 
+ #include <cstring>
++#include <ranges>
+ #include <utility>
+ 
++#include "WallpaperEngine/Render/Objects/CImage.h"
++#include "WallpaperEngine/Render/Objects/CSound.h"
++#include "WallpaperEngine/Render/Objects/CText.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+ #include "WallpaperEngine/Scripting/ScriptableObject.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+@@ -10,85 +14,479 @@
+ using namespace WallpaperEngine::Data::Model;
+ using namespace WallpaperEngine::Data::Utils;
+ using namespace WallpaperEngine::Scripting::Adapters;
++using WallpaperEngine::Render::Objects::CImage;
++using WallpaperEngine::Render::Objects::CRenderable;
++using WallpaperEngine::Render::Objects::CSound;
++using WallpaperEngine::Render::Objects::CText;
++using WallpaperEngine::Scripting::ScriptableObject;
+ 
+ #define SCRIPTABLE_OPAQUE_MAGIC 0xdeadbeef
+ 
+ struct OpaqueScriptableObjectAdapter {
+     unsigned int magic;
+     ScriptableObjectAdapter& adapter;
+-    WallpaperEngine::Scripting::ScriptableObject& object;
++    ScriptableObject& object;
++    /** what scripts store on the layer under names it doesn't have (kept: one JS object per layer) */
++    JSValue extras;
+ };
+ 
+-void scriptableobject_finalizer (JSRuntime* rt, JSValueConst val);
++/** an IEffect: one effect of an image layer */
++struct OpaqueEffect {
++    ScriptableObjectAdapter& adapter;
++    const ImageEffect& effect;
++};
+ 
+-JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
++/** an ITextureAnimation: the texture animation of an image layer */
++struct OpaqueTextureAnimation {
++    ScriptableObjectAdapter& adapter;
++    CImage& image;
++};
++
++namespace {
++OpaqueScriptableObjectAdapter* layerOf (JSValueConst value) {
+     JSClassID classId = 0;
++    auto* container = static_cast<OpaqueScriptableObjectAdapter*> (JS_GetAnyOpaque (value, &classId));
++
++    if (container == nullptr || container->magic != SCRIPTABLE_OPAQUE_MAGIC) {
++	return nullptr;
++    }
++
++    return container;
++}
++
++/** the C string of an atom, freed at scope exit */
++struct AtomName {
++    JSContext* ctx;
++    const char* str;
++
++    AtomName (JSContext* c, JSAtom atom) : ctx (c), str (JS_AtomToCString (c, atom)) { }
++    ~AtomName () { JS_FreeCString (ctx, str); }
++};
++
++/** names scripts use that differ from the registered property's */
++const char* propertyAlias (const char* name) {
++    if (strcmp (name, "pointsize") == 0) {
++	return "pointSize";
++    }
++
++    return name;
++}
++
++enum LayerMethod {
++    Method_GetEffect,
++    Method_GetEffectCount,
++    Method_GetTextureAnimation,
++    Method_GetParent,
++    Method_GetChildren,
++    Method_Play,
++    Method_Stop,
++    Method_Pause,
++    Method_IsPlaying,
++};
++
++constexpr std::pair<const char*, LayerMethod> kMethods[] = {
++    { "getEffect", Method_GetEffect },	 { "getEffectCount", Method_GetEffectCount },
++    { "getTextureAnimation", Method_GetTextureAnimation },
++    { "getParent", Method_GetParent },	 { "getChildren", Method_GetChildren },
++    { "play", Method_Play },		 { "stop", Method_Stop },
++    { "pause", Method_Pause },		 { "isPlaying", Method_IsPlaying },
++};
++
++JSValue newEffect (JSContext* ctx, ScriptableObjectAdapter& adapter, const ImageEffect& effect) {
++    JSValue result = JS_NewObjectClass (ctx, static_cast<int> (adapter.getEffectClassId ()));
++    JS_SetOpaque (result, new OpaqueEffect { .adapter = adapter, .effect = effect });
++    return result;
++}
++
++JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    auto* layer = layerOf (this_val);
++
++    if (layer == nullptr) {
++	return JS_ThrowTypeError (ctx, "not a layer");
++    }
++
++    auto& object = layer->object;
++    auto& adapter = layer->adapter;
++    auto* image = object.asOrNull<CImage> ();
++    auto* sound = object.asOrNull<CSound> ();
++
++    switch (static_cast<LayerMethod> (magic)) {
++	case Method_GetEffect: {
++	    if (image == nullptr || argc < 1) {
++		return JS_UNDEFINED;
++	    }
++
++	    const auto& effects = image->getImage ().effects;
++
++	    if (JS_IsNumber (argv[0])) {
++		int index = -1;
++		JS_ToInt32 (ctx, &index, argv[0]);
++
++		if (index < 0 || index >= static_cast<int> (effects.size ())) {
++		    return JS_UNDEFINED;
++		}
++
++		return newEffect (ctx, adapter, *effects[index]);
++	    }
++
++	    const char* name = JS_ToCString (ctx, argv[0]);
++
++	    if (name == nullptr) {
++		return JS_EXCEPTION;
++	    }
++
++	    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
++
++	    for (const auto& effect : effects) {
++		if (effect->name == name) {
++		    return newEffect (ctx, adapter, *effect);
++		}
++	    }
++
++	    return JS_UNDEFINED;
++	}
++	case Method_GetEffectCount:
++	    return JS_NewInt32 (ctx, image == nullptr ? 0 : static_cast<int> (image->getImage ().effects.size ()));
++	case Method_GetTextureAnimation: {
++	    if (image == nullptr) {
++		return JS_UNDEFINED;
++	    }
++
++	    JSValue result = JS_NewObjectClass (ctx, static_cast<int> (adapter.getTextureAnimationClassId ()));
++	    JS_SetOpaque (result, new OpaqueTextureAnimation { .adapter = adapter, .image = *image });
++	    return result;
++	}
++	case Method_GetParent: {
++	    const auto& parent = object.getObject ().parent;
++	    const auto* parentObject = parent.has_value () ? object.getScene ().getObject (*parent) : nullptr;
++	    auto* scriptable = parentObject == nullptr
++		? nullptr
++		: const_cast<WallpaperEngine::Render::CObject*> (parentObject)->asOrNull<ScriptableObject> ();
++
++	    return scriptable == nullptr ? JS_NULL : adapter.instantiate (*scriptable);
++	}
++	case Method_GetChildren: {
++	    JSValue result = JS_NewArray (ctx);
++	    uint32_t count = 0;
++
++	    for (const auto* cur : object.getScene ().getObjectsByRenderOrder ()) {
++		if (!cur->getObject ().parent.has_value () || *cur->getObject ().parent != object.getId ()) {
++		    continue;
++		}
+ 
+-    auto* container = static_cast<OpaqueScriptableObjectAdapter*> (JS_GetAnyOpaque (obj_val, &classId));
++		if (auto* child = const_cast<WallpaperEngine::Render::CObject*> (cur)->asOrNull<ScriptableObject> ()) {
++		    JS_SetPropertyUint32 (ctx, result, count++, adapter.instantiate (*child));
++		}
++	    }
++
++	    return result;
++	}
++	case Method_Play:
++	    if (sound != nullptr) {
++		sound->play ();
++	    }
++	    return JS_UNDEFINED;
++	case Method_Stop:
++	    if (sound != nullptr) {
++		sound->stop ();
++	    }
++	    return JS_UNDEFINED;
++	case Method_Pause:
++	    if (sound != nullptr) {
++		sound->pause ();
++	    }
++	    return JS_UNDEFINED;
++	case Method_IsPlaying:
++	    return JS_NewBool (ctx, sound != nullptr && sound->isPlaying ());
++    }
+ 
+-    if (!container || container->magic != SCRIPTABLE_OPAQUE_MAGIC) {
++    return JS_UNDEFINED;
++}
++} // namespace
++
++void scriptableobject_finalizer (JSRuntime* rt, JSValueConst val);
++
++JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
++    auto* container = layerOf (obj_val);
++
++    if (container == nullptr) {
+ 	return JS_EXCEPTION;
+     }
+ 
+-    const char* name = JS_AtomToCString (ctx, atom);
++    const AtomName atomName (ctx, atom);
+ 
+-    if (name == nullptr) {
++    if (atomName.str == nullptr) {
+ 	return JS_EXCEPTION;
+     }
+ 
+-    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
++    const char* name = propertyAlias (atomName.str);
++    auto& object = container->object;
++    auto& engine = container->adapter.getEngine ();
+ 
+-    // ILayer.name (read-only)
++    // ILayer.name / id (read-only)
+     if (strcmp (name, "name") == 0) {
+-	return JS_NewString (ctx, container->object.getObject ().name.c_str ());
++	return JS_NewString (ctx, object.getObject ().name.c_str ());
++    }
++    if (strcmp (name, "id") == 0) {
++	return JS_NewInt32 (ctx, object.getId ());
++    }
++    if (strcmp (name, "solid") == 0) {
++	return JS_NewBool (ctx, object.isSolid ());
+     }
+ 
+-    // a registered property, otherwise undefined (looked up, not getProperty: that logs an error per miss, and a
+-    // script calling a method LWE lacks, e.g. getTextureAnimation(), misses every frame)
+-    const auto& properties = container->object.getProperties ();
+-    const auto it = properties.find (name);
++    // a registered property: its live value (looked up, not getProperty: that logs an error per miss)
++    const auto& properties = object.getProperties ();
++
++    if (const auto it = properties.find (name); it != properties.end ()) {
++	return engine.dynamicToJs (it->second.value);
++    }
+ 
+-    if (it == properties.end ()) {
+-	return JS_UNDEFINED;
++    // IImageLayer.size / ITextLayer.size: the layer's size in pixels
++    if (strcmp (name, "size") == 0) {
++	if (const auto* image = object.asOrNull<CImage> ()) {
++	    return engine.newVec (image->getSize ());
++	}
++	if (object.getObject ().is<Text> ()) {
++	    return engine.newVec (object.getObject ().as<Text> ()->size);
++	}
+     }
+ 
+-    return container->adapter.getEngine ().dynamicToJs (it->second.value);
++    // ITextLayer alignment (read; the renderer doesn't lay out by it yet)
++    if (object.getObject ().is<Text> ()) {
++	const auto* text = object.getObject ().as<Text> ();
++
++	if (strcmp (name, "horizontalalign") == 0) {
++	    return JS_NewString (ctx, text->alignment.c_str ());
++	}
++	if (strcmp (name, "verticalalign") == 0) {
++	    return JS_NewString (ctx, text->verticalalign.c_str ());
++	}
++    }
++
++    // what the script stored on the layer wins over a method of the same name
++    JSValue extra = JS_GetPropertyStr (ctx, container->extras, atomName.str);
++
++    if (!JS_IsUndefined (extra)) {
++	return extra;
++    }
++
++    if (JSValueConst method = container->adapter.method (name); !JS_IsUndefined (method)) {
++	return JS_DupValue (ctx, method);
++    }
++
++    return JS_UNDEFINED;
+ }
+ 
+ int scriptableobject_property_set (
+     JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
+ ) {
+-    JSClassID classId = 0;
++    auto* container = layerOf (obj_val);
+ 
+-    auto* container = static_cast<OpaqueScriptableObjectAdapter*> (JS_GetAnyOpaque (obj_val, &classId));
+-
+-    if (!container || container->magic != SCRIPTABLE_OPAQUE_MAGIC) {
++    if (container == nullptr) {
+ 	return -1;
+     }
+ 
+-    const char* name = JS_AtomToCString (ctx, atom);
++    const AtomName atomName (ctx, atom);
+ 
+-    if (name == nullptr) {
++    if (atomName.str == nullptr) {
+ 	return -1;
+     }
+ 
+-    ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
+-    const auto& properties = container->object.getProperties ();
+-    const auto it = properties.find (name);
++    const char* name = propertyAlias (atomName.str);
++    auto& object = container->object;
++
++    if (strcmp (name, "solid") == 0) {
++	object.setSolid (JS_ToBool (ctx, val) != 0);
++	return 1;
++    }
++
++    const auto& properties = object.getProperties ();
+ 
+-    // a registered property (origin, scale, angles, visible, alpha, color, …) takes the value; other names are
+-    // accepted and dropped (not an exception: a strict-mode script would abort on them)
+-    if (it != properties.end ()) {
++    // a registered property (origin, scale, angles, visible, alpha, color, text, volume, …) takes the value
++    if (const auto it = properties.find (name); it != properties.end ()) {
+ 	container->adapter.getEngine ().jsToDynamic (val, it->second.value);
++	return 1;
++    }
++
++    // anything else is kept on the layer (one JS object per layer, so it is there on the next getLayer)
++    JS_SetPropertyStr (ctx, container->extras, atomName.str, JS_DupValue (ctx, val));
++    return 1;
++}
++
++static JSValue effect_material_count (JSContext* ctx, JSValueConst, int, JSValueConst*) { return JS_NewInt32 (ctx, 1); }
++static JSValue effect_material_noop (JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
++
++// IEffect: name (read-only), visible (read/write: an effect's visibility is live since E41), and the material
++// calls as no-ops (WE: every effect has at least one material)
++JSValue effect_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
++    JSClassID classId = 0;
++    auto* effect = static_cast<OpaqueEffect*> (JS_GetAnyOpaque (obj_val, &classId));
++    const AtomName name (ctx, atom);
++
++    if (effect == nullptr || name.str == nullptr) {
++	return JS_EXCEPTION;
++    }
++
++    if (strcmp (name.str, "name") == 0) {
++	return JS_NewString (ctx, effect->effect.name.c_str ());
++    }
++    if (strcmp (name.str, "visible") == 0) {
++	return JS_NewBool (ctx, effect->effect.visible->value->getBool ());
++    }
++    if (strcmp (name.str, "getMaterialCount") == 0) {
++	return JS_NewCFunction (ctx, effect_material_count, "getMaterialCount", 0);
++    }
++    if (strcmp (name.str, "setMaterialProperty") == 0 || strcmp (name.str, "executeMaterialFunction") == 0) {
++	return JS_NewCFunction (ctx, effect_material_noop, name.str, 1);
++    }
++
++    return JS_UNDEFINED;
++}
++
++int effect_property_set (
++    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
++) {
++    JSClassID classId = 0;
++    auto* effect = static_cast<OpaqueEffect*> (JS_GetAnyOpaque (obj_val, &classId));
++    const AtomName name (ctx, atom);
++
++    if (effect == nullptr || name.str == nullptr) {
++	return -1;
++    }
++
++    if (strcmp (name.str, "visible") == 0) {
++	effect->effect.visible->value->update (JS_ToBool (ctx, val) != 0, DynamicValue::UpdateSource::Script);
++    }
++
++    return 1;
++}
++
++void effect_finalizer (JSRuntime* rt, JSValueConst val) {
++    JSClassID classId = 0;
++    delete static_cast<OpaqueEffect*> (JS_GetAnyOpaque (val, &classId));
++}
++
++namespace {
++enum TextureAnimationMethod {
++    TexAnim_Play,
++    TexAnim_Stop,
++    TexAnim_Pause,
++    TexAnim_IsPlaying,
++    TexAnim_GetFrame,
++    TexAnim_SetFrame,
++    TexAnim_Join,
++};
++
++constexpr std::pair<const char*, TextureAnimationMethod> kTextureAnimationMethods[] = {
++    { "play", TexAnim_Play },	{ "stop", TexAnim_Stop },	  { "pause", TexAnim_Pause },
++    { "isPlaying", TexAnim_IsPlaying }, { "getFrame", TexAnim_GetFrame }, { "setFrame", TexAnim_SetFrame },
++    { "join", TexAnim_Join },
++};
++
++JSValue texture_animation_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    JSClassID classId = 0;
++    auto* animation = static_cast<OpaqueTextureAnimation*> (JS_GetAnyOpaque (this_val, &classId));
++
++    if (animation == nullptr) {
++	return JS_ThrowTypeError (ctx, "not a texture animation");
++    }
++
++    auto& image = animation->image;
++
++    switch (static_cast<TextureAnimationMethod> (magic)) {
++	case TexAnim_Play:
++	    image.detachTextureAnimation ().playing = true;
++	    return JS_UNDEFINED;
++	case TexAnim_Pause:
++	    image.detachTextureAnimation ().playing = false;
++	    return JS_UNDEFINED;
++	case TexAnim_Stop:
++	    // "stops the animation and reverts to the beginning"
++	    image.setTextureFrame (0);
++	    image.detachTextureAnimation ().playing = false;
++	    return JS_UNDEFINED;
++	case TexAnim_IsPlaying: {
++	    const auto& state = image.getTextureAnimationState ();
++	    return JS_NewBool (ctx, !state.detached || state.playing);
++	}
++	case TexAnim_GetFrame:
++	    return JS_NewInt32 (ctx, image.getTextureFrame ());
++	case TexAnim_SetFrame: {
++	    double frame = 0.0;
++	    if (argc > 0) {
++		JS_ToFloat64 (ctx, &frame, argv[0]);
++	    }
++	    image.setTextureFrame (static_cast<int> (frame));
++	    return JS_UNDEFINED;
++	}
++	case TexAnim_Join:
++	    image.joinTextureAnimation ();
++	    return JS_UNDEFINED;
++    }
++
++    return JS_UNDEFINED;
++}
++} // namespace
++
++JSValue texture_animation_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
++    JSClassID classId = 0;
++    auto* animation = static_cast<OpaqueTextureAnimation*> (JS_GetAnyOpaque (obj_val, &classId));
++    const AtomName name (ctx, atom);
++
++    if (animation == nullptr || name.str == nullptr) {
++	return JS_EXCEPTION;
++    }
++
++    auto& image = animation->image;
++
++    if (strcmp (name.str, "frameCount") == 0) {
++	return JS_NewInt32 (ctx, image.getTextureFrameCount ());
++    }
++    if (strcmp (name.str, "duration") == 0) {
++	return JS_NewFloat64 (ctx, image.getAnimationTime ());
++    }
++    if (strcmp (name.str, "rate") == 0) {
++	return JS_NewFloat64 (ctx, image.getTextureAnimationState ().rate);
++    }
++
++    for (const auto& [method, id] : kTextureAnimationMethods) {
++	if (strcmp (name.str, method) == 0) {
++	    return JS_NewCFunctionMagic (ctx, texture_animation_method, method, 1, JS_CFUNC_generic_magic, id);
++	}
++    }
++
++    return JS_UNDEFINED;
++}
++
++int texture_animation_property_set (
++    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
++) {
++    JSClassID classId = 0;
++    auto* animation = static_cast<OpaqueTextureAnimation*> (JS_GetAnyOpaque (obj_val, &classId));
++    const AtomName name (ctx, atom);
++
++    if (animation == nullptr || name.str == nullptr) {
++	return -1;
++    }
++
++    if (strcmp (name.str, "rate") == 0) {
++	double rate = 1.0;
++	JS_ToFloat64 (ctx, &rate, val);
++	animation->image.detachTextureAnimation ().rate = rate;
+     }
+ 
+     return 1;
+ }
+ 
++void texture_animation_finalizer (JSRuntime* rt, JSValueConst val) {
++    JSClassID classId = 0;
++    delete static_cast<OpaqueTextureAnimation*> (JS_GetAnyOpaque (val, &classId));
++}
++
+ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::string name) :
+-    ObjectAdapter (engine), m_exoticMethods (), m_name (std::move (name)) {
+-    // the layer's registered properties, read and written live (these were never installed: every property of
+-    // thisLayer / getLayer() read undefined)
++    ObjectAdapter (engine), m_exoticMethods (), m_effectExoticMethods (), m_textureAnimationExoticMethods (),
++    m_effectDefinition (), m_textureAnimationDefinition (), m_name (std::move (name)) {
++    // the layer's registered properties, read and written live
+     this->m_exoticMethods.get_property = scriptableobject_property_get;
+     this->m_exoticMethods.set_property = scriptableobject_property_set;
+     this->registerType (
+@@ -98,30 +496,86 @@ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::str
+ 	    .exotic = &m_exoticMethods,
+ 	}
+     );
++
++    JSRuntime* rt = engine.getRuntime ();
++
++    this->m_effectExoticMethods.get_property = effect_property_get;
++    this->m_effectExoticMethods.set_property = effect_property_set;
++    this->m_effectDefinition = {
++	.class_name = "IEffect",
++	.finalizer = effect_finalizer,
++	.exotic = &m_effectExoticMethods,
++    };
++    JS_NewClassID (rt, &this->m_effectClassId);
++    JS_NewClass (rt, this->m_effectClassId, &this->m_effectDefinition);
++
++    this->m_textureAnimationExoticMethods.get_property = texture_animation_property_get;
++    this->m_textureAnimationExoticMethods.set_property = texture_animation_property_set;
++    this->m_textureAnimationDefinition = {
++	.class_name = "ITextureAnimation",
++	.finalizer = texture_animation_finalizer,
++	.exotic = &m_textureAnimationExoticMethods,
++    };
++    JS_NewClassID (rt, &this->m_textureAnimationClassId);
++    JS_NewClass (rt, this->m_textureAnimationClassId, &this->m_textureAnimationDefinition);
++
++    JSContext* ctx = engine.getContext ();
++
++    for (const auto& [method, id] : kMethods) {
++	this->m_methods.emplace (method, JS_NewCFunctionMagic (ctx, layer_method, method, 1, JS_CFUNC_generic_magic, id));
++    }
++}
++
++ScriptableObjectAdapter::~ScriptableObjectAdapter () {
++    JSContext* ctx = this->m_engine.getContext ();
++
++    for (auto& instance : this->m_instances | std::views::values) {
++	JS_FreeValue (ctx, instance);
++    }
++    for (auto& method : this->m_methods | std::views::values) {
++	JS_FreeValue (ctx, method);
++    }
++}
++
++JSValueConst ScriptableObjectAdapter::method (const char* name) const {
++    const auto it = this->m_methods.find (name);
++    return it == this->m_methods.end () ? JS_UNDEFINED : it->second;
+ }
+ 
+ JSValue ScriptableObjectAdapter::instantiate (ScriptableObject& object) {
+-    JSValue result = this->ObjectAdapter::instantiate (object);
++    JSContext* ctx = this->m_engine.getContext ();
++
++    if (const auto it = this->m_instances.find (&object); it != this->m_instances.end ()) {
++	return JS_DupValue (ctx, it->second);
++    }
++
++    JSValue result = JS_NewObjectClass (ctx, static_cast<int> (this->m_classId));
+     JS_SetOpaque (
+-	result,
+-	new OpaqueScriptableObjectAdapter { .magic = SCRIPTABLE_OPAQUE_MAGIC, .adapter = *this, .object = object }
++	result, new OpaqueScriptableObjectAdapter {
++		    .magic = SCRIPTABLE_OPAQUE_MAGIC, .adapter = *this, .object = object, .extras = JS_NewObject (ctx)
++		}
+     );
++    this->m_instances.emplace (&object, JS_DupValue (ctx, result));
+ 
+     return result;
+ }
+ 
+-void scriptableobject_finalizer (JSRuntime* rt, JSValueConst val) {
+-    JSClassID classId = 0;
++ScriptableObject* ScriptableObjectAdapter::fromValue (JSValueConst value) const {
++    auto* container = layerOf (value);
++    return container == nullptr || &container->adapter != this ? nullptr : &container->object;
++}
+ 
+-    const auto* container = static_cast<OpaqueScriptableObjectAdapter*> (JS_GetAnyOpaque (val, &classId));
++void scriptableobject_finalizer (JSRuntime* rt, JSValueConst val) {
++    auto* container = layerOf (val);
+ 
+-    if (container == nullptr || container->magic != SCRIPTABLE_OPAQUE_MAGIC) {
++    if (container == nullptr) {
+ 	return;
+     }
+ 
++    JS_FreeValueRT (rt, container->extras);
+     delete container;
+ }
+ 
+ JSValue ScriptableObjectAdapter::instantiate (DynamicValue& value) {
+     throw std::runtime_error ("Cannot create a ScriptableObject instance from a DynamicValue");
+-}
+\ No newline at end of file
++}
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+index ea8bc32..a96b068 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+@@ -2,16 +2,45 @@
+ 
+ #include "ObjectAdapter.h"
+ 
++#include <map>
++#include <string>
++#include <unordered_map>
++
+ namespace WallpaperEngine::Scripting::Adapters {
+-class ScriptableObjectAdapter : public ObjectAdapter {
++/**
++ * SceneScript's ILayer (and its IImageLayer / ITextLayer / ISoundLayer faces): one JS object per layer, so
++ * `getLayer ('a') === getLayer ('a')` and what a script stores on it stays. Its registered properties read and write
++ * the live values; `getEffect`, `getTextureAnimation`, `getParent`, `play`, … are its methods. IEffect and
++ * ITextureAnimation are classes of their own
++ */
++class ScriptableObjectAdapter final : public ObjectAdapter {
+ public:
+     explicit ScriptableObjectAdapter (ScriptEngine& engine, std::string name);
++    ~ScriptableObjectAdapter () override;
+ 
++    /** The layer's one JS object (a new reference) */
+     JSValue instantiate (ScriptableObject& object) override;
+     JSValue instantiate (Data::Model::DynamicValue& value) override;
+ 
++    /** The layer behind a JS value this adapter made, or nullptr */
++    [[nodiscard]] ScriptableObject* fromValue (JSValueConst value) const;
++
++    /** A method of ILayer by name, or JS_UNDEFINED (a borrowed reference) */
++    [[nodiscard]] JSValueConst method (const char* name) const;
++
++    [[nodiscard]] JSClassID getEffectClassId () const { return m_effectClassId; }
++    [[nodiscard]] JSClassID getTextureAnimationClassId () const { return m_textureAnimationClassId; }
++
+ private:
+     JSClassExoticMethods m_exoticMethods;
++    JSClassExoticMethods m_effectExoticMethods;
++    JSClassExoticMethods m_textureAnimationExoticMethods;
++    JSClassDef m_effectDefinition;
++    JSClassDef m_textureAnimationDefinition;
++    JSClassID m_effectClassId = 0;
++    JSClassID m_textureAnimationClassId = 0;
+     std::string m_name;
++    std::unordered_map<ScriptableObject*, JSValue> m_instances;
++    std::map<std::string, JSValue> m_methods;
+ };
+-}
+\ No newline at end of file
++} // namespace WallpaperEngine::Scripting::Adapters
+diff --git a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+index d9d7cfa..c873480 100644
+--- a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+@@ -18,7 +18,7 @@ JSValue console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
+ 	const char* str = JS_ToCString (ctx, argv[i]);
+ 	ScopeGuard guard ([ctx, str] { JS_FreeCString (ctx, str); });
+ 
+-	stream << str;
++	stream << (i > 0 ? " " : "") << (str ? str : "");
+     }
+ 
+     sLog.out (stream.str ());
+@@ -37,7 +37,7 @@ JSValue console_error (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
+ 	const char* str = JS_ToCString (ctx, argv[i]);
+ 	ScopeGuard guard ([ctx, str] { JS_FreeCString (ctx, str); });
+ 
+-	stream << str;
++	stream << (i > 0 ? " " : "") << (str ? str : "");
+     }
+ 
+     sLog.error (stream.str ());
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index cc8277f..138e6fe 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -14,8 +14,9 @@ std::map<uint32_t, EngineObject&> engineInstances;
+ 
+ JSValue engine_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_EXCEPTION; }
+ 
++// a User Shortcut property launches a Windows shortcut: nothing to open here, so "no shortcut was called"
+ JSValue engine_open_user_shortcut (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    return JS_UNDEFINED;
++    return JS_FALSE;
+ }
+ 
+ JSValue engine_get_frametime (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+@@ -52,6 +53,41 @@ JSValue engine_get_daytime (JSContext* ctx, JSValueConst this_val, int argc, JSV
+     return JS_NewFloat64 (ctx, it->second.getScene ().getContext ().getContext ().daytime);
+ }
+ 
++JSValue engine_get_canvas_size (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    const auto it = engineInstances.find (magic);
++
++    if (it == engineInstances.end ()) {
++	return JS_EXCEPTION;
++    }
++
++    // "the size of the wallpaper project defined in the editor": the scene's orthographic size
++    const auto& scene = it->second.getScene ();
++    return it->second.getEngine ().newVec (glm::vec2 (scene.getWidth (), scene.getHeight ()));
++}
++
++JSValue engine_get_screen_resolution (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    const auto it = engineInstances.find (magic);
++
++    if (it == engineInstances.end ()) {
++	return JS_EXCEPTION;
++    }
++
++    // "the size of the screen the wallpaper is displayed on": the core renders at the scene's size and the host
++    // scales that to its output, which the core doesn't know, so the scene's size
++    const auto& scene = it->second.getScene ();
++    return it->second.getEngine ().newVec (glm::vec2 (scene.getWidth (), scene.getHeight ()));
++}
++
++JSValue engine_get_user_properties (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    const auto it = engineInstances.find (magic);
++
++    if (it == engineInstances.end ()) {
++	return JS_EXCEPTION;
++    }
++
++    return it->second.getEngine ().userProperties ();
++}
++
+ // the stop function setInterval/setTimeout return: called without arguments, the timer's id is its bound data
+ JSValue engine_stop_interval (
+     JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic, JSValueConst* func_data
+@@ -184,6 +220,20 @@ EngineObject::EngineObject (ScriptEngine& engine, Render::Wallpapers::CScene& sc
+ 	),
+ 	JS_NewCFunction (this->m_engine.getContext (), engine_set_value, "set", 1), JS_PROP_ENUMERABLE
+     );
++    const std::pair<const char*, JSCFunctionMagic*> live[] = {
++	{ "canvasSize", engine_get_canvas_size },
++	{ "screenResolution", engine_get_screen_resolution },
++	{ "userProperties", engine_get_user_properties },
++    };
++    for (const auto& [name, getter] : live) {
++	JSAtom atom = JS_NewAtom (this->m_engine.getContext (), name);
++	JS_DefinePropertyGetSet (
++	    this->m_engine.getContext (), this->m_instance, atom,
++	    JS_NewCFunctionMagic (this->m_engine.getContext (), getter, "get", 0, JS_CFUNC_generic_magic, this->m_instanceId),
++	    JS_UNDEFINED, JS_PROP_ENUMERABLE
++	);
++	JS_FreeAtom (this->m_engine.getContext (), atom);
++    }
+     JS_DefinePropertyValueStr (
+ 	this->m_engine.getContext (), this->m_instance, "AUDIO_RESOLUTION_16",
+ 	JS_NewInt32 (this->m_engine.getContext (), 16), JS_PROP_ENUMERABLE
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index 0953003..4cbcc1f 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -6,7 +6,10 @@
+ #include "WallpaperEngine/Render/Wallpapers/CScene.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ 
++#include <algorithm>
++
+ using namespace WallpaperEngine::Scripting;
++using WallpaperEngine::Data::Model::DynamicValue;
+ 
+ SceneObject* get_opaque (JSValueConst this_val) {
+     JSClassID classId;
+@@ -22,19 +25,18 @@ JSValue get_bloom (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst
+ JSValue get_bloomstrength (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return JS_NewInt32 (ctx, container->getScene ().getScene ().camera.bloom.strength->value->getInt ());
++    return JS_NewFloat64 (ctx, container->getScene ().getScene ().camera.bloom.strength->value->getFloat ());
+ }
+ 
+ JSValue get_bloomthreshold (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return JS_NewInt32 (ctx, container->getScene ().getScene ().camera.bloom.threshold->value->getInt ());
++    return JS_NewFloat64 (ctx, container->getScene ().getScene ().camera.bloom.threshold->value->getFloat ());
+ }
+ 
+ JSValue get_clearenabled (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    auto* container = get_opaque (this_val);
+-
+-    return JS_NewBool (ctx, container->getScene ().getScene ().camera.bloom.enabled->value->getBool ());
++    // LWE always clears the scene with clearcolor
++    return JS_NewBool (ctx, true);
+ }
+ 
+ JSValue get_clearcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+@@ -52,7 +54,7 @@ JSValue get_ambientcolor (JSContext* ctx, JSValueConst this_val, int argc, JSVal
+ JSValue get_skylightcolor (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+ 
+-    return container->getEngine ().newVec (container->getScene ().getScene ().colors.ambient->value->getVec3 ());
++    return container->getEngine ().newVec (container->getScene ().getScene ().colors.skylight->value->getVec3 ());
+ }
+ 
+ JSValue get_fov (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+@@ -127,179 +129,227 @@ JSValue get_cameraparallaxmouseinfluence (JSContext* ctx, JSValueConst this_val,
+     return JS_NewFloat64 (ctx, container->getScene ().getScene ().camera.parallax.mouseInfluence->value->getFloat ());
+ }
+ 
++namespace {
++using WallpaperEngine::Render::CObject;
++
++/** the scripts' view of a layer: the object behind a name, an index, or an ILayer value (nullptr: none) */
++CObject* resolveLayer (JSContext* ctx, SceneObject& container, JSValueConst layer) {
++    const auto& layers = container.getScene ().getLayers ();
++
++    if (JS_IsNumber (layer)) {
++	// "Get a layer by index": the scene's objects in their order
++	int index = -1;
++	JS_ToInt32 (ctx, &index, layer);
++
++	return index < 0 || index >= static_cast<int> (layers.size ()) ? nullptr : layers[index];
++    }
++
++    if (JS_IsString (layer)) {
++	const char* name = JS_ToCString (ctx, layer);
++
++	if (name == nullptr) {
++	    return nullptr;
++	}
++
++	ScopeGuard guard ([=] { JS_FreeCString (ctx, name); });
++
++	for (auto* object : layers) {
++	    if (object->getObject ().name == name) {
++		return object;
++	    }
++	}
++
++	return nullptr;
++    }
++
++    if (auto* object = container.getEngine ().getAdapters ().object->fromValue (layer)) {
++	return object;
++    }
++
++    return nullptr;
++}
++
++JSValue layerValue (SceneObject& container, CObject* object) {
++    auto* scriptable = object == nullptr ? nullptr : object->asOrNull<ScriptableObject> ();
++
++    if (scriptable == nullptr) {
++	return JS_UNDEFINED;
++    }
++
++    return container.getEngine ().getAdapters ().object->instantiate (*scriptable);
++}
++} // namespace
++
+ JSValue get_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+-    if (argc != 1) {
+-	return JS_EXCEPTION;
++    if (argc < 1) {
++	return JS_UNDEFINED;
+     }
+ 
+     auto* container = get_opaque (this_val);
+ 
+-    JSValue layer = argv[0];
++    // no such layer: undefined, not an exception without an error
++    return layerValue (*container, resolveLayer (ctx, *container, argv[0]));
++}
+ 
+-    if (JS_IsNumber (layer)) {
+-	int id = 0;
++JSValue get_layer_count (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    return JS_NewInt32 (ctx, static_cast<int> (get_opaque (this_val)->getScene ().getLayers ().size ()));
++}
+ 
+-	JS_ToInt32 (ctx, &id, layer);
++JSValue enumerate_layers (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    JSValue result = JS_NewArray (ctx);
++    uint32_t count = 0;
+ 
+-	auto* object = container->getScene ().getObject (id);
++    for (auto* object : container->getScene ().getLayers ()) {
++	JSValue layer = layerValue (*container, object);
+ 
+-	if (object == nullptr) {
+-	    return JS_UNDEFINED;
++	if (!JS_IsUndefined (layer)) {
++	    JS_SetPropertyUint32 (ctx, result, count++, layer);
+ 	}
++    }
+ 
+-	if (!object->is<ScriptableObject> ()) {
+-	    return JS_UNDEFINED;
+-	}
++    return result;
++}
+ 
+-	// TODO: REMOVE THIS CONST_CAST?
+-	return container->getEngine ().getAdapters ().object->instantiate (
+-	    const_cast<ScriptableObject&> (*object->as<ScriptableObject> ())
+-	);
+-    } else if (JS_IsString (layer)) {
+-	// find by name, this is harder
+-	const char* result = JS_ToCString (ctx, layer);
++JSValue get_layer_index (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    auto* object = argc < 1 ? nullptr : resolveLayer (ctx, *container, argv[0]);
++    const auto& layers = container->getScene ().getLayers ();
++    const auto it = std::ranges::find (layers, object);
+ 
+-	if (result == nullptr) {
+-	    return JS_UNDEFINED;
+-	}
++    return JS_NewInt32 (ctx, object == nullptr || it == layers.end () ? -1 : static_cast<int> (it - layers.begin ()));
++}
+ 
+-	ScopeGuard guard ([=] { JS_FreeCString (ctx, result); });
++JSValue sort_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    auto* object = argc < 2 ? nullptr : resolveLayer (ctx, *container, argv[0]);
++    int index = 0;
+ 
+-	for (auto object : container->getScene ().getObjectsByRenderOrder ()) {
+-	    if (object->getObject ().name != result) {
+-		continue;
+-	    }
++    if (object == nullptr) {
++	return JS_FALSE;
++    }
+ 
+-	    if (!object->is<ScriptableObject> ()) {
+-		continue;
+-	    }
++    JS_ToInt32 (ctx, &index, argv[1]);
++    return JS_NewBool (ctx, container->getScene ().sortLayer (object, index));
++}
+ 
+-	    return container->getEngine ().getAdapters ().object->instantiate (*object->as<ScriptableObject> ());
+-	}
++// createLayer/destroyLayer: not supported (a layer built at run time needs the loader at run time); createLayer
++// returns undefined (as a missing layer), destroyLayer false
++JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_UNDEFINED; }
++JSValue destroy_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_FALSE; }
++
++/** IScene's properties are writable ("all properties are writable"): a script's value replaces the scene's */
++JSValue scene_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    auto* container = get_opaque (this_val);
++    auto* value = container->settableValue (magic);
++
++    if (value != nullptr && argc > 0) {
++	container->getEngine ().jsToDynamic (argv[0], *value);
+     }
+ 
+-    // no such layer (or not one scripts can reach yet): undefined, not an exception without an error
+     return JS_UNDEFINED;
+ }
+ 
+-JSValue scene_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_EXCEPTION; }
+-
+ SceneObject::SceneObject (ScriptEngine& engine, Render::Wallpapers::CScene& scene) :
+     m_scene (scene), m_engine (engine), m_classId (0) {
++    JSContext* ctx = this->m_engine.getContext ();
+     this->m_definition = { .class_name = "IScene" };
+     JS_NewClassID (this->m_engine.getRuntime (), &this->m_classId);
+     JS_NewClass (this->m_engine.getRuntime (), this->m_classId, &this->m_definition);
+-    this->m_instance = JS_NewObjectClass (this->m_engine.getContext (), this->m_classId);
++    this->m_instance = JS_NewObjectClass (ctx, this->m_classId);
+ 
+-    JS_DupValue (this->m_engine.getContext (), this->m_instance);
++    JS_DupValue (ctx, this->m_instance);
+ 
+     // set properties
+     JS_SetOpaque (this->m_instance, this);
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "bloom"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_bloom, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "bloomstrength"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_bloomstrength, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "bloomthreshold"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_bloomthreshold, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "clearenabled"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_clearenabled, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "clearcolor"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_clearcolor, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "ambientcolor"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_ambientcolor, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "skylightcolor"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_skylightcolor, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "fov"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_fov, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "nearz"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_nearz, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "farz"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_farz, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "camerafade"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_camerafade, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "camerashake"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_camerashake, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "camerashakespeed"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_camerashakespeed, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance,
+-	JS_NewAtom (this->m_engine.getContext (), "camerashakeamplitude"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_camerashakeamplitude, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance,
+-	JS_NewAtom (this->m_engine.getContext (), "camerashakeroughness"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_camerashakeroughness, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance, JS_NewAtom (this->m_engine.getContext (), "cameraparallax"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_cameraparallax, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance,
+-	JS_NewAtom (this->m_engine.getContext (), "cameraparallaxamount"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_cameraparallaxamount, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance,
+-	JS_NewAtom (this->m_engine.getContext (), "cameraparallaxdelay"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_cameraparallaxdelay, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyGetSet (
+-	this->m_engine.getContext (), this->m_instance,
+-	JS_NewAtom (this->m_engine.getContext (), "cameraparallaxmouseinfluence"),
+-	JS_NewCFunction (this->m_engine.getContext (), get_cameraparallaxmouseinfluence, "get", 0),
+-	JS_NewCFunction (this->m_engine.getContext (), scene_set_value, "set", 1), JS_PROP_ENUMERABLE
+-    );
+-    JS_DefinePropertyValueStr (
+-	this->m_engine.getContext (), this->m_instance, "getLayer",
+-	JS_NewCFunction (this->m_engine.getContext (), get_layer, "getLayer", 1), JS_PROP_ENUMERABLE
+-    );
+-    // TODO: ADD REST OF THE METHODS
++
++    // the properties, read live and writable (the setter's magic is the index settableValue () maps)
++    const std::pair<const char*, JSCFunction*> properties[] = {
++	{ "bloom", get_bloom },
++	{ "bloomstrength", get_bloomstrength },
++	{ "bloomthreshold", get_bloomthreshold },
++	{ "clearenabled", get_clearenabled },
++	{ "clearcolor", get_clearcolor },
++	{ "ambientcolor", get_ambientcolor },
++	{ "skylightcolor", get_skylightcolor },
++	{ "fov", get_fov },
++	{ "nearz", get_nearz },
++	{ "farz", get_farz },
++	{ "camerafade", get_camerafade },
++	{ "camerashake", get_camerashake },
++	{ "camerashakespeed", get_camerashakespeed },
++	{ "camerashakeamplitude", get_camerashakeamplitude },
++	{ "camerashakeroughness", get_camerashakeroughness },
++	{ "cameraparallax", get_cameraparallax },
++	{ "cameraparallaxamount", get_cameraparallaxamount },
++	{ "cameraparallaxdelay", get_cameraparallaxdelay },
++	{ "cameraparallaxmouseinfluence", get_cameraparallaxmouseinfluence },
++    };
++    int index = 0;
++
++    for (const auto& [name, getter] : properties) {
++	JSAtom atom = JS_NewAtom (ctx, name);
++	JS_DefinePropertyGetSet (
++	    ctx, this->m_instance, atom, JS_NewCFunction (ctx, getter, "get", 0),
++	    JS_NewCFunctionMagic (ctx, scene_set_value, "set", 1, JS_CFUNC_generic_magic, index++), JS_PROP_ENUMERABLE
++	);
++	JS_FreeAtom (ctx, atom);
++    }
++
++    const std::pair<const char*, JSCFunction*> methods[] = {
++	{ "getLayer", get_layer },	       { "getLayerCount", get_layer_count }, { "enumerateLayers", enumerate_layers },
++	{ "getLayerIndex", get_layer_index }, { "sortLayer", sort_layer },	      { "createLayer", create_layer },
++	{ "destroyLayer", destroy_layer },
++    };
++
++    for (const auto& [name, function] : methods) {
++	JS_DefinePropertyValueStr (ctx, this->m_instance, name, JS_NewCFunction (ctx, function, name, 1), JS_PROP_ENUMERABLE);
++    }
++}
++
++DynamicValue* SceneObject::settableValue (int index) const {
++    auto& scene = const_cast<WallpaperEngine::Data::Model::Scene&> (this->m_scene.getScene ());
++
++    switch (index) {
++	case 0:
++	    return scene.camera.bloom.enabled->value.get ();
++	case 1:
++	    return scene.camera.bloom.strength->value.get ();
++	case 2:
++	    return scene.camera.bloom.threshold->value.get ();
++	case 4:
++	    return scene.colors.clear->value.get ();
++	case 5:
++	    return scene.colors.ambient->value.get ();
++	case 6:
++	    return scene.colors.skylight->value.get ();
++	case 7:
++	    return scene.camera.projection.fov->value.get ();
++	case 8:
++	    return scene.camera.projection.nearz->value.get ();
++	case 9:
++	    return scene.camera.projection.farz->value.get ();
++	case 10:
++	    return scene.camera.fade->value.get ();
++	case 11:
++	    return scene.camera.shake.enabled->value.get ();
++	case 12:
++	    return scene.camera.shake.speed->value.get ();
++	case 13:
++	    return scene.camera.shake.amplitude->value.get ();
++	case 14:
++	    return scene.camera.shake.roughness->value.get ();
++	case 15:
++	    return scene.camera.parallax.enabled->value.get ();
++	case 16:
++	    return scene.camera.parallax.amount->value.get ();
++	case 17:
++	    return scene.camera.parallax.delay->value.get ();
++	case 18:
++	    return scene.camera.parallax.mouseInfluence->value.get ();
++	default:
++	    return nullptr;
++    }
+ }
+ 
+ SceneObject::~SceneObject () { JS_FreeValue (this->m_engine.getContext (), this->m_instance); }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.h b/src/core/WallpaperEngine/Scripting/SceneObject.h
+index 60ab9d6..83087d8 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.h
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.h
+@@ -1,6 +1,10 @@
+ #pragma once
+ #include "quickjs.h"
+ 
++namespace WallpaperEngine::Data::Model {
++class DynamicValue;
++}
++
+ namespace WallpaperEngine::Render::Wallpapers {
+ class CScene;
+ }
+@@ -11,7 +15,9 @@ public:
+     SceneObject (ScriptEngine& engine, Render::Wallpapers::CScene& scene);
+     ~SceneObject ();
+ 
+-    const Render::Wallpapers::CScene& getScene () const { return m_scene; }
++    Render::Wallpapers::CScene& getScene () const { return m_scene; }
++    /** the scene value a property setter writes (by the setter's magic), or nullptr (read-only) */
++    Data::Model::DynamicValue* settableValue (int index) const;
+     JSValue getInstance () const { return m_instance; }
+     ScriptEngine& getEngine () const { return m_engine; }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 4c050c9..96590d0 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -40,6 +40,10 @@ using namespace WallpaperEngine::Scripting;
+ using namespace WallpaperEngine::Data::Model;
+ 
+ extern char** environ;
++
++namespace {
++JSValue scriptengine_layer_prop (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
++}
+ extern float g_Time;
+ extern float g_TimeLast;
+ 
+@@ -246,6 +250,7 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+     }
+ 
+     this->m_globalThis = JS_GetGlobalObject (this->m_context);
++    JS_SetContextOpaque (this->m_context, this);
+ 
+     this->m_adapters = {
+ 	.object
+@@ -262,8 +267,6 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+     this->m_consoleObject = std::make_unique<ConsoleObject> (*this, scene);
+     this->m_scriptPropertiesObject = std::make_unique<ScriptPropertiesObject> (*this, scene);
+ 
+-    // setup scene objects and other things
+-    this->installBuiltins ();
+     // add engine to the global
+     JS_DefinePropertyValueStr (
+ 	this->m_context, this->m_globalThis, "engine", this->m_engineObject->getInstance (), JS_PROP_ENUMERABLE
+@@ -280,9 +283,30 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+     JS_DefinePropertyValueStr (
+ 	this->m_context, this->m_globalThis, "shared", JS_NewObject (this->m_context), JS_PROP_ENUMERABLE
+     );
++    JS_SetPropertyStr (
++	this->m_context, this->m_globalThis, "__layerProp",
++	JS_NewCFunction (this->m_context, scriptengine_layer_prop, "__layerProp", 2)
++    );
++    // the rest of the API in JS (engine.is*(), localStorage, …), on top of the globals above
++    this->installBuiltins ();
++
++    // a user property the user changes reaches applyUserProperties on the next tick
++    for (const auto& [name, property] : scene.getScene ().project.properties) {
++	this->m_propertyListeners.push_back (
++	    property->listen ([this, key = name] (const DynamicValue&, DynamicValue::UpdateSource source) {
++		if (source == DynamicValue::UpdateSource::User) {
++		    this->m_changedProperties.insert (key);
++		}
++	    })
++	);
++    }
+ }
+ 
+ ScriptEngine::~ScriptEngine () {
++    for (auto& unlisten : this->m_propertyListeners) {
++	unlisten ();
++    }
++
+     for (const auto& module : this->m_scriptModules) {
+ 	JS_FreeValue (this->m_context, module->ns);
+     }
+@@ -429,9 +453,39 @@ void ScriptEngine::ensureLayerRegistry () {
+     this->m_layerRegistryReady = true;
+ }
+ 
++namespace {
++/** what a text-layer script may export besides init/update/destroy: the events dispatchEvent delivers */
++constexpr const char* kLayerEvents[] = {
++    "applyUserProperties",   "resizeScreen",	      "cursorEnter",	      "cursorLeave",
++    "cursorMove",	     "cursorDown",	      "cursorUp",	      "cursorClick",
++    "mediaPlaybackChanged",  "mediaPropertiesChanged", "mediaThumbnailChanged", "mediaTimelineChanged",
++    "mediaStatusChanged",
++};
++
++// __layerProp (id, name): a text-layer script property's live value (bound to a user property: follows it)
++JSValue scriptengine_layer_prop (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* engine = static_cast<ScriptEngine*> (JS_GetContextOpaque (ctx));
++    int id = 0;
++
++    if (engine == nullptr || argc < 2 || JS_ToInt32 (ctx, &id, argv[0]) < 0) {
++	return JS_UNDEFINED;
++    }
++
++    const char* name = JS_ToCString (ctx, argv[1]);
++
++    if (name == nullptr) {
++	return JS_UNDEFINED;
++    }
++
++    JSValue result = engine->layerScriptProperty (id, name);
++    JS_FreeCString (ctx, name);
++    return result;
++}
++} // namespace
++
+ ScriptLayerHandle ScriptEngine::createLayerScript (
+     const std::string& scriptSource, std::map<std::string, UserSettingUniquePtr>& initialScriptProps,
+-    const std::string& initialText
++    const std::string& initialText, ScriptableObject& layer
+ ) {
+     if (!this->m_context) {
+ 	sLog.error ("ScriptEngine: No JS context available");
+@@ -441,22 +495,15 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+     this->ensureLayerRegistry ();
+ 
+     JSContext* ctx = this->m_context;
+-    JSValue globalObj = JS_GetGlobalObject (ctx);
+ 
+-    // Seed initial scriptProperties and text as temporary globals the IIFE reads.
+-    JSValue seedProps = JS_NewObject (ctx);
+-
+-    for (auto& [name, dynVal] : initialScriptProps) {
+-	JS_SetPropertyStr (ctx, seedProps, name.c_str (), this->dynamicToJs (*dynVal->value));
+-    }
+-
+-    JS_SetPropertyStr (ctx, globalObj, "__layerSeedProps", seedProps);
+-    JS_SetPropertyStr (ctx, globalObj, "__layerSeedText", JS_NewString (ctx, initialText.c_str ()));
++    // the layer the script is on: thisLayer is the real layer (its text, and every ILayer member)
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__layerSeedLayer", this->m_adapters.object->instantiate (layer));
+ 
+     const ScriptLayerHandle id = this->m_nextLayerId++;
++    this->m_layerObjects[id] = &layer;
++    this->m_layerProps[id] = &initialScriptProps;
+ 
+-    // Same stripping logic as evaluate(): WE scripts come as ES6 modules but
+-    // QuickJS is easier to drive as plain script evaluation.
++    // WE scripts come as ES6 modules; this path drives them as plain script evaluation
+     std::string body = scriptSource;
+     size_t pos;
+     while ((pos = body.find ("'use strict';")) != std::string::npos) {
+@@ -469,18 +516,26 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	body.erase (pos, 7);
+     }
+ 
+-    // The IIFE gives every layer its own closure for top-level vars and
+-    // functions, so two layers that both define `function update()` or a
+-    // top-level `var scriptProperties` don't clobber each other. Lifecycle
+-    // hooks are captured into globalThis.__textLayers[id] so tick/destroy can
+-    // reach them later. `typeof init === 'function'` is safe even when
++    // The IIFE gives every layer its own closure for top-level vars and functions, so two layers that both define
++    // `function update()` don't clobber each other. Lifecycle hooks and events are captured into
++    // globalThis.__textLayers[id] so the engine can reach them later. `typeof init === 'function'` is safe even when
+     // `init` was never declared — bare-identifier `typeof` never throws.
+     std::ostringstream wrapper;
+     wrapper
+ 	<< "(function() {\n"
+ 	<< "  var __id = " << id << ";\n"
+-	<< "  var __props = Object.assign({}, globalThis.__layerSeedProps || {});\n"
+-	<< "  var thisLayer = { text: String(globalThis.__layerSeedText || '') };\n"
++	// the script properties: the scene's stored values, live (a user property bound to one reaches the script on
++	// its next read); a key the scene doesn't store reads its builder default
++	<< "  var __defaults = {};\n"
++	<< "  var __props = new Proxy(__defaults, {\n"
++	<< "    get: function(t, k) {\n"
++	<< "      if (typeof k !== 'string') { return t[k]; }\n"
++	<< "      var v = globalThis.__layerProp(__id, k);\n"
++	<< "      return v === undefined ? t[k] : v;\n"
++	<< "    },\n"
++	<< "    has: function(t, k) { return (k in t) || globalThis.__layerProp(__id, k) !== undefined; }\n"
++	<< "  });\n"
++	<< "  var thisLayer = globalThis.__layerSeedLayer, thisObject = thisLayer;\n"
+ 	// `thisScene` and `engine` are the real objects (getLayer, setInterval, …) seen through a layer of the text
+ 	// layer's own clock: time/currentTime/dt/fps and `frametime` (the per-frame delta in seconds, what
+ 	// InsertFPS reads) come from the text object's tick
+@@ -502,109 +557,140 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	<< "    get frametime() { var c = globalThis.__sceneCtx; return c ? c.dt : 0; },\n"
+ 	<< "    get time()      { var c = globalThis.__sceneCtx; return c ? c.time : 0; },\n"
+ 	<< "  });\n"
++	// WE's builder semantics (baseclasses.js): every key gets its default, a combo its first option's value
+ 	<< "  function createScriptProperties() {\n"
++	<< "    function add(o) {\n"
++	<< "      if (o && o.name !== undefined) {\n"
++	<< "        var d = o.value;\n"
++	<< "        if (d === undefined && o.options && o.options.length) { d = o.options[0].value; }\n"
++	<< "        __defaults[o.name] = d;\n"
++	<< "      }\n"
++	<< "      return builder;\n"
++	<< "    }\n"
+ 	<< "    var builder = {\n"
+-	<< "      addSlider:   function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+-	<< "      addCheckbox: function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+-	<< "      addCombo:    function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+-	<< "      addColor:    function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+-	<< "      addText:     function(o){ if (!(o.name in __props)) __props[o.name] = o.value; return builder; },\n"
+-	<< "      finish:      function(){ return __props; }\n"
++	<< "      addSlider: add, addCheckbox: add, addCombo: add, addColor: add, addText: add, addTextInput: add,\n"
++	<< "      addFile: add, addDirectory: add,\n"
++	<< "      finish: function(){ return __props; }\n"
+ 	<< "    };\n"
+ 	<< "    return builder;\n"
+ 	<< "  }\n"
+ 	<< body
+ 	<< "\n"
+-	// `_tick` wraps the user's `update()` so both WE text conventions work:
+-	//   A) `export function update() { thisLayer.text = …; }` (mutates in place)
+-	//   B) `export function update(value) { …; return value; }` (returns new text)
+-	// We pass the current text in, and if the return value is a string we
+-	// adopt it as the new `thisLayer.text`. Non-string / undefined return
+-	// leaves `thisLayer.text` as whatever the function assigned itself.
++	// `update` either assigns thisLayer.text or returns the text (both WE conventions); init (value) the same
++	<< "  function __adopt(r) { if (typeof r === 'string') thisLayer.text = r; }\n"
+ 	<< "  globalThis.__textLayers[__id] = {\n"
+ 	<< "    thisLayer: thisLayer,\n"
+ 	<< "    thisScene: thisScene,\n"
+-	<< "    _init:    (typeof init    === 'function') ? init    : null,\n"
++	<< "    _init:    (typeof init    === 'function') ? function() { __adopt(init(thisLayer.text)); } : null,\n"
+ 	<< "    _destroy: (typeof destroy === 'function') ? destroy : null,\n"
+-	<< "    _tick:    (typeof update  === 'function')\n"
+-	<< "              ? function() {\n"
+-	<< "                  var r = update(thisLayer.text);\n"
+-	<< "                  if (typeof r === 'string') thisLayer.text = r;\n"
+-	<< "                }\n"
+-	<< "              : null,\n"
+-	<< "    _scriptProperties: (typeof scriptProperties !== 'undefined') ? scriptProperties : __props\n"
+-	<< "  };\n"
+-	<< "})();\n";
++	<< "    _tick:    (typeof update  === 'function') ? function() { __adopt(update(thisLayer.text)); } : null,\n"
++	<< "    _events: {\n";
++    for (const char* event : kLayerEvents) {
++	wrapper << "      " << event << ": (typeof " << event << " === 'function') ? " << event << " : null,\n";
++    }
++    wrapper << "    },\n"
++	    << "    _scriptProperties: (typeof scriptProperties !== 'undefined') ? scriptProperties : __props\n"
++	    << "  };\n"
++	    << "})();\n";
+ 
+     const std::string evalScript = wrapper.str ();
+     JSValue result = JS_Eval (ctx, evalScript.c_str (), evalScript.size (), "<layer-script>", JS_EVAL_TYPE_GLOBAL);
+ 
+-    // Unset seeds so they don't leak into the next createLayerScript call.
+-    JS_SetPropertyStr (ctx, globalObj, "__layerSeedProps", JS_UNDEFINED);
+-    JS_SetPropertyStr (ctx, globalObj, "__layerSeedText", JS_UNDEFINED);
+-    JS_FreeValue (ctx, globalObj);
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__layerSeedLayer", JS_UNDEFINED);
+ 
+     if (JS_IsException (result)) {
+ 	logJSException (ctx, "createLayerScript");
+ 	JS_FreeValue (ctx, result);
++	this->m_layerObjects.erase (id);
++	this->m_layerProps.erase (id);
+ 	return kInvalidLayerHandle;
+     }
+     JS_FreeValue (ctx, result);
+ 
++    // init and the first applyUserProperties run on the next tick, with the property scripts'
+     this->m_layerInitialized[id] = false;
++    this->m_pendingModules = true;
+     return id;
+ }
+ 
+-void ScriptEngine::tickLayer (ScriptLayerHandle handle, double time, double deltaTime, double fps) {
+-    if (!this->m_context || handle == kInvalidLayerHandle) {
+-	return;
++JSValue ScriptEngine::layerScriptProperty (ScriptLayerHandle handle, const std::string& name) {
++    const auto it = this->m_layerProps.find (handle);
++
++    if (it == this->m_layerProps.end () || it->second == nullptr) {
++	return JS_UNDEFINED;
+     }
+-    JSContext* ctx = this->m_context;
+-    JSValue globalObj = JS_GetGlobalObject (ctx);
+ 
+-    JSValue sceneCtx = JS_NewObject (ctx);
+-    JS_SetPropertyStr (ctx, sceneCtx, "time", JS_NewFloat64 (ctx, time));
+-    JS_SetPropertyStr (ctx, sceneCtx, "dt", JS_NewFloat64 (ctx, deltaTime));
+-    JS_SetPropertyStr (ctx, sceneCtx, "fps", JS_NewFloat64 (ctx, fps));
+-    JS_SetPropertyStr (ctx, globalObj, "__sceneCtx", sceneCtx);
++    const auto prop = it->second->find (name);
+ 
+-    JSValue layers = JS_GetPropertyStr (ctx, globalObj, "__textLayers");
+-    JSValue layerObj = JS_GetPropertyUint32 (ctx, layers, static_cast<uint32_t> (handle));
++    if (prop == it->second->end () || prop->second == nullptr || prop->second->value == nullptr) {
++	return JS_UNDEFINED;
++    }
++
++    return this->dynamicToJs (*prop->second->value);
++}
++
++void ScriptEngine::callLayerHook (ScriptLayerHandle handle, const char* name, int argc, JSValueConst argv[], bool event) {
++    JSContext* ctx = this->m_context;
++    JSValue layers = JS_GetPropertyStr (ctx, this->m_globalThis, "__textLayers");
++    JSValue layerObj = JS_IsObject (layers) ? JS_GetPropertyUint32 (ctx, layers, static_cast<uint32_t> (handle))
++					    : JS_UNDEFINED;
+     JS_FreeValue (ctx, layers);
+ 
+-    if (JS_IsUndefined (layerObj) || JS_IsNull (layerObj)) {
++    if (!JS_IsObject (layerObj)) {
+ 	JS_FreeValue (ctx, layerObj);
+-	JS_FreeValue (ctx, globalObj);
+ 	return;
+     }
+ 
+-    auto callHook = [&] (const char* prop, const char* tag) {
+-	JSValue fn = JS_GetPropertyStr (ctx, layerObj, prop);
+-	if (JS_IsFunction (ctx, fn)) {
+-	    JSValue ret = JS_Call (ctx, fn, layerObj, 0, nullptr);
+-	    if (JS_IsException (ret)) {
+-		logJSException (ctx, tag);
+-	    }
+-	    JS_FreeValue (ctx, ret);
+-	}
+-	JS_FreeValue (ctx, fn);
+-    };
++    JSValue holder = event ? JS_GetPropertyStr (ctx, layerObj, "_events") : JS_DupValue (ctx, layerObj);
++    JSValue fn = JS_IsObject (holder) ? JS_GetPropertyStr (ctx, holder, name) : JS_UNDEFINED;
+ 
+-    auto it = this->m_layerInitialized.find (handle);
+-    if (it != this->m_layerInitialized.end () && !it->second) {
+-	callHook ("_init", "layer.init");
+-	it->second = true;
++    if (JS_IsFunction (ctx, fn)) {
++	JSValue ret = JS_Call (ctx, fn, layerObj, argc, argv);
++	if (JS_IsException (ret)) {
++	    const std::string tag = std::string ("layer.") + name;
++	    logJSException (ctx, tag.c_str ());
++	}
++	JS_FreeValue (ctx, ret);
+     }
+-    callHook ("_tick", "layer.update");
+ 
++    JS_FreeValue (ctx, fn);
++    JS_FreeValue (ctx, holder);
+     JS_FreeValue (ctx, layerObj);
+-    JS_FreeValue (ctx, globalObj);
++}
++
++void ScriptEngine::tickLayer (ScriptLayerHandle handle, double time, double deltaTime, double fps) {
++    if (!this->m_context || handle == kInvalidLayerHandle) {
++	return;
++    }
++    JSContext* ctx = this->m_context;
++
++    JSValue sceneCtx = JS_NewObject (ctx);
++    JS_SetPropertyStr (ctx, sceneCtx, "time", JS_NewFloat64 (ctx, time));
++    JS_SetPropertyStr (ctx, sceneCtx, "dt", JS_NewFloat64 (ctx, deltaTime));
++    JS_SetPropertyStr (ctx, sceneCtx, "fps", JS_NewFloat64 (ctx, fps));
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__sceneCtx", sceneCtx);
++
++    // init runs first, from tick (); a layer created after the last tick is started here
++    if (const auto it = this->m_layerInitialized.find (handle); it != this->m_layerInitialized.end () && !it->second) {
++	this->startPendingScripts ();
++    }
++
++    this->callLayerHook (handle, "_tick", 0, nullptr, false);
+ }
+ 
+ std::string ScriptEngine::layerText (ScriptLayerHandle handle) {
+     if (!this->m_context || handle == kInvalidLayerHandle) {
+ 	return {};
+     }
++
++    // thisLayer is the real layer: its text is the layer's `text` value
++    if (const auto it = this->m_layerObjects.find (handle); it != this->m_layerObjects.end ()) {
++	const auto& properties = it->second->getProperties ();
++	if (const auto text = properties.find ("text"); text != properties.end ()) {
++	    return text->second.value.getType () == DynamicValue::String ? text->second.value.getString ()
++									  : text->second.value.toString ();
++	}
++    }
+     JSContext* ctx = this->m_context;
+     JSValue globalObj = JS_GetGlobalObject (ctx);
+     JSValue layers = JS_GetPropertyStr (ctx, globalObj, "__textLayers");
+@@ -664,6 +750,8 @@ void ScriptEngine::destroyLayer (ScriptLayerHandle handle) {
+     JS_FreeValue (ctx, delResult);
+ 
+     this->m_layerInitialized.erase (handle);
++    this->m_layerObjects.erase (handle);
++    this->m_layerProps.erase (handle);
+ }
+ 
+ void ScriptEngine::queueScript (const std::string& key, DynamicValue& currentValue, ScriptableObject& object) {
+@@ -798,75 +886,187 @@ void ScriptEngine::callModule (LoadedModule& module, const char* name, int argc,
+     JS_FreeValue (ctx, result);
+ }
+ 
+-void ScriptEngine::tick () {
++JSValue ScriptEngine::userPropertyValue (const Property& property) {
++    // "color properties are converted to Vec3 automatically"
++    return property.getType () == DynamicValue::Vec4 ? this->newVec (property.getVec3 ())
++						      : this->dynamicToJs (const_cast<Property&> (property));
++}
++
++JSValue ScriptEngine::userProperties () {
++    JSValue properties = JS_NewObject (this->m_context);
++
++    for (const auto& [name, property] : this->m_scene.getScene ().project.properties) {
++	JS_SetPropertyStr (this->m_context, properties, name.c_str (), this->userPropertyValue (*property));
++    }
++
++    return properties;
++}
++
++void ScriptEngine::startPendingScripts () {
++    if (!this->m_pendingModules) {
++	return;
++    }
++
++    this->m_pendingModules = false;
++
+     // scripts queued since the last tick: evaluate every module first, then init(value) each, in the order the
+     // objects queued them (so one script's init sees the others' top-level state, e.g. `shared`)
+-    if (this->m_pendingModules) {
+-	this->m_pendingModules = false;
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	if (!this->m_scriptModules[i]->evaluated) {
++	    this->evaluateModule (*this->m_scriptModules[i]);
++	}
++    }
+ 
+-	for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
+-	    if (!this->m_scriptModules[i]->evaluated) {
+-		this->evaluateModule (*this->m_scriptModules[i]);
+-	    }
++    std::vector<LoadedModule*> started;
++
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	auto& module = *this->m_scriptModules[i];
++
++	if (module.initialized) {
++	    continue;
+ 	}
+ 
+-	std::vector<LoadedModule*> started;
++	module.initialized = true;
++	started.push_back (&module);
++	JSValue args[] = { this->dynamicToJs (module.value) };
++	this->callModule (module, "init", 1, args, true);
++	JS_FreeValue (this->m_context, args[0]);
++    }
+ 
+-	for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
+-	    auto& module = *this->m_scriptModules[i];
++    // text-layer scripts: init (value) once, the text it returns adopted
++    std::vector<ScriptLayerHandle> startedLayers;
+ 
+-	    if (module.initialized) {
+-		continue;
+-	    }
++    for (auto& [handle, initialized] : this->m_layerInitialized) {
++	if (!initialized) {
++	    initialized = true;
++	    startedLayers.push_back (handle);
++	}
++    }
+ 
+-	    module.initialized = true;
+-	    started.push_back (&module);
+-	    JSValue args[] = { this->dynamicToJs (module.value) };
+-	    this->callModule (module, "init", 1, args, true);
+-	    JS_FreeValue (this->m_context, args[0]);
++    for (const auto handle : startedLayers) {
++	this->callLayerHook (handle, "_init", 0, nullptr, false);
++    }
++
++    // WE calls applyUserProperties once on load, after init, with every user property (scripts set up state there
++    // that update relies on); later, with the changed ones only (tick)
++    if (!started.empty () || !startedLayers.empty ()) {
++	JSValue properties = this->userProperties ();
++
++	for (auto* module : started) {
++	    this->callModule (*module, "applyUserProperties", 1, &properties, false);
++	}
++	for (const auto handle : startedLayers) {
++	    this->callLayerHook (handle, "applyUserProperties", 1, &properties, true);
+ 	}
+ 
+-	// WE calls applyUserProperties once on load, after init, with every user property (scripts set up state
+-	// there that update relies on). Later changes don't reach it yet
+-	if (!started.empty ()) {
+-	    JSValue properties = JS_NewObject (this->m_context);
++	JS_FreeValue (this->m_context, properties);
++    }
++}
+ 
+-	    for (const auto& [name, property] : this->m_scene.getScene ().project.properties) {
+-		JSValue value = property->getType () == DynamicValue::Vec4 ? this->newVec (property->getVec3 ())
+-									    : this->dynamicToJs (*property);
+-		JS_SetPropertyStr (this->m_context, properties, name.c_str (), value);
+-	    }
++void ScriptEngine::dispatchEvent (const char* name, JSValueConst arg, const ScriptableObject* only) {
++    JSValueConst args[] = { arg };
+ 
+-	    for (auto* module : started) {
+-		this->callModule (*module, "applyUserProperties", 1, &properties, false);
+-	    }
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	auto& module = *this->m_scriptModules[i];
+ 
+-	    JS_FreeValue (this->m_context, properties);
++	if (only == nullptr || &module.object == only) {
++	    this->callModule (module, name, 1, args, false);
+ 	}
+     }
+ 
+-    // run intervals
+-    this->m_engineObject->tick ();
++    std::vector<ScriptLayerHandle> handles;
+ 
+-    // run any pending notifications
+-    if (!this->m_queuedEvents.empty ()) {
+-	for (auto& event : this->m_queuedEvents) {
+-	    JSValue args[] = { event.second };
++    for (const auto& [handle, object] : this->m_layerObjects) {
++	if (only == nullptr || object == only) {
++	    handles.push_back (handle);
++	}
++    }
+ 
+-	    for (const auto& module : this->m_scriptModules) {
+-		this->callModule (*module, event.first.c_str (), 1, args, false);
+-	    }
++    for (const auto handle : handles) {
++	this->callLayerHook (handle, name, 1, args, true);
++    }
++}
++
++bool ScriptEngine::handlesEvent (const ScriptableObject& object, const char* name) {
++    JSContext* ctx = this->m_context;
++
++    for (const auto& module : this->m_scriptModules) {
++	if (&module->object != &object || !JS_IsObject (module->ns)) {
++	    continue;
++	}
++
++	JSValue fn = JS_GetPropertyStr (ctx, module->ns, name);
++	const bool found = JS_IsFunction (ctx, fn);
++	JS_FreeValue (ctx, fn);
++
++	if (found) {
++	    return true;
++	}
++    }
++
++    for (const auto& [handle, layer] : this->m_layerObjects) {
++	if (layer != &object) {
++	    continue;
++	}
++
++	JSValue layers = JS_GetPropertyStr (ctx, this->m_globalThis, "__textLayers");
++	JSValue layerObj = JS_IsObject (layers) ? JS_GetPropertyUint32 (ctx, layers, static_cast<uint32_t> (handle))
++						: JS_UNDEFINED;
++	JSValue events = JS_IsObject (layerObj) ? JS_GetPropertyStr (ctx, layerObj, "_events") : JS_UNDEFINED;
++	JSValue fn = JS_IsObject (events) ? JS_GetPropertyStr (ctx, events, name) : JS_UNDEFINED;
++	const bool found = JS_IsFunction (ctx, fn);
++
++	JS_FreeValue (ctx, fn);
++	JS_FreeValue (ctx, events);
++	JS_FreeValue (ctx, layerObj);
++	JS_FreeValue (ctx, layers);
+ 
+-	    JS_FreeValue (this->m_context, event.second);
++	if (found) {
++	    return true;
++	}
++    }
++
++    return false;
++}
++
++void ScriptEngine::tick () {
++    this->startPendingScripts ();
++
++    // user properties changed since the last tick: applyUserProperties gets only those
++    if (!this->m_changedProperties.empty ()) {
++	JSValue changed = JS_NewObject (this->m_context);
++	const auto& properties = this->m_scene.getScene ().project.properties;
++
++	for (const auto& name : this->m_changedProperties) {
++	    if (const auto it = properties.find (name); it != properties.end ()) {
++		JS_SetPropertyStr (this->m_context, changed, name.c_str (), this->userPropertyValue (*it->second));
++	    }
+ 	}
+ 
++	this->m_changedProperties.clear ();
++	this->dispatchEvent ("applyUserProperties", changed);
++	JS_FreeValue (this->m_context, changed);
++    }
++
++    // run intervals
++    this->m_engineObject->tick ();
++
++    // run any pending notifications (property scripts and text-layer scripts)
++    if (!this->m_queuedEvents.empty ()) {
++	auto events = std::move (this->m_queuedEvents);
+ 	this->m_queuedEvents.clear ();
++
++	for (auto& [name, value] : events) {
++	    this->dispatchEvent (name.c_str (), value);
++	    JS_FreeValue (this->m_context, value);
++	}
+     }
+ 
+     // run all update methods
+-    for (const auto& module : this->m_scriptModules) {
+-	JSValue args[] = { this->dynamicToJs (module->value) };
+-	this->callModule (*module, "update", 1, args, true);
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	auto& module = *this->m_scriptModules[i];
++	JSValue args[] = { this->dynamicToJs (module.value) };
++	this->callModule (module, "update", 1, args, true);
+ 	JS_FreeValue (this->m_context, args[0]);
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 71596b4..1c54eb4 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -9,7 +9,9 @@
+ #include <future>
+ #include <map>
+ #include <memory>
++#include <functional>
+ #include <optional>
++#include <set>
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+@@ -130,9 +132,22 @@ public:
+      */
+     ScriptLayerHandle createLayerScript (
+ 	const std::string& scriptSource, std::map<std::string, UserSettingUniquePtr>& initialScriptProps,
+-	const std::string& initialText
++	const std::string& initialText, ScriptableObject& layer
+     );
+ 
++    /** The live value of a text layer's script property (`scriptProperties.<name>`), or JS_UNDEFINED */
++    JSValue layerScriptProperty (ScriptLayerHandle handle, const std::string& name);
++
++    /**
++     * Calls the event `name` (cursorClick, mediaPropertiesChanged, applyUserProperties, …) with `arg` on every script
++     * that exports it: property scripts and text-layer scripts. `only` limits it to the scripts of one layer
++     */
++    void dispatchEvent (const char* name, JSValueConst arg, const ScriptableObject* only = nullptr);
++    /** A script of `object` exports `name` (a property script's or its text-layer script's) */
++    [[nodiscard]] bool handlesEvent (const ScriptableObject& object, const char* name);
++    /** engine.userProperties: every user property, colours as Vec3 (a new object) */
++    [[nodiscard]] JSValue userProperties ();
++
+     /**
+      * Advance a layer by one frame.
+      *
+@@ -202,6 +217,18 @@ private:
+     ScriptLayerHandle m_nextLayerId = 1;
+     bool m_layerRegistryReady = false;
+     std::map<ScriptLayerHandle, bool> m_layerInitialized;
++    /** each text-layer script's layer and its script properties (live) */
++    std::map<ScriptLayerHandle, ScriptableObject*> m_layerObjects;
++    std::map<ScriptLayerHandle, std::map<std::string, UserSettingUniquePtr>*> m_layerProps;
++    /** the user properties changed since the last tick (applyUserProperties gets them) */
++    std::set<std::string> m_changedProperties;
++    std::vector<std::function<void ()>> m_propertyListeners;
++    /** calls a text-layer hook (`_init`, `_tick`, or an event in `_events`) if the script has it */
++    void callLayerHook (ScriptLayerHandle handle, const char* name, int argc, JSValueConst argv[], bool event);
++    /** init + the first applyUserProperties of property and text-layer scripts queued since the last tick */
++    void startPendingScripts ();
++    /** the value scripts see for one user property (colours as Vec3) */
++    JSValue userPropertyValue (const Property& property);
+     bool m_builtinsInstalled = false;
+ 
+     std::map<std::string, JSValue> m_queuedEvents;
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp b/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
+index 7c1f9d1..3d60129 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptableObject.cpp
+@@ -11,6 +11,7 @@ using namespace WallpaperEngine::Scripting;
+ ScriptableObject::ScriptableObject (Wallpapers::CScene& scene, const Object& object) : CObject (scene, object) {
+     // register common dynamic values. scale/angles/visible are not common: an image, text or particle object
+     // registers its own (the values it renders with); a script on the group* copies would drive nothing
++    this->m_solid = object.solid;
+     this->registerProperty ("origin", *object.origin->value);
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptableObject.h b/src/core/WallpaperEngine/Scripting/ScriptableObject.h
+index 8bb3413..753984d 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptableObject.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptableObject.h
+@@ -21,6 +21,10 @@ public:
+ 
+     const std::map<std::string, PropertyEntry>& getProperties () const;
+ 
++    /** `solid`: the layer receives cursor events (scene.json, default true; a script may change it) */
++    [[nodiscard]] bool isSolid () const { return this->m_solid; }
++    void setSolid (bool solid) { this->m_solid = solid; }
++
+ protected:
+     /**
+      * Makes `name` readable by scripts (thisLayer, getLayer). Its property script, if any, is queued unless
+@@ -30,5 +34,6 @@ protected:
+ 
+ private:
+     std::map<std::string, PropertyEntry> m_properties;
++    bool m_solid = true;
+ };
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index 64abd0e..12d1c8a 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -55,3 +55,22 @@ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+     return creator;
+   };
+ })();
++
++// IEngine members that are constants or plain JS here (WE's PC app, running as a wallpaper, outside its editor)
++(function () {
++  const engine = globalThis.engine;
++  if (engine === undefined || engine === null) {
++    return;
++  }
++  const define = (name, value) => Object.defineProperty(engine, name, { value, enumerable: true, configurable: true });
++  define('isDesktopDevice', () => true);
++  define('isMobileDevice', () => false);
++  define('isWallpaper', () => true);
++  define('isScreensaver', () => false);
++  define('isRunningInEditor', () => false);
++  define('isPortrait', () => { const r = engine.screenResolution; return r.y > r.x; });
++  define('isLandscape', () => { const r = engine.screenResolution; return r.x >= r.y; });
++  // an IAssetHandle: what createLayer would take (createLayer isn't supported, so a plain record of the file)
++  define('registerAsset', (file) => ({ file: String(file) }));
++  define('isObjectValid', (object) => object !== undefined && object !== null);
++})();

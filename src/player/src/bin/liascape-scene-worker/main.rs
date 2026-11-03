@@ -45,6 +45,8 @@ mod gputimer;
 #[cfg(feature = "lwe")]
 mod lwe;
 #[cfg(feature = "lwe")]
+mod media;
+#[cfg(feature = "lwe")]
 mod render;
 mod ring;
 mod stretch;

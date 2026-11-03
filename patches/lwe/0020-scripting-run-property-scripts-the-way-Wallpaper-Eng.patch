@@ -1,7 +1,7 @@
 From 02475c81964c59acc7c55f70d5c75198c62b6442 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 29 Oct 2026 21:34:17 +0530
-Subject: [PATCH 20/37] scripting: run property scripts the way Wallpaper
+Subject: [PATCH 20/44] scripting: run property scripts the way Wallpaper
  Engine does
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

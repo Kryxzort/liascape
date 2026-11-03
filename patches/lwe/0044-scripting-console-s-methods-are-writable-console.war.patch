@@ -1,0 +1,57 @@
+From c60fd2e9ca31869ae29d8d7886016c603d41b9d6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:36:58 +0530
+Subject: [PATCH 44/44] scripting: console's methods are writable;
+ console.warn/info/debug
+
+`console.log = () => {}` (3363252053, 3414858021 silence their logs
+outside the editor) threw "'log' is read-only" and aborted the script.
+console.warn is error, info and debug are log, as in V8.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B10 (smoke of 3363252053, 3414858021)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Scripting/ConsoleObject.cpp  |  4 ++--
+ .../WallpaperEngine/Scripting/resources/builtins.js   | 11 +++++++++++
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+index c873480..be206a4 100644
+--- a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+@@ -58,11 +58,11 @@ ConsoleObject::ConsoleObject (ScriptEngine& engine, Render::Wallpapers::CScene&
+     JS_SetOpaque (this->m_instance, this);
+     JS_DefinePropertyValueStr (
+ 	this->m_engine.getContext (), this->m_instance, "log",
+-	JS_NewCFunction (this->m_engine.getContext (), console_log, "log", 1), JS_PROP_ENUMERABLE
++	JS_NewCFunction (this->m_engine.getContext (), console_log, "log", 1), JS_PROP_C_W_E
+     );
+     JS_DefinePropertyValueStr (
+ 	this->m_engine.getContext (), this->m_instance, "error",
+-	JS_NewCFunction (this->m_engine.getContext (), console_error, "error", 1), JS_PROP_ENUMERABLE
++	JS_NewCFunction (this->m_engine.getContext (), console_error, "error", 1), JS_PROP_C_W_E
+     );
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index bcfedcc..26f8215 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -153,3 +153,14 @@ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+   define('registerAsset', (file) => ({ file: String(file) }));
+   define('isObjectValid', (object) => object !== undefined && object !== null);
+ })();
++
++// console.warn/info/debug as V8 has them (log/error are native); scripts may also replace them (console.log = …)
++(function () {
++  const c = globalThis.console;
++  if (c === undefined || c === null) {
++    return;
++  }
++  c.warn = c.warn || c.error;
++  c.info = c.info || c.log;
++  c.debug = c.debug || c.log;
++})();

@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <functional>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -887,6 +888,10 @@ struct ScriptRig {
     std::vector<std::string> extra;
     /** the pointer LWE reads (B5), none by default */
     wp_mouse_input* mouse = nullptr;
+    /** localStorage's directory (B10), none by default */
+    std::string storage;
+    /** called once the project loaded, before its first frame (B10: what a host reports before the scene exists) */
+    std::function<void (wp_project*)> loaded;
 
     bool open (const std::string& sceneDir) {
         dir = sceneDir;
@@ -896,12 +901,18 @@ struct ScriptRig {
             return false;
         }
         wp_config_set_audio_output (cfg, &kStereo48k);
+        if (!storage.empty () && !wp_config_set_storage_dir (cfg, storage.c_str ())) {
+            return false;
+        }
         ctx = wp_context_create (cfg);
         wp_context_set_gl_proc_address (ctx, &g_proc);
         wp_context_set_time_counter (ctx, &g_clock);
         p = wp_project_load_folder (ctx, mouse, dir.c_str ());
         if (p == nullptr) {
             return false;
+        }
+        if (loaded) {
+            loaded (p);
         }
         wp_project_set_output_framebuffer (p, scratch_fbo ());
         step ();
@@ -2058,6 +2069,450 @@ static bool effect_visible_is_live () {
     return true;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// B10: the SceneScript API surface (docs/player/spikes/we-lwe-gap-audit.md S10–S37)
+
+// a JS check list a script runs: every failed name is logged, the script returns whether all passed
+static std::string js_checks (const std::string& checks) {
+    return "let fails = [];\nfunction check(n, c) { if (!c) fails.push(n); }\n" + checks
+         + "if (fails.length) console.log('FAILS ' + fails.join(','));\n";
+}
+
+// layers by index for every type (a group too), one JS object per layer, enumerateLayers/getLayerIndex/sortLayer,
+// engine.canvasSize/is*()/userProperties, solid/size, what a script stores on a layer stays, a write through
+// getLayer (index) moves that layer (unpatched: numbers were ids, groups undefined, engine.canvasSize threw)
+static bool layer_api_reaches_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks = js_checks (
+        "check('count', thisScene.getLayerCount() == 4);\n"
+        "check('index0', thisScene.getLayer(0).name == 'sq1');\n"
+        "check('same', thisScene.getLayer('sq2') === thisScene.getLayer(1));\n"
+        "check('group', thisScene.getLayer('grp') !== undefined && thisScene.getLayer(3).visible === true);\n"
+        "check('enum', thisScene.enumerateLayers().length == 4);\n"
+        "check('idx', thisScene.getLayerIndex('sq3') == 2 && thisScene.getLayerIndex(thisLayer) == 0);\n"
+        "check('sort', thisScene.sortLayer('sq3', 0) && thisScene.getLayer(0).name == 'sq3' && thisScene.getLayerIndex('sq1') == 1);\n"
+        "thisScene.sortLayer('sq3', 2);\n"
+        "check('unsort', thisScene.getLayerIndex('sq3') == 2);\n"
+        "check('canvas', engine.canvasSize.x == 64 && engine.canvasSize.y == 32);\n"
+        "check('desk', engine.isDesktopDevice() && !engine.isRunningInEditor() && engine.isLandscape() && engine.isObjectValid(thisLayer));\n"
+        "check('uprops', Math.abs(engine.userProperties.speed - 0.25) < 1e-6);\n"
+        "check('solid', thisLayer.solid === true && thisScene.getLayer('sq2').solid === false);\n"
+        "check('size', thisLayer.size.x == 8 && thisLayer.size.y == 8);\n"
+        "thisScene.getLayer('sq2').mark = 7;\n"
+        "check('kept', thisScene.getLayer('sq2').mark === 7);\n"
+        "check('effects', thisLayer.getEffectCount() == 0 && thisLayer.getEffect('x') === undefined);\n"
+        "check('parent', thisLayer.getParent() === null && thisScene.getLayer('grp').getChildren().length == 0);\n"
+        "check('scene', typeof thisScene.bloomstrength === 'number' && thisScene.clearenabled === true);\n");
+    const std::string dir = script_scene (
+        square (1, scripted ("visible", "true", "export function update(value) {\n" + checks
+                                                    + "thisScene.getLayer(2).origin = new Vec3(48, 16, 0);\nreturn fails.length == 0;\n}")
+                       + ",\"origin\":\"8 16 0\"")
+        + "," + square (2, "\"origin\":\"24 16 0\",\"solid\":false") + "," + square (3, "\"origin\":\"40 16 0\"")
+        + ",{\"id\":4,\"name\":\"grp\",\"origin\":\"0 0 0\",\"visible\":true}");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    std::string want = covered (4, 11);
+    for (int x = 20; x <= 27; x++) {
+        want[x] = '#';
+    }
+    for (int x = 44; x <= 51; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == want, "want %s (a missing square at 4..11: a failed check, see FAILS above)", want.c_str ());
+    return true;
+}
+
+// thisLayer.getEffect (name).visible written by a script turns the effect on live (an effect hidden at load is
+// built because the scene's scripts call getEffect); applyUserProperties gets every property once, then only the
+// changed ones (unpatched: getEffect was undefined, applyUserProperties never saw a change)
+static bool script_effect_and_property_changes () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += "," + scripted ("visible", "true",
+                              "let seen = [];\n"
+                              "export function applyUserProperties(p) { seen.push(Object.keys(p).sort().join(',')); }\n"
+                              "export function update(value) {\n"
+                              "  thisLayer.getEffect('g').visible = engine.userProperties.fx === true\n"
+                              "    && seen.join('|') == 'fx,other|fx' && thisLayer.getEffect(0).name == 'g';\n"
+                              "}")
+            + ",\"effects\":[{\"id\":2,\"name\":\"g\",\"file\":\"effects/e41g/effect.json\",\"visible\":false}]}";
+    const std::string dir = camera_scene ("\"zoom\":1", object,
+        "\"fx\":{\"type\":\"bool\",\"value\":false,\"text\":\"f\"},\"other\":{\"type\":\"bool\",\"value\":false,\"text\":\"o\"}");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    e41_effect (dir, "e41g", "g");
+    ScriptRig rig;
+    rig.extra = { "effects/e41g/effect.json", "shaders/e41g.vert", "shaders/e41g.frag", "materials/e41g.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto before = b9_pixel (rig);
+    CHECK (wp_project_property_set_boolean_by_name (rig.p, "fx", true), "bool refused");
+    rig.step ();
+    rig.step ();
+    const auto after = b9_pixel (rig);
+    printf ("    effect hidden %d %d %d; shown by the script %d %d %d\n", before[0], before[1], before[2], after[0], after[1],
+            after[2]);
+    CHECK (before[0] > 250 && before[1] < 5, "not the red base at first (%d %d %d)", before[0], before[1], before[2]);
+    CHECK (after[0] > 250 && after[1] > 250, "the script didn't show the effect (%d %d %d)", after[0], after[1], after[2]);
+    return true;
+}
+
+// a text layer's script: thisLayer is the real layer (name, text written through it), init (value) gets the text,
+// a combo's default is its first option, engine/thisScene are the real ones, it runs while its layer is hidden,
+// and it gets applyUserProperties (unpatched: thisLayer was {text}, init had no value, the combo read undefined,
+// a hidden text never ran)
+static bool text_script_is_a_real_layer () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script =
+        "export var scriptProperties = createScriptProperties()"
+        ".addCombo({name: 'mode', options: [{label: 'a', value: 'x'}, {label: 'b', value: 'y'}]}).finish();\n"
+        "let started = '';\nlet applied = false;\n"
+        "export function init(value) { started = value; return value + '|' + scriptProperties.mode; }\n"
+        "export function applyUserProperties(p) { applied = p.speed !== undefined; }\n"
+        "export function update(value) {\n"
+        + js_checks ("check('name', thisLayer.name == 'txt');\ncheck('init', started == 'hello');\n"
+                     "check('text', value == 'hello|x' && thisLayer.text == 'hello|x');\n"
+                     "check('applied', applied);\ncheck('canvas', engine.canvasSize.x == 64);\n")
+        + "  thisScene.getLayer('sq1').visible = fails.length == 0;\n}";
+    std::string escaped;
+    for (char c : script) {
+        if (c == '"' || c == '\\') {
+            escaped += '\\';
+        }
+        if (c == '\n') {
+            escaped += "\\n";
+            continue;
+        }
+        escaped += c;
+    }
+    const std::string dir = script_scene (
+        square (1, "\"origin\":\"8 16 0\",\"visible\":false")
+        + ",{\"id\":2,\"name\":\"txt\",\"origin\":\"40 16 0\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+          "\"text\":{\"value\":\"hello\",\"script\":\"" + escaped + "\"}}");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == covered (4, 11), "the text script didn't show sq1 (a failed check, see FAILS above)");
+    return true;
+}
+
+
+// a JS string literal of a script, for a text object's "script" (the same escaping as scripted ())
+static std::string json_escaped (const std::string& script) {
+    std::string escaped;
+    for (char c : script) {
+        if (c == '"' || c == '\\') {
+            escaped += '\\';
+        }
+        if (c == '\n') {
+            escaped += "\\n";
+            continue;
+        }
+        escaped += c;
+    }
+    return escaped;
+}
+
+// the host's media notifications reach property scripts and text-layer scripts: the status (reported before the
+// scene existed), every MediaPropertiesEvent field, a thumbnail's colours from the image (red art: primary red,
+// black as the high-contrast colour), sent once per image, the playback state and the timeline (unpatched: no
+// status, no albumArtist/genres/contentType, fixed greys, text scripts got nothing)
+static bool media_events_reach_scripts () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks = js_checks (
+        "check('status', got.status === true);\n"
+        "check('props', got.props == 'T/A/L/AA/rock, pop/music');\n"
+        "check('thumb', got.thumb === true && got.n == 1);\n"
+        "check('state', got.state == 1);\n"
+        "check('timeline', got.pos == 12 && got.dur == 200);\n");
+    const std::string script =
+        "let got = {};\n"
+        "export function mediaStatusChanged(e) { got.status = e.enabled; }\n"
+        "export function mediaPropertiesChanged(e) { got.props = [e.title, e.artist, e.albumTitle, e.albumArtist, e.genres, e.contentType].join('/'); }\n"
+        "export function mediaThumbnailChanged(e) {\n"
+        "  got.n = (got.n || 0) + 1;\n"
+        "  got.thumb = e.hasThumbnail && e.primaryColor.x > 0.9 && e.primaryColor.z < 0.1 && e.highContrastColor.x == 0\n"
+        "    && e.textColor !== undefined && e.secondaryColor.z > 0.9;\n"
+        "}\n"
+        "export function mediaPlaybackChanged(e) { got.state = e.state; }\n"
+        "export function mediaTimelineChanged(e) { got.pos = e.position; got.dur = e.duration; }\n"
+        "export function update(value) {\n" + checks + "return fails.length == 0;\n}";
+    const std::string text = "export function mediaPropertiesChanged(e) { thisScene.getLayer('sq2').visible = e.title == 'T'; }\n";
+    const std::string dir = script_scene (
+        square (1, scripted ("visible", "false", script) + ",\"origin\":\"8 16 0\"") + ","
+        + square (2, "\"origin\":\"24 16 0\",\"visible\":false")
+        + ",{\"id\":3,\"name\":\"txt\",\"origin\":\"40 16 0\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+          "\"text\":{\"value\":\"x\",\"script\":\"" + json_escaped (text) + "\"}}");
+    // the album art: a 4x4 PPM, 12 red pixels and 4 blue
+    const std::string art = dir + "/art.ppm";
+    std::string ppm = "P6\n4 4\n255\n";
+    for (int i = 0; i < 16; i++) {
+        ppm += i < 12 ? std::string ("\xff\x00\x00", 3) : std::string ("\x00\x00\xff", 3);
+    }
+    write_file (art, ppm);
+    const std::string url = "file://" + art;
+    ScriptRig rig;
+    rig.extra = { "art.ppm" };
+    rig.loaded = [] (wp_project* p) { wp_project_notify_media_status (p, true); };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    CHECK (wp_project_uses_media (rig.p), "the scene's media events aren't seen");
+    wp_project_notify_track_metadata_change (rig.p, "T", "A", "L");
+    wp_project_notify_track_metadata_extra (rig.p, "AA", "", "rock, pop", nullptr);
+    wp_project_notify_album_art_url_change (rig.p, url.c_str ());
+    wp_project_notify_playback_state_change (rig.p, WP_MEDIA_PLAYBACK_STATE_PLAYING);
+    wp_project_notify_playback_position_and_duration_change (rig.p, 12.0, 200.0);
+    rig.step ();
+    // the same image again (the next track of an album): no second event
+    wp_project_notify_album_art_url_change (rig.p, url.c_str ());
+    rig.step ();
+    rig.step ();
+    std::string want = covered (4, 11);
+    for (int x = 20; x <= 27; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == want, "want %s (sq1: the property script's checks, see FAILS; sq2: the text script)", want.c_str ());
+    return true;
+}
+
+
+// a script on an effect's `visible` has thisObject = that effect: a media thumbnail shows the effect, the layer stays
+// (unpatched: thisObject was the layer, so `thisObject.visible = …` hid the whole layer, and no event came)
+static bool effect_script_this_object_is_the_effect () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"g\",\"file\":\"effects/e41g/effect.json\",\"visible\":{\"value\":false,\"script\":\""
+              + json_escaped ("export function mediaThumbnailChanged(e) { thisObject.visible = e.hasThumbnail && thisObject.name == 'g'; }\n")
+              + "\"}}]}";
+    const std::string dir = camera_scene ("\"zoom\":1", object);
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    e41_effect (dir, "e41g", "g");
+    const std::string art = dir + "/art.ppm";
+    write_file (art, "P6\n1 1\n255\n" + std::string ("\x20\x40\xc0", 3));
+    const std::string url = "file://" + art;
+    ScriptRig rig;
+    rig.extra = { "effects/e41g/effect.json", "shaders/e41g.vert", "shaders/e41g.frag", "materials/e41g.json", "art.ppm" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto before = b9_pixel (rig);
+    wp_project_notify_album_art_url_change (rig.p, url.c_str ());
+    rig.step ();
+    rig.step ();
+    const auto after = b9_pixel (rig);
+    printf ("    before the thumbnail %d %d %d; after %d %d %d\n", before[0], before[1], before[2], after[0], after[1], after[2]);
+    CHECK (before[0] > 250 && before[1] < 5, "not the red layer at first (%d %d %d)", before[0], before[1], before[2]);
+    CHECK (after[0] > 250 && after[1] > 250, "the effect isn't shown on the layer (%d %d %d)", after[0], after[1], after[2]);
+    return true;
+}
+
+
+// thisObject.getAnimation () is the script's own property's keyframe animation: a `startpaused` fade a script
+// play ()s runs to its end; the same fade with no script stays paused (unpatched: getAnimation was undefined)
+static bool script_plays_a_keyframe_animation () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string curve = "\"c0\":[" + key (0, 0.75) + "," + key (10, 0) + "]";
+    const std::string options = "\"fps\":30,\"length\":10,\"mode\":\"single\",\"startpaused\":true";
+    std::string scriptedFade = animated ("alpha", "1.0", curve, options);
+    scriptedFade.pop_back ();
+    scriptedFade += ",\"script\":\"let n = 0;\\nexport function update(value) {\\n  const a = thisObject.getAnimation();\\n"
+                    "  if (++n == 3) { a.play(); }\\n  if (n == 2 && (a.isPlaying() || a.frameCount != 10)) { console.log('FAILS anim'); }\\n}\"}";
+    const std::string dir = script_scene (white_square (1, "\"origin\":\"4 16 0\"," + scriptedFade) + ","
+                                          + white_square (2, "\"origin\":\"14 16 0\"," + animated ("alpha", "1.0", curve, options)));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 20) {
+        rig.step ();
+    }
+    const int played = red_at (rig, 4), paused = red_at (rig, 14);
+    printf ("    after %d ticks: played %d, paused %d\n", rig.frames, played, paused);
+    CHECK (near (played, 0), "the played fade didn't reach 0: r=%d", played);
+    CHECK (near (paused, 0.75 * 255), "the paused fade moved: r=%d", paused);
+    return true;
+}
+
+
+// cursor events: enter/down/up/click on the solid layer under the pointer, with localPosition 0..size and
+// worldPosition in scene pixels (y up); a hidden solid layer gets enter/leave/move but no press or click;
+// a non-solid one gets none; input.cursorWorldPosition follows the pointer (unpatched: no cursor event at all,
+// cursorWorldPosition 0 0 0)
+static bool cursor_events_reach_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string sq1 = "shared.log = shared.log || [];\n"
+                            "export function cursorEnter(e) { shared.log.push('enter1'); }\n"
+                            "export function cursorLeave(e) { shared.log.push('leave1'); }\n"
+                            "export function cursorDown(e) { shared.log.push('down1'); }\n"
+                            "export function cursorUp(e) { shared.log.push('up1'); }\n"
+                            "export function cursorClick(e) { shared.log.push('click1:' + Math.round(e.localPosition.x) + ','\n"
+                            "  + Math.round(e.localPosition.y) + ':' + Math.round(e.worldPosition.x) + ',' + Math.round(e.worldPosition.y)); }\n";
+    const std::string sq2 = "shared.log = shared.log || [];\nexport function cursorClick(e) { shared.log.push('click2'); }\n"
+                            "export function cursorEnter(e) { shared.log.push('enter2'); }\n";
+    const std::string sq3 = "shared.log = shared.log || [];\nexport function cursorEnter(e) { shared.log.push('enter3'); }\n";
+    const std::string sq4 = "export function update(value) {\n"
+                            "  const log = (shared.log || []).join(' ');\n"
+                            "  const p = input.cursorWorldPosition;\n"
+                            "  const ok = log == 'enter1 down1 up1 click1:4,4:8,24 leave1 enter2' && p.x == 24 && p.y == 16 && !input.cursorLeftDown;\n"
+                            "  return ok;\n}";
+    const std::string dir = script_scene (
+        square (1, scripted ("visible", "true", sq1) + ",\"origin\":\"8 24 0\"") + ","
+        + square (2, scripted ("visible", "false", sq2) + ",\"origin\":\"40 8 0\"") + ","
+        + square (3, scripted ("visible", "true", sq3) + ",\"origin\":\"24 16 0\",\"solid\":false") + ","
+        + square (4, scripted ("visible", "false", sq4) + ",\"origin\":\"56 16 0\""));
+    ScriptRig rig;
+    g_mouseX = 60.0;
+    g_mouseY = 30.0;
+    g_buttonDown = false;
+    rig.mouse = &g_clicker;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    // y down: (8, 8) is world (8, 24), sq1's centre
+    g_mouseX = 8.0;
+    g_mouseY = 8.0;
+    rig.step ();
+    g_buttonDown = true;
+    rig.step ();
+    g_buttonDown = false;
+    rig.step ();
+    g_mouseX = 40.0;
+    g_mouseY = 24.0;
+    rig.step ();
+    g_buttonDown = true;
+    rig.step ();
+    g_buttonDown = false;
+    rig.step ();
+    g_mouseX = 24.0;
+    g_mouseY = 16.0;
+    rig.step ();
+    rig.step ();
+    const std::string got = rig.row ();
+    std::string want = covered (20, 27);
+    for (int x = 52; x <= 59; x++) {
+        want[x] = '#';
+    }
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == want, "want %s (sq4 shows when the event log is right)", want.c_str ());
+    return true;
+}
+
+
+// localStorage persists in the host's storage dir from one load to the next, keeps a number a number and a Vec3 a
+// Vec3, keeps LOCATION_GLOBAL apart from the default screen store; delete answers whether the key was there
+// (unpatched: an in-memory object, lost on reload; set stored String(value))
+static bool local_storage_persists () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    char tmpl[] = "/tmp/lwe-storage.XXXXXX";
+    const char* storage = mkdtemp (tmpl);
+    CHECK (storage != nullptr, "mkdtemp");
+    const std::string first = "export function init(value) {\n"
+                              "  localStorage.set('n', 41);\n"
+                              "  localStorage.set('pos', new Vec3(1, 2, 3), localStorage.LOCATION_GLOBAL);\n"
+                              "  localStorage.set('gone', 1);\n"
+                              "  return localStorage.delete('gone') && !localStorage.delete('gone');\n"
+                              "}";
+    const std::string second = js_checks ("check('number', localStorage.get('n') + 1 === 42);\n"
+                                          "check('screen', localStorage.get('pos') === undefined);\n"
+                                          "check('vec', localStorage.get('pos', 'global').add(new Vec3(1, 0, 0)).x === 2);\n"
+                                          "check('deleted', localStorage.get('gone') === undefined);\n");
+    for (int run = 0; run < 2; run++) {
+        const std::string dir = script_scene (square (1, scripted ("visible", "false", run == 0 ? first
+                                                                       : "export function init(value) {\n" + second + "return fails.length == 0;\n}")
+                                                         + ",\"origin\":\"8 16 0\""));
+        ScriptRig rig;
+        rig.storage = storage;
+        CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+        rig.step ();
+        const std::string got = rig.row ();
+        printf ("    load %d: %s\n", run + 1, got.c_str ());
+        CHECK (got == covered (4, 11), "load %d: the script's checks failed (see FAILS above)", run + 1);
+    }
+    const std::string file = std::string (storage) + "/scripts.json";
+    const std::string stored = read_file (file);
+    printf ("    %s: %s\n", file.c_str (), stored.c_str ());
+    unlink (file.c_str ());
+    rmdir (storage);
+    CHECK (stored.find ("\"n\":41") != std::string::npos, "not stored as a number");
+    return true;
+}
+
+// ISoundLayer from a script: play () starts a startsilent sound, pause () silences it and play () resumes it,
+// volume is live (0.5 → 0.25 gain), stop () silences it for good (unpatched: getLayer could not return a sound)
+static bool script_controls_a_sound () {
+    if (!sound_tests_can_run ()) {
+        return true;
+    }
+    const std::string script = "export function applyUserProperties(p) {\n"
+                               "  const s = thisScene.getLayer('snd');\n"
+                               "  if (p.cmd === 1) { s.play(); }\n"
+                               "  if (p.cmd === 2) { s.pause(); }\n"
+                               "  if (p.cmd === 3) { s.stop(); }\n"
+                               "  if (p.cmd === 4) { s.volume = 0.5; }\n"
+                               "}";
+    const std::string dir = sound_scene (
+        "{\"id\":1,\"name\":\"snd\",\"sound\":[\"a.wav\"],\"startsilent\":true},"
+            + square (2, scripted ("visible", "true", script) + ",\"origin\":\"8 16 0\""),
+        "\"cmd\":{\"type\":\"slider\",\"value\":0,\"min\":0,\"max\":9,\"text\":\"c\"}",
+        { { "a.wav", tone_wav (0.4f, 2.0) } });
+    SoundRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    auto run = [&] (int steps) {
+        float peak = 0.0f;
+        for (int i = 0; i < steps; i++) {
+            peak = std::fmax (peak, rig.step ());
+        }
+        return peak;
+    };
+    const float silent = run (15);
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cmd", 1.0f), "slider refused");
+    rig.until_above (0.1f);
+    const float played = run (5);
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cmd", 2.0f), "slider refused");
+    run (3);
+    const float paused = run (10);
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cmd", 1.0f), "slider refused");
+    rig.until_above (0.1f);
+    const float resumed = run (5);
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cmd", 4.0f), "slider refused");
+    run (3);
+    const float quieter = run (5);
+    CHECK (wp_project_property_set_slider_by_name (rig.p, "cmd", 3.0f), "slider refused");
+    run (3);
+    const float stopped = run (30);
+    printf ("    startsilent %.3f; play %.3f; pause %.3f; play again %.3f; volume 0.5 %.3f; stop %.3f\n", silent, played,
+            paused, resumed, quieter, stopped);
+    CHECK (silent < 1e-4f, "startsilent was audible (%.3f)", silent);
+    CHECK (std::fabs (played - 0.4f) < 0.02f, "play: peak %.3f, want 0.4", played);
+    CHECK (paused < 1e-4f, "pause: still audible (%.3f)", paused);
+    CHECK (std::fabs (resumed - 0.4f) < 0.02f, "play after pause: peak %.3f", resumed);
+    CHECK (std::fabs (quieter - 0.1f) < 0.01f, "volume 0.5: peak %.3f, want 0.1 (0.4 x 0.5²)", quieter);
+    CHECK (stopped < 1e-4f, "stop: still audible (%.3f)", stopped);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -2107,6 +2562,15 @@ int main (int argc, char** argv) {
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
     run ("effect_visible_is_live", effect_visible_is_live);
+    run ("layer_api_reaches_layers", layer_api_reaches_layers);
+    run ("script_effect_and_property_changes", script_effect_and_property_changes);
+    run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
+    run ("media_events_reach_scripts", media_events_reach_scripts);
+    run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
+    run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
+    run ("cursor_events_reach_layers", cursor_events_reach_layers);
+    run ("local_storage_persists", local_storage_persists);
+    run ("script_controls_a_sound", script_controls_a_sound);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

@@ -1,0 +1,386 @@
+From 1a839dd1e82670083cf861e3704dea6bf4141dae Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:30:54 +0530
+Subject: [PATCH 42/44] scripting: localStorage persists, as SceneScript's
+ ILocalStorage
+
+localStorage was an in-memory object that stored String(value), had
+no delete and no locations. Now:
+
+- get/set/delete/clear (key, location), LOCATION_GLOBAL ("global") and
+  LOCATION_SCREEN ("screen", the default). delete answers whether the
+  key was there; remove stays as LWE's old name for it.
+- Values keep their type (JSON): a number comes back a number, an
+  object an object, and a stored Vec2/Vec3/Vec4 a vector again. A
+  missing key reads undefined (WE's result is not documented; the
+  library's scripts read it with || or ??).
+- It persists: new wp_config_set_storage_dir names a directory, and
+  each project keeps one JSON file there (its Workshop id, else its
+  title), written whole and renamed after a tick that changed it, and
+  when the scene goes. Over WE's 100 KB it is not saved (logged).
+  Without a directory it lives as long as the scene, as before.
+- One "screen" store per project: the core plays a project on one
+  screen.
+
+Origin: ours
+Why: saved positions and settings reset on every start (docs/player/spikes/we-lwe-gap-audit.md B10: S36)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ include/linux-wallpaperengine/configuration.h |  11 ++
+ src/core/WallpaperEngine/Configuration.h      |   2 +
+ .../Scripting/ScriptEngine.cpp                | 102 ++++++++++++++++++
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |   6 ++
+ .../Scripting/resources/builtins.js           |  99 +++++++++++++++--
+ src/core/frontends/configuration.cpp          |  11 ++
+ 6 files changed, 221 insertions(+), 10 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/configuration.h b/include/linux-wallpaperengine/configuration.h
+index 3af86d3..c4e4be2 100644
+--- a/include/linux-wallpaperengine/configuration.h
++++ b/include/linux-wallpaperengine/configuration.h
+@@ -87,6 +87,17 @@ WPENGINE_API bool wp_config_set_assets_dir (wp_configuration* config, const char
+  */
+ WPENGINE_API bool wp_config_set_backgrounds_dir (wp_configuration* config, const char* dir);
+ 
++/**
++ * Where scripts' localStorage persists (SceneScript ILocalStorage): one JSON file per project in this directory,
++ * named after its Workshop id (else its title). Unset: localStorage lives only as long as the project
++ *
++ * @param config
++ * @param dir An existing, writable directory
++ *
++ * @return true if the directory was set (it exists), false otherwise
++ */
++WPENGINE_API bool wp_config_set_storage_dir (wp_configuration* config, const char* dir);
++
+ /**
+  * Updates the steam directory for this configuration.
+  *
+diff --git a/src/core/WallpaperEngine/Configuration.h b/src/core/WallpaperEngine/Configuration.h
+index 34d6b72..371b23e 100644
+--- a/src/core/WallpaperEngine/Configuration.h
++++ b/src/core/WallpaperEngine/Configuration.h
+@@ -51,6 +51,8 @@ public:
+     std::optional<wp_audio_output> audioOutput;
+     bool disableParticles;
+     bool disableParallax;
++    /** where scripts' localStorage persists (wp_config_set_storage_dir); unset: in memory only */
++    std::optional<std::filesystem::path> storageDir;
+     int web_fps;
+ 
+     bool baseOnly;
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index e6303d8..509ee80 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -4,6 +4,7 @@
+ #include "ScriptPropertiesObject.h"
+ #include "ScriptableObject.h"
+ #include "WallpaperEngine/Audio/AudioContext.h"
++#include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/Data/Model/Project.h"
+ #include "WallpaperEngine/Data/Model/Property.h"
+ #include "WallpaperEngine/Logging/Log.h"
+@@ -23,6 +24,8 @@
+ #include <chrono>
+ #include <cmath>
+ #include <cstring>
++#include <filesystem>
++#include <fstream>
+ #include <ctime>
+ #include <future>
+ #include <optional>
+@@ -46,6 +49,58 @@ extern char** environ;
+ 
+ namespace {
+ JSValue scriptengine_layer_prop (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
++
++// __storage.read () / write (text): localStorage's file (wp_config_set_storage_dir), "" when none
++JSValue scriptengine_storage_read (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* engine = static_cast<ScriptEngine*> (JS_GetContextOpaque (ctx));
++    const auto path = engine == nullptr ? std::optional<std::filesystem::path> () : engine->storagePath ();
++
++    if (!path.has_value ()) {
++	return JS_NewString (ctx, "");
++    }
++
++    std::ifstream in (*path, std::ios::binary);
++    std::stringstream text;
++    text << in.rdbuf ();
++    return JS_NewString (ctx, text.str ().c_str ());
++}
++
++JSValue scriptengine_storage_write (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* engine = static_cast<ScriptEngine*> (JS_GetContextOpaque (ctx));
++    const auto path = engine == nullptr ? std::optional<std::filesystem::path> () : engine->storagePath ();
++
++    if (!path.has_value () || argc < 1) {
++	return JS_FALSE;
++    }
++
++    const char* text = JS_ToCString (ctx, argv[0]);
++
++    if (text == nullptr) {
++	return JS_FALSE;
++    }
++
++    // written whole, then renamed over the old file: a crash never leaves half a file
++    const std::filesystem::path partial = path->string () + ".part";
++    bool ok = false;
++    {
++	std::ofstream out (partial, std::ios::binary | std::ios::trunc);
++	out << text;
++	ok = out.good ();
++    }
++    JS_FreeCString (ctx, text);
++
++    std::error_code error;
++    if (ok) {
++	std::filesystem::rename (partial, *path, error);
++    }
++    if (!ok || error) {
++	sLog.error ("localStorage: cannot write ", path->string ());
++	std::filesystem::remove (partial, error);
++	return JS_FALSE;
++    }
++
++    return JS_TRUE;
++}
+ }
+ extern float g_Time;
+ extern float g_TimeLast;
+@@ -290,6 +345,12 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+ 	this->m_context, this->m_globalThis, "__layerProp",
+ 	JS_NewCFunction (this->m_context, scriptengine_layer_prop, "__layerProp", 2)
+     );
++    JSValue storage = JS_NewObject (this->m_context);
++    JS_SetPropertyStr (this->m_context, storage, "read", JS_NewCFunction (this->m_context, scriptengine_storage_read, "read", 0));
++    JS_SetPropertyStr (
++	this->m_context, storage, "write", JS_NewCFunction (this->m_context, scriptengine_storage_write, "write", 1)
++    );
++    JS_SetPropertyStr (this->m_context, this->m_globalThis, "__storage", storage);
+     // the rest of the API in JS (engine.is*(), localStorage, …), on top of the globals above
+     this->installBuiltins ();
+ 
+@@ -306,6 +367,8 @@ ScriptEngine::ScriptEngine (Wallpapers::CScene& scene) : m_scene (scene) {
+ }
+ 
+ ScriptEngine::~ScriptEngine () {
++    this->flushStorage ();
++
+     for (auto& unlisten : this->m_propertyListeners) {
+ 	unlisten ();
+     }
+@@ -1206,6 +1269,45 @@ void ScriptEngine::tick () {
+     }
+ 
+     this->runPendingJobs ();
++    this->flushStorage ();
++}
++
++void ScriptEngine::flushStorage () {
++    JSValue flush = JS_GetPropertyStr (this->m_context, this->m_globalThis, "__storageFlush");
++
++    if (JS_IsFunction (this->m_context, flush)) {
++	JSValue result = JS_Call (this->m_context, flush, JS_UNDEFINED, 0, nullptr);
++	if (JS_IsException (result)) {
++	    logJSException (this->m_context, "localStorage");
++	}
++	JS_FreeValue (this->m_context, result);
++    }
++
++    JS_FreeValue (this->m_context, flush);
++}
++
++std::optional<std::filesystem::path> ScriptEngine::storagePath () const {
++    const auto& dir = this->m_scene.getContext ().getContext ().config.storageDir;
++
++    if (!dir.has_value ()) {
++	return std::nullopt;
++    }
++
++    // the project's Workshop id, else its title, as a file name
++    const auto& project = this->m_scene.getScene ().project;
++    std::string name = !project.workshopId.empty () && project.workshopId[0] != '-' ? project.workshopId : project.title;
++
++    for (auto& c : name) {
++	if (!std::isalnum (static_cast<unsigned char> (c)) && c != '-' && c != '_') {
++	    c = '_';
++	}
++    }
++
++    if (name.empty ()) {
++	name = "untitled";
++    }
++
++    return *dir / (name + ".json");
+ }
+ 
+ void ScriptEngine::notifyTrackMetadataChange (const MediaProperties& properties) {
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 47ac3c9..76a2468 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -6,6 +6,7 @@
+ #include "SceneObject.h"
+ 
+ #include <chrono>
++#include <filesystem>
+ #include <future>
+ #include <map>
+ #include <memory>
+@@ -166,6 +167,9 @@ public:
+     /** The layers a cursor event can reach: solid ones with a script that handles one (re-listed as scripts load) */
+     [[nodiscard]] const std::vector<ScriptableObject*>& cursorLayers ();
+ 
++    /** localStorage's file for this project (wp_config_set_storage_dir), or none */
++    [[nodiscard]] std::optional<std::filesystem::path> storagePath () const;
++
+     /** engine.userProperties: every user property, colours as Vec3 (a new object) */
+     [[nodiscard]] JSValue userProperties ();
+ 
+@@ -218,6 +222,8 @@ private:
+     void callModule (LoadedModule& module, const char* name, int argc, JSValueConst argv[], bool writeBack);
+     void logModuleError (LoadedModule& module, const char* what);
+     void runPendingJobs ();
++    /** writes localStorage's file when a script changed it */
++    void flushStorage ();
+ 
+     // Installs globalThis.__layers and related helpers. Called lazily.
+     void ensureLayerRegistry ();
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index 12d1c8a..bcfedcc 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -1,14 +1,93 @@
+ globalThis.__intervals = Object.create(null);
+-globalThis.localStorage = globalThis.localStorage || {
+-  __data: Object.create(null),
+-  get(key) {
+-    key = String(key);
+-    return Object.prototype.hasOwnProperty.call(this.__data, key) ? this.__data[key] : null;
+-  },
+-  set(key, value) { this.__data[String(key)] = String(value); },
+-  remove(key) { delete this.__data[String(key)]; },
+-  clear() { this.__data = Object.create(null); }
+-};
++// SceneScript's ILocalStorage: get/set/delete/clear (key, location), LOCATION_GLOBAL ("global") and LOCATION_SCREEN
++// ("screen", the default). Values keep their type (JSON), and persist in the project's file (__storage, the host's
++// storage dir) up to WE's 100 KB; without one they live as long as the scene. One "screen" store per project (the core
++// plays a project on one screen). A missing key reads undefined (WE's result is not documented); a stored vector comes
++// back as a Vec2/3/4
++(function () {
++  const native = globalThis.__storage;
++  let data = { global: {}, screen: {} };
++  try {
++    const text = native ? native.read() : '';
++    if (text) {
++      const stored = JSON.parse(text);
++      if (stored && typeof stored === 'object') {
++        data.global = stored.global && typeof stored.global === 'object' ? stored.global : {};
++        data.screen = stored.screen && typeof stored.screen === 'object' ? stored.screen : {};
++      }
++    }
++  } catch (e) {
++    console.error('localStorage: the stored file is not JSON, starting empty');
++  }
++  let dirty = false;
++  const store = (location) => (location === 'global' ? data.global : data.screen);
++  const has = (bucket, key) => Object.prototype.hasOwnProperty.call(bucket, key);
++  // a stored Vec2/Vec3/Vec4 comes back as one (JSON keeps only its x y z w)
++  const revive = (key, value) => {
++    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
++      return value;
++    }
++    const keys = Object.keys(value).sort().join('');
++    const ctor = { xy: 'Vec2', xyz: 'Vec3', wxyz: 'Vec4' }[keys];
++    if (ctor === undefined || !Object.values(value).every((v) => typeof v === 'number')) {
++      return value;
++    }
++    try {
++      const make = (0, eval)(ctor);
++      return ctor === 'Vec2' ? new make(value.x, value.y)
++        : ctor === 'Vec3' ? new make(value.x, value.y, value.z) : new make(value.x, value.y, value.z, value.w);
++    } catch (e) {
++      return value;
++    }
++  };
++  globalThis.localStorage = {
++    LOCATION_GLOBAL: 'global',
++    LOCATION_SCREEN: 'screen',
++    get(key, location) {
++      const bucket = store(location);
++      key = String(key);
++      return has(bucket, key) ? JSON.parse(JSON.stringify(bucket[key]), revive) : undefined;
++    },
++    set(key, value, location) {
++      store(location)[String(key)] = value === undefined ? null : JSON.parse(JSON.stringify(value));
++      dirty = true;
++    },
++    delete(key, location) {
++      const bucket = store(location);
++      key = String(key);
++      if (!has(bucket, key)) {
++        return false;
++      }
++      delete bucket[key];
++      dirty = true;
++      return true;
++    },
++    // LWE's old name for delete
++    remove(key, location) { return this.delete(key, location); },
++    clear(location) {
++      if (location === 'global') {
++        data.global = {};
++      } else {
++        data.screen = {};
++      }
++      dirty = true;
++    }
++  };
++  globalThis.__storageFlush = function () {
++    if (!dirty) {
++      return;
++    }
++    dirty = false;
++    const text = JSON.stringify(data);
++    if (text.length > 100 * 1024) {
++      console.error('localStorage: over 100 KB (' + text.length + ' bytes), not saved');
++      return;
++    }
++    if (native) {
++      native.write(text);
++    }
++  };
++})();
+ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+   PLAYBACK_STOPPED: 0,
+   PLAYBACK_PLAYING: 1,
+diff --git a/src/core/frontends/configuration.cpp b/src/core/frontends/configuration.cpp
+index 62d414c..36ffaac 100644
+--- a/src/core/frontends/configuration.cpp
++++ b/src/core/frontends/configuration.cpp
+@@ -1,3 +1,4 @@
++#include <filesystem>
+ #include <algorithm>
+ #include <vector>
+ 
+@@ -51,6 +52,16 @@ WPENGINE_API bool wp_config_set_backgrounds_dir (wp_configuration* config, const
+     WPENGINE_CONFIG_API_END (false);
+ }
+ 
++WPENGINE_API bool wp_config_set_storage_dir (wp_configuration* config, const char* dir) {
++    WPENGINE_CONFIG_API_BEGIN
++    if (dir == nullptr || !std::filesystem::is_directory (dir)) {
++	return false;
++    }
++    static_cast<WallpaperEngine::Configuration*> (config)->storageDir = std::filesystem::path (dir);
++    return true;
++    WPENGINE_CONFIG_API_END (false);
++}
++
+ WPENGINE_API bool wp_config_set_steam_dir (wp_configuration* config, const char* dir) {
+     WPENGINE_CONFIG_API_BEGIN
+     return static_cast<WallpaperEngine::Configuration*> (config)->setSteamDir (dir);
