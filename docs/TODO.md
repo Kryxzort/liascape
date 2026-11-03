@@ -1031,8 +1031,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           result" (§ 5).
     - [ ] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
           loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
-    - [ ] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
+    - [x] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
+          **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a
+          synthetic tone; see the audit's "B8 result".
+          - [ ] Feed stereo: the worker still sends SysMon's u8 mono mix (Left = Right). Send f32 stereo frames
+                through `wp_context_audio_input_push` (a protocol change).
+          - [ ] Re-check the 17 audio scenes that didn't change with a 110 Hz tone, with a sweep or music.
     - [x] **B9 Small uniform/property/shader fixes.** `g_Frametime`, `g_PointerState`, `g_Daytime` (0 scenes read it),
           time wrap, annotation defaults, the foliagesway varying, live bloom, textinput quotes, usertextures (E4,
           E5, E9, E11, E17–E20, E36–E41, C1, C3, U1, U2, S18). ≤ 10 scenes each. S.

@@ -1,7 +1,7 @@
 From ccb545d8930d04e28e1b1b569e0bd1c77494d03e Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Mon, 2 Nov 2026 23:53:09 +0530
-Subject: [PATCH 23/44] data: play property keyframe animations the way
+Subject: [PATCH 23/45] data: play property keyframe animations the way
  Wallpaper Engine does
 
 A property's `animation` (`{"c0": [keys], ..., "options": {...},

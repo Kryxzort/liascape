@@ -3716,6 +3716,11 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   the previous rev's `-source` store path copied, the new patch `git apply`d, `nix hash path` = the PIN's
   `nix_hash`, `nix-store --add-fixed --recursive sha256 <dir named source>`. Only this machine builds until
   the branch is pushed.
+- **Audio response** (`patches/lwe/0045`, B8): `wp_context_audio_input_push(ctx, f32 interleaved, frames, channels,
+  rate)` feeds WE's spectrum (`g_AudioSpectrum*`, `engine.registerAudioBuffers`, audio-driven emitters);
+  `wp_context_audio_spectrum(ctx, 16|32|64, 0 left|1 right|2 average, out)` reads it. The worker still feeds the u8
+  mono mix (`wp_context_set_audio_input_mix`, taken as 44.1 kHz mono), so Left = Right until it sends f32 stereo.
+  Smoke: `--lwe-smoke … --tone HZ` puts a synthetic sine in the input mix (nothing plays).
 - **The patched API** (`patches/lwe/0003`): `wp_config_set_audio_output(cfg, {sample_rate,
   channels})` before `wp_context_create` → the context uses `HostAudioDriver`: no SDL audio
   subsystem, no device. `wp_context_audio_pull(ctx, float*, frames)` = the sum of every stream, each

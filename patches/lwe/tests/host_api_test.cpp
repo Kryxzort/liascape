@@ -2513,6 +2513,249 @@ static bool script_controls_a_sound () {
     return true;
 }
 
+// ---- B8: the audio spectrum (wp_context_audio_input_push / wp_context_audio_spectrum) ----
+
+// a context fed `seconds` of a tone per channel (frequency 0 = silence), `fps` frames a second at `rate` Hz,
+// wp_render_update_time after each push (the frame tick that smooths the spectrum)
+struct SpectrumRig {
+    wp_configuration* cfg = nullptr;
+    wp_context* ctx = nullptr;
+    double phase[2] = { 0.0, 0.0 };
+    double pending = 0.0;
+
+    SpectrumRig () {
+        g_now = 0.0f;
+        cfg = wp_config_create ();
+        wp_config_set_audio_output (cfg, &kStereo48k);
+        ctx = wp_context_create (cfg);
+        wp_context_set_time_counter (ctx, &g_clock);
+    }
+    ~SpectrumRig () {
+        wp_context_destroy (ctx);
+        wp_config_destroy (cfg);
+    }
+    void feed (double seconds, double fps, double fl, double fr, int rate = 48000, int channels = 2, float amp = 0.5f) {
+        const int frames = static_cast<int> (std::lround (seconds * fps));
+        std::vector<float> buf;
+        for (int f = 0; f < frames; f++) {
+            pending += rate / fps;
+            const int n = static_cast<int> (pending);
+            pending -= n;
+            buf.assign (static_cast<size_t> (n) * channels, 0.0f);
+            for (int i = 0; i < n; i++) {
+                for (int c = 0; c < channels; c++) {
+                    const double freq = c == 0 ? fl : fr;
+                    buf[static_cast<size_t> (i) * channels + c]
+                        = freq > 0.0 ? amp * static_cast<float> (std::sin (phase[c])) : 0.0f;
+                    phase[c] += 2.0 * M_PI * freq / rate;
+                }
+            }
+            if (n > 0) {
+                wp_context_audio_input_push (ctx, buf.data (), n, channels, rate);
+            }
+            g_now += static_cast<float> (1.0 / fps);
+            wp_render_update_time (ctx);
+        }
+    }
+    // just time passing (no input)
+    void idle (double seconds, double fps) {
+        const int frames = static_cast<int> (std::lround (seconds * fps));
+        for (int f = 0; f < frames; f++) {
+            g_now += static_cast<float> (1.0 / fps);
+            wp_render_update_time (ctx);
+        }
+    }
+    std::vector<float> bands (int resolution, int channel) const {
+        std::vector<float> out (resolution, -1.0f);
+        wp_context_audio_spectrum (ctx, resolution, channel, out.data ());
+        return out;
+    }
+};
+
+static int loudest (const std::vector<float>& v) {
+    return static_cast<int> (std::max_element (v.begin (), v.end ()) - v.begin ());
+}
+
+// WE's band of an FFT bin (GH 0x140103630): bins 1..639, pow ((i−1)/639, 0.25)·64, at most one band past the
+// previous bin's. A tone's bin at 48 kHz: f / (48000 / 2089)
+static int we_band_of (double freq, int rate) {
+    const int size = static_cast<int> (std::max (rate / 44100.0f, 1.0f) * 64.0f * 30.0f);
+    const int bin = static_cast<int> (std::lround (freq / (static_cast<double> (rate) / size)));
+    int band = 0;
+    for (int i = 1; i <= bin; i++) {
+        band = std::min (band + 1, static_cast<int> (std::pow ((i - 1) / 639.0f, 0.25f) * 64.0f) & 63);
+    }
+    return band;
+}
+
+// a tone lands in WE's band for its frequency (bass bins one band each, then the pow mapping), at 44.1 and 48 kHz
+// (unpatched: 64 linear bins of 21.5 Hz, u8 mono, so 5 kHz fell outside the spectrum)
+static bool audio_tones_land_in_we_bands () {
+    for (const int rate : { 48000, 44100 }) {
+        for (const double freq : { 100.0, 440.0, 1000.0, 5000.0, 12000.0 }) {
+            SpectrumRig rig;
+            rig.feed (1.5, 60.0, freq, freq, rate);
+            const auto left = rig.bands (64, 0);
+            const int got = loudest (left), want = we_band_of (freq, rate);
+            printf ("    %5d Hz %6.0f Hz tone → band %2d (WE's %2d), value %.3f\n", rate, freq, got, want, left[got]);
+            CHECK (std::abs (got - want) <= 1, "%.0f Hz at %d Hz: loudest band %d, want %d", freq, rate, got, want);
+            CHECK (left[got] > 0.05f, "%.0f Hz: band %d only %.4f", freq, got, left[got]);
+        }
+    }
+    return true;
+}
+
+// left and right are their own channels, the average is their mean, 32/16 bands are the max of pairs; a mono
+// input reads the same on both sides (unpatched: right was left's array)
+static bool audio_left_right_and_resolutions () {
+    SpectrumRig rig;
+    rig.feed (1.5, 60.0, 1000.0, 5000.0);
+    const auto l = rig.bands (64, 0), r = rig.bands (64, 1), a = rig.bands (64, 2);
+    const int bl = loudest (l), br = loudest (r);
+    printf ("    1 kHz left → left band %d (%.3f; right there %.3f), 5 kHz right → right band %d (%.3f; left there %.3f)\n",
+            bl, l[bl], r[bl], br, r[br], l[br]);
+    CHECK (std::abs (bl - we_band_of (1000.0, 48000)) <= 1 && std::abs (br - we_band_of (5000.0, 48000)) <= 1,
+           "bands %d / %d", bl, br);
+    CHECK (r[bl] < 0.2f * l[bl] && l[br] < 0.2f * r[br], "channels leak: %.3f / %.3f", r[bl], l[br]);
+    bool mean = true, pairs = true;
+    for (int c = 0; c < 3; c++) {
+        const auto b64 = rig.bands (64, c), b32 = rig.bands (32, c), b16 = rig.bands (16, c);
+        for (int i = 0; i < 32; i++) {
+            pairs = pairs && b32[i] == std::max (b64[2 * i], b64[2 * i + 1]);
+        }
+        for (int i = 0; i < 16; i++) {
+            pairs = pairs && b16[i] == std::max (b32[2 * i], b32[2 * i + 1]);
+        }
+    }
+    for (int i = 0; i < 64; i++) {
+        mean = mean && std::fabs (a[i] - 0.5f * (l[i] + r[i])) < 1e-6f;
+    }
+    CHECK (mean, "average isn't (left + right) / 2");
+    CHECK (pairs, "32/16 bands aren't the max of pairs");
+    float none[16];
+    CHECK (!wp_context_audio_spectrum (rig.ctx, 20, 0, none) && !wp_context_audio_spectrum (rig.ctx, 16, 3, none),
+           "a bad resolution/channel was accepted");
+
+    SpectrumRig mono;
+    mono.feed (1.5, 60.0, 1000.0, 0.0, 48000, 1);
+    const auto ml = mono.bands (64, 0), mr = mono.bands (64, 1);
+    CHECK (ml == mr && ml[loudest (ml)] > 0.05f, "mono: right isn't left");
+    return true;
+}
+
+// the smoothing runs on the frame's dt: 30 and 144 fps reach the same values; a second without input is silence;
+// a context never fed stays at zero (unpatched: movetowards 0.3 per frame)
+static bool audio_smoothing_is_dt_based () {
+    SpectrumRig slow, fast;
+    slow.feed (2.0, 30.0, 440.0, 440.0);
+    fast.feed (2.0, 144.0, 440.0, 440.0);
+    const auto a = slow.bands (64, 0), b = fast.bands (64, 0);
+    const int k = loudest (a);
+    printf ("    440 Hz for 2 s: band %d = %.3f at 30 fps, %.3f at 144 fps\n", k, a[k], b[k]);
+    CHECK (loudest (b) == k && std::fabs (a[k] - b[k]) < 0.1f * a[k], "30 vs 144 fps: %.3f vs %.3f", a[k], b[k]);
+
+    // the follow is limited to 40/s: 0.1 s after a step it has moved ≤ 4 (at 60 fps ≈ 0.07 s of rise per frame)
+    SpectrumRig step;
+    step.feed (0.05, 60.0, 440.0, 440.0);
+    const float early = step.bands (64, 0)[k];
+    step.idle (1.2, 60.0);
+    const auto after = step.bands (64, 0);
+    printf ("    after 3 frames %.3f; 1.2 s without input → max %.4f\n", early, after[loudest (after)]);
+    CHECK (after[loudest (after)] == 0.0f, "input stopped 1.2 s ago, band still %.4f", after[loudest (after)]);
+
+    SpectrumRig unfed;
+    unfed.idle (0.5, 60.0);
+    const auto z = unfed.bands (64, 2);
+    CHECK (z[loudest (z)] == 0.0f, "an unfed context has a spectrum");
+    return true;
+}
+
+// one step of a rig with `freq` Hz (0 = silence) in the left channel only: 1/30 s of 48 kHz stereo
+static void step_with_left_tone (ScriptRig& rig, double freq, double& phase) {
+    std::vector<float> buf (1600 * 2, 0.0f);
+    for (int i = 0; i < 1600; i++) {
+        buf[2 * i] = freq > 0.0 ? 0.5f * static_cast<float> (std::sin (phase)) : 0.0f;
+        phase += 2.0 * M_PI * freq / 48000.0;
+    }
+    wp_context_audio_input_push (rig.ctx, buf.data (), 1600, 2, 48000);
+    rig.step ();
+}
+
+// the spectrum reaches g_AudioSpectrum16Left/Right (their own channels), engine.registerAudioBuffers (only at a
+// module's top level, 16/32/64 only) and an emitter's audioprocessingmode (left / right) (unpatched: Right = Left,
+// registerAudioBuffers was undefined so the module failed, emitters ignored the audio)
+static bool audio_reaches_shaders_scripts_and_emitters () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script = "const ab = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);\n"
+                               "let bad = '';\n"
+                               "try { engine.registerAudioBuffers(20); } catch (e) { bad = e.message; }\n"
+                               "export function update(value) {\n"
+                               "  let inside = '';\n"
+                               "  try { engine.registerAudioBuffers(16); } catch (e) { inside = e.message; }\n"
+                               "  if (bad != 'Resolution must be either 16, 32 or 64.' || inside.indexOf('global scope') < 0\n"
+                               "      || ab.left.length != 16 || ab.right.length != 16 || ab.average.length != 16) {\n"
+                               "    console.log('FAILS ' + bad + ' / ' + inside);\n"
+                               "    return false;\n"
+                               "  }\n"
+                               "  return ab.left[0] > 0.2 && ab.right[0] < 0.05 && Math.abs(ab.average[0] - ab.left[0] / 2) < 1e-6;\n"
+                               "}";
+    const std::string dir
+        = script_scene (b9_object (1, 16) + "," + square (2, scripted ("visible", "false", script) + ",\"origin\":\"40 16 0\""));
+    b9_layer (dir, "uniform float g_AudioSpectrum16Left[16];\nuniform float g_AudioSpectrum16Right[16];\n",
+              "gl_FragColor = vec4(min(g_AudioSpectrum16Left[0], 1.0), min(g_AudioSpectrum16Right[0], 1.0), 0.0, 1.0);");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    double phase = 0.0;
+    for (int i = 0; i < 3; i++) {
+        step_with_left_tone (rig, 0.0, phase);
+    }
+    std::array<unsigned char, 4> quiet {};
+    read_pixel (rig.fbo, 16, 16, quiet.data ());
+    const bool shownQuiet = rig.row ()[40] == '#';
+    for (int i = 0; i < 30; i++) {
+        step_with_left_tone (rig, 100.0, phase);
+    }
+    std::array<unsigned char, 4> loud {};
+    read_pixel (rig.fbo, 16, 16, loud.data ());
+    const bool shownLoud = rig.row ()[40] == '#';
+    printf ("    shader: silence r=%d g=%d, a 100 Hz tone on the left r=%d g=%d; the script's square: %s → %s\n", quiet[0],
+            quiet[1], loud[0], loud[1], shownQuiet ? "shown" : "hidden", shownLoud ? "shown" : "hidden");
+    CHECK (quiet[0] < 3 && quiet[1] < 3, "silence drew r=%d g=%d", quiet[0], quiet[1]);
+    CHECK (loud[0] > 100 && loud[1] < 10, "left tone: r=%d g=%d (want left only)", loud[0], loud[1]);
+    CHECK (!shownQuiet && shownLoud, "registerAudioBuffers: square %d → %d (see FAILS above)", shownQuiet, shownLoud);
+
+    // emitters: rate 10 at full level; mode 1 listens to the left, mode 2 to the right
+    const std::string grey = "{\"name\":\"colorrandom\",\"min\":\"8 8 8\",\"max\":\"8 8 8\"},"
+                             "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    const auto system = [&grey] (int mode) {
+        return particle_system ("add", ",\"maxcount\":100",
+                                ",\"distancemin\":0,\"distancemax\":0,\"rate\":10,\"audioprocessingmode\":" + std::to_string (mode),
+                                grey);
+    };
+    std::vector<std::string> files;
+    const std::string pdir = particle_scene (particle_object (1, "left.json", 16, 16) + "," + particle_object (2, "right.json", 48, 16),
+                                             "0 0 0", { { "left.json", system (1) }, { "right.json", system (2) } }, files);
+    ScriptRig prig;
+    CHECK (particle_rig_open (prig, pdir, files), "load/build of %s failed", pdir.c_str ());
+    phase = 0.0;
+    for (int i = 0; i < 15; i++) {
+        step_with_left_tone (prig, 0.0, phase);
+    }
+    const double silentLeft = stacked (prig, 16, 16), silentRight = stacked (prig, 48, 16);
+    for (int i = 0; i < 45; i++) {
+        step_with_left_tone (prig, 100.0, phase);
+    }
+    const double left = stacked (prig, 16, 16), right = stacked (prig, 48, 16);
+    printf ("    emitters (rate 10): silence 0.5 s → left %.1f right %.1f; then a left tone 1.5 s → left %.1f right %.1f\n",
+            silentLeft, silentRight, left, right);
+    CHECK (silentLeft < 0.5 && silentRight < 0.5, "silence emitted (%.1f / %.1f)", silentLeft, silentRight);
+    CHECK (left >= 9.0 && left <= 16.5, "the left emitter: %.1f particles in 1.5 s of a loud left tone", left);
+    CHECK (right < 0.5, "the right emitter emitted for a left-only tone (%.1f)", right);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -2571,6 +2814,10 @@ int main (int argc, char** argv) {
     run ("cursor_events_reach_layers", cursor_events_reach_layers);
     run ("local_storage_persists", local_storage_persists);
     run ("script_controls_a_sound", script_controls_a_sound);
+    run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
+    run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
+    run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
+    run ("audio_reaches_shaders_scripts_and_emitters", audio_reaches_shaders_scripts_and_emitters);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);

@@ -224,3 +224,9 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   to 183; most of what's left is audio-reactive scripts (batch B8). 3414858021's date text now moves off-screen
   because text layers don't follow their parent yet (batch B4).
 
+- **Scenes, batch B8 (fork patch 0045, pin `592fdff`):** audio-reactive wallpapers now use Wallpaper Engine's own
+  spectrum (decoded from wallpaper64.exe): its bands, smoothing and auto-gain, `engine.registerAudioBuffers` for
+  scripts, and particle emitters whose rate follows the music. With a synthetic tone, 22 of the 39 audio scenes that
+  load visibly react (2542468435, 3029971128, 2890767643, 1556245028 the most). Left and right are still the same:
+  the player feeds one mono mix; stereo is a TODO. The agent doing this hit the weekly usage limit mid-way; the
+  rest was finished in the main session.

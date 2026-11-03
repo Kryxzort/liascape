@@ -529,12 +529,15 @@ impl Drop for Scene {
 /// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
 /// `--audio-dump` (a live change, as the worker applies `SetProperty`), or without `--audio-dump`
 /// `T` s into the frames, after writing the frame before it as `<out>/lwe-smoke-before-<T>s.png`.
+/// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` every frame (synthetic: nothing is
+/// played), for audio-responsive scenes — compare with a run without it.
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
     let mut out = None;
     let mut seconds = 3.0f32;
     let mut audio_dump = 0.0f32;
+    let mut tone = 0.0f32;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
     let mut props_at: Vec<(f32, String, serde_json::Value)> = Vec::new();
     let prop = |kv: Option<&String>| -> Option<(String, serde_json::Value)> {
@@ -550,6 +553,7 @@ pub fn smoke(args: &[String]) -> ! {
             "--out" => out = it.next().cloned(),
             "--seconds" => seconds = it.next().and_then(|v| v.parse().ok()).unwrap_or(3.0),
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            "--tone" => tone = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
                 let at = it.next().and_then(|v| v.parse().ok());
@@ -562,7 +566,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--prop name=value]... [--prop-at T name=value]..."
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]..."
         );
         std::process::exit(2)
     };
@@ -573,6 +577,7 @@ pub fn smoke(args: &[String]) -> ! {
         Path::new(&out),
         seconds,
         audio_dump,
+        tone,
         &props,
         &props_at,
     ) {
@@ -593,6 +598,7 @@ fn run_smoke(
     out: &Path,
     seconds: f32,
     audio_dump: f32,
+    tone: f32,
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
 ) -> Result<String, String> {
@@ -672,6 +678,17 @@ fn run_smoke(
                     live_errors.push(e);
                 }
             }
+        }
+        if tone > 0.0 {
+            // LWE takes the input mix as 44.1 kHz: the frame's last INPUT_FRAME samples, phase-continuous
+            let end = (t * 44_100.0) as usize;
+            let sine: Vec<u8> = (end.saturating_sub(INPUT_FRAME)..end)
+                .map(|n| {
+                    let x = (std::f32::consts::TAU * tone * n as f32 / 44_100.0).sin();
+                    (128.0 + 127.0 * x).round() as u8
+                })
+                .collect();
+            scene.set_input(&sine);
         }
         let s = std::time::Instant::now();
         scene.render(t, fbo_id);

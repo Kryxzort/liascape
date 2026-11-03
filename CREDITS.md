@@ -76,3 +76,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0042-scripting-localStorage-persists-as-SceneScript-s-ILo.patch` | scripting: localStorage persists, as SceneScript's ILocalStorage | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0043-scripting-a-press-a-release-and-a-click-go-to-the-sh.patch` | scripting: a press, a release and a click go to the shown layers under the cursor | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0044-scripting-console-s-methods-are-writable-console.war.patch` | scripting: console's methods are writable; console.warn/info/debug | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0045-audio-compute-WE-s-spectrum-per-channel-for-shaders-.patch` | audio: compute WE's spectrum, per channel, for shaders, scripts and emitters | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

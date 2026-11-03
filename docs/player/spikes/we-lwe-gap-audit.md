@@ -126,7 +126,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B5 Parallax and camera** — **done 2026-11-03** (patch 0029; see "B5 result" in § 5; E6, the camera-object pan and paths left) | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
 | **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
-| **B8 Audio response** | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
+| **B8 Audio response** — **done 2026-11-03** on the fork side; liascape still feeds mono (patch 0045; see "B8 result" in § 5) | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
 | **B9 Small uniform, property and shader fixes** — **done 2026-11-03** except E9, E11, E20, E38 (patches 0031–0036; E41 in patch 0037; see "B9 result" and "E41 result" in § 5) | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
 | **B10 SceneScript API surface** — **done 2026-11-03** except S16 (resize/animation events), S26 (video textures, puppet layers, …), S37 (createLayer) (patches 0038–0044; see "B10 result" in § 5) | S8, S10–S16, S19–S27, S29–S32, S36, S37 | 1–28 each | M–L | Cursor hit-test + events (`solid`). Media events from liascape's MPRIS (`wp_project_notify_*`). `applyUserProperties` + `engine.userProperties`. `getLayer` by index for all layer types. ISoundLayer `play/stop/pause` (unblocks `startsilent`, A7). Persistent `localStorage`. Layer writes. Missing engine/scene members. Needs B1. | Per feature, a fork test script. Smoke 2325974975 (sounds + menu), 2890767643 (media widget with a fake MPRIS). Headless pointer clicks for cursor events. |
 | **B11 Particles, extended** | P2, P10, P15, P22, P24–P30, P34, P35, P37 | 29 | L | Child systems (static / eventfollow / eventspawn / eventdeath). The missing initializers and operators. Control-point overrides and transforms. Rope/trail combos. Needs the operator interpreter (GH 0x140265800) read from asm first (P31–P33). | Smoke the 29 child-system scenes before/after: sub-effects present. WE captures for 2 of them. |
@@ -1204,3 +1204,38 @@ The scripts behind the counts are in the session scratchpad's `audit/`:
 - `work-scenegraph/`, `work-effects/`, `work-particles/`, `work-scenescript/`.
 
 They are not committed. Re-run them against the Workshop folder to refresh the counts after the library changes.
+
+### B8 result (fork patch 0045, pin `592fdff`, 2026-11-03)
+
+Done: A1, A3, A4, A5, E8, S17, P20, P21 on the fork side. The decode (GH 0x140103630 capture thread, GH 0x140141520
+frame tick, GH 0x14025cfe0 / 0x140250d80 emitters, scenescript64.dll for `registerAudioBuffers`) is in the
+PlaybackRecorder.h comment and the fork commit message.
+
+- **The spectrum.** Per channel a complex FFT of N = max (rate / 44100, 1) · 1920 points, 2N/3 fresh frames per
+  analysis; bins 1..639 → 64 bands by pow ((i−1)/639, 0.25)·64 (max per band) of sqrt (w·|X|²) with WE's window
+  weight; per rendered frame an auto-gain per group of 8 bands, a dt-based low-pass and a rise/fall-limited follow;
+  the average channel and 32/16 bands as the max of pairs. A size with a factor above 5 runs as a Bluestein
+  convolution, as WE's FFT does.
+- **Consumers.** `g_AudioSpectrum{16,32,64}{Left,Right}` read their own channel. `engine.registerAudioBuffers
+  (16|32|64)` returns left/right/average Float32Arrays refreshed every frame, only from a module's top level, with
+  WE's errors; `engine.AUDIO_RESOLUTION_*`. Emitters with `audioprocessingmode` scale their rate by the loudest band
+  of their range through bounds, a smoothstep and the exponent (a float now).
+- **C API.** `wp_context_audio_input_push (ctx, f32 interleaved, frames, channels, rate)` and
+  `wp_context_audio_spectrum (ctx, resolution, channel, out)`. The u8 mono input mix (`wp_context_set_audio_input_mix`)
+  still works, taken as 44.1 kHz mono; nothing runs for a context never fed.
+- **Fork tests** (`host_api_test`): 49/49, 4 new — `audio_tones_land_in_we_bands`, `audio_left_right_and_resolutions`,
+  `audio_smoothing_is_dt_based`, `audio_reaches_shaders_scripts_and_emitters`.
+- **Smoke** (`--lwe-smoke --tone 110`, a synthetic sine in the input mix, vs silence, 3 s, % of pixels differing):
+  of the 41 `supportsaudioprocessing` scenes, 39 load (3477054430 and 3509243656 are the known 3D load failures);
+  22 respond — 2542468435 36 %, 3029971128 32 %, 2890767643 22 %, 1556245028 19 %, 2134765860 10 %, the rest
+  0.02–1.3 % (bars, pulses); 17 show no change to a 110 Hz tone in 3 s. One `registerAudioBuffers` error is left:
+  3163060610 passes `engine.AUDIO_RESOtime_switchingION_16` (the author's find-and-replace typo → undefined), and
+  WE throws the same RangeError.
+- **Player tests** (debug): 737 passed, 0 failed, 3 ignored.
+
+Left:
+- **Stereo from liascape.** The worker still feeds the 1024-sample u8 mono mix SysMon builds, so Left = Right and
+  the input is resampled to 44.1 kHz u8. Feed SysMon's f32 stereo through `wp_context_audio_input_push` instead
+  (protocol: f32 frames instead of the u8 frame).
+- The 17 scenes that showed no change: check with music (a sweep, not one tone) before calling them done.
+
