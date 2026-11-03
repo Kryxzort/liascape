@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -68,6 +69,13 @@ public static class LiascapePlayerMedia
     //   anyway — so the final state is exactly what the full sequence would leave, and a burst holds ONE
     //   pending command per key, however long the player stalls. A coalesced command is admitted even at
     //   the cap (it doesn't grow the queue).
+    // - BATCHED (`QueueBatch`, keyed by kind, with a MEMBER — an item path): a coalescible pass whose
+    //   targets are a set of items (`override` — /library/volume|speed; `sceneloudness`): a new member
+    //   joins the pending batch of its key (since the last barrier), which moves to the tail like a
+    //   replaced set, and the pass runs ONCE over every member. Before (speed storm re-run, 2026-11-03),
+    //   each item was its own key (`override:<path>`) — clearing 315 items' overrides queued 315 passes,
+    //   reached the cap with the player answering in ms, and dropped an item's pass (any item's: the
+    //   playing one's too).
     // - anything else (`Queue`) — unknown semantics, so a barrier for coalescing, and refused at the cap.
     // The cap (item 6) still bounds memory: at MaxQueueDepth a command that can't coalesce and isn't
     // essential is logged and dropped. R81 re-applies settings when a stalled player answers again.
@@ -80,7 +88,12 @@ public static class LiascapePlayerMedia
         public bool Essential;
         public readonly TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<TaskCompletionSource>? Replaced; // completions of the pending items this one superseded
+        public HashSet<string>? Members;     // a batch's items (QueueBatch): a replaced batch's members join this one
+        public string? Caller;               // a barrier's origin (CallerMemberName) — the cap's histogram
         public bool Barrier => Key == null;
+        // what the cap's log counts it as: a key without its item paths (`preview:speed:/a,/b` → `preview:speed`)
+        public string Kind => Key == null ? (Essential ? "essential:" : "barrier:") + (Caller ?? "?")
+            : string.Join(':', Key.Split(':').TakeWhile(x => x.Length > 0 && x[0] != '/' && x[0] != '<'));
     }
 
     private static readonly LinkedList<QItem> _pending = new();
@@ -94,23 +107,23 @@ public static class LiascapePlayerMedia
     // how many pending commands a newer one with the same key replaced — self-test evidence
     public static int Coalesced => Volatile.Read(ref _coalesced);
 
-    public static Task<T> Queue<T>(Func<T> f)
+    public static Task<T> Queue<T>(Func<T> f, [CallerMemberName] string? caller = null)
     {
         var res = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        return Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: false)
+        return Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: false, caller)
             ? res.Task : Task.FromResult(default(T)!);
     }
 
-    public static Task Queue(Action a) => Queue<bool>(() => { a(); return true; });
+    public static Task Queue(Action a, [CallerMemberName] string? caller = null) => Queue<bool>(() => { a(); return true; }, caller);
 
     // A switch or a stop is user intent, not a coalescible property write: it is never dropped at the
     // cap (it still counts toward the depth) and nothing coalesces across it.
-    public static Task QueueEssential(Action a) => QueueEssential<bool>(() => { a(); return true; });
+    public static Task QueueEssential(Action a, [CallerMemberName] string? caller = null) => QueueEssential<bool>(() => { a(); return true; }, caller);
 
-    public static Task<T> QueueEssential<T>(Func<T> f)
+    public static Task<T> QueueEssential<T>(Func<T> f, [CallerMemberName] string? caller = null)
     {
         var res = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: true);
+        Enqueue(Wrap(() => res.TrySetResult(f()), () => res.TrySetResult(default!)), key: null, essential: true, caller);
         return res.Task;
     }
 
@@ -122,15 +135,48 @@ public static class LiascapePlayerMedia
         return Admit(it) ? it.Done.Task : Task.CompletedTask;
     }
 
+    // A coalescible pass over a SET of items (`member` = an item's full path): joins the pending batch of
+    // `key` since the last barrier (that batch's members + this one, at the tail — a replaced set's rule),
+    // and `run` gets every member once, when it runs (each pass re-reads its inputs then). So a loop over
+    // every item (the storm's 315 `/library/speed`) is ONE pending command, not one per item.
+    public static Task QueueBatch(string key, string member, Action<IReadOnlyCollection<string>> run)
+    {
+        var members = new HashSet<string>(StringComparer.Ordinal) { member };
+        var it = MakeItem(Wrap(() => { string[] m; lock (_qLock) m = [.. members]; run(m); }, () => { }), key, essential: false);
+        it.Members = members;
+        return Admit(it) ? it.Done.Task : Task.CompletedTask;
+    }
+
     private static Action Wrap(Action run, Action onThrow) => () =>
     {
         try { run(); }
         catch (Exception e) { LiascapePlayerClient.Log($"queued liascape-player command threw: {e.GetBaseException().Message}"); onThrow(); }
     };
 
-    private static QItem MakeItem(Action run, string? key, bool essential) => new() { Run = run, Key = key, Essential = essential };
+    private static QItem MakeItem(Action run, string? key, bool essential, string? caller = null) =>
+        new() { Run = run, Key = key, Essential = essential, Caller = caller };
 
-    private static bool Enqueue(Action run, string? key, bool essential) => Admit(MakeItem(run, key, essential));
+    private static bool Enqueue(Action run, string? key, bool essential, string? caller) => Admit(MakeItem(run, key, essential, caller));
+
+    // the cap: drops counted, the pending kinds logged at most every CapLogEveryMs (what filled it — a
+    // drop said only "dropping a queued command", and the 2026-11-03 re-run couldn't tell which)
+    private const long CapLogEveryMs = 5000;
+    private static long _capLoggedAt = -CapLogEveryMs;
+    private static long _runningSince;
+    private static int _capDrops;
+    public static int CapDrops => Volatile.Read(ref _capDrops); // self-test / IT evidence
+    public static string? LastCapHistogram { get; private set; }
+
+    // Under _qLock.
+    private static string CapHistogram()
+    {
+        var kinds = _pending.GroupBy(x => x.Kind).Select(g => (kind: g.Key, n: g.Count(), keys: g.Select(x => x.Key ?? "").Distinct().Count()))
+            .OrderByDescending(x => x.n).ToList();
+        var top = string.Join(", ", kinds.Take(12).Select(x => $"{x.kind} ×{x.n}" + (x.keys > 1 ? $" ({x.keys} keys)" : "")));
+        if (kinds.Count > 12) top += $", +{kinds.Count - 12} kinds";
+        var run = _running is { } r ? $"{r.Kind} for {Math.Max(0, Environment.TickCount64 - _runningSince)} ms" : "nothing";
+        return $"pending {_pending.Count}: {top}; running {run}";
+    }
 
     private static bool Admit(QItem it)
     {
@@ -143,6 +189,7 @@ public static class LiascapePlayerMedia
                     if (n.Value.Barrier) break;              // never coalesce across a barrier
                     if (n.Value.Key != it.Key) continue;
                     _pending.Remove(n);
+                    if (it.Members != null && n.Value.Members != null) it.Members.UnionWith(n.Value.Members); // a batch keeps every member
                     (it.Replaced ??= []).Add(n.Value.Done);
                     if (n.Value.Replaced != null) it.Replaced.AddRange(n.Value.Replaced);
                     replaced = true;
@@ -151,7 +198,15 @@ public static class LiascapePlayerMedia
                 }
             if (!replaced && !it.Essential && _pending.Count + (_running != null ? 1 : 0) >= MaxQueueDepth)
             {
-                LiascapePlayerClient.Log($"liascape-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping a queued command");
+                Interlocked.Increment(ref _capDrops);
+                long nowMs = Environment.TickCount64;
+                LastCapHistogram = CapHistogram(); // O(depth), only on a drop
+                if (nowMs - _capLoggedAt >= CapLogEveryMs)
+                {
+                    _capLoggedAt = nowMs;
+                    LiascapePlayerClient.Log($"liascape-player command queue at its cap ({MaxQueueDepth}, a stalled/overloaded player) — dropping {it.Kind}; {LastCapHistogram} ({CapDrops} dropped so far)");
+                }
+                else LiascapePlayerClient.Log($"liascape-player command queue at its cap ({MaxQueueDepth}) — dropping {it.Kind}");
                 return false;
             }
             _pending.AddLast(it);
@@ -172,6 +227,7 @@ public static class LiascapePlayerMedia
                 _pending.RemoveFirst();
                 it = first.Value;
                 _running = it;
+                _runningSince = Environment.TickCount64;
             }
             try { it.Run(); } catch { } // Run is wrapped; belt and braces — the worker must never die
             lock (_qLock) _running = null;
@@ -1075,7 +1131,8 @@ public static class LiascapePlayerMedia
     //     loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
     //   R81 (a restart / the stall breaker closing) → `ReapplyAll()`: "reapply", the same + log + count.
     //   /library/volume|speed, the volume key on an item's own volume (`ApplyOverrideLive`) →
-    //     `ApplyOverride(path)`: "override:<path>", that item's sources only, gain.user + speed, cached.
+    //     `ApplyOverride(path)`: batch "override" (every item queued since the pending one ran), those
+    //     items' sources only, gain.user + speed, cached.
     //   /preview {paths} (the modal's drag) → `Preview`: "preview:<prop>:<paths>", only those items'
     //     sources, the dragged prop, the dragged value as their transient, cached — ONE `set` per source
     //     per value, nothing persisted (no paths → the playing item).
@@ -1167,8 +1224,8 @@ public static class LiascapePlayerMedia
     // configuration's `loudness_key` (+ seed) and `gain.normalize` (ramped). Coalescible per item.
     public static void ApplySceneLoudness(string path)
     {
-        QueueSet("sceneloudness:" + FullPath(path), () =>
-            ResolveNow(new Req { Items = [path], OnlyItems = true, Props = SceneLoudnessProps }));
+        QueueBatch("sceneloudness", FullPath(path), paths =>
+            ResolveNow(new Req { Items = paths, OnlyItems = true, Props = SceneLoudnessProps }));
         LiascapePlayerProgram.PushItem(path);
     }
 
@@ -1194,13 +1251,17 @@ public static class LiascapePlayerMedia
     // `path`'s own volume/speed (its override ?? the global) onto its source(s) — wherever they are (on
     // screen, either side of an effect, a pending B). `onPlayingSpeed` gets its effective speed when it is
     // what `cur:*` shows (the timed tick's speed factor). Coalescible per item: it re-reads the override.
+    // Batched (`override`, one pending pass for every item whose override changed — a loop over the whole
+    // library is one command, not one per item). `onPlayingSpeed`: the newest one given.
+    private static Action<double>? _onPlayingSpeed;
     public static void ApplyOverride(string path, Action<double>? onPlayingSpeed = null)
     {
-        QueueSet("override:" + FullPath(path), () =>
+        if (onPlayingSpeed != null) _onPlayingSpeed = onPlayingSpeed;
+        QueueBatch("override", FullPath(path), paths =>
         {
-            if (ResolveNow(new Req { Items = [path], OnlyItems = true, Props = PerItem }) == 0 || onPlayingSpeed == null) return;
-            if (SamePath(CurrentPath(), path))
-                onPlayingSpeed(Math.Clamp(LibraryService.ReadSpeedOverride(path) ?? SettingsService.Load().Speed, 0.1, 4.0));
+            if (ResolveNow(new Req { Items = paths, OnlyItems = true, Props = PerItem }) == 0 || _onPlayingSpeed is not { } cb) return;
+            if (CurrentPath() is string cur && paths.Contains(FullPath(cur)))
+                cb(Math.Clamp(LibraryService.ReadSpeedOverride(cur) ?? SettingsService.Load().Speed, 0.1, 4.0));
         });
         LiascapePlayerProgram.PushItem(path); // a rotation's next B of it
     }

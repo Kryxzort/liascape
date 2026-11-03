@@ -617,6 +617,11 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       video) timed out in all 6 cells. The source now confirms `AudioFlowing` when `audio-pts` is
       unavailable while the picture plays on (no audio playing: track ended or `aid` unresolved), and its
       40 ms margin on real time, not on a later `audio-pts` change (`MpvSource::confirm_flowing_by_time`).
+- [ ] **Adapter IT: the private-PipeWire auto-mute section flakes under load** (2026-11-03, 3 of ~8 runs while other
+      agents' suites ran; each passed on a rerun): once `bus never came up` (`bus: {state:null}`), once a new `serve`
+      found "already running" (another player held the socket between the test's `quit` and `serve`), once "the private
+      pipewire-pulse never made its socket" (+ `armed upgrade` precondition: stale only 5 s). Harness waits/races, not
+      product code — make the section's setup wait on what it needs (socket, bus up, the old player gone) with bounds.
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
@@ -775,6 +780,16 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         256 cap twice (04:08:45 at the drag → global edge, 04:24:57 in the 50/s flood) and dropped one queued
         command each time, despite the per-key coalescing — so ≥ 256 non-coalesced commands were pending: find
         which (switches/barriers from `/next` every 8 s? keys that differ per value?) before trusting the cap.
+        — **cap hits explained + fixed (2026-11-03, `queue-cap`)**: both hits were the storm's own loops over
+        every item's `/library/speed` (04:08:45 = drag → global edge, which clears all 315 overrides; 04:24:57 =
+        the restore after flood 420 s + settle 10 s, which re-sets them), not the drag/flood/`/next`: each
+        `ApplyOverride` was its own `override:<path>` key → 315 distinct keys, and the worker (each pass + the
+        `program:items` push of 315 items it triggers) is slower than the loop. The dropped one was some item's
+        override pass — the playing item's possible (its speed then stays wrong). Now per-item passes are a
+        **batch** (`QueueBatch`: `override`, `sceneloudness` — one pending pass over every item since it ran),
+        and a cap drop logs the pending kinds (`dropping <kind>; pending N: <kind> ×n (k keys), …; running …`).
+        Self-test "per-item override burst": 317 overrides behind a clog, the playing one last → depth 3 (the clog + the batch + the items push), its
+        speed lands (RED: depth 256, dropped, speed stuck at the preview's). The stall-breaker trips above stay open.
   - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
         — done: the queue is a pending list; a `QueueSet(key)` (target + property) replaces a still-pending one

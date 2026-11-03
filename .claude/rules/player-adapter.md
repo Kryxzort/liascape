@@ -119,11 +119,33 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
     behind a stalled player) holds ONE pending command per key. A coalesced command is admitted even
     at the cap (it doesn't grow the queue); the replaced one's task completes with its replacement
     (`Drain` stays correct).
+  - **batched** (`QueueBatch(key, member, run)` — a coalescible pass over a SET of items, member = an
+    item's full path): `override` (`ApplyOverride` — `/library/volume|speed`, the volume key on an item)
+    and `sceneloudness` (`ApplySceneLoudness`). A new member joins the pending batch of its key since
+    the last barrier (the batch moves to the tail, the replaced-set rule) and the pass runs ONCE over
+    every member (`Req.Items` = the set). **Why (speed storm re-run, 2026-11-03):** the cap was hit
+    twice with the player answering in ms — both times at a loop over every playlist item's
+    `/library/speed` (the storm's drag → global edge clears all 315 overrides; its restore re-sets
+    them): each was its own `override:<path>` key, 315 distinct keys never coalesce, and the worker
+    (each pass + the `program:items` push it triggers rebuilding 315 items) is slower than the loop →
+    256 pending, the next item's pass dropped — any item's, the PLAYING one's included (its speed then
+    stays wrong until the next change). Guard: self-test "per-item override burst" (317 overrides
+    behind a 600 ms clog, the playing item last: depth ≤ 3, its speed lands, the tick's speed callback
+    fires — RED: depth 256, speed stuck at the preview's) + the queue-level batch order
+    (`e1 B[/x,/y] E3 B[/z]`). Per-item keys that remain (`sceneprops:<path>`,
+    `preview:…:<paths>`, `preview:scene_props:<path>:…`) come from one user's drag/edit at a time.
   - anything else (`Queue(…)`): a barrier, refused at the cap.
 
   At the cap a command that can't coalesce and isn't essential is logged and dropped (R81 catches up
   after a stall). Before (speed storm): admission was refused for every set past 256, the NEWEST
-  included — the storm's own final restore sets were dropped.
+  included — the storm's own final restore sets were dropped. **The drop logs what filled the queue**
+  (at most every 5 s; the lines between say only the dropped kind): `dropping <kind>; pending N:
+  <kind> ×n (k keys), …; running <kind> for M ms (D dropped so far)` — a kind is the key without its
+  item paths (`preview:speed`, `override`), a barrier's is `essential:`/`barrier:` + its caller
+  (`CallerMemberName`: `QueueSwitch`, `Verb`, `QueueNewSession`, …). `CapDrops` /
+  `LastCapHistogram` are the self-test's evidence. With every per-item pass batched, what can still
+  reach the cap is ≥ 256 distinct keys/barriers behind a really stalled player — then a dropped set is
+  re-applied by R81 when it answers, and switches/stops/toggles are never dropped.
 - `SwitchEngineLive` reads `IsPlaying` before taking `_lock`, tears the session state down under it,
   and talks to liascape-player only AFTER releasing it: `StopAndQuit()` (drain the queue ≤ 3 s, `stop`, `quit`,
   then escalate against the **supervisor** — SIGCONT+SIGTERM, then SIGKILL, each waiting ≤ 1.5 s for the
@@ -662,11 +684,11 @@ computed for the playing item at request time landed on whatever played when it 
   |---|---|---|---|---|---|
   | `/settings` (`ApplyEffectiveLive`), volume key on the global, normalization, a loudness landing → `ApplyEffective` | `resolve` | all | all + fit | — | Fresh |
   | R81 → `ReapplyAll` | `reapply` | all | all + fit | — | Fresh |
-  | `/library/volume\|speed`, volume key on an item → `ApplyOverride(path)` | `override:<path>` | that item's | gain.user, speed | — | cached |
+  | `/library/volume\|speed`, volume key on an item → `ApplyOverride(path)` | batch `override` (every item since it ran) | those items' | gain.user, speed | — | cached |
   | `/preview {paths}` → `Preview` | `preview:<prop>:<paths>` | those items' (none → the playing item's) | the dragged one | the value, for those items | cached |
   | `/preview {global}` → `PreviewGlobal` | `preview-global:<prop>` | all | the dragged one | the value, as the global | cached |
   | `/library/scene-props` → `ApplySceneProps(path)` (after the re-plan) | `sceneprops:<path>` | that item's | scene_props, loudness_key (+ its seed), gain.normalize | — | cached |
-  | a scene's estimate landing (the queue) → `ApplySceneLoudness(path)` | `sceneloudness:<path>` | that item's | loudness_key (+ its seed), gain.normalize | — | cached |
+  | a scene's estimate landing (the queue) → `ApplySceneLoudness(path)` | batch `sceneloudness` | those items' | loudness_key (+ its seed), gain.normalize | — | cached |
   | `/library/scene-props/preview` → `PreviewSceneProps` | `preview:scene_props:<path>:<names>` | that item's | scene_props | the dragged values | cached |
   | an mpv volume/speed literal (`/volume {value}`) → `Mpv` | `set:<prop>` | all | that one | the value, for the playing item | cached |
   | a mute change (SetMute / SetUserMute → mpv `mute`) → `Mpv` | `set:gain.mute` | all | gain.mute | — | Force |
@@ -977,7 +999,9 @@ all of them must stay fast (≤ 500 ms, never blocking the caller) and `QueueDep
 cap; draining afterward must bring it back to 0) **+ the coalescing assertions** (behind a clog: a
 newer `QueueSet` of a key replaces the pending one and the rest keep their order — `b1 a2 E1 a4`;
 nothing merges across an essential command; at the cap a pending key's newest set still lands, an
-essential command is admitted and runs last, a new key is refused), then a round-trip against a **private, supervised**
+essential command is admitted and runs last, a new key is refused, and the drop logs the pending kinds —
+`LastCapHistogram`; a `QueueBatch` burst is one command whose pass gets each member once, never across a
+barrier — `e1 B[/x,/y] E3 B[/z]`), then a round-trip against a **private, supervised**
 `liascape-player serve --headless --outputs 640x360@60 --clock stepped --ao null` (temp
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME` under `/tmp` — a unix socket path must be < 108 bytes — own
 `--socket`, `LD_LIBRARY_PATH` removed, `quit` + kill at the end; the shared client is swapped to it
@@ -990,6 +1014,9 @@ subscribed event**; mpv `volume 50` via `Mpv()` → `gain.user` −18.06; **a sl
 (`MaxQueueDepth + 61` volume sets behind a 600 ms clog) lands its NEWEST value and queues ≤ 3 commands
 (RED before: depth 256, the last ~60 dropped, gain.user stuck at the 255th value); **20 `/preview`s
 on A cost 1 request each** (`client.RequestCount`; RED before: 2 — `state` + `set`) and the last lands;
+**a per-item override burst** (`MaxQueueDepth + 61` `ApplyOverride`s of distinct items behind a 600 ms clog,
+the playing A last, after a transient preview speed on it): ≤ 3 commands queued, A's speed back to its
+effective value and the speed callback called (RED before: depth 256, A's pass dropped, speed 2);
 **the resolver's diff**: a full pass (`ApplyEffective`) over a source that already runs every effective value
 costs exactly 1 request (its `state` read, no `set`), and a speed another client set behind our back is put
 back by the next full pass;

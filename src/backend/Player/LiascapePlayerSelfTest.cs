@@ -827,6 +827,26 @@ public static class LiascapePlayerSelfTest
             if (ran.LastOrDefault() != "E2") fails.Add($"an essential command at the cap didn't run last (last: {ran.LastOrDefault() ?? "none"})");
         }
         if (LiascapePlayerMedia.QueueDepth != 0) fails.Add($"queue depth {LiascapePlayerMedia.QueueDepth} after the coalescing checks, want 0");
+        // the cap logs what filled it (the 2026-11-03 re-run's two drops said only "dropping a queued command")
+        if (LiascapePlayerMedia.CapDrops < 1 || LiascapePlayerMedia.LastCapHistogram is not { } hist || !hist.Contains("t:d"))
+            fails.Add($"at the cap: drops {LiascapePlayerMedia.CapDrops}, histogram `{LiascapePlayerMedia.LastCapHistogram ?? "none"}` (want the pending kinds)");
+
+        // A batch (per-item passes — /library/speed of every item): members join the pending batch of their key,
+        // each once, at the tail; never across a barrier.
+        ran.Clear();
+        _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(300); return 0; });
+        var x1 = LiascapePlayerMedia.QueueBatch("t:batch", "/x", m => Rec("B[" + string.Join(",", m.Order(StringComparer.Ordinal)) + "]"));
+        LiascapePlayerMedia.QueueSet("t:e", () => Rec("e1"));
+        for (int i = 0; i < LiascapePlayerMedia.MaxQueueDepth + 20; i++)
+            LiascapePlayerMedia.QueueBatch("t:batch", i % 2 == 0 ? "/y" : "/x", m => Rec("B[" + string.Join(",", m.Order(StringComparer.Ordinal)) + "]"));
+        int batchDepth = LiascapePlayerMedia.QueueDepth;
+        LiascapePlayerMedia.QueueEssential(() => Rec("E3"));
+        LiascapePlayerMedia.QueueBatch("t:batch", "/z", m => Rec("B[" + string.Join(",", m.Order(StringComparer.Ordinal)) + "]"));
+        try { LiascapePlayerMedia.Drain().Wait(5000); } catch { }
+        want = "e1 B[/x,/y] E3 B[/z]";
+        lock (ran) if (string.Join(" ", ran) != want) fails.Add($"batch order: ran `{string.Join(" ", ran)}`, want `{want}`");
+        if (batchDepth > 3) fails.Add($"a batch burst queued {batchDepth} commands, want the clog + e1 + one batch");
+        if (!x1.IsCompleted) fails.Add("a merged batch's first task didn't complete");
     }
 
     // ---- protocol round-trip -----------------------------------------------------------------
@@ -955,6 +975,30 @@ public static class LiascapePlayerSelfTest
                 if (perPreview > 1.05) fails.Add($"/preview costs {perPreview:0.##} requests per value (want 1: one `set` on the cached source; map reads {LiascapePlayerMedia.SourceMapReads - reads0})");
                 if (Math.Abs(guPrev - MpvPropertyMap.VolumeDb(50)) > 1e-3) fails.Add($"/preview's last value didn't land: gain.user {guPrev:0.###}, want {MpvPropertyMap.VolumeDb(50):0.###}");
                 Phase($"/preview: {perPreview:0.##} requests per value over {nPrev} (map reads {LiascapePlayerMedia.SourceMapReads - reads0})");
+
+                // Speed storm re-run (2026-11-03): the queue hit its cap with the player answering fast — the storm's
+                // global phase clears every playlist item's speed override in a loop (315 × /library/speed), and each
+                // was its own `override:<path>` pass, a key per item that never coalesced: ≥ 256 pending, and the next
+                // one dropped (whichever item it was — the PLAYING one's included). A burst of per-item overrides
+                // behind a slow command must stay a handful of commands and every item's pass (the playing one last
+                // here) must land. RED before: depth 256, a's override dropped (its speed stayed the preview's).
+                {
+                    double eff = Math.Clamp(LibraryService.ReadSpeedOverride(a) ?? SettingsService.Load().Speed, 0.1, 4.0);
+                    double transient = Math.Abs(eff - 2.0) > 0.1 ? 2.0 : 3.0;
+                    LiascapePlayerMedia.Preview(null, transient, [a]); LiascapePlayerMedia.Drain().Wait(2000);
+                    double? cbSpeed = null;
+                    _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(600); return 0; });
+                    for (int i = 0; i < LiascapePlayerMedia.MaxQueueDepth + 60; i++)
+                        LiascapePlayerMedia.ApplyOverride(Path.Combine(tmp, $"not-playing-{i}.mp4"), v => cbSpeed = v);
+                    LiascapePlayerMedia.ApplyOverride(a, v => cbSpeed = v);
+                    int depthOv = LiascapePlayerMedia.QueueDepth;
+                    LiascapePlayerMedia.Drain().Wait(20000);
+                    var spOv = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.speed" }).GetProperty("value").GetDouble();
+                    if (depthOv > 3) fails.Add($"queue cap: {LiascapePlayerMedia.MaxQueueDepth + 61} per-item overrides (/library/speed of every item) queued {depthOv} commands (want them coalesced: the slow one + 1)");
+                    if (Math.Abs(spOv - eff) > 1e-3) fails.Add($"queue cap: the playing item's override pass didn't land after a per-item burst — speed {spOv:0.###}, want {eff:0.###} (depth at the burst {depthOv})");
+                    if (cbSpeed is not double cs || Math.Abs(cs - eff) > 1e-3) fails.Add($"per-item burst: the playing item's speed callback got {cbSpeed?.ToString() ?? "nothing"}, want {eff:0.###}");
+                    Phase($"per-item override burst: depth {depthOv}, playing speed {spOv:0.##} (want {eff:0.##})");
+                }
 
                 // the effective-settings resolver's diff (player-adapter.md § Targeting): a full pass over a source
                 // that already runs every effective value costs its one `state` read and sends nothing; a value
