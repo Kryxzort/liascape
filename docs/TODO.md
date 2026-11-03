@@ -993,9 +993,15 @@ Two bug classes kept recurring; fix the class, not the instance:
           loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
     - [ ] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
-    - [ ] **B9 Small uniform/property/shader fixes.** `g_Frametime`, `g_PointerState`, `g_Daytime` (0 scenes read it),
+    - [x] **B9 Small uniform/property/shader fixes.** `g_Frametime`, `g_PointerState`, `g_Daytime` (0 scenes read it),
           time wrap, annotation defaults, the foliagesway varying, live bloom, textinput quotes, usertextures (E4,
           E5, E9, E11, E17–E20, E36–E41, C1, C3, U1, U2, S18). ≤ 10 scenes each. S.
+          **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
+          tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
+          2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
+          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, E41 (M: live effect
+          visibility needs the pass chain retargeted), loading a user-picked picture. Result: the audit's "B9
+          result" (§ 5).
     - [ ] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
           ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
           (S8, S10–S37). 1–28 scenes each. M–L; needs B1.
@@ -1031,7 +1037,7 @@ Two bug classes kept recurring; fix the class, not the instance:
         left out (`Leaving out effect …`), the image renders. Corpus: 2189783622 (blank → ok); the same drops
         happened (unnoticed — other layers drew) in 3233141951, 3326873240, 3354740764. A passthrough/fullscreen
         layer (pure post-processing) still goes whole: rendering part of its chain blacked out 3432999904.
-  - [ ] **LWE: the packaged shader that drops an effect in 2189783622** — it is **foliagesway**, not godrays
+  - [x] **LWE: the packaged shader that drops an effect in 2189783622** (2026-11-03, fork patch 0034) — it is **foliagesway**, not godrays
         (gap audit E19): its fragment reads `v_Bounds`, which only the vertex unit declares (under `MODE == 0`)
         (`'v_Bounds' : undeclared identifier`, `missing #endif`). WE compiles it, so it probably builds the
         fragment's inputs from the vertex unit's varyings. Fix: add the missing varying declarations to the fragment.

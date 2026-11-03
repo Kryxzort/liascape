@@ -127,7 +127,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
 | **B8 Audio response** | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
-| **B9 Small uniform, property and shader fixes** | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
+| **B9 Small uniform, property and shader fixes** — **done 2026-11-03** except E9, E11, E20, E38, E41 (patches 0031–0036; see "B9 result" in § 5) | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
 | **B10 SceneScript API surface** | S8, S10–S16, S19–S27, S29–S32, S36, S37 | 1–28 each | M–L | Cursor hit-test + events (`solid`). Media events from liascape's MPRIS (`wp_project_notify_*`). `applyUserProperties` + `engine.userProperties`. `getLayer` by index for all layer types. ISoundLayer `play/stop/pause` (unblocks `startsilent`, A7). Persistent `localStorage`. Layer writes. Missing engine/scene members. Needs B1. | Per feature, a fork test script. Smoke 2325974975 (sounds + menu), 2890767643 (media widget with a fake MPRIS). Headless pointer clicks for cursor events. |
 | **B11 Particles, extended** | P2, P10, P15, P22, P24–P30, P34, P35, P37 | 29 | L | Child systems (static / eventfollow / eventspawn / eventdeath). The missing initializers and operators. Control-point overrides and transforms. Rope/trail combos. Needs the operator interpreter (GH 0x140265800) read from asm first (P31–P33). | Smoke the 29 child-system scenes before/after: sub-effects present. WE captures for 2 of them. |
 | **B12 Puppet warp** | G06, G07, G08, G09 | 14 | L | Start from PR #625's MDL parsing (unmerged, so cherry-pick into our own commit). Add MDLV 0016/0017/0019. GPU skinning. Animation-layer mixing. Bone attachments. | Smoke the 14 puppet scenes at 2 timestamps: the mesh deforms. WE capture of 1 scene. |
@@ -947,6 +947,71 @@ The port (0030):
 - **Left of B6:** text parent transforms (B4, with G13/G30); whether a sound object under a hidden parent goes silent
   (no call site found); G05 (parent alpha) is still Unknown; the owner's WE captures of 3243449890, 3163060610 or
   3319542538, and 3490034653.
+
+### B9 result (fork patches 0031–0036, pin `cc6f1c9`, 2026-11-03)
+
+Done: E4, E5, C1, S18, C3 (engine uniforms), E36, E37 (bloom), E17, E45 (annotation defaults; E18 is parity),
+E19 (varyings), U1, U2, U4 (properties), and the property side of E40. Left: E9, E11, E20, E38, E41 (below).
+One patch per theme:
+
+- **0031: engine uniforms**, from the uniform switch GH 0x14010a0e0 and the tick GH 0x1401afbf0.
+  - `g_Frametime` (case 4) is the frame's dt.
+  - `g_PointerState` (case 0x71): xy is 1 while the left button is down, z is 1 on the frame it went down (WE's
+    flags at ctx+0xa4: bit 0 down, bit 1 already seen), w is 0. The worker already passes the buttons.
+  - `g_Daytime` (case 5) and `engine.timeOfDay` are the local time of day, h/24 + m/1440 + s/86400 + ms/86400000,
+    from the wall clock each frame (GH 0x14013f370).
+  - `g_Time` wraps at 432000 s. Scripts, particles and sounds keep the host clock.
+- **0032: bloom.** The passes' strength, threshold and tint are connected to `general`'s values, so a user
+  property moves them live. `bloomtint` was never parsed. The bloom chain is built when `bloom` is on or bound to a
+  user property, and skipped each frame while off. Before, it existed only when on at load. A chain that can't be
+  built (no WE assets) is logged and left out. A `bloom` driven by a script (2325974975, 2134765860's strength) needs
+  a script host for `general` (S4, B10).
+- **0033: annotation defaults.** A float `default` written as a string is that float (`std::stoi("0.1")` was 0).
+  A vector default written as a number broadcasts; it threw, which lost the pass. **E18 is parity:** WE parses
+  `[COMBO]` lines with a strict JSON parser (RapidJSON, by its error strings) and skips the combo when the parse
+  fails (GH 0x14019ba90 → GH 0x140195900), as LWE does. So 3243449890's `VERTICAL_RELATIVE_WIDTH` and the
+  procedural_noise combos stay undefined, which is 0, in WE too.
+- **0034: varyings.** A varying that a fragment unit uses but only its vertex unit declares is now declared in the
+  fragment. WE's mechanism is not decoded; that it compiles them is inferred from the scene working in WE.
+- **0035: properties.** A textinput default has no JSON quotes. The listing API lists it as
+  `WP_PROPERTY_TYPE_TEXT_INPUT`; it threw "Unknown property type". Combo values keep non-integer numbers.
+  `WP_PROPERTY_TYPE_FILE` was 4, the same as BOOLEAN, and is now 5. liascape reads project.json itself, so none of
+  this changes what the player sends.
+- **0036: usertextures (E40, property side).** A non-system usertexture is the value of the scenetexture property
+  it names. With nothing picked, which is every default in the library, the slot keeps its fallback quietly. Before,
+  the property's name was looked up as a texture, which failed with a log line.
+
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All six fail on c959e7a (built against the new
+  headers), and the suite is 35/35 on cc6f1c9.
+  - `engine_uniforms_are_fed`: frametime 1/30 → r 127, daytime → g = the local time × 255, pointer up / pressed /
+    held → b 0 / 255 / 127, and `g_Time` at 432005 s reads 5. Before: 0 0 0 and no wrap.
+  - `bloom_is_live_and_tinted`: off at load, then on through its property, glows green only (tint 0 1 0, g 7, r 0).
+    Strength 0 through its slider: no glow. Before: no glow at all.
+  - `annotation_defaults_parse`: "0.25" → r 64; a vec2 `default: 0.5` → 127 127. Before: 0, and the pass lost.
+  - `fragment_gets_vertex_varyings`: a vertex-only `v_Bounds` (0.5, 0.25) reaches the fragment.
+  - `properties_list_as_written`: the listing has the textinput "YOURNAME", the combo key "0.5", file 5 and boolean 4.
+  - `usertexture_reads_its_property`: a pass's `usertextures [null, "picked"]` samples the property's util/white.
+- **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, before = c959e7a): 3184155462 (cursorripple),
+  2189783622, 2890767643, 3490034653, 2388299037, 3414858021, 3028473503, 3013489778, 3042865984.
+  - **2189783622:** its foliagesway effect is built again ("Leaving out effect" 1 → 0). 0.4 % of the frame changes,
+    the swaying foliage.
+  - 3490034653's bloom tint (1 1 0.878) changes 0.09 % of the frame.
+  - The rest are within 0.01 %. The smoke mode has no pointer or audio, so cursorripple and the audio bars show
+    nothing new there.
+  - 3414858021 still leaves out 5 effects, for a different reason: "must write to gl_Position", a vertex unit that
+    doesn't compile (not E45).
+- **Corpus** (`scene_corpus.sh --results /tmp/sc-b9`, 96 scenes, a release player and worker on the B9 core, the
+  machine at load ~27 from another agent's run): ok 93, static 0, blank 0, load_failed 3, renderer_failed 0, crashed
+  0, broken 0, timeout 0, the same as B6. The same 3 scenes fail to load.
+- **Left of B9:**
+  - **E9** `g_TexelSize`: whether WE's ctx+0x74 is the output or the render-target size is not decoded.
+  - **E11** `g_LayerModelMatrix` (ctx+0xa30): not decoded (1 scene).
+  - **E20** `TEXnFORMAT` for samplers ≠ 0 (1 scene, only with `RENDERING=1`).
+  - **E38** `alphatocoverage` (1 scene): it needs a decision for single-sampled targets.
+  - **E41** effect `visible` live (33 scenes): skipping a pass per frame changes the ping-pong targets of the chain,
+    so it needs the chain rebuilt or retargeted. That is M, not S.
+  - **E40's other half:** loading a picture the user picks (not a `.tex`), and the UI picker.
+  - The 3414858021 vertex units that don't write `gl_Position`.
 
 ## 6. Audio after patch 0018 (A)
 
