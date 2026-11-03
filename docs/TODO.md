@@ -1000,8 +1000,8 @@ Two bug classes kept recurring; fix the class, not the instance:
           tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
           2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
           its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, E41 (M: live effect
-          visibility needs the pass chain retargeted), loading a user-picked picture. Result: the audit's "B9
-          result" (§ 5).
+          visibility needs the pass chain retargeted), loading a user-picked picture, 3414858021's vertex units that
+          don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
     - [ ] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
           ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
           (S8, S10–S37). 1–28 scenes each. M–L; needs B1.
