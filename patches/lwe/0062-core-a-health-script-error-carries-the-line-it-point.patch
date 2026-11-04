@@ -1,7 +1,7 @@
 From 42f301d76c55fff7e03e6d52d6c7ef309a9c5d19 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 16:52:37 +0530
-Subject: [PATCH 62/71] core: a health script error carries the line it points
+Subject: [PATCH 62/77] core: a health script error carries the line it points
  at
 
 QuickJS names no callee in "TypeError: not a function" (13 errors in 7 of the library's scenes read only

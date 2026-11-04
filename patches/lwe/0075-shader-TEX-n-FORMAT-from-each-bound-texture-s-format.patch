@@ -1,0 +1,277 @@
+From abe8642a976f3210bc0f964777acf8ec11d8a4a6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:46:56 +0530
+Subject: [PATCH 75/77] shader: TEX<n>FORMAT from each bound texture's format
+
+WE defines TEX<n>FORMAT for every sampler slot 0..9 whose annotation has `formatcombo`, to the
+format of the texture bound there or, with none, of the sampler's default (GH 0x1401d2a20:
+"TEX" + n + "FORMAT" = the texture's format field). The stock common_fragment.h reads them
+(DecompressNormal on TEX1FORMAT: DXT and RG88 normal maps unpack differently; fur4 reads
+TEX8FORMAT). LWE set only TEX0FORMAT (RG88 / R8 of the layer's texture) and 0 for the rest.
+
+Now a pass resolves what setupTextureUniforms will bind at the slot (a bind, the effect's
+user / plain texture overrides, the pass's user / plain textures, the sampler's default), and
+the formatcombo define takes its format: an FBO's, a .tex's (a JPEG / PNG .tex is RGBA8, 0).
+A `previous` bind is an RGBA target (0). TEX0FORMAT stays as CPass sets it.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Shader preprocessing result" (E20); we-coverage.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/CTexture.cpp  |  2 +
+ src/core/WallpaperEngine/Render/CTexture.h    |  2 +
+ .../Render/Objects/Effects/CPass.cpp          | 60 ++++++++++++++++++-
+ .../Render/Objects/Effects/CPass.h            |  2 +
+ .../WallpaperEngine/Render/Shaders/Shader.cpp |  7 ++-
+ .../WallpaperEngine/Render/Shaders/Shader.h   |  3 +-
+ .../Render/Shaders/ShaderUnit.cpp             | 17 ++++--
+ .../Render/Shaders/ShaderUnit.h               | 11 +++-
+ 8 files changed, 92 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index 475c482..c583d0a 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -228,6 +228,8 @@ uint32_t CTexture::getRealHeight () const {
+ 
+ TextureFormat CTexture::getFormat () const { return this->getHeader ().format; }
+ 
++bool CTexture::isFreeImage () const { return this->getHeader ().freeImageFormat != FIF_UNKNOWN; }
++
+ uint32_t CTexture::getFlags () const { return this->getHeader ().flags; }
+ 
+ const Texture& CTexture::getHeader () const { return *this->m_header; }
+diff --git a/src/core/WallpaperEngine/Render/CTexture.h b/src/core/WallpaperEngine/Render/CTexture.h
+index 39652b5..380740b 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.h
++++ b/src/core/WallpaperEngine/Render/CTexture.h
+@@ -31,6 +31,8 @@ public:
+     [[nodiscard]] uint32_t getRealWidth () const override;
+     [[nodiscard]] uint32_t getRealHeight () const override;
+     [[nodiscard]] TextureFormat getFormat () const override;
++    /** a .tex that holds a JPEG / PNG / … (FreeImage): uploaded as RGBA8 whatever its format field says */
++    [[nodiscard]] bool isFreeImage () const;
+     [[nodiscard]] uint32_t getFlags () const override;
+     [[nodiscard]] const glm::vec4* getResolution () const override;
+     [[nodiscard]] const std::vector<FrameSharedPtr>& getFrames () const override;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index cb4f033..102b875 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -15,6 +15,7 @@
+ #include "WallpaperEngine/Data/Model/Property.h"
+ 
+ #include "WallpaperEngine/Render/CFBO.h"
++#include "WallpaperEngine/Render/CTexture.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
+ 
+ #include "WallpaperEngine/Render/Shaders/Variables/ShaderVariable.h"
+@@ -694,6 +695,62 @@ GLuint CPass::compileShader (const char* shader, GLuint type) {
+     return shaderID;
+ }
+ 
++int CPass::shaderFormatOf (int index, const std::string& defaultName) const {
++    // what setupTextureUniforms will bind at `index`, most important first: a bind, the effect's user / plain texture
++    // overrides, the pass's user / plain textures, the sampler's default
++    std::string name;
++    const auto pick = [&] (const TextureMap& map, bool user) {
++	if (!name.empty ()) {
++	    return;
++	}
++	const auto it = map.find (index);
++	if (it == map.end ()) {
++	    return;
++	}
++	if (user) {
++	    name = this->userTextureName (it->second).value_or ("");
++	} else {
++	    name = it->second;
++	}
++    };
++    if (const auto bind = this->m_binds.find (index); bind != this->m_binds.end ()) {
++	if (bind->second == "previous") {
++	    return 0; // the chain's previous output: an RGBA target
++	}
++	name = bind->second;
++    }
++    pick (this->m_override.usertextures, true);
++    pick (this->m_override.textures, false);
++    pick (this->m_pass.usertextures, true);
++    pick (this->m_pass.textures, false);
++    if (name.empty ()) {
++	name = defaultName;
++    }
++    if (name.empty ()) {
++	return 0;
++    }
++    std::shared_ptr<const TextureProvider> texture = nullptr;
++    try {
++	if (name.find ("_rt_") == 0 || name.find ("_alias_") == 0) {
++	    texture = this->m_fboProvider->find (name);
++	} else {
++	    texture = this->getContext ().resolveTexture (name);
++	}
++    } catch (const std::exception&) {
++	return 0; // reported when it's bound
++    }
++    if (texture == nullptr) {
++	return 0;
++    }
++    // a .tex holding a JPEG / PNG is decoded to RGBA8 (CTexture::setupInternalFormat)
++    if (const auto* tex = dynamic_cast<const CTexture*> (texture.get ());
++	tex != nullptr && tex->isFreeImage ()) {
++	return 0;
++    }
++    const auto format = texture->getFormat ();
++    return format == TextureFormat_UNKNOWN ? 0 : static_cast<int> (format);
++}
++
+ void CPass::setupShaders () {
+     // ensure the constants are defined
+     const auto texture0 = this->m_renderable.getTexture ();
+@@ -724,7 +781,8 @@ void CPass::setupShaders () {
+ 
+     this->m_shader = new Render::Shaders::Shader (
+ 	this->m_renderable.getAssetLocator (), shaderName, this->m_combos, this->m_override.combos, passTextures,
+-	this->m_override.textures, this->m_override.constants
++	this->m_override.textures, this->m_override.constants,
++	[this] (int index, const std::string& defaultName) { return this->shaderFormatOf (index, defaultName); }
+     );
+ 
+     // WPENGINE_HEALTH: a compile error names the shader
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 7437b72..b365099 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -61,6 +61,8 @@ public:
+ 
+     /** `command: swap` (GH 0x1402131b0 reads it as command 2): render () exchanges the two named FBOs instead */
+     void setSwap (std::string first, std::string second);
++    /** the WE texture format bound at sampler `index` (TEX<n>FORMAT, ShaderUnit::TextureFormatResolver) */
++    [[nodiscard]] int shaderFormatOf (int index, const std::string& defaultName) const;
+     [[nodiscard]] bool isSwap () const;
+ 
+     // Custom geometry rendering support (for particles, etc.)
+diff --git a/src/core/WallpaperEngine/Render/Shaders/Shader.cpp b/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
+index e70b162..2493181 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
+@@ -18,15 +18,16 @@ using namespace WallpaperEngine::Assets;
+ namespace WallpaperEngine::Render::Shaders {
+ Shader::Shader (
+     const AssetLocator& assetLocator, std::string filename, const ComboMap& combos, const ComboMap& overrideCombos,
+-    const TextureMap& textures, const TextureMap& overrideTextures, const ShaderConstantMap& constants
++    const TextureMap& textures, const TextureMap& overrideTextures, const ShaderConstantMap& constants,
++    const TextureFormatResolver& formatOf
+ ) :
+     m_vertex (
+ 	GLSLContext::UnitType_Vertex, filename, assetLocator.vertexShader (filename), assetLocator, constants, textures,
+-	overrideTextures, combos, overrideCombos
++	overrideTextures, combos, overrideCombos, formatOf
+     ),
+     m_fragment (
+ 	GLSLContext::UnitType_Fragment, filename, assetLocator.fragmentShader (filename), assetLocator, constants,
+-	textures, overrideTextures, combos, overrideCombos
++	textures, overrideTextures, combos, overrideCombos, formatOf
+     ),
+     m_file (std::move (filename)), m_combos (combos), m_overrideCombos (overrideCombos), m_passTextures (textures),
+     m_overrideTextures (overrideTextures) {
+diff --git a/src/core/WallpaperEngine/Render/Shaders/Shader.h b/src/core/WallpaperEngine/Render/Shaders/Shader.h
+index 3721243..8cb990e 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/Shader.h
++++ b/src/core/WallpaperEngine/Render/Shaders/Shader.h
+@@ -41,7 +41,8 @@ public:
+      */
+     Shader (
+ 	const AssetLocator& assetLocator, std::string filename, const ComboMap& combos, const ComboMap& overrideCombos,
+-	const TextureMap& textures, const TextureMap& overrideTextures, const ShaderConstantMap& constants
++	const TextureMap& textures, const TextureMap& overrideTextures, const ShaderConstantMap& constants,
++	const TextureFormatResolver& formatOf = nullptr
+     );
+     /**
+      * @return The vertex's shader coude for OpenGL to use
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 9e850a2..69d0e99 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -107,11 +107,12 @@ using namespace WallpaperEngine::Render::Shaders;
+ ShaderUnit::ShaderUnit (
+     const GLSLContext::UnitType type, std::string file, std::string content, const AssetLocator& assetLocator,
+     const ShaderConstantMap& constants, const TextureMap& passTextures, const TextureMap& overrideTextures,
+-    const ComboMap& combos, const ComboMap& overrideCombos
++    const ComboMap& combos, const ComboMap& overrideCombos, TextureFormatResolver formatOf
+ ) :
+     m_type (type), m_file (std::move (file)), m_content (std::move (content)), m_combos (combos),
+     m_overrideCombos (overrideCombos), m_constants (constants), m_passTextures (passTextures),
+-    m_overrideTextures (overrideTextures), m_link (nullptr), m_assetLocator (assetLocator) {
++    m_overrideTextures (overrideTextures), m_formatOf (std::move (formatOf)), m_link (nullptr),
++    m_assetLocator (assetLocator) {
+     // pre-process the shader so the units are clear
+     this->preprocess ();
+ }
+@@ -791,14 +792,18 @@ void ShaderUnit::parseParameterConfiguration (
+ 	    }
+ 	}
+ 
+-	// "formatcombo": WE defines TEX<n>FORMAT to the bound texture's format (common_fragment.h's FORMAT_*, read by
+-	// ConvertTextureFormat; the stock fur4 uses TEX8FORMAT in code). LWE sets only TEX0FORMAT (CPass): the others
+-	// are FORMAT_RGBA8888 (0), what LWE hands the shader for any texture it decoded. Inferred
++	// "formatcombo": WE defines TEX<n>FORMAT for each of slots 0..9 whose sampler has the flag, to the format of the
++	// texture bound there or, with none, of the sampler's default (GH 0x1401d2a20: "TEX" + n + "FORMAT" = the
++	// texture's format field; common_fragment.h's FORMAT_*, read by ConvertTextureFormat / DecompressNormal; the
++	// stock fur4 uses TEX8FORMAT in code). TEX0FORMAT stays CPass's (RG88 / R8 of the layer's texture)
+ 	const auto formatCombo = data.find ("formatcombo");
+ 	if (formatCombo != data.end () && formatCombo->is_boolean () && formatCombo->get<bool> ()) {
+ 	    const std::string name = "TEX" + std::to_string (index) + "FORMAT";
+ 	    if (!this->m_combos.contains (name) && !this->m_overrideCombos.contains (name)) {
+-		this->m_discoveredCombos.emplace (name, 0);
++		const std::string defaultName
++		    = textureName != data.end () && textureName->is_string () ? textureName->get<std::string> () : "";
++		const int format = this->m_formatOf && index != 0 ? this->m_formatOf (static_cast<int> (index), defaultName) : 0;
++		this->m_discoveredCombos.emplace (name, format);
+ 	    }
+ 	}
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index e8e7181..182950c 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <functional>
+ #include <map>
+ #include <memory>
+ #include <string>
+@@ -17,6 +18,12 @@ using JSON = WallpaperEngine::Data::JSON::JSON;
+ using namespace WallpaperEngine::Assets;
+ using namespace WallpaperEngine::Data::Model;
+ 
++/**
++ * The WE texture format (common_fragment.h's FORMAT_*) of what a pass binds at sampler slot `index` (`defaultName`: the
++ * sampler's own default texture, empty if none): a `formatcombo` sampler's TEX<n>FORMAT
++ */
++using TextureFormatResolver = std::function<int (int index, const std::string& defaultName)>;
++
+ /**
+  * Represents a whole shader unit
+  */
+@@ -25,7 +32,7 @@ public:
+     ShaderUnit (
+ 	const GLSLContext::UnitType type, std::string file, std::string content, const AssetLocator& assetLocator,
+ 	const ShaderConstantMap& constants, const TextureMap& passTextures, const TextureMap& overrideTextures,
+-	const ComboMap& combos, const ComboMap& overrideCombos
++	const ComboMap& combos, const ComboMap& overrideCombos, TextureFormatResolver formatOf = nullptr
+     );
+     ~ShaderUnit () = default;
+ 
+@@ -182,6 +189,8 @@ private:
+     const TextureMap& m_passTextures;
+     /** The textures that are being overridden */
+     const TextureMap& m_overrideTextures;
++    /** the bound textures' formats, for TEX<n>FORMAT (none: 0) */
++    TextureFormatResolver m_formatOf;
+     /** The default textures to use when a texture is not applied in a given slot */
+     TextureMap m_defaultTextures = {};
+     /**

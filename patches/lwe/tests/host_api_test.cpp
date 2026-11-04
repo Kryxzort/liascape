@@ -1788,7 +1788,8 @@ static std::string puppet_skeleton (int version) {
 }
 
 // animations moving the bone to (x, 0) in both of their 2 samples: (id, x)
-static std::string puppet_animations (int version, const std::vector<std::pair<int, float>>& anims) {
+static std::string puppet_animations (int version, const std::vector<std::pair<int, float>>& anims,
+                                      const std::vector<std::pair<uint32_t, std::string>>& events = {}) {
     MdlWriter a;
     a.u32 (static_cast<uint32_t> (anims.size ()));
     for (const auto& [id, x] : anims) {
@@ -1811,7 +1812,10 @@ static std::string puppet_animations (int version, const std::vector<std::pair<i
         if (version > 5) {
             a.u8 (0);
         }
-        a.u32 (0); // events
+        a.u32 (static_cast<uint32_t> (events.size ())); // events: a frame, a name
+        for (const auto& [frame, name] : events) {
+            a.u32 (frame).str (name);
+        }
     }
     return a.out;
 }
@@ -2246,6 +2250,60 @@ static bool particle_follows_its_parent () {
     CHECK (moved >= 8 && moved <= 12.5, "the system didn't follow its moving parent to 32 (%.1f there)", moved);
     CHECK (left < 0.5, "particles left behind at the parent's first origin (%.1f)", left);
     CHECK (hidden < 0.5, "a hidden group's system drew (%.1f)", hidden);
+    return true;
+}
+
+// F9/P29: a sprite's `orientation` (WE GH 0x1401efc50 parses it, GH 0x14024fd30 turns it into g_Orientation*): a
+// screen sprite faces the camera however its system is tilted, a `fixed` one lies in the plane `axis` is the normal
+// of (edge-on when that is world y), a child system uses its own renderer's. Unpatched every sprite took the
+// system's own axes (a tilted system's sprites foreshortened, a fixed one faced the camera, a child copied its
+// parent's)
+static bool sprite_orientation_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const std::string& top, const char* instantaneous) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":10") + top
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":" + instantaneous + "}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":24,\"max\":24}," + white + "," + life + "]}\n";
+    };
+    const std::string flat = ",\"renderer\":[{\"name\":\"sprite\",\"orientation\":\"fixed\",\"axis\":\"0 1 0\",\"flags\":1}]";
+    const std::string facing = ",\"renderer\":[{\"name\":\"sprite\",\"orientation\":\"fixed\",\"axis\":\"0 0 1\",\"flags\":1}]";
+    std::string tilted = particle_object (1, "screen.json", 8, 16);
+    const std::string level = "\"angles\":\"0 0 0\"";
+    tilted.replace (tilted.find (level), level.size (), "\"angles\":\"1 0 0\"");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        tilted + "," + particle_object (2, "flat.json", 24, 16) + "," + particle_object (3, "parent.json", 40, 16) + ","
+            + particle_object (4, "facing.json", 56, 16),
+        "0 0 0",
+        { { "screen.json", sys ("", "1") }, { "flat.json", sys (flat, "1") }, { "facing.json", sys (facing, "1") },
+          { "parent.json", sys (",\"children\":[{\"name\":\"particles/flat.json\"}]", "0") } },
+        files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 5; i++) {
+        rig.step ();
+    }
+    auto height = [&] (int x) {
+        int n = 0;
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        for (int y = 0; y < 32; y++) {
+            read_pixel (rig.fbo, x, y, px);
+            n += px[0] > 128 ? 1 : 0;
+        }
+        return n;
+    };
+    const int tiltedH = height (8), flatH = height (24), childH = height (40), facingH = height (56);
+    printf ("    sprite heights: screen in a system tilted 1 rad about x %d, fixed on world y %d, its child copy %d, "
+            "fixed facing the camera %d\n", tiltedH, flatH, childH, facingH);
+    CHECK (facingH >= 10 && facingH <= 14, "the camera-facing fixed sprite isn't 12 tall (%d)", facingH);
+    CHECK (tiltedH >= 10 && tiltedH <= 14, "the tilted system's screen sprite doesn't face the camera (%d tall)", tiltedH);
+    CHECK (flatH <= 1, "the fixed sprite on world y isn't edge-on (%d tall)", flatH);
+    CHECK (childH <= 1, "the child system didn't use its own (fixed) renderer (%d tall)", childH);
     return true;
 }
 
@@ -3703,6 +3761,49 @@ static bool animation_layer_api () {
     return true;
 }
 
+// F7: a puppet animation's own events (MDLA's event list: a frame, a name) reach the layer's scripts as
+// animationEvent (event, value) when the clock passes them: a one-second loop with events at frames 0 and 1, played
+// 1.5 s, gives start:0, end:1, start:0. Unpatched the list was skipped: no events
+static bool puppet_animation_events () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16);
+    a.section ("MDLS0001", puppet_skeleton (1))
+        .section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }, { { 0, "start" }, { 1, "end" } }));
+    const std::string script =
+        "let frames = 0, result;\n"
+        "export function animationEvent(event, value) { (shared.ev = shared.ev || []).push(event.name + ':' + event.frame); }\n"
+        "export function update(value) {\n"
+        "  if (++frames == 45) {\n" + js_checks (
+        "check('events', shared.ev !== undefined && shared.ev.join(',') == 'start:0,end:1,start:0');\n"
+        "if (fails.length) console.log('events ' + shared.ev);\n") + "    result = fails.length == 0;\n  }\n"
+        "  return frames < 45 ? true : result;\n}";
+    const std::string objects = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"16 16 0\",\"size\":\"32 32\","
+                                "\"animationlayers\":[{\"id\":10,\"name\":\"walk\",\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}],"
+                                + scripted ("visible", "true", script) + "}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 48) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 16, 16, px);
+    printf ("    the puppet after 1.6 s: %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (px[0] > 128, "the puppet is hidden: a failed check, see FAILS above");
+    return true;
+}
+
 // IParticleSystem: instance overrides read and write (count, a control point), stop () takes every particle away,
 // pause () + emitParticles (5) shows those 5 and no more, isPlaying. Unpatched: instance was undefined, play / stop /
 // pause did nothing on a particle system
@@ -3801,6 +3902,66 @@ static bool script_events_reach_scripts () {
 }
 
 
+// F8: the host's wp_project_hint_size is the screen the scene shows on: engine.screenResolution reads it, a change
+// sends resizeScreen (size) (WE: on every change of the screen resolution, never on creation), and
+// IInput.cursorScreenPosition is in its pixels (the scene covering it: the pointer at 48 8 of the 64×32 scene is 96 16
+// of a 128×64 screen). Unpatched: screenResolution was the scene's size, no resizeScreen, the cursor 0..1
+static bool resize_screen_reaches_scripts () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string watcher =
+        "let frames = 0, result;\n"
+        "export function resizeScreen(size) { (shared.sizes = shared.sizes || []).push(size.x + 'x' + size.y); }\n"
+        "export function update(value) {\n"
+        "  frames++;\n"
+        "  if (frames == 1) { shared.first = engine.screenResolution.x + 'x' + engine.screenResolution.y; }\n"
+        "  if (frames == 8) {\n" + js_checks (
+        "const c = input.cursorScreenPosition;\n"
+        "check('first', shared.first == '64x32');\n"
+        "check('resized', shared.sizes !== undefined && shared.sizes.join(',') == '128x64');\n"
+        "check('resolution', engine.screenResolution.x == 128 && engine.screenResolution.y == 64);\n"
+        "check('cursor', Math.abs(c.x - 96) < 1.5 && Math.abs(c.y - 16) < 1.5);\n"
+        "if (fails.length) console.log('first ' + shared.first + ' sizes ' + shared.sizes + ' cursor ' + c.x + ' ' + c.y);\n")
+        + "    result = fails.length == 0;\n  }\n  return frames < 8 ? true : result;\n}";
+    const std::string dir = script_scene (square (1, scripted ("visible", "true", watcher) + ",\"origin\":\"8 16 0\""));
+    ScriptRig rig;
+    rig.mouse = &g_mouse;
+    g_mouseX = 48.0;
+    g_mouseY = 8.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    wp_project_hint_size (rig.p, 128, 64);
+    wp_project_hint_size (rig.p, 128, 64); // the same size again: no second event
+    while (rig.frames < 12) {
+        rig.step ();
+    }
+    g_mouseX = 0.0;
+    g_mouseY = 0.0;
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == covered (4, 11), "the square vanished: a check failed (see FAILS above)");
+    // a size the host hints before the first frame is the screen from the start: no resizeScreen
+    const std::string early =
+        "let frames = 0, result;\n"
+        "export function resizeScreen(size) { shared.early = size.x; }\n"
+        "export function update(value) {\n"
+        "  if (++frames == 4) {\n" + js_checks (
+        "check('hinted', engine.screenResolution.x == 128 && engine.screenResolution.y == 64);\n"
+        "check('no resize', shared.early === undefined);\n") + "    result = fails.length == 0;\n  }\n"
+        "  return frames < 4 ? true : result;\n}";
+    const std::string dir2 = script_scene (square (1, scripted ("visible", "true", early) + ",\"origin\":\"8 16 0\""));
+    ScriptRig rig2;
+    rig2.loaded = [] (wp_project* p) { wp_project_hint_size (p, 128, 64); };
+    CHECK (rig2.open (dir2), "load/build of %s failed", dir2.c_str ());
+    while (rig2.frames < 6) {
+        rig2.step ();
+    }
+    CHECK (rig2.row () == covered (4, 11), "hinted before the first frame: a check failed (see FAILS above)");
+    return true;
+}
+
 // a material's `alphatocoverage` blending sets the ALPHATOCOVERAGE combo (the stock shaders cut the alpha there and
 // discard on GLSL) and draws unblended, `additive` sets ADDITIVE (WE's GH 0x140183570). The layer's shader discards
 // under ALPHATOCOVERAGE and drops green under ADDITIVE. Unpatched: alphatocoverage was "unsupported, as normal" (the
@@ -3834,6 +3995,145 @@ static bool blending_sets_combos () {
     return true;
 }
 
+
+// F9/E39: a material pass's `alphawriting` (WE: default / enabled / disabled, GH 0x140186aa0). The layer's pass
+// writes (1, 1, 1, 0.25) into its composite and an effect after it shows that alpha as grey: by default a pass that
+// isn't the last writes alpha (64), with "disabled" it doesn't (the composite's alpha before it). Unpatched the key
+// wasn't read: both 64
+static bool alphawriting_masks_alpha () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"show\",\"file\":\"effects/show/effect.json\"}]}";
+    std::string normal = b9_object (1, 16), masked = "{\"id\":2,\"name\":\"off\",\"image\":\"models/b9off.json\","
+                                                     "\"size\":\"8 8\",\"origin\":\"48 16 0\"}";
+    normal.pop_back ();
+    masked.pop_back ();
+    const std::string dir = camera_scene ("\"zoom\":1", normal + effect + "," + masked + effect, "");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 0.25);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/show").c_str (), 0755);
+    write_file (dir + "/shaders/show.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/show.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tfloat a = texSample2D(g_Texture0, v_TexCoord).a;\n\tgl_FragColor = vec4(a, a, a, 1.0);\n}\n");
+    write_file (dir + "/materials/show.json", "{\"passes\":[{\"shader\":\"show\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/show/effect.json", "{\"name\":\"show\",\"passes\":[{\"material\":\"materials/show.json\"}]}\n");
+    std::string off = read_file (dir + "/materials/b9.json");
+    off.replace (off.find ("\"blending\""), 10, "\"alphawriting\":\"disabled\",\"blending\"");
+    write_file (dir + "/materials/b9off.json", off);
+    write_file (dir + "/models/b9off.json", "{\"material\":\"materials/b9off.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/b9off.json", "models/b9off.json", "effects/show/effect.json", "shaders/show.vert",
+                  "shaders/show.frag", "materials/show.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char written[4] = {}, kept[4] = {};
+    read_pixel (rig.fbo, 16, 16, written);
+    read_pixel (rig.fbo, 48, 16, kept);
+    printf ("    the composite's alpha as grey: default %d, alphawriting disabled %d\n", written[0], kept[0]);
+    CHECK (written[0] >= 55 && written[0] <= 75, "the default pass didn't write its alpha 0.25 (%d)", written[0]);
+    CHECK (kept[0] < 40 || kept[0] > 90, "the alphawriting-disabled pass wrote its alpha (%d)", kept[0]);
+    return true;
+}
+
+// F9/E26 + fbos.fit: an effect FBO's `fit` caps its longer side (aspect kept, GH 0x140216080: a 16×8 layer's fit 4
+// FBO is 4×2) and a `command: swap` pass exchanges two FBOs (the stock fluid simulation's ping-pong): a pass draws
+// green into B, the layer shows A, the swap makes A what B was, so from the second frame the layer is green.
+// Unpatched the FBO was the layer's 16×8 and the swap pass was dropped (A stayed empty)
+static bool effect_fbo_fit_and_swap () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto layer = [] (int id, int x, const char* effect) {
+        return "{\"id\":" + std::to_string (id) + ",\"name\":\"l" + std::to_string (id) + "\",\"image\":\"models/b9.json\","
+               "\"size\":\"16 8\",\"origin\":\"" + std::to_string (x) + " 16 0\",\"effects\":[{\"id\":" + std::to_string (id + 10)
+             + ",\"name\":\"" + effect + "\",\"file\":\"effects/" + effect + "/effect.json\"}]}";
+    };
+    const std::string dir = camera_scene ("\"zoom\":1", layer (1, 16, "fit") + "," + layer (2, 48, "swap"), "");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const std::string vert = "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), "
+                             "g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n";
+    auto shader = [&] (const std::string& name, const std::string& frag) {
+        write_file (dir + "/shaders/" + name + ".vert", vert);
+        write_file (dir + "/shaders/" + name + ".frag", frag);
+        write_file (dir + "/materials/" + name + ".json", "{\"passes\":[{\"shader\":\"" + name + "\",\"cullmode\":\"nocull\","
+                    "\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    };
+    shader ("green", "void main() {\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n}\n");
+    shader ("size", "uniform sampler2D g_Texture1;\nuniform vec4 g_Texture1Resolution;\nvoid main() {\n"
+                    "\tgl_FragColor = vec4(g_Texture1Resolution.x / 16.0, g_Texture1Resolution.y / 16.0, 0.0, 1.0);\n}\n");
+    shader ("show", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                    "\tgl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);\n}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/fit").c_str (), 0755);
+    mkdir ((dir + "/effects/swap").c_str (), 0755);
+    write_file (dir + "/effects/fit/effect.json",
+                "{\"name\":\"fit\",\"fbos\":[{\"name\":\"_rt_small\",\"fit\":4,\"format\":\"rgba8888\"}],\"passes\":["
+                "{\"material\":\"materials/green.json\",\"target\":\"_rt_small\"},"
+                "{\"material\":\"materials/size.json\",\"bind\":[{\"name\":\"_rt_small\",\"index\":1}]}]}\n");
+    write_file (dir + "/effects/swap/effect.json",
+                "{\"name\":\"swap\",\"fbos\":[{\"name\":\"_rt_A\",\"unique\":true,\"format\":\"rgba8888\"},"
+                "{\"name\":\"_rt_B\",\"unique\":true,\"format\":\"rgba8888\"}],\"passes\":["
+                "{\"material\":\"materials/green.json\",\"target\":\"_rt_B\"},"
+                "{\"material\":\"materials/show.json\",\"bind\":[{\"name\":\"_rt_A\",\"index\":0}]},"
+                "{\"command\":\"swap\",\"source\":\"_rt_A\",\"target\":\"_rt_B\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/fit/effect.json", "effects/swap/effect.json", "shaders/green.vert", "shaders/green.frag",
+                  "shaders/size.vert", "shaders/size.frag", "shaders/show.vert", "shaders/show.frag", "materials/green.json",
+                  "materials/size.json", "materials/show.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    unsigned char sized[4] = {}, shown[4] = {};
+    read_pixel (rig.fbo, 16, 16, sized);
+    read_pixel (rig.fbo, 48, 16, shown);
+    printf ("    fit-4 FBO of a 16x8 layer: %.1f x %.1f; swapped A after two frames: %d %d %d\n", sized[0] * 16.0 / 255.0,
+            sized[1] * 16.0 / 255.0, shown[0], shown[1], shown[2]);
+    CHECK (sized[0] >= 60 && sized[0] <= 68 && sized[1] >= 28 && sized[1] <= 36, "the fit FBO isn't 4x2 (%d %d)", sized[0], sized[1]);
+    CHECK (shown[1] > 200 && shown[0] < 30, "A doesn't hold what was drawn into B (no swap: %d %d %d)", shown[0], shown[1], shown[2]);
+    return true;
+}
+
+// TEX<n>FORMAT: WE defines it for every `formatcombo` sampler, to the format of the texture bound there (GH
+// 0x1401d2a20). An effect pass binds an r8 FBO at slot 1 and an rg88 one at slot 2: TEX1FORMAT is FORMAT_R8 (9),
+// TEX2FORMAT FORMAT_RG88 (8) — the layer turns green. Unpatched only TEX0FORMAT was set: both 0, red
+static bool texture_format_combos_per_slot () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"fmt\",\"file\":\"effects/fmt/effect.json\"}]}";
+    const std::string dir = camera_scene ("\"zoom\":1", object, "");
+    b9_layer (dir, "", "gl_FragColor = vec4(0.0, 0.0, 1.0, 1.0);");
+    write_file (dir + "/shaders/fmt.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nvoid main() {\n"
+                                           "\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n");
+    write_file (dir + "/shaders/fmt.frag",
+                "uniform sampler2D g_Texture1; // {\"material\":\"one\",\"formatcombo\":true}\n"
+                "uniform sampler2D g_Texture2; // {\"material\":\"two\",\"formatcombo\":true}\n"
+                "void main() {\n#if TEX1FORMAT == 9 && TEX2FORMAT == 8\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n#else\n"
+                "\tgl_FragColor = vec4(1.0, 0.0, float(TEX1FORMAT) / 16.0, 1.0);\n#endif\n}\n");
+    write_file (dir + "/materials/fmt.json", "{\"passes\":[{\"shader\":\"fmt\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                             "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/fmt").c_str (), 0755);
+    write_file (dir + "/effects/fmt/effect.json",
+                "{\"name\":\"fmt\",\"fbos\":[{\"name\":\"_rt_red\",\"format\":\"r8\"},{\"name\":\"_rt_rg\",\"format\":\"rg88\"}],"
+                "\"passes\":[{\"material\":\"materials/fmt.json\",\"bind\":[{\"name\":\"_rt_red\",\"index\":1},"
+                "{\"name\":\"_rt_rg\",\"index\":2}]}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/fmt/effect.json", "shaders/fmt.vert", "shaders/fmt.frag", "materials/fmt.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = b9_pixel (rig);
+    printf ("    a pass binding r8 at 1 and rg88 at 2: %d %d %d (green: TEX1FORMAT 9, TEX2FORMAT 8)\n", px[0], px[1], px[2]);
+    CHECK (px[1] > 200 && px[0] < 30, "TEX1FORMAT / TEX2FORMAT aren't the bound FBOs' formats (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
 
 // IScene: get/setCameraTransforms (the scene's camera, a CameraTransforms), getInitialLayerConfig (the object as the
 // scene file has it), getAnimation (a named keyframe timeline), getLayerByID; a camera object's ICamera zoom;
@@ -5058,6 +5358,7 @@ int main (int argc, char** argv) {
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);
+    run ("sprite_orientation_as_we", sprite_orientation_as_we);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
     run ("bloom_is_live_and_tinted", bloom_is_live_and_tinted);
@@ -5099,9 +5400,14 @@ int main (int argc, char** argv) {
     run ("script_strings_and_regexp", script_strings_and_regexp);
     run ("video_texture_api", video_texture_api);
     run ("animation_layer_api", animation_layer_api);
+    run ("puppet_animation_events", puppet_animation_events);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
+    run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
     run ("blending_sets_combos", blending_sets_combos);
+    run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
+    run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
+    run ("texture_format_combos_per_slot", texture_format_combos_per_slot);
     run ("scene_camera_and_config_api", scene_camera_and_config_api);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);

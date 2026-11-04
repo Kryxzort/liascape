@@ -1,0 +1,100 @@
+From 0b04e43ca6899dda22ea269c021b02f215b16e3f Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:37:33 +0530
+Subject: [PATCH 73/77] material: a pass's alphawriting (default / enabled /
+ disabled)
+
+WE registers the material pass key `alphawriting` with default 0, enabled 1, disabled 2
+(GH 0x140186aa0, next to `blending`). LWE didn't read it. Now `enabled` makes the pass write
+alpha and `disabled` keeps the target's alpha, whatever the layer decided (a layer's last pass
+keeps the scene's alpha, CImage::render); `default` leaves that as it was. The colour mask is
+put back after the draw. Inferred: that the key is the colour write mask's alpha bit (from its
+name and values; WE's render-state use of the field wasn't traced).
+
+The library has the key in 31 scenes, "enabled" in one (3184155462's cursorripple simulation,
+which draws into its own FBOs).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F9 (E39)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Material.h       |  9 +++++++++
+ .../WallpaperEngine/Data/Parsers/MaterialParser.cpp  |  6 ++++++
+ .../WallpaperEngine/Render/Objects/Effects/CPass.cpp | 12 ++++++++++++
+ 3 files changed, 27 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Material.h b/src/core/WallpaperEngine/Data/Model/Material.h
+index c871ade..758b48a 100644
+--- a/src/core/WallpaperEngine/Data/Model/Material.h
++++ b/src/core/WallpaperEngine/Data/Model/Material.h
+@@ -24,6 +24,13 @@ enum DepthtestMode {
+     DepthtestMode_Enabled = 2,
+ };
+ 
++/** a pass's `alphawriting` (WE's names and values, GH 0x140186aa0): `default` leaves the alpha write to the engine */
++enum AlphawritingMode {
++    AlphawritingMode_Default = 0,
++    AlphawritingMode_Enabled = 1,
++    AlphawritingMode_Disabled = 2,
++};
++
+ enum DepthwriteMode {
+     DepthwriteMode_Unknown = 0,
+     DepthwriteMode_Disabled = 1,
+@@ -39,6 +46,8 @@ struct MaterialPass {
+     DepthtestMode depthtest;
+     /** Depth write mode */
+     DepthwriteMode depthwrite;
++    /** whether the pass writes alpha (`alphawriting`) */
++    AlphawritingMode alphawriting = AlphawritingMode_Default;
+     /** Shader file to use for this pass */
+     std::string shader;
+     /** List of textures defined for this pass */
+diff --git a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+index 6c738a3..07033fe 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+@@ -56,6 +56,12 @@ MaterialPassUniquePtr MaterialParser::parsePass (const JSON& it, const Project&
+ 	.constants = constants.has_value () ? ShaderConstantParser::parse (*constants, project) : ShaderConstantMap {},
+     });
+ 
++    // `alphawriting` default / enabled / disabled (GH 0x140186aa0 registers the names; an unknown one is default)
++    const std::string alphawriting = it.optional ("alphawriting", std::string ("default"));
++    pass->alphawriting = alphawriting == "enabled"	   ? AlphawritingMode_Enabled
++			 : alphawriting == "disabled" ? AlphawritingMode_Disabled
++						      : AlphawritingMode_Default;
++
+     // WE's material pass setup (GH 0x140183570) turns the blending into combos: `alphatocoverage` (3) sets
+     // ALPHATOCOVERAGE 1, `additive` (2) ADDITIVE 1. With ALPHATOCOVERAGE the stock shaders sharpen alpha and, on
+     // GLSL, discard below 0.5 (generic*.frag, genericimage*.frag, genericparticle.frag): a cutout drawn without
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 152c5e6..db0091b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -558,6 +558,15 @@ void CPass::render () {
+     }
+ 
+     this->setupRenderFramebuffer ();
++    // `alphawriting` enabled / disabled: the pass writes alpha, or doesn't, whatever the layer decided (its last
++    // pass keeps the target's alpha, CImage::render); default leaves that. The mask is put back after the draw.
++    // Inferred: WE's names (GH 0x140186aa0), the colour-write-mask effect read from the names
++    GLboolean mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
++    const bool alphaOverride = this->m_pass.alphawriting != AlphawritingMode_Default;
++    if (alphaOverride) {
++	glGetBooleanv (GL_COLOR_WRITEMASK, mask);
++	glColorMask (mask[0], mask[1], mask[2], this->m_pass.alphawriting == AlphawritingMode_Enabled);
++    }
+     this->m_drawToCopy = nullptr;
+     this->setupRenderTexture ();
+     this->setupRenderUniforms ();
+@@ -565,6 +574,9 @@ void CPass::render () {
+     this->setupRenderAttributes ();
+     this->renderGeometry ();
+     this->cleanupRenderSetup ();
++    if (alphaOverride) {
++	glColorMask (mask[0], mask[1], mask[2], mask[3]);
++    }
+ }
+ 
+ std::shared_ptr<const FBOProvider> CPass::getFBOProvider () const { return this->m_fboProvider; }

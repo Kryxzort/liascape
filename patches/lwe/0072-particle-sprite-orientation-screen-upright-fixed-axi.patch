@@ -1,0 +1,236 @@
+From faccdc7518a86dd87127381ed0a45a01a225e928 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:33:56 +0530
+Subject: [PATCH 72/77] particle: sprite orientation (screen / upright / fixed,
+ axis, flags)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE's sprite renderer reads `orientation` (screen 0, upright 1, fixed 2), `axis` (default
+"0 0 0" = y, normalised) and `flags` (GH 0x1401efc50), and every frame turns them into
+g_OrientationForward/Right/Up (GH 0x14024fd30): forward and up are chosen in the world —
+screen: −view forward and the view's up (flags bit 0) or the system's y; upright: world y
+(bit 0) or the system's axis, right = view forward × up, forward = right × up; fixed: the
+axis and its in-plane up, as given (bit 0) or the system's — then taken into the system's
+space by the transpose of its model matrix and normalised, right = up × forward.
+
+LWE always drew the system's own axes: a system tilted about x foreshortened its sprites, a
+fixed sprite faced the camera, and a child system copied its parent's orientation instead of
+using its own renderer. 3174556087's rain splashes (upright and fixed, flags 1, in squashed,
+turned systems) now follow WE's axes. Ropes and trails keep LWE's identity (their renderers'
+parsers are not read). With no rotation every mode is the identity LWE drew before.
+
+mapsequencearoundcontrolpoint: WE's defaults are bounds "0 1", limitbehavior "repeat", axis
+"0 0 1" (GH 0x1401e8c90), which is what LWE does; the library uses only those. Other values
+are reported to the health report (their runtime is in the operator interpreter, not read).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F9 (P29, P27)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  | 10 +++
+ .../Data/Parsers/ObjectParser.cpp             | 39 ++++++++++
+ .../Render/Objects/CParticle.cpp              | 74 +++++++++++++++++--
+ .../Render/Objects/CParticle.h                |  2 +
+ 4 files changed, 119 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index a9b7cfa..3ea3e40 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -621,6 +621,16 @@ struct ParticleRenderer {
+     bool uvSmoothing; // rope only: reduces flickering when lifetimes are identical
+     bool fadeAlpha; // ropetrail: fade alpha along trail
+     bool fadeSize; // ropetrail: fade size along trail
++    /** sprite: how the quad faces (WE's parser GH 0x1401efc50): 0 `screen` (the default), 1 `upright` (turns about
++     *  an up axis to face the camera), 2 `fixed` (a fixed plane, `axis` its normal) */
++    int orientation = 0;
++    /** sprite: `axis` ("0 0 0" by default: then WE's y axis), normalised */
++    glm::vec3 axis = glm::vec3 (0.0f, 1.0f, 0.0f);
++    /** sprite: the in-plane up of a `fixed` quad, cross (axis, cross (y, axis)) (the parser builds it) */
++    glm::vec3 axisUp = glm::vec3 (0.0f, 0.0f, -1.0f);
++    /** sprite: `flags` bit 0: the axes are in world space (the camera's up / world y / `axis` as is), not the
++     *  system's own */
++    bool worldSpace = false;
+ };
+ 
+ /**
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 1be3cfd..0ea2e24 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -825,6 +825,19 @@ ParticleInitializerUniquePtr ObjectParser::parseParticleInitializer (const JSON&
+ 	    it.user ("right", properties, glm::vec3 (0.0f, 0.0f, 1.0f))
+ 	);
+     } else if (name == "mapsequencearoundcontrolpoint") {
++	// WE's defaults (GH 0x1401e8c90) are bounds "0 1", limitbehavior "repeat", axis "0 0 1": the sequence
++	// around the whole circle, wrapping, in the xy plane — what this initializer does. The library uses only
++	// them (2288455459, 3233141951, 3413117423); another value isn't decoded (its runtime is in the operator
++	// interpreter): reported, drawn as the default
++	{
++	    const glm::vec2 bounds = it.optional ("bounds", glm::vec2 (0.0f, 1.0f));
++	    const std::string limit = it.optional<std::string> ("limitbehavior", "repeat");
++	    const glm::vec3 axis = it.optional ("axis", glm::vec3 (0.0f, 0.0f, 1.0f));
++	    if (bounds != glm::vec2 (0.0f, 1.0f) || limit != "repeat" || axis != glm::vec3 (0.0f, 0.0f, 1.0f)) {
++		WPENGINE_HEALTH ("unsupported", { { "what", "particle initializer mapsequencearoundcontrolpoint: bounds / "
++							   "limitbehavior / axis other than WE's defaults (drawn as the defaults)" } });
++	    }
++	}
+ 	return std::make_unique<MapSequenceAroundControlPointInitializer> (
+ 	    it.user ("controlpoint", properties, 0), it.user ("count", properties, 1),
+ 	    it.user ("speedmin", properties, glm::vec3 (0.0f)), it.user ("speedmax", properties, glm::vec3 (100.0f))
+@@ -938,6 +951,28 @@ ParticleRenderer ObjectParser::parseParticleRenderer (const JSON& it) {
+     float subdivisionDefault = (name == "rope") ? 4.0f : 1.0f;
+     float lengthDefault = (name == "ropetrail") ? 1.0f : 0.05f;
+ 
++    // a sprite's orientation (WE's parser GH 0x1401efc50): `orientation` screen / upright / fixed (anything else is
++    // screen), `axis` (default "0 0 0", which is WE's y axis), normalised, and the in-plane up of a fixed quad
++    // b = axis × t with t = normalize (y × axis) (along x when the axis is y itself), `flags` (as WE's asUInt, bit 0)
++    const std::string orientation = it.optional<std::string> ("orientation", "screen");
++    glm::vec3 axis = it.optional ("axis", glm::vec3 (0.0f));
++    glm::vec3 axisUp;
++    if (axis == glm::vec3 (0.0f)) {
++	axis = glm::vec3 (0.0f, 1.0f, 0.0f);
++    } else {
++	axis = glm::normalize (axis);
++    }
++    if (axis.x == 0.0f && axis.z == 0.0f) {
++	axisUp = glm::vec3 (0.0f, 0.0f, -1.0f); // WE's constant, either sign of y
++    } else {
++	const glm::vec3 t = glm::normalize (glm::vec3 (axis.z, 0.0f, -axis.x));
++	axisUp = glm::normalize (glm::cross (axis, t));
++    }
++    int flags = 0;
++    if (const auto flagsIt = it.find ("flags"); flagsIt != it.end () && flagsIt->is_number ()) {
++	flags = flagsIt->is_number_float () ? static_cast<int> (flagsIt->get<double> ()) : flagsIt->get<int> ();
++    }
++
+     return ParticleRenderer {
+ 	.name = name,
+ 	.length = it.optional ("length", lengthDefault),
+@@ -950,6 +985,10 @@ ParticleRenderer ObjectParser::parseParticleRenderer (const JSON& it) {
+ 	.uvSmoothing = it.optional ("uvsmoothing", true),
+ 	.fadeAlpha = it.optional ("fadealpha", false),
+ 	.fadeSize = it.optional ("fadesize", false),
++	.orientation = orientation == "upright" ? 1 : orientation == "fixed" ? 2 : 0,
++	.axis = axis,
++	.axisUp = axisUp,
++	.worldSpace = (flags & 1) != 0,
+     };
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 5d641d3..fdc0b66 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2420,11 +2420,10 @@ void CParticle::updateMatrices () {
+ 	m_mvpMatrix = m_parentSystem->m_mvpMatrix;
+ 	m_mvpMatrixInverse = m_parentSystem->m_mvpMatrixInverse;
+ 	m_eyePosition = m_parentSystem->m_eyePosition;
+-	m_orientationUp = m_parentSystem->m_orientationUp;
+-	m_orientationRight = m_parentSystem->m_orientationRight;
+-	m_orientationForward = m_parentSystem->m_orientationForward;
+ 	m_viewUp = m_parentSystem->m_viewUp;
+ 	m_viewRight = m_parentSystem->m_viewRight;
++	// its own renderer's orientation, in the parent's matrices
++	this->updateOrientation ();
+ 	this->updateParticleRenderVars ();
+ 	return;
+     }
+@@ -2448,15 +2447,78 @@ void CParticle::updateMatrices () {
+     m_mvpMatrix = m_viewProjectionMatrix * m_modelMatrix;
+     m_mvpMatrixInverse = glm::inverse (m_mvpMatrix);
+ 
+-    m_orientationUp = glm::vec3 (0.0f, 1.0f, 0.0f);
+-    m_orientationRight = glm::vec3 (1.0f, 0.0f, 0.0f);
+-    m_orientationForward = glm::vec3 (0.0f, 0.0f, 1.0f);
+     m_viewUp = glm::vec3 (0.0f, 1.0f, 0.0f);
+     m_viewRight = glm::vec3 (1.0f, 0.0f, 0.0f);
+ 
++    this->updateOrientation ();
+     this->updateParticleRenderVars ();
+ }
+ 
++void CParticle::updateOrientation () {
++    // WE's sprite orientation (GH 0x14024fd30, the renderer's settings from GH 0x1401efc50): forward F and up U are
++    // chosen in WE's world, taken into the system's space by the transpose of its model matrix's 3×3 (row-vector:
++    // v' = M·v), normalised, and right is U × F:
++    //   screen (0):  F = −view forward; U = the view's up (flags bit 0) or the system's y in the world, made
++    //                perpendicular to F
++    //   upright (1): U = world y (bit 0) or the system's `axis` in the world; R = view forward × U; F = R × U
++    //   fixed (2):   F = `axis`, U = its in-plane up — as given (bit 0) or the system's own, in the world
++    // LWE's particle space is WE's with y flipped (M_lwe = Fy·M_we·Fy, `updateMatrices`), and its sprites take
++    // (1,0,0)/(0,1,0)/(0,0,1) for WE's identity: R and F go across with Fy, U with −Fy, so with no rotation every
++    // mode is the identity LWE always drew
++    if (m_particle.renderers.empty () || m_particle.renderers[0].name != "sprite") {
++	// the trail and rope renderers have parsers of their own (not read): LWE's identity, as before
++	m_orientationRight = glm::vec3 (1.0f, 0.0f, 0.0f);
++	m_orientationUp = glm::vec3 (0.0f, 1.0f, 0.0f);
++	m_orientationForward = glm::vec3 (0.0f, 0.0f, 1.0f);
++	return;
++    }
++    const ParticleRenderer& renderer = m_particle.renderers[0];
++    const glm::mat3 fy (1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
++    const glm::mat3 m = fy * glm::mat3 (m_modelMatrix) * fy;
++    const glm::mat3 toLocal = glm::transpose (m);
++
++    const auto& camera = getScene ().getCamera ();
++    glm::vec3 viewForward = camera.getCenter () - camera.getEye ();
++    viewForward = glm::length (viewForward) > 1e-6f ? glm::normalize (viewForward) : glm::vec3 (0.0f, 0.0f, -1.0f);
++    glm::vec3 viewUp = camera.getUp ();
++    viewUp = glm::length (viewUp) > 1e-6f ? glm::normalize (viewUp) : glm::vec3 (0.0f, 1.0f, 0.0f);
++
++    glm::vec3 forward, up;
++    switch (renderer.orientation) {
++	case 1:
++	    {
++		up = renderer.worldSpace ? glm::vec3 (0.0f, 1.0f, 0.0f) : m * renderer.axis;
++		const glm::vec3 right = glm::cross (viewForward, up);
++		forward = glm::cross (right, up);
++		break;
++	    }
++	case 2:
++	    forward = renderer.worldSpace ? renderer.axis : m * renderer.axis;
++	    up = renderer.worldSpace ? renderer.axisUp : m * renderer.axisUp;
++	    break;
++	default:
++	    forward = -viewForward;
++	    up = renderer.worldSpace ? viewUp : m * glm::vec3 (0.0f, 1.0f, 0.0f);
++	    up -= forward * glm::dot (forward, up);
++	    break;
++    }
++
++    forward = toLocal * forward;
++    up = toLocal * up;
++    glm::vec3 right = glm::cross (up, forward);
++    const auto unit = [] (const glm::vec3& v, const glm::vec3& fallback) {
++	const float length = glm::length (v);
++	return length > 1e-12f && std::isfinite (length) ? v / length : fallback;
++    };
++    forward = unit (forward, glm::vec3 (0.0f, 0.0f, 1.0f));
++    up = unit (up, glm::vec3 (0.0f, 1.0f, 0.0f));
++    right = unit (right, glm::vec3 (1.0f, 0.0f, 0.0f));
++
++    m_orientationRight = fy * right;
++    m_orientationUp = -(fy * up);
++    m_orientationForward = fy * forward;
++}
++
+ void CParticle::applyParallaxToModelMatrix () {
+     // as for every object (CScene::getParallaxOffset): a world translation by the root's offset, y flipped
+     const glm::vec2 parallax = getScene ().getParallaxOffset (m_particle);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index 9f8a13c..9f2ffc7 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -240,6 +240,8 @@ protected:
+     void setupGeometryCallbacks ();
+     void setupParticleUniforms ();
+     void updateMatrices ();
++    /** g_Orientation* from the sprite renderer's orientation, in this system's matrices (WE's GH 0x14024fd30) */
++    void updateOrientation ();
+     /** The system's origin/scale/angle this frame, with its parents' (P36/G04); moves world-space control points */
+     void refreshTransform ();
+     void applyParallaxToModelMatrix ();

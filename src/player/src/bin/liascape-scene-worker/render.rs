@@ -22,6 +22,8 @@ pub struct LoadOpts<'a> {
     pub steam_dir: Option<&'a Path>,
     /// User properties applied after the load, before the first frame.
     pub properties: &'a Map<String, Value>,
+    /// The screen it shows on (`Start.max_size`; 0 = unknown), given before the first frame.
+    pub screen: (u32, u32),
 }
 
 pub struct LweScene {
@@ -96,6 +98,7 @@ impl LweScene {
         for (name, value) in o.properties {
             on_prop(name, scene.set_property(name, value));
         }
+        scene.hint_screen(o.screen.0, o.screen.1);
         let scratch = gfx.tex(1, 1);
         let scratch_fbo = gfx.fbo(&scratch);
         let (w, h) = scene.first_render(scratch_fbo.id.0.get()).map_err(|e| {
@@ -124,6 +127,11 @@ impl LweScene {
 
     pub fn set_pointer(&self, x: f64, y: f64, buttons: u32) {
         self.scene.set_pointer(x, y, buttons);
+    }
+
+    /// The screen showing it changed size (`resize {max_size}`): the scripts' `resizeScreen`.
+    pub fn hint_screen(&self, w: u32, h: u32) {
+        self.scene.hint_screen(w, h);
     }
 
     pub fn set_input(&self, samples: &[u8]) {

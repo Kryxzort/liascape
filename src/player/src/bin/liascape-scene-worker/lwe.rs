@@ -78,6 +78,7 @@ unsafe extern "C" {
     fn wp_project_get_width(project: *mut c_void) -> c_int;
     fn wp_project_get_height(project: *mut c_void) -> c_int;
     fn wp_project_set_output_framebuffer(project: *mut c_void, framebuffer: c_uint);
+    fn wp_project_hint_size(project: *mut c_void, width: c_int, height: c_int);
     fn wp_project_property_set_value_by_name(
         project: *mut c_void,
         name: *const c_char,
@@ -347,6 +348,17 @@ impl Scene {
             }
             Ok((w as u32, h as u32))
         }
+    }
+
+    /// The screen the scene is shown on (the largest output showing it, pixels): the scripts'
+    /// `engine.screenResolution`, and `resizeScreen` when it changes after the first frame (a
+    /// size given before it is the screen from the start). 0 = unknown: nothing.
+    pub fn hint_screen(&self, w: u32, h: u32) {
+        if w == 0 || h == 0 || self.project.is_null() {
+            return;
+        }
+        let clamp = |v: u32| v.min(c_int::MAX as u32) as c_int;
+        unsafe { wp_project_hint_size(self.project, clamp(w), clamp(h)) };
     }
 
     /// Renders the scene at scene time `t` (seconds) into `fbo`, which must be native-sized.

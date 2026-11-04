@@ -401,3 +401,19 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   animated (skinned) models, which LWE doesn't do yet (batch F4).
 - Left: shadows from directional lights (WE splits them into "cascades"), WE's light clustering for scenes with many
   lights, the "ultra" soft-shadow mode, and a shadow-quality setting (it's WE's default, medium).
+
+## 2026-11-04 night — the small WE-coverage gaps (F7–F9, fork patches 0072–0077)
+- **Sprite orientation as WE does it** (0072): particle sprites set to `upright` / `fixed` (3174556087's rain
+  splashes) now take WE's axes, read from its renderer code; a screen sprite in a tilted system faces the camera; a
+  child system uses its own renderer instead of copying its parent's. Untilted systems draw exactly as before.
+- **`alphawriting`, effect FBO `fit` / `width` / `height` / `uvs`, `command: swap`** (0073–0074): 3184155462's
+  cursor-ripple buffers are now 512 px as WE sizes them; the stock fluid simulation's ping-pong works.
+- **TEX<n>FORMAT per bound texture** (0075): DXT / RG88 normal maps unpack as in WE (lit layers, reflection).
+- **resizeScreen** (0076): the worker now tells the core the output it shows the scene on.
+  `engine.screenResolution` is that output (it was the scene's size), resizeScreen fires when it changes (not at
+  start, as in WE), and `input.cursorScreenPosition` is in its pixels (it was 0..1 — 3509243656's mouse-follow read
+  it as pixels and stuck at one edge).
+- **Puppet animation events** (0077): an MDL animation's own events reach the layer's scripts (none in the
+  library yet).
+- Left: puppet **hit boxes** (where WE stores them isn't decoded; no library script reads them), text-layer writes
+  re-laying text, `transformAttachmentToTexture`, three unknown .tex flags.
