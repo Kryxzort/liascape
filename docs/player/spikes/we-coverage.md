@@ -226,6 +226,13 @@ Tests (host_api_test, each RED on 42f301d): `layer_transform_api`, `create_layer
 `script_strings_and_regexp`, `video_texture_api`, `animation_layer_api`, `particle_system_api`,
 `script_events_reach_scripts`, `blending_sets_combos`, `scene_camera_and_config_api`.
 
+Health (`scene-health.md`, 96 scenes) before → after, on pin `deeb4da` (which also carries the shader agent's
+0063–0064): 75 → 86 clean, 21 → 10 degraded, 0 failed; script errors 38 → 11 (all 11 fail in WE too: § 1), layers
+dropped 3 → 0, effects dropped 57 → 0 (the shader patches, not this batch), no scene worse. By eye (smoke 1 s/3 s):
+3243449890 now draws its triangle clock and the character; 3219908811 its cherry-blossom background and ring;
+3516174947, 3516106265 and 2890767643 unchanged apart from animation. One run timed out 3432876246 once (exit
+124); five reruns alone took 4–5 s, so a one-off.
+
 ## Future batches (render features, not done here)
 
 | Batch | What | Library | Size |

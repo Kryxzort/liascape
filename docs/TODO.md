@@ -1175,9 +1175,11 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
-          features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96. Report only; batched by cause:
-          - [ ] script `thisLayer.getTransformMatrix()` not a function (5 scenes; + the `.x of undefined` that follows
-                it, 7) — a missing ILayer API.
+          features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96. Rerun on pin `deeb4da`
+          (shader 0063–0064 + coverage 0065–0070): 86 clean, 10 degraded, 0 failed; script errors 38 → 11, effects
+          dropped 57 → 0 (the shader patches), layers dropped 3 → 0, no scene worse. Batched by cause:
+          - [x] script `thisLayer.getTransformMatrix()` not a function (5 scenes; + the `.x of undefined` that follows
+                it, 7) — a missing ILayer API. Done in the coverage batch (0065, below).
           - [ ] GL `C7011 implicit cast from vec4 to vec2` after glslang accepted the source (4 scenes; drops the
                 `音频光环` / `test_shader` compose layers of 3243449890, 3184155462 whole — the top losses).
           - [ ] glslang `'M_PI' undeclared` — `auto_sway` (3 scenes, 14 layers; the item above).
@@ -1186,8 +1188,18 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] glslang `'input' : Reserved word` (custom_user_texture, 24 layers of 3516106265), `non-constant
                 initializer` (3354740764's color grading, 30 % of its canvas), `function does not return a value`,
                 `l-value required a_TexCoord`, `boolean expression expected`, `#if unexpected tokens` (1 scene each).
-          - [ ] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
-                parallaxDepth of undefined` (2 each), user property type `Text` unsupported, VolumeLight objects.
+          - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
+                parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
+                the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
+          - [ ] user property type `Text` unsupported (3319542538), VolumeLight objects (future batch F2).
+    - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
+          [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
+          item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object
+          types, pass options) with library / stock usage and sizes. Pick work from its "Future batches":
+          - [ ] F1 shadows + light cookies (L), F2 volumetric lights (L), F3 bone physics + blend shapes (L),
+                F4 skinned / animated 3D models + createModelData (L), F5 perspective layers (M), F6 the 20 stock-only
+                particle operators (M), F7 puppet hit boxes + MDLA events (S–M), F8 `resizeScreen` (S), F9 small keys
+                (`alphawriting`, `fbos.fit`, sprite `orientation`, mapsequence bounds, `command: swap`; S each).
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
