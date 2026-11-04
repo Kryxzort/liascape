@@ -1139,8 +1139,10 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [x] Bone alpha (SKINNING_ALPHA), blend shapes (MDMP; MDLE turned out to be a copy of the bones' local
                 matrices) — done in F3 (0079); GPU skinning for 3D models in F4 (0080; puppets stay CPU-posed);
                 animation events in F7 (0077).
-          - [ ] IK (3042492564's arm, one bone) and physics bones (none enabled in the library): the solver lives in
-                the mixer GH 0x140228470, unread; root motion (MDLA flags bit 0, 18 bytes, undecoded);
+          - [x] IK (3042492564's arm, one bone) — done in F2 (0087): MDLS v2 targets + MDLA v2 target tracks decoded,
+                the solver inferred (not found in the mixer).
+          - [ ] Physics bones (none enabled in the library; WE's simulation is on an unread rigid-body helper family
+                reached from the mixer GH 0x140228470); root motion (MDLA flags bit 0, 18 bytes, undecoded);
                 `autosort`/`index` layer order (0 users, not in the exe's strings).
           - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
           - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
@@ -1165,7 +1167,7 @@ Two bug classes kept recurring; fix the class, not the instance:
                 0071, below).
           - [x] G20 perspectiveoverridefov, G21 `perspective` layers, G23 camerafade, camera paths, sortorder and WE's
                 transparent sort key — done in F5 (fork patches 0082–0083, below).
-          - [ ] Left: directional shadow cascades, light clusters, volumetrics; shape objects (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
+          - [ ] Left: directional shadow cascades, light clusters, volumetrics' SHADOW / COOKIE / fog / directional (point and spot volumetrics and shape objects: done in F2, 0086 and 0088); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
                 particle shaders; the 3D camera's parallax and zoom (WE's 3D projection doesn't read the zoom; its
                 other reader and the 3D parallax block weren't read — 0 3D scenes use either); E43 text `depthtest`
                 (no-op in 2D, not ported); customsortorder's reader; hit-testing world-placed layers; an
@@ -1205,7 +1207,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
-          - [ ] user property type `Text` unsupported (3319542538), VolumeLight objects (future batch F2).
+          - [ ] user property type `Text` unsupported (3319542538). (Its "VolumeLight" object — a shape — draws since F2, 0086.)
     - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object
@@ -1221,7 +1223,7 @@ Two bug classes kept recurring; fix the class, not the instance:
                 (+ get/setBlendShapeWeight), skinned and morphed 3D models posed by their animation layers,
                 createModelData / IModelData / createLayer ({ model }). Result in the audit's "F3/F4 result".
                 host_api_test +4 (RED on 24adeff).
-                - [ ] Left: IK and bone physics (+ applyBonePhysicsImpulse, gravity/wind), root motion /
+                - [ ] Left: bone physics (+ applyBonePhysicsImpulse, gravity/wind; IK done in F2), root motion /
                       `rootmotion`, MORPHING_MODIFIERS, IModelLayer's animation-layer API on models, `perspective`
                       model layers, MDLA v6's per-bone float track.
           - [x] **F5 perspective layers + F6 the stock-only particle operators — done 2026-11-04** (fork patches
@@ -1235,7 +1237,15 @@ Two bug classes kept recurring; fix the class, not the instance:
                       0x13 and the spawn interpreter GH 0x140260d80), vortex_v2, a camera object's own `path`/`queuemode`
                       (all empty in the library), text `depthtest`, customsortorder, the 3D zoom/parallax, WE captures
                       of the element previews (`assets/scenes/particleelementpreviews`).
-          - [ ] F2 volumetric lights (L), F7 puppet hit boxes (S–M).
+          - [x] **F2 shape objects + volumetric lights, F3's puppet IK — done 2026-11-05** (fork patches 0086–0089,
+                pin `c1df824`): the "VolumeLight" is WE's shape class (3319542538's light shafts now draw), point and
+                spot `castvolumetrics` with WE's volumetrics pass and shaders (synthetic check; 0 library users), puppet
+                IK chains (3042492564's arm follows its hand target; solver inferred). Result in the audit's "F2
+                result". host_api_test +3 (RED on `78128d1`).
+                - [ ] Left: volumetrics with SHADOW / COOKIE / fog, directional volumetrics, the `volumetrics` quality
+                      setting (medium); bone physics + applyBonePhysicsImpulse + gravity/wind (0 users); IK limits
+                      (`ikce`, `ikrmin/max`); root motion; MORPHING_MODIFIERS.
+          - [ ] F7 puppet hit boxes (S–M).
           - [x] F8 `resizeScreen` + `engine.screenResolution` + `cursorScreenPosition` in screen pixels (0076; the
                 worker hints `max_size`), F9 (0072–0075: `alphawriting`, `fbos.fit/width/height/uvs`, `command: swap`,
                 sprite `orientation`, mapsequence defaults, `TEX<n>FORMAT`), F7's MDLA animation events (0077) —

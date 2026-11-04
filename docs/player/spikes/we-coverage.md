@@ -100,7 +100,7 @@ so those counts are upper bounds, marked ~). Stock = WE asset files.
 | ITextLayer | 15 | 7 | partial | partial | font, anchor, padding, limitrows, limitwidth, opaquebackground now read; writes to those (and `backgroundcolor`) are kept on the layer but don't re-lay the text (S) |
 | IParticleSystemInstance | 15 | 0–16 | missing | impl | the instanceoverride values, live (controlpoint0..7 made from the control point when the scene sets none) |
 | IParticleSystem | play pause stop isPlaying emitParticles instance | ~22 | missing (sound only) | impl | |
-| IImageLayer | 25 | 7 | partial | partial | alignment, getVideoTexture, animation layers, bones, blend shapes (`getBlendShapeIndex/Weight`, `setBlendShapeWeight`: F3, 0079) now; `applyBonePhysicsImpulse`/`resetBonePhysicsSimulation` are no-ops (LWE has no bone physics; no library bone enables it) |
+| IImageLayer | 25 | 7 | partial | partial | alignment, getVideoTexture, animation layers, bones, blend shapes (`getBlendShapeIndex/Weight`, `setBlendShapeWeight`: F3, 0079) now; `applyBonePhysicsImpulse`/`resetBonePhysicsSimulation` are no-ops (LWE has no bone physics; no library bone enables it); puppet IK chains follow their targets (F2, 0087) |
 | IModelLayer | perspective, rootmotion, animation layers | 0 | missing | partial | a model's scene `animationlayers` pose its skeleton (F4, 0080) and a model layer is a script layer; the IModelLayer animation-layer methods, `rootmotion` and `perspective` are missing |
 | ICamera {fov zoom} | 2 | 0 | missing | impl | a camera object's zoom/fov are layer properties (scriptable) |
 | IModelData / createModelData | 7 | 0 | missing | impl | createModelData, applyData, replaceData, the format constants, createLayer ({ model }), destroyModelData (F4, 0081); COLOR is read past, the bounding box ignored |
@@ -159,7 +159,7 @@ worth a row. Row ids in brackets are the gap audit's.
 | objects.`instanceoverride.controlpoint1..7` | 6 | 34 | impl | (literal built from the index: the classifier misses it) |
 | objects.`particlesrc` | 3 | 21 | n/a | editor source reference |
 | objects.`effects.username` | 1 | 2 | n/a | editor label |
-| objects.`density`, `volumetricsexponent` (VolumeLight) | 1 | 1 | missing | with the `shape` object (below) |
+| objects.`density`, `volumetricsexponent` (VolumeLight) | 1 | 1 | impl | light keys, not a VolumeLight's: with `castvolumetrics` and `volumetricsscattering` (GH 0x140283df0) they drive the volumetrics pass (F2, 0088). 3477054430's four spots carry the editor's defaults, castvolumetrics off |
 | general.`lightconfig` | 1 | 2 | missing | 2.8.485 reads only `directional` (≤ 3) and `directionalshadow`; 3477054430's `{"spot": 4}` is an older form. LWE counts the directional lights itself (F1) |
 | general.`camerapreview`, `hdr`, `fov`, `farz`, `zoom`, objects.`fov`/`zoom` | — | — | impl | (not in the exe's narrow strings: wide strings) |
 
@@ -209,7 +209,8 @@ the health report (their runtime is in the operator interpreter, not read). Stoc
 | | normalmap | 0 | 2 | partial (as rgba8888) | partial |
 | object type | image, compose (passthrough), fullscreen, solidlayer, text, particle, sound, camera, group, model (static MDL) | 96 / 11 / … / 45 / 78 / 55 / 11 / 16 / 2 | | impl | impl |
 | | light `lpoint` / `lspot` / `ltube` / `ldirectional` | 0 / 1 / 0 / 0 | 2 / 0 / 0 / 0 | impl (F1: shadows, spot cookies, tubes, directional; no directional cascades, no clusters) | impl |
-| | `shape` (VolumeLight) | 1 (3319542538) | 3 | missing | missing (L: volumetrics) |
+| | `shape` (VolumeLight) | 1 (3319542538) | 3 | missing | **impl** (F2, 0086): not a light — WE's shape class (vtable 0x1404d36e8): a square of the scene's height whose corners are its first effect's point0..3, its last effect drawn into the scene with DIRECTDRAW, additively |
+| | light `castvolumetrics` | 0 | 0 | missing | **impl** (F2, 0088): point and spot volumes marched with WE's volumetrics shaders (no SHADOW / COOKIE / fog in the march, no directional) |
 | effect pass | material, target, bind, compose, source, command copy (3) | 5–82 | | impl | impl |
 | | command `swap` | 0 | 2 | missing (refused) | **impl**: WE's command 2 (GH 0x1402131b0); the two FBOs exchange their storage, swaps after the last draw run after it (**Inferred** from the stock fluid simulation's ping-pong) |
 
@@ -357,11 +358,34 @@ unturned; no scene has camera paths). Tests (host_api_test, each RED on `24adeff
 | Batch | What | Library | Size |
 |---|---|---|---|
 | ~~F1 Shadows and light cookies~~ **done** (0071, below) | `castshadow`, the shadow atlas, spot cookies, tube and directional lights; left: directional cascades, clusters, `lightconfig` | 0 (3477054430's spots don't cast) | L |
-| F2 Volumetric lights | `shape` objects (VolumeLight), `density`, `volumetricsexponent` | 1 (3319542538) | L |
-| F3 Bone physics + blend shapes | blend shapes, their weight tracks, bone alpha **done (0079)**; left: IK (1 library bone), bone physics (0 enabled), `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them), root motion | 1 (3490034653's blink) | L |
+| F2 Volumetric lights | **done (0086, 0088)**: `shape` objects, `castvolumetrics` / `density` / `volumetricsscattering` / `volumetricsexponent`; left: SHADOW / COOKIE / fog volumetrics, directional, the quality setting | 1 (3319542538) | L |
+| F3 Bone physics + blend shapes | blend shapes, their weight tracks, bone alpha **done (0079)**; IK **done (0087, solver inferred)**; left: bone physics (0 enabled), `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them, all wind off), root motion, MORPHING_MODIFIERS | 1 (3490034653's blink), 1 (3042492564's arm) | L |
 | F4 Skinned / animated 3D models | skinned / morphed models, the casters' combos, `createModelData` **done (0078, 0080, 0081)**; left: IModelLayer's animation-layer methods, `rootmotion` | 0 | L |
 | ~~F5 World-space perspective layers~~ **done (0082–0083)** | `perspectiveoverridefov`, image/text `perspective`, perspective particles in 2D, camera paths + camerafade, `sortorder`; left: text `depthtest`, `customsortorder`'s reader, the 3D zoom / parallax, a camera object's own path | 4 layers + 35 particle scenes | M |
 | ~~F6 Stock-only particle operators~~ **done (0084–0085)** | the stock-only types above; left: `layerimage`, collisionmodel, the inferred parts (boids' forces, remap's shapes, the initializers' runtime) | 0 (stock presets) | M |
 | F7 Puppet hit boxes + MDLA events | CursorEvent.hitBox (left: layout not decoded); puppet animationEvent **done (0077)** | 0 known | S–M |
 | F8 Resize events | `resizeScreen` when the output size changes — **done (0076)** | 1 | S |
 | F9 Small parser keys | **done (0072–0075)**: `alphawriting`, `fbos.fit/uvs`, sprite `orientation`, mapsequence bounds (defaults), `command: swap`; left: texture flags 64/2²¹/2²³ (meaning not decoded) | 31 / 1 / 5 / 3 / 0 / 3 | S each |
+
+## Implemented: F2 shape objects and volumetric lights, F3's puppet IK (fork patches 0086–0089, 2026-11-05)
+
+Decoded addresses and what's inferred: the audit's "F2 result".
+- **0086 render: shape objects.** What upstream called a VolumeLight is WE's shape class (factory GH 0x1401be650,
+  vtable 0x1404d36e8): a square of the scene's orthographic height (GH 0x140285b40), its corners its first effect's
+  point0..point3 (GH 0x1402861b0), every pass with DIRECTDRAW 1 (GH 0x140285f40), the last effect's passes drawn
+  straight into the scene (GH 0x140285b70), the last pass additively (GH 0x1402866d0). 3319542538's light shafts.
+- **0088 render: volumetric point and spot lights.** `castvolumetrics` (flags bit 2), `density`,
+  `volumetricsscattering`, `volumetricsexponent` (GH 0x140283df0); WE's pass (GH 0x1401c56e0) with its materials:
+  back faces' depth, the march (front faces, or full screen from inside), an eighth-size light buffer, blur_k3, added
+  to the scene. **Ours**: the depth convention (D3D clip depth over GL depth textures, y-flipped targets). Not done:
+  SHADOW / COOKIE in the march, fog, directional, the quality setting. 0 library users (a synthetic check).
+- **0087 render: puppet IK.** `ik` / `ikd` / `ikr` bones, MDLS v2's IK targets and MDLA v2's target tracks (Observed);
+  the solver is **Inferred** (two-bone law of cosines toward the pole, CCD for longer chains). 3042492564's arm now
+  follows its animated hand target.
+- **0089**: the factory address in the comments.
+
+Not done: bone physics and applyBonePhysicsImpulse / gravity / wind (0 library bones enable physics; WE's simulation
+sits on an unread rigid-body helper family), root motion, MORPHING_MODIFIERS.
+
+Tests (host_api_test, each RED on 78128d1): `shape_draws_its_effect_in_place`, `volumetric_lights_glow`,
+`puppet_ik_reaches_its_target`.

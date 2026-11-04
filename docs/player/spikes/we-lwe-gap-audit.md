@@ -2474,3 +2474,77 @@ blendinend as a clamped life ramp (inferred).
 Pin `78128d1` (which also carries the rig agent's F3/F4 0078–0081). host_api_test 101/101 on it (105/105 with the
 rig agent's tests merged in). Player tests (DEBUG): 738 passed, 2 failed, 3 ignored; the 2
 (`no_trim_once_shutdown_started`, `align_end_hands_off_as_a_last_frame_ends`) are timing tests and passed alone.
+
+### F2 result: shape objects, volumetric lights, puppet IK (fork patches 0086–0089, pin `c1df824`, 2026-11-05)
+
+Decoded from wallpaper64.exe 2.8.485 (the sound spike's `all.c` plus the exe for vtables, constants and asm; no REA
+session was needed) and the stock assets (2.8.42's `effects/lightshafts`, `materials/util/volumetrics_*`,
+`shaders/volumetrics{back,front}`). Library scan of the Workshop folder: one `shape` object (3319542538's layer 895,
+"Rayons lumineux - linéaire", `shape: quad` with the stock lightshafts effect), no light with `castvolumetrics`
+(3477054430's four spots carry the editor's `density` 2 / `volumetricsexponent` 1 defaults, off), one IK bone
+(3042492564's 海果-手臂), no bone with physics enabled.
+
+**What "VolumeLight" was.** Upstream LWE logged every `shape` object as "VolumeLight objects are not supported yet".
+WE's object factory (GH 0x1401be650) builds a `shape` as its own class (vtable 0x1404d36e8, 0x460 bytes, on the
+effect-object base 0x1404d2168 of GH 0x140212c50): no light at all. Volumetric light is the lights' `castvolumetrics`.
+
+**Shape objects (0086, Observed):**
+
+- Its size is a square of the scene's orthographic height, both sides (GH 0x140285b40 reads the render context's
+  +0x88 twice; GH 0x1401b6c60 stores the ortho height there).
+- Its mesh (GH 0x1402861b0): its first effect's first pass's `point0`..`point3` (vec2; all four, else the plain quad
+  GH 0x140219570), vertex = (S · (p.x − 0.5), S · (0.5 − p.y), 0), uv = p, triangles 0 2 1 / 0 3 2; the bounding radius
+  (+0x450) culls it.
+- Every pass gets combo DIRECTDRAW 1 (vtable +0xc8, GH 0x140285f40). lightshafts under DIRECTDRAW reads no layer
+  picture and maps the quad's corners back to its unit square (`inverse (squareToQuad (p0..p3))`).
+- Its draw (GH 0x140285b70): the layer's world matrix, then the LAST effect's passes (GH 0x1402176a0 with param 5 = 1),
+  straight into the scene. On that effect's last pass GH 0x1402176a0 calls the shape's vtable +0x108 (GH 0x1402866d0),
+  which sets the pass's blending to 2 = additive (GH 0x140182410's names).
+- LWE: a shape is an Image with no base pass, no colour-blend/tint pass and 1 x 1 composites; its 6-vertex quad is
+  recomputed per frame on the layer's scene rectangle (as the puppets'). Not ported: the radius cull, the object's
+  flag 0x80 path (FUN_1401b4fd0, a perspective variant).
+
+**Volumetric lights (0088):**
+
+- Observed: `castvolumetrics` is flags +0x2c4 bit 2; `density` +0x2f8 (default 2), `volumetricsscattering` +0x2fc
+  (0.5), `volumetricsexponent` +0x300 (1) (GH 0x140283df0, the factory's defaults). The app setting `volumetrics`
+  defaults to "medium" (GH 0x140048ca0); quality 0 skips the pass.
+- Observed, the pass (GH 0x1401c56e0, per light): targets `_rt_volumetricsBack` (the scene's depth),
+  `_rt_volumetricsSingle` (the light volume's back faces' depth, volumetrics_back) and `_rt_volumetricsLightBuffer`
+  (+ `B`), a divisor of 8 up to medium, 4 above; blur_h / blur_v (blur_depthaware above high) and volumetrics_combine
+  (DEPTHAWARE when quality > 1); combos QUALITY, POINTLIGHT, SHADOW (castshadow and shadows on), COOKIE (usecookie).
+  The eye's probe (eye + forward · 0.2) inside the volume picks volumetrics_fullscreen, else volumetrics_front.
+- Observed, the volume mesh (GH 0x140282d40): a point light's sphere (GH 0x1402813c0) of its radius; a spot's 32-step
+  cone in its own clip space (a frustum cube with usecookie).
+- Observed, the packing: g_RenderVar1 = (radius · 0.99, cos inner, cos outer, intensity), 2 = (origin, density),
+  3 = the spot's x axis (a point light: its projection info), 4 = (colour · scattering, volumetricsexponent),
+  0 = the shadow map transform; g_AltViewProjectionMatrix = the volume's matrix, g_AltModelMatrix = the light's
+  projection, g_EffectModelMatrix = the inverse view-projection.
+- Ours: the front shader compares GL depth-texture values with D3D clip depth: the march draws through the
+  view-projection with z remapped to 0 … w (and unprojects through its inverse); the depth targets are y-flipped
+  (the shader's screen uv grows down): the scene's depth is blitted flipped, the back faces drawn through a y-flipped
+  view-projection. Half float light buffers. Where the pass runs in WE's frame is Inferred (after the objects).
+- Not done: SHADOW and COOKIE volumetrics, fog in the march, directional volumetrics (2.8.485's
+  volumetrics_directional; 2.8.42's assets lack it), the `volumetrics` quality as a setting (medium).
+
+**Puppet IK (0087):**
+
+- Observed: the bone JSON (GH 0x14028bbd0) sets settings flags: `ik` 0x4000, `ikce` 0x8000, `se` 0x1000, `re`
+  0x2000, `r` 1, `t` 2, `ikg` 0x20, `ikr` 0x40, `ikse` 0x80, `ikfe` 0x100, `rax/ray/raz` 0x100000/0x200000/0x400000,
+  `tax/tay/taz` 0x800000…; `ikd` (≥ 1) at +0x5c, `ikrminl`/`ikrmaxl` +0x64/+0x68 (with `ikce`). MDLS v2's IK targets:
+  a name, the bone, a type, a 64-byte matrix in the mesh's space; MDLA v2 has one key track per target.
+  3042492564's arm: the hand's type-0 target sits on the hand and its track moves 24 px (y −76.7 … −52.7 … −76.7 over
+  6 s) while every bone track is still; a type-1 target sits by the elbow.
+- Inferred: the solver. It isn't in the mixer GH 0x140228470 (which holds the Euler wraps of `rax`… and a physics
+  world, the 0x14023f… helpers); not found elsewhere. LWE: two-bone chains by the law of cosines with the elbow on the
+  type-1 target's side, longer ones CCD, in the puppet's plane, after the layers mix (the target tracks mix as the
+  bones'), before a script's bone overrides; `ikr` turns the end bone to the target's rotation.
+- Not done: `ikce` / `ikrmin`/`ikrmax` limits, `ikg`, `ikse`/`ikfe`.
+
+**Not done (Left):**
+
+- Bone physics, applyBonePhysicsImpulse / resetBonePhysicsSimulation (no-ops), `general.gravity*` / `wind*`: no library
+  bone enables physics (`se`/`re`/`ge` false, `s` 0 everywhere); the simulation is built on a rigid-body helper family
+  (GH 0x14023f030…0x14023fc00, the world at the puppet's +0x4b8) reached from the mixer, unread. Porting it without a
+  user would be invention.
+- Root motion (MDLA flags bit 0, 0 users), MORPHING_MODIFIERS (0 users), MDLA v6's per-bone float track.
