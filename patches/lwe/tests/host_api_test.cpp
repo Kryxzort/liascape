@@ -5619,6 +5619,37 @@ static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba, 
     return t.out;
 }
 
+// g_LayerModelMatrix is the layer's matrix in WE's world (uniform 0x19: GH 0x14010a0e0 reads ctx +0xa30, which
+// GH 0x1402176a0 fills from the layer's own draw matrix for its effect passes): an effect on a layer scaled 2 x 3 and
+// turned reads its column lengths as 2 and 3 (frame_builder's FIXSCALE, 3516106265). Unpatched: not registered, zero
+static bool layer_model_matrix_is_fed () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"bloom\":false",
+        b7_object (1, "lmbase", 32, "8 8", ",\"scale\":\"2 3 1\",\"angles\":\"0 0 0.5\","
+                                          "\"effects\":[{\"id\":2,\"name\":\"lm\",\"file\":\"effects/lm/effect.json\",\"visible\":true}]"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "lmbase", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/lm").c_str (), 0755);
+    auto files = b7_layer (dir, "lm",
+                           "gl_FragColor = vec4(length(vec2(g_LayerModelMatrix[0][0], g_LayerModelMatrix[0][1])) / 4.0, "
+                           "length(vec2(g_LayerModelMatrix[1][0], g_LayerModelMatrix[1][1])) / 4.0, 0.0, 1.0);",
+                           "", true, "uniform sampler2D g_Texture0;\nuniform mat4 g_LayerModelMatrix;\n");
+    unlink ((dir + "/models/lm.json").c_str ());
+    files.pop_back ();
+    write_file (dir + "/effects/lm/effect.json", "{\"name\":\"lm\",\"passes\":[{\"material\":\"materials/lm.json\"}]}\n");
+    files.push_back ("effects/lm/effect.json");
+    rig.extra.insert (rig.extra.end (), files.begin (), files.end ());
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = pixel_at (rig, 32);
+    printf ("    scale 2 x 3, turned 0.5: column lengths / 4 read %d %d (want 127 191)\n", px[0], px[1]);
+    CHECK (near (px[0], 127, 3) && near (px[1], 191, 3), "g_LayerModelMatrix isn't the layer's matrix (%d %d)", px[0], px[1]);
+    return true;
+}
+
 // a sampler's "components" combos follow the bound texture's flags 0x100000 << i (WE's shader preamble GH 0x14019b550;
 // resourcecompiler64.exe sets the bit for each channel built from a component image): a mask with 0x800000 (the alpha
 // component, as 3509243656's PBR masks) defines the fourth component's combo, one with 0xa00000 (3477054430's) the
@@ -6516,6 +6547,7 @@ int main (int argc, char** argv) {
     run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
     run ("texture_components_define_combos", texture_components_define_combos);
+    run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);
