@@ -1,0 +1,181 @@
+From e372e44cacc1b3afa2fb6d724e5633ede21721b6 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 07:16:09 +0530
+Subject: [PATCH 50/50] render: text wraps at maxwidth, stops at maxrows, takes
+ spacing and script-set alignment
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wires the rest of WE's layout (GH 0x1401dd330, in TextLayout since the previous patch) to the
+text's properties, each only while its switch is on (GH 0x14027c600: maxwidth with flag 4 =
+limitwidth, maxrows with flag 8 = limitrows):
+- limitwidth: a glyph (not the line's first, not a space) whose right edge passes maxwidth breaks
+  the line at the last space before it, or at it in a longer word; the rest, less its leading
+  spaces, is the next line and the line's trailing spaces go.
+- limitrows: lines past maxrows are dropped. A wrap that would pass it instead ends the line: with
+  limituseellipsis shortened a character at a time until it fits with "…" after it, without it cut
+  at the glyph. An explicit line past maxrows ends the last kept one the same way.
+- blockalign: a wrapped line's spaces share what it lacks of maxwidth (justified).
+- spacing: x per glyph advance, y per line.
+- maxwidth and maxrows are layer properties (a script on maxwidth sizes song titles to their box);
+  ITextLayer.horizontalalign / verticalalign are writable from scripts and relayout the next frame
+  (S28: 6 scenes write them).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B4 (T2, T5, S28)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ .../WallpaperEngine/Render/Objects/CText.cpp  | 27 ++++++++++++++++---
+ .../WallpaperEngine/Render/Objects/CText.h    |  7 +++++
+ .../Render/Objects/TextLayout.h               |  2 ++
+ .../Adapters/ScriptableObjectAdapter.cpp      | 24 ++++++++++++-----
+ 4 files changed, 51 insertions(+), 9 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index 6553b27..2bccaa6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -52,7 +52,12 @@ int verticalAlignOf (const std::string& value) {
+ CText::CText (Wallpapers::CScene& scene, const Text& text) :
+     CObject (scene, text), CImage (scene, withTarget (scene, text)), m_text (text) {
+     this->m_target = scene.find (targetName (text));
++    this->m_horizontalAlign = text.horizontalAlign;
++    this->m_verticalAlign = text.verticalAlign;
+     this->registerProperty ("pointSize", *text.pointSize->value);
++    // ITextLayer.maxwidth / maxrows (a script on maxwidth sizes song titles to their box)
++    this->registerProperty ("maxwidth", *text.maxWidth->value);
++    this->registerProperty ("maxrows", *text.maxRows->value);
+     // the text's script runs as a layer script (initScriptLayer), not a second time as a property script
+     this->registerProperty ("text", *text.text->value, false);
+ }
+@@ -66,6 +71,14 @@ CText::~CText () {
+ 
+ const Text& CText::getText () const { return this->m_text; }
+ 
++const std::string& CText::getHorizontalAlign () const { return this->m_horizontalAlign; }
++
++const std::string& CText::getVerticalAlign () const { return this->m_verticalAlign; }
++
++void CText::setHorizontalAlign (const std::string& value) { this->m_horizontalAlign = value; }
++
++void CText::setVerticalAlign (const std::string& value) { this->m_verticalAlign = value; }
++
+ void CText::setup () {
+     const auto& font = this->m_text.font;
+     bool systemFont = font.empty () || font.rfind ("systemfont_", 0) == 0;
+@@ -151,7 +164,15 @@ std::string CText::currentText () {
+ bool CText::relayout (const std::string& text) {
+     TextLayoutParams params;
+     params.pointSize = this->m_text.pointSize->value->getFloat ();
+-    params.horizontalAlign = horizontalAlignOf (this->m_text.horizontalAlign);
++    params.horizontalAlign = horizontalAlignOf (this->m_horizontalAlign);
++    params.verticalAlign = verticalAlignOf (this->m_verticalAlign);
++    params.spacingX = this->m_text.spacing.x;
++    params.spacingY = this->m_text.spacing.y;
++    // the limits count only while switched on (GH 0x14027c600: maxwidth with flag 4, maxrows with flag 8)
++    params.maxWidth = this->m_text.limitWidth ? std::max (0.0f, this->m_text.maxWidth->value->getFloat ()) : 0.0f;
++    params.maxRows = this->m_text.limitRows ? std::max (0, this->m_text.maxRows->value->getInt ()) : 0;
++    params.ellipsis = this->m_text.limitUseEllipsis;
++    params.blockAlign = this->m_text.blockAlign;
+ 
+     // WE pads the text's texture while the layer has effects (GH 0x14027dd90, 0x14027d250)
+     const bool padded = !this->getImage ().effects.empty ();
+@@ -227,11 +248,11 @@ void CText::rasterise () {
+     glm::vec2 offset (0.0f);
+     if (!layout.empty) {
+ 	const float halfWidth = (layout.maxX - layout.minX) * 0.5f;
+-	const int horizontal = horizontalAlignOf (this->m_text.horizontalAlign);
++	const int horizontal = this->m_laidOut.params.horizontalAlign;
+ 	offset.x = horizontal == 0 ? halfWidth : horizontal == 2 ? -halfWidth : 0.0f;
+ 
+ 	const float below = static_cast<float> (layout.rows - 1) * layout.lineHeight;
+-	const int vertical = verticalAlignOf (this->m_text.verticalAlign);
++	const int vertical = this->m_laidOut.params.verticalAlign;
+ 	const float reference = vertical == 0 ? layout.descender - below
+ 	    : vertical == 1		      ? (layout.ascender - below) * 0.5f
+ 					      : layout.ascender;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.h b/src/core/WallpaperEngine/Render/Objects/CText.h
+index 01a126d..1505693 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.h
++++ b/src/core/WallpaperEngine/Render/Objects/CText.h
+@@ -36,6 +36,11 @@ public:
+     void render () override;
+ 
+     [[nodiscard]] const Text& getText () const;
++    /** ITextLayer.horizontalalign / verticalalign: "left" "center" "right" / "top" "center" "bottom", live */
++    [[nodiscard]] const std::string& getHorizontalAlign () const;
++    [[nodiscard]] const std::string& getVerticalAlign () const;
++    void setHorizontalAlign (const std::string& value);
++    void setVerticalAlign (const std::string& value);
+ 
+ private:
+     /** Lays the text out again when it, its size or its layout settings changed; true when it did */
+@@ -61,5 +66,7 @@ private:
+     } m_laidOut;
+     Scripting::ScriptLayerHandle m_layerHandle = Scripting::kInvalidLayerHandle;
+     bool m_hasFont = false;
++    std::string m_horizontalAlign;
++    std::string m_verticalAlign;
+ };
+ } // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Render/Objects/TextLayout.h b/src/core/WallpaperEngine/Render/Objects/TextLayout.h
+index eb44b0c..5b42242 100644
+--- a/src/core/WallpaperEngine/Render/Objects/TextLayout.h
++++ b/src/core/WallpaperEngine/Render/Objects/TextLayout.h
+@@ -33,6 +33,8 @@ struct TextLayoutParams {
+     bool blockAlign = false;
+     /** 0 left, 1 centre, 2 right (WE's enum, GH 0x14027e130) */
+     int horizontalAlign = 1;
++    /** 0 bottom, 1 centre, 2 top: only where the block sits on the origin (CText), not the layout */
++    int verticalAlign = 1;
+ 
+     bool operator== (const TextLayoutParams&) const = default;
+ };
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index bd42e9a..278fe56 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -298,15 +298,13 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 	}
+     }
+ 
+-    // ITextLayer alignment
+-    if (object.getObject ().is<Text> ()) {
+-	const auto* text = object.getObject ().as<Text> ();
+-
++    // ITextLayer alignment (live: a script can switch it)
++    if (const auto* text = object.asOrNull<CText> ()) {
+ 	if (strcmp (name, "horizontalalign") == 0) {
+-	    return JS_NewString (ctx, text->horizontalAlign.c_str ());
++	    return JS_NewString (ctx, text->getHorizontalAlign ().c_str ());
+ 	}
+ 	if (strcmp (name, "verticalalign") == 0) {
+-	    return JS_NewString (ctx, text->verticalAlign.c_str ());
++	    return JS_NewString (ctx, text->getVerticalAlign ().c_str ());
+ 	}
+     }
+ 
+@@ -347,6 +345,20 @@ int scriptableobject_property_set (
+ 	return 1;
+     }
+ 
++    // ITextLayer alignment: the layout follows on the next frame
++    if (auto* text = object.asOrNull<CText> ();
++	text != nullptr && (strcmp (name, "horizontalalign") == 0 || strcmp (name, "verticalalign") == 0)) {
++	if (const char* value = JS_ToCString (ctx, val)) {
++	    if (name[0] == 'h') {
++		text->setHorizontalAlign (value);
++	    } else {
++		text->setVerticalAlign (value);
++	    }
++	    JS_FreeCString (ctx, value);
++	}
++	return 1;
++    }
++
+     const auto& properties = object.getProperties ();
+ 
+     // a registered property (origin, scale, angles, visible, alpha, color, text, volume, …) takes the value

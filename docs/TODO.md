@@ -1012,9 +1012,18 @@ Two bug classes kept recurring; fix the class, not the instance:
           8 of 10 scenes (the other 2 have a `starttime` shorter than their lifetimes, as in WE). Corpus ok 93 as
           B2 (2 load timeouts under another run's load, ok alone). Left: `SPRITESHEETBLENDNPOT`, the WE captures
           of 1797172968/1155728109. Result: the audit's "B3 result" (§ 5).
-    - [ ] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
+    - [x] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
           NixOS today), drawn as an image so effects/parent/rotation/parallax apply (T1–T8, E34, G13, G30). 45
-          scenes. L.
+          scenes. L. **Done 2026-11-04** (fork patches 0048 text layers are image layers + 0049 text strings and
+          `"1 1 1"` colour properties + 0050 wrap/rows/spacing/script alignment, pin `e372e44`). Decoded: text
+          extends image, 300 dpi, WE's layout, placement and padding, the systemfont table. fontconfig finds
+          Arimo / Comic Neue / Inconsolata here. host_api_test 58/58 (5 new, all failing on c4eea29); 44 of 50 literal
+          texts match the editor's saved height within 2 px. See the audit's "B4 result".
+          - [ ] WE captures of two clock scenes (1884904087, 2134765860) for size and line layout (T10 is decoded;
+                this checks it).
+          - [ ] HarfBuzz shaping (ligatures, GPOS kerning; most of the width misses) and WE's own font fallback
+                chain; T6/T7 (background, outline, shadow, MSDF; 0 scenes); `anchor` for crop/letterbox (G32/C5).
+          - [ ] Cursor hit tests now reach text layers (they are CImages); check 2325974975's buttons still behave.
     - [x] **B5 Parallax + camera.** Delay smoothing (read as a bool → 14 of 25 frozen), a centred target,
           `g_ParallaxPosition`, `general.zoom`/fov, camera objects, shake (G10–G19, E1). 25 + 8 scenes. M. **Done
           2026-11-03:** fork patch 0029 (decoded camera update, per-object offset by the root's depth, zoom × the
@@ -1042,7 +1051,10 @@ Two bug classes kept recurring; fix the class, not the instance:
                 frames to the wall clock (`--unpaced` for the old run); all three render. The player was never
                 affected. 3046119914 / 3432999904 ("black") were the same thing and render too. See the
                 audit's "Blank-scene result".
-          - [ ] Re-check B7's 2883756643 blend modes now that its video layer shows in the smoke.
+          - [x] Re-check B7's 2883756643 blend modes now that its video layer shows in the smoke. **Done 2026-11-04**
+                (paced, c4eea29 vs 592fdff, two runs each): the cores differ on 81–83 % of pixels (run-to-run 0.4–0.9 %),
+                the frame is brighter (pixels over 200: 30.6 → 35.6 %), the bokeh adds instead of tinting and the
+                rim light glows; no seams or black blocks. Still looks right; a WE capture stays the check.
     - [x] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
           **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a

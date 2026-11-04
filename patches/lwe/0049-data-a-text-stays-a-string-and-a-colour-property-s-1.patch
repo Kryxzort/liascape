@@ -1,0 +1,221 @@
+From bddf451d65eae2b06568e0ec90e627c94dd79bf5 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 07:16:09 +0530
+Subject: [PATCH 49/50] data: a text stays a string, and a colour property's "1
+ 1 1" is white
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two parse faults that made text vanish:
+- A text object's text went through the generic value parser, which reads a string of 2-4
+  space-separated words as a vector: "Sinner #8", "HHH HHH HHH", "ART MADE BY @Minau_" became a
+  zero vec2/3/4 and laid out as nothing (with the old renderer too). JsonExtensions::text keeps a
+  string a string (UserSettingParser/DynamicValueParser expectString); parseText uses it.
+- WE's colour picker stores 0..1 floats and writes whole ones without a point ("1 1 1", "1 0 0").
+  ColorBuilder read any point-less colour as 0..255, so the 117 colour user properties of the owner's
+  96 scenes written that way (none has a component above 1) came out black or near it — e.g.
+  2134765860's clock bound to `clock1` = "1 1 1" drew at 1/255. Colour properties now parse with
+  ColorBuilder::parseProperty (whole numbers 0/1 are 0..1; a component above 1 still means 0..255).
+  Object and particle colours keep the old reading (particle colorrandom writes 0..255).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B4 (text present at all)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ .../Data/Builders/ColorBuilder.cpp            | 22 +++++++++++++++++++
+ .../Data/Builders/ColorBuilder.h              |  6 +++++
+ src/core/WallpaperEngine/Data/JSON.cpp        |  6 +++++
+ src/core/WallpaperEngine/Data/JSON.h          |  2 ++
+ .../WallpaperEngine/Data/Model/Property.h     |  2 +-
+ .../Data/Parsers/DynamicValueParser.cpp       |  7 ++++--
+ .../Data/Parsers/DynamicValueParser.h         |  4 +++-
+ .../Data/Parsers/ObjectParser.cpp             |  2 +-
+ .../Data/Parsers/UserSettingParser.cpp        |  5 +++--
+ .../Data/Parsers/UserSettingParser.h          |  3 ++-
+ 10 files changed, 51 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Builders/ColorBuilder.cpp b/src/core/WallpaperEngine/Data/Builders/ColorBuilder.cpp
+index e13a2d5..6baa2d0 100644
+--- a/src/core/WallpaperEngine/Data/Builders/ColorBuilder.cpp
++++ b/src/core/WallpaperEngine/Data/Builders/ColorBuilder.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <algorithm>
+ #include <format>
++#include <glm/glm.hpp>
+ #include <glm/vec3.hpp>
+ 
+ const WallpaperEngine::Data::Model::Color WallpaperEngine::Data::Builders::ColorBuilder::White
+@@ -10,6 +11,27 @@ const WallpaperEngine::Data::Model::Color WallpaperEngine::Data::Builders::Color
+ const WallpaperEngine::Data::Model::Color WallpaperEngine::Data::Builders::ColorBuilder::Black
+     = WallpaperEngine::Data::Model::Color (0.0f, 0.0f, 0.0f, 1.0f);
+ 
++WallpaperEngine::Data::Model::Color
++WallpaperEngine::Data::Builders::ColorBuilder::parseProperty (const std::string& value) {
++    auto copy = value;
++    std::ranges::replace (copy, ',', ' ');
++
++    if (copy.find ('#') != 0 && copy.find ('.') == std::string::npos) {
++	const int vectorSize = VectorBuilder::preparseSize (copy);
++
++	if (vectorSize == 3 || vectorSize == 4) {
++	    const glm::ivec4 whole = vectorSize == 3 ? glm::ivec4 (VectorBuilder::parse<glm::ivec3> (copy), 1)
++						     : VectorBuilder::parse<glm::ivec4> (copy);
++
++	    if (glm::all (glm::lessThanEqual (whole, glm::ivec4 (1))) && glm::all (glm::greaterThanEqual (whole, glm::ivec4 (0)))) {
++		return Model::Color (glm::vec4 (whole));
++	    }
++	}
++    }
++
++    return parse (value);
++}
++
+ WallpaperEngine::Data::Model::Color
+ WallpaperEngine::Data::Builders::ColorBuilder::parse (const std::string& value, float alpha) {
+     auto copy = value;
+diff --git a/src/core/WallpaperEngine/Data/Builders/ColorBuilder.h b/src/core/WallpaperEngine/Data/Builders/ColorBuilder.h
+index d07b348..e828765 100644
+--- a/src/core/WallpaperEngine/Data/Builders/ColorBuilder.h
++++ b/src/core/WallpaperEngine/Data/Builders/ColorBuilder.h
+@@ -18,5 +18,11 @@ public:
+     static const Model::Color Black;
+ 
+     static WallpaperEngine::Data::Model::Color parse (const std::string& value, float alpha = 1.0f);
++    /**
++     * A colour user property's value (project.json `"type": "color"`, or one the host sets): WE's colour picker
++     * stores 0..1 floats and writes whole ones without a point, so "1 1 1" is white and "1 0 0" red (117 colour
++     * properties in the owner's 96 scenes, none with a component above 1). A component above 1 still reads as 0..255
++     */
++    static WallpaperEngine::Data::Model::Color parseProperty (const std::string& value);
+ };
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Data/JSON.cpp b/src/core/WallpaperEngine/Data/JSON.cpp
+index f3cc532..1807d27 100644
+--- a/src/core/WallpaperEngine/Data/JSON.cpp
++++ b/src/core/WallpaperEngine/Data/JSON.cpp
+@@ -12,6 +12,12 @@ UserSettingUniquePtr JsonExtensions::user (const std::string& key, const Propert
+     return UserSettingParser::parse (value, properties);
+ }
+ 
++UserSettingUniquePtr JsonExtensions::text (const std::string& key, const Properties& properties) const {
++    const auto value = this->require (key, "User setting without default value must be present");
++
++    return UserSettingParser::parse (value, properties, false, true);
++}
++
+ UserSettingUniquePtr JsonExtensions::color (const std::string& key, const Properties& properties) const {
+     const auto value = this->require (key, "User setting without default value must be present");
+ 
+diff --git a/src/core/WallpaperEngine/Data/JSON.h b/src/core/WallpaperEngine/Data/JSON.h
+index 13fdd09..e54b526 100644
+--- a/src/core/WallpaperEngine/Data/JSON.h
++++ b/src/core/WallpaperEngine/Data/JSON.h
+@@ -141,6 +141,8 @@ public:
+ 	return this->user (key, properties);
+     }
+     [[nodiscard]] UserSettingUniquePtr color (const std::string& key, const Properties& properties) const;
++    /** A text value: a string stays a string ("Sinner #8" or "HHH HHH HHH" isn't a vector) */
++    [[nodiscard]] UserSettingUniquePtr text (const std::string& key, const Properties& properties) const;
+     [[nodiscard]] UserSettingUniquePtr
+     color (const std::string& key, const Properties& properties, Color defaultValue) const {
+ 	const auto value = this->optional (key);
+diff --git a/src/core/WallpaperEngine/Data/Model/Property.h b/src/core/WallpaperEngine/Data/Model/Property.h
+index e710c1c..8ec172f 100644
+--- a/src/core/WallpaperEngine/Data/Model/Property.h
++++ b/src/core/WallpaperEngine/Data/Model/Property.h
+@@ -91,7 +91,7 @@ public:
+ 
+     using Property::update;
+     void update (const std::string& value, UpdateSource source) override {
+-	this->update (ColorBuilder::parse (value), source);
++	this->update (ColorBuilder::parseProperty (value), source);
+     }
+ 
+     [[nodiscard]] std::string dump () const override {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+index 391a1fa..d764ef8 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+@@ -145,7 +145,8 @@ PropertyAnimationSharedPtr DynamicValueParser::parseAnimation (const JSON& anima
+     );
+ }
+ 
+-DynamicValueUniquePtr DynamicValueParser::parse (const JSON& data, const Properties& properties, bool expectColor) {
++DynamicValueUniquePtr
++DynamicValueParser::parse (const JSON& data, const Properties& properties, bool expectColor, bool expectString) {
+     auto value = std::make_unique<DynamicValue> ();
+     auto valueIt = data;
+     std::optional<std::string> scriptSource = std::nullopt;
+@@ -164,7 +165,9 @@ DynamicValueUniquePtr DynamicValueParser::parse (const JSON& data, const Propert
+ 
+     // actual value parsing
+     if (valueIt.is_string ()) {
+-	if (expectColor) {
++	if (expectString) {
++	    value->update (valueIt.get<std::string> (), DynamicValue::UpdateSource::Initialization);
++	} else if (expectColor) {
+ 	    value->update (Builders::ColorBuilder::parse (valueIt), DynamicValue::UpdateSource::Initialization);
+ 	} else {
+ 	    std::string str = valueIt;
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+index 57a7962..32af042 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+@@ -12,7 +12,9 @@ using namespace WallpaperEngine::Data::Model;
+ 
+ class DynamicValueParser {
+ public:
+-    static Model::DynamicValueUniquePtr parse (const JSON& data, const Properties& properties, bool expectColor);
++    /** `expectString`: a string value stays a string (a text object's text), never a number or a vector */
++    static Model::DynamicValueUniquePtr
++    parse (const JSON& data, const Properties& properties, bool expectColor, bool expectString = false);
+     /**
+      * Parses a property's `animation` object (G01/G02 of docs/player/spikes/we-lwe-gap-audit.md) the way
+      * Wallpaper Engine 2.8 does: `options` needs `fps` > 0 and `length` > 0 or there is no animation; curves
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 995d428..972bbda 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -207,7 +207,7 @@ TextUniquePtr ObjectParser::parseText (const JSON& it, const Project& project, O
+ 	    .animationLayers = {},
+ 	},
+ 	TextData {
+-	    .text = it.user ("text", properties),
++	    .text = it.text ("text", properties),
+ 	    .font = it.optional ("font", std::string ("systemfont_arial")),
+ 	    .pointSize = it.user ("pointsize", properties, 32.0f),
+ 	    .horizontalAlign = it.optional ("horizontalalign", it.optional ("alignment", std::string ("center"))),
+diff --git a/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.cpp b/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.cpp
+index 28feeb5..5e82495 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.cpp
+@@ -7,8 +7,9 @@
+ using namespace WallpaperEngine::Data::Parsers;
+ using namespace WallpaperEngine::Data::Builders;
+ 
+-UserSettingUniquePtr UserSettingParser::parse (const JSON& data, const Properties& properties, bool expectColor) {
+-    auto value = DynamicValueParser::parse (data, properties, expectColor);
++UserSettingUniquePtr
++UserSettingParser::parse (const JSON& data, const Properties& properties, bool expectColor, bool expectString) {
++    auto value = DynamicValueParser::parse (data, properties, expectColor, expectString);
+     PropertySharedPtr property;
+     std::optional<ConditionInfo> condition = std::nullopt;
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.h b/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.h
+index ab347d8..14cbc14 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/UserSettingParser.h
+@@ -12,6 +12,7 @@ using namespace WallpaperEngine::Data::Model;
+ 
+ class UserSettingParser {
+ public:
+-    static UserSettingUniquePtr parse (const JSON& data, const Properties& properties, bool expectColor = false);
++    static UserSettingUniquePtr
++    parse (const JSON& data, const Properties& properties, bool expectColor = false, bool expectString = false);
+ };
+ } // namespace WallpaperEngine::Data::Parsers

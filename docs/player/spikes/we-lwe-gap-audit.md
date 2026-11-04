@@ -75,7 +75,7 @@ These are ranked by scenes × how visible the difference is.
 | 2 | P1, P6, P5, P4, P3, P8 | **Particles are subtly wrong almost everywhere.** No `starttime` prewarm, so systems start empty (61). Colour randomness is per channel instead of shared (58). `colorn` multiplies instead of shifting hue (43). `count` and `rate` overrides mean different things (43, 36). Sprite-sheet frames step instead of cross-fading (33). | 61 |
 | 3 | E2, E3 | **(Fixed by B2, patch 0022.)** **Image alpha and colour.** `g_Color4.w` is 1 instead of the layer alpha. Alpha, colour and brightness uniforms are frozen at setup, so fades, user sliders and scripts never reach the shader. | 30 + ~22 |
 | 4 | G01, G02 | **(Fixed by B2, patch 0023; the SceneScript animation API is B10.)** **Keyframe animations (`alpha/origin/angles/scale.animation`) are ignored**, so fades, slides and spins are static. | 20 |
-| 5 | T1–T5, T8, G04, G13, G30 | **Text.** One line only, bytes not UTF-8, no alignment, no wrapping, no effects, no parent, no rotation, no parallax. A `systemfont_*` has no font on NixOS, so the text **vanishes**. | 45 |
+| 5 | T1–T5, T8, G04, G13, G30 | **(Fixed by B4, patches 0048–0050.)** **Text.** One line only, bytes not UTF-8, no alignment, no wrapping, no effects, no parent, no rotation, no parallax. A `systemfont_*` has no font on NixOS, so the text **vanishes**. | 45 |
 | 6 | E27, E28 | **`colorBlendMode` layers sample the framebuffer they draw into**, a GL feedback loop with undefined output. | 28 |
 | 7 | A1, A3, E8, S17, P20 | **Audio response.** u8 mono, only 0–5.4 kHz, linear bins, Right = Left. `registerAudioBuffers` is missing, so script visualisers throw. | 41 |
 | 8 | G10, G11, G12, G14 | **(Fixed by B5, patch 0029.)** **Parallax.** `cameraparallaxdelay` is read as a bool, so 14 of 25 parallax scenes never move. The rest are off-centre, and `g_ParallaxPosition` is never fed. | 25 |
@@ -122,7 +122,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B1 Make property scripts run** — **done 2026-10-29** (patches 0019–0021; see "B1 result" in § 5) | S1–S7, S9; S33, S34, S35, S38 by evaluating WE's own `scripts/jsclasses/baseclasses.js` + `jsmodules/*.js` as the prelude | 40 | M | `JS_EVAL_FLAG_COMPILE_ONLY` → `JS_EvalFunction` → `JS_GetModuleNamespace`. Skip the write on `undefined`. Call `init(value)`. Bind `thisLayer`/`thisObject` per call. Register scale/angles/visible on the live values. Replace the native Vec/WEMath adapters with WE's JS classes (keep the C++ side for marshalling only). | Smoke 2890767643, 3291729669, 2325974975: the widget is no longer in the corner, and stderr has no `TypeError: not a function`. Fork test: a module whose `update` returns `value+1` moves the property. Corpus: no new blank. |
 | **B2 Layer alpha, colour, keyframe animation** — **done 2026-11-02** (patches 0022–0023; see "B2 result" in § 5) | E2, E3, G01, G02 (+ G05 once known) | ~50 | M | `g_Color4 = (color.rgb, alpha)`. Upload alpha/colour/brightness per draw from the live values. A keyframe evaluator for `c0..c2` bezier keys (`fps`, `length`, `mode` loop/mirror/single, `wraploop`, `startpaused`, `relative`), as decoded at GH 0x1401d1740/0x1401d4dd0/0x1401d5790. | Smoke two timestamps of 3 animated scenes: pixels change where WE animates. WE capture of 2388299037 (translucent layer). |
 | **B3 Particle core semantics** — **done 2026-11-03** (patches 0024–0028; see "B3 result" in § 5) | P1, P3, P4, P5, P6, P7, P8, P13, P14, P18, P19, P38, P41 | 61 | M (mostly S rows) | Prewarm in 0.05 s / 0.2 s steps until `starttime`. One shared `t` for colorrandom. `pow(rand, exponent)`. `rate` scales the system's dt. `count` scales emitter rate. HSV `colorn` against the reference colour. Enable `SPRITESHEETBLEND`. Re-patch overrides live. One scene RNG. | Smoke at +1 s ≈ +60 s particle density (prewarm). Fork tests for colorrandom, rate, count and exponent math. WE capture of 1797172968 and 1155728109 (P5, P8/P9). |
-| **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
+| **B4 Text renderer** — **done 2026-11-04** (patches 0048–0050; see "B4 result" in § 5; T6/T7 unused, anchor not needed yet) | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
 | **B5 Parallax and camera** — **done 2026-11-03** (patch 0029; see "B5 result" in § 5; E6, the camera-object pan and paths left) | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
 | **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
 | **B7 Blend modes and the framebuffer** — **done 2026-11-04** (patches 0046–0047; see "B7 result" in § 5) | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
@@ -1331,6 +1331,13 @@ layer's region).
 Left:
 - WE captures of 2883756643 (blend modes) and 3414858021 / 3432999904 (copybackground: false) to confirm the inferred
   parts.
+- ~~Re-check 2883756643 with its video showing~~ (2026-11-04). Paced, c4eea29 vs 592fdff, two runs each:
+  - the cores differ on 81–83 % of pixels, against 0.4–0.9 % between runs of the same core;
+  - the frame is brighter (pixels over 200: 30.6 → 35.6 %; mean RGB 161/142/143 → 177/154/148);
+  - the bokeh adds over the sky and the hill instead of tinting it, and the rim light glows;
+  - no seams or black blocks.
+
+  B7's change still looks right.
 - ~~The 3 newly blank scenes (3426575339, 3432876246, 3556794116) and the 2 black ones (3046119914, 3432999904,
   the second of which is a B7 target: compose + blend 12 + `copybackground: false` + text children).~~ All five
   were the smoke, not the core: see "Blank-scene result" below.
@@ -1368,3 +1375,139 @@ Left:
     frames) and more on the video scenes, whose frames now include libmpv's work. Compare frame times only
     within one mode.
 
+
+### B4 result (fork patches 0048–0050, pin `e372e44`, 2026-11-04)
+
+Done: T1 (= E34's text part), T2, T3, T4, T5, T8, T10, G04 (text), G13, G30, S28. Text objects are image layers now,
+laid out the way WE lays them out. Everything below was decoded from the sound spike's `all.c` (wallpaper64.exe
+2.8.485); the addresses are in the fork commits.
+
+**Decoded (Observed):**
+
+- **Text is an image.** WE's text class extends its image class: its constructor (GH 0x14027c1b0) calls the image's
+  (GH 0x140212c50). With effects, WE draws the glyphs into the layer's own FBO (`composelayer_clearalpha`, GH
+  0x14027dd90) and runs the image's effect chain on it, its last pass `effectpassthrough` (GH 0x14027ce30). Ours:
+  `Text : Image` in the model, and CText is a CImage whose texture `_rt_textLayer_<id>` holds the laid-out text. So
+  effects, parent, angles, parallax, alpha, brightness, colour and blend modes all come from CImage.
+- **The property table** (GH 0x14027e130) and the constructor's defaults: font `systemfont_arial`, pointsize 32,
+  padding 32 32, spacing 0 0, maxwidth 500, maxrows 1. horizontalalign is left 0 / center 1 / right 2, and
+  verticalalign is bottom 0 / center 1 / top 2. The flags at +0x594 are opaquebackground 2, limitwidth 4, limitrows 8,
+  limituseellipsis 0x10 and blockalign 0x20. anchor runs none 0 … topleft 9.
+- **T10, size: 300 dpi.** `FT_Set_Char_Size (face, 0, pointsize · 64, 300)` with pointsize clamped to 1..256 (GH
+  0x1401d94c0, 0x1401dd330). A 32 pt text is 133 px in the layer, and the layer's scale (often 0.2–0.3) shrinks it.
+  The old renderer used pointsize / scale.
+- **Layout** (GH 0x1401dd330, now `TextLayout`):
+  - Lines split at `\n`. A glyph advances by `advance >> 6` + spacing.x. The line height is the size's
+    `metrics.height >> 6` + spacing.y.
+  - limitwidth: a glyph (not the line's first, not a space) whose right edge passes maxwidth breaks the line at the
+    last space before it, or at that glyph in a longer word. The rest, less its leading spaces, becomes the next
+    line, and the line's trailing spaces go.
+  - limitrows: lines past maxrows are dropped. A wrap past maxrows ends the line instead. With limituseellipsis it is
+    shortened one character at a time until it fits with "…" after it. Without it, it is cut at the glyph.
+  - blockalign justifies a wrapped line: its spaces share what it lacks of maxwidth.
+  - Each line is aligned within the widest line. The block spans the glyphs' ink and 0..ascender on every line,
+    down to ascender − rows · line height.
+- **Placement** (GH 0x14027c600): the quad sits at an offset from the origin, in the layer's own pixels, and turns and
+  scales with it.
+  - x: +width/2 for left alignment, −width/2 for right.
+  - y: the block's centre minus a reference height. That height is the ascender (top), (ascender − (rows−1) · line
+    height)/2 (center), or descender − (rows−1) · line height (bottom).
+- **The layer's size** (GH 0x14027dd90): the block, plus the padding (clamped to 512) on each side, but only while
+  the layer has effects. The glyphs are drawn at padding − min (GH 0x14027d250). An empty text is 2 × 2.
+- **T8, fonts.**
+  - A `systemfont_*` name is a Windows file in WE: arial.ttf, calibri.ttf, cambria.ttc, comic.ttf, consola.ttf,
+    micross.ttf, segoeui.ttf, verdana.ttf (the table read by GH 0x1401dd330).
+  - A font that doesn't open falls back to arial.ttf (GH 0x1401d9d70).
+  - WE builds a fallback chain for characters the font lacks (GH 0x1401d94c0, 0x1401da3c0) and shapes with
+    HarfBuzz.
+- **anchor** (GH 0x14027da50) shifts the layer by the visible area's insets: 0 when the scene fills the output. That
+  is the case for every output liascape draws today, so it isn't ported (it belongs with G32/C5).
+
+**How the fonts are found on NixOS:** scene-bundled and WE `fonts/…` files are read through the asset locator first.
+A `systemfont_*` name goes to fontconfig (the core now links `fontconfig`; the flake adds `pkgs.fontconfig` to
+`lwe-core`) with the Windows family first, then metric-compatible and generic ones:
+
+| WE name | Families asked for | Resolved on the owner's NixOS |
+|---|---|---|
+| `systemfont_arial` | Arial, Liberation Sans, Arimo, sans-serif | `Arimo[wght].ttf` |
+| `systemfont_comicsans` | Comic Sans MS, Comic Neue, Comic Relief, sans-serif | `ComicNeue-Regular.ttf` |
+| `systemfont_consolas` | Consolas, Inconsolata, DejaVu Sans Mono, monospace | `Inconsolata-Regular.ttf` |
+| `systemfont_calibri` | Calibri, Carlito, sans-serif | Carlito |
+| `systemfont_cambria` / `segoe` / `sansserif` / `verdana` | Cambria, Caladea, serif / Segoe UI, Selawik, Noto Sans, Open Sans, sans-serif / Microsoft Sans Serif, Liberation Sans, Arimo / Verdana, DejaVu Sans | not used by the library |
+
+The fonts come from the system's `google-fonts`. The nix-built libfontconfig reads `/etc/fonts/fonts.conf`, so it
+sees the same fonts as `fc-match`. A character the font lacks comes from the first scalable fontconfig font that has
+it (`FcFontSort`). The log line `CText: '<name>' (<id>) font <font> -> <file>` records each choice. "no usable system
+font" no longer appears in the smoke.
+
+**Two parse faults found on the way (0049):**
+
+- A text of 2–4 space-separated words ("Sinner #8", "ART MADE BY @Minau_") went through the generic value parser,
+  which read it as a zero vec2/3/4. It laid out as nothing, with the old renderer too. Text now stays a string.
+- A colour user property written with whole numbers (`"1 1 1"`) was read as 0..255, so it came out near black. That
+  covers 117 of the library's colour properties, none with a component above 1: e.g. 2134765860's clock, bound to
+  `clock1` = "1 1 1", drew at 1/255. Colour properties now read whole 0/1 as 0..1. Object and particle colours keep
+  0..255 (particle colorrandom writes it).
+
+**Inferred / not WE's:**
+
+- Glyphs come from FreeType with the font's kern table. WE shapes with HarfBuzz, so there are no ligatures and no
+  GPOS kerning (most of the width differences below).
+- The glyph fallback is fontconfig's choice, not WE's chain.
+- The text texture is mipmapped. The colour is baked into it, because genericimage2 doesn't take g_Color4 in LWE;
+  alpha and brightness stay live in the pass, and a colour change redraws the texture.
+- The text with effects starts from colour × coverage, as WE's font pass does, but through the image's own base pass.
+- Not ported: `opaquebackground`, `backgroundcolor` and `backgroundbrightness` (T6, used by 0 scenes); `outline*`,
+  `dropshadow*`, `blursize` and the MSDF path (T7, 0 scenes); `anchor` (above). On the WE side, `depthtest` picks a
+  `_depth` material variant.
+
+**Fork tests** (`host_api_test`): 58/58, 5 new. All five fail on c4eea29.
+
+| Test | What it checks | On c4eea29 |
+|---|---|---|
+| `text_follows_its_parent_and_turns` | a child text at the group's origin + (20, 0) is at x 180; a 90° text is tall | not drawn; upright |
+| `text_lays_out_like_we` | a 10 pt H is 29 px (300 dpi: 29.8); "H\nH" is two lines (34 px); left/right alignment puts the ink at the origin (42 / 215 for 40 / 216); "éé" is as wide as "ee" | 1 px H, no lines, "ee" 0 px |
+| `text_takes_effects_and_colour` | an effect turns the text red, in place; colour 1 0 1 reaches it | white, flat |
+| `colour_property_whole_numbers` | text bound to a colour property "1 0 0" is red | black |
+| `text_wraps_and_limits` | "HHH HHH HHH" is 113 px on one line, wraps at maxwidth 100 to 73 × 34, and is cut to one row with "…" (86 × 12); spacing 10 adds 10 px; a script's `thisLayer.horizontalalign = 'left'` applies | nothing drawn (the vector parse) |
+
+**Size check against the editor.** The editor saves each text layer's laid-out `size`. `WPENGINE_TEXT_DEBUG=1` logs
+ours next to it at load; for scripted texts both come from the placeholder. Across the 45 text scenes, 260 objects
+load; the other 54 are in the two 3D scenes that fail to load. Of the 50 literal texts with a saved size:
+
+- **44 match in height within 2 px**: 36 of 39 in scene fonts, 8 of 11 in system fonts.
+- 34 match in width within 3 %.
+- The width misses are CJK and Latin texts in scene fonts with no kern table (shaping), and Comic Neue / Arimo for
+  Comic Sans / Arial.
+- The height misses: 2561227934 "ART MADE BY @Minau_" (Comic Neue's line height 144 vs Comic Sans' 174), a
+  two-line Comic Sans label in 3354740764, and 3480481965's single CJK glyphs, which take a fallback font.
+- With 0048 alone, 20 of these 50 laid out as nothing because of the vector parse; with 0049, none do. The one
+  2 × 2 left is a genuinely empty text whose saved size is the same 66 × 66.
+
+**Smoke, all 96 scenes**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`). The same worker ran on
+c4eea29 (the store core) and on e372e44, one run after the other with nothing else running. The metric is the % of
+pixels differing by more than 8 at the 3 s frame.
+
+- **93 ok on both. No scene newly blank or failed.** The 3 failures are the known 3D ones.
+- The text scenes that changed most:
+  - 2890767643, 56 % (its VHS time/date in Inconsolata; it also has a video);
+  - 3480481965, 52 % (lit 49.9 → 100 %: the white half and "LIFE / DEATH" now match the author's preview; the white
+    half is a colour property);
+  - 3326873240, 19 %; 3028473503, 19 % (its 58 pt clock was a speck under the notice and is now at its place);
+  - 3163060610, 9.5 %; 2932157836, 7.9 %; 2883756643, 3.7 %.
+  - 1884904087's greeting and clock and 2134765860's wall clock now show (0.4–0.5 % of pixels: the text is small in
+    the frame).
+- Of the 50 scenes without text, 46 are within 0.3 %. The other four:
+  - 2886313155 (25 %), 3046119914 (16 %) and 3432876246 (1.7 %) are video scenes, whose frame at 3 s varies with
+    decode timing;
+  - 3419466417 (4.2 %) varied 4 % between cores in B7 too, and its `embercolor` "1 0 0" is now red.
+- Mean frame time over the 93: 3.70 → 3.86 ms. On the 43 text scenes it is 4.57 → 4.93 ms (median +0.35 ms): their
+  effects run now, and each text is an image's passes.
+
+Player tests (DEBUG, the pinned e372e44): 737 passed, 0 failed, 3 ignored.
+
+Left:
+- WE captures of 1884904087 and 2134765860 to confirm size and layout against WE itself. The editor's saved sizes
+  already agree on height.
+- HarfBuzz shaping (ligatures, GPOS kerning), WE's own fallback chain, T6/T7, and `anchor` with G32/C5.
+- Cursor hit tests reach text layers now (they are CImages); B10 listed them as missing.

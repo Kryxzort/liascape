@@ -114,6 +114,8 @@
         buildInputs = [
           pkgs.SDL2
           pkgs.freetype
+          # text objects: `systemfont_*` and glyphs the scene's font lacks are looked up through fontconfig
+          pkgs.fontconfig
           pkgs.glm
           pkgs.lz4
           pkgs.zlib

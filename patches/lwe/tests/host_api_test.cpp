@@ -892,6 +892,9 @@ struct ScriptRig {
     std::string storage;
     /** called once the project loaded, before its first frame (B10: what a host reports before the scene exists) */
     std::function<void (wp_project*)> loaded;
+    /** the scene's size (B4's text scenes are bigger) */
+    int width = 64;
+    int height = 32;
 
     bool open (const std::string& sceneDir) {
         dir = sceneDir;
@@ -916,10 +919,10 @@ struct ScriptRig {
         }
         wp_project_set_output_framebuffer (p, scratch_fbo ());
         step ();
-        if (wp_project_get_width (p) != 64 || wp_project_get_height (p) != 32) {
+        if (wp_project_get_width (p) != width || wp_project_get_height (p) != height) {
             return false;
         }
-        fbo = scratch_fbo (64, 32);
+        fbo = scratch_fbo (width, height);
         wp_project_set_output_framebuffer (p, fbo);
         return true;
     }
@@ -2955,6 +2958,215 @@ static bool audio_reaches_shaders_scripts_and_emitters () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// B4 (docs/player/spikes/we-lwe-gap-audit.md): text layers are image layers (WE's text class extends its image
+// class) laid out the way WE lays text out (GH 0x1401dd330, 0x14027c600), in WE's NotoSans from the assets dir.
+// White text on the 0 0 0.5 clear colour of a 256 x 128 scene, read back as the box of its lit pixels
+
+// a scene folder of the given objects, `w` x `h`
+static std::string sized_scene (const std::string& objects, int w, int h) {
+    const std::string d = script_scene (objects);
+    if (!d.empty ()) {
+        write_file (d + "/scene.json", "{\"camera\":{\"center\":\"0 0 -1\",\"eye\":\"0 0 0\",\"up\":\"0 1 0\"},"
+                                       "\"general\":{\"clearcolor\":\"0 0 0.5\",\"orthogonalprojection\":{\"width\":"
+                                           + std::to_string (w) + ",\"height\":" + std::to_string (h) + "}},\"objects\":[" + objects + "]}\n");
+    }
+    return d;
+}
+
+// a text object in NotoSans; `props` is the rest of its JSON members
+static std::string text_object (int id, const std::string& text, const std::string& props) {
+    return "{\"id\":" + std::to_string (id) + ",\"name\":\"t" + std::to_string (id)
+         + "\",\"font\":\"fonts/NotoSans-Regular.ttf\",\"text\":\"" + text + "\",\"color\":\"1.0 1.0 1.0\"," + props + "}";
+}
+
+struct InkBox {
+    int x0 = 1 << 20, y0 = 1 << 20, x1 = -1, y1 = -1, count = 0;
+    [[nodiscard]] int width () const { return count ? x1 - x0 + 1 : 0; }
+    [[nodiscard]] int height () const { return count ? y1 - y0 + 1 : 0; }
+    [[nodiscard]] float cx () const { return (x0 + x1) * 0.5f; }
+    [[nodiscard]] float cy () const { return (y0 + y1) * 0.5f; }
+};
+
+// the box of the pixels lit by text (red over half: the clear colour has none) in x0..x1, y up from the bottom;
+// `red` counts only red text (green under 100)
+static InkBox ink_box (ScriptRig& rig, int fromX = 0, int toX = 1 << 20, bool red = false) {
+    InkBox box;
+    for (int y = 0; y < rig.height; y++) {
+        for (int x = std::max (0, fromX); x < std::min (rig.width, toX + 1); x++) {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (rig.fbo, x, y, px);
+            if (px[0] > 128 && (!red || px[1] < 100)) {
+                box.x0 = std::min (box.x0, x);
+                box.x1 = std::max (box.x1, x);
+                box.y0 = std::min (box.y0, y);
+                box.y1 = std::max (box.y1, y);
+                box.count++;
+            }
+        }
+    }
+    return box;
+}
+
+// one text object alone in a 256 x 128 scene: its ink after two frames
+static bool one_text (const std::string& object, InkBox& box, int w = 256, int h = 128) {
+    ScriptRig rig;
+    rig.width = w;
+    rig.height = h;
+    if (!rig.open (sized_scene (object, w, h))) {
+        return false;
+    }
+    rig.step ();
+    box = ink_box (rig);
+    return true;
+}
+
+// a text layer's origin is in its parent's space and it turns with `angles` (G04, G30; unpatched: the raw local
+// origin, upright)
+static bool text_follows_its_parent_and_turns () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = sized_scene (
+        "{\"id\":10,\"name\":\"group\",\"origin\":\"160 64 0\",\"scale\":\"1 1 1\",\"angles\":\"0 0 0\"},"
+            + text_object (1, "H", "\"pointsize\":6,\"origin\":\"20 0 0\",\"parent\":10") + ","
+            + text_object (2, "IIIIIIII", "\"pointsize\":6,\"origin\":\"60 64 0\",\"angles\":\"0 0 1.5707964\""),
+        256, 128);
+    ScriptRig rig;
+    rig.width = 256;
+    rig.height = 128;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const InkBox child = ink_box (rig, 130), turned = ink_box (rig, 0, 129);
+    printf ("    child of the group at 160 64 (its origin 20 0): x %d..%d y %d..%d; turned 90°: %d x %d\n", child.x0, child.x1,
+            child.y0, child.y1, turned.width (), turned.height ());
+    CHECK (child.count > 0 && std::fabs (child.cx () - 180.0f) <= 4.0f && std::fabs (child.cy () - 64.0f) <= 12.0f,
+           "the child isn't at 180 64 (%.1f %.1f)", child.cx (), child.cy ());
+    CHECK (turned.count > 0 && turned.height () > 2 * turned.width (), "the turned text isn't upright-tall (%d x %d)",
+           turned.width (), turned.height ());
+    return true;
+}
+
+// WE's size (300 dpi), lines, alignment and UTF-8 (T2, T3, T4, T10; unpatched: pointsize as pixels, one line with a
+// missing glyph for "\n", always centred, bytes as Latin-1)
+static bool text_lays_out_like_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    InkBox h10, two, left, right, accented, plain;
+    CHECK (one_text (text_object (1, "H", "\"pointsize\":10,\"origin\":\"128 64 0\""), h10), "load failed");
+    CHECK (one_text (text_object (1, "H\\nH", "\"pointsize\":4,\"origin\":\"128 64 0\""), two), "load failed");
+    CHECK (one_text (text_object (1, "HHH", "\"pointsize\":4,\"origin\":\"40 64 0\",\"horizontalalign\":\"left\""), left), "load failed");
+    CHECK (one_text (text_object (1, "HHH", "\"pointsize\":4,\"origin\":\"216 64 0\",\"horizontalalign\":\"right\""), right), "load failed");
+    CHECK (one_text (text_object (1, "\xc3\xa9\xc3\xa9", "\"pointsize\":4,\"origin\":\"128 64 0\""), accented), "load failed");
+    CHECK (one_text (text_object (1, "ee", "\"pointsize\":4,\"origin\":\"128 64 0\""), plain), "load failed");
+    printf ("    10 pt H: %d px tall (NotoSans' cap height 0.714 em at 41.7 px = 29.8)\n", h10.height ());
+    printf ("    4 pt H\\nH: %d x %d (one H %.0f px, the line 1.362 em = 22.7)\n", two.width (), two.height (), 0.714f * 16.67f);
+    printf ("    left-aligned at 40: x %d..%d; right-aligned at 216: x %d..%d\n", left.x0, left.x1, right.x0, right.x1);
+    printf ("    \"\xc3\xa9\xc3\xa9\" %d px wide, \"ee\" %d\n", accented.width (), plain.width ());
+    CHECK (h10.height () >= 28 && h10.height () <= 32, "a 10 pt H is %d px tall, not ~30 (300 dpi)", h10.height ());
+    CHECK (two.height () >= 32 && two.height () <= 37 && two.width () <= 14, "H\\nH isn't two lines (%d x %d)", two.width (),
+           two.height ());
+    CHECK (left.x0 >= 40 && left.x0 <= 44, "left alignment: the ink starts at %d, not at the origin 40", left.x0);
+    CHECK (right.x1 >= 211 && right.x1 <= 216, "right alignment: the ink ends at %d, not at the origin 216", right.x1);
+    CHECK (accented.count > 0 && std::abs (accented.width () - plain.width ()) <= 2, "UTF-8: \"\xc3\xa9\xc3\xa9\" is %d px wide, \"ee\" %d",
+           accented.width (), plain.width ());
+    return true;
+}
+
+// a text layer takes effects (here one turning it red, keeping its alpha) and its colour (E34/T1; unpatched: drawn
+// flat by its own shader, white)
+static bool text_takes_effects_and_colour () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = sized_scene (
+        text_object (1, "HHH", "\"pointsize\":5,\"origin\":\"64 64 0\",\"effects\":[{\"id\":5,\"name\":\"red\",\"file\":\"effects/b4red/effect.json\"}]")
+            + "," + text_object (2, "HHH", "\"pointsize\":5,\"origin\":\"192 64 0\",\"color\":\"1.0 0.0 1.0\""),
+        256, 128);
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/b4red").c_str (), 0755);
+    write_file (dir + "/shaders/b4red.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/b4red.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                             "\tvec4 c = texSample2D(g_Texture0, v_TexCoord);\n\tgl_FragColor = vec4(c.r, 0.0, 0.0, c.a);\n}\n");
+    write_file (dir + "/materials/b4red.json", "{\"passes\":[{\"shader\":\"b4red\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                               "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/b4red/effect.json", "{\"name\":\"b4red\",\"passes\":[{\"material\":\"materials/b4red.json\"}]}\n");
+    ScriptRig rig;
+    rig.width = 256;
+    rig.height = 128;
+    rig.extra = { "shaders/b4red.vert", "shaders/b4red.frag", "materials/b4red.json", "effects/b4red/effect.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const InkBox redEffect = ink_box (rig, 0, 127, true), anyLeft = ink_box (rig, 0, 127);
+    const InkBox magenta = ink_box (rig, 128), magentaRed = ink_box (rig, 128, 1 << 20, true);
+    printf ("    with the red effect: %d lit, %d of them red; magenta text: %d lit, %d without green\n", anyLeft.count,
+            redEffect.count, magenta.count, magentaRed.count);
+    CHECK (anyLeft.count > 50 && redEffect.count >= anyLeft.count * 9 / 10, "the effect didn't turn the text red (%d of %d)",
+           redEffect.count, anyLeft.count);
+    CHECK (std::fabs (anyLeft.cx () - 64.0f) <= 3.0f, "the text with an effect moved (centre %.1f, origin 64)", anyLeft.cx ());
+    CHECK (magenta.count > 50 && magentaRed.count >= magenta.count * 9 / 10, "the colour 1 0 1 didn't reach the text");
+    return true;
+}
+
+// a colour user property written with whole numbers is 0..1 ("1 0 0" red), as WE's picker writes it (unpatched:
+// 0..255, so 1/255: the text bound to it near black)
+static bool colour_property_whole_numbers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = sized_scene (
+        text_object (1, "HHH", "\"pointsize\":5,\"origin\":\"128 64 0\",\"color\":{\"user\":\"tint\",\"value\":\"1.0 1.0 1.0\"}"), 256, 128);
+    write_file (dir + "/project.json", "{\"title\":\"c\",\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":"
+                                       "{\"tint\":{\"type\":\"color\",\"value\":\"1 0 0\",\"text\":\"t\"}}}}\n");
+    ScriptRig rig;
+    rig.width = 256;
+    rig.height = 128;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const InkBox lit = ink_box (rig), red = ink_box (rig, 0, 1 << 20, true);
+    printf ("    \"1 0 0\": %d lit, %d red\n", lit.count, red.count);
+    CHECK (lit.count > 50 && red.count >= lit.count * 9 / 10, "the text bound to \"1 0 0\" isn't red (%d of %d)", red.count, lit.count);
+    return true;
+}
+
+// maxwidth wraps at a space, maxrows cuts with "…", spacing widens, and a script switches the alignment (T2, T5,
+// S28; unpatched: one line, no limits, alignment read-only)
+static bool text_wraps_and_limits () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string common = "\"pointsize\":4,\"origin\":\"128 64 0\",\"horizontalalign\":\"left\",\"maxwidth\":100,";
+    InkBox one, wrapped, cut, plain, spaced, scripted;
+    CHECK (one_text (text_object (1, "HHH HHH HHH", common + "\"limitwidth\":false"), one), "load failed");
+    CHECK (one_text (text_object (1, "HHH HHH HHH", common + "\"limitwidth\":true"), wrapped), "load failed");
+    CHECK (one_text (text_object (1, "HHH HHH HHH", common + "\"limitwidth\":true,\"limitrows\":true,\"maxrows\":1,\"limituseellipsis\":true"), cut),
+           "load failed");
+    CHECK (one_text (text_object (1, "HH", "\"pointsize\":4,\"origin\":\"128 64 0\""), plain), "load failed");
+    CHECK (one_text (text_object (1, "HH", "\"pointsize\":4,\"origin\":\"128 64 0\",\"spacing\":\"10 0\""), spaced), "load failed");
+    const std::string script = "export function update(value) {\n  thisLayer.horizontalalign = 'left';\n  return value;\n}";
+    CHECK (one_text ("{\"id\":1,\"name\":\"t1\",\"font\":\"fonts/NotoSans-Regular.ttf\",\"color\":\"1.0 1.0 1.0\",\"pointsize\":4,"
+                     "\"origin\":\"40 64 0\",\"text\":{\"value\":\"HHH\",\"script\":\"" + json_escaped (script) + "\"}}", scripted),
+           "load failed");
+    printf ("    no limit: %d x %d; wrapped at 100: %d x %d; 1 row with ellipsis: %d x %d\n", one.width (), one.height (),
+            wrapped.width (), wrapped.height (), cut.width (), cut.height ());
+    printf ("    HH: %d wide, with spacing 10: %d; scripted left at 40: x %d..%d\n", plain.width (), spaced.width (), scripted.x0,
+            scripted.x1);
+    CHECK (one.width () > 100 && one.height () <= 14, "unlimited: not one line (%d x %d)", one.width (), one.height ());
+    CHECK (wrapped.width () <= 100 && wrapped.height () >= 32 && wrapped.height () <= 37, "not wrapped to two lines (%d x %d)",
+           wrapped.width (), wrapped.height ());
+    CHECK (cut.width () <= 100 && cut.height () <= 14 && cut.width () > 60, "not cut to one row (%d x %d)", cut.width (),
+           cut.height ());
+    CHECK (spaced.width () >= plain.width () + 9 && spaced.width () <= plain.width () + 11, "spacing.x: %d vs %d", spaced.width (),
+           plain.width ());
+    CHECK (scripted.x0 >= 40 && scripted.x0 <= 44, "the script's horizontalalign didn't apply (x %d)", scripted.x0);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -3011,6 +3223,11 @@ int main (int argc, char** argv) {
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
+    run ("text_follows_its_parent_and_turns", text_follows_its_parent_and_turns);
+    run ("text_lays_out_like_we", text_lays_out_like_we);
+    run ("text_takes_effects_and_colour", text_takes_effects_and_colour);
+    run ("colour_property_whole_numbers", colour_property_whole_numbers);
+    run ("text_wraps_and_limits", text_wraps_and_limits);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);

@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`c4eea29`** (fork, 2026-11-04: + 0046–0047, batch B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`e372e44`** (fork, 2026-11-04: + 0048–0050, batch B4 text; 0046–0047 = B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after
@@ -122,6 +122,9 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0042 scripting: persistent localStorage | B10 (S36): get/set/delete/clear with locations, typed values, one JSON file per project in `wp_config_set_storage_dir` | candidate-for-upstream |
 | 0043 scripting: clicks only on shown layers | B10 (S10): press/release/click go to shown layers (2325974975's Hide button) | candidate-for-upstream |
 | 0044 scripting: console writable | B10: `console.log = …` no longer throws; console.warn/info/debug | candidate-for-upstream |
+| 0048 render: text layers are image layers | B4 (T1/E34, T3, T4, T8, T10, G04 text, G13, G30), decoded (text constructor GH 0x14027c1b0, property table GH 0x14027e130, layout GH 0x1401dd330, placement GH 0x14027c600, size GH 0x14027dd90): `Text : Image`, CText a CImage whose texture is its laid-out text, so effects/parent/angles/parallax/alpha/blend modes apply; 300 dpi glyphs (`FT_Set_Char_Size (0, pt·64, 300)`); lines at `\n`, WE's block box and line alignment; the quad offset from the origin by the alignment; padding only with effects; `systemfont_*` → WE's Windows family via fontconfig (metric-compatible fallbacks), a font's missing glyphs from fontconfig; UTF-8; FBOs resized in place when the text changes | candidate-for-upstream |
+| 0049 data: text strings, colour properties | B4: a text of 2–4 words stayed a string (it was read as a zero vector, so it vanished); a colour user property written `"1 1 1"` is white (0..1, as WE's picker writes it; 117 such properties read as 0..255 → black) | candidate-for-upstream |
+| 0050 render: text wrap, rows, spacing, script alignment | B4 (T2, T5, S28): `limitwidth`/`maxwidth` word wrap, `limitrows`/`maxrows` with `limituseellipsis` "…", `blockalign` justification, `spacing`; maxwidth/maxrows layer properties; ITextLayer.horizontalalign/verticalalign writable | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and

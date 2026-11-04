@@ -249,3 +249,16 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   video never got its first frame. Your player was never affected. The test now runs in real time: all three
   render, and so do 3046119914 and 3432999904 (the two "black" ones). 93 of 96 scenes pass; the 3 left are the known
   3D scenes. Earlier test numbers for the 12 video scenes were taken with the video black.
+
+- **Scenes, batch B4 (fork patches 0048–0050, pin `e372e44`):** text in scenes now works the way Wallpaper Engine
+  does it (decoded from wallpaper64.exe).
+  - Clocks, dates, song titles and labels are drawn as image layers. They take their effects (glow, shake, tint),
+    follow their parent, turn, and move with parallax. 3414858021's date block is back on screen.
+  - They are sized as WE sizes them (300 dpi), wrap at their width limit, stop at their row limit with "…", align
+    left/right/centre, and do multi-line and Chinese/accented text.
+  - System fonts (`systemfont_arial` etc.) come through fontconfig. Here that's Arimo, Comic Neue and Inconsolata;
+    before, the text vanished on NixOS.
+  - Two bugs found on the way: a text of 2–4 words ("Sinner #8") vanished, and a colour setting written "1 1 1" was
+    black (117 colour settings in your scenes are written that way; e.g. 2134765860's clock).
+  - Compared with the sizes WE's editor saved, 44 of 50 texts match in height within 2 px.
+  - Also re-checked B7's blend modes on 2883756643 now that its video shows: still right.
