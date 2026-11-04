@@ -3344,24 +3344,34 @@ static bool create_layer_builds_layers () {
         return true;
     }
     const std::string script =
+        "export let __workshopId = '77';\n"
         "let made, bar, ok;\n"
         "export function init(value) {\n" + js_checks (
         "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(1, 1, 1),"
         " origin: new Vec3(40, 16, 0) });\n"
         "bar = thisScene.createLayer('models/util/solidlayer.json');\n"
+        "const own = thisScene.createLayer('models/own.json');\n"
+        "check('workshop', own !== undefined);\n"
+        "own.visible = false;\n"
         "check('made', made !== undefined && bar !== undefined && made !== bar);\n"
-        "check('count', thisScene.getLayerCount() == 4 && thisScene.getLayerIndex(made) == 2);\n"
+        "check('count', thisScene.getLayerCount() == 5 && thisScene.getLayerIndex(made) == 2);\n"
         "check('origin', Math.abs(made.origin.x - 40) < 1e-4 && made.size.x == 8);\n"
         "check('sort', thisScene.sortLayer(made, 0) && thisScene.getLayerIndex(made) == 0);\n"
         "bar.visible = false;\n"
         "const gone = thisScene.getLayer('sq2');\n"
         "check('destroy', thisScene.destroyLayer(gone) && !engine.isObjectValid(gone) && engine.isObjectValid(made));\n"
-        "check('after', thisScene.getLayerCount() == 3 && thisScene.getLayer('sq2') === undefined && !thisScene.destroyLayer(gone));\n")
+        "check('after', thisScene.getLayerCount() == 4 && thisScene.getLayer('sq2') === undefined && !thisScene.destroyLayer(gone));\n")
         + "  ok = fails.length == 0;\n  return ok;\n}\n"
         "export function update(value) { return ok; }";
     const std::string dir = script_scene (square (1, scripted ("visible", "true", script) + ",\"origin\":\"8 16 0\"") + ","
                                           + square (2, "\"origin\":\"24 16 0\""));
+    // the script's own Workshop item's model: `models/own.json` is models/workshop/77/own.json
+    mkdir ((dir + "/models").c_str (), 0755);
+    mkdir ((dir + "/models/workshop").c_str (), 0755);
+    mkdir ((dir + "/models/workshop/77").c_str (), 0755);
+    write_file (dir + "/models/workshop/77/own.json", read_file (g_assets + "/models/util/solidlayer.json"));
     ScriptRig rig;
+    rig.extra = { "models/workshop/77/own.json" };
     CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
     rig.step ();
     rig.step ();
@@ -3735,6 +3745,8 @@ static bool scene_camera_and_config_api () {
         "check('config', thisScene.getInitialLayerConfig('sq2').origin == '24 16 0' && thisScene.getInitialLayerConfig(thisLayer).id == 1);\n"
         "const a = thisScene.getAnimation('fade');\n"
         "check('animation', a !== undefined && a.name == 'fade' && a.fps == 30);\n"
+        "a.rate = 2;\n"
+        "check('rate', a.rate == 2);\n"
         "check('cam', thisScene.getLayer('cam').zoom == 1);\n"
         "check('render', typeof renderContext === 'object');\n";
     const std::string dir = script_scene (
