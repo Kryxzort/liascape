@@ -1,0 +1,40 @@
+From 58c2348b4503f4e10181005d5ee8445090d530e2 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 01:49:48 +0530
+Subject: [PATCH 96/97] render: note that the turbulence's simplex noise is
+ WE's own
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+B11 left "WE's simplex gradient hash (GH 0x14012c280)" unported. Read now: WE's SSE simplex is
+Gustavson's 3D simplex noise with Ken Perlin's permutation (its 512-byte table at 0x1404c3520 is
+PERLIN_PERM byte for byte), the permMod12 table at 0x1404c37b0 equal to perm % 12, the 12 edge
+gradients, 0.6 − r², t⁴ and the × 32 scale: the noise LWE already computes. Comment only.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Leftovers result" (B11's simplex hash)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/Utils/NoiseUtils.h | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Utils/NoiseUtils.h b/src/core/WallpaperEngine/Render/Utils/NoiseUtils.h
+index 667b41b..d503048 100644
+--- a/src/core/WallpaperEngine/Render/Utils/NoiseUtils.h
++++ b/src/core/WallpaperEngine/Render/Utils/NoiseUtils.h
+@@ -149,9 +149,10 @@ inline glm::vec3 curlNoise (const glm::vec3& p) {
+ }
+ 
+ 
+-// 3D simplex noise in about [-1, 1] (Gustavson's, on the Perlin permutation). WE's turbulence operator samples a 3D
+-// simplex noise once per masked axis (the SSE noise object's slot 2, GH 0x14012b830 → 0x14012c280, behind
+-// GH 0x140265800 case 0xe); its own gradient hash isn't ported, so the field differs while its character doesn't
++// 3D simplex noise in about [-1, 1]: WE's own (GH 0x14012c280, four points per call, behind GH 0x14012b830 and the
++// turbulence case 0xe of GH 0x140265800) is this one exactly — Gustavson's: skew 1/3, unskew 1/6, 0.6 − r², t⁴, × 32,
++// gradients the 12 edge vectors (gx/gy/gz tables 0x1404c3780/3750/3720), hash permMod12[i + perm[j + perm[k]]] with
++// perm = Perlin's permutation doubled (0x1404c3520, 512 bytes, = PERLIN_PERM) and permMod12 = perm % 12 (0x1404c37b0)
+ inline float simplexNoise (float xin, float yin, float zin) {
+     static const int grad3[12][3] = { { 1, 1, 0 }, { -1, 1, 0 }, { 1, -1, 0 }, { -1, -1, 0 }, { 1, 0, 1 }, { -1, 0, 1 },
+ 				      { 1, 0, -1 }, { -1, 0, -1 }, { 0, 1, 1 }, { 0, -1, 1 }, { 0, 1, -1 }, { 0, -1, -1 } };

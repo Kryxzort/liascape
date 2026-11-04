@@ -1,0 +1,304 @@
+From 7744165c836c330fc5e4c77b674119e231d0e80a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 01:46:32 +0530
+Subject: [PATCH 95/97] render: a keyframe timeline follows its parent's
+ (options.parent)
+
+WE's binding parser reads an animation's `options.parent.key` (GH 0x1401d1740, B2's G01 row); the
+editor writes it on the property whose timeline follows a sibling's, with `options.children`
+listing them back on the parent. 5 library scenes use it: 1864677589's origins follow their
+angles, 3163060610's scripted Radius timeline (startpaused, played by its script) drives Size and
+opacity, which ran on their own clocks at load instead of waiting for it.
+
+The parser now records each animation with the JSON object holding it (an object, an effect
+pass's constantshadervalues) and its key; once the scene is parsed, a child is linked to the
+parentless sibling its parent.key names. A child's time is the parent's (seconds, held at its own
+length), advanced after the parents each frame. Inferred: the shared clock (the runtime's use of
+the link wasn't read).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Leftovers result" (B2's shared parent/children timelines)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/JSON.cpp        |  4 ++
+ .../Data/Model/PropertyAnimation.cpp          |  5 ++
+ .../Data/Model/PropertyAnimation.h            | 13 ++++++
+ .../Data/Parsers/DynamicValueParser.cpp       | 46 ++++++++++++++++++-
+ .../Data/Parsers/DynamicValueParser.h         | 26 +++++++++++
+ .../Data/Parsers/ShaderConstantParser.cpp     |  5 +-
+ .../Render/Wallpapers/CScene.cpp              | 23 ++++++----
+ 7 files changed, 109 insertions(+), 13 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/JSON.cpp b/src/core/WallpaperEngine/Data/JSON.cpp
+index 1807d27..c5414b1 100644
+--- a/src/core/WallpaperEngine/Data/JSON.cpp
++++ b/src/core/WallpaperEngine/Data/JSON.cpp
+@@ -1,5 +1,6 @@
+ #include "JSON.h"
+ 
++#include "Parsers/DynamicValueParser.h"
+ #include "Parsers/UserSettingParser.h"
+ 
+ using namespace WallpaperEngine::Data::JSON;
+@@ -8,18 +9,21 @@ using namespace WallpaperEngine::Data::Parsers;
+ 
+ UserSettingUniquePtr JsonExtensions::user (const std::string& key, const Properties& properties) const {
+     const auto value = this->require (key, "User setting without default value must be present");
++    const DynamicValueParser::PropertyScope scope (this, key);
+ 
+     return UserSettingParser::parse (value, properties);
+ }
+ 
+ UserSettingUniquePtr JsonExtensions::text (const std::string& key, const Properties& properties) const {
+     const auto value = this->require (key, "User setting without default value must be present");
++    const DynamicValueParser::PropertyScope scope (this, key);
+ 
+     return UserSettingParser::parse (value, properties, false, true);
+ }
+ 
+ UserSettingUniquePtr JsonExtensions::color (const std::string& key, const Properties& properties) const {
+     const auto value = this->require (key, "User setting without default value must be present");
++    const DynamicValueParser::PropertyScope scope (this, key);
+ 
+     return UserSettingParser::parse (value, properties, true);
+ }
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+index 09a3fe8..456976b 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+@@ -176,6 +176,11 @@ std::vector<std::pair<std::string, int>> PropertyAnimation::takeFiredEvents () {
+ }
+ 
+ void PropertyAnimation::advance (float dt) {
++    if (this->m_parent != nullptr) {
++	// on the parent's clock (inferred from the editor's parent / children links: the curves share one timeline)
++	this->m_time = std::clamp (this->m_parent->getTime (), 0.0f, this->m_duration);
++	return;
++    }
+     if ((this->m_flags & (StartPaused | Finished)) != 0) {
+ 	return;
+     }
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+index 65d7ec0..765f234 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+@@ -89,6 +89,17 @@ public:
+     [[nodiscard]] unsigned int getFlags () const;
+ 
+     void setEvents (std::vector<Event> events) { this->m_events = std::move (events); }
++
++    /**
++     * `options.parent.key`: the sibling property (same object, or same effect pass's constants) whose timeline this
++     * one follows; its `options.children` lists them back (1864677589's origins follow their angles, 3163060610's
++     * scripted Radius drives Size and opacity). A child runs on the parent's clock: its time is the parent's
++     * (seconds, held at its own length), so it plays, pauses and restarts with it
++     */
++    [[nodiscard]] const std::string& getParentKey () const { return this->m_parentKey; }
++    void setParentKey (std::string key) { this->m_parentKey = std::move (key); }
++    void setParent (std::shared_ptr<const PropertyAnimation> parent) { this->m_parent = std::move (parent); }
++    [[nodiscard]] bool hasParent () const { return this->m_parent != nullptr; }
+     /** The events the timeline passed since the last call (name, frame), in order */
+     [[nodiscard]] std::vector<std::pair<std::string, int>> takeFiredEvents ();
+ 
+@@ -107,6 +118,8 @@ private:
+     std::vector<Curve> m_curves;
+     std::vector<Event> m_events = {};
+     std::vector<std::pair<std::string, int>> m_fired = {};
++    std::string m_parentKey;
++    std::shared_ptr<const PropertyAnimation> m_parent;
+     /** the time span advance covered last: [from, to] in timeline seconds, forwards (wrapped spans split) */
+     void collectEvents (float from, float to);
+ };
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+index 95385e3..38c755c 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+@@ -12,6 +12,9 @@ using namespace WallpaperEngine::Data::Model;
+ 
+ namespace {
+ thread_local std::vector<AnimatedValue>* g_animatedValues = nullptr;
++thread_local std::vector<DynamicValueParser::AnimationCollector::Named>* g_named = nullptr;
++thread_local const void* g_scopeOwner = nullptr;
++thread_local const std::string* g_scopeKey = nullptr;
+ 
+ // a `back`/`front` handle: an object, enabled unless `"enabled": false`; a disabled one is (0, 0)
+ bool parseHandle (const JSON& key, const char* name, glm::vec2& out) {
+@@ -72,11 +75,40 @@ PropertyAnimation::Curve parseCurve (const JSON& keys, float offset) {
+ } // namespace
+ 
+ DynamicValueParser::AnimationCollector::AnimationCollector (std::vector<AnimatedValue>& out) :
+-    m_previous (g_animatedValues) {
++    m_previous (g_animatedValues), m_previousNamed (g_named) {
+     g_animatedValues = &out;
++    g_named = &this->m_named;
+ }
+ 
+-DynamicValueParser::AnimationCollector::~AnimationCollector () { g_animatedValues = this->m_previous; }
++DynamicValueParser::AnimationCollector::~AnimationCollector () {
++    g_animatedValues = this->m_previous;
++    g_named = this->m_previousNamed;
++
++    for (const auto& child : this->m_named) {
++	const auto& key = child.animation->getParentKey ();
++	if (key.empty ()) {
++	    continue;
++	}
++	for (const auto& parent : this->m_named) {
++	    if (parent.owner == child.owner && parent.key == key && parent.animation != child.animation
++		&& parent.animation->getParentKey ().empty ()) {
++		child.animation->setParent (parent.animation);
++		break;
++	    }
++	}
++    }
++}
++
++DynamicValueParser::PropertyScope::PropertyScope (const void* owner, const std::string& key) :
++    m_owner (g_scopeOwner), m_key (g_scopeKey) {
++    g_scopeOwner = owner;
++    g_scopeKey = &key;
++}
++
++DynamicValueParser::PropertyScope::~PropertyScope () {
++    g_scopeOwner = this->m_owner;
++    g_scopeKey = this->m_key;
++}
+ 
+ PropertyAnimationSharedPtr DynamicValueParser::parseAnimation (const JSON& animation, const JSON& value) {
+     if (!animation.is_object ()) {
+@@ -144,6 +176,13 @@ PropertyAnimationSharedPtr DynamicValueParser::parseAnimation (const JSON& anima
+ 	std::move (curves)
+     );
+ 
++    // `options.parent.key`: the sibling property whose timeline this one follows (linked by AnimationCollector)
++    if (const auto parent = options->find ("parent"); parent != options->end () && parent->is_object ()) {
++	if (const auto key = parent->find ("key"); key != parent->end () && key->is_string ()) {
++	    result->setParentKey (key->get<std::string> ());
++	}
++    }
++
+     // `options.events`: [{ frame, name }], SceneScript's animationEvent
+     if (const auto events = options->find ("events"); events != options->end () && events->is_array ()) {
+ 	std::vector<PropertyAnimation::Event> parsed;
+@@ -243,6 +282,9 @@ DynamicValueParser::parse (const JSON& data, const Properties& properties, bool
+ 		if (g_animatedValues != nullptr) {
+ 		    g_animatedValues->push_back ({ .value = value.get (), .alive = value->getAliveFlag () });
+ 		}
++		if (g_named != nullptr && g_scopeOwner != nullptr && g_scopeKey != nullptr) {
++		    g_named->push_back ({ .animation = value->getAnimation (), .owner = g_scopeOwner, .key = *g_scopeKey });
++		}
+ 	    }
+ 	}
+     }
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+index 32af042..8d68668 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.h
+@@ -4,6 +4,7 @@
+ #include "../Model/Types.h"
+ 
+ #include <memory>
++#include <string>
+ #include <vector>
+ 
+ namespace WallpaperEngine::Data::Parsers {
+@@ -31,12 +32,37 @@ public:
+     class AnimationCollector {
+     public:
+ 	explicit AnimationCollector (std::vector<Model::AnimatedValue>& out);
++	/** links each animation with an `options.parent.key` to its sibling's (same owner, that key) */
+ 	~AnimationCollector ();
+ 	AnimationCollector (const AnimationCollector&) = delete;
+ 	AnimationCollector& operator= (const AnimationCollector&) = delete;
+ 
++	struct Named {
++	    Model::PropertyAnimationSharedPtr animation;
++	    const void* owner;
++	    std::string key;
++	};
++
+     private:
+ 	std::vector<Model::AnimatedValue>* m_previous;
++	std::vector<Named>* m_previousNamed;
++	std::vector<Named> m_named;
++    };
++
++    /**
++     * The property being parsed: the JSON object holding it (an object, an effect pass's constantshadervalues) and its
++     * key — what an animation's `options.parent.key` names its parent by
++     */
++    class PropertyScope {
++    public:
++	PropertyScope (const void* owner, const std::string& key);
++	~PropertyScope ();
++	PropertyScope (const PropertyScope&) = delete;
++	PropertyScope& operator= (const PropertyScope&) = delete;
++
++    private:
++	const void* m_owner;
++	const std::string* m_key;
+     };
+ };
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ShaderConstantParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ShaderConstantParser.cpp
+index bafaa22..89cfecc 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ShaderConstantParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ShaderConstantParser.cpp
+@@ -1,6 +1,7 @@
+ #include "ShaderConstantParser.h"
+ 
+ #include "../Model/Project.h"
++#include "WallpaperEngine/Data/Parsers/DynamicValueParser.h"
+ #include "WallpaperEngine/Data/Parsers/UserSettingParser.h"
+ 
+ using namespace WallpaperEngine::Data::Parsers;
+@@ -14,7 +15,9 @@ ShaderConstantMap ShaderConstantParser::parse (const JSON& it, const Project& pr
+     ShaderConstantMap result = {};
+ 
+     for (const auto& cur : it.items ()) {
+-	result.emplace (cur.key (), UserSettingParser::parse (cur.value (), project.properties));
++	const std::string key = cur.key ();
++	const DynamicValueParser::PropertyScope scope (&it, key);
++	result.emplace (key, UserSettingParser::parse (cur.value (), project.properties));
+     }
+ 
+     return result;
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index ca57e3d..208910b 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -697,19 +697,22 @@ void CScene::advanceAnimations () {
+ 
+     std::erase_if (animated, [] (const Data::Model::AnimatedValue& cur) { return cur.alive && !*cur.alive; });
+ 
+-    for (const auto& [value, alive] : animated) {
+-	const auto& animation = value->getAnimation ();
++    // the timelines that follow a parent's (`options.parent`) after the parents, so they read this frame's time
++    for (const bool children : { false, true }) {
++	for (const auto& [value, alive] : animated) {
++	    const auto& animation = value->getAnimation ();
+ 
+-	if (animation == nullptr) {
+-	    continue;
+-	}
++	    if (animation == nullptr || animation->hasParent () != children) {
++		continue;
++	    }
+ 
+-	animation->advance (dt);
+-	animation->apply (*value);
++	    animation->advance (dt);
++	    animation->apply (*value);
+ 
+-	// the events it passed reach the property's script (animationEvent)
+-	if (auto fired = animation->takeFiredEvents (); !fired.empty ()) {
+-	    this->m_scriptEngine->animationEvents (*value, fired);
++	    // the events it passed reach the property's script (animationEvent)
++	    if (auto fired = animation->takeFiredEvents (); !fired.empty ()) {
++		this->m_scriptEngine->animationEvents (*value, fired);
++	    }
+ 	}
+     }
+ }

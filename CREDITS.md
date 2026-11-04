@@ -122,3 +122,10 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0088-render-volumetric-point-and-spot-lights-castvolumetr.patch` | render: volumetric point and spot lights (castvolumetrics) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0089-render-name-the-object-factory-s-address-right-in-th.patch` | render: name the object factory's address right in the shape and light notes | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0090-render-a-shape-s-placeholder-picture-is-1-x-1.patch` | render: a shape's placeholder picture is 1 x 1 | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0091-text-shape-with-HarfBuzz-and-take-WE-s-font-fallback.patch` | text: shape with HarfBuzz and take WE's font fallback chain | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0092-render-world-space-particle-systems-system-flags-bit.patch` | render: world-space particle systems (system flags bit 0) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0093-render-slots-WE-leaves-to-the-pass-aren-t-missing-as.patch` | render: slots WE leaves to the pass aren't missing assets | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0094-render-scripts-on-a-particle-s-instanceoverride-valu.patch` | render: scripts on a particle's instanceoverride values run | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0095-render-a-keyframe-timeline-follows-its-parent-s-opti.patch` | render: a keyframe timeline follows its parent's (options.parent) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0096-render-note-that-the-turbulence-s-simplex-noise-is-W.patch` | render: note that the turbulence's simplex noise is WE's own | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0097-render-a-rope-segment-has-subdivision-1-pieces-as-WE.patch` | render: a rope segment has subdivision + 1 pieces, as WE's | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
