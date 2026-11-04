@@ -2500,7 +2500,8 @@ effect-object base 0x1404d2168 of GH 0x140212c50): no light at all. Volumetric l
 - Its draw (GH 0x140285b70): the layer's world matrix, then the LAST effect's passes (GH 0x1402176a0 with param 5 = 1),
   straight into the scene. On that effect's last pass GH 0x1402176a0 calls the shape's vtable +0x108 (GH 0x1402866d0),
   which sets the pass's blending to 2 = additive (GH 0x140182410's names).
-- LWE: a shape is an Image with no base pass, no colour-blend/tint pass and 1 x 1 composites; its 6-vertex quad is
+- LWE: a shape is an Image with no base pass, no colour-blend/tint pass, 1 x 1 composites and a 1 x 1 placeholder
+  picture (0090); its 6-vertex quad is
   recomputed per frame on the layer's scene rectangle (as the puppets'). Not ported: the radius cull, the object's
   flag 0x80 path (FUN_1401b4fd0, a perspective variant).
 
@@ -2548,3 +2549,31 @@ effect-object base 0x1404d2168 of GH 0x140212c50): no light at all. Volumetric l
   (GH 0x14023f030…0x14023fc00, the world at the puppet's +0x4b8) reached from the mixer, unread. Porting it without a
   user would be invention.
 - Root motion (MDLA flags bit 0, 0 users), MORPHING_MODIFIERS (0 users), MDLA v6's per-bone float track.
+
+**Fork tests** (`host_api_test`): 108/108; the 3 new ones fail on `78128d1`.
+
+| Test | What it checks | On `78128d1` |
+|---|---|---|
+| `shape_draws_its_effect_in_place` | two shapes in a 64 x 32 scene: A's corners (x 0.25..0.75, y 0.25..0.5 of its 32 px square) land in the rows of a white marker 8 px up, red (DIRECTDRAW) left, red + green (uv.x > 0.5) right, nothing outside; B with two effects draws only the second (green) on the first's corners (x 48..63); both add to the blue clear though their materials say `normal` | nothing drawn (blue) |
+| `volumetric_lights_glow` | a point light (radius 3) glows white at the centre, not at the corner; off without castvolumetrics; a spot along +x glows on its axis, not 2.5 units above; from inside the sphere the full-screen march glows; a black depth-writing wall in the sphere cuts the glow (135 → 22) | the clear colour everywhere |
+| `puppet_ik_reaches_its_target` | a three-bone MDLV0016 arm whose hand's IK target is animated to (0, 8): the hand's square at x 30..33, 8 px up | the square at its bind (x 38..41, centre row) |
+
+**Scenes, old core (`78128d1`) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the release worker with each core on
+LD_LIBRARY_PATH; VRAM at 4 s; scratchpad `f2/pairs/`):
+
+| Scene | What changes | Frame ms old → new | VRAM old → new |
+|---|---|---|---|
+| 3319542538 (shape) | pink light rays rising from the horizon right of the tree (448 841 px differ at 1 s, inside x 1895..3840, y 304..1541) | 5.3 → 5.0–5.4 | 530 → 530 MiB (548 before 0090) |
+| 3042492564 (IK arm) | the hand on the rail moves with its target (a 94 x 122 px box at 1 s, 1520 px at 4 s) | 8.0 → 7.1 | — |
+| the synthetic F1 scene with castvolumetrics on both lights | the point light's blue haze and the spot's shaft over the floor (no shadows in the shaft: SHADOW not done) | 0.96 → 1.19 | 49 → 71 MiB (the full-size depth copy, the light buffers, the shaders) |
+| 3477054430 (3D, spots, castvolumetrics off) | nothing | 1.33 → 1.37 | 139 → 139 MiB |
+| 2182433068 (2D) | nothing | 0.79 → 0.89 | 82 → 82 MiB |
+
+- A scene without volumetric lights builds nothing for them (no targets, no pass). One with them pays, per light, a
+  back-face depth draw and a march at an eighth of the scene, then a full-size depth blit, two blurs and an
+  additive full-screen draw.
+
+**Shader sweep** (4085 compiles, the new core, compared with F5/F6's run): 16 → 6 failures, 10 fixed (F4's caster
+fixes, absent from that run's core), 0 newly failing; the 6 are as in F1.
+
+Player tests (DEBUG, pin `f4aa7c5`): 740 passed, 0 failed, 3 ignored.

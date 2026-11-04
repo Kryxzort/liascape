@@ -449,3 +449,16 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   as before; shader sweep 16 failing, none new.
 - Left: the `layerimage` emitter, `collisionmodel`, the inferred parts of F6, text `depthtest` (no effect in 2D),
   `customsortorder`, the 3D camera's zoom and parallax.
+
+## 2026-11-05 — WE coverage F2: shape objects, volumetric lights, puppet IK (fork 0086–0090, pin `f4aa7c5`)
+- **The "VolumeLight" in 3319542538 was a shape object** (WE's light-shafts quad), not a light. It now draws: pink
+  light rays rising from the horizon right of the tree, added onto the scene as WE does. The health report no longer
+  lists it as unsupported.
+- **Volumetric lights** (`castvolumetrics` on point and spot lights): visible light cones / glow spheres in 3D
+  scenes, with WE's own volumetrics shaders. None of your scenes turns it on (3477054430's spots have it off), so
+  nothing of yours changes; checked on a synthetic scene. Not done: shadows and cookies inside the glow, fog,
+  directional lights.
+- **Puppet IK**: 3042492564's arm now follows its animated hand target (it stayed still). How WE solves IK
+  wasn't found in its code; ours is a standard two-bone solver (marked inferred).
+- **Not done: bone physics** (springy hair etc., `applyBonePhysicsImpulse`, gravity/wind): none of your puppets
+  enables it, and WE's simulation code is a large unread rigid-body layer.
