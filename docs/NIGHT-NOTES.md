@@ -417,3 +417,16 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   library yet).
 - Left: puppet **hit boxes** (where WE stores them isn't decoded; no library script reads them), text-layer writes
   re-laying text, `transformAttachmentToTexture`, three unknown .tex flags.
+
+## 2026-11-04 night — F3/F4: blend shapes, bone alpha, skinned 3D models, createModelData (fork patches 0078–0081)
+- **Blend shapes on puppets** (0079): WE's MDL morph targets (MDMP) and their animation weight tracks are read and
+  applied, and scripts get `getBlendShapeIndex` / `get/setBlendShapeWeight`. Only 3490034653 has one: 人物1's blink
+  target moves 25 eyelid points by a few pixels (under a pixel at the smoke's frames, so no visible change there).
+  Bone alpha tracks work too (none in the library).
+- **Skinned / morphed 3D models** (0080): a model with a skeleton is now posed by its animation layers and skinned on
+  the GPU as WE does (generic4's SKINNING / MORPHING); the stock shadow casters build with those combos (0078: the
+  shader sweep's 10 caster failures are gone). No library model has a skeleton, so nothing you have changes.
+- **createModelData** (0081): scripts can build their own meshes and show them as model layers (also in 2D
+  scenes). No library script does yet. Model layers are now script layers (getLayer returns them).
+- Not done (decoded as far as the data, the solver not read): **IK** (one bone in 3042492564's arm) and **bone
+  physics** (no library bone has it switched on), root motion, `applyBonePhysicsImpulse` (still a no-op).
