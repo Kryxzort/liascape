@@ -1,8 +1,8 @@
 From f0b485c9bcde6d1ae82134e9bae6dbbcaf182c88 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 22:16:03 +0530
-Subject: [PATCH 84/97] particle: the operators and initializers of WE's stock
- presets
+Subject: [PATCH 084/100] particle: the operators and initializers of WE's
+ stock presets
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

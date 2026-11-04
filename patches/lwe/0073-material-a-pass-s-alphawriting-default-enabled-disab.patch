@@ -1,7 +1,7 @@
 From 0b04e43ca6899dda22ea269c021b02f215b16e3f Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:37:33 +0530
-Subject: [PATCH 73/97] material: a pass's alphawriting (default / enabled /
+Subject: [PATCH 073/100] material: a pass's alphawriting (default / enabled /
  disabled)
 
 WE registers the material pass key `alphawriting` with default 0, enabled 1, disabled 2
