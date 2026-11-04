@@ -3991,6 +3991,43 @@ static bool effect_fbo_fit_and_swap () {
     return true;
 }
 
+// TEX<n>FORMAT: WE defines it for every `formatcombo` sampler, to the format of the texture bound there (GH
+// 0x1401d2a20). An effect pass binds an r8 FBO at slot 1 and an rg88 one at slot 2: TEX1FORMAT is FORMAT_R8 (9),
+// TEX2FORMAT FORMAT_RG88 (8) — the layer turns green. Unpatched only TEX0FORMAT was set: both 0, red
+static bool texture_format_combos_per_slot () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"fmt\",\"file\":\"effects/fmt/effect.json\"}]}";
+    const std::string dir = camera_scene ("\"zoom\":1", object, "");
+    b9_layer (dir, "", "gl_FragColor = vec4(0.0, 0.0, 1.0, 1.0);");
+    write_file (dir + "/shaders/fmt.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nvoid main() {\n"
+                                           "\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n");
+    write_file (dir + "/shaders/fmt.frag",
+                "uniform sampler2D g_Texture1; // {\"material\":\"one\",\"formatcombo\":true}\n"
+                "uniform sampler2D g_Texture2; // {\"material\":\"two\",\"formatcombo\":true}\n"
+                "void main() {\n#if TEX1FORMAT == 9 && TEX2FORMAT == 8\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n#else\n"
+                "\tgl_FragColor = vec4(1.0, 0.0, float(TEX1FORMAT) / 16.0, 1.0);\n#endif\n}\n");
+    write_file (dir + "/materials/fmt.json", "{\"passes\":[{\"shader\":\"fmt\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                             "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/fmt").c_str (), 0755);
+    write_file (dir + "/effects/fmt/effect.json",
+                "{\"name\":\"fmt\",\"fbos\":[{\"name\":\"_rt_red\",\"format\":\"r8\"},{\"name\":\"_rt_rg\",\"format\":\"rg88\"}],"
+                "\"passes\":[{\"material\":\"materials/fmt.json\",\"bind\":[{\"name\":\"_rt_red\",\"index\":1},"
+                "{\"name\":\"_rt_rg\",\"index\":2}]}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/fmt/effect.json", "shaders/fmt.vert", "shaders/fmt.frag", "materials/fmt.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = b9_pixel (rig);
+    printf ("    a pass binding r8 at 1 and rg88 at 2: %d %d %d (green: TEX1FORMAT 9, TEX2FORMAT 8)\n", px[0], px[1], px[2]);
+    CHECK (px[1] > 200 && px[0] < 30, "TEX1FORMAT / TEX2FORMAT aren't the bound FBOs' formats (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
+
 // IScene: get/setCameraTransforms (the scene's camera, a CameraTransforms), getInitialLayerConfig (the object as the
 // scene file has it), getAnimation (a named keyframe timeline), getLayerByID; a camera object's ICamera zoom;
 // renderContext exists. Unpatched: none of these existed (getAnimation, the camera methods: not functions)
@@ -4995,6 +5032,7 @@ int main (int argc, char** argv) {
     run ("blending_sets_combos", blending_sets_combos);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
     run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
+    run ("texture_format_combos_per_slot", texture_format_combos_per_slot);
     run ("scene_camera_and_config_api", scene_camera_and_config_api);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
