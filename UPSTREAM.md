@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`36ad6a0`** (fork, 2026-11-04: + 0054, batch B12 puppet warp; 0051–0053 = B11 particles; 0048–0050 = B4 text; 0046–0047 = B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`157c111`** (fork, 2026-11-04: + 0056, batch B14 3D scenes; 0055 = B13 HDR bloom; 0054 = B12 puppet warp; 0051–0053 = B11 particles; 0048–0050 = B4 text; 0046–0047 = B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after
@@ -129,6 +129,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0052 render: child particle systems | B11 (P2): static / eventfollow / eventspawn / eventdeath children (WE's defaults, shared overrides, pooled instances, one renderer per event child) | candidate-for-upstream |
 | 0053 render: control point overrides, scene space, transform | B11 (P10, P34, P35): instanceoverride controlpoint0–7 (live), flags bit 1 = scene space (not point 0), pointer/scene points unrotated and unscaled, local offsets mirrored like emitter origins | candidate-for-upstream |
 | 0054 render: puppet warp — WE's MDL loader, skinning, animation-layer mixing and attachments | B12 (G06–G09): decoded GH 0x1402873f0 (vertex layout from the format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT sections), CPU skinning, layer clock / weight / normal + additive mixing, `attachment`, effect-less puppets drawn in place; follows PR #625's parsing and autosize where WE agrees | candidate-for-upstream |
+| 0056 render: 3D scenes | B14 (G22, G24–G26, G28, G29 part, E13, E14): no `orthogonalprojection` = a perspective scene (GH 0x1401b6c60/0x1401b3f70), the active camera object's view and fov, the 3D shake; WE's object matrix (Rz·Ry·Rx, parents) for layers; `model` objects (static MDL meshes, generic4) with a depth buffer; point/spot lights packed as g_LCluster_* and WE's PerformLighting_V1 loop; distance/height fog; `transparentsorting` back to front (ours); texture flags with unknown bits load | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and

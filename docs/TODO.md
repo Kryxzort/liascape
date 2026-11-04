@@ -1120,8 +1120,16 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
     - [ ] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M.
-    - [ ] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
-          E14, E43). The 3 load_failed scenes below. L.
+    - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
+          E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
+          also carries B13's 0055): G24, G22, G25, G26 point/spot (E13), G28 (E14), `transparentsorting`, camera
+          objects and the 3D shake; decoded addresses in the audit's "B14 result". host_api_test 66/66 (4 new,
+          failing on 36ad6a0); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
+          - [ ] Left: shadows (`_rt_shadowAtlas`), light cookies, volumetrics, tube/directional lights; shape objects
+                (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
+                particle shaders; the 3D camera's parallax, zoom and paths; G20 perspectiveoverridefov, G21/E43
+                `perspective` and `depthtest` layers, G23 camerafade, sortorder/customsortorder; hit-testing
+                world-placed layers; WE's sort key and an output-sized 3D target; WE captures of the three scenes.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
@@ -1136,7 +1144,7 @@ Two bug classes kept recurring; fix the class, not the instance:
         text objects carry `"particle": null`, dispatched to `parseParticle` → a particle without a material →
         null deref in `CParticle::CParticle`. Upstream `main` #692, cherry-picked (0014). Corpus: 1884904087,
         2047150134 (broken → ok, leaves and clock both drawn).
-  - [ ] **LWE: 3D / perspective scenes** — `Projection must have a width. Contents: null`: `general.
+  - [x] **LWE: 3D / perspective scenes** (2026-11-04, B14, fork patch 0056) — `Projection must have a width. Contents: null`: `general.
         orthogonalprojection` null + a perspective `camera {eye, center, up}`; next-v2 parses only 2D scenes.
         Corpus: 3276522107, 3477054430, 3509243656. Likely the biggest item (upstream may have work in flight).
         Gap audit B14 / G24 gives what each one needs (3276522107 has no meshes, so it is the cheapest).

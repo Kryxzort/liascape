@@ -1,7 +1,7 @@
 From 8bbcd5124df41b888c5f04da40ac402cffc33e62 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 00:58:39 +0530
-Subject: [PATCH 25/54] render: particle initializers draw the way Wallpaper
+Subject: [PATCH 25/56] render: particle initializers draw the way Wallpaper
  Engine does
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

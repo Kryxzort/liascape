@@ -1,0 +1,703 @@
+From c62d777fd17a67e1be3cca0bd5f00e233710d797 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 10:28:27 +0530
+Subject: [PATCH 55/56] render: HDR scenes render in half float and bloom with
+ WE's HDR chain; FBOs take their format
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decoded from wallpaper64.exe 2.8.485 (the headless decompile; constants read from the binary):
+
+- general.hdr is general flag 0x400 (setter GH 0x1401c95e0). bloomhdrstrength/threshold/feather/
+  scatter/iterations are general +0x388/+0x38c/+0x390/+0x394/+0x398 (key table GH 0x1401c7880);
+  their defaults 2, 1, 0.1, 1.619, 8, and bloomstrength 2 / bloomthreshold 0.65 (LWE had 0 / 0),
+  are in the scene constructor GH 0x1401b6c60.
+- The scene tick GH 0x1401afbf0 loads, with the renderer's HDR flag (0x2000), combine_hdr_upsample,
+  combine_srgb, hdr_downsample, hdr_downsample_bloom, hdr_upsample and hdr_upsample_cubic instead
+  of the LDR chain's materials, which are not built then.
+- Targets (GH 0x1401af5b0): with HDR the scene is RGB161616f and one bloom level per halving of
+  the smaller side, up to 8, "_rt_" + (2 << level) + "FrameBuffer", RGB161616f.
+- GH 0x1401b42b0: levels = min (bloomhdriterations, levels made), at least 1; the downsample's
+  g_BloomStrength = strength / (scatter^(max (levels, 2) − 2) + 1) (the call at 0x1401b436a is
+  powf: inferred from its CRT shape), blend = (t, t − t·f, 2·t·f, 0.25 / (t·f + 1e-5)), tint;
+  both upsamples' scatter.
+- GH 0x1401b3b10: level 0 is hdr_downsample_bloom from the scene, levels 1… hdr_downsample from
+  the level above, g_RenderVar0 = (1, 1, −1, −1) · 2^level / the scene size; then up from the
+  last level, adding onto the one above (additive), hdr_upsample_cubic for the two coarsest
+  steps, hdr_upsample after, g_RenderVar0 · 2^level; the combine reads the scene and level 0.
+- FBO formats: an effect FBO's `format` (GH 0x140216080, names → enum GH 0x1402116c0, the .tex
+  enum): rgba_backbuffer is RGBA16161616f with HDR else rgba8888, rgb_backbuffer RGB161616f /
+  RGB888; image composites are RGBA16161616f with HDR (format 0xe), else RGBA8.
+
+Ours: CFBO allocates the format it is given (rg88 → RG8, r8 → R8, the f formats half float, RGB
+ones RGBA16F with alpha read as 1); FBOProvider maps the names. An HDR scene's FBO, composites,
+compose targets and sampling copies are RGBA16F (LWE keeps alpha: compose layers and blend modes
+read it). The HDR chain is a bloom image like the LDR one, one virtual effect per level count;
+CScene feeds its uniforms each frame. The combine is WE's combine_hdr_upsample_linear (no lin ()):
+WE's combine_hdr / combine_srgb apply lin () and multiply by g_RenderVar0.x for its sRGB
+backbuffer view, which leaves the picture as it was (inferred: we write to an RGBA8 target
+without sRGB encoding). The output copy to the host's framebuffer clamps, as WE's saturate does.
+
+Inferred, not WE's: WE runs the HDR path only when its "postprocessing" setting is "ultra"
+(GH 0x14013f860 sets the renderer flag 0x2000 from it, 0x6000 for "displayhdr"); LWE has no such
+setting, so a general.hdr scene renders HDR unless WPENGINE_HDR=0. How general.hdr gates the
+renderer flag was not found. bloomhdriterations is read at load.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B13 (E35, E23)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |   8 +
+ .../Data/Parsers/WallpaperParser.cpp          |  12 +-
+ src/core/WallpaperEngine/Project.cpp          |  43 +++++
+ src/core/WallpaperEngine/Render/CFBO.cpp      |  50 +++++-
+ .../WallpaperEngine/Render/CWallpaper.cpp     |   2 +-
+ src/core/WallpaperEngine/Render/CWallpaper.h  |   5 +
+ .../WallpaperEngine/Render/FBOProvider.cpp    |  36 +++-
+ src/core/WallpaperEngine/Render/FBOProvider.h |   8 +-
+ .../WallpaperEngine/Render/Objects/CImage.cpp |   9 +-
+ .../WallpaperEngine/Render/Objects/CImage.h   |   2 +
+ .../Render/Objects/CParticle.cpp              |   2 +-
+ .../Render/Wallpapers/CScene.cpp              | 162 ++++++++++++++----
+ .../Render/Wallpapers/CScene.h                |  25 +++
+ 13 files changed, 319 insertions(+), 45 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index 6ce43a3..2544d5d 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -65,6 +65,14 @@ struct SceneData {
+ 	    UserSettingUniquePtr threshold;
+ 	    /** Bloom's tint (`g_BloomTint` of the LDR chain, WE's default 1 1 1) */
+ 	    UserSettingUniquePtr tint;
++	    /** `general.hdr`: the scene renders in half float and blooms with WE's HDR chain (GH 0x1401afbf0) */
++	    UserSettingUniquePtr hdr;
++	    /** The HDR chain's `bloomhdr*` (WE's defaults 2, 1, 0.1, 1.619, 8: GH 0x1401b6c60) */
++	    UserSettingUniquePtr hdrStrength;
++	    UserSettingUniquePtr hdrThreshold;
++	    UserSettingUniquePtr hdrFeather;
++	    UserSettingUniquePtr hdrScatter;
++	    UserSettingUniquePtr hdrIterations;
+ 	} bloom;
+ 	/**
+ 	 * Parallax effect configuration
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 4fb1a0e..490d1ad 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -53,9 +53,17 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                 .preview = general.optional ("camerapreview", false),
+                 .bloom = {
+                     .enabled = general.user ("bloom", properties, false),
+-                    .strength = general.user ("bloomstrength", properties, 0.0f),
+-                    .threshold = general.user ("bloomthreshold", properties, 0.0f),
++                    // WE's defaults (its scene constructor, GH 0x1401b6c60: +0x380 2, +0x384 0.65; LWE had 0, 0)
++                    .strength = general.user ("bloomstrength", properties, 2.0f),
++                    .threshold = general.user ("bloomthreshold", properties, 0.65f),
+                     .tint = general.user ("bloomtint", properties, glm::vec3 (1.0f)),
++                    // the HDR chain's (keys at +0x388…+0x398, GH 0x1401c7880; hdr is general flag 0x400)
++                    .hdr = general.user ("hdr", properties, false),
++                    .hdrStrength = general.user ("bloomhdrstrength", properties, 2.0f),
++                    .hdrThreshold = general.user ("bloomhdrthreshold", properties, 1.0f),
++                    .hdrFeather = general.user ("bloomhdrfeather", properties, 0.1f),
++                    .hdrScatter = general.user ("bloomhdrscatter", properties, 1.619f),
++                    .hdrIterations = general.user ("bloomhdriterations", properties, 8),
+                 },
+                 .parallax = {
+                     .enabled = general.user ("cameraparallax", properties, false),
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 4d45878..2bd2ccc 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -113,6 +113,49 @@ AssetLocatorUniquePtr wp_setup_asset_locator (
+ 	  } }
+     );
+ 
++    // the HDR chain, one effect per level count n (WE's GH 0x1401b3b10 on targets made by GH 0x1401af5b0): the scene
++    // into _rt_2FrameBuffer through hdr_downsample_bloom (the threshold), each level into the next half-size one
++    // through hdr_downsample, then back up adding each level onto the one above (hdr_upsample, bicubic for the two
++    // coarsest steps), and combine_hdr_upsample's linear variant adds _rt_2FrameBuffer onto the scene. Targets are
++    // "_rt_" + (2 << level) + "FrameBuffer". CScene feeds g_RenderVar0 (the tap offsets) and the bloom parameters
++    for (int levels = 1; levels <= 8; levels++) {
++	const auto target = [] (int level) { return "_rt_" + std::to_string (2 << level) + "FrameBuffer"; };
++	const auto pass = [] (const std::string& material, const std::string& to, const std::string& from) {
++	    return JSON { { "material", material },
++			  { "target", to },
++			  { "bind", JSON::array ({ { { "name", from }, { "index", 0 } } }) } };
++	};
++	JSON passes = JSON::array ();
++
++	passes.push_back (pass ("materials/util/hdr_downsample_bloom.json", target (0), "_rt_FullFrameBuffer"));
++	for (int level = 1; level < levels; level++) {
++	    passes.push_back (pass ("materials/util/hdr_downsample.json", target (level), target (level - 1)));
++	}
++	for (int level = levels - 1; level > 0; level--) {
++	    passes.push_back (pass (
++		level < levels - 2 ? "materials/util/hdr_upsample.json" : "materials/util/hdr_upsample_cubic.json",
++		target (level - 1), target (level)
++	    ));
++	}
++	passes.push_back (
++	    { { "material", "materials/util/combine_hdr_upsample_linear.json" },
++	      { "target", "_rt_FullFrameBuffer" },
++	      { "bind",
++		JSON::array (
++		    { { { "name", "_rt_imageLayerComposite_-1_a" }, { "index", 0 } },
++		      { { "name", target (0) }, { "index", 1 } } }
++		) } }
++	);
++
++	vfs.add (
++	    "effects/wpenginelinux/bloomhdr" + std::to_string (levels) + ".json",
++	    { { "name", "camerabloomhdr_wpengine_linux" },
++	      { "group", "wpengine_linux_camera" },
++	      { "dependencies", JSON::array () },
++	      { "passes", passes } }
++	);
++    }
++
+     vfs.add ("models/wpenginelinux.json", { { "material", "materials/wpenginelinux.json" } });
+ 
+     vfs.add (
+diff --git a/src/core/WallpaperEngine/Render/CFBO.cpp b/src/core/WallpaperEngine/Render/CFBO.cpp
+index 021c8af..b8e3ee6 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.cpp
++++ b/src/core/WallpaperEngine/Render/CFBO.cpp
+@@ -3,6 +3,43 @@
+ 
+ using namespace WallpaperEngine::Render;
+ 
++namespace {
++/**
++ * The GL storage of an FBO of WE's texture format `format` (the .tex enum; WE's effect FBO `format` names map onto it,
++ * FBOProvider::formatFromName). WE creates its render targets in that format (GH 0x1401d7460): rg88 and r8 have no
++ * blue/alpha (they sample as 0 and 1), the f formats are half floats (HDR scenes keep values above 1). An RGB format
++ * has no alpha: RGB16F isn't required to be colour-renderable, so it is RGBA16F with alpha sampled as 1
++ */
++struct GLStorage {
++    GLint internalFormat;
++    GLenum format;
++    GLenum type;
++    bool opaqueAlpha;
++};
++
++GLStorage storageFor (const TextureFormat format) {
++    switch (format) {
++	case TextureFormat_RG88:
++	    return { GL_RG8, GL_RG, GL_UNSIGNED_BYTE, false };
++	case TextureFormat_R8:
++	    return { GL_R8, GL_RED, GL_UNSIGNED_BYTE, false };
++	case TextureFormat_RG1616f:
++	    return { GL_RG16F, GL_RG, GL_HALF_FLOAT, false };
++	case TextureFormat_R16f:
++	    return { GL_R16F, GL_RED, GL_HALF_FLOAT, false };
++	case TextureFormat_RGBA16161616f:
++	    return { GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, false };
++	case TextureFormat_RGB161616f:
++	    return { GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true };
++	case TextureFormat_RGBa1010102:
++	    return { GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, false };
++	default:
++	    // ARGB8888, RGB888 (LWE's scene and layer targets keep their alpha: compose layers and blend modes read it)
++	    return { GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, false };
++    }
++}
++} // namespace
++
+ CFBO::CFBO (
+     std::string name, const TextureFormat format, const uint32_t flags, const float scale, uint32_t realWidth,
+     uint32_t realHeight, uint32_t textureWidth, uint32_t textureHeight
+@@ -17,7 +54,13 @@ CFBO::CFBO (
+     // bind the new texture to set settings on it
+     glBindTexture (GL_TEXTURE_2D, this->m_texture);
+     // give OpenGL an empty image
+-    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    const GLStorage storage = storageFor (format);
++    glTexImage2D (
++	GL_TEXTURE_2D, 0, storage.internalFormat, textureWidth, textureHeight, 0, storage.format, storage.type, nullptr
++    );
++    if (storage.opaqueAlpha) {
++	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
++    }
+     // label stuff for debugging
+ #if !NDEBUG
+     if (GLAD_GL_VERSION_4_3) {
+@@ -90,7 +133,10 @@ void CFBO::resize (uint32_t realWidth, uint32_t realHeight, uint32_t textureWidt
+     glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+ 
+     glBindTexture (GL_TEXTURE_2D, this->m_texture);
+-    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    const GLStorage storage = storageFor (this->m_format);
++    glTexImage2D (
++	GL_TEXTURE_2D, 0, storage.internalFormat, textureWidth, textureHeight, 0, storage.format, storage.type, nullptr
++    );
+ 
+     glBindFramebuffer (GL_FRAMEBUFFER, this->m_framebuffer);
+     GLfloat previousClearColor[4] = {};
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.cpp b/src/core/WallpaperEngine/Render/CWallpaper.cpp
+index e864189..c8cd95a 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.cpp
++++ b/src/core/WallpaperEngine/Render/CWallpaper.cpp
+@@ -243,7 +243,7 @@ void CWallpaper::setupFramebuffers () {
+ 
+     // create framebuffer for the scene
+     this->m_sceneFBO = this->create (
+-	"_rt_FullFrameBuffer", TextureFormat_ARGB8888, TextureFlags_NoFlags, 1.0, { width, height }, { width, height }
++	"_rt_FullFrameBuffer", this->m_sceneFormat, TextureFlags_NoFlags, 1.0, { width, height }, { width, height }
+     );
+ 
+     this->alias ("_rt_MipMappedFrameBuffer", "_rt_FullFrameBuffer");
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.h b/src/core/WallpaperEngine/Render/CWallpaper.h
+index da87741..3d0f4a5 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.h
++++ b/src/core/WallpaperEngine/Render/CWallpaper.h
+@@ -158,6 +158,11 @@ protected:
+ 
+     /** The FBO used for scene output */
+     std::shared_ptr<const CFBO> m_sceneFBO = nullptr;
++    /**
++     * The scene FBO's format (setupFramebuffers): half float for a scene WE renders HDR (WE: RGB161616f, GH 0x1401af5b0;
++     * LWE keeps alpha), else RGBA8. The output copy to the host's framebuffer converts (and clamps) to its format
++     */
++    TextureFormat m_sceneFormat = TextureFormat_ARGB8888;
+ 
+     GLuint m_vaoBuffer = GL_NONE;
+ 
+diff --git a/src/core/WallpaperEngine/Render/FBOProvider.cpp b/src/core/WallpaperEngine/Render/FBOProvider.cpp
+index 5067a99..a785b56 100644
+--- a/src/core/WallpaperEngine/Render/FBOProvider.cpp
++++ b/src/core/WallpaperEngine/Render/FBOProvider.cpp
+@@ -5,12 +5,36 @@ using namespace WallpaperEngine::Data::Model;
+ 
+ FBOProvider::FBOProvider (const FBOProvider* parent) : m_parent (parent) { }
+ 
+-std::shared_ptr<CFBO> FBOProvider::create (const FBO& base, uint32_t flags, const glm::vec2 size) {
++TextureFormat FBOProvider::formatFromName (const std::string& name, const bool hdr) {
++    // WE's effect FBO parse (GH 0x140216080 → 0x1402116c0): the backbuffer formats follow the scene's HDR, the rest are
++    // the .tex format names
++    if (name == "rgba_backbuffer") {
++	return hdr ? TextureFormat_RGBA16161616f : TextureFormat_ARGB8888;
++    }
++    if (name == "rgb_backbuffer") {
++	return hdr ? TextureFormat_RGB161616f : TextureFormat_RGB888;
++    }
++
++    static const std::map<std::string, TextureFormat> named = {
++	{ "rgba8888", TextureFormat_ARGB8888 },	       { "rgb888", TextureFormat_RGB888 },
++	{ "rg88", TextureFormat_RG88 },		       { "r8", TextureFormat_R8 },
++	{ "rgb565", TextureFormat_RGB565 },	       { "rgba16161616f", TextureFormat_RGBA16161616f },
++	{ "rgb161616f", TextureFormat_RGB161616f },     { "rg1616f", TextureFormat_RG1616f },
++	{ "r16f", TextureFormat_R16f },		       { "rgba1010102", TextureFormat_RGBa1010102 },
++    };
++
++    if (const auto it = named.find (name); it != named.end ()) {
++	return it->second;
++    }
++
++    // WE's other names are compressed or 32-bit formats no effect renders into; anything else is its default
++    return TextureFormat_ARGB8888;
++}
++
++std::shared_ptr<CFBO> FBOProvider::create (const FBO& base, uint32_t flags, const glm::vec2 size, const bool hdr) {
+     return this->m_fbos[base.name] = std::make_shared<CFBO> (
+-	       base.name,
+-	       // TODO: PROPERLY DETERMINE FBO FORMAT BASED ON THE STRING
+-	       TextureFormat_ARGB8888, flags, base.scale, size.x / base.scale, size.y / base.scale, size.x / base.scale,
+-	       size.y / base.scale
++	       base.name, formatFromName (base.format, hdr), flags, base.scale, size.x / base.scale,
++	       size.y / base.scale, size.x / base.scale, size.y / base.scale
+ 	   );
+ }
+ 
+@@ -19,7 +43,7 @@ std::shared_ptr<CFBO> FBOProvider::create (
+     glm::vec2 textureSize
+ ) {
+     return this->m_fbos[name] = std::make_shared<CFBO> (
+-	       name, TextureFormat_ARGB8888, flags, scale, realSize.x, realSize.y, textureSize.x, textureSize.y
++	       name, format, flags, scale, realSize.x, realSize.y, textureSize.x, textureSize.y
+ 	   );
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/FBOProvider.h b/src/core/WallpaperEngine/Render/FBOProvider.h
+index 29dd2fd..20a3e89 100644
+--- a/src/core/WallpaperEngine/Render/FBOProvider.h
++++ b/src/core/WallpaperEngine/Render/FBOProvider.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <map>
++#include <string>
++
+ #include <glm/vec2.hpp>
+ 
+ #include "CFBO.h"
+@@ -12,11 +15,14 @@ class FBOProvider {
+ public:
+     explicit FBOProvider (const FBOProvider* parent);
+ 
+-    std::shared_ptr<CFBO> create (const FBO& base, uint32_t flags, glm::vec2 size);
++    /** An effect's FBO, in the format its `format` names (`hdr`: the scene renders HDR, for the backbuffer formats) */
++    std::shared_ptr<CFBO> create (const FBO& base, uint32_t flags, glm::vec2 size, bool hdr);
+     std::shared_ptr<CFBO> create (
+ 	const std::string& name, TextureFormat format, uint32_t flags, float scale, glm::vec2 realSize,
+ 	glm::vec2 textureSize
+     );
++    /** WE's FBO format name → its texture format; `rgba_backbuffer`/`rgb_backbuffer` are half float in HDR */
++    [[nodiscard]] static TextureFormat formatFromName (const std::string& name, bool hdr);
+     std::shared_ptr<CFBO> alias (const std::string& newName, const std::string& original);
+     [[nodiscard]] std::shared_ptr<CFBO> find (const std::string& name) const;
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index e4b03ea..7592b20 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -174,11 +174,12 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+ 	       ? TextureFlags_NoInterpolation
+ 	       : 0);
+ 
++    // WE's composites are half float in an HDR scene (GH 0x140216080: format 0xe when the renderer's flag 0x2000)
+     const auto mainFBO = scene.create (
+-	nameA.str (), TextureFormat_ARGB8888, compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
++	nameA.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
+     );
+     const auto subFBO = scene.create (
+-	nameB.str (), TextureFormat_ARGB8888, compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
++	nameB.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
+     );
+     this->m_currentMainFBO = this->m_mainFBO = mainFBO;
+     this->m_currentSubFBO = this->m_subFBO = subFBO;
+@@ -696,7 +697,7 @@ void CImage::setup () {
+ 	    // create all the fbos for this effect
+ 	    for (const auto& fbo : cur->effect->fbos) {
+ 		this->m_sizedTargets.emplace_back (
+-		    fboProvider->create (*fbo, this->m_texture->getFlags (), this->getSize ()), fbo->scale
++		    fboProvider->create (*fbo, this->m_texture->getFlags (), this->getSize (), this->getScene ().rendersHDR ()), fbo->scale
+ 		);
+ 	    }
+ 
+@@ -1437,3 +1438,5 @@ GLuint CImage::getPassSpacePosition () const { return this->m_passSpacePosition;
+ GLuint CImage::getTexCoordCopy () const { return this->m_texcoordCopy; }
+ 
+ GLuint CImage::getTexCoordPass () const { return this->m_texcoordPass; }
++
++const std::vector<Effects::CPass*>& CImage::getPasses () const { return this->m_passes; }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 7900e82..2e17305 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -51,6 +51,8 @@ public:
+     [[nodiscard]] GLuint getPassSpacePosition () const;
+     [[nodiscard]] GLuint getTexCoordCopy () const;
+     [[nodiscard]] GLuint getTexCoordPass () const;
++    /** Every pass built for the image: its base pass, then its effects' passes in order (shown or not) */
++    [[nodiscard]] const std::vector<Effects::CPass*>& getPasses () const;
+ 
+     [[nodiscard]] const float& getBrightness () const override;
+     [[nodiscard]] const float& getUserAlpha () const override;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 8076031..613161c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2162,7 +2162,7 @@ void CParticle::setupPass () {
+ 	float w = static_cast<float> (sceneFBO->getRealWidth ());
+ 	float h = static_cast<float> (sceneFBO->getRealHeight ());
+ 	m_refractFBO = m_passFBOProvider->create (
+-	    "_rt_FullFrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0f, { w, h }, { w, h }
++	    "_rt_FullFrameBuffer", sceneFBO->getFormat (), TextureFlags_ClampUVs, 1.0f, { w, h }, { w, h }
+ 	);
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 52399ff..01d0bed 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdlib>
++#include <string_view>
+ 
+ #include <glm/gtc/matrix_transform.hpp>
+ 
+@@ -84,6 +85,12 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     // WE starts the smoothed parallax position at the centre (GH 0x1401b6c60), g_ParallaxPosition at 0.5 0.5
+     this->m_parallaxPosition = { width / 2.0f, height / 2.0f };
+ 
++    // an HDR scene renders into half float targets (WPENGINE_HDR=0: as WE below Ultra post-processing, LDR)
++    const char* hdrSetting = std::getenv ("WPENGINE_HDR");
++    this->m_hdr = scene->camera.bloom.hdr->value->getBool ()
++	&& !(hdrSetting != nullptr && std::string_view (hdrSetting) == "0");
++    this->m_sceneFormat = this->m_hdr ? TextureFormat_RGBA16161616f : TextureFormat_ARGB8888;
++
+     // setup framebuffers here as they're required for the scene setup
+     this->setupFramebuffers ();
+ 
+@@ -118,19 +125,48 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	}
+     }
+ 
+-    // create extra framebuffers for the bloom effect
+-    this->_rt_4FrameBuffer = this->create (
+-	"_rt_4FrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth / 4, sceneHeight / 4 },
+-	{ sceneWidth / 4, sceneHeight / 4 }
+-    );
+-    this->_rt_8FrameBuffer = this->create (
+-	"_rt_8FrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth / 8, sceneHeight / 8 },
+-	{ sceneWidth / 8, sceneHeight / 8 }
+-    );
+-    this->_rt_Bloom = this->create (
+-	"_rt_Bloom", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth / 8, sceneHeight / 8 },
+-	{ sceneWidth / 8, sceneHeight / 8 }
+-    );
++    this->setupBloom (*scene, sceneWidth, sceneHeight);
++}
++
++void CScene::setupBloom (const Scene& scene, const uint32_t sceneWidth, const uint32_t sceneHeight) {
++    if (this->m_hdr) {
++	// the HDR chain's targets: one per level while the smaller side still halves to ≥ 1, at most 8, RGB161616f
++	// (GH 0x1401af5b0), named "_rt_" + (2 << level) + "FrameBuffer"
++	int available = 0;
++	for (int level = 0; level < 8; level++) {
++	    const uint32_t divisor = 2u << level;
++
++	    if (std::min (sceneWidth, sceneHeight) / divisor < 1) {
++		break;
++	    }
++
++	    this->m_hdrTargets.push_back (this->create (
++		"_rt_" + std::to_string (divisor) + "FrameBuffer", TextureFormat_RGB161616f, TextureFlags_ClampUVs, 1.0,
++		{ sceneWidth / divisor, sceneHeight / divisor }, { sceneWidth / divisor, sceneHeight / divisor }
++	    ));
++	    available++;
++	}
++
++	// the levels that run: bloomhdriterations, at most the targets there are, at least 1 (GH 0x1401b42b0)
++	this->m_hdrLevels = std::max (1, std::min (scene.camera.bloom.hdrIterations->value->getInt (), available));
++	this->m_hdrSize = { static_cast<float> (sceneWidth), static_cast<float> (sceneHeight) };
++    }
++
++    // the LDR chain's targets (WE makes them only below HDR, GH 0x1401af5b0)
++    if (!this->m_hdr) {
++	this->_rt_4FrameBuffer = this->create (
++	    "_rt_4FrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0,
++	    { sceneWidth / 4, sceneHeight / 4 }, { sceneWidth / 4, sceneHeight / 4 }
++	);
++	this->_rt_8FrameBuffer = this->create (
++	    "_rt_8FrameBuffer", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0,
++	    { sceneWidth / 8, sceneHeight / 8 }, { sceneWidth / 8, sceneHeight / 8 }
++	);
++	this->_rt_Bloom = this->create (
++	    "_rt_Bloom", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth / 8, sceneHeight / 8 },
++	    { sceneWidth / 8, sceneHeight / 8 }
++	);
++    }
+ 
+     //
+     // Had to get a little creative with the effects to achieve the same bloom effect without any custom code
+@@ -150,6 +186,20 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	{ "bloomthreshold", this->getScene ().camera.bloom.threshold->value->getFloat () },
+ 	{ "bloomtint", std::to_string (tint.x) + " " + std::to_string (tint.y) + " " + std::to_string (tint.z) },
+     };
++    // the HDR chain takes no pass constants: CScene feeds its uniforms (updateHDRBloom)
++    const JSON effect = this->m_hdr
++	? JSON { { "file", "effects/wpenginelinux/bloomhdr" + std::to_string (this->m_hdrLevels) + ".json" },
++		 { "id", 15242000 },
++		 { "name", "" } }
++	: JSON { { "file", "effects/wpenginelinux/bloomeffect.json" },
++		 { "id", 15242000 },
++		 { "name", "" },
++		 { "passes",
++		   JSON::array (
++		       { { { "constantshadervalues", constants } },
++			 { { "constantshadervalues", constants } },
++			 { { "constantshadervalues", constants } } }
++		   ) } };
+     const JSON bloom
+ 	= { { "image", "models/wpenginelinux.json" },
+ 	    { "name", "bloomimagewpenginelinux" },
+@@ -161,27 +211,16 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 		  + std::to_string (bloomOrigin.z) },
+ 	    { "size", std::to_string (bloomSize.x) + " " + std::to_string (bloomSize.y) },
+ 	    { "id", -1 },
+-	    { "effects",
+-	      JSON::array (
+-		  { { { "file", "effects/wpenginelinux/bloomeffect.json" },
+-		      { "id", 15242000 },
+-		      { "name", "" },
+-		      { "passes",
+-			JSON::array (
+-			    { { { "constantshadervalues", constants } },
+-			      { { "constantshadervalues", constants } },
+-			      { { "constantshadervalues", constants } } }
+-			) } } }
+-	      ) } };
++	    { "effects", JSON::array ({ effect }) } };
+ 
+     // the image for the bloom passes, built when bloom is on or a user property can turn it on: `bloom` is read every
+     // frame (renderFrame). A scene whose bloom is a plain false never builds it (nor needs WE's bloom materials)
+-    const auto& bloomEnabled = scene->camera.bloom.enabled;
+-    const auto& bloomCamera = scene->camera.bloom;
++    const auto& bloomEnabled = scene.camera.bloom.enabled;
++    const auto& bloomCamera = scene.camera.bloom;
+     const bool bloomScripted = bloomEnabled->value->getScriptSource ().has_value ();
+     if (bloomEnabled->value->getBool () || bloomEnabled->property != nullptr || bloomScripted) {
+ 	try {
+-	    this->m_bloomObjectData = ObjectParser::parse (bloom, scene->project);
++	    this->m_bloomObjectData = ObjectParser::parse (bloom, scene.project);
+ 
+ 	    if (this->m_bloomObjectData->is<Image> ()) {
+ 		for (const auto& effect : this->m_bloomObjectData->as<Image> ()->effects) {
+@@ -202,6 +241,10 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	    }
+ 
+ 	    this->m_bloomObject = this->createObject (*this->m_bloomObjectData);
++
++	    if (this->m_hdr && this->m_bloomObject != nullptr && this->m_bloomObject->is<Objects::CImage> ()) {
++		this->connectHDRBloom (*this->m_bloomObject->as<Objects::CImage> ());
++	    }
+ 	} catch (const std::exception& e) {
+ 	    sLog.error ("Cannot build the bloom passes, the scene renders without bloom: ", e.what ());
+ 	    this->m_bloomObject = nullptr;
+@@ -227,6 +270,64 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     }
+ }
+ 
++void CScene::connectHDRBloom (Objects::CImage& image) {
++    // the image's passes: its base copy, the downsamples (levels 0 … n − 1), the upsamples (n − 1 … 1), the combine
++    const auto& passes = image.getPasses ();
++    const int n = this->m_hdrLevels;
++
++    if (passes.size () != static_cast<size_t> (2 * n + 1)) {
++	sLog.error ("The HDR bloom image has ", passes.size (), " passes, not ", 2 * n + 1, ": its inputs aren't fed");
++	return;
++    }
++
++    // g_RenderVar0 = the four taps' offsets (x, y) and (z, w) about the pixel, (1, 1, −1, −1) · 2^level / the scene
++    // size: one source texel when going down, half of one going up (GH 0x1401b3b10)
++    const auto taps = [this] (float scale) {
++	auto offsets = std::make_unique<glm::vec4> (
++	    scale / this->m_hdrSize.x, scale / this->m_hdrSize.y, -scale / this->m_hdrSize.x, -scale / this->m_hdrSize.y
++	);
++	const glm::vec4* at = offsets.get ();
++	this->m_hdrRenderVars.push_back (std::move (offsets));
++	return at;
++    };
++
++    for (int level = 0; level < n; level++) {
++	auto* pass = passes[1 + level];
++	pass->addUniform ("g_RenderVar0", taps (static_cast<float> (1 << level)));
++
++	if (level == 0) {
++	    pass->addUniform ("g_BloomStrength", &this->m_hdrStrength);
++	    pass->addUniform ("g_BloomBlendParams", &this->m_hdrBlend);
++	    pass->addUniform ("g_BloomTint", &this->m_hdrTint);
++	}
++    }
++
++    for (int up = n - 1; up > 0; up--) {
++	auto* pass = passes[1 + n + (n - 1 - up)];
++	pass->addUniform ("g_RenderVar0", taps (static_cast<float> (2 << (up - 1))));
++	pass->addUniform ("g_BloomScatter", &this->m_hdrScatter);
++    }
++
++    this->updateHDRBloom ();
++}
++
++void CScene::updateHDRBloom () {
++    // GH 0x1401b42b0 (re-run when general's values change): the strength over (scatter^(max (n, 2) − 2) + 1), the
++    // soft knee from the threshold and feather, the tint, the upsamples' scatter
++    const auto& bloom = this->getScene ().camera.bloom;
++    const float scatter = bloom.hdrScatter->value->getFloat ();
++    const float threshold = bloom.hdrThreshold->value->getFloat ();
++    const float knee = threshold * bloom.hdrFeather->value->getFloat ();
++
++    this->m_hdrStrength = bloom.hdrStrength->value->getFloat ()
++	/ (std::pow (scatter, static_cast<float> (std::max (this->m_hdrLevels, 2) - 2)) + 1.0f);
++    this->m_hdrBlend = { threshold, threshold - knee, knee + knee, 0.25f / (knee + 0.00001f) };
++    this->m_hdrTint = bloom.tint->value->getVec3 ();
++    this->m_hdrScatter = scatter;
++}
++
++bool CScene::rendersHDR () const { return this->m_hdr; }
++
+ CScene::~CScene () {
+     // bloom object is in the objects list, so no need to explicitly delete it
+     this->m_bloomObject = nullptr;
+@@ -466,6 +567,9 @@ void CScene::renderFrame () {
+ 	if (cur == this->m_bloomObject && !this->getScene ().camera.bloom.enabled->value->getBool ()) {
+ 	    continue;
+ 	}
++	if (cur == this->m_bloomObject && this->m_hdr) {
++	    this->updateHDRBloom ();
++	}
+ 	// a compose layer draws its subtree into itself (renderComposed)
+ 	if (this->drawingOwnerOf (cur->getObject ()).has_value ()) {
+ 	    continue;
+@@ -679,7 +783,7 @@ std::shared_ptr<const CFBO> CScene::getComposeTarget (int id) {
+     if (target == nullptr) {
+ 	const auto& scene = *this->getFBO ();
+ 	target = std::make_shared<CFBO> (
+-	    "_rt_composeLayer_" + std::to_string (id), TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0f,
++	    "_rt_composeLayer_" + std::to_string (id), scene.getFormat (), TextureFlags_ClampUVs, 1.0f,
+ 	    scene.getRealWidth (), scene.getRealHeight (), scene.getTextureWidth (0), scene.getTextureHeight (0)
+ 	);
+     }
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index f860f28..bdf3f70 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -19,6 +19,7 @@ class CObject;
+ 
+ namespace WallpaperEngine::Render::Objects {
+ class CSound;
++class CImage;
+ }
+ 
+ namespace WallpaperEngine::Render::Wallpapers {
+@@ -99,6 +100,12 @@ public:
+     bool sortLayer (CObject* layer, int index);
+     /** The scene's scripts call `getEffect`: every effect is built, a script may show it (SceneScript IEffect.visible) */
+     [[nodiscard]] bool scriptsReachEffects () const;
++    /**
++     * WE renders this scene HDR: `general.hdr`, with WE's post-processing at Ultra (renderer flag 0x2000, set from the
++     * "postprocessing" setting "ultra", GH 0x14013f860). LWE has no quality setting: on unless WPENGINE_HDR=0.
++     * Its targets are half float, its bloom is the HDR chain
++     */
++    [[nodiscard]] bool rendersHDR () const;
+ 
+ protected:
+     void renderFrame () override;
+@@ -116,6 +123,12 @@ private:
+     Render::CObject* createObject (const Object& object);
+     Render::CObject* dispatchObjectType (const Object& object);
+     void addObjectToRenderOrder (const Object& object);
++    /** Builds the bloom image: WE's LDR chain, or the HDR chain of `m_hdrLevels` levels when rendersHDR */
++    void setupBloom (const Scene& scene, uint32_t sceneWidth, uint32_t sceneHeight);
++    /** Points the HDR bloom image's passes at their inputs (tap offsets, strength, knee, tint, scatter) */
++    void connectHDRBloom (Objects::CImage& image);
++    /** The HDR chain's live inputs (GH 0x1401b42b0), from general's bloomhdr* values */
++    void updateHDRBloom ();
+ 
+     std::unique_ptr<Scripting::ScriptEngine> m_scriptEngine;
+     std::unique_ptr<Camera> m_camera;
+@@ -144,5 +157,17 @@ private:
+     std::shared_ptr<const CFBO> _rt_8FrameBuffer = nullptr;
+     std::shared_ptr<const CFBO> _rt_Bloom = nullptr;
+     std::shared_ptr<const CFBO> _rt_shadowAtlas = nullptr;
++    bool m_hdr = false;
++    /** The HDR chain's targets, _rt_2FrameBuffer … (scene size / (2 << level)), and how many levels run */
++    std::vector<std::shared_ptr<const CFBO>> m_hdrTargets = {};
++    int m_hdrLevels = 0;
++    /** The scene size the tap offsets are relative to (WE's renderer +0x84/+0x88) */
++    glm::vec2 m_hdrSize = {};
++    /** Per HDR pass (downsamples, upsamples), its g_RenderVar0: the four taps' offsets */
++    std::vector<std::unique_ptr<glm::vec4>> m_hdrRenderVars = {};
++    float m_hdrStrength = 0.0f;
++    glm::vec4 m_hdrBlend = {};
++    glm::vec3 m_hdrTint = {};
++    float m_hdrScatter = 0.0f;
+ };
+ } // namespace WallpaperEngine::Render::Wallpaper

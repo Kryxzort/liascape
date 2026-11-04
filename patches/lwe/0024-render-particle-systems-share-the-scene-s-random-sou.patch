@@ -1,7 +1,7 @@
 From 8c2253513636fb4a6d3aa58757db3470c356ddf5 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 00:57:35 +0530
-Subject: [PATCH 24/54] render: particle systems share the scene's random
+Subject: [PATCH 24/56] render: particle systems share the scene's random
  source
 
 Every CParticle seeded its own std::mt19937 from std::random_device, and

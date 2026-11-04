@@ -132,7 +132,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B11 Particles, extended** | P2, P10, P15, P22, P24–P30, P34, P35, P37 | 29 | L | Child systems (static / eventfollow / eventspawn / eventdeath). The missing initializers and operators. Control-point overrides and transforms. Rope/trail combos. Needs the operator interpreter (GH 0x140265800) read from asm first (P31–P33). | Smoke the 29 child-system scenes before/after: sub-effects present. WE captures for 2 of them. |
 | **B12 Puppet warp** | G06, G07, G08, G09 | 14 | L | Start from PR #625's MDL parsing (unmerged, so cherry-pick into our own commit). Add MDLV 0016/0017/0019. GPU skinning. Animation-layer mixing. Bone attachments. | Smoke the 14 puppet scenes at 2 timestamps: the mesh deforms. WE capture of 1 scene. |
 | **B13 HDR bloom and FBO formats** | E35, E23, E37 | 5 | M | WE's HDR chain (`hdr_downsample`, `combine_hdr_upsample`) with RGBA16F targets when `general.hdr`. | Smoke 2511663284 vs a WE capture. |
-| **B14 3D scenes** | G24–G29, G20–G22, E13, E14, E43 | 3 (+4 with `perspective` layers) | L | A perspective camera with optional `orthogonalprojection`. 3D image layers and depth/transparent sort (3276522107 first, M). Then the MDLV static-mesh loader + `generic4`. Then lights, shadow atlas, fog. | Corpus: 3276522107 → ok, then 3477054430 and 3509243656. WE captures. |
+| **B14 3D scenes** — **done 2026-11-04** except shadows, cookies, volumetrics, shapes, skinned models (patch 0056; see "B14 result" in § 5) | G24–G29, G20–G22, E13, E14, E43 | 3 (+4 with `perspective` layers) | L | A perspective camera with optional `orthogonalprojection`. 3D image layers and depth/transparent sort (3276522107 first, M). Then the MDLV static-mesh loader + `generic4`. Then lights, shadow atlas, fog. | Corpus: 3276522107 → ok, then 3477054430 and 3509243656. WE captures. |
 
 Rows not in a batch are parity, editor-only or not used by the library. Their rows say so, for example T6, T7, A6,
 U5–U7 and E10.
@@ -1712,3 +1712,115 @@ Left (in TODO):
   13 files), IK and physics bones (MDLS v2+, bone flag 2), root motion, animation events, the scripted layer API
   (`getAnimationLayer`, `playSingleAnimation`, S26), `autosort`/`index` layer order.
 - Read the attachment builder (vtable +0x78 of the puppet image) and the additive scale.
+
+### B14 result (fork patch 0056, pin `157c111`, 2026-11-04)
+
+Done: G24 (3D scenes load), G22 (3-axis angles, origin z, full parent matrices for world-placed layers), G25 (static
+MDL meshes with `generic4`), G26 point and spot lights (E13), G28 fog (E14), the `transparentsorting` part of G29, and
+the 3D camera (camera objects, shake). Decoded from wallpaper64.exe 2.8.485 with the headless `all.c`; every function
+below decompiled there, so no REA session was needed. The three corpus scenes that failed to load now load and draw.
+
+**Decoded (Observed):**
+
+- **Perspective or orthographic.** The scene loader GH 0x1401b6c60 sets the ortho flag (scene +0xe0 bit 0x8) only
+  when `general.orthogonalprojection` is an object with a width and height (or `auto`). An absent or null member
+  means a 3D scene. LWE required it and threw "Projection must have a width".
+- **Projection** (GH 0x1401b3f70). Without the ortho flag it calls the renderer's perspective (vtable +0x10) with:
+  - the effective fov (scene +0x148) × π/180;
+  - the target's aspect, width / height;
+  - general nearz (+0x14c) and farz (+0x150).
+
+  The effective fov is general.fov (+0x140), or perspectiveoverridefov (+0x144) in an ortho scene. The active camera
+  object's fov replaces it, and it is clamped to 0.1–179.9 (camera update GH 0x1401b8af0). The camera then reads back
+  2·atan (1 / m[1][1]), so the fov is the vertical one.
+- **View** (GH 0x1401b8af0, lookAt GH 0x1401cb340). The lookAt is right-handed and the same as glm::lookAt
+  (s = normalize (f × up), the third column −f).
+  - The active camera object is the last one in the list that is effectively visible.
+  - From its world matrix: eye = the translation, centre = eye − the z axis (row 2), up = the y axis (row 1).
+  - With no camera object it is camera.eye/center/up.
+  - All three corpus scenes have a camera object. In 3276522107 it puts the eye inside the train. The scene camera
+    looked at the train from 2 units behind it, which made the train look small.
+- **Shake in 3D** (GH 0x1401c7680). The offset is (cos t, sin 1.333 t, sin t) with t = speed² · time. Its length is
+  raised to roughness³ (unless that is ≤ 0.001 or 1), then × amplitude · 0.1. It is added to both the eye and the
+  centre. In 2D, z is 0 and the amplitude is × height · 0.1 (B5).
+- **Object matrix** (GH 0x1401b5170): world = parent world · local. The local matrix is the rotation rows scaled per
+  axis, then the origin. The rows come from the angles (GH 0x14020af40), (cy·cz, cy·sz, −sy), …, which in column form
+  is R = Rz · Ry · Rx. The multiply GH 0x14005ff00 is local · parent in row vectors.
+- **Lights.**
+  - Properties (GH 0x140283df0): color +0x2cc, intensity +0x2e4, radius +0x2e8, exponent +0x2ec, innercone +0x2f0,
+    outercone +0x2f4.
+  - Packing (GH 0x1401bf270), per visible point or spot light (type byte +0x2c0: 0 point, 1 spot):
+    - `g_LCluster_Origin` = (world translation, radius);
+    - `g_LCluster_Color` = (colour · intensity, exponent);
+    - for a spot, `g_LCluster_Direction` = (its normalised world x axis, 1 / (cos inner − cos outer)), the cones in
+      degrees;
+    - `g_LCluster_Extra.x` = −cos outer / (cos inner − cos outer).
+  - The generated `PerformLighting_V1` (GH 0x140197e20) loops over the point and spot lights. Per light: spotCookie =
+    smoothstep (0, 1, −dot (normalize (delta), dir) · dir.w + extra.x), then `ComputePBRLightShadow` with radius =
+    origin.w and exponent = color.w. LWE's stub returned 0.
+- **Fog.** The general fields fogdistancecolor +0x344, fogheightcolor +0x350, fogdistancestart/end/startdensity/
+  enddensity +0x35c…+0x368 and fogheight* +0x36c…+0x378 are registered in GH 0x1401c7880. GH 0x1401ba300 builds
+  `g_FogDistanceParams` = (start, end − start, startdensity, enddensity − startdensity), and the height params the
+  same way.
+
+**Ours (not decoded):**
+
+- A 3D scene renders at 1920x1080. WE uses its output's size; LWE builds the scene before it knows the output.
+- `transparentsorting`: every run of world-placed objects (models, particles, layers that aren't full screen) is drawn
+  back to front by the distance of its origin from the eye. Full-screen layers and the bloom keep their place in the
+  order. WE's sort key was not read.
+- A model material without `depthtest`/`depthwrite` gets both enabled. The scene's target gets a depth buffer.
+  Culling is off for models, because the target's y flip reverses the winding.
+- A point light's direction terms are (0, 1), so its spotCookie is 1. At most 8 lights, without clusters.
+- A world-placed layer draws its quad in its own pixels: `alignment` anchors the quad at the origin, as in 2D.
+  Particles use the 3D camera through LWE's scene space (x − w/2, h/2 − y).
+- A texture with flag bits LWE doesn't know now loads. 3509243656's PBR masks carry 0x800000 and were rejected.
+
+**What was wrong in LWE:**
+
+- The parser required `orthogonalprojection`.
+- `Camera` had only the ortho projection, translated by the eye.
+- Layers used only `angles.z` and drew at z 0.
+- `model` objects fell through to placeholders, and lights were logged as unsupported.
+- `PerformLighting_V1` returned 0, and nothing fed the fog uniforms.
+- `parseTextureFlags` threw for any value ≥ `TextureFlags_All`.
+
+**Fork tests** (`host_api_test`): 66/66 on `157c111` (B12 + B13 + this patch), 4 new, all failing on 36ad6a0
+("load/build failed").
+
+| Test | What it checks |
+|---|---|
+| `perspective_scene_loads` | a null `orthogonalprojection` scene loads; a 2-unit layer 10 units away is 232 px (2 / (20 · tan 25°) · 1080), centred; a layer 3 units up is on the same side as a 2D scene's high y |
+| `layer_tilts_and_moves_in_depth` | 60° about y is about half as wide (114 vs 230 px); at z 5 it is twice the size; a 2 x 1 child of a z-turned parent at z 5 stands upright, 230 x 462 |
+| `model_draws_and_lights` | an MDLV0016 quad with generic4: unlit it is white; lit with no light it is black; a point light, and a spot whose x axis points at it, light it; a spot pointing away doesn't |
+| `fog_and_depth` | fog from 0 to 5 at density 0 → 1 turns a model 10 units away red; a nearer model drawn first stays in front of a farther one drawn after it (depth test) |
+
+**Smoke, all 96 scenes**, paced (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 36ad6a0 then this patch on it:
+
+- **93 → 96 ok. No scene newly blank or failed**; lit pixels match within 1 % on every scene that loaded before.
+- The pixel differences above 3 % are videos and clock/animated scenes (2883756643, 2886313155, 2890767643,
+  3028473503, 3326873240, 3556794116, 3046119914, 3419466417), as in B11's runs: timing, not this patch (nothing a
+  2D scene runs changed, except texture flags none of them carry and a lighting loop with no lights).
+- Mean frame time of the 93: 3.61 → 3.79 ms (the second run overlapped builds). The 3D scenes: 7.6, 1.0 and 11 ms.
+- The 3 scenes also load and draw the same on `157c111` (B13's HDR on top; 3509243656 is an HDR scene).
+
+- 3276522107 (metro car): matches its preview. The car's interior fills the view, the passing buildings show through
+  the windows, and the girl sits on the right.
+- 3477054430 (rooftop kitty): the lit town meshes, the moon, the star field and the kitty's head and body are drawn,
+  the head lit by its spot lights. The preview frame shows a different camera angle (a scripted turn and the shake).
+- 3509243656 (space HUD): its texts fade in from 3.5 s (an alpha script), so a 3 s frame is nearly black. At 10 s
+  the clock, the date, the log texts, the skybox's Milky Way and an unlit planet sphere are drawn. The sphere is black:
+  the scene has no lights and its material's PBR mask combos aren't set.
+
+Player tests (DEBUG, pin `157c111`): 737 passed, 0 failed, 3 ignored.
+
+Left (in TODO):
+- Shadows (`_rt_shadowAtlas`, PerformShadowMapping), light cookies, volumetrics, tube and directional lights.
+- Shape objects (G27, the volume-light quad of 3319542538).
+- Skinned and morphed MDL models; the PBR-mask component combos (METALLIC_MAP … EMISSIVE_MAP) from a mask texture;
+  REFLECTION.
+- Fog on image and particle shaders (genericimage4 and genericparticle have FOG_DIST paths).
+- The 3D camera's parallax, zoom and camera paths. `perspectiveoverridefov` (G20) for 2D scenes. The image
+  `perspective` flag (G21, E43). `depthtest` on layers (E43). `camerafade` (G23). `sortorder` / `customsortorder`.
+- Hit-testing world-placed layers (cursor events in 3D). WE's transparent sort key. The output-sized render target.
+- WE captures of the three scenes.

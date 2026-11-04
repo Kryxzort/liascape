@@ -3567,6 +3567,264 @@ static bool text_wraps_and_limits () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// B14: 3D scenes (docs/player/spikes/we-lwe-gap-audit.md G19–G29, E13, E14). wallpaper64.exe 2.8.485: the scene loader
+// GH 0x1401b6c60 (no orthogonalprojection = perspective), the perspective GH 0x1401b3f70, the object matrix
+// GH 0x1401b5170 / 0x14020af40, the lights GH 0x1401bf270, the fog GH 0x1401ba300. A 3D scene renders 1920x1080
+
+static constexpr int kW3 = 1920, kH3 = 1080;
+
+// a 3D scene: no orthogonalprojection, the eye on +z looking at the origin, fov 50 (vertical), and `general` more
+static std::string world_scene (const std::string& general, const std::string& objects, const std::string& eye = "0 0 10") {
+    char tmpl[] = "/tmp/lwe-world-scene.XXXXXX";
+    const char* dir = mkdtemp (tmpl);
+    if (!dir) {
+        return {};
+    }
+    const std::string d = dir;
+    write_file (d + "/project.json", "{\"title\":\"world\",\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":{}}}\n");
+    write_file (d + "/scene.json", "{\"camera\":{\"center\":\"0 0 0\",\"eye\":\"" + eye + "\",\"up\":\"0 1 0\"},"
+                                   "\"general\":{\"clearcolor\":\"0 0 0.5\",\"orthogonalprojection\":null,\"fov\":50,"
+                                   "\"nearz\":0.1,\"farz\":1000" + general + "},\"objects\":[" + objects + "]}\n");
+    return d;
+}
+
+static std::array<unsigned char, 4> pixel_xy (const ScriptRig& rig, int x, int y) {
+    std::array<unsigned char, 4> px {};
+    read_pixel (rig.fbo, x, y, px.data ());
+    return px;
+}
+
+// the columns (x0..x1) of row y where `hit` holds, -1 -1 when none
+static std::pair<int, int> span_x (const ScriptRig& rig, int y, bool (*hit) (const std::array<unsigned char, 4>&), int step = 2) {
+    int first = -1, last = -1;
+    for (int x = 0; x < kW3; x += step) {
+        if (hit (pixel_xy (rig, x, y))) {
+            first = first < 0 ? x : first;
+            last = x;
+        }
+    }
+    return { first, last };
+}
+static std::pair<int, int> span_y (const ScriptRig& rig, int x, bool (*hit) (const std::array<unsigned char, 4>&), int step = 2) {
+    int first = -1, last = -1;
+    for (int y = 0; y < kH3; y += step) {
+        if (hit (pixel_xy (rig, x, y))) {
+            first = first < 0 ? y : first;
+            last = y;
+        }
+    }
+    return { first, last };
+}
+static bool is_red (const std::array<unsigned char, 4>& px) { return px[0] > 200 && px[1] < 60 && px[2] < 60; }
+static bool is_green (const std::array<unsigned char, 4>& px) { return px[1] > 200 && px[0] < 60 && px[2] < 60; }
+
+// a scene without orthogonalprojection loads and draws its layers through the perspective camera: a 2 x 2 unit layer
+// 10 units away fills 2 / (2 · 10 · tan 25°) of the height (G24; unpatched: "Projection must have a width", no load)
+static bool perspective_scene_loads () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = world_scene ("",
+        "{\"id\":1,\"name\":\"r\",\"image\":\"models/b14red.json\",\"size\":\"200 200\",\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\"},"
+        "{\"id\":2,\"name\":\"g\",\"image\":\"models/b14green.json\",\"size\":\"50 50\",\"origin\":\"0 3 0\",\"scale\":\"0.01 0.01 0.01\"}");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = b7_layer (dir, "b14red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const auto green = b7_layer (dir, "b14green", "gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);");
+    rig.extra.insert (rig.extra.end (), green.begin (), green.end ());
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto across = span_x (rig, kH3 / 2, is_red), down = span_y (rig, kW3 / 2, is_red);
+    const auto up = span_y (rig, kW3 / 2, is_green);
+    // 2 / 9.326 · 1080 = 231.6 px, square
+    const double want = 2.0 / (2.0 * 10.0 * std::tan (25.0 * M_PI / 180.0)) * kH3;
+    printf ("    red layer %d..%d x %d..%d (want %.0f px square at the centre); the layer 3 units up at rows %d..%d\n",
+            across.first, across.second, down.first, down.second, want, up.first, up.second);
+    CHECK (across.first >= 0 && std::abs ((across.second - across.first) - want) <= 8, "the red layer isn't %.0f px wide", want);
+    CHECK (down.first >= 0 && std::abs ((down.second - down.first) - want) <= 8, "the red layer isn't %.0f px tall", want);
+    CHECK (std::abs ((across.first + across.second) / 2 - kW3 / 2) <= 4 && std::abs ((down.first + down.second) / 2 - kH3 / 2) <= 4,
+           "the red layer isn't centred");
+    // world y up is where a 2D scene's high y is (the control: a 2D scene's layer at y 28 of 32)
+    const std::string flat = camera_scene ("\"zoom\":1", "{\"id\":1,\"name\":\"g\",\"image\":\"models/b14green.json\",\"size\":\"4 4\",\"origin\":\"32 28 0\"}");
+    ScriptRig rig2;
+    rig2.extra = b7_layer (flat, "b14green", "gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);");
+    CHECK (rig2.open (flat), "load/build of %s failed", flat.c_str ());
+    rig2.step ();
+    int highRow = -1;
+    for (int y = 0; y < 32; y++) {
+        std::array<unsigned char, 4> px {};
+        read_pixel (rig2.fbo, 32, y, px.data ());
+        if (is_green (px)) {
+            highRow = y;
+        }
+    }
+    printf ("    2D control: y 28 of 32 is read at row %d\n", highRow);
+    CHECK (highRow >= 0, "the 2D control layer wasn't drawn");
+    CHECK (up.first >= 0 && (up.second < down.first) == (highRow < 16), "the layer 3 units up isn't on the 2D scene's top side (rows %d..%d)",
+           up.first, up.second);
+    return true;
+}
+
+// a 3D layer turns about x/y and sits at its origin's z: turned 60° about y it is cos 60° as wide; at z 5 (halfway to
+// the eye) twice as big; and a child takes its parent's whole matrix (G22; unpatched: no load — and the 2D path
+// draws z 0, angles z only)
+static bool layer_tilts_and_moves_in_depth () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto width = [] (const std::string& object, int& w, int& h) {
+        const std::string dir = world_scene ("", object);
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = b7_layer (dir, "b14red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        const auto x = span_x (rig, kH3 / 2, is_red), y = span_y (rig, kW3 / 2, is_red);
+        w = x.first < 0 ? 0 : x.second - x.first;
+        h = y.first < 0 ? 0 : y.second - y.first;
+        return true;
+    };
+    const std::string base = "{\"id\":1,\"name\":\"r\",\"image\":\"models/b14red.json\",\"size\":\"200 200\",\"scale\":\"0.01 0.01 0.01\"";
+    int flatW = 0, flatH = 0, turnedW = 0, turnedH = 0, nearW = 0, nearH = 0, childW = 0, childH = 0;
+    CHECK (width (base + ",\"origin\":\"0 0 0\"}", flatW, flatH), "load failed (flat)");
+    CHECK (width (base + ",\"origin\":\"0 0 0\",\"angles\":\"0 1.0471976 0\"}", turnedW, turnedH), "load failed (turned)");
+    CHECK (width (base + ",\"origin\":\"0 0 5\"}", nearW, nearH), "load failed (near)");
+    // the parent at z 5 turned 90° about z: the child (2 x 1 units) stands upright
+    CHECK (width ("{\"id\":9,\"name\":\"p\",\"origin\":\"0 0 5\",\"angles\":\"0 0 1.5707964\"}," + base
+                      + ",\"size\":\"200 100\",\"origin\":\"0 0 0\",\"parent\":9}",
+                  childW, childH),
+           "load failed (child)");
+    printf ("    flat %d x %d, turned 60° about y %d x %d, at z 5 %d x %d, 2 x 1 child of a z-turned parent at z 5 %d x %d\n", flatW,
+            flatH, turnedW, turnedH, nearW, nearH, childW, childH);
+    CHECK (flatW > 200 && std::abs (flatW - flatH) <= 6, "the flat layer isn't square (%d x %d)", flatW, flatH);
+    CHECK (turnedW > flatW * 0.4 && turnedW < flatW * 0.62, "turned 60° about y isn't about half as wide (%d)", turnedW);
+    CHECK (std::abs (nearW - 2 * flatW) <= 12, "at z 5 it isn't twice as wide (%d)", nearW);
+    CHECK (childH > 1.8 * childW && std::abs (childH - nearW) <= 12, "the child didn't take its parent's turn and z (%d x %d)", childW,
+           childH);
+    return true;
+}
+
+// a minimal MDLV0016 file: one mesh, format 0xf (position, normal, tangent, texcoord), a 4 x 4 quad at z 0 facing +z
+static std::string b14_mdl (const std::string& material) {
+    std::string out;
+    auto u32 = [&out] (uint32_t v) { out.append (reinterpret_cast<const char*> (&v), 4); };
+    auto f32 = [&out] (float v) { out.append (reinterpret_cast<const char*> (&v), 4); };
+    out += std::string ("MDLV0016") + '\0';
+    u32 (0xf);
+    u32 (1);
+    u32 (1);
+    out += material + '\0';
+    u32 (0);   // flags: 16-bit indices
+    u32 (0xf); // the mesh's format
+    const float corners[4][2] = { { -2, -2 }, { 2, -2 }, { 2, 2 }, { -2, 2 } };
+    u32 (4 * 48);
+    for (const auto& c : corners) {
+        f32 (c[0]); f32 (c[1]); f32 (0.0f);              // position
+        f32 (0.0f); f32 (0.0f); f32 (1.0f);              // normal
+        f32 (1.0f); f32 (0.0f); f32 (0.0f); f32 (1.0f);  // tangent
+        f32 ((c[0] + 2) / 4); f32 ((2 - c[1]) / 4);      // texcoord
+    }
+    const uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
+    u32 (sizeof (indices));
+    out.append (reinterpret_cast<const char*> (indices), sizeof (indices));
+    return out;
+}
+
+// the model and its generic4 material (util/white) with these combos
+static std::vector<std::string> b14_model (const std::string& dir, const std::string& combos) {
+    mkdir ((dir + "/models").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/models/b14quad.mdl", b14_mdl ("materials/b14quad.json"));
+    write_file (dir + "/materials/b14quad.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                 "\"combos\":{" + combos + "}}]}\n");
+    return { "models/b14quad.mdl", "materials/b14quad.json" };
+}
+
+// the centre pixel of a scene with the quad model
+static bool model_centre (const std::string& general, const std::string& combos, const std::string& more, std::array<unsigned char, 4>& px) {
+    const std::string dir = world_scene (general, "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\"}" + more);
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = b14_model (dir, combos);
+    if (!rig.open (dir)) {
+        return false;
+    }
+    rig.step ();
+    px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+    return true;
+}
+
+// a model object draws its MDL mesh with its material (G25; unpatched: no load, and a model was a placeholder):
+// unlit it is the albedo (generic4 without LIGHTING), lit by a point light, and by a spot only when its x axis points
+// at it (GH 0x1401bf270; unpatched PerformLighting_V1 returned 0)
+static bool model_draws_and_lights () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<unsigned char, 4> unlit {}, dark {}, point {}, spotAt {}, spotAway {};
+    CHECK (model_centre ("", "\"LIGHTING\":0,\"FOG\":0", "", unlit), "load failed (unlit)");
+    const std::string black = ",\"ambientcolor\":\"0 0 0\",\"skylightcolor\":\"0 0 0\"";
+    CHECK (model_centre (black, "\"LIGHTING\":1,\"FOG\":0", "", dark), "load failed (no light)");
+    const std::string light = ",{\"id\":2,\"name\":\"l\",\"light\":\"lpoint\",\"origin\":\"0 0 3\",\"color\":\"1.0 1.0 1.0\",\"intensity\":4,"
+                              "\"radius\":20,\"exponent\":1";
+    CHECK (model_centre (black, "\"LIGHTING\":1,\"FOG\":0", light + "}", point), "load failed (point)");
+    const std::string spot = ",{\"id\":2,\"name\":\"l\",\"light\":\"lspot\",\"origin\":\"0 0 3\",\"color\":\"1.0 1.0 1.0\",\"intensity\":4,"
+                             "\"radius\":20,\"exponent\":1,\"innercone\":20,\"outercone\":30";
+    CHECK (model_centre (black, "\"LIGHTING\":1,\"FOG\":0", spot + ",\"angles\":\"0 1.5707964 0\"}", spotAt), "load failed (spot at)");
+    CHECK (model_centre (black, "\"LIGHTING\":1,\"FOG\":0", spot + ",\"angles\":\"0 -1.5707964 0\"}", spotAway), "load failed (spot away)");
+    printf ("    unlit %d %d %d (want white), no light %d %d %d, point %d %d %d, spot at it %d %d %d, spot away %d %d %d\n", unlit[0],
+            unlit[1], unlit[2], dark[0], dark[1], dark[2], point[0], point[1], point[2], spotAt[0], spotAt[1], spotAt[2], spotAway[0],
+            spotAway[1], spotAway[2]);
+    CHECK (unlit[0] > 240 && unlit[1] > 240 && unlit[2] > 240, "the unlit model isn't white");
+    CHECK (dark[0] < 8 && dark[1] < 8 && dark[2] < 8, "the model without a light isn't black");
+    CHECK (point[0] > 40 && point[0] == point[1], "the point light doesn't light the model");
+    CHECK (spotAt[0] > 40, "the spot pointing at the model doesn't light it");
+    CHECK (spotAway[0] < 8, "the spot pointing away lights the model");
+    return true;
+}
+
+// distance fog: the model 10 units away, the fog from 0 to 5 at density 0 → 1 is all fog colour; and the depth test
+// keeps a nearer model drawn first in front of a farther one drawn after it (G28, E14; unpatched: no load, no fog
+// uniforms, no depth buffer)
+static bool fog_and_depth () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<unsigned char, 4> clear {}, fogged {};
+    CHECK (model_centre ("", "\"LIGHTING\":0", "", clear), "load failed (no fog)");
+    CHECK (model_centre (",\"fogdistance\":true,\"fogdistancecolor\":\"1 0 0\",\"fogdistancestart\":0,\"fogdistanceend\":5,"
+                         "\"fogdistancestartdensity\":0,\"fogdistanceenddensity\":1",
+                         "\"LIGHTING\":0", "", fogged),
+           "load failed (fog)");
+    printf ("    no fog %d %d %d (want white), fog %d %d %d (want red)\n", clear[0], clear[1], clear[2], fogged[0], fogged[1], fogged[2]);
+    CHECK (clear[0] > 240 && clear[1] > 240, "the model isn't white without fog");
+    CHECK (fogged[0] > 240 && fogged[1] < 16 && fogged[2] < 16, "the fog didn't turn the far model red");
+
+    // the white quad, then a red one 2 units behind it drawn after: the depth test keeps the white one in front
+    const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\"},"
+                                             "{\"id\":2,\"name\":\"b\",\"model\":\"models/b14back.mdl\",\"origin\":\"0 0 -2\"}");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = b14_model (dir, "\"LIGHTING\":0,\"FOG\":0");
+    write_file (dir + "/models/b14back.mdl", b14_mdl ("materials/b14back.json"));
+    write_file (dir + "/materials/b14back.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                 "\"combos\":{\"LIGHTING\":0,\"FOG\":0},\"constantshadervalues\":{\"color\":\"1.0 0.0 0.0\"}}]}\n");
+    rig.extra.insert (rig.extra.end (), { "models/b14back.mdl", "materials/b14back.json" });
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
+    printf ("    near white quad, far red quad drawn after: centre %d %d %d (want white)\n", centre[0], centre[1], centre[2]);
+    CHECK (centre[0] > 240 && centre[1] > 240 && centre[2] > 240, "the far quad drawn after covered the near one (no depth test)");
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -3632,6 +3890,10 @@ int main (int argc, char** argv) {
     run ("text_takes_effects_and_colour", text_takes_effects_and_colour);
     run ("colour_property_whole_numbers", colour_property_whole_numbers);
     run ("text_wraps_and_limits", text_wraps_and_limits);
+    run ("perspective_scene_loads", perspective_scene_loads);
+    run ("layer_tilts_and_moves_in_depth", layer_tilts_and_moves_in_depth);
+    run ("model_draws_and_lights", model_draws_and_lights);
+    run ("fog_and_depth", fog_and_depth);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);

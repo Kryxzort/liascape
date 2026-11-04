@@ -289,3 +289,16 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - All 93 scenes that load still load; none went blank.
   - Not done yet (in TODO): a WE capture to check the poses against WE itself, and blend shapes, physics hair and
     bone fading, which a few scenes also use.
+
+- **Scenes, batch B14 (fork patch 0056, pin `157c111`):** the 3 scenes that never loaded — Wallpaper Engine's 3D
+  scenes — now load and play. LWE had no 3D at all.
+  - 3276522107 (night metro car): looks like its preview — the inside of the car, the city passing in the windows,
+    the girl on the right, rain and the camera sway.
+  - 3477054430 (kitty on a rooftop): the 3D town, the moon, the stars and the kitty's head and body, lit by the
+    scene's spot lights.
+  - 3509243656 (space HUD): its texts fade in after 3.5 s, then the clock, date, logs and the Milky Way sky show. Its
+    planet sphere stays black: the scene has no lights and the planet's glow map isn't hooked up yet.
+  - The pin also carries batch B13 (HDR bloom). All 93 other scenes still load; none went blank.
+  - Not done yet (in TODO): shadows, light cones you can see (volumetrics), the light-ray quads of 3319542538, and
+    checking the three against Wallpaper Engine itself.
+

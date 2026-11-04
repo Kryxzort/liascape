@@ -1,0 +1,1553 @@
+From 157c1119403268457181262195b64394dd0fcd50 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 11:12:07 +0530
+Subject: [PATCH 56/56] =?UTF-8?q?render:=203D=20scenes=20=E2=80=94=20persp?=
+ =?UTF-8?q?ective=20camera,=20world-placed=20layers,=20MDL=20models,=20lig?=
+ =?UTF-8?q?hts=20and=20fog?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decoded from wallpaper64.exe 2.8.485:
+
+- A scene without `orthogonalprojection` (absent or null) is a 3D scene: the loader (GH 0x1401b6c60)
+  flags a scene orthographic only for an object with a width and height. LWE required the member
+  ("Projection must have a width"), so the three 3D scenes of the corpus didn't load (G24).
+- The perspective (GH 0x1401b3f70): the effective fov (vertical, degrees, clamped 0.1–179.9 in the
+  camera update GH 0x1401b8af0), the target's aspect, general nearz/farz. The view is a right-handed
+  lookAt (GH 0x1401cb340) of the active camera object — the last visible one: eye = its world
+  translation, centre = eye − its z axis, up = its y axis, its `fov` — else of camera.eye/center/up.
+  The shake (GH 0x1401c7680) moves eye and centre by (cos t, sin 1.333t, sin t), length^roughness³,
+  × amplitude · 0.1.
+- An object's matrix (GH 0x1401b5170): parent world · T(origin) · R · S, R from the angles as
+  Rz · Ry · Rx (GH 0x14020af40). In a 3D scene an image layer (not full-screen or passthrough) draws
+  its quad in its own space (alignment anchored at the origin) through that matrix and the camera;
+  full-screen layers keep the 2D layout over the target. Particles take the 3D camera in LWE's scene
+  space. Only angles.z and a 2D origin were used before (G22).
+- Model objects (`"model": "x.mdl"`, G25; the factory tries `model` first, GH 0x1401be650): the MDL
+  meshes (B12's loader, now also reading normals and tangents, format bits 0x2 / 0x4), each drawn
+  with the material it names (generic4) into the scene's target, which gets a depth buffer.
+- Lights (G26, E13): lpoint/lspot objects (properties GH 0x140283df0) packed as WE's
+  g_LCluster_Origin/Color/Direction/Extra (GH 0x1401bf270): (position, radius), (colour · intensity,
+  exponent), (a spot's world x axis, 1 / (cos inner − cos outer)), (−cos outer / that). The
+  generated PerformLighting_V1 (GH 0x140197e20) is now WE's point/spot loop over them with
+  ComputePBRLightShadow; it returned 0.
+- Fog (G28, E14): general fogdistance*/fogheight* (registered GH 0x1401c7880) fed as WE builds
+  them (GH 0x1401ba300): params = (start, end − start, startdensity, enddensity − startdensity); a
+  model material keeping generic4's FOG combo gets FOG_DIST / FOG_HEIGHT.
+- A texture whose flags have bits LWE doesn't know (0x800000 on 3509243656's PBR masks) loads; it
+  was rejected ("unknown texture flags").
+
+Ours (not decoded): a 3D scene renders 1920x1080 (WE: the output's size); `transparentsorting` draws
+each run of world-placed objects back to front by origin distance; a model material without
+depthtest/depthwrite enables them; culling is off for models (the y flip of the target turns the
+winding over); a point light's direction terms (0, 1); at most 8 lights, no clusters.
+
+Not done: shadows (shadow atlas), light cookies, volumetrics, tube/directional lights, shape
+(volume light) objects, skinned/morphed models, reflection, the 3D camera's parallax, zoom and
+camera paths, image `perspective` layers in 2D scenes, perspectiveoverridefov, fog on image and
+particle shaders, sortorder/customsortorder, hit-testing world-placed layers.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B14 (G19–G29, E13, E14, E43)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/CMakeLists.txt                       |   1 +
+ src/core/WallpaperEngine/Data/Model/Object.h  |  43 +++
+ src/core/WallpaperEngine/Data/Model/Types.h   |   4 +
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |  22 ++
+ .../Data/Parsers/ObjectParser.cpp             |  34 +-
+ .../Data/Parsers/ObjectParser.h               |   1 +
+ .../Data/Parsers/TextureParser.cpp            |   8 +-
+ .../Data/Parsers/WallpaperParser.cpp          |  44 ++-
+ src/core/WallpaperEngine/Render/CFBO.cpp      |  41 +++
+ src/core/WallpaperEngine/Render/CFBO.h        |   7 +-
+ src/core/WallpaperEngine/Render/Camera.cpp    |  57 +++
+ src/core/WallpaperEngine/Render/Camera.h      |  31 ++
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  66 +++-
+ .../WallpaperEngine/Render/Objects/CImage.h   |   6 +
+ .../WallpaperEngine/Render/Objects/CModel.cpp | 324 ++++++++++++++++++
+ .../WallpaperEngine/Render/Objects/CModel.h   |  82 +++++
+ .../Render/Objects/CParticle.cpp              |   6 +-
+ .../WallpaperEngine/Render/Objects/Puppet.cpp |   6 +
+ .../WallpaperEngine/Render/Objects/Puppet.h   |   4 +
+ .../Render/Shaders/ShaderUnit.cpp             |  34 +-
+ .../Render/Wallpapers/CScene.cpp              | 216 +++++++++++-
+ .../Render/Wallpapers/CScene.h                |  25 ++
+ 22 files changed, 1037 insertions(+), 25 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/CModel.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/CModel.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 47e62cc..8849e64 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -58,6 +58,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Render/Objects/CRenderable.cpp
+     WallpaperEngine/Render/Objects/CImage.cpp
+     WallpaperEngine/Render/Objects/Puppet.cpp
++    WallpaperEngine/Render/Objects/CModel.cpp
+     WallpaperEngine/Render/Objects/CSound.cpp
+     WallpaperEngine/Render/Objects/CText.cpp
+     WallpaperEngine/Render/Objects/TextLayout.cpp
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 2c42b2d..6998ebc 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -45,6 +45,8 @@ struct ObjectData {
+      *  angle are then in the attachment's space, which follows its bone (GH 0x14020be30 looks it up by name, the
+      *  world transform GH 0x1401b5170 applies it under the parent's) */
+     std::optional<std::string> attachment = std::nullopt;
++    /** A camera object's `fov` (null otherwise, or when it has none): a 3D scene's view angle while it is active */
++    UserSettingUniquePtr cameraFov = nullptr;
+ };
+ 
+ /**
+@@ -183,6 +185,47 @@ public:
+     ~Sound () override = default;
+ };
+ 
++/**
++ * A model object (`"model": "models/x.mdl"`): static MDL meshes in the 3D world, each drawn with the material its
++ * mesh names (WE's object factory tries `model` first, GH 0x1401be650). Its transform, visibility and parent are the
++ * base object's (groupScale/groupAngles/groupVisible)
++ */
++struct MeshObjectData {
++    /** the .mdl file */
++    std::string file;
++};
++
++class MeshObject : public Object, public MeshObjectData {
++public:
++    explicit MeshObject (ObjectData data, MeshObjectData meshData) noexcept :
++	Object (std::move (data)), MeshObjectData (std::move (meshData)) { };
++    ~MeshObject () override = default;
++};
++
++/**
++ * A light object (`"light": "lpoint" | "lspot" | …`). WE's light property table (GH 0x140283df0): color +0x2cc,
++ * intensity +0x2e4, radius +0x2e8, exponent +0x2ec, innercone +0x2f0, outercone +0x2f4 (degrees). Its transform is
++ * the base object's; a spot shines along its world x axis (GH 0x1401bf270)
++ */
++struct LightData {
++    enum class Kind { Point, Spot, Other };
++    Kind kind = Kind::Point;
++    std::string type;
++    UserSettingUniquePtr color;
++    UserSettingUniquePtr intensity;
++    float radius = 1000.0f;
++    float exponent = 1.0f;
++    float innerCone = 0.0f;
++    float outerCone = 45.0f;
++};
++
++class Light : public Object, public LightData {
++public:
++    explicit Light (ObjectData data, LightData lightData) noexcept :
++	Object (std::move (data)), LightData (std::move (lightData)) { };
++    ~Light () override = default;
++};
++
+ /**
+  * Particle control points for forces and positions
+  */
+diff --git a/src/core/WallpaperEngine/Data/Model/Types.h b/src/core/WallpaperEngine/Data/Model/Types.h
+index fc5b8df..de5bf5d 100644
+--- a/src/core/WallpaperEngine/Data/Model/Types.h
++++ b/src/core/WallpaperEngine/Data/Model/Types.h
+@@ -22,6 +22,8 @@ struct ImageEffect;
+ struct ImageEffectPassOverride;
+ class Particle;
+ class Text;
++class MeshObject;
++class Light;
+ class DynamicValue;
+ class Property;
+ class PropertySlider;
+@@ -58,6 +60,8 @@ using SoundUniquePtr = std::unique_ptr<Sound>;
+ using ImageUniquePtr = std::unique_ptr<Image>;
+ using ParticleUniquePtr = std::unique_ptr<Particle>;
+ using TextUniquePtr = std::unique_ptr<Text>;
++using MeshObjectUniquePtr = std::unique_ptr<MeshObject>;
++using LightUniquePtr = std::unique_ptr<Light>;
+ using MaterialUniquePtr = std::unique_ptr<Material>;
+ using MaterialPassUniquePtr = std::unique_ptr<MaterialPass>;
+ using EffectUniquePtr = std::unique_ptr<Effect>;
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index 2544d5d..5f3b959 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -113,12 +113,34 @@ struct SceneData {
+ 	    UserSettingUniquePtr nearz;
+ 	    UserSettingUniquePtr farz;
+ 	    UserSettingUniquePtr fov;
++	    /**
++	     * No `orthogonalprojection` (absent or null): a 3D scene, seen through a perspective camera from
++	     * `camera.eye/center/up` with general fov/nearz/farz (the scene loader GH 0x1401b6c60 sets the ortho flag
++	     * 0x8 only when the member is an object with a width and height)
++	     */
++	    bool isPerspective = false;
+ 	} projection;
+ 
+ 	/** `general.zoom`: scales the view about the scene's centre (with an active camera object's zoom) */
+ 	UserSettingUniquePtr zoom;
+     } camera;
+ 
++    /**
++     * Fog (general +0x344…+0x378, registered in GH 0x1401c7880, uploaded by GH 0x1401ba300): distance fog by the
++     * distance to the eye, height fog by the world height. g_Fog*Params = (start, end − start, start density, end
++     * density − start density)
++     */
++    struct Fog {
++	bool distance = false;
++	bool height = false;
++	glm::vec3 distanceColor = glm::vec3 (0.0f);
++	glm::vec3 heightColor = glm::vec3 (0.0f);
++	glm::vec4 distanceParams = glm::vec4 (0.0f, 1.0f, 0.0f, 0.0f);
++	glm::vec4 heightParams = glm::vec4 (0.0f, 1.0f, 0.0f, 0.0f);
++    } fog = {};
++    /** `transparentsorting`: a 3D scene draws its translucent objects back to front */
++    bool transparentSorting = false;
++
+     ObjectList objects;
+     /** Every value in this scene with a keyframe animation (the scene advances them every frame) */
+     std::vector<AnimatedValue> animatedValues = {};
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 1940156..c971a66 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -83,6 +83,16 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	};
+     }
+ 
++    if (isCamera && it.find ("fov") != it.end ()) {
++	basedata.cameraFov = it.user ("fov", project.properties, 50.0f);
++    }
++
++    // a model object: static MDL meshes (an image object has a string `image`, a model one `image: null`)
++    if (const auto modelIt = it.find ("model");
++	modelIt != it.end () && modelIt->is_string () && (imageIt == it.end () || !imageIt->is_string ())) {
++	return std::make_unique<MeshObject> (std::move (basedata), MeshObjectData { .file = *modelIt });
++    }
++
+     if (imageIt != it.end () && imageIt->is_string ()) {
+ 	return parseImage (it, project, std::move (basedata), *imageIt);
+     } else if (soundIt != it.end () && (soundIt->is_array () || soundIt->is_string ())) {
+@@ -91,8 +101,8 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	return parseParticle (it, project, std::move (basedata));
+     } else if (textIt != it.end ()) {
+ 	return parseText (it, project, std::move (basedata));
+-    } else if (lightIt != it.end ()) {
+-	sLog.error ("Light objects are not supported yet");
++    } else if (lightIt != it.end () && lightIt->is_string ()) {
++	return parseLight (it, project, std::move (basedata));
+     } else if (shapeIt != it.end ()) {
+ 	sLog.error ("VolumeLight objects are not supported yet");
+     } else if (isCamera) {
+@@ -109,6 +119,26 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+     return std::make_unique<Object> (std::move (basedata));
+ }
+ 
++LightUniquePtr ObjectParser::parseLight (const JSON& it, const Project& project, ObjectData base) {
++    const std::string type = it.optional ("light", std::string ("lpoint"));
++
++    return std::make_unique<Light> (
++	std::move (base),
++	LightData {
++	    .kind = type == "lpoint"	 ? LightData::Kind::Point
++		: type == "lspot" ? LightData::Kind::Spot
++				  : LightData::Kind::Other,
++	    .type = type,
++	    .color = it.color ("color", project.properties, Builders::ColorBuilder::White),
++	    .intensity = it.user ("intensity", project.properties, 1.0f),
++	    .radius = it.optional ("radius", 1000.0f),
++	    .exponent = it.optional ("exponent", 1.0f),
++	    .innerCone = it.optional ("innercone", 0.0f),
++	    .outerCone = it.optional ("outercone", 45.0f),
++	}
++    );
++}
++
+ std::vector<int> ObjectParser::parseDependencies (const JSON& it) {
+     const auto dependenciesIt = it.find ("dependencies");
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+index 2a04b4b..69564a6 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+@@ -24,6 +24,7 @@ private:
+     parseImage (const JSON& it, const Project& project, ObjectData base, const std::string& image);
+     static ParticleUniquePtr parseParticle (const JSON& it, const Project& project, ObjectData base);
+     static TextUniquePtr parseText (const JSON& it, const Project& project, ObjectData base);
++    static LightUniquePtr parseLight (const JSON& it, const Project& project, ObjectData base);
+     static std::vector<ImageEffectUniquePtr> parseEffects (const JSON& it, const Project& project);
+     static ImageEffectUniquePtr parseEffect (const JSON& it, const Project& project);
+     static std::vector<ImageEffectPassOverrideUniquePtr>
+diff --git a/src/core/WallpaperEngine/Data/Parsers/TextureParser.cpp b/src/core/WallpaperEngine/Data/Parsers/TextureParser.cpp
+index 07065f2..019b77a 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/TextureParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/TextureParser.cpp
+@@ -303,11 +303,13 @@ void TextureParser::parseAnimations (Texture& header, const BinaryReader& file)
+ }
+ 
+ uint32_t TextureParser::parseTextureFlags (uint32_t value) {
+-    if (value < TextureFlags_All) {
+-	return value;
++    // a flag LWE doesn't know is left alone, not a reason to drop the texture: the PBR masks of 3509243656's models
++    // carry 0x800000 (they failed with "unknown texture flags: 8388610" and their materials lost the mask)
++    if ((value & ~static_cast<uint32_t> (TextureFlags_All)) != 0) {
++	sLog.debug ("texture flags with bits LWE doesn't know: ", value);
+     }
+ 
+-    sLog.exception ("unknown texture flags: ", value);
++    return value;
+ }
+ 
+ FIF TextureParser::parseFIF (uint32_t value) {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 490d1ad..33729a4 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -1,5 +1,7 @@
+ #include "WallpaperParser.h"
+ 
++#include <cmath>
++
+ #include "../Model/Project.h"
+ #include "../Model/Wallpaper.h"
+ #include "DynamicValueParser.h"
+@@ -22,12 +24,39 @@ WallpaperUniquePtr WallpaperParser::parse (const JSON& file, Project& project) {
+     }
+ }
+ 
++namespace {
++SceneData::Fog parseFog (const JSON& general) {
++    // the general fields and their upload (GH 0x1401c7880 registers them, GH 0x1401ba300 builds the shader params);
++    // the defaults are ours (no corpus scene leaves them out)
++    const auto range = [&general] (const char* start, const char* end, const char* startDensity, const char* endDensity) {
++	const float s = general.optional (start, 0.0f);
++	const float e = general.optional (end, 1000.0f);
++	const float sd = general.optional (startDensity, 0.0f);
++	const float ed = general.optional (endDensity, 1.0f);
++	// a zero span would divide by zero in CalculateFogPixelState
++	return glm::vec4 (s, std::abs (e - s) < 1e-6f ? 1e-6f : e - s, sd, ed - sd);
++    };
++
++    return SceneData::Fog {
++	.distance = general.optional ("fogdistance", false),
++	.height = general.optional ("fogheight", false),
++	.distanceColor = general.optional ("fogdistancecolor", glm::vec3 (0.0f)),
++	.heightColor = general.optional ("fogheightcolor", glm::vec3 (0.0f)),
++	.distanceParams = range ("fogdistancestart", "fogdistanceend", "fogdistancestartdensity", "fogdistanceenddensity"),
++	.heightParams = range ("fogheightstart", "fogheightend", "fogheightstartdensity", "fogheightenddensity"),
++    };
++}
++} // namespace
++
+ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project) {
+     const auto scene = JSON::parse (project.assetLocator->readString (file));
+     const auto camera = scene.require ("camera", "Scenes must have a camera section");
+     const auto general = scene.require ("general", "Scenes must have a general section");
+-    const auto projection
+-	= general.require ("orthogonalprojection", "General section must have orthogonal projection info");
++    // a 3D scene has no `orthogonalprojection` (absent or null): WE's loader (GH 0x1401b6c60) flags a scene orthographic
++    // only for an object member, and sees the rest through the perspective camera
++    const auto orthogonal = general.optional ("orthogonalprojection");
++    const bool perspective = !orthogonal.has_value () || !orthogonal->is_object ();
++    const JSON projection = perspective ? JSON::object () : *orthogonal;
+     const auto objects = scene.require ("objects", "Scenes must have an objects section");
+     const auto& properties = project.properties;
+ 
+@@ -84,16 +113,19 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                     .up = camera.require <glm::vec3> ("up", "Camera must have an up position"),
+                 },
+                 .projection = {
+-                    .width  = projection.optional ("auto", false) ? 0 : projection.require <int> ("width",  "Projection must have a width"),
+-                    .height = projection.optional ("auto", false) ? 0 : projection.require <int> ("height", "Projection must have a height"),
+-                    .isAuto = projection.optional ("auto", false),
++                    .width  = perspective || projection.optional ("auto", false) ? 0 : projection.require <int> ("width",  "Projection must have a width"),
++                    .height = perspective || projection.optional ("auto", false) ? 0 : projection.require <int> ("height", "Projection must have a height"),
++                    .isAuto = !perspective && projection.optional ("auto", false),
+                     // `general` fields in Wallpaper Engine (the camera block has none), defaults as in WE
+                     .nearz = general.user ("nearz", properties, 0.1f),
+                     .farz = general.user ("farz", properties, 10000.0f),
+-                    .fov = general.user ("fov", properties, 50.0f)
++                    .fov = general.user ("fov", properties, 50.0f),
++                    .isPerspective = perspective,
+                 },
+                 .zoom = general.user ("zoom", properties, 1.0f)
+             },
++            .fog = parseFog (general),
++            .transparentSorting = general.optional ("transparentsorting", false),
+             .objects = parseObjects (objects, project),
+         }
+     );
+diff --git a/src/core/WallpaperEngine/Render/CFBO.cpp b/src/core/WallpaperEngine/Render/CFBO.cpp
+index b8e3ee6..ecb3b3c 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.cpp
++++ b/src/core/WallpaperEngine/Render/CFBO.cpp
+@@ -148,6 +148,12 @@ void CFBO::resize (uint32_t realWidth, uint32_t realHeight, uint32_t textureWidt
+ 
+     this->m_resolution = { textureWidth, textureHeight, realWidth, realHeight };
+ 
++    if (this->m_depthbuffer != GL_NONE) {
++	glBindRenderbuffer (GL_RENDERBUFFER, this->m_depthbuffer);
++	glRenderbufferStorage (GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, textureWidth, textureHeight);
++	glBindRenderbuffer (GL_RENDERBUFFER, 0);
++    }
++
+     for (const auto& frame : this->m_frames) {
+ 	frame->width1 = textureWidth;
+ 	frame->height1 = textureHeight;
+@@ -156,7 +162,42 @@ void CFBO::resize (uint32_t realWidth, uint32_t realHeight, uint32_t textureWidt
+     }
+ }
+ 
++void CFBO::attachDepthBuffer () const {
++    if (this->m_depthbuffer != GL_NONE) {
++	return;
++    }
++
++    GLint previousFramebuffer = 0;
++    glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
++
++    glGenRenderbuffers (1, &this->m_depthbuffer);
++    glBindRenderbuffer (GL_RENDERBUFFER, this->m_depthbuffer);
++    glRenderbufferStorage (
++	GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, static_cast<GLsizei> (this->m_resolution.x),
++	static_cast<GLsizei> (this->m_resolution.y)
++    );
++    glBindRenderbuffer (GL_RENDERBUFFER, 0);
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_framebuffer);
++    glFramebufferRenderbuffer (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, this->m_depthbuffer);
++
++    if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++	sLog.error ("The depth buffer of ", this->m_name, " left the framebuffer incomplete, drawing without depth");
++	glFramebufferRenderbuffer (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0);
++	glDeleteRenderbuffers (1, &this->m_depthbuffer);
++	this->m_depthbuffer = GL_NONE;
++    } else {
++	glDepthMask (GL_TRUE);
++	glClearDepth (1.0);
++	glClear (GL_DEPTH_BUFFER_BIT);
++    }
++
++    glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
++}
++
+ CFBO::~CFBO () {
++    if (this->m_depthbuffer != GL_NONE) {
++	glDeleteRenderbuffers (1, &this->m_depthbuffer);
++    }
+     // free opengl texture and framebuffer
+     glDeleteTextures (1, &this->m_texture);
+     glDeleteFramebuffers (1, &this->m_framebuffer);
+diff --git a/src/core/WallpaperEngine/Render/CFBO.h b/src/core/WallpaperEngine/Render/CFBO.h
+index ba333e1..b116c74 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.h
++++ b/src/core/WallpaperEngine/Render/CFBO.h
+@@ -39,6 +39,11 @@ public:
+      * their pointer to it, and to its resolution, so they follow. A text layer's targets change size with its text
+      */
+     void resize (uint32_t realWidth, uint32_t realHeight, uint32_t textureWidth, uint32_t textureHeight);
++    /**
++     * Gives the FBO a depth buffer (made once; it follows resize): a 3D scene's target, which its models depth test
++     * against. Cleared to the far plane
++     */
++    void attachDepthBuffer () const;
+ 
+     void incrementUsageCount () const override;
+     void decrementUsageCount () const override;
+@@ -47,7 +52,7 @@ public:
+ 
+ private:
+     GLuint m_framebuffer = GL_NONE;
+-    GLuint m_depthbuffer = GL_NONE;
++    mutable GLuint m_depthbuffer = GL_NONE;
+     GLuint m_texture = GL_NONE;
+     glm::vec4 m_resolution = {};
+     float m_scale = 0;
+diff --git a/src/core/WallpaperEngine/Render/Camera.cpp b/src/core/WallpaperEngine/Render/Camera.cpp
+index 91e35ef..b9d9074 100644
+--- a/src/core/WallpaperEngine/Render/Camera.cpp
++++ b/src/core/WallpaperEngine/Render/Camera.cpp
+@@ -1,3 +1,5 @@
++#include <algorithm>
++
+ #include <glm/glm.hpp>
+ #include <glm/gtc/matrix_transform.hpp>
+ 
+@@ -38,6 +40,60 @@ float Camera::getHeight () const { return this->m_height; }
+ 
+ float Camera::getFov () const { return this->m_camera.projection.fov->value->getFloat (); }
+ 
++bool Camera::isPerspective () const { return this->m_isPerspective; }
++
++const glm::mat4& Camera::getWorldViewProjection () const { return this->m_worldViewProjection; }
++
++const glm::vec3& Camera::getWorldEye () const { return this->m_worldEye; }
++
++glm::vec3 Camera::getSceneEye () const {
++    return { this->m_worldEye.x - this->m_width / 2.0f, this->m_height / 2.0f - this->m_worldEye.y, this->m_worldEye.z };
++}
++
++const glm::mat4& Camera::getScreenProjection () const { return this->m_screenProjection; }
++
++void Camera::setPerspectiveProjection (const float width, const float height) {
++    this->m_width = width;
++    this->m_height = height;
++    this->m_isOrthogonal = false;
++    this->m_isPerspective = true;
++
++    this->setPerspectiveFov (this->getFov ());
++    // full-screen layers keep the 2D layout: LWE's scene space at z 0 (x centred, y down) over the whole target
++    this->m_screenProjection = glm::ortho<float> (-width / 2.0f, width / 2.0f, -height / 2.0f, height / 2.0f, -1.0f, 1.0f);
++    this->setPerspectiveView (this->getEye (), this->getCenter (), this->getUp ());
++}
++
++void Camera::setPerspectiveFov (float fov) {
++    fov = glm::clamp (fov, 0.1f, 179.9f);
++
++    if (fov == this->m_perspectiveFov) {
++	return;
++    }
++
++    this->m_perspectiveFov = fov;
++    const float nearz = std::max (this->getNearZ (), 1e-4f);
++    const float farz = std::max (this->getFarZ (), nearz * 2.0f);
++
++    // the scene FBO is read top-down (row 0 is the top, as a texture's): flip clip y
++    this->m_worldProjection = glm::scale (glm::mat4 (1.0f), glm::vec3 (1.0f, -1.0f, 1.0f))
++	* glm::perspective (glm::radians (fov), this->m_width / this->m_height, nearz, farz);
++    this->m_projection = this->m_worldProjection;
++}
++
++void Camera::setPerspectiveView (const glm::vec3& eye, const glm::vec3& center, const glm::vec3& up) {
++    const glm::mat4 view = glm::lookAt (eye, center, up);
++
++    this->m_worldEye = eye;
++    this->m_worldViewProjection = this->m_worldProjection * view;
++    // LWE's scene space (x − w/2, h/2 − y, z) back to WE's world, then the view: what getProjection () · getLookAt ()
++    // gives the objects that place themselves in scene space (particles)
++    const glm::mat4 fromScene = glm::scale (glm::mat4 (1.0f), glm::vec3 (1.0f, -1.0f, 1.0f))
++	* glm::translate (glm::mat4 (1.0f), glm::vec3 (this->m_width / 2.0f, -this->m_height / 2.0f, 0.0f));
++    this->m_lookat = view * fromScene;
++    this->m_view = this->m_lookat;
++}
++
+ float Camera::getNearZ () const { return this->m_camera.projection.nearz->value->getFloat (); }
+ 
+ float Camera::getFarZ () const { return this->m_camera.projection.farz->value->getFloat (); }
+@@ -53,5 +109,6 @@ void Camera::setOrthogonalProjection (const float width, const float height) {
+ 
+     this->m_projection = glm::ortho<float> (-width / 2.0, width / 2.0, -height / 2.0, height / 2.0, nearz, farz);
+     this->m_projection = glm::translate (this->m_projection, this->getEye ());
++    this->m_screenProjection = this->m_projection;
+     this->m_isOrthogonal = true;
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/Camera.h b/src/core/WallpaperEngine/Render/Camera.h
+index 83803cc..420f0d5 100644
+--- a/src/core/WallpaperEngine/Render/Camera.h
++++ b/src/core/WallpaperEngine/Render/Camera.h
+@@ -20,6 +20,31 @@ public:
+     ~Camera ();
+ 
+     void setOrthogonalProjection (const float width, const float height);
++    /**
++     * A 3D scene (no `orthogonalprojection`): WE's perspective (GH 0x1401b3f70) of the general fov (vertical, degrees,
++     * clamped to 0.1–179.9 by the camera update GH 0x1401b8af0), width / height, nearz, farz. The scene's FBO rows run
++     * top-down (textures do), so clip y is flipped
++     */
++    void setPerspectiveProjection (const float width, const float height);
++    /** A 3D scene's view this frame: lookAt (eye, center, up) in WE's world (x right, y up), the shake applied */
++    void setPerspectiveView (const glm::vec3& eye, const glm::vec3& center, const glm::vec3& up);
++    /** A 3D scene's view angle this frame (vertical, degrees): general.fov, or the active camera object's */
++    void setPerspectiveFov (float fov);
++    [[nodiscard]] bool isPerspective () const;
++    /**
++     * A 3D scene's view-projection for WE's world (x right, y up, z as written): what models and 3D image layers
++     * draw with (their model matrix in WE's world)
++     */
++    [[nodiscard]] const glm::mat4& getWorldViewProjection () const;
++    /** The eye in WE's world (3D: with the shake) */
++    [[nodiscard]] const glm::vec3& getWorldEye () const;
++    /**
++     * The eye in LWE's scene space (x − width/2, height/2 − y, z), which particles use. In a 3D scene
++     * getProjection () · getLookAt () takes LWE's scene space too: the world view after the y flip and the centring
++     */
++    [[nodiscard]] glm::vec3 getSceneEye () const;
++    /** The 2D projection of the scene's rectangle (LWE's scene space at z 0): a 3D scene's full-screen layers */
++    [[nodiscard]] const glm::mat4& getScreenProjection () const;
+ 
+     [[nodiscard]] const glm::vec3& getCenter () const;
+     [[nodiscard]] const glm::vec3& getEye () const;
+@@ -41,6 +66,12 @@ private:
+     float m_width;
+     float m_height;
+     bool m_isOrthogonal = false;
++    bool m_isPerspective = false;
++    glm::mat4 m_screenProjection = glm::mat4 (1.0f);
++    glm::mat4 m_worldViewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_worldProjection = glm::mat4 (1.0f);
++    glm::vec3 m_worldEye = glm::vec3 (0.0f);
++    float m_perspectiveFov = -1.0f;
+     glm::mat4 m_projection = {};
+     glm::mat4 m_lookat = {};
+     glm::mat4 m_view = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 7592b20..e2b592b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -287,8 +287,7 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     this->m_sceneCenter
+ 	= glm::vec3 ((this->m_pos.x + this->m_pos.z) / 2.0f, (this->m_pos.y + this->m_pos.w) / 2.0f, 0.0f);
+ 
+-    this->m_modelViewProjectionScreen
+-	= this->getScene ().getCamera ().getProjection () * this->getScene ().getCamera ().getLookAt ();
++    this->m_modelViewProjectionScreen = this->screenViewProjection ();
+ 
+     if (this->getImage ().model->passthrough) {
+ 	this->m_modelViewProjectionCopy = this->m_modelViewProjectionScreen;
+@@ -1357,9 +1356,65 @@ CImage::ResolvedTransform CImage::updateGeometryBuffers () {
+     return transform;
+ }
+ 
++bool CImage::isWorldPlaced () const {
++    // in a 3D scene every layer is in the world but the ones that cover the screen (full-screen and passthrough
++    // layers, and LWE's own bloom image, id -1)
++    return this->getScene ().getCamera ().isPerspective () && !this->getImage ().model->fullscreen
++	&& !this->getImage ().model->passthrough && this->getId () >= 0;
++}
++
++glm::mat4 CImage::screenViewProjection () const {
++    const auto& camera = this->getScene ().getCamera ();
++
++    // a 3D scene's screen layers keep the 2D layout over the scene's target
++    return camera.isPerspective () ? camera.getScreenProjection () : camera.getProjection () * camera.getLookAt ();
++}
++
++void CImage::updateWorldPosition () {
++    const glm::vec2 size = this->m_size;
++    // the quad in the layer's own space (x right, y up, its pixels), its centre at the origin or moved by
++    // `alignment` (the anchor is on the origin, GH 0x140230a80) or by a text block's offset; scale, angles, z and
++    // the parents are the world matrix's
++    glm::vec2 centre (0.0f);
++
++    if (this->m_localOffset.has_value ()) {
++	centre = *this->m_localOffset;
++    } else {
++	const std::string& alignment = this->getImage ().alignment;
++	if (alignment.find ("top") != std::string::npos) {
++	    centre.y = -size.y / 2.0f;
++	} else if (alignment.find ("bottom") != std::string::npos) {
++	    centre.y = size.y / 2.0f;
++	}
++	if (alignment.find ("left") != std::string::npos) {
++	    centre.x = size.x / 2.0f;
++	} else if (alignment.find ("right") != std::string::npos) {
++	    centre.x = -size.x / 2.0f;
++	}
++    }
++
++    const float left = centre.x - size.x / 2.0f, right = centre.x + size.x / 2.0f;
++    const float bottom = centre.y - size.y / 2.0f, top = centre.y + size.y / 2.0f;
++    // the order and texture rows of the 2D quad: (left, bottom) takes v 1
++    const GLfloat position[] = { left, bottom, 0.0f, left, top, 0.0f, right, bottom, 0.0f,
++				 right, bottom, 0.0f, left, top, 0.0f, right, top, 0.0f };
++
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_sceneSpacePosition);
++    glBufferData (GL_ARRAY_BUFFER, sizeof (position), position, GL_DYNAMIC_DRAW);
++
++    this->m_modelViewProjectionScreen
++	= this->getScene ().getCamera ().getWorldViewProjection () * this->getScene ().worldMatrixOf (this->getImage ());
++    this->m_modelViewProjectionScreenInverse = glm::inverse (this->m_modelViewProjectionScreen);
++}
++
+ void CImage::updateScreenSpacePosition () {
+     const ResolvedTransform transform = this->updateGeometryBuffers ();
+ 
++    if (this->isWorldPlaced ()) {
++	this->updateWorldPosition ();
++	return;
++    }
++
+     // Build rotation from angles (already in radians from scene.json — see CParticle.cpp:2119)
+     // Negate X and Z rotations to account for Y-flipped coordinate system (CParticle.cpp:2120)
+     const float angle = transform.angle;
+@@ -1373,7 +1428,7 @@ void CImage::updateScreenSpacePosition () {
+     // the mouse parallax moves the object in the world, after its own transform (WE: view · translate(offset), GH
+     // 0x1401b9b50); WE's y is up, this world's y is down
+     const glm::vec2 parallax = this->getScene ().getParallaxOffset (this->getImage ());
+-    const glm::mat4 mvp = this->getScene ().getCamera ().getProjection () * this->getScene ().getCamera ().getLookAt ()
++    const glm::mat4 mvp = this->screenViewProjection ()
+ 	* glm::translate (glm::mat4 (1.0f), glm::vec3 (parallax.x, -parallax.y, 0.0f)) * rotModel;
+ 
+     this->m_modelViewProjectionScreen = mvp;
+@@ -1387,6 +1442,11 @@ void CImage::updateScreenSpacePosition () {
+ const Image& CImage::getImage () const { return this->m_image; }
+ 
+ bool CImage::hitTest (const glm::vec2& world, glm::vec2& local) const {
++    // a layer in a 3D scene's world isn't hit-tested (the cursor would have to be cast into the world)
++    if (this->isWorldPlaced ()) {
++	return false;
++    }
++
+     const float sceneWidth = static_cast<float> (this->getScene ().getWidth ());
+     const float sceneHeight = static_cast<float> (this->getScene ().getHeight ());
+     // the drawing's space (m_pos): x from the centre, y down
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 2e17305..3a91eea 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -38,6 +38,8 @@ public:
+     /** A passthrough (compose) layer built with a group target: it draws its subtree into it (CScene::renderComposed) */
+     [[nodiscard]] bool drawsSubtree () const;
+     [[nodiscard]] glm::vec2 getSize () const;
++    /** In a 3D scene's world (drawn with its world matrix and the perspective camera), not over the screen */
++    [[nodiscard]] bool isWorldPlaced () const;
+ 
+     /**
+      * Whether a point of the scene (WE's world: x right, y up, scene pixels) is on this layer as it was last drawn:
+@@ -102,6 +104,10 @@ protected:
+     [[nodiscard]] bool effectCanBeVisible (const ImageEffect& effect) const;
+ 
+     void updateScreenSpacePosition ();
++    /** A 3D scene's layer: its quad in its own space and its world matrix through the perspective camera */
++    void updateWorldPosition ();
++    /** The view-projection of a layer over the screen: the camera's, a 3D scene's 2D one */
++    [[nodiscard]] glm::mat4 screenViewProjection () const;
+ 
+ private:
+     bool loadPuppetMesh (const glm::vec2& size);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+new file mode 100644
+index 0000000..106d43b
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -0,0 +1,324 @@
++#include "CModel.h"
++
++#include <iterator>
++
++#include <glm/gtc/type_ptr.hpp>
++
++#include "WallpaperEngine/Context.h"
++#include "WallpaperEngine/Data/JSON.h"
++#include "WallpaperEngine/Data/Model/Material.h"
++#include "WallpaperEngine/Data/Model/Project.h"
++#include "WallpaperEngine/Data/Model/Wallpaper.h"
++#include "WallpaperEngine/Data/Parsers/MaterialParser.h"
++#include "WallpaperEngine/Logging/Log.h"
++
++using namespace WallpaperEngine;
++using namespace WallpaperEngine::Render::Objects;
++using namespace WallpaperEngine::Render::Objects::Effects;
++using namespace WallpaperEngine::Data::Parsers;
++using JSON = WallpaperEngine::Data::JSON::JSON;
++
++namespace {
++// the interleaved vertex: position, normal, tangent (w: the bitangent's sign), texcoord
++constexpr GLsizei kFloatsPerVertex = 3 + 3 + 4 + 2;
++} // namespace
++
++CModelMesh::CModelMesh (
++    Wallpapers::CScene& scene, const MeshObject& object, const Material& material, const Puppet::Mesh& mesh
++) :
++    CObject (scene, object), CRenderable (scene, object, material), m_meshMaterial (material), m_mesh (mesh) { }
++
++CModelMesh::~CModelMesh () {
++    for (auto* pass : this->m_passes) {
++	delete pass;
++    }
++    this->m_passes.clear ();
++
++    if (this->m_vbo != GL_NONE) {
++	glDeleteBuffers (1, &this->m_vbo);
++    }
++    if (this->m_ibo != GL_NONE) {
++	glDeleteBuffers (1, &this->m_ibo);
++    }
++}
++
++void CModelMesh::setup () {
++    this->detectTexture ();
++
++    // a material without a texture of its own samples white (generic4's albedo default, "util/white")
++    if (this->m_texture == nullptr) {
++	try {
++	    this->m_texture = this->getContext ().resolveTexture ("util/white");
++	} catch (const std::exception&) {
++	    this->m_texture = nullptr;
++	}
++    }
++    if (this->m_texture == nullptr) {
++	auto white = std::make_shared<CFBO> ("", TextureFormat_ARGB8888, TextureFlags_NoFlags, 1, 1, 1, 1, 1);
++	GLint previous = 0;
++	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previous);
++	glBindFramebuffer (GL_FRAMEBUFFER, white->getFramebuffer ());
++	GLfloat clear[4] = {};
++	glGetFloatv (GL_COLOR_CLEAR_VALUE, clear);
++	glClearColor (1.0f, 1.0f, 1.0f, 1.0f);
++	glClear (GL_COLOR_BUFFER_BIT);
++	glClearColor (clear[0], clear[1], clear[2], clear[3]);
++	glBindFramebuffer (GL_FRAMEBUFFER, previous);
++	this->m_texture = white;
++    }
++
++    CRenderable::setup ();
++
++    std::vector<GLfloat> vertices;
++    vertices.reserve (this->m_mesh.vertices.size () * kFloatsPerVertex);
++    for (const auto& v : this->m_mesh.vertices) {
++	vertices.insert (vertices.end (), { v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
++					    v.tangent.x, v.tangent.y, v.tangent.z, v.tangent.w, v.uv.x, v.uv.y });
++    }
++
++    glGenBuffers (1, &this->m_vbo);
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_vbo);
++    glBufferData (GL_ARRAY_BUFFER, vertices.size () * sizeof (GLfloat), vertices.data (), GL_STATIC_DRAW);
++    glGenBuffers (1, &this->m_ibo);
++    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_ibo);
++    glBufferData (
++	GL_ELEMENT_ARRAY_BUFFER, this->m_mesh.indices.size () * sizeof (uint32_t), this->m_mesh.indices.data (),
++	GL_STATIC_DRAW
++    );
++    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
++    this->m_indexCount = static_cast<GLsizei> (this->m_mesh.indices.size ());
++
++    for (const auto& pass : this->m_meshMaterial.passes) {
++	auto* cpass = new CPass (*this, std::make_shared<FBOProvider> (this), *pass, std::nullopt, std::nullopt, std::nullopt);
++	const GLuint program = cpass->getProgramID ();
++
++	cpass->setModelMatrix (&this->m_modelMatrix);
++	cpass->setViewProjectionMatrix (&this->m_viewProjection);
++	cpass->setModelViewProjectionMatrix (&this->m_modelViewProjection);
++	cpass->setModelViewProjectionMatrixInverse (&this->m_modelViewProjectionInverse);
++	cpass->addUniform ("g_EyePosition", &this->m_eye);
++	cpass->setInput (this->m_texture);
++
++	const GLint position = glGetAttribLocation (program, "a_Position");
++	const GLint normal = glGetAttribLocation (program, "a_Normal");
++	const GLint tangent = glGetAttribLocation (program, "a_Tangent4");
++	const GLint texcoord = glGetAttribLocation (program, "a_TexCoord");
++
++	cpass->setGeometryCallback (
++	    [this, position, normal, tangent, texcoord] () {
++		glBindBuffer (GL_ARRAY_BUFFER, this->m_vbo);
++		glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_ibo);
++		const GLsizei stride = kFloatsPerVertex * sizeof (GLfloat);
++		const std::pair<GLint, std::pair<GLint, size_t>> attributes[] = {
++		    { position, { 3, 0 } }, { normal, { 3, 3 } }, { tangent, { 4, 6 } }, { texcoord, { 2, 10 } }
++		};
++		for (const auto& [location, layout] : attributes) {
++		    if (location < 0) {
++			continue;
++		    }
++		    glEnableVertexAttribArray (location);
++		    glVertexAttribPointer (
++			location, layout.first, GL_FLOAT, GL_FALSE, stride,
++			reinterpret_cast<const void*> (layout.second * sizeof (GLfloat))
++		    );
++		}
++	    },
++	    [this, program] () {
++		this->uploadSceneUniforms (program);
++		glDrawElements (GL_TRIANGLES, this->m_indexCount, GL_UNSIGNED_INT, nullptr);
++	    },
++	    [position, normal, tangent, texcoord] () {
++		for (const GLint location : { position, normal, tangent, texcoord }) {
++		    if (location >= 0) {
++			glDisableVertexAttribArray (location);
++		    }
++		}
++		glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
++	    }
++	);
++
++	this->m_passes.push_back (cpass);
++    }
++
++    this->m_ready = !this->m_passes.empty () && this->m_indexCount > 0;
++}
++
++void CModelMesh::uploadSceneUniforms (GLuint program) const {
++    const auto& scene = this->getScene ();
++
++    if (const GLint at = glGetUniformLocation (program, "g_NormalModelMatrix"); at >= 0) {
++	glUniformMatrix3fv (at, 1, GL_FALSE, glm::value_ptr (this->m_normalMatrix));
++    }
++
++    const auto& lights = scene.getLights ();
++    if (const GLint at = glGetUniformLocation (program, "g_LCluster_Counts"); at >= 0) {
++	glUniform4f (at, static_cast<float> (lights.count), 0.0f, 0.0f, 0.0f);
++    }
++    const std::pair<const char*, const glm::vec4*> arrays[] = {
++	{ "g_LCluster_Origin", lights.origin },
++	{ "g_LCluster_Color", lights.color },
++	{ "g_LCluster_Direction", lights.direction },
++	{ "g_LCluster_Extra", lights.extra },
++    };
++    for (const auto& [name, values] : arrays) {
++	if (const GLint at = glGetUniformLocation (program, name); at >= 0) {
++	    glUniform4fv (at, Wallpapers::CScene::SceneLights::Max, glm::value_ptr (values[0]));
++	}
++    }
++
++    const auto& fog = scene.getScene ().fog;
++    const std::pair<const char*, glm::vec4> fog4[] = {
++	{ "g_FogDistanceParams", fog.distanceParams },
++	{ "g_FogHeightParams", fog.heightParams },
++    };
++    for (const auto& [name, value] : fog4) {
++	if (const GLint at = glGetUniformLocation (program, name); at >= 0) {
++	    glUniform4fv (at, 1, glm::value_ptr (value));
++	}
++    }
++    const std::pair<const char*, glm::vec3> fog3[] = {
++	{ "g_FogDistanceColor", fog.distanceColor },
++	{ "g_FogHeightColor", fog.heightColor },
++    };
++    for (const auto& [name, value] : fog3) {
++	if (const GLint at = glGetUniformLocation (program, name); at >= 0) {
++	    glUniform3fv (at, 1, glm::value_ptr (value));
++	}
++    }
++}
++
++void CModelMesh::draw (const std::shared_ptr<const CFBO>& target, const glm::mat4& world, bool keepAlpha) {
++    const auto& camera = this->getScene ().getCamera ();
++
++    this->m_modelMatrix = world;
++    this->m_viewProjection = camera.getWorldViewProjection ();
++    this->m_modelViewProjection = this->m_viewProjection * world;
++    this->m_modelViewProjectionInverse = glm::inverse (this->m_modelViewProjection);
++    this->m_normalMatrix = glm::transpose (glm::inverse (glm::mat3 (world)));
++    this->m_eye = camera.getWorldEye ();
++
++    for (auto* pass : this->m_passes) {
++	pass->setDestination (target);
++	glColorMask (true, true, true, !keepAlpha);
++	pass->render ();
++    }
++
++    glColorMask (true, true, true, true);
++    glDisable (GL_DEPTH_TEST);
++    glDepthMask (GL_FALSE);
++}
++
++bool CModelMesh::isReady () const { return this->m_ready; }
++
++const float& CModelMesh::getBrightness () const { return this->m_one; }
++
++const float& CModelMesh::getUserAlpha () const { return this->m_one; }
++
++const float& CModelMesh::getAlpha () const { return this->m_one; }
++
++const glm::vec3& CModelMesh::getColor () const { return this->m_white; }
++
++const glm::vec4& CModelMesh::getColor4 () const { return this->m_white4; }
++
++const glm::vec3& CModelMesh::getCompositeColor () const { return this->m_white; }
++
++CModel::CModel (Wallpapers::CScene& scene, const MeshObject& object) : CObject (scene, object), m_object (object) { }
++
++CModel::~CModel () = default;
++
++void CModel::setup () {
++    const auto& project = this->getScene ().getScene ().project;
++    const std::string& file = this->m_object.file;
++
++    if (!this->getScene ().getCamera ().isPerspective ()) {
++	// (a model in a 2D scene: none in the corpus; there's no depth buffer to draw it against)
++	sLog.error ("Model ", file, " is in a 2D scene: not drawn");
++	return;
++    }
++
++    try {
++	const auto stream = project.assetLocator->read (file);
++	std::vector<char> data { std::istreambuf_iterator<char> (*stream), std::istreambuf_iterator<char> () };
++	std::string error;
++
++	if (!Puppet::parse (data.data (), data.size (), this->m_model, error)) {
++	    sLog.error ("Could not load model ", file, ": ", error);
++	    return;
++	}
++	if (!error.empty ()) {
++	    sLog.error ("Model ", file, " partly loaded: ", error);
++	}
++    } catch (const std::exception& ex) {
++	sLog.error ("Could not load model ", file, ": ", ex.what ());
++	return;
++    }
++
++    const auto& fog = this->getScene ().getScene ().fog;
++
++    for (const auto& mesh : this->m_model.meshes) {
++	try {
++	    auto material = MaterialParser::load (project, mesh.material);
++	    const auto raw = JSON::parse (project.assetLocator->readString (mesh.material));
++	    const auto& passes = raw.require ("passes", "Material must have passes to render");
++
++	    for (size_t i = 0; i < material->passes.size (); i++) {
++		auto& pass = *material->passes[i];
++		const auto& json = i < passes.size () ? passes[i] : JSON::object ();
++
++		// a model depth tests and writes depth unless its material says otherwise (the parser's 2D default is
++		// off; ours). The y flip of the scene's target turns the winding over: culling is left off
++		if (!json.contains ("depthtest")) {
++		    pass.depthtest = DepthtestMode_Enabled;
++		}
++		if (!json.contains ("depthwrite")) {
++		    pass.depthwrite = DepthwriteMode_Enabled;
++		}
++		pass.cullmode = CullingMode_Disable;
++
++		// the scene's fog for a material that keeps generic4's FOG combo (default 1)
++		const auto fogCombo = pass.combos.find ("FOG");
++		if (fogCombo == pass.combos.end () || fogCombo->second != 0) {
++		    if (fog.distance) {
++			pass.combos.insert_or_assign ("FOG_DIST", 1);
++		    }
++		    if (fog.height) {
++			pass.combos.insert_or_assign ("FOG_HEIGHT", 1);
++		    }
++		}
++	    }
++
++	    auto renderable = std::make_unique<CModelMesh> (this->getScene (), this->m_object, *material, mesh);
++	    this->m_materials.push_back (std::move (material));
++	    renderable->setup ();
++
++	    if (renderable->isReady ()) {
++		this->m_meshes.push_back (std::move (renderable));
++	    }
++	} catch (const std::exception& ex) {
++	    sLog.error ("Leaving out mesh ", mesh.material, " of model ", file, ": ", ex.what ());
++	}
++    }
++
++    sLog.out (
++	"Loaded model ", file, " version=", this->m_model.version, " meshes=", this->m_meshes.size (), "/",
++	this->m_model.meshes.size ()
++    );
++}
++
++void CModel::render () {
++    if (this->m_meshes.empty () || !this->getScene ().isEffectivelyVisible (this->m_object)) {
++	return;
++    }
++
++    const glm::mat4 world = this->getScene ().worldMatrixOf (this->m_object);
++    const auto target = this->getScene ().getTargetFor (this->m_object);
++    const bool keepAlpha = this->getScene ().targetKeepsAlpha (this->m_object);
++
++    for (const auto& mesh : this->m_meshes) {
++	mesh->draw (target, world, keepAlpha);
++    }
++}
++
++const MeshObject& CModel::getMeshObject () const { return this->m_object; }
++
++size_t CModel::getMeshCount () const { return this->m_meshes.size (); }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.h b/src/core/WallpaperEngine/Render/Objects/CModel.h
+new file mode 100644
+index 0000000..d4159de
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.h
+@@ -0,0 +1,82 @@
++#pragma once
++
++#include <memory>
++#include <vector>
++
++#include "CRenderable.h"
++#include "Puppet.h"
++#include "WallpaperEngine/Data/Model/Object.h"
++#include "WallpaperEngine/Render/Wallpapers/CScene.h"
++
++namespace WallpaperEngine::Render::Objects {
++/**
++ * One mesh of a model object: its material's passes (WE's `generic4` and the like) over the mesh's vertices, in the
++ * model's world matrix through the 3D scene's camera. It isn't one of the scene's objects: its model draws it
++ */
++class CModelMesh final : public CRenderable {
++public:
++    CModelMesh (
++	Wallpapers::CScene& scene, const MeshObject& object, const Material& material, const Puppet::Mesh& mesh
++    );
++    ~CModelMesh () override;
++
++    void setup () override;
++    /** Draws the mesh into `target` with this frame's matrices */
++    void draw (const std::shared_ptr<const CFBO>& target, const glm::mat4& world, bool keepAlpha);
++    [[nodiscard]] bool isReady () const;
++
++    [[nodiscard]] const float& getBrightness () const override;
++    [[nodiscard]] const float& getUserAlpha () const override;
++    [[nodiscard]] const float& getAlpha () const override;
++    [[nodiscard]] const glm::vec3& getColor () const override;
++    [[nodiscard]] const glm::vec4& getColor4 () const override;
++    [[nodiscard]] const glm::vec3& getCompositeColor () const override;
++
++private:
++    /** the engine values CPass doesn't feed: the normal matrix, the lights, the fog */
++    void uploadSceneUniforms (GLuint program) const;
++
++    const Material& m_meshMaterial;
++    const Puppet::Mesh& m_mesh;
++    std::vector<Effects::CPass*> m_passes = {};
++    GLuint m_vbo = GL_NONE;
++    GLuint m_ibo = GL_NONE;
++    GLsizei m_indexCount = 0;
++    bool m_ready = false;
++
++    glm::mat4 m_modelMatrix = glm::mat4 (1.0f);
++    glm::mat4 m_viewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_modelViewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_modelViewProjectionInverse = glm::mat4 (1.0f);
++    glm::mat3 m_normalMatrix = glm::mat3 (1.0f);
++    glm::vec3 m_eye = glm::vec3 (0.0f);
++
++    float m_one = 1.0f;
++    glm::vec3 m_white = glm::vec3 (1.0f);
++    glm::vec4 m_white4 = glm::vec4 (1.0f);
++};
++
++/**
++ * A model object (`"model": "models/x.mdl"`, G25): WE's MDL file read by the puppet loader (GH 0x1402873f0) for
++ * its meshes only (static: no skinning, morphs or animation), each mesh drawn with the material it names. A 3D
++ * scene's models depth test against the scene's depth buffer. A mesh whose material can't be built is left out
++ */
++class CModel final : public CObject {
++public:
++    CModel (Wallpapers::CScene& scene, const MeshObject& object);
++    ~CModel () override;
++
++    void setup () override;
++    void render () override;
++
++    [[nodiscard]] const MeshObject& getMeshObject () const;
++    /** The meshes that could be built (tests) */
++    [[nodiscard]] size_t getMeshCount () const;
++
++private:
++    const MeshObject& m_object;
++    Puppet::Model m_model = {};
++    std::vector<MaterialUniquePtr> m_materials = {};
++    std::vector<std::unique_ptr<CModelMesh>> m_meshes = {};
++};
++} // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 613161c..932d3a1 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2412,7 +2412,11 @@ void CParticle::applyParallaxToModelMatrix () {
+ }
+ 
+ void CParticle::updateParticleViewProjection () {
+-    if ((m_particle.flags & 4) != 0) {
++    if (getScene ().getCamera ().isPerspective ()) {
++	// a 3D scene: the scene's perspective camera, which takes LWE's scene space the system's matrices are in
++	m_viewProjectionMatrix = getScene ().getCamera ().getProjection () * getScene ().getCamera ().getLookAt ();
++	m_eyePosition = getScene ().getCamera ().getSceneEye ();
++    } else if ((m_particle.flags & 4) != 0) {
+ 	// Perspective particles use a dedicated perspective projection
+ 	float width = getScene ().getCamera ().getWidth ();
+ 	float height = getScene ().getCamera ().getHeight ();
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index b0e0ddc..ad0b1ca 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -149,6 +149,12 @@ void parseMeshes (Reader& r, int version, Model& out) {
+ 	    if (hasUv) {
+ 		std::memcpy (&vertex.uv, base + uvAt, sizeof (glm::vec2));
+ 	    }
++	    if (format & 0x2) {
++		std::memcpy (&vertex.normal, base + offsets[3], sizeof (glm::vec3));
++	    }
++	    if (format & 0x4) {
++		std::memcpy (&vertex.tangent, base + offsets[4], sizeof (glm::vec4));
++	    }
+ 	    vertex.bones = glm::uvec4 (0);
+ 	    vertex.weights = glm::vec4 (0.0f);
+ 	    if (hasBones) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index 8f1018e..1f5e776 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -25,6 +25,10 @@ struct Vertex {
+     glm::vec2 uv;
+     glm::uvec4 bones;
+     glm::vec4 weights;
++    /** format bit 0x2 (static meshes light with it; 0 0 1 when absent) */
++    glm::vec3 normal = glm::vec3 (0.0f, 0.0f, 1.0f);
++    /** format bit 0x4: xyz and the bitangent's sign in w (1 0 0 1 when absent) */
++    glm::vec4 tangent = glm::vec4 (1.0f, 0.0f, 0.0f, 1.0f);
+ };
+ 
+ struct Mesh {
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 3316564..ecc2cfb 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -364,14 +364,36 @@ std::string ShaderUnit::resolveRequireModule (const std::string& moduleName) con
+ }
+ 
+ std::string ShaderUnit::generateLightingV1 () const {
+-    // PerformLighting_V1 is dynamically generated by Wallpaper Engine based on the scene's
+-    // light sources. Since linux-wallpaperengine does not yet support light objects, we
+-    // generate a stub that returns no dynamic light contribution.
++    // WE generates PerformLighting_V1 for the scene's lights (GH 0x140197e20 builds it: the point/spot loop over
++    // g_LCluster_Origin/Color/Direction/Extra, ComputePBRLightShadow per light). This is that loop without the
++    // clusters, the shadows, the cookies and the tube and directional lights: the first
++    // g_LCluster_Counts.x lights of the scene (CScene::updateLights feeds them; none outside a 3D scene)
+     return "// begin of generated module LightingV1\n"
+-	   "vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal, vec3 viewDir,\n"
+-	   "    vec3 specularTint, vec3 baseReflectance, float roughness, float metallic)\n"
++	   "uniform vec4 g_LCluster_Counts;\n"
++	   "uniform vec4 g_LCluster_Origin[8];\n"
++	   "uniform vec4 g_LCluster_Color[8];\n"
++	   "uniform vec4 g_LCluster_Direction[8];\n"
++	   "uniform vec4 g_LCluster_Extra[8];\n"
++	   "vec3 PerformLighting_V1(vec3 worldPos, vec3 color, vec3 normal, vec3 viewVector,\n"
++	   "    vec3 specularTint, vec3 ambient, float roughness, float metallic)\n"
+ 	   "{\n"
+-	   "    return vec3(0.0);\n"
++	   "    vec3 light = CAST3(0.0);\n"
++	   "    int pointSpotCount = int(g_LCluster_Counts.x);\n"
++	   "    for (int lightIndex = 0; lightIndex < 8; ++lightIndex)\n"
++	   "    {\n"
++	   "        if (lightIndex >= pointSpotCount) break;\n"
++	   "        vec4 lightOrigin = g_LCluster_Origin[lightIndex];\n"
++	   "        vec4 lightColor = g_LCluster_Color[lightIndex];\n"
++	   "        vec4 lightDirection = g_LCluster_Direction[lightIndex];\n"
++	   "        vec4 lightExtra = g_LCluster_Extra[lightIndex];\n"
++	   "        vec3 lightDelta = lightOrigin.xyz - worldPos;\n"
++	   "        float spotCookie = -dot(normalize(lightDelta), lightDirection.xyz);\n"
++	   "        spotCookie = smoothstep(0.0, 1.0, spotCookie * lightDirection.w + lightExtra.x);\n"
++	   "        vec3 clusterColor = lightColor.rgb * spotCookie;\n"
++	   "        light += ComputePBRLightShadow(normal, lightDelta, viewVector, color, clusterColor, lightOrigin.w,\n"
++	   "            lightColor.w, specularTint, ambient, roughness, metallic, 1.0);\n"
++	   "    }\n"
++	   "    return light;\n"
+ 	   "}\n"
+ 	   "// end of generated module LightingV1\n";
+ }
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 01d0bed..0219b0b 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1,5 +1,6 @@
+ #include "WallpaperEngine/Render/Objects/CGroup.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
++#include "WallpaperEngine/Render/Objects/CModel.h"
+ #include "WallpaperEngine/Render/Objects/CParticle.h"
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+ 
+@@ -80,8 +81,16 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 	height = boundingBox.w - boundingBox.y;
+     }
+ 
+-    // TODO: CONVERSION
+-    this->m_camera->setOrthogonalProjection (width, height);
++    if (scene->camera.projection.isPerspective) {
++	// a 3D scene: WE renders it at the output's size (GH 0x1401b3f70 takes the aspect from the render target's);
++	// LWE renders the scene before it knows the output, so it takes a 1920x1080 target (scaled to the output)
++	width = 1920.0f;
++	height = 1080.0f;
++	this->m_camera->setPerspectiveProjection (width, height);
++    } else {
++	// TODO: CONVERSION
++	this->m_camera->setOrthogonalProjection (width, height);
++    }
+     // WE starts the smoothed parallax position at the centre (GH 0x1401b6c60), g_ParallaxPosition at 0.5 0.5
+     this->m_parallaxPosition = { width / 2.0f, height / 2.0f };
+ 
+@@ -94,6 +103,11 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     // setup framebuffers here as they're required for the scene setup
+     this->setupFramebuffers ();
+ 
++    // a 3D scene's models depth test against the scene's target
++    if (this->m_camera->isPerspective ()) {
++	this->getFBO ()->attachDepthBuffer ();
++    }
++
+     const uint32_t sceneWidth = this->m_camera->getWidth ();
+     const uint32_t sceneHeight = this->m_camera->getHeight ();
+ 
+@@ -411,6 +425,8 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	}
+ 
+ 	renderObject = new Objects::CParticle (*this, particleData);
++    } else if (object.is<MeshObject> ()) {
++	renderObject = new Objects::CModel (*this, *object.as<MeshObject> ());
+     } else if (object.cameraZoom != nullptr) {
+ 	// a camera object: nothing to draw, CScene::updateCamera reads its data
+ 	renderObject = new Objects::CGroup (*this, object);
+@@ -554,9 +570,16 @@ void CScene::renderFrame () {
+     // the last frame's last pass left alpha masked: the clear sets the scene's alpha (opaque) every frame, as a compose
+     // layer's background copy and a blend mode's output alpha read it
+     glColorMask (true, true, true, true);
++    // (a pass leaves depth writes off: the clear needs them)
++    glDepthMask (GL_TRUE);
+     glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+-    for (const auto& cur : this->m_objectsByRenderOrder) {
++    // a 3D scene's lights for this frame (the models' shading reads them)
++    if (this->m_camera->isPerspective ()) {
++	this->updateLights ();
++    }
++
++    for (const auto& cur : this->drawOrder ()) {
+ 	const auto& debug = this->getContext ().getContext ().config;
+ 	if (debug.objectFilter.has_value () && cur->getId () != debug.objectFilter.value ()) {
+ 	    continue;
+@@ -849,8 +872,195 @@ glm::vec2 CScene::getParallaxOffset (const Object& object) const {
+     return (origin - this->m_parallaxPosition) * amount * parallaxDepthOf (*root);
+ }
+ 
++glm::mat4 CScene::localMatrixOf (const Object& object) {
++    glm::vec3 angles (0.0f);
++    glm::vec3 scale (1.0f);
++
++    if (object.is<Image> ()) {
++	angles = object.as<Image> ()->angles->value->getVec3 ();
++	scale = object.as<Image> ()->scale->value->getVec3 ();
++    } else if (object.is<Particle> ()) {
++	angles = object.as<Particle> ()->angles->value->getVec3 ();
++	scale = object.as<Particle> ()->scale->value->getVec3 ();
++    } else {
++	angles = object.groupAngles->value->getVec3 ();
++	scale = object.groupScale->value->getVec3 ();
++    }
++
++    // WE's object matrix (GH 0x1401b5170): the rotation rows from the angles (GH 0x14020af40: R = Rz · Ry · Rx in
++    // column form) scaled per axis, then the origin
++    glm::mat4 local = glm::translate (glm::mat4 (1.0f), object.origin->value->getVec3 ());
++    local = glm::rotate (local, angles.z, glm::vec3 (0.0f, 0.0f, 1.0f));
++    local = glm::rotate (local, angles.y, glm::vec3 (0.0f, 1.0f, 0.0f));
++    local = glm::rotate (local, angles.x, glm::vec3 (1.0f, 0.0f, 0.0f));
++    return glm::scale (local, scale);
++}
++
++glm::mat4 CScene::worldMatrixOf (const Object& object) const {
++    // world = parent world · local (GH 0x1401b5170), bounded as resolveTransform is
++    const Object* chain[33];
++    int count = 0;
++    const Object* cur = &object;
++    chain[count++] = cur;
++
++    while (cur->parent.has_value () && count < 33) {
++	const CObject* parent = this->getObject (cur->parent.value ());
++	if (parent == nullptr || &parent->getObject () == &object) {
++	    break;
++	}
++	cur = &parent->getObject ();
++	chain[count++] = cur;
++    }
++
++    glm::mat4 world (1.0f);
++    for (int i = count - 1; i >= 0; --i) {
++	world = world * localMatrixOf (*chain[i]);
++    }
++
++    return world;
++}
++
++bool CScene::drawsInWorld (const CObject& object) const {
++    if (object.is<Objects::CModel> () || object.is<Objects::CParticle> ()) {
++	return true;
++    }
++
++    return object.is<Objects::CImage> () && object.as<Objects::CImage> ()->isWorldPlaced ();
++}
++
++const std::vector<CObject*>& CScene::drawOrder () {
++    if (!this->m_camera->isPerspective () || !this->getScene ().transparentSorting) {
++	return this->m_objectsByRenderOrder;
++    }
++
++    // transparentsorting: every run of objects placed in the world is drawn back to front by the distance of their
++    // origins from the eye (the order of what draws flat over the screen — full-screen layers, the bloom — stays).
++    // WE's sort key is not decoded: this is ours
++    this->m_sortedOrder = this->m_objectsByRenderOrder;
++    const glm::vec3 eye = this->m_camera->getWorldEye ();
++    auto distance = [this, &eye] (const CObject* object) {
++	return glm::length (glm::vec3 (this->worldMatrixOf (object->getObject ())[3]) - eye);
++    };
++
++    auto begin = this->m_sortedOrder.begin ();
++    while (begin != this->m_sortedOrder.end ()) {
++	if (!this->drawsInWorld (**begin)) {
++	    ++begin;
++	    continue;
++	}
++	auto end = begin;
++	std::vector<std::pair<float, CObject*>> run;
++	while (end != this->m_sortedOrder.end () && this->drawsInWorld (**end)) {
++	    run.emplace_back (distance (*end), *end);
++	    ++end;
++	}
++	std::stable_sort (run.begin (), run.end (), [] (const auto& a, const auto& b) { return a.first > b.first; });
++	for (auto& [d, object] : run) {
++	    *begin++ = object;
++	}
++	begin = end;
++    }
++
++    return this->m_sortedOrder;
++}
++
++void CScene::updateLights () {
++    // the point and spot lights the models' generated PerformLighting_V1 loops over (GH 0x1401bf270 fills
++    // g_LCluster_Origin/Color/Direction/Extra the same way; WE culls them into clusters, LWE takes the first ones):
++    //  origin (world position, radius), color (rgb · intensity, exponent), direction (a spot's world x axis,
++    //  1 / (cos inner − cos outer)), extra.x (−cos outer / (cos inner − cos outer)); a point light: 0 and 1
++    auto& lights = this->m_lights;
++    lights.count = 0;
++
++    for (const auto& object : this->getScene ().objects) {
++	if (!object->is<Light> () || lights.count >= SceneLights::Max) {
++	    continue;
++	}
++
++	const auto& light = *object->as<Light> ();
++	if (light.kind == LightData::Kind::Other || !this->isEffectivelyVisible (light)) {
++	    continue;
++	}
++
++	const glm::mat4 world = this->worldMatrixOf (light);
++	const int i = lights.count++;
++	const float intensity = light.intensity->value->getFloat ();
++
++	lights.origin[i] = glm::vec4 (glm::vec3 (world[3]), light.radius);
++	lights.color[i] = glm::vec4 (light.color->value->getVec3 () * intensity, light.exponent);
++
++	if (light.kind == LightData::Kind::Spot) {
++	    const glm::vec3 axis = glm::vec3 (world[0]);
++	    const glm::vec3 direction = glm::length (axis) > 0.0f ? glm::normalize (axis) : glm::vec3 (1.0f, 0.0f, 0.0f);
++	    const float outer = std::cos (glm::radians (light.outerCone));
++	    const float inner = std::cos (glm::radians (light.innerCone));
++	    const float scale = 1.0f / std::max (inner - outer, 1e-4f);
++
++	    lights.direction[i] = glm::vec4 (direction, scale);
++	    lights.extra[i] = glm::vec4 (-outer * scale, 0.0f, 0.0f, 0.0f);
++	} else {
++	    lights.direction[i] = glm::vec4 (0.0f, 0.0f, -1.0f, 0.0f);
++	    lights.extra[i] = glm::vec4 (1.0f, 0.0f, 0.0f, 0.0f);
++	}
++    }
++}
++
++const CScene::SceneLights& CScene::getLights () const { return this->m_lights; }
++
+ void CScene::updateCamera () {
+     const auto& camera = this->getScene ().camera;
++
++    if (this->m_camera->isPerspective ()) {
++	// a 3D scene's view (GH 0x1401b8af0): the active camera object's — the last visible one — places the eye at
++	// its world position, looking down its −z axis with its y axis up, at its fov; else the scene's camera at
++	// general.fov. Then the shake moves the eye and the centre alike (GH 0x1401c7680 with z = sin t, the amplitude
++	// in world units · 0.1). The parallax, the zoom and camera paths of a 3D camera are not done
++	glm::vec3 eye = this->m_camera->getEye ();
++	glm::vec3 center = this->m_camera->getCenter ();
++	glm::vec3 up = this->m_camera->getUp ();
++	float fov = this->m_camera->getFov ();
++
++	for (auto it = this->getScene ().objects.rbegin (); it != this->getScene ().objects.rend (); ++it) {
++	    const Object& object = **it;
++
++	    if (object.cameraZoom == nullptr || !this->isEffectivelyVisible (object)) {
++		continue;
++	    }
++
++	    const glm::mat4 world = this->worldMatrixOf (object);
++	    eye = glm::vec3 (world[3]);
++	    center = eye - glm::vec3 (world[2]);
++	    up = glm::vec3 (world[1]);
++	    if (object.cameraFov != nullptr) {
++		fov = object.cameraFov->value->getFloat ();
++	    }
++	    break;
++	}
++
++	glm::vec3 offset (0.0f);
++
++	if (camera.shake.enabled->value->getBool ()) {
++	    const float speed = camera.shake.speed->value->getFloat ();
++	    const float t = speed * speed * this->getContext ().getContext ().renderTime;
++	    glm::vec3 shake (std::cos (t), std::sin (t * 1.333f), std::sin (t));
++	    const float roughness = std::pow (camera.shake.roughness->value->getFloat (), 3.0f);
++
++	    if (roughness > 0.001f && roughness != 1.0f) {
++		const float length = glm::length (shake);
++
++		if (length > 0.0f) {
++		    shake *= std::pow (length, roughness) / length;
++		}
++	    }
++
++	    offset = shake * (camera.shake.amplitude->value->getFloat () * 0.1f);
++	}
++
++	this->m_camera->setPerspectiveFov (fov);
++	this->m_camera->setPerspectiveView (eye + offset, center + offset, up);
++	return;
++    }
++
+     const float width = this->m_camera->getWidth ();
+     const float height = this->m_camera->getHeight ();
+     const float dt = std::max (
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index bdf3f70..ad053eb 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -91,6 +91,24 @@ public:
+     void renderComposed (int ownerId, const CFBO& target);
+ 
+     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
++
++    /** An object's own matrix in WE's world: T (origin) · Rz · Ry · Rx · S (GH 0x1401b5170 / 0x14020af40) */
++    [[nodiscard]] static glm::mat4 localMatrixOf (const Object& object);
++    /** An object's matrix in WE's world with its parents' (a 3D scene's models, image layers and lights) */
++    [[nodiscard]] glm::mat4 worldMatrixOf (const Object& object) const;
++    /** Placed in a 3D scene's world (a model, a particle system, an image that isn't full-screen) */
++    [[nodiscard]] bool drawsInWorld (const CObject& object) const;
++
++    /** A 3D scene's point and spot lights this frame, packed as the generated PerformLighting_V1 reads them */
++    struct SceneLights {
++	static constexpr int Max = 8;
++	int count = 0;
++	glm::vec4 origin[Max] = {};
++	glm::vec4 color[Max] = {};
++	glm::vec4 direction[Max] = {};
++	glm::vec4 extra[Max] = {};
++    };
++    [[nodiscard]] const SceneLights& getLights () const;
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
+     [[nodiscard]] std::mt19937& getParticleRng ();
+     [[nodiscard]] const CObject* getObject (int id) const;
+@@ -116,6 +134,10 @@ protected:
+     void advanceAnimations ();
+     /** The camera update (WE GH 0x1401b8af0): shake, the active camera object's zoom, general.zoom, the parallax */
+     void updateCamera ();
++    /** Packs the 3D scene's lights for this frame (getLights) */
++    void updateLights ();
++    /** The order objects draw in this frame: the render order, a 3D scene's world objects sorted by `transparentsorting` */
++    const std::vector<CObject*>& drawOrder ();
+ 
+     friend class CWallpaper;
+ 
+@@ -137,6 +159,9 @@ private:
+     std::map<int, CObject*> m_objects = {};
+     std::vector<CObject*> m_objectsByRenderOrder = {};
+     std::vector<CObject*> m_layers = {};
++    /** drawOrder's sorted copy of the render order */
++    std::vector<CObject*> m_sortedOrder = {};
++    SceneLights m_lights = {};
+     /** the sound objects, ticked on the host's clock every frame (they don't render) */
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
