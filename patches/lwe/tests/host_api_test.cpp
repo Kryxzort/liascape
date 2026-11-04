@@ -3855,6 +3855,66 @@ static bool script_events_reach_scripts () {
 }
 
 
+// F8: the host's wp_project_hint_size is the screen the scene shows on: engine.screenResolution reads it, a change
+// sends resizeScreen (size) (WE: on every change of the screen resolution, never on creation), and
+// IInput.cursorScreenPosition is in its pixels (the scene covering it: the pointer at 48 8 of the 64×32 scene is 96 16
+// of a 128×64 screen). Unpatched: screenResolution was the scene's size, no resizeScreen, the cursor 0..1
+static bool resize_screen_reaches_scripts () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string watcher =
+        "let frames = 0, result;\n"
+        "export function resizeScreen(size) { (shared.sizes = shared.sizes || []).push(size.x + 'x' + size.y); }\n"
+        "export function update(value) {\n"
+        "  frames++;\n"
+        "  if (frames == 1) { shared.first = engine.screenResolution.x + 'x' + engine.screenResolution.y; }\n"
+        "  if (frames == 8) {\n" + js_checks (
+        "const c = input.cursorScreenPosition;\n"
+        "check('first', shared.first == '64x32');\n"
+        "check('resized', shared.sizes !== undefined && shared.sizes.join(',') == '128x64');\n"
+        "check('resolution', engine.screenResolution.x == 128 && engine.screenResolution.y == 64);\n"
+        "check('cursor', Math.abs(c.x - 96) < 1.5 && Math.abs(c.y - 16) < 1.5);\n"
+        "if (fails.length) console.log('first ' + shared.first + ' sizes ' + shared.sizes + ' cursor ' + c.x + ' ' + c.y);\n")
+        + "    result = fails.length == 0;\n  }\n  return frames < 8 ? true : result;\n}";
+    const std::string dir = script_scene (square (1, scripted ("visible", "true", watcher) + ",\"origin\":\"8 16 0\""));
+    ScriptRig rig;
+    rig.mouse = &g_mouse;
+    g_mouseX = 48.0;
+    g_mouseY = 8.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    wp_project_hint_size (rig.p, 128, 64);
+    wp_project_hint_size (rig.p, 128, 64); // the same size again: no second event
+    while (rig.frames < 12) {
+        rig.step ();
+    }
+    g_mouseX = 0.0;
+    g_mouseY = 0.0;
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == covered (4, 11), "the square vanished: a check failed (see FAILS above)");
+    // a size the host hints before the first frame is the screen from the start: no resizeScreen
+    const std::string early =
+        "let frames = 0, result;\n"
+        "export function resizeScreen(size) { shared.early = size.x; }\n"
+        "export function update(value) {\n"
+        "  if (++frames == 4) {\n" + js_checks (
+        "check('hinted', engine.screenResolution.x == 128 && engine.screenResolution.y == 64);\n"
+        "check('no resize', shared.early === undefined);\n") + "    result = fails.length == 0;\n  }\n"
+        "  return frames < 4 ? true : result;\n}";
+    const std::string dir2 = script_scene (square (1, scripted ("visible", "true", early) + ",\"origin\":\"8 16 0\""));
+    ScriptRig rig2;
+    rig2.loaded = [] (wp_project* p) { wp_project_hint_size (p, 128, 64); };
+    CHECK (rig2.open (dir2), "load/build of %s failed", dir2.c_str ());
+    while (rig2.frames < 6) {
+        rig2.step ();
+    }
+    CHECK (rig2.row () == covered (4, 11), "hinted before the first frame: a check failed (see FAILS above)");
+    return true;
+}
+
 // a material's `alphatocoverage` blending sets the ALPHATOCOVERAGE combo (the stock shaders cut the alpha there and
 // discard on GLSL) and draws unblended, `additive` sets ADDITIVE (WE's GH 0x140183570). The layer's shader discards
 // under ALPHATOCOVERAGE and drops green under ADDITIVE. Unpatched: alphatocoverage was "unsupported, as normal" (the
@@ -5029,6 +5089,7 @@ int main (int argc, char** argv) {
     run ("animation_layer_api", animation_layer_api);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
+    run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
     run ("blending_sets_combos", blending_sets_combos);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
     run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
