@@ -1119,11 +1119,20 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
-    - [ ] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M.
+    - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
+          `c62d777`): a `general.hdr` scene renders into half float targets and blooms with WE's HDR chain
+          (hdr_downsample_bloom → hdr_downsample levels → hdr_upsample(_cubic) back up → combine, decoded GH
+          0x1401afbf0 / 0x1401b3b10 / 0x1401b42b0); effect FBOs take the format they name (rg88, r8, the f formats,
+          rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 64/64 (2 new); corpus 93/96
+          on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
+          - [ ] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
+          - [ ] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 (set from the "postprocessing" setting
+                `ultra`, GH 0x14013f860). Today: HDR whenever `general.hdr`, unless WPENGINE_HDR=0.
+          - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
     - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
           E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
           also carries B13's 0055): G24, G22, G25, G26 point/spot (E13), G28 (E14), `transparentsorting`, camera
-          objects and the 3D shake; decoded addresses in the audit's "B14 result". host_api_test 66/66 (4 new,
+          objects and the 3D shake; decoded addresses in the audit's "B14 result". host_api_test 68/68 (4 new,
           failing on 36ad6a0); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
           - [ ] Left: shadows (`_rt_shadowAtlas`), light cookies, volumetrics, tube/directional lights; shape objects
                 (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and

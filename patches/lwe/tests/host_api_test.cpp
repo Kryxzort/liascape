@@ -3567,6 +3567,111 @@ static bool text_wraps_and_limits () {
     return true;
 }
 
+// B13 (docs/player/spikes/we-lwe-gap-audit.md E35, E23): HDR scenes and FBO formats, decoded from wallpaper64.exe
+// 2.8.485. A scene with general.hdr renders into half float targets (WE: the scene RGB161616f, composites and
+// rgba_backbuffer FBOs RGBA16161616f; GH 0x1401af5b0, 0x140216080) and blooms with WE's HDR chain (hdr_downsample_bloom,
+// hdr_downsample, hdr_upsample(_cubic), combine_hdr_upsample; GH 0x1401afbf0, 0x1401b3b10, 0x1401b42b0)
+
+// a solid layer material `name` adding `rgb` (blending additive), as models/<name>.json
+static std::vector<std::string> b13_adder (const std::string& dir, const std::string& name, const std::string& rgb) {
+    auto files = b7_layer (dir, name, "gl_FragColor = vec4(" + rgb + ", 1.0);");
+    const std::string material = dir + "/materials/" + name + ".json";
+    std::string json = read_file (material);
+    const std::string normal = "\"blending\":\"normal\"";
+    json.replace (json.find (normal), normal.size (), "\"blending\":\"additive\"");
+    write_file (material, json);
+    return files;
+}
+
+// two additive 0.6 squares at x 16 make 1.2 (red, green) in an HDR scene; one at x 48 stays 0.6. HDR bloom (threshold
+// 1, feather 0.1) glows only around the first: values above 1 survive in the half float scene, and below the knee
+// (0.9) nothing blooms. Unpatched: the scene was RGBA8 (1.2 clipped to 1) and bloomed with the LDR chain, its
+// bloomthreshold 0.3 lighting both squares; bloomhdr* were never read
+static bool hdr_bloom_is_wes_chain () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& hdr, std::array<std::array<unsigned char, 4>, 3>& out) {
+        const std::string dir = camera_scene (
+            hdr + ",\"bloom\":true,\"bloomstrength\":4,\"bloomthreshold\":0.3,\"bloomhdrstrength\":8,\"bloomhdrthreshold\":1.0,"
+                  "\"bloomhdrfeather\":0.1,\"bloomhdrscatter\":1.0,\"bloomhdriterations\":3",
+            b7_object (1, "b13add", 16, "8 8") + "," + b7_object (2, "b13add", 16, "8 8") + "," + b7_object (3, "b13add", 48, "8 8"));
+        ScriptRig rig;
+        rig.extra = b13_adder (dir, "b13add", "0.6, 0.6, 0.0");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        out = { pixel_at (rig, 16), pixel_at (rig, 23), pixel_at (rig, 55) };
+        return true;
+    };
+    std::array<std::array<unsigned char, 4>, 3> hdr {}, ldr {};
+    CHECK (run ("\"hdr\":true", hdr), "load/build of the HDR scene failed");
+    CHECK (run ("\"hdr\":false", ldr), "load/build of the LDR scene failed");
+    printf ("    HDR: square %d %d %d, 3 px past the bright square %d %d %d, past the dim one %d %d %d\n", hdr[0][0], hdr[0][1],
+            hdr[0][2], hdr[1][0], hdr[1][1], hdr[1][2], hdr[2][0], hdr[2][1], hdr[2][2]);
+    printf ("    LDR (same scene, hdr false): past the bright square %d %d %d, past the dim one %d %d %d\n", ldr[1][0], ldr[1][1],
+            ldr[1][2], ldr[2][0], ldr[2][1], ldr[2][2]);
+    CHECK (hdr[0][0] == 255 && hdr[0][2] >= 125, "the bright square isn't white-yellow on blue (%d %d %d)", hdr[0][0], hdr[0][1],
+           hdr[0][2]);
+    CHECK (hdr[1][0] >= 8 && hdr[1][1] >= 8, "no HDR glow past the square above 1 (%d %d)", hdr[1][0], hdr[1][1]);
+    CHECK (hdr[2][0] < 3 && hdr[2][1] < 3, "an HDR glow past the square below the threshold (%d %d)", hdr[2][0], hdr[2][1]);
+    CHECK (ldr[2][0] >= 4, "the LDR chain (threshold 0.3) didn't glow past the dim square (r=%d)", ldr[2][0]);
+    return true;
+}
+
+// an effect FBO is the format it names: rg88 keeps red and green only (blue reads 0), rgba_backbuffer is half float
+// in an HDR scene (2.0 · 0.25 = 0.5) and 8-bit otherwise (clipped: 1 · 0.25). Unpatched: every FBO was RGBA8
+static bool fbo_formats_as_written () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (bool hdr, std::array<unsigned char, 4>& rg, std::array<unsigned char, 4>& wide) {
+        const std::string dir = camera_scene (hdr ? "\"hdr\":true" : "\"hdr\":false",
+            b7_object (1, "b13base", 16, "8 8", ",\"effects\":[{\"id\":2,\"name\":\"rg\",\"file\":\"effects/b13rg/effect.json\",\"visible\":true}]")
+                + "," + b7_object (3, "b13base", 48, "8 8",
+                                   ",\"effects\":[{\"id\":4,\"name\":\"w\",\"file\":\"effects/b13wide/effect.json\",\"visible\":true}]"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "b13base", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+        const std::string sampler = "uniform sampler2D g_Texture0;\n";
+        for (const auto& f : { b7_layer (dir, "b13put", "gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);", "", true, sampler),
+                               b7_layer (dir, "b13big", "gl_FragColor = vec4(2.0, 0.0, 0.0, 1.0);", "", true, sampler),
+                               b7_layer (dir, "b13get", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);", "", true, sampler),
+                               b7_layer (dir, "b13qtr", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb * 0.25, 1.0);", "", true,
+                                         sampler) }) {
+            rig.extra.insert (rig.extra.end (), f.begin (), f.end ());
+        }
+        mkdir ((dir + "/effects").c_str (), 0755);
+        const auto effect = [&dir, &rig] (const std::string& name, const std::string& format, const std::string& put, const std::string& get) {
+            mkdir ((dir + "/effects/" + name).c_str (), 0755);
+            write_file (dir + "/effects/" + name + "/effect.json",
+                        "{\"name\":\"" + name + "\",\"fbos\":[{\"name\":\"_x\",\"format\":\"" + format + "\",\"scale\":1}],\"passes\":["
+                        "{\"material\":\"materials/" + put + ".json\",\"target\":\"_x\"},"
+                        "{\"material\":\"materials/" + get + ".json\",\"bind\":[{\"name\":\"_x\",\"index\":0}]}]}\n");
+            rig.extra.push_back ("effects/" + name + "/effect.json");
+        };
+        effect ("b13rg", "rg88", "b13put", "b13get");
+        effect ("b13wide", "rgba_backbuffer", "b13big", "b13qtr");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rg = pixel_at (rig, 16);
+        wide = pixel_at (rig, 48);
+        return true;
+    };
+    std::array<unsigned char, 4> rgH {}, wideH {}, rgL {}, wideL {};
+    CHECK (run (true, rgH, wideH), "load/build of the HDR scene failed");
+    CHECK (run (false, rgL, wideL), "load/build of the LDR scene failed");
+    printf ("    rg88 FBO of (0.2 0.4 0.6): %d %d %d (want 51 102 0); rgba_backbuffer of 2.0, read · 0.25: HDR %d (want 127), "
+            "LDR %d (want 64)\n", rgL[0], rgL[1], rgL[2], wideH[0], wideL[0]);
+    CHECK (rgb_near (rgL, 51, 102, 0) && rgb_near (rgH, 51, 102, 0), "the rg88 FBO isn't red-green only (%d %d %d)", rgL[0], rgL[1], rgL[2]);
+    CHECK (near (wideH[0], 127, 3), "rgba_backbuffer isn't half float in an HDR scene (r=%d)", wideH[0]);
+    CHECK (near (wideL[0], 64, 3), "rgba_backbuffer isn't 8-bit in an LDR scene (r=%d)", wideL[0]);
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // B14: 3D scenes (docs/player/spikes/we-lwe-gap-audit.md G19–G29, E13, E14). wallpaper64.exe 2.8.485: the scene loader
 // GH 0x1401b6c60 (no orthogonalprojection = perspective), the perspective GH 0x1401b3f70, the object matrix
@@ -3881,6 +3986,8 @@ int main (int argc, char** argv) {
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);
     run ("composite_a_is_what_the_last_pass_reads", composite_a_is_what_the_last_pass_reads);
     run ("compose_layer_draws_its_children", compose_layer_draws_its_children);
+    run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
+    run ("fbo_formats_as_written", fbo_formats_as_written);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
