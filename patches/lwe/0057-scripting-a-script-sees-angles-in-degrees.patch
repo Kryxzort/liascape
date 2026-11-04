@@ -1,0 +1,207 @@
+From f89c0d714727f557172e8cdd9dff5f6329a3344d Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 14:18:54 +0530
+Subject: [PATCH 57/60] scripting: a script sees angles in degrees
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SceneScript's `angles` are degrees; the scene file and the renderer keep radians. The property scripts'
+value (init, update and the value they return) and a layer's `angles` read or written through thisLayer /
+getLayer now go through 180 / π. The library's scripts are written for degrees: 2679248947 sets
+`value.z = newAngle * WEMath.rad2deg`, 2134765860 spins its fan by `(t · 2) % 1 · 360`, 3477054430 labels a
+slider "Max Rotation (degrees)", 3219908811 swings bars by ±30. 3414858021 sways the girl's body by
+cursorWorldPosition.x · −0.0005 and her head and arm by −0.0015 / −0.001 — about one degree with the cursor
+at the centre; taken as radians the body turned 55° and her head (attached to the body's neck bone) and arm
+left the screen.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md, 3414858021 result
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Adapters/ScriptableObjectAdapter.cpp      |  4 +-
+ .../Scripting/ScriptEngine.cpp                | 57 ++++++++++++++++---
+ .../WallpaperEngine/Scripting/ScriptEngine.h  | 11 ++++
+ 3 files changed, 63 insertions(+), 9 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 278fe56..56b113d 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -288,7 +288,7 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+     const auto& properties = object.getProperties ();
+ 
+     if (const auto it = properties.find (name); it != properties.end ()) {
+-	return engine.dynamicToJs (it->second.value);
++	return engine.dynamicToJs (it->second.value, ScriptEngine::scriptScaleOf (name));
+     }
+ 
+     // IImageLayer.size / ITextLayer.size: the layer's size in pixels
+@@ -363,7 +363,7 @@ int scriptableobject_property_set (
+ 
+     // a registered property (origin, scale, angles, visible, alpha, color, text, volume, …) takes the value
+     if (const auto it = properties.find (name); it != properties.end ()) {
+-	container->adapter.getEngine ().jsToDynamic (val, it->second.value);
++	container->adapter.getEngine ().jsToDynamic (val, it->second.value, ScriptEngine::scriptScaleOf (name));
+ 	return 1;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index af661ac..5cdb160 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -188,12 +188,44 @@ JSValue ScriptEngine::dynamicToJs (DynamicValue& value) const {
+     }
+ }
+ 
+-static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target);
++static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target, float scale = 1.0f);
+ 
+ bool ScriptEngine::jsToDynamic (JSValueConst value, DynamicValue& target) const {
+     return jsToDynamicValue (this->m_context, value, target);
+ }
+ 
++bool ScriptEngine::jsToDynamic (JSValueConst value, DynamicValue& target, float scale) const {
++    return jsToDynamicValue (this->m_context, value, target, scale);
++}
++
++float ScriptEngine::scriptScaleOf (const std::string& property) {
++    // SceneScript's angles are degrees: scripts write `value.z = angle * WEMath.rad2deg` (2679248947), spin by
++    // `% 1.0 * 360` (2134765860), label sliders "Max Rotation (degrees)" (3477054430) and sway a body by
++    // cursor x · −0.0005 (3414858021: 1° at the centre, 55° read as radians); scene.json and the renderer keep radians
++    return property == "angles" ? static_cast<float> (180.0 / M_PI) : 1.0f;
++}
++
++JSValue ScriptEngine::dynamicToJs (DynamicValue& value, float scale) const {
++    if (scale == 1.0f) {
++	return this->dynamicToJs (value);
++    }
++
++    switch (value.getType ()) {
++	case DynamicValue::Float:
++	    return JS_NewFloat64 (this->m_context, value.getFloat () * scale);
++	case DynamicValue::Int:
++	    return JS_NewFloat64 (this->m_context, value.getInt () * scale);
++	case DynamicValue::Vec2:
++	    return this->newVec (value.getVec2 () * scale);
++	case DynamicValue::Vec3:
++	    return this->newVec (value.getVec3 () * scale);
++	case DynamicValue::Vec4:
++	    return this->newVec (value.getVec4 () * scale);
++	default:
++	    return this->dynamicToJs (value);
++    }
++}
++
+ JSValue ScriptEngine::newVec (int components, const float* values) const {
+     JSValue ctor = this->m_vecCtors[components - 2];
+ 
+@@ -228,9 +260,14 @@ std::string ScriptEngine::readScriptAsset (const std::string& path) const {
+  *
+  * @return false when nothing was written
+  */
+-static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target) {
++static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& target, float scale) {
+     const int tag = JS_VALUE_GET_TAG (val);
+ 
++    if (tag == JS_TAG_INT && scale != 1.0f) {
++	target.update (static_cast<float> (JS_VALUE_GET_INT (val) / scale), DynamicValue::UpdateSource::Script);
++	return true;
++    }
++
+     if (tag == JS_TAG_INT) {
+ 	target.update (JS_VALUE_GET_INT (val), DynamicValue::UpdateSource::Script);
+ 	return true;
+@@ -242,7 +279,7 @@ static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& ta
+     }
+ 
+     if (JS_TAG_IS_FLOAT64 (tag)) {
+-	target.update (static_cast<float> (JS_VALUE_GET_FLOAT64 (val)), DynamicValue::UpdateSource::Script);
++	target.update (static_cast<float> (JS_VALUE_GET_FLOAT64 (val) / scale), DynamicValue::UpdateSource::Script);
+ 	return true;
+     }
+ 
+@@ -269,6 +306,7 @@ static bool jsToDynamicValue (JSContext* ctx, JSValueConst val, DynamicValue& ta
+ 
+     while (count < 4 && JS_IsNumber (components[count])) {
+ 	JS_ToFloat64 (ctx, &v[count], components[count]);
++	v[count] /= scale;
+ 	count++;
+     }
+ 
+@@ -833,7 +871,12 @@ void ScriptEngine::queueScript (
+     // evaluated on the next tick: objects queue their scripts while the scene is still being built, and a script's
+     // top level may already look up other layers (thisScene.getLayer) or this layer's other properties
+     this->m_scriptModules.emplace_back (
+-	new LoadedModule { .key = key, .source = *source, .value = currentValue, .object = object, .effect = effect }
++	new LoadedModule { .key = key,
++			   .source = *source,
++			   .value = currentValue,
++			   .object = object,
++			   .effect = effect,
++			   .scriptScale = scriptScaleOf (key.substr (0, key.rfind ('_'))) }
+     );
+     this->m_pendingModules = true;
+ }
+@@ -959,7 +1002,7 @@ void ScriptEngine::callModule (LoadedModule& module, const char* name, int argc,
+     if (JS_IsException (result)) {
+ 	this->logModuleError (module, name);
+     } else if (writeBack) {
+-	jsToDynamicValue (ctx, result, module.value);
++	jsToDynamicValue (ctx, result, module.value, module.scriptScale);
+     }
+ 
+     JS_FreeValue (ctx, result);
+@@ -1007,7 +1050,7 @@ void ScriptEngine::startPendingScripts () {
+ 
+ 	module.initialized = true;
+ 	started.push_back (&module);
+-	JSValue args[] = { this->dynamicToJs (module.value) };
++	JSValue args[] = { this->dynamicToJs (module.value, module.scriptScale) };
+ 	this->callModule (module, "init", 1, args, true);
+ 	JS_FreeValue (this->m_context, args[0]);
+     }
+@@ -1272,7 +1315,7 @@ void ScriptEngine::tick () {
+     // run all update methods
+     for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
+ 	auto& module = *this->m_scriptModules[i];
+-	JSValue args[] = { this->dynamicToJs (module.value) };
++	JSValue args[] = { this->dynamicToJs (module.value, module.scriptScale) };
+ 	this->callModule (module, "update", 1, args, true);
+ 	JS_FreeValue (this->m_context, args[0]);
+     }
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 243b6c6..92fb054 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -60,6 +60,8 @@ public:
+ 	ScriptableObject& object;
+ 	/** a script on an effect's `visible`: thisObject is that effect (IEffect), not the layer */
+ 	const ImageEffect* effect = nullptr;
++	/** the script's unit per stored unit: a script sees `angles` in degrees, the layer keeps radians */
++	float scriptScale = 1.0f;
+ 	/** the module namespace once evaluated (JS_UNDEFINED before, or when it failed to load) */
+ 	JSValue ns = JS_UNDEFINED;
+ 	bool evaluated = false;
+@@ -82,11 +84,20 @@ public:
+     /** A module's top level is being evaluated (not one of its exported functions) */
+     bool isEvaluatingModule () const { return m_evaluatingModule; }
+     JSValue dynamicToJs (DynamicValue& value) const;
++    /** dynamicToJs, every numeric component times `scale` (scriptScaleOf) */
++    JSValue dynamicToJs (DynamicValue& value, float scale) const;
++    /**
++     * How a layer property is scaled for a script: `angles` is degrees in SceneScript and radians in the scene
++     * (and here), so 180 / π; everything else 1
++     */
++    static float scriptScaleOf (const std::string& property);
+     /**
+      * Writes a script value into `target` (numbers, booleans, strings, Vec2/3/4); undefined/null write nothing
+      * @return false when nothing was written
+      */
+     bool jsToDynamic (JSValueConst value, DynamicValue& target) const;
++    /** jsToDynamic, every numeric component divided by `scale` (scriptScaleOf) */
++    bool jsToDynamic (JSValueConst value, DynamicValue& target, float scale) const;
+     /** A new instance of the scripts' own `Vec2`/`Vec3`/`Vec4` class (Wallpaper Engine's baseclasses.js) */
+     JSValue newVec (const glm::vec2& value) const;
+     JSValue newVec (const glm::vec3& value) const;

@@ -1,0 +1,46 @@
+From b6e2878e81bd521ef2b4847f5a84f272ff23060b Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 14:18:54 +0530
+Subject: [PATCH 60/60] render: a parent that wasn't built still places its
+ children
+
+resolveTransform walked the parent chain through the built render objects and stopped at the first one
+missing, so the children of a layer that failed to build (a shader that doesn't compile) were placed as if
+it and everything above it were the scene's root: 3414858021's head pieces sat at the bottom-left corner of
+the screen. The chain now continues through the parent's scene data.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md, 3414858021 result
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/CObject.cpp | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/CObject.cpp b/src/core/WallpaperEngine/Render/CObject.cpp
+index a58106b..67fc71e 100644
+--- a/src/core/WallpaperEngine/Render/CObject.cpp
++++ b/src/core/WallpaperEngine/Render/CObject.cpp
+@@ -70,10 +70,20 @@ CObject::ResolvedTransform CObject::resolveTransform (const Object& object) cons
+ 	    break;
+ 	}
+ 	const auto* parentObject = this->getScene ().getObject (current->parent.value ());
+-	if (parentObject == nullptr) {
++	const Object* parentData = parentObject != nullptr ? &parentObject->getObject () : nullptr;
++	if (parentData == nullptr) {
++	    // a parent that wasn't built (a layer whose shaders failed) still places its children: its scene data
++	    for (const auto& candidate : this->getScene ().getScene ().objects) {
++		if (candidate->id == current->parent.value ()) {
++		    parentData = candidate.get ();
++		    break;
++		}
++	    }
++	}
++	if (parentData == nullptr) {
+ 	    break;
+ 	}
+-	current = &parentObject->getObject ();
++	current = parentData;
+ 	chain[count++] = current;
+     }
+ 

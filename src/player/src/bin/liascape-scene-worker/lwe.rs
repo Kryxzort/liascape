@@ -529,6 +529,9 @@ impl Drop for Scene {
 /// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
 /// `--audio-dump` (a live change, as the worker applies `SetProperty`), or without `--audio-dump`
 /// `T` s into the frames, after writing the frame before it as `<out>/lwe-smoke-before-<T>s.png`.
+/// `--pointer X0,Y0:X1,Y1` moves the pointer (native scene px, y down, as the host feeds it) in a straight
+/// line from the first point at frame 1 to the second at the last frame — a scripted cursor path, so a
+/// pointer-driven layer (a trail, parallax, a cursor-follow script) can be checked for direction.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` every frame (synthetic: nothing is
 /// played), for audio-responsive scenes — compare with a run without it.
 /// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
@@ -542,6 +545,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut audio_dump = 0.0f32;
     let mut tone = 0.0f32;
     let mut paced = true;
+    let mut pointer: Option<[f64; 4]> = None;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
     let mut props_at: Vec<(f32, String, serde_json::Value)> = Vec::new();
     let prop = |kv: Option<&String>| -> Option<(String, serde_json::Value)> {
@@ -559,6 +563,12 @@ pub fn smoke(args: &[String]) -> ! {
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--tone" => tone = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--unpaced" => paced = false,
+            "--pointer" => {
+                pointer = it.next().and_then(|v| {
+                    let n: Vec<f64> = v.split([',', ':']).filter_map(|x| x.parse().ok()).collect();
+                    (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
+                })
+            }
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
                 let at = it.next().and_then(|v| v.parse().ok());
@@ -571,7 +581,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--unpaced]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced]"
         );
         std::process::exit(2)
     };
@@ -584,6 +594,7 @@ pub fn smoke(args: &[String]) -> ! {
         audio_dump,
         tone,
         paced,
+        pointer,
         &props,
         &props_at,
     ) {
@@ -606,6 +617,7 @@ fn run_smoke(
     audio_dump: f32,
     tone: f32,
     paced: bool,
+    pointer: Option<[f64; 4]>,
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
 ) -> Result<String, String> {
@@ -704,6 +716,10 @@ fn run_smoke(
                 })
                 .collect();
             scene.set_input(&sine);
+        }
+        if let Some([x0, y0, x1, y1]) = pointer {
+            let k = if frames > 1 { (f - 1) as f64 / (frames - 1) as f64 } else { 1.0 };
+            scene.set_pointer(x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, 0);
         }
         let s = std::time::Instant::now();
         scene.render(t, fbo_id);

@@ -330,3 +330,18 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     has had its full 33 ms (6 switches at 144 Hz, real libmpv) — never before.
   - Still yours: a battery re-run on the real session (`programs.sh dropout` with `P3_RECORD`) to see the
     23 zero runs gone on your outputs.
+
+- **3414858021 (the rainy-window girl) — your report, fixed (fork patches 0057–0060, pin `b6e2878`).** None of it
+  came from today's batches; it was broken from the start, as you said.
+  - **The head:** the scene's "follow" scripts turn the body, head and arm by about a degree as the cursor moves.
+    Wallpaper Engine's scripts work in degrees; LWE took them as radians, so the body turned 55° and the head (pinned
+    to the body's neck) and the arm flew off the screen — the grey arch was the turned body. On top of that, the
+    layer holding the head, eyes and hair (a compose layer with an eye-tracking and a depth effect) failed to
+    compile on four things Wallpaper Engine's compiler accepts, so it wasn't drawn at all. Both fixed; the hard
+    bright band across the lower part of the screen was a side effect of that broken layer and is gone too.
+  - **The mouse trail:** it followed the pointer mirrored top-to-bottom (pointer down → trail up). Fixed; this
+    affects every scene with a cursor trail.
+  - Also fixed: script rotations in other scenes (a fan, audio bars, a loading spinner) now turn in degrees too.
+  - Not done: the hair/cloth sway effect in this scene still doesn't run (making it compile made the left curtain
+    vanish, so I left it off — in TODO); "WEDNESDAY" still touches the right edge.
+  - Corpus 96/96 ok on both cores, none newly blank; host_api_test 71/71 (3 new, red before); player tests 740/0/3.

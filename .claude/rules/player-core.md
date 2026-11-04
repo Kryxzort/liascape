@@ -3951,9 +3951,11 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   native size or `Err` when ≤ 1, `render(t, fbo)` (native-sized FBO; no flip, alpha 0 — the caller
   forces 1), `pull_audio`, `audio_streams`, `audio_driver`. Task 7's `render.rs` builds on it.
   **`liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S] [--audio-dump S]
-  [--prop name=value]… [--prop-at T name=value]…`** (`--prop`: a user property before the build, like
+  [--prop name=value]… [--prop-at T name=value]… [--pointer X0,Y0:X1,Y1]`** (`--prop`: a user property before the build, like
   `scene_props`; `--prop-at`: set T s into the dump, live; the dump renders at 30 fps of scene time meanwhile,
-  so 0018's playlists advance) renders a
+  so 0018's playlists advance; `--pointer`: a scripted pointer, native scene px y down as the host feeds it, in a
+  straight line from the first point at frame 1 to the second at the last — for a trail / cursor-follow
+  direction, 2026-11-04) renders a
   real scene offscreen (frames at 30 fps of scene time, paced to the wall clock: libmpv decodes video
   textures in real time, so an unpaced run showed 3426575339 / 3432876246 / 3556794116 black; `--unpaced`
   for the old as-fast-as-possible run), writes `lwe-smoke-1s.png`/`-3s.png`

@@ -2001,6 +2001,86 @@ static bool parallax_follows_the_pointer () {
     return true;
 }
 
+// 3414858021 (the owner's report): a pointer-linked control point (flags 1) is where the pointer is, y down from the
+// top like the host's pointer. A system whose emitter spawns at control point 0, the pointer at (16, 6): its particle
+// is on the row of a reference system's at WE's world (40, 26) (unpatched: the pointer was taken y up, the particle
+// at world y 6, so a trail went up when the pointer went down)
+static bool particle_pointer_is_y_down () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const char* cp0, const char* emitterCp) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":5,\"controlpoint\":[") + cp0 + "],"
+             + "\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":1" + emitterCp + "}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4}," + white + "," + life + "]}\n";
+    };
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "pointer.json", 16, 16) + "," + particle_object (2, "ref.json", 40, 26), "0 0 0",
+        { { "pointer.json", sys ("{\"id\":0,\"flags\":1,\"offset\":\"0 0 0\"}", ",\"controlpoint\":0") },
+          { "ref.json", sys ("{\"id\":0}", "") } },
+        files);
+    ScriptRig rig;
+    rig.mouse = &g_mouse;
+    g_mouseX = 16.0;
+    g_mouseY = 6.0;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 10; i++) {
+        rig.step ();
+    }
+    auto rowOf = [&] (int x) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        for (int y = 0; y < 32; y++) {
+            read_pixel (rig.fbo, x, y, px);
+            if (px[0] > 128) {
+                return y;
+            }
+        }
+        return -1;
+    };
+    const int pointerRow = rowOf (16), referenceRow = rowOf (40);
+    printf ("    pointer at y 6 (down): particle on row %d; reference at world y 26: row %d\n", pointerRow, referenceRow);
+    CHECK (pointerRow >= 0 && referenceRow >= 0 && std::abs (pointerRow - referenceRow) <= 1,
+           "the pointer's particle (row %d) isn't on the reference's row (%d)", pointerRow, referenceRow);
+    return true;
+}
+
+// SceneScript's angles are degrees (2679248947 writes `value.z = angle * WEMath.rad2deg`), the scene's radians: a
+// 4x24 bar whose angles script returns z 90 lies across (lit 10 px left and right of its centre, not above); a square
+// whose scene angles are z π/2 reads thisLayer.angles.z as 90 (its alpha script returns z / 180: red ≈ 128)
+// (unpatched: 90 was taken as radians, the bar at 116.6°, and the script read 1.5708, red ≈ 2)
+static bool script_angles_are_degrees () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string bar = white_square (1, scripted ("angles", "\"0 0 0\"", "export function update(value) {\n  return new Vec3(0, 0, 90);\n}")
+                                         + ",\"origin\":\"16 16 0\"");
+    bar.replace (bar.find ("\"size\":\"8 8\""), 12, "\"size\":\"4 24\"");
+    const std::string reader = white_square (
+        2, scripted ("alpha", "1", "export function update(value) {\n  return thisLayer.angles.z / 180;\n}")
+               + ",\"origin\":\"48 16 0\",\"angles\":\"0 0 1.5707963\"");
+    const std::string dir = script_scene (bar + "," + reader);
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char left[4] = {}, right[4] = {}, above[4] = {}, half[4] = {};
+    read_pixel (rig.fbo, 6, 16, left);
+    read_pixel (rig.fbo, 26, 16, right);
+    read_pixel (rig.fbo, 16, 26, above);
+    read_pixel (rig.fbo, 48, 16, half);
+    printf ("    bar at z 90°: left %d right %d above %d; thisLayer.angles.z / 180 → red %d\n", left[0], right[0], above[0],
+            half[0]);
+    CHECK (left[0] > 200 && right[0] > 200 && above[0] < 60, "the bar isn't turned 90° (left %d right %d above %d)", left[0],
+           right[0], above[0]);
+    CHECK (near (half[0], 127.5, 6), "thisLayer.angles.z of a π/2 layer isn't 90 (red %d)", half[0]);
+    return true;
+}
+
 // g_ParallaxPosition = the smoothed position over the scene size, clamped 0..1 (unpatched: never fed, 0)
 static bool parallax_position_uniform () {
     if (!script_tests_can_run ()) {
@@ -2218,6 +2298,33 @@ static void b9_layer (const std::string& dir, const std::string& uniforms, const
 static std::string b9_object (int id, int x) {
     return "{\"id\":" + std::to_string (id) + ",\"name\":\"b9\",\"image\":\"models/b9.json\",\"size\":\"8 8\",\"origin\":\"" + std::to_string (x)
          + " 16 0\"}";
+}
+
+// WE's effect shaders are HLSL-era sources, compiled leniently where GLSL 3.30 refuses (3414858021's compose layer
+// holding the girl's head failed on all four, so neither it nor anything under it was drawn): a backslash continues a
+// line, a fragment unit may assign to its varyings, a vec4 times a vec2 is truncated to a vec2, and an #endif with
+// no #if is dropped. A layer whose shaders use each draws red 1 (0.5 doubled) and green 0.5 (0.25 doubled)
+// (unpatched: its material didn't build, the 0 0 0.5 clear shows)
+static bool shaders_compile_like_hlsl () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "", "");
+    write_file (dir + "/shaders/b9.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nvarying vec2 v_Half;\n"
+                                          "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+                                          "\tvec4 wide = vec4(0.5, 0.25, 9.0, 9.0);\n\tvec2 scale = vec2(1.0, 1.0);\n"
+                                          "\tvec2 h = wide * scale;\n\tv_Half = h;\n#if 1\n#endif\n#endif\n}\n");
+    write_file (dir + "/shaders/b9.frag", "varying vec2 v_Half;\nvoid main() {\n\tv_Half *= 2.0;\n"
+                                          "\tgl_FragColor = vec4(v_Half.x, \\\n\t                    v_Half.y, 0.0, 1.0);\n}\n");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 16, 16, px);
+    printf ("    the layer's centre: %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], 255, 3) && near (px[1], 127.5, 3) && px[2] < 4, "want 255 128 0, got %d %d %d", px[0], px[1], px[2]);
+    return true;
 }
 
 // g_Frametime (the frame's dt), g_PointerState (xy held, z the press frame), g_Daytime (the local time of day) and
@@ -3972,6 +4079,9 @@ int main (int argc, char** argv) {
     run ("puppet_warp_as_we", puppet_warp_as_we);
     run ("parallax_follows_the_pointer", parallax_follows_the_pointer);
     run ("parallax_position_uniform", parallax_position_uniform);
+    run ("particle_pointer_is_y_down", particle_pointer_is_y_down);
+    run ("script_angles_are_degrees", script_angles_are_degrees);
+    run ("shaders_compile_like_hlsl", shaders_compile_like_hlsl);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);

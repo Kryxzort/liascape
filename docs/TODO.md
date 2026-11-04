@@ -1159,6 +1159,19 @@ Two bug classes kept recurring; fix the class, not the instance:
                 particle shaders; the 3D camera's parallax, zoom and paths; G20 perspectiveoverridefov, G21/E43
                 `perspective` and `depthtest` layers, G23 camerafade, sortorder/customsortorder; hit-testing
                 world-placed layers; WE's sort key and an output-sized 3D target; WE captures of the three scenes.
+    - [x] **3414858021 (owner report): head gone, cursor trail y-inverted.** **Done 2026-11-04** (fork patches
+          0057–0060, pin `b6e2878`): SceneScript `angles` are degrees (scripts turned the body 55°, the head and arm
+          left the screen); a pointer-linked particle control point was y up in a y-down space (trail mirrored);
+          the compose layer holding the head didn't compile (line continuation, a written varying, a vec4×vec2
+          truncation, a stray `#endif` — all accepted now as WE does); a failed parent orphaned its children. The
+          bright band across the lower screen went with the compose layer. Result: the audit's "3414858021
+          result". Smoke: `--pointer X0,Y0:X1,Y1`.
+          - [ ] `auto_sway` (3235948233, 3414858021's hair/cloth sway): `M_PI` from `common.h` used above where LWE
+                pastes includes; hoisting the include's `#define`s builds it but the left cloth then vanishes — read
+                the effect before enabling it.
+          - [ ] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — check in WE.
+          - [ ] Locate WE's SceneScript angles binding (xrefs of 0x1404928d0 / 0x140492628) to make the degrees
+                Observed in the binary, not only in scene scripts.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy

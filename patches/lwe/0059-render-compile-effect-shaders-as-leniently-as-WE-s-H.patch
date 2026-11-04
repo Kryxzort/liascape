@@ -1,0 +1,360 @@
+From 0c8d02b220bc55ede0aa7f17181627db1ca4ac27 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 14:18:54 +0530
+Subject: [PATCH 59/60] render: compile effect shaders as leniently as WE's
+ HLSL path
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Workshop effects are written against WE's compiler, which accepts what GLSL 3.30 refuses. Four of them, all
+in 3414858021's compose layer (the one holding the girl's head, eyes and hair, with the deformer_simulation
+and iris_movement__ effects), made the layer fail to build, so nothing under it was drawn:
+
+- a backslash at the end of a line continues it (depthparallax.frag splits an expression over two lines;
+  glslang splices only from GLSL 4.20) — spliced before parsing, the lines put back after the joined one so
+  error line numbers still match;
+- a fragment unit may assign to its varyings (depthparallax.frag: `v_Depth += …`; HLSL inputs are plain
+  parameters) — such a varying is read into a global copy at the top of main, its other uses go to the copy;
+- a wider float vector with a narrower one truncates to the narrower (iris_movement__.vert:
+  `vec2 da = transformedCursorPosition * g_CursorScale`, a vec4 times a vec2) — from glslang's "wrong operand
+  types" / "cannot convert" error, the line's variables declared with the wider type take the narrower
+  swizzle and the unit is parsed again (at most 16 times);
+- an #endif with no #if is dropped (iris_movement__.vert has a stray one after its FOLLOWCURSOR block).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md, 3414858021 result
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Shaders/GLSLContext.cpp            | 198 +++++++++++++++---
+ .../Render/Shaders/ShaderUnit.cpp             |  62 +++++-
+ .../Render/Shaders/ShaderUnit.h               |   5 +
+ 3 files changed, 236 insertions(+), 29 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+index dd4f4d4..a1631a8 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <cassert>
+ #include <memory>
++#include <regex>
+ 
+ #include "SPIRV/GlslangToSpv.h"
+ #include "glslang/Include/ResourceLimits.h"
+@@ -131,40 +132,183 @@ GLSLContext& GLSLContext::get () {
+     return *sInstance;
+ }
+ 
+-std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vertex, const std::string& fragment) {
+-    glslang::TShader vertexShader (EShLangVertex);
++namespace {
++/**
++ * The preprocessor's line splicing: a backslash at the end of a line joins it to the next. WE's shaders are
++ * HLSL-era sources whose compiler splices (3414858021's depthparallax.frag continues an expression over lines);
++ * glslang only does so from GLSL 4.20, so a 3.30 unit failed to parse and its whole layer wasn't built. The lines
++ * taken out are put back after the joined one, so the line numbers in errors still match the source.
++ */
++std::string spliceLines (const std::string& source) {
++    std::string out;
++    out.reserve (source.size ());
++    int pending = 0;
+ 
+-    const char* vertexSource = vertex.c_str ();
+-    vertexShader.setStrings (&vertexSource, 1);
+-    vertexShader.setEntryPoint ("main");
+-    vertexShader.setEnvInput (glslang::EShSourceGlsl, EShLangVertex, glslang::EShClientOpenGL, 330);
+-    vertexShader.setEnvClient (glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
+-    vertexShader.setEnvTarget (glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
+-    vertexShader.setAutoMapLocations (true);
+-    vertexShader.setAutoMapBindings (true);
++    for (size_t i = 0; i < source.size (); i++) {
++	if (source[i] == '\\') {
++	    size_t next = i + 1;
++	    if (next < source.size () && source[next] == '\r') {
++		next++;
++	    }
++	    if (next < source.size () && source[next] == '\n') {
++		pending++;
++		i = next;
++		continue;
++	    }
++	}
++	out += source[i];
++	if (source[i] == '\n' && pending > 0) {
++	    out.append (static_cast<size_t> (pending), '\n');
++	    pending = 0;
++	}
++    }
++
++    return out;
++}
++/**
++ * An `#endif` with no open `#if` (2973943998's iris_movement__.vert has a stray one after its FOLLOWCURSOR block)
++ * is dropped, as WE's shader compiler builds such effects; glslang stops at it. The line stays (empty) so the
++ * line numbers hold.
++ */
++std::string dropUnmatchedEndifs (const std::string& source) {
++    static const std::regex opens (R"(^\s*#\s*if(?:n?def)?\b)");
++    static const std::regex closes (R"(^\s*#\s*endif\b)");
++    std::string out;
++    out.reserve (source.size ());
++    int depth = 0;
++    size_t begin = 0;
++
++    while (begin < source.size ()) {
++	size_t end = source.find ('\n', begin);
++	end = end == std::string::npos ? source.size () : end + 1;
++	const std::string line = source.substr (begin, end - begin);
++	if (std::regex_search (line, opens)) {
++	    depth++;
++	} else if (std::regex_search (line, closes)) {
++	    if (depth == 0) {
++		sLog.out ("Dropping an #endif with no #if: ", line);
++		out += line.back () == '\n' ? "\n" : "";
++		begin = end;
++		continue;
++	    }
++	    depth--;
++	}
++	out += line;
++	begin = end;
++    }
++
++    return out;
++}
++
++/**
++ * HLSL's implicit truncation: an operation between a wider and a narrower float vector (or a narrower variable
++ * taking a wider value) uses the wider one's first components, with a warning. GLSL refuses it; WE's effects rely
++ * on it (3414858021's iris_movement__: `vec2 da = transformedCursorPosition * g_CursorScale`, a vec4 times a vec2,
++ * failed the compose layer holding the girl's head). From glslang's error, the line's variables declared with the
++ * wider type get the narrower swizzle; false when the error isn't one of these or nothing changed.
++ */
++bool truncateWiderOperands (std::string& source, const std::string& log) {
++    static const std::regex operands (
++	R"(ERROR: 0:(\d+): '[^']*' :\s+wrong operand types: no operation '[^']*' exists that takes a left-hand operand of type ' (?:[a-z]+ )*(\d)-component vector of float' and a right operand of type ' (?:[a-z]+ )*(\d)-component vector of float')"
++    );
++    static const std::regex conversion (
++	R"(ERROR: 0:(\d+): '[^']*' :\s+cannot convert from ' (?:[a-z]+ )*(\d)-component vector of float' to ' (?:[a-z]+ )*(\d)-component vector of float')"
++    );
++    std::smatch match;
++    int line = 0, wider = 0, narrower = 0;
++
++    if (std::regex_search (log, match, operands) || std::regex_search (log, match, conversion)) {
++	line = std::stoi (match[1].str ());
++	const int a = std::stoi (match[2].str ()), b = std::stoi (match[3].str ());
++	wider = std::max (a, b);
++	narrower = std::min (a, b);
++    }
++    if (line <= 0 || wider == narrower) {
++	return false;
++    }
++
++    size_t begin = 0;
++    for (int i = 1; i < line && begin != std::string::npos; i++) {
++	begin = source.find ('\n', begin);
++	begin = begin == std::string::npos ? begin : begin + 1;
++    }
++    if (begin == std::string::npos) {
++	return false;
++    }
++    const size_t end = std::min (source.find ('\n', begin), source.size ());
++    const std::string text = source.substr (begin, end - begin);
++    static const char* swizzles[] = { "", ".x", ".xy", ".xyz" };
++    // a bare identifier (not a call, not already swizzled or indexed)
++    static const std::regex identifier (R"(\b([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*[.(\[])(?![A-Za-z0-9_]))");
++    std::string rebuilt;
++    size_t at = 0;
+ 
+-    if (!vertexShader.parse (&BuiltInResource, 100, false, EShMsgDefault)) {
+-	sLog.error ("GLSL vertex unit parsing Failed: ", vertexShader.getInfoLog ());
++    for (auto it = std::sregex_iterator (text.begin (), text.end (), identifier); it != std::sregex_iterator (); ++it) {
++	const std::string name = (*it)[1].str ();
++	const std::regex declared ("\\bvec" + std::to_string (wider) + "\\s+" + name + "\\b");
++	// a preceding '.' makes it a member or swizzle, not a variable
++	const size_t pos = static_cast<size_t> (it->position ());
++	const bool member = pos > 0 && text[pos - 1] == '.';
++	if (member || !std::regex_search (source, declared)) {
++	    continue;
++	}
++	rebuilt += text.substr (at, pos + name.size () - at) + swizzles[narrower];
++	at = pos + name.size ();
++    }
++    if (at == 0) {
++	return false;
++    }
++
++    rebuilt += text.substr (at);
++    sLog.out ("Truncating to vec", narrower, " as HLSL does, line ", line, ": ", rebuilt);
++    source.replace (begin, end - begin, rebuilt);
++    return true;
++}
++
++/** Parses a unit, retrying after each HLSL-style truncation it needed (`source` must outlive the shader) */
++std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& source, const char* what) {
++    for (int attempt = 0;; attempt++) {
++	auto shader = std::make_unique<glslang::TShader> (stage);
++	const char* text = source.c_str ();
++	shader->setStrings (&text, 1);
++	shader->setEntryPoint ("main");
++	shader->setEnvInput (glslang::EShSourceGlsl, stage, glslang::EShClientOpenGL, 330);
++	shader->setEnvClient (glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
++	shader->setEnvTarget (glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
++	shader->setAutoMapLocations (true);
++	shader->setAutoMapBindings (true);
++
++	if (shader->parse (&BuiltInResource, 100, false, EShMsgDefault)) {
++	    return shader;
++	}
++
++	const std::string log = shader->getInfoLog ();
++	shader.reset ();
++	if (attempt >= 16 || !truncateWiderOperands (source, log)) {
++	    sLog.error ("GLSL ", what, " unit parsing Failed: ", log);
++	    return nullptr;
++	}
++    }
++}
++} // namespace
++
++std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vertexIn, const std::string& fragmentIn) {
++    std::string vertex = dropUnmatchedEndifs (spliceLines (vertexIn));
++    std::string fragment = dropUnmatchedEndifs (spliceLines (fragmentIn));
++    const auto vertexShader = parseUnit (EShLangVertex, vertex, "vertex");
++
++    if (vertexShader == nullptr) {
+ 	return { "", "" };
+     }
+-    glslang::TShader fragmentShader (EShLangFragment);
+-
+-    const char* fragmentSource = fragment.c_str ();
+-    fragmentShader.setStrings (&fragmentSource, 1);
+-    fragmentShader.setEntryPoint ("main");
+-    fragmentShader.setEnvInput (glslang::EShSourceGlsl, EShLangFragment, glslang::EShClientOpenGL, 330);
+-    fragmentShader.setEnvClient (glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
+-    fragmentShader.setEnvTarget (glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
+-    fragmentShader.setAutoMapLocations (true);
+-    fragmentShader.setAutoMapBindings (true);
+-
+-    if (!fragmentShader.parse (&BuiltInResource, 100, false, EShMsgDefault)) {
+-	sLog.error ("GLSL fragment unit parsing Failed: ", fragmentShader.getInfoLog ());
++
++    const auto fragmentShader = parseUnit (EShLangFragment, fragment, "fragment");
++
++    if (fragmentShader == nullptr) {
+ 	return { "", "" };
+     }
+     glslang::TProgram program;
+-    program.addShader (&vertexShader);
+-    program.addShader (&fragmentShader);
++    program.addShader (vertexShader.get ());
++    program.addShader (fragmentShader.get ());
+ 
+     if (!program.link (EShMsgDefault)) {
+ 	sLog.error ("Program Linking Failed: ", program.getInfoLog ());
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index ecc2cfb..f5018db 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -164,6 +164,7 @@ void ShaderUnit::preprocessIncludes () {
+ 	// replace the first two letters with a comment so the filelength doesn't change
+ 	this->m_preprocessed = this->m_preprocessed.replace (start, 2, "//");
+ 
++
+ 	this->m_includes += content;
+ 
+ 	// go to the end of the line
+@@ -495,6 +496,63 @@ std::string ShaderUnit::applyFragmentTexCoordCompatibility (std::string source)
+     return source;
+ }
+ 
++std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const {
++    if (this->m_type != GLSLContext::UnitType_Fragment) {
++	return source;
++    }
++
++    static const std::regex declaration (
++	R"(\bvarying\s+((?:(?:lowp|mediump|highp|flat|smooth|noperspective)\s+)*[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)"
++    );
++    static const std::regex mainOpen (R"(\bvoid\s+main\s*\(\s*(?:void)?\s*\)\s*\{)");
++    std::vector<std::pair<std::string, std::string>> written; // (type, name)
++
++    for (auto it = std::sregex_iterator (source.begin (), source.end (), declaration); it != std::sregex_iterator ();
++	 ++it) {
++	const std::string name = (*it)[2].str ();
++	// `name = …`, `name += …`, `name.xy *= …` (not `==`), or `name++` / `++name`
++	const std::regex assigned ("\\b" + name + "\\b(?:\\s*\\.\\s*[xyzwrgba]+)?\\s*(?:[-+*/]?=(?!=)|\\+\\+|--)|(?:\\+\\+|--)\\s*" + name + "\\b");
++	if (std::regex_search (source, assigned)) {
++	    // the type without its qualifiers
++	    std::string type = (*it)[1].str ();
++	    type = type.substr (type.find_last_of (" \t") == std::string::npos ? 0 : type.find_last_of (" \t") + 1);
++	    written.emplace_back (type, name);
++	}
++    }
++
++    std::smatch open;
++    if (written.empty () || !std::regex_search (source, open, mainOpen)) {
++	return source;
++    }
++
++    // every use after the declarations reads the copy; main starts by filling it
++    const size_t bodyAt = static_cast<size_t> (open.position () + open.length ());
++    std::string head = source.substr (0, bodyAt);
++    std::string body = source.substr (bodyAt);
++    std::string copies, fill;
++
++    for (const auto& [type, name] : written) {
++	const std::regex use ("\\b" + name + "\\b");
++	const std::regex decl ("\\bvarying\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + name + "\\s*;");
++	const std::string copy = "_wp_writable_" + name;
++	// keep the declaration (the vertex unit's output links by its name), the other uses go to the copy
++	std::string rebuilt;
++	size_t at = 0;
++	for (auto it = std::sregex_iterator (head.begin (), head.end (), decl); it != std::sregex_iterator (); ++it) {
++	    const size_t end = static_cast<size_t> (it->position () + it->length ());
++	    rebuilt += std::regex_replace (head.substr (at, it->position () - at), use, copy) + it->str ()
++		+ "\n" + type + " " + copy + ";";
++	    at = end;
++	}
++	head = rebuilt + std::regex_replace (head.substr (at), use, copy);
++	body = std::regex_replace (body, use, copy);
++	fill += "\n\t" + copy + " = " + name + ";";
++    }
++
++    sLog.out ("Copying the varyings the fragment unit of ", this->m_file, " writes to:", fill);
++    return head + fill + body;
++}
++
+ void ShaderUnit::parseComboConfiguration (const std::string& content, const int defaultValue) {
+     // TODO: SUPPORT REQUIRES SO WE PROPERLY FOLLOW THE REQUIRED CHAIN
+     JSON data;
+@@ -803,8 +861,8 @@ const std::string& ShaderUnit::compile () {
+ 
+     // this should be the rest of the shader
+     this->m_final
+-	+= this->applyFragmentTexCoordCompatibility (this->applyFragmentVaryingDeclarations (
+-	    this->applyLinkedVaryingCompatibility (this->m_preprocessed)
++	+= this->applyWritableFragmentVaryings (this->applyFragmentTexCoordCompatibility (
++	    this->applyFragmentVaryingDeclarations (this->applyLinkedVaryingCompatibility (this->m_preprocessed))
+ 	));
+ 
+     // the pass itself handles shader compilation, the unit doesn't have enough information for this step
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index 43f41e1..7ffcc9a 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -104,6 +104,11 @@ private:
+      * Adjusts fragment shaders that use wide texture coordinates as vec2 values in Wallpaper Engine effects.
+      */
+     [[nodiscard]] std::string applyFragmentTexCoordCompatibility (std::string source) const;
++    /**
++     * A fragment unit that assigns to one of its varyings (HLSL lets a shader change its inputs; GLSL's are
++     * read-only) works on a copy of it: a global taken from the varying at the top of main
++     */
++    [[nodiscard]] std::string applyWritableFragmentVaryings (std::string source) const;
+     /**
+      * A fragment unit that reads a varying only its vertex unit declares gets the declaration (WE compiles such
+      * shaders: the packaged foliagesway reads `v_Bounds`, declared in its vertex unit only)

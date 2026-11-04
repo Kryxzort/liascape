@@ -1913,3 +1913,42 @@ Left (in TODO):
   `perspective` flag (G21, E43). `depthtest` on layers (E43). `camerafade` (G23). `sortorder` / `customsortorder`.
 - Hit-testing world-placed layers (cursor events in 3D). WE's transparent sort key. The output-sized render target.
 - WE captures of the three scenes.
+
+### 3414858021 result (fork patches 0057–0060, pin `b6e2878`, 2026-11-04)
+
+The owner reported the scene with the girl's head missing and the cursor trail going up when the pointer went down.
+Both were there before the day's batches (a smoke on the B4-era core shows the head off the bottom and the same trail
+direction); B12's attachments only changed how the head went missing. Four causes, none of them a batch regression:
+
+- **SceneScript angles are degrees (Observed in scene scripts; the binding not located in the decompile).** The scene
+  file and LWE's renderer keep radians; scripts read and write degrees: 2679248947 writes
+  `value.z = newAngle * WEMath.rad2deg`, 2134765860 spins by `(t · 2) % 1 · 360`, 3477054430 labels a slider
+  "Max Rotation (degrees)", 3219908811 swings by ±30. 3414858021's `angles` scripts sway the body by
+  `cursorWorldPosition.x · −0.0005`, the head by −0.0015 and the arm by −0.001: about a degree at the screen's
+  centre. Read as radians the body turned 55°, so the neck attachment (and the head on it) and the arm left the
+  screen; the grey arch in the owner's screenshot is the turned body. Fix (0057): property scripts' value in and out
+  and `thisLayer.angles` / `layer.angles` get and set scale by 180/π (`ScriptEngine::scriptScaleOf`). The
+  float constants 57.29578 / 0.017453292 are in `.rdata` at 0x1404928d0 / 0x140492628, referenced from
+  FUN_1401fdf90 and 20 other places; which of them is the binding was not read.
+- **The pointer trail (0058).** A control point linked to the pointer (flags bit 0) took the host's pointer (y down)
+  as y up in a space that is centred and y down like the system's origin, so it was mirrored about the middle row.
+  The conversion is upstream's (#400); B11's 0053 only added the inverse transform after it.
+- **The compose layer didn't build (0059).** The head, eyes, fringe and hair are children of a compose layer (id 672,
+  `deformer_simulation` + `iris_movement__`); four HLSL-isms in their shaders failed glslang, the layer was dropped,
+  and with it everything under it: a backslash line continuation (depthparallax.frag), a fragment unit writing to a
+  varying (`v_Depth +=`), a vec4 × vec2 truncated to vec2 (iris_movement__.vert) and a stray `#endif`
+  (iris_movement__.vert). Each now compiles the way WE's path accepts it (GLSLContext: splice, truncation retry,
+  unmatched #endif dropped; ShaderUnit: written varyings read into a global copy).
+- **A failed parent orphaned its children (0060).** `resolveTransform` stopped at the first parent that wasn't a
+  built render object, so the failed compose layer's children were placed from the scene's origin. It continues
+  through the scene data now. The hard-edged bright band across the lower screen (y ≈ 800–935 of 1080) went away
+  with the compose layer building.
+
+Not ours / left: the date text "WEDNESDAY" still reaches the right edge (its group's x is a script on user property
+`x8` = 0.967 of the canvas; not checked against WE). The `auto_sway` hair/cloth effect (3235948233) still fails: its
+helper functions use `M_PI` from `common.h` above the point LWE pastes includes (before main, after the last
+varying). Moving the include's `#define`s to the `#include` line builds it, but then the left white cloth (左白巾)
+vanished, so that change is not in; it needs the effect itself read (TODO).
+
+Tests (host_api_test, all RED on 157c111): `particle_pointer_is_y_down`, `script_angles_are_degrees`,
+`shaders_compile_like_hlsl`. The smoke has `--pointer X0,Y0:X1,Y1` (a scripted pointer path) for direction checks.

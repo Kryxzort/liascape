@@ -1,0 +1,37 @@
+From 7daef0571df909b7ece7abfbfefcdbde46a123cc Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 14:18:54 +0530
+Subject: [PATCH 58/60] render: a pointer-linked particle control point is y
+ down
+
+A control point that follows the pointer (flags bit 0) took the host's pointer (normalised, y down from the
+top) as y up, while the system's origin and the rest of its space are centred and y down
+(refreshTransform). Every pointer-following particle was mirrored about the screen's middle row: 3414858021's
+cursor trail went up when the pointer went down.
+
+Origin: ours (the conversion was upstream's, #400)
+Why: docs/player/spikes/we-lwe-gap-audit.md, 3414858021 result
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/Objects/CParticle.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 932d3a1..26e8c65 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -683,10 +683,11 @@ void CParticle::update (float dt) {
+ 	}
+ 	if (cp.linkMouse) {
+ 	    if (mousePos) {
+-		// Convert mouse position from normalized [0,1] to centered screen space
++		// the pointer (normalised, y down from the top: the host's) in this centred, y-down space, as the
++		// origin (refreshTransform); it was y up, so a trail went up when the pointer went down (3414858021)
+ 		glm::vec3 position;
+ 		position.x = (mousePos->x * screenWidth) - (screenWidth / 2.0f);
+-		position.y = (screenHeight / 2.0f) - (mousePos->y * screenHeight);
++		position.y = (mousePos->y * screenHeight) - (screenHeight / 2.0f);
+ 		position.z = 0.0f;
+ 		// its offset, like any, is WE's y-up one
+ 		cp.position = toLocal * (position + glm::vec3 (offset.x, -offset.y, offset.z) - m_transformedOrigin);
