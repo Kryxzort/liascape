@@ -1,17 +1,17 @@
 {
- "generated": "2026-11-04 19:27 IST",
+ "generated": "2026-11-04 19:42 IST",
  "run": {
   "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
   "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
   "worker": "src/player/target/release/liascape-scene-worker",
   "seconds": 3,
-  "started": "2026-11-04T19:16:12+05:30",
-  "commit": "9bfe644+dirty",
-  "lwe": "dev:/home/kryxzort/.cache/liascape/src/lwe-coverage",
+  "started": "2026-11-04T19:33:11+05:30",
+  "commit": "c367cab",
+  "lwe": "deeb4dada1dcc182e27f3621f93d04bd190b1cd7",
   "pin": "deeb4dada1dc",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
  },
- "commit": "b0d209d",
+ "commit": "c367cab",
  "summary": {
   "clean": 86,
   "degraded": 10,
@@ -757,14 +757,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.597519,
-   "build_ms": 255.831082,
-   "frame_ms_mean": 0.6236091,
-   "frame_ms_p95": 1.4226690000000002,
+   "load_ms": 1.257533,
+   "build_ms": 227.729142,
+   "frame_ms_mean": 0.38669446666666674,
+   "frame_ms_p95": 0.532518,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1155728109/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1155728109/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1155728109/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1155728109/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -789,14 +789,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.101681,
-   "build_ms": 273.04692200000005,
-   "frame_ms_mean": 0.9327117,
-   "frame_ms_p95": 1.905804,
+   "load_ms": 1.628251,
+   "build_ms": 245.564014,
+   "frame_ms_mean": 0.5620449,
+   "frame_ms_p95": 0.766434,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1160682576/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1160682576/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1160682576/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1160682576/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -821,14 +821,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.263831,
-   "build_ms": 173.395766,
-   "frame_ms_mean": 0.7448357555555557,
-   "frame_ms_p95": 1.537288,
+   "load_ms": 1.516632,
+   "build_ms": 134.92713700000002,
+   "frame_ms_mean": 0.3482941333333333,
+   "frame_ms_p95": 0.5685749999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1174926427/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1174926427/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1174926427/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1174926427/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -853,14 +853,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.174689,
-   "build_ms": 677.253191,
-   "frame_ms_mean": 1.670271011111111,
-   "frame_ms_p95": 2.293874,
+   "load_ms": 1.57057,
+   "build_ms": 433.8557,
+   "frame_ms_mean": 1.0146307,
+   "frame_ms_p95": 1.136998,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1195626192/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1195626192/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1195626192/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1195626192/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -885,14 +885,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.145424,
-   "build_ms": 514.628533,
-   "frame_ms_mean": 1.2101287444444446,
-   "frame_ms_p95": 2.051697,
+   "load_ms": 1.67652,
+   "build_ms": 330.803827,
+   "frame_ms_mean": 0.6237262111111112,
+   "frame_ms_p95": 0.967131,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1264170639/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1264170639/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1264170639/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1264170639/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -917,14 +917,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.188692,
-   "build_ms": 993.191772,
-   "frame_ms_mean": 1.7637115444444444,
-   "frame_ms_p95": 2.5520120000000004,
+   "load_ms": 2.118464,
+   "build_ms": 840.053736,
+   "frame_ms_mean": 1.3059502444444444,
+   "frame_ms_p95": 2.120078,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1556245028/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1556245028/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1556245028/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1556245028/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -992,14 +992,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.3500919999999996,
-   "build_ms": 446.699473,
-   "frame_ms_mean": 0.7853688111111111,
-   "frame_ms_p95": 1.740315,
+   "load_ms": 12.707431,
+   "build_ms": 231.724356,
+   "frame_ms_mean": 0.4060980777777778,
+   "frame_ms_p95": 0.5354679999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1726902114/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1726902114/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1726902114/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1726902114/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1024,14 +1024,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.356009,
-   "build_ms": 550.768326,
-   "frame_ms_mean": 1.5207016111111114,
-   "frame_ms_p95": 2.668888,
+   "load_ms": 3.928402,
+   "build_ms": 501.752243,
+   "frame_ms_mean": 1.0350825444444447,
+   "frame_ms_p95": 1.387608,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1797172968/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1797172968/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1797172968/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1797172968/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1056,14 +1056,14 @@
    "built": 39,
    "perspective": false,
    "hdr": false,
-   "load_ms": 21.068007,
-   "build_ms": 1875.741071,
-   "frame_ms_mean": 2.248225222222222,
-   "frame_ms_p95": 3.55031,
+   "load_ms": 11.766894,
+   "build_ms": 1550.556776,
+   "frame_ms_mean": 1.6360637555555555,
+   "frame_ms_p95": 2.598604,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1864677589/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1864677589/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1864677589/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1864677589/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1211,14 +1211,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.4184240000000004,
-   "build_ms": 583.766096,
-   "frame_ms_mean": 0.8892846111111112,
-   "frame_ms_p95": 1.682918,
+   "load_ms": 2.701271,
+   "build_ms": 350.244414,
+   "frame_ms_mean": 0.49059326666666664,
+   "frame_ms_p95": 0.65296,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1884904087/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1884904087/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1884904087/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1884904087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1243,14 +1243,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.414124,
-   "build_ms": 321.833426,
-   "frame_ms_mean": 0.8809935888888889,
-   "frame_ms_p95": 1.716174,
+   "load_ms": 1.674759,
+   "build_ms": 254.065011,
+   "frame_ms_mean": 0.4597857888888889,
+   "frame_ms_p95": 0.668409,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/1934084447/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/1934084447/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/1934084447/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/1934084447/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1275,14 +1275,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.837176,
-   "build_ms": 248.012932,
-   "frame_ms_mean": 0.7430589222222223,
-   "frame_ms_p95": 1.410647,
+   "load_ms": 1.508549,
+   "build_ms": 192.219626,
+   "frame_ms_mean": 0.32635605555555564,
+   "frame_ms_p95": 0.440184,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2047150134/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2047150134/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2047150134/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2047150134/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1307,14 +1307,14 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 8.216915,
-   "build_ms": 1129.534223,
-   "frame_ms_mean": 3.207218200000001,
-   "frame_ms_p95": 5.014966,
+   "load_ms": 3.870551,
+   "build_ms": 957.148322,
+   "frame_ms_mean": 2.406683977777778,
+   "frame_ms_p95": 3.906744999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2064316482/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2064316482/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2064316482/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2064316482/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1339,14 +1339,14 @@
    "built": 42,
    "perspective": false,
    "hdr": false,
-   "load_ms": 25.798693,
-   "build_ms": 2319.38099,
-   "frame_ms_mean": 1.825870277777777,
-   "frame_ms_p95": 2.231607,
+   "load_ms": 12.048722,
+   "build_ms": 2081.269095,
+   "frame_ms_mean": 1.5384962777777775,
+   "frame_ms_p95": 2.410546,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2134765860/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2134765860/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2134765860/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2134765860/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1372,14 +1372,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.453757,
-   "build_ms": 244.033776,
-   "frame_ms_mean": 0.7842638111111112,
-   "frame_ms_p95": 1.635711,
+   "load_ms": 1.311045,
+   "build_ms": 224.928674,
+   "frame_ms_mean": 0.4821011555555556,
+   "frame_ms_p95": 1.0073949999999998,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2182433068/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2182433068/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2182433068/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2182433068/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1404,14 +1404,14 @@
    "built": 1,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.101273,
-   "build_ms": 529.0918959999999,
-   "frame_ms_mean": 1.6489782888888886,
-   "frame_ms_p95": 2.5834479999999997,
+   "load_ms": 1.833258,
+   "build_ms": 276.798244,
+   "frame_ms_mean": 1.1458250333333335,
+   "frame_ms_p95": 1.420229,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2189783622/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2189783622/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2189783622/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2189783622/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1437,14 +1437,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.637297,
-   "build_ms": 248.362069,
-   "frame_ms_mean": 0.8883730555555557,
-   "frame_ms_p95": 2.193392,
+   "load_ms": 1.367245,
+   "build_ms": 180.877781,
+   "frame_ms_mean": 0.6982070888888889,
+   "frame_ms_p95": 1.412228,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2219762084/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2219762084/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2219762084/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2219762084/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1469,14 +1469,14 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.151264,
-   "build_ms": 683.0610620000001,
-   "frame_ms_mean": 3.6322515111111113,
-   "frame_ms_p95": 3.486283,
+   "load_ms": 3.440057,
+   "build_ms": 693.999924,
+   "frame_ms_mean": 4.002970666666666,
+   "frame_ms_p95": 4.484818,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2288455459/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2288455459/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2288455459/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2288455459/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1514,14 +1514,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.379019,
-   "build_ms": 352.391617,
-   "frame_ms_mean": 0.9686971222222226,
-   "frame_ms_p95": 1.85168,
+   "load_ms": 1.744282,
+   "build_ms": 322.229314,
+   "frame_ms_mean": 0.7062535666666668,
+   "frame_ms_p95": 0.928199,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2290002190/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2290002190/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2290002190/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2290002190/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1546,14 +1546,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.090891,
-   "build_ms": 1833.887528,
-   "frame_ms_mean": 1.4364705000000002,
-   "frame_ms_p95": 2.576753,
+   "load_ms": 6.604671000000001,
+   "build_ms": 1257.9834380000002,
+   "frame_ms_mean": 0.8484158333333333,
+   "frame_ms_p95": 1.066711,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2325974975/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2325974975/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2325974975/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2325974975/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1631,14 +1631,14 @@
    "built": 43,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.9873330000000005,
-   "build_ms": 2039.433181,
-   "frame_ms_mean": 1.813580433333333,
-   "frame_ms_p95": 3.067875,
+   "load_ms": 8.634598,
+   "build_ms": 1883.794058,
+   "frame_ms_mean": 1.596940855555556,
+   "frame_ms_p95": 2.3457920000000003,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2371103399/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2371103399/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2371103399/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2371103399/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1756,14 +1756,14 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.913697,
-   "build_ms": 843.387918,
-   "frame_ms_mean": 3.1991113888888885,
-   "frame_ms_p95": 4.866872000000001,
+   "load_ms": 4.423903,
+   "build_ms": 862.769446,
+   "frame_ms_mean": 3.11061088888889,
+   "frame_ms_p95": 5.490151,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2375914945/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2375914945/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2375914945/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2375914945/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1788,14 +1788,14 @@
    "built": 35,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.487523,
-   "build_ms": 1866.227335,
-   "frame_ms_mean": 2.9205022555555553,
-   "frame_ms_p95": 3.631507,
+   "load_ms": 9.580602,
+   "build_ms": 1873.443642,
+   "frame_ms_mean": 2.581245588888889,
+   "frame_ms_p95": 4.132217,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2388299037/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2388299037/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2388299037/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2388299037/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1849,14 +1849,14 @@
    "built": 12,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.018382,
-   "build_ms": 1628.7676760000002,
-   "frame_ms_mean": 2.538072666666666,
-   "frame_ms_p95": 3.918641,
+   "load_ms": 4.054976,
+   "build_ms": 1435.712739,
+   "frame_ms_mean": 1.5172612222222222,
+   "frame_ms_p95": 2.177963,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2469881470/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2469881470/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2469881470/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2469881470/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2526,14 +2526,14 @@
    "built": 34,
    "perspective": false,
    "hdr": true,
-   "load_ms": 14.331874,
-   "build_ms": 1931.776347,
-   "frame_ms_mean": 4.972869566666668,
-   "frame_ms_p95": 6.937112,
+   "load_ms": 9.131091,
+   "build_ms": 1597.735792,
+   "frame_ms_mean": 4.31057998888889,
+   "frame_ms_p95": 5.830196,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2511663284/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2511663284/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2511663284/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2511663284/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2558,14 +2558,14 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 2.629701,
-   "build_ms": 314.23614100000003,
-   "frame_ms_mean": 1.934401166666667,
-   "frame_ms_p95": 2.39906,
+   "load_ms": 1.975699,
+   "build_ms": 303.006603,
+   "frame_ms_mean": 1.9976853777777772,
+   "frame_ms_p95": 2.382033,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2542468435/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2542468435/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2542468435/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2542468435/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2590,14 +2590,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.34137,
-   "build_ms": 860.552486,
-   "frame_ms_mean": 1.4108815222222222,
-   "frame_ms_p95": 1.955736,
+   "load_ms": 2.906256,
+   "build_ms": 648.7643899999999,
+   "frame_ms_mean": 1.0545836666666666,
+   "frame_ms_p95": 1.12599,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2561227934/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2561227934/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2561227934/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2561227934/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2635,14 +2635,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.828189,
-   "build_ms": 313.927233,
-   "frame_ms_mean": 0.8093393444444447,
-   "frame_ms_p95": 1.5918009999999998,
+   "load_ms": 1.181234,
+   "build_ms": 198.76972,
+   "frame_ms_mean": 0.44915291111111105,
+   "frame_ms_p95": 0.6432570000000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2638125030/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2638125030/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2638125030/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2638125030/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2667,14 +2667,14 @@
    "built": 14,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.224403,
-   "build_ms": 1645.0187299999998,
-   "frame_ms_mean": 2.506517899999998,
-   "frame_ms_p95": 4.193456,
+   "load_ms": 6.172126,
+   "build_ms": 1098.2757279999998,
+   "frame_ms_mean": 2.415580255555556,
+   "frame_ms_p95": 4.111328,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2672425887/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2672425887/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2672425887/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2672425887/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2712,14 +2712,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11.965533,
-   "build_ms": 1603.7596999999998,
-   "frame_ms_mean": 5.816817288888889,
-   "frame_ms_p95": 4.383464,
+   "load_ms": 6.914123,
+   "build_ms": 1312.96668,
+   "frame_ms_mean": 5.634913544444445,
+   "frame_ms_p95": 4.861802999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2679248947/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2679248947/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2679248947/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2679248947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2757,14 +2757,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.417574,
-   "build_ms": 707.4292330000001,
-   "frame_ms_mean": 1.0904733222222225,
-   "frame_ms_p95": 1.574019,
+   "load_ms": 2.442693,
+   "build_ms": 716.1630719999999,
+   "frame_ms_mean": 0.7194960888888886,
+   "frame_ms_p95": 1.109461,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2679885269/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2679885269/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2679885269/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2679885269/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2802,14 +2802,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.242352,
-   "build_ms": 329.296425,
-   "frame_ms_mean": 1.290263466666666,
-   "frame_ms_p95": 4.33285,
+   "load_ms": 1.334913,
+   "build_ms": 212.76454,
+   "frame_ms_mean": 0.7786407666666668,
+   "frame_ms_p95": 0.8427009999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2683776412/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2683776412/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2683776412/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2683776412/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2834,14 +2834,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.7871429999999995,
-   "build_ms": 398.039528,
-   "frame_ms_mean": 1.0755163222222222,
-   "frame_ms_p95": 1.6958030000000002,
+   "load_ms": 1.827093,
+   "build_ms": 365.960655,
+   "frame_ms_mean": 0.7620449222222223,
+   "frame_ms_p95": 1.044027,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2694785040/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2694785040/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2694785040/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2694785040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2866,14 +2866,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.580474,
-   "build_ms": 210.510599,
-   "frame_ms_mean": 0.6182212222222222,
-   "frame_ms_p95": 1.048234,
+   "load_ms": 1.350348,
+   "build_ms": 189.48742499999997,
+   "frame_ms_mean": 0.3117444555555556,
+   "frame_ms_p95": 0.417374,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2783122117/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2783122117/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2783122117/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2783122117/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2898,14 +2898,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.845305,
-   "build_ms": 1619.065991,
-   "frame_ms_mean": 5.4204773,
-   "frame_ms_p95": 6.054698,
+   "load_ms": 3.907422,
+   "build_ms": 1046.286341,
+   "frame_ms_mean": 4.281579644444444,
+   "frame_ms_p95": 5.068722,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2815800031/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2815800031/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2815800031/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2815800031/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2932,14 +2932,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.335669,
-   "build_ms": 3263.549793,
-   "frame_ms_mean": 2.490122255555555,
-   "frame_ms_p95": 4.38606,
+   "load_ms": 2.247626,
+   "build_ms": 2345.288072,
+   "frame_ms_mean": 2.066116322222222,
+   "frame_ms_p95": 3.2539740000000004,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2828233985/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2828233985/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2828233985/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2828233985/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3607,14 +3607,14 @@
    "built": 95,
    "perspective": false,
    "hdr": false,
-   "load_ms": 73.377944,
-   "build_ms": 11807.255839,
-   "frame_ms_mean": 15.256848433333335,
-   "frame_ms_p95": 18.018749,
+   "load_ms": 29.685139,
+   "build_ms": 9325.857762,
+   "frame_ms_mean": 15.152694377777774,
+   "frame_ms_p95": 19.401281,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2883756643/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2883756643/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2883756643/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2883756643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -3640,14 +3640,14 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.720254,
-   "build_ms": 774.4172580000001,
-   "frame_ms_mean": 6.202191488888891,
-   "frame_ms_p95": 9.948257,
+   "load_ms": 2.134945,
+   "build_ms": 775.6292540000001,
+   "frame_ms_mean": 4.127351422222223,
+   "frame_ms_p95": 5.953112,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2886313155/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2886313155/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2886313155/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2886313155/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3685,14 +3685,14 @@
    "built": 17,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.307713000000001,
-   "build_ms": 3140.192441,
-   "frame_ms_mean": 8.885671466666668,
-   "frame_ms_p95": 12.424691,
+   "load_ms": 4.798845,
+   "build_ms": 2354.427993,
+   "frame_ms_mean": 4.083182855555557,
+   "frame_ms_p95": 5.632726,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2890767643/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2890767643/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2890767643/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2890767643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4431,14 +4431,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.470693,
-   "build_ms": 593.622492,
-   "frame_ms_mean": 1.898009300000001,
-   "frame_ms_p95": 5.066705000000001,
+   "load_ms": 3.2006360000000003,
+   "build_ms": 494.2190839999999,
+   "frame_ms_mean": 1.1138262777777783,
+   "frame_ms_p95": 2.091806,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2905264428/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2905264428/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2905264428/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2905264428/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4476,14 +4476,14 @@
    "built": 72,
    "perspective": false,
    "hdr": false,
-   "load_ms": 59.694662,
-   "build_ms": 7927.53166,
-   "frame_ms_mean": 15.658198055555555,
-   "frame_ms_p95": 18.0738,
+   "load_ms": 83.679815,
+   "build_ms": 7996.402703000001,
+   "frame_ms_mean": 83.03996655555557,
+   "frame_ms_p95": 88.74114800000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2921510865/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2921510865/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2921510865/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2921510865/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4508,14 +4508,14 @@
    "built": 22,
    "perspective": false,
    "hdr": false,
-   "load_ms": 19.990058,
-   "build_ms": 2001.012726,
-   "frame_ms_mean": 3.9832022,
-   "frame_ms_p95": 12.239377,
+   "load_ms": 14.451509,
+   "build_ms": 1959.325629,
+   "frame_ms_mean": 4.111756322222222,
+   "frame_ms_p95": 6.317255,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2932157836/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2932157836/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2932157836/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2932157836/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4541,14 +4541,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.383979,
-   "build_ms": 503.971442,
-   "frame_ms_mean": 1.6933467111111111,
-   "frame_ms_p95": 4.722157,
+   "load_ms": 2.777787,
+   "build_ms": 455.131267,
+   "frame_ms_mean": 1.2362657777777777,
+   "frame_ms_p95": 1.192101,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/2951169110/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/2951169110/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/2951169110/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/2951169110/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4586,14 +4586,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.389202999999999,
-   "build_ms": 1730.554556,
-   "frame_ms_mean": 2.067886511111111,
-   "frame_ms_p95": 2.4796430000000003,
+   "load_ms": 5.643153,
+   "build_ms": 1791.745729,
+   "frame_ms_mean": 2.5602285777777776,
+   "frame_ms_p95": 4.053631,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3013489778/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3013489778/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3013489778/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3013489778/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4642,14 +4642,14 @@
    "built": 1,
    "perspective": false,
    "hdr": true,
-   "load_ms": 2.497173,
-   "build_ms": 403.540063,
-   "frame_ms_mean": 2.015176844444445,
-   "frame_ms_p95": 2.660742,
+   "load_ms": 1.7033269999999998,
+   "build_ms": 403.990432,
+   "frame_ms_mean": 2.0497770333333323,
+   "frame_ms_p95": 2.765685,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3019192537/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3019192537/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3019192537/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3019192537/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4674,14 +4674,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.133826,
-   "build_ms": 797.304173,
-   "frame_ms_mean": 3.212384644444445,
-   "frame_ms_p95": 6.831735999999999,
+   "load_ms": 2.847185,
+   "build_ms": 818.6512379999999,
+   "frame_ms_mean": 2.0987842555555556,
+   "frame_ms_p95": 3.3665269999999996,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3022080536/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3022080536/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3022080536/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3022080536/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4706,14 +4706,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.984663,
-   "build_ms": 435.789444,
-   "frame_ms_mean": 0.7929423555555556,
-   "frame_ms_p95": 1.426617,
+   "load_ms": 1.877678,
+   "build_ms": 414.1631579999999,
+   "frame_ms_mean": 0.6000375888888889,
+   "frame_ms_p95": 0.789528,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3023509773/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3023509773/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3023509773/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3023509773/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4751,14 +4751,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.16653,
-   "build_ms": 707.218564,
-   "frame_ms_mean": 3.143730488888889,
-   "frame_ms_p95": 4.515559,
+   "load_ms": 1.873721,
+   "build_ms": 739.9944830000001,
+   "frame_ms_mean": 3.425437966666667,
+   "frame_ms_p95": 4.712152,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3028473503/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3028473503/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3028473503/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3028473503/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4796,14 +4796,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.9650700000000003,
-   "build_ms": 446.867046,
-   "frame_ms_mean": 1.9754403777777785,
-   "frame_ms_p95": 2.086173,
+   "load_ms": 3.5022569999999997,
+   "build_ms": 486.794276,
+   "frame_ms_mean": 2.146778322222222,
+   "frame_ms_p95": 3.199061,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3029971128/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3029971128/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3029971128/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3029971128/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4828,14 +4828,14 @@
    "built": 79,
    "perspective": false,
    "hdr": false,
-   "load_ms": 41.674821,
-   "build_ms": 5482.026605999999,
-   "frame_ms_mean": 3.842937955555557,
-   "frame_ms_p95": 5.337269,
+   "load_ms": 36.842842,
+   "build_ms": 5545.331031,
+   "frame_ms_mean": 8.36793915555555,
+   "frame_ms_p95": 10.600768,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3042492564/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3042492564/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3042492564/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3042492564/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4876,14 +4876,14 @@
    "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.261822,
-   "build_ms": 1667.763682,
-   "frame_ms_mean": 32.43706253333332,
-   "frame_ms_p95": 33.332347,
+   "load_ms": 6.181525000000001,
+   "build_ms": 1728.0846520000002,
+   "frame_ms_mean": 11.680519577777783,
+   "frame_ms_p95": 12.630753,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3042865984/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3042865984/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3042865984/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3042865984/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4925,14 +4925,14 @@
    "built": 13,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.777453,
-   "build_ms": 1317.861527,
-   "frame_ms_mean": 5.905181244444443,
-   "frame_ms_p95": 6.782487000000001,
+   "load_ms": 4.2405230000000005,
+   "build_ms": 1284.964765,
+   "frame_ms_mean": 6.59074986666667,
+   "frame_ms_p95": 7.585698,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3046119914/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3046119914/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3046119914/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3046119914/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4957,14 +4957,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.7112719999999997,
-   "build_ms": 896.543895,
-   "frame_ms_mean": 4.7953085333333325,
-   "frame_ms_p95": 6.830963,
+   "load_ms": 1.946021,
+   "build_ms": 789.88228,
+   "frame_ms_mean": 3.9973280999999994,
+   "frame_ms_p95": 5.155723,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3089687436/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3089687436/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3089687436/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3089687436/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5002,14 +5002,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.705442,
-   "build_ms": 588.385442,
-   "frame_ms_mean": 1.8386153000000007,
-   "frame_ms_p95": 1.958978,
+   "load_ms": 1.506153,
+   "build_ms": 578.680873,
+   "frame_ms_mean": 1.918301988888889,
+   "frame_ms_p95": 3.272466,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3104056709/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3104056709/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3104056709/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3104056709/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -5034,14 +5034,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.903864,
-   "build_ms": 378.144828,
-   "frame_ms_mean": 1.178048188888889,
-   "frame_ms_p95": 1.421551,
+   "load_ms": 2.215765,
+   "build_ms": 388.041491,
+   "frame_ms_mean": 1.1828872666666663,
+   "frame_ms_p95": 1.301551,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3134525336/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3134525336/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3134525336/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3134525336/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5089,14 +5089,14 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 36.334453,
-   "build_ms": 4461.521516999999,
-   "frame_ms_mean": 2.111076055555556,
-   "frame_ms_p95": 3.204513,
+   "load_ms": 35.645785,
+   "build_ms": 4520.746982000001,
+   "frame_ms_mean": 5.844684600000002,
+   "frame_ms_p95": 8.393313,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3163060610/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3163060610/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3163060610/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3163060610/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5147,14 +5147,14 @@
    "built": 19,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.239509,
-   "build_ms": 1059.847832,
-   "frame_ms_mean": 7.708278388888889,
-   "frame_ms_p95": 6.162617,
+   "load_ms": 7.302656,
+   "build_ms": 1101.201921,
+   "frame_ms_mean": 8.27729478888889,
+   "frame_ms_p95": 7.323471,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3174556087/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3174556087/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3174556087/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3174556087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5193,14 +5193,14 @@
    "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 31.360812000000003,
-   "build_ms": 1159.744994,
-   "frame_ms_mean": 4.301897155555553,
-   "frame_ms_p95": 4.898222,
+   "load_ms": 5.794428,
+   "build_ms": 1137.914807,
+   "frame_ms_mean": 5.1360600000000005,
+   "frame_ms_p95": 7.037147,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3184155462/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3184155462/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3184155462/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3184155462/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -5228,14 +5228,14 @@
    "built": 41,
    "perspective": false,
    "hdr": false,
-   "load_ms": 23.049641,
-   "build_ms": 4535.967237000001,
-   "frame_ms_mean": 4.506091877777777,
-   "frame_ms_p95": 5.189767,
+   "load_ms": 18.089344,
+   "build_ms": 4652.640873,
+   "frame_ms_mean": 9.105898788888888,
+   "frame_ms_p95": 10.907988,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3219908811/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3219908811/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3219908811/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3219908811/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5318,14 +5318,14 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 20.556129,
-   "build_ms": 4656.671322,
-   "frame_ms_mean": 76.47609857777775,
-   "frame_ms_p95": 80.471345,
+   "load_ms": 21.391004,
+   "build_ms": 4455.414282,
+   "frame_ms_mean": 72.58517497777781,
+   "frame_ms_p95": 78.404623,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3233141951/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3233141951/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3233141951/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3233141951/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5547,14 +5547,14 @@
    "built": 83,
    "perspective": false,
    "hdr": false,
-   "load_ms": 31.929509000000003,
-   "build_ms": 7702.68187,
-   "frame_ms_mean": 10.822850155555557,
-   "frame_ms_p95": 18.573589,
+   "load_ms": 28.528792,
+   "build_ms": 7610.129763,
+   "frame_ms_mean": 10.568379711111112,
+   "frame_ms_p95": 14.598436,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3243449890/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3243449890/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3243449890/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3243449890/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5707,14 +5707,14 @@
    "built": 25,
    "perspective": true,
    "hdr": false,
-   "load_ms": 12.165044,
-   "build_ms": 1526.835705,
-   "frame_ms_mean": 4.581878566666668,
-   "frame_ms_p95": 8.467165,
+   "load_ms": 5.64479,
+   "build_ms": 1392.375121,
+   "frame_ms_mean": 5.118581555555554,
+   "frame_ms_p95": 6.560343,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3276522107/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3276522107/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3276522107/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3276522107/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5773,14 +5773,14 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 10.522671,
-   "build_ms": 2772.552122,
-   "frame_ms_mean": 2.373033288888889,
-   "frame_ms_p95": 5.459463,
+   "load_ms": 9.642681,
+   "build_ms": 2428.685704,
+   "frame_ms_mean": 1.7922056222222222,
+   "frame_ms_p95": 5.7047110000000005,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3289734539/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3289734539/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3289734539/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3289734539/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5988,14 +5988,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.859468,
-   "build_ms": 462.01303,
-   "frame_ms_mean": 0.9087808333333334,
-   "frame_ms_p95": 1.366028,
+   "load_ms": 2.022943,
+   "build_ms": 474.901727,
+   "frame_ms_mean": 0.6208837777777777,
+   "frame_ms_p95": 0.730358,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3291729669/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3291729669/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3291729669/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3291729669/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6020,14 +6020,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.682762,
-   "build_ms": 428.326983,
-   "frame_ms_mean": 1.1672762444444449,
-   "frame_ms_p95": 2.219915,
+   "load_ms": 2.850206,
+   "build_ms": 421.901104,
+   "frame_ms_mean": 0.515577788888889,
+   "frame_ms_p95": 0.680236,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3291745179/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3291745179/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3291745179/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3291745179/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6065,14 +6065,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.160849,
-   "build_ms": 409.100749,
-   "frame_ms_mean": 1.280411222222222,
-   "frame_ms_p95": 1.45451,
+   "load_ms": 1.667013,
+   "build_ms": 398.0557,
+   "frame_ms_mean": 1.2996507333333334,
+   "frame_ms_p95": 1.44582,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3309103316/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3309103316/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3309103316/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3309103316/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6097,14 +6097,14 @@
    "built": 46,
    "perspective": false,
    "hdr": false,
-   "load_ms": 23.094488,
-   "build_ms": 2993.396579,
-   "frame_ms_mean": 4.284797422222223,
-   "frame_ms_p95": 3.371351,
+   "load_ms": 12.576095,
+   "build_ms": 2587.292524,
+   "frame_ms_mean": 4.995515711111111,
+   "frame_ms_p95": 5.303794,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3319542538/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3319542538/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3319542538/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3319542538/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6203,14 +6203,14 @@
    "built": 62,
    "perspective": false,
    "hdr": false,
-   "load_ms": 16.456346,
-   "build_ms": 4728.286349,
-   "frame_ms_mean": 11.514907922222225,
-   "frame_ms_p95": 18.784568,
+   "load_ms": 17.077225000000002,
+   "build_ms": 4446.569928,
+   "frame_ms_mean": 7.846633199999999,
+   "frame_ms_p95": 8.918221,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3326873240/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3326873240/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3326873240/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3326873240/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6263,14 +6263,14 @@
    "built": 47,
    "perspective": false,
    "hdr": false,
-   "load_ms": 20.915728,
-   "build_ms": 3529.9423819999997,
-   "frame_ms_mean": 2.334665322222223,
-   "frame_ms_p95": 3.663688,
+   "load_ms": 16.366643,
+   "build_ms": 3349.272023,
+   "frame_ms_mean": 4.3529012666666675,
+   "frame_ms_p95": 9.58246,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3354740764/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3354740764/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3354740764/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3354740764/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6339,14 +6339,14 @@
    "built": 48,
    "perspective": false,
    "hdr": false,
-   "load_ms": 25.536072,
-   "build_ms": 3258.89898,
-   "frame_ms_mean": 2.7535912,
-   "frame_ms_p95": 3.634404,
+   "load_ms": 16.395465,
+   "build_ms": 2679.1262819999997,
+   "frame_ms_mean": 4.464323344444446,
+   "frame_ms_p95": 5.526053,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3363252053/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3363252053/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3363252053/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3363252053/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6406,14 +6406,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1754.5101619999998,
-   "build_ms": 1394.815492,
-   "frame_ms_mean": 3.8430073,
-   "frame_ms_p95": 4.638431,
+   "load_ms": 3.327806,
+   "build_ms": 986.312938,
+   "frame_ms_mean": 4.304464644444444,
+   "frame_ms_p95": 5.605770000000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3366535880/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3366535880/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3366535880/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3366535880/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6438,14 +6438,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1997.076734,
-   "build_ms": 3101.8235120000004,
-   "frame_ms_mean": 0.5693724444444445,
-   "frame_ms_p95": 0.636053,
+   "load_ms": 2.730724,
+   "build_ms": 414.999099,
+   "frame_ms_mean": 0.44522021111111104,
+   "frame_ms_p95": 0.656686,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3387433141/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3387433141/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3387433141/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3387433141/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6483,14 +6483,14 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 353.33489699999996,
-   "build_ms": 611.2461460000001,
-   "frame_ms_mean": 1.3318341000000002,
-   "frame_ms_p95": 2.2252029999999996,
+   "load_ms": 0.849995,
+   "build_ms": 348.544386,
+   "frame_ms_mean": 1.1533540666666666,
+   "frame_ms_p95": 1.308821,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3395587987/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3395587987/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3395587987/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3395587987/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6515,14 +6515,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1245.695655,
-   "build_ms": 2985.3635550000004,
-   "frame_ms_mean": 3.2556125888888894,
-   "frame_ms_p95": 4.635612,
+   "load_ms": 2.247022,
+   "build_ms": 729.1909420000001,
+   "frame_ms_mean": 5.709739099999999,
+   "frame_ms_p95": 6.610713,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3413117423/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3413117423/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3413117423/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3413117423/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6560,14 +6560,14 @@
    "built": 139,
    "perspective": false,
    "hdr": false,
-   "load_ms": 18.283806,
-   "build_ms": 6425.268723,
-   "frame_ms_mean": 4.373822322222223,
-   "frame_ms_p95": 5.525976999999999,
+   "load_ms": 50.664965,
+   "build_ms": 6463.252718,
+   "frame_ms_mean": 8.991812633333335,
+   "frame_ms_p95": 10.916712,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3414858021/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3414858021/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3414858021/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3414858021/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6648,14 +6648,14 @@
    "built": 23,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5407.2292800000005,
-   "build_ms": 5249.381449,
-   "frame_ms_mean": 7.731860433333333,
-   "frame_ms_p95": 12.347876,
+   "load_ms": 10.537909,
+   "build_ms": 2216.289211,
+   "frame_ms_mean": 7.323712811111109,
+   "frame_ms_p95": 9.19576,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3419466417/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3419466417/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3419466417/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3419466417/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6680,14 +6680,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 800.2091409999999,
-   "build_ms": 1856.566754,
-   "frame_ms_mean": 0.8815473777777778,
-   "frame_ms_p95": 2.151049,
+   "load_ms": 1.610597,
+   "build_ms": 406.344924,
+   "frame_ms_mean": 0.8319278444444442,
+   "frame_ms_p95": 1.091677,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3422085307/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3422085307/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3422085307/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3422085307/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6712,14 +6712,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3731.971192,
-   "build_ms": 947.403027,
-   "frame_ms_mean": 1.1523352555555555,
-   "frame_ms_p95": 1.683956,
+   "load_ms": 1.968205,
+   "build_ms": 487.638902,
+   "frame_ms_mean": 1.0286723666666668,
+   "frame_ms_p95": 1.128849,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3422383300/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3422383300/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3422383300/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3422383300/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6744,14 +6744,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 588.480258,
-   "build_ms": 4708.863789999999,
-   "frame_ms_mean": 7.202002211111111,
-   "frame_ms_p95": 7.755509,
+   "load_ms": 0.810859,
+   "build_ms": 586.922987,
+   "frame_ms_mean": 8.628197433333334,
+   "frame_ms_p95": 5.3862939999999995,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3426575339/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3426575339/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3426575339/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3426575339/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6776,14 +6776,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1847.107986,
-   "build_ms": 2557.993142,
-   "frame_ms_mean": 4.464464800000001,
-   "frame_ms_p95": 6.143942,
+   "load_ms": 1.796075,
+   "build_ms": 715.850452,
+   "frame_ms_mean": 4.494952333333335,
+   "frame_ms_p95": 6.353938,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3432876246/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3432876246/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3432876246/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3432876246/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6808,14 +6808,14 @@
    "built": 10,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2490.894559,
-   "build_ms": 1905.388364,
-   "frame_ms_mean": 2.0302990666666676,
-   "frame_ms_p95": 4.927501,
+   "load_ms": 3.172638,
+   "build_ms": 839.852302,
+   "frame_ms_mean": 1.708138422222222,
+   "frame_ms_p95": 2.234279,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3432999904/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3432999904/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3432999904/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3432999904/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6858,14 +6858,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4105.123347,
-   "build_ms": 3643.96437,
-   "frame_ms_mean": 4.952988522222221,
-   "frame_ms_p95": 6.059917,
+   "load_ms": 9.30519,
+   "build_ms": 2339.194111,
+   "frame_ms_mean": 5.34748691111111,
+   "frame_ms_p95": 6.841438,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3445973124/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3445973124/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3445973124/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3445973124/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6913,14 +6913,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.4460849999999998,
-   "build_ms": 199.415276,
-   "frame_ms_mean": 0.3679652222222223,
-   "frame_ms_p95": 0.458012,
+   "load_ms": 1.215805,
+   "build_ms": 204.45101,
+   "frame_ms_mean": 0.35391946666666674,
+   "frame_ms_p95": 0.431216,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3461192631/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3461192631/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3461192631/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3461192631/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6945,14 +6945,14 @@
    "built": 74,
    "perspective": false,
    "hdr": false,
-   "load_ms": 54.83288,
-   "build_ms": 4953.940255,
-   "frame_ms_mean": 4.248164833333331,
-   "frame_ms_p95": 6.051224,
+   "load_ms": 16.116102,
+   "build_ms": 5027.036169,
+   "frame_ms_mean": 3.674268300000001,
+   "frame_ms_p95": 7.547396,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3463520581/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3463520581/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3463520581/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3463520581/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7041,14 +7041,14 @@
    "built": 15,
    "perspective": true,
    "hdr": false,
-   "load_ms": 3.187357,
-   "build_ms": 812.122315,
-   "frame_ms_mean": 0.7740793888888888,
-   "frame_ms_p95": 1.4892189999999998,
+   "load_ms": 3.143242,
+   "build_ms": 900.812053,
+   "frame_ms_mean": 0.9010557000000002,
+   "frame_ms_p95": 1.539787,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3477054430/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3477054430/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3477054430/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3477054430/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -7075,14 +7075,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.4290189999999998,
-   "build_ms": 213.824491,
-   "frame_ms_mean": 0.44312347777777783,
-   "frame_ms_p95": 0.554461,
+   "load_ms": 1.325561,
+   "build_ms": 217.062468,
+   "frame_ms_mean": 0.4157588666666666,
+   "frame_ms_p95": 0.6184769999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3478602089/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3478602089/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3478602089/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3478602089/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -7107,14 +7107,14 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11.973122,
-   "build_ms": 1944.388616,
-   "frame_ms_mean": 4.519968966666666,
-   "frame_ms_p95": 7.330376,
+   "load_ms": 13.093198,
+   "build_ms": 1920.599058,
+   "frame_ms_mean": 4.346933211111111,
+   "frame_ms_p95": 6.757871000000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3479521040/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3479521040/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3479521040/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3479521040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7225,14 +7225,14 @@
    "built": 20,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.312479,
-   "build_ms": 1716.800002,
-   "frame_ms_mean": 2.3671707888888887,
-   "frame_ms_p95": 5.065226,
+   "load_ms": 5.748659,
+   "build_ms": 1351.297062,
+   "frame_ms_mean": 2.690228055555556,
+   "frame_ms_p95": 5.848014,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3480481965/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3480481965/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3480481965/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3480481965/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7292,14 +7292,14 @@
    "built": 49,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1792.653889,
-   "build_ms": 2916.775363,
-   "frame_ms_mean": 10.587940344444448,
-   "frame_ms_p95": 19.825166000000003,
+   "load_ms": 13.952273,
+   "build_ms": 2394.796505,
+   "frame_ms_mean": 9.053677455555558,
+   "frame_ms_p95": 11.488642,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3489263099/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3489263099/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3489263099/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3489263099/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7368,14 +7368,14 @@
    "built": 51,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4418.237393,
-   "build_ms": 2652.452226,
-   "frame_ms_mean": 2.779946755555555,
-   "frame_ms_p95": 6.002642,
+   "load_ms": 10.231636,
+   "build_ms": 2103.973288,
+   "frame_ms_mean": 4.069190222222224,
+   "frame_ms_p95": 5.662175,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3490034653/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3490034653/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3490034653/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3490034653/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7486,14 +7486,14 @@
    "built": 142,
    "perspective": true,
    "hdr": true,
-   "load_ms": 4955.165615,
-   "build_ms": 15081.701978,
-   "frame_ms_mean": 8.752360333333334,
-   "frame_ms_p95": 12.835465,
+   "load_ms": 35.41462,
+   "build_ms": 6977.050883999999,
+   "frame_ms_mean": 15.029258322222226,
+   "frame_ms_p95": 33.050021,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3509243656/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3509243656/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3509243656/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3509243656/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8184,14 +8184,14 @@
    "built": 69,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4599.081177,
-   "build_ms": 5120.772241,
-   "frame_ms_mean": 3.690238866666666,
-   "frame_ms_p95": 3.447484,
+   "load_ms": 20.717545,
+   "build_ms": 4025.497261,
+   "frame_ms_mean": 8.61319966666667,
+   "frame_ms_p95": 9.647812,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3516106265/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3516106265/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3516106265/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3516106265/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8542,14 +8542,14 @@
    "built": 132,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12965.658235,
-   "build_ms": 14760.691552,
-   "frame_ms_mean": 3.7872008888888895,
-   "frame_ms_p95": 5.993006,
+   "load_ms": 27.637232,
+   "build_ms": 9171.067722,
+   "frame_ms_mean": 3.935506588888888,
+   "frame_ms_p95": 6.359402,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3516174947/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3516174947/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3516174947/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3516174947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8695,14 +8695,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 473.075095,
-   "build_ms": 14352.905825,
-   "frame_ms_mean": 3.683575755555556,
-   "frame_ms_p95": 5.455774,
+   "load_ms": 3.067693,
+   "build_ms": 1505.371182,
+   "frame_ms_mean": 3.2794177777777787,
+   "frame_ms_p95": 4.569574,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3556794116/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3556794116/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3556794116/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3556794116/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8740,14 +8740,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 561.2136399999999,
-   "build_ms": 422.562649,
-   "frame_ms_mean": 0.45894665555555564,
-   "frame_ms_p95": 1.1990880000000002,
+   "load_ms": 1.0930149999999998,
+   "build_ms": 119.520944,
+   "frame_ms_mean": 0.26217916666666663,
+   "frame_ms_p95": 0.45439,
    "static": true,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3593587273/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3593587273/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3593587273/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3593587273/lwe-smoke-3s.png"
    ],
    "exit": 1,
    "counts": {},
@@ -8772,14 +8772,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 549.28735,
-   "build_ms": 1227.081737,
-   "frame_ms_mean": 0.7231903555555553,
-   "frame_ms_p95": 1.468983,
+   "load_ms": 1.210114,
+   "build_ms": 300.441087,
+   "frame_ms_mean": 0.5547144666666667,
+   "frame_ms_p95": 0.821993,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-cov3/scenes/3749550751/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-cov3/scenes/3749550751/lwe-smoke-3s.png"
+    "/tmp/liascape-scene-health-cov4/scenes/3749550751/lwe-smoke-1s.png",
+    "/tmp/liascape-scene-health-cov4/scenes/3749550751/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
