@@ -1,7 +1,7 @@
 From c959e7a4a2068376b48c1cc8de1697b6a7f2f17a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:08:31 +0530
-Subject: [PATCH 30/53] render: hierarchy the way Wallpaper Engine does
+Subject: [PATCH 30/54] render: hierarchy the way Wallpaper Engine does
 
 Decoded from wallpaper64.exe 2.8.485: the "effectively visible" test
 (GH 0x1401b50e0), the image model matrix (GH 0x1402277d0) and the

@@ -1,0 +1,1392 @@
+From 36ad6a09b0992e40a872051426166b7ee2ddce91 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 10:25:44 +0530
+Subject: [PATCH 54/54] =?UTF-8?q?render:=20puppet=20warp=20=E2=80=94=20WE'?=
+ =?UTF-8?q?s=20MDL=20loader,=20skinning,=20animation-layer=20mixing=20and?=
+ =?UTF-8?q?=20attachments?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decoded from wallpaper64.exe 2.8.485:
+
+- The loader (GH 0x1402873f0) takes every MDLV version up to 0023. A mesh's vertex layout comes
+  from its format word (the component tables at 0x1404c4da0 / 0x1404c4e10: position, normal,
+  tangent, blend indices, weights, texcoords, colour), read from the header before MDLV0015, after
+  it from 0015, after the bounds from 0017; flag bit 0 = 32-bit indices. LWE took only
+  MDLV0021/0023, found the vertex block by a byte scan and assumed 80-byte vertices and 16-bit
+  indices, so 7 of the 14 puppet scenes drew their raw sprite sheet (G07).
+- Sections follow the meshes, each a tag and the offset of its end. MDLS: bones (name, flags,
+  parent, the bind matrix relative to the parent, a JSON string), then IK targets and constraints
+  from version 2. MDLA: per animation an id, name, mode (loop / mirror / single), fps, frame count,
+  flags and one track per bone of frames + 1 samples (position, Euler angles WE turns into a
+  quaternion R = Rz·Ry·Rx, scale), then per version the target, constraint, curve, bone-alpha,
+  blend-shape and range blocks and the events. MDAT: attachments (bone, name, matrix). Parsed to
+  each section's end in all 50 library puppet files.
+- Skinning: bind world = parent world · local (GH 0x1402261c0); a vertex is Σ weight ·
+  world(pose) · bindWorld⁻¹ · position, on the CPU, in the mesh's own y-up space (PR #625 negated
+  the x and z angles; WE doesn't). Skinned z is flattened (inferred, as PR #625).
+- Layers (GH 0x140228470): from the bind pose, each visible layer in order on its own clock
+  (dt · rate; loop wraps, mirror bounces, single stops: GH 0x1401d4d00 / 0x1401d6a00). The
+  animation is sampled between frames ⌊t·fps⌋ and the next (nlerp; GH 0x1401a00a0) and mixed in:
+  normal = lerp (pose, sample, weight) (GH 0x140223b90), additive = pose + (sample − bind) ·
+  weight with the rotation nlerp (1, sample · bind⁻¹, weight) · pose (GH 0x140224390; the scale
+  and the product's order are inferred). The weight is blend × the blendin / blendout ramps over
+  min (length / 2, blendtime) (GH 0x140291f60). `additive`, `blendin`, `blendout` and `blendtime`
+  are parsed now and a layer is visible by default (WE's constructor GH 0x140291d20) (G06, G08).
+- `attachment` (G09): a child pinned to its parent puppet's attachment is placed in the
+  attachment's space — the bone's posed world · the MDAT matrix — under the parent's transform
+  (looked up by name in GH 0x14020be30, applied in GH 0x1401b5170). It was ignored, so attached
+  hair and heads sat off their characters.
+- autosize grows the canvas to hold the mesh in every frame (PR #625's approach).
+- A puppet without effects draws its only pass straight to the scene: its mesh is now mapped into
+  the layer's scene rectangle there; it was drawn in layer pixels with the scene's projection.
+
+Not ported: GPU skinning (SKINNING / g_Bones), bone alpha (SKINNING_ALPHA), blend shapes (MDLE,
+MDMP), IK, physics bones, root motion, animation events, script layer control.
+
+Origin: ours (the parsing and autosize follow upstream PR #625, Almamu/linux-wallpaperengine,
+closed unmerged; checked against WE)
+Why: docs/player/spikes/we-lwe-gap-audit.md B12 (G06–G09)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/CMakeLists.txt                       |   1 +
+ src/core/WallpaperEngine/Data/Model/Object.h  |  10 +
+ .../Data/Parsers/ObjectParser.cpp             |   9 +-
+ src/core/WallpaperEngine/Render/CObject.cpp   |  18 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 301 +++++----
+ .../WallpaperEngine/Render/Objects/CImage.h   |  32 +-
+ .../WallpaperEngine/Render/Objects/Puppet.cpp | 579 ++++++++++++++++++
+ .../WallpaperEngine/Render/Objects/Puppet.h   | 132 ++++
+ 8 files changed, 968 insertions(+), 114 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/Puppet.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 3a38299..47e62cc 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -57,6 +57,7 @@ set(TARGET_SOURCE_FILES
+ 
+     WallpaperEngine/Render/Objects/CRenderable.cpp
+     WallpaperEngine/Render/Objects/CImage.cpp
++    WallpaperEngine/Render/Objects/Puppet.cpp
+     WallpaperEngine/Render/Objects/CSound.cpp
+     WallpaperEngine/Render/Objects/CText.cpp
+     WallpaperEngine/Render/Objects/TextLayout.cpp
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 5001303..2c42b2d 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -41,6 +41,10 @@ struct ObjectData {
+     /** `solid` (default true): the object receives cursor events (WE's docs: "All mouse cursor events will only work on
+      *  objects marked as Solid") */
+     bool solid = true;
++    /** `attachment`: the name of a parent puppet's attachment (MDAT) the object is pinned to; its origin, scale and
++     *  angle are then in the attachment's space, which follows its bone (GH 0x14020be30 looks it up by name, the
++     *  world transform GH 0x1401b5170 applies it under the parent's) */
++    std::optional<std::string> attachment = std::nullopt;
+ };
+ 
+ /**
+@@ -103,6 +107,12 @@ struct ImageAnimationLayer {
+     UserSettingUniquePtr visible;
+     UserSettingUniquePtr blend;
+     UserSettingUniquePtr animation;
++    /** The layer's reflected fields (GH 0x140292030; defaults from the constructor GH 0x140291d20): flags +0xd0 bit 0
++     *  visible (default on), bit 1 additive, bit 2 blendin, bit 3 blendout; blendtime +0x18c (0.5) */
++    bool additive = false;
++    bool blendIn = false;
++    bool blendOut = false;
++    float blendTime = 0.5f;
+ };
+ 
+ struct ImageData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index f4081ad..1940156 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -52,6 +52,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	    .solid = it.optional ("solid", true),
++	    .attachment = it.optional<std::string> ("attachment"),
+ 	};
+     } catch (const std::exception& e) {
+ 	sLog.error ("Error parsing object base data: ", e.what ());
+@@ -78,6 +79,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .groupParallaxDepth = it.user ("parallaxDepth", project.properties, glm::vec2 (1.0f)),
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	    .solid = it.optional ("solid", true),
++	    .attachment = it.optional<std::string> ("attachment"),
+ 	};
+     }
+ 
+@@ -369,9 +371,14 @@ ImageAnimationLayerUniquePtr ObjectParser::parseAnimationLayer (const JSON& it,
+     return std::make_unique<ImageAnimationLayer> (ImageAnimationLayer {
+ 	.id = it.require<int> ("id", "Animation layer must have an id"),
+ 	.rate = it.user ("rate", properties, 1.0f),
+-	.visible = it.user ("visible", properties, false),
++	// WE's layer starts visible (flags 1, GH 0x140291d20)
++	.visible = it.user ("visible", properties, true),
+ 	.blend = it.user ("blend", properties, 1.0f),
+ 	.animation = it.user ("animation", properties, 0),
++	.additive = it.optional ("additive", false),
++	.blendIn = it.optional ("blendin", false),
++	.blendOut = it.optional ("blendout", false),
++	.blendTime = it.optional ("blendtime", 0.5f),
+     });
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/CObject.cpp b/src/core/WallpaperEngine/Render/CObject.cpp
+index c70e48b..a58106b 100644
+--- a/src/core/WallpaperEngine/Render/CObject.cpp
++++ b/src/core/WallpaperEngine/Render/CObject.cpp
+@@ -4,6 +4,7 @@
+ #include <utility>
+ 
+ #include "WallpaperEngine/Logging/Log.h"
++#include "WallpaperEngine/Render/Objects/CImage.h"
+ 
+ using namespace WallpaperEngine;
+ using namespace WallpaperEngine::Render;
+@@ -81,6 +82,23 @@ CObject::ResolvedTransform CObject::resolveTransform (const Object& object) cons
+     ResolvedTransform resolved = localTransform (*chain[count - 1]);
+     for (int i = count - 2; i >= 0; --i) {
+ 	ResolvedTransform local = localTransform (*chain[i]);
++	// G09: a child pinned to its parent puppet's attachment is in the attachment's space, under the parent's
++	// (GH 0x1401b5170: world = parent world · attachment · local)
++	if (chain[i]->attachment.has_value ()) {
++	    const auto* parentObject = this->getScene ().getObject (chain[i + 1]->id);
++	    if (parentObject != nullptr && parentObject->is<Objects::CImage> ()) {
++		auto* puppet = const_cast<Objects::CImage*> (parentObject->as<Objects::CImage> ());
++		glm::vec2 offset;
++		float attachmentAngle = 0.0f;
++		if (puppet->attachmentTransform (*chain[i]->attachment, offset, attachmentAngle)) {
++		    const glm::vec2 moved
++			= rotateVec2 ({ offset.x * resolved.scale.x, offset.y * resolved.scale.y }, resolved.angle);
++		    resolved.origin.x += moved.x;
++		    resolved.origin.y += moved.y;
++		    resolved.angle += attachmentAngle;
++		}
++	    }
++	}
+ 	const glm::vec2 offset
+ 	    = rotateVec2 ({ local.origin.x * resolved.scale.x, local.origin.y * resolved.scale.y }, resolved.angle);
+ 	local.origin.x = resolved.origin.x + offset.x;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 4f1c4a6..e4b03ea 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -57,41 +57,6 @@ std::optional<glm::vec3> findMagentaCompositeTint (const Image& image, const std
+     return std::nullopt;
+ }
+ 
+-struct PuppetMeshBlock {
+-    size_t headerOffset = 0;
+-    uint32_t vertexBytes = 0;
+-    uint32_t indexBytes = 0;
+-};
+-
+-std::optional<PuppetMeshBlock> findPuppetMeshBlock (
+-    const BinaryReader& reader, size_t markerSize, size_t mdlsOffset, size_t meshHeaderSize, size_t vertexStride
+-) {
+-    for (size_t offset = markerSize; offset + meshHeaderSize + sizeof (uint32_t) < mdlsOffset; offset++) {
+-	reader.base ().seekg (static_cast<std::streamoff> (offset + sizeof (uint32_t)), std::ios::beg);
+-	const uint32_t candidateVertexBytes = reader.nextUInt32 ();
+-	const size_t verticesOffset = offset + meshHeaderSize;
+-	const size_t indexLengthOffset = verticesOffset + candidateVertexBytes;
+-
+-	if (candidateVertexBytes == 0 || candidateVertexBytes % vertexStride != 0
+-	    || indexLengthOffset + sizeof (uint32_t) > mdlsOffset) {
+-	    continue;
+-	}
+-
+-	reader.base ().seekg (static_cast<std::streamoff> (indexLengthOffset), std::ios::beg);
+-	const uint32_t candidateIndexBytes = reader.nextUInt32 ();
+-	const size_t indicesOffset = indexLengthOffset + sizeof (uint32_t);
+-	if (candidateIndexBytes == 0 || candidateIndexBytes % (sizeof (uint16_t) * 3) != 0
+-	    || indicesOffset + candidateIndexBytes > mdlsOffset) {
+-	    continue;
+-	}
+-
+-	return PuppetMeshBlock { .headerOffset = offset,
+-				 .vertexBytes = candidateVertexBytes,
+-				 .indexBytes = candidateIndexBytes };
+-    }
+-
+-    return std::nullopt;
+-}
+ }
+ 
+ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+@@ -156,6 +121,11 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+ 
+ 	// TODO: CHANGE ALIGNMENT TOO?
+     }
++    // the puppet first: with autosize its canvas grows to hold the posed mesh, which sizes the quad and the FBOs
++    this->m_hasPuppetMesh = this->loadPuppetMesh (size);
++    if (this->m_hasPuppetMesh) {
++	size = this->m_puppetSize;
++    }
+     this->m_size = size;
+ 
+     glm::vec2 scaledSize = size * glm::vec2 (scale);
+@@ -312,8 +282,6 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     glBindBuffer (GL_ARRAY_BUFFER, this->m_texcoordPass);
+     glBufferData (GL_ARRAY_BUFFER, sizeof (texcoordPass), texcoordPass, GL_STATIC_DRAW);
+ 
+-    this->m_hasPuppetMesh = this->loadPuppetMesh (size);
+-
+     // compute the center of the image in scene space for rotation
+     this->m_sceneCenter
+ 	= glm::vec3 ((this->m_pos.x + this->m_pos.z) / 2.0f, (this->m_pos.y + this->m_pos.w) / 2.0f, 0.0f);
+@@ -351,6 +319,9 @@ CImage::~CImage () {
+     glDeleteBuffers (1, &this->m_passSpacePosition);
+     glDeleteBuffers (1, &this->m_texcoordCopy);
+     glDeleteBuffers (1, &this->m_texcoordPass);
++    if (this->m_puppetScenePosition != GL_NONE) {
++	glDeleteBuffers (1, &this->m_puppetScenePosition);
++    }
+     if (this->m_puppetSpacePosition != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetSpacePosition);
+     }
+@@ -366,83 +337,63 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+     if (!this->getImage ().model->puppet.has_value ()) {
+ 	return false;
+     }
++    const std::string& file = *this->getImage ().model->puppet;
+ 
+     try {
+-	const auto stream = this->getScene ().getScene ().project.assetLocator->read (*this->getImage ().model->puppet);
++	const auto stream = this->getScene ().getScene ().project.assetLocator->read (file);
+ 	std::vector<char> data { std::istreambuf_iterator<char> (*stream), std::istreambuf_iterator<char> () };
+ 
+-	constexpr size_t markerSize = 9;
+-	constexpr size_t meshHeaderSize = sizeof (uint32_t) * 2;
+-	constexpr size_t vertexStride = 80;
+-	constexpr size_t positionOffset = 0;
+-	constexpr size_t uvOffset = 72;
+-
+-	const std::string puppetVersion
+-	    = data.size () >= markerSize ? std::string (data.data (), strlen ("MDLV0021")) : "";
+-	if (puppetVersion != "MDLV0021" && puppetVersion != "MDLV0023") {
+-	    sLog.error ("Unsupported puppet model header ", puppetVersion, " in ", *this->getImage ().model->puppet);
++	// WE's loader (GH 0x1402873f0): every MDLV version up to 0023, the vertex layout from the mesh's format word
++	std::string error;
++	if (!Puppet::parse (data.data (), data.size (), this->m_puppet, error)) {
++	    sLog.error ("Could not load puppet ", file, ": ", error);
+ 	    return false;
+ 	}
++	if (!error.empty ()) {
++	    sLog.error ("Puppet ", file, " partly loaded: ", error);
++	}
+ 
+-	const size_t mdlsOffset = [&data] () -> size_t {
+-	    for (size_t offset = markerSize; offset + strlen ("MDLS") < data.size (); offset++) {
+-		if (std::memcmp (data.data () + offset, "MDLS", strlen ("MDLS")) == 0) {
+-		    return offset;
+-		}
++	std::vector<GLfloat> texcoords;
++	std::vector<GLuint> indices;
++	this->m_puppetVertices.clear ();
++	for (const auto& mesh : this->m_puppet.meshes) {
++	    const auto base = static_cast<GLuint> (this->m_puppetVertices.size ());
++	    for (const auto& vertex : mesh.vertices) {
++		this->m_puppetVertices.push_back (vertex);
++		texcoords.push_back (vertex.uv.x);
++		texcoords.push_back (vertex.uv.y);
+ 	    }
+-	    return data.size ();
+-	}();
+-
+-	auto meshBuffer = std::make_unique<char[]> (data.size ());
+-	std::copy (data.begin (), data.end (), meshBuffer.get ());
+-	const BinaryReader reader (std::make_shared<MemoryStream> (std::move (meshBuffer), data.size ()));
+-	const auto meshBlock = findPuppetMeshBlock (reader, markerSize, mdlsOffset, meshHeaderSize, vertexStride);
+-	if (!meshBlock.has_value ()) {
+-	    sLog.error ("Could not find a usable MDLV mesh block in ", *this->getImage ().model->puppet);
++	    for (const uint32_t index : mesh.indices) {
++		indices.push_back (base + index);
++	    }
++	}
++	if (this->m_puppetVertices.empty () || indices.empty ()) {
++	    sLog.error ("Puppet ", file, " has no triangles");
+ 	    return false;
+ 	}
+ 
+-	const size_t vertexCount = meshBlock->vertexBytes / vertexStride;
+-	const size_t verticesOffset = meshBlock->headerOffset + meshHeaderSize;
+-	const size_t indicesOffset = verticesOffset + meshBlock->vertexBytes + sizeof (uint32_t);
+-	const size_t indexCount = meshBlock->indexBytes / sizeof (uint16_t);
+-	std::vector<GLfloat> texcoords;
+-	std::vector<GLushort> indices;
+-
+-	this->m_puppetRawPositions.clear ();
+-	this->m_puppetRawPositions.reserve (vertexCount * 3);
+-	texcoords.reserve (vertexCount * 2);
+-	indices.reserve (indexCount);
+-
+-	for (size_t index = 0; index < vertexCount; index++) {
+-	    const size_t vertexOffset = verticesOffset + index * vertexStride;
+-	    reader.base ().seekg (static_cast<std::streamoff> (vertexOffset + positionOffset), std::ios::beg);
+-	    const float x = reader.nextFloat ();
+-	    const float y = reader.nextFloat ();
+-	    const float z = reader.nextFloat ();
+-	    reader.base ().seekg (static_cast<std::streamoff> (vertexOffset + uvOffset), std::ios::beg);
+-	    const float u = reader.nextFloat ();
+-	    const float v = reader.nextFloat ();
+-
+-	    this->m_puppetRawPositions.push_back (x);
+-	    this->m_puppetRawPositions.push_back (y);
+-	    this->m_puppetRawPositions.push_back (z);
+-	    texcoords.push_back (u);
+-	    texcoords.push_back (v);
++	this->m_puppetBind = Puppet::bindPose (this->m_puppet);
++	Puppet::bindWorldMatrices (this->m_puppet, this->m_puppetBindWorldInverse);
++	for (auto& m : this->m_puppetBindWorldInverse) {
++	    m = glm::inverse (m);
+ 	}
++	this->m_puppetLayers.assign (this->getImage ().animationLayers.size (), {});
++	for (size_t i = 0; i < this->m_puppetLayers.size (); i++) {
++	    this->m_puppetLayers[i].blendIn = this->getImage ().animationLayers[i]->blendIn;
++	}
++	this->m_puppetSkinned = !this->m_puppet.bones.empty () && !this->m_puppet.animations.empty ();
+ 
+-	reader.base ().seekg (static_cast<std::streamoff> (indicesOffset), std::ios::beg);
+-	for (size_t index = 0; index < indexCount; index++) {
+-	    uint16_t value = 0;
+-	    reader.next (reinterpret_cast<char*> (&value), sizeof (value));
+-	    if (value >= vertexCount) {
+-		sLog.error ("Invalid puppet mesh index ", value, " in ", *this->getImage ().model->puppet);
+-		return false;
+-	    }
+-	    indices.push_back (value);
++	this->m_puppetRawPositions.clear ();
++	this->m_puppetRawPositions.reserve (this->m_puppetVertices.size () * 3);
++	for (const auto& vertex : this->m_puppetVertices) {
++	    this->m_puppetRawPositions.push_back (vertex.position.x);
++	    this->m_puppetRawPositions.push_back (vertex.position.y);
++	    this->m_puppetRawPositions.push_back (vertex.position.z);
+ 	}
+ 
+-	this->updatePuppetPositionBuffer (size);
++	this->m_puppetSize = this->getImage ().model->autosize && this->m_puppetSkinned ? this->puppetCanvasSize (size)
++											 : size;
++	this->updatePuppetPositionBuffer (this->m_puppetSize);
+ 
+ 	glGenBuffers (1, &this->m_puppetTexCoord);
+ 	glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetTexCoord);
+@@ -450,21 +401,112 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 
+ 	glGenBuffers (1, &this->m_puppetIndices);
+ 	glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_puppetIndices);
+-	glBufferData (GL_ELEMENT_ARRAY_BUFFER, indices.size () * sizeof (GLushort), indices.data (), GL_STATIC_DRAW);
++	glBufferData (GL_ELEMENT_ARRAY_BUFFER, indices.size () * sizeof (GLuint), indices.data (), GL_STATIC_DRAW);
+ 
+ 	this->m_puppetIndexCount = static_cast<GLsizei> (indices.size ());
+ 	sLog.out (
+-	    "Loaded puppet mesh ", *this->getImage ().model->puppet, " version=", puppetVersion,
+-	    " vertices=", vertexCount, " indices=", this->m_puppetIndexCount
++	    "Loaded puppet ", file, " version=", this->m_puppet.version, " vertices=", this->m_puppetVertices.size (),
++	    " indices=", this->m_puppetIndexCount, " bones=", this->m_puppet.bones.size (),
++	    " animations=", this->m_puppet.animations.size (), " attachments=", this->m_puppet.attachments.size ()
+ 	);
+-
+ 	return true;
+     } catch (const std::exception& ex) {
+-	sLog.error ("Could not load puppet mesh ", *this->getImage ().model->puppet, ": ", ex.what ());
++	sLog.error ("Could not load puppet mesh ", file, ": ", ex.what ());
+ 	return false;
+     }
+ }
+ 
++glm::vec2 CImage::puppetCanvasSize (const glm::vec2& size) const {
++    // (PR #625's autosize: measure the mesh in every frame of every animation, grow the canvas symmetrically)
++    float maxX = size.x / 2.0f, maxY = size.y / 2.0f;
++    std::vector<glm::mat4> world, skinning (this->m_puppet.bones.size ());
++    for (const auto& animation : this->m_puppet.animations) {
++	for (uint32_t frame = 0; frame <= animation.frames; frame++) {
++	    std::vector<Puppet::Key> pose = this->m_puppetBind;
++	    Puppet::mix (pose, this->m_puppetBind, animation, static_cast<float> (frame) / animation.fps, 1.0f, false);
++	    Puppet::worldMatrices (this->m_puppet, pose, world);
++	    for (size_t b = 0; b < world.size (); b++) {
++		skinning[b] = world[b] * this->m_puppetBindWorldInverse[b];
++	    }
++	    for (const auto& vertex : this->m_puppetVertices) {
++		const glm::vec3 p = Puppet::skin (vertex, skinning);
++		maxX = std::max (maxX, std::abs (p.x));
++		maxY = std::max (maxY, std::abs (p.y));
++	    }
++	}
++    }
++    return { std::ceil (maxX) * 2.0f, std::ceil (maxY) * 2.0f };
++}
++
++void CImage::updatePuppetPose () {
++    if (!this->m_puppetSkinned) {
++	return;
++    }
++    const float now = static_cast<float> (this->getScene ().getTime ());
++    if (now == this->m_puppetPoseTime) {
++	return;
++    }
++    const float dt = this->m_puppetPoseTime < 0.0f ? 0.0f : std::max (now - this->m_puppetPoseTime, 0.0f);
++    this->m_puppetPoseTime = now;
++
++    // GH 0x140228470: from the bind pose, every visible layer in order; its clock runs at dt · rate
++    std::vector<Puppet::Key> pose = this->m_puppetBind;
++    const auto& layers = this->getImage ().animationLayers;
++    for (size_t i = 0; i < layers.size () && i < this->m_puppetLayers.size (); i++) {
++	const auto& layer = *layers[i];
++	const auto id = static_cast<uint32_t> (layer.animation->value->getInt ());
++	const auto match = std::find_if (this->m_puppet.animations.begin (), this->m_puppet.animations.end (),
++					 [id] (const Puppet::Animation& a) { return a.id == id; });
++	if (match == this->m_puppet.animations.end ()) {
++	    continue;
++	}
++	auto& state = this->m_puppetLayers[i];
++	if (!layer.visible->value->getBool ()) {
++	    continue;
++	}
++	Puppet::advance (*match, state.clock, dt * layer.rate->value->getFloat ());
++	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
++						  layer.blendOut, layer.blendTime);
++	Puppet::mix (pose, this->m_puppetBind, *match, state.clock.time, weight, layer.additive);
++    }
++
++    Puppet::worldMatrices (this->m_puppet, pose, this->m_puppetWorld);
++    std::vector<glm::mat4> skinning (this->m_puppetWorld.size ());
++    for (size_t b = 0; b < skinning.size (); b++) {
++	skinning[b] = this->m_puppetWorld[b] * this->m_puppetBindWorldInverse[b];
++    }
++    for (size_t v = 0; v < this->m_puppetVertices.size (); v++) {
++	const glm::vec3 p = Puppet::skin (this->m_puppetVertices[v], skinning);
++	this->m_puppetRawPositions[v * 3] = p.x;
++	this->m_puppetRawPositions[v * 3 + 1] = p.y;
++	// (inferred, as PR #625) flat: x/y bone turns would push vertices out of the FBO's depth range
++	this->m_puppetRawPositions[v * 3 + 2] = 0.0f;
++    }
++    this->updatePuppetPositionBuffer (this->getSize ());
++}
++
++bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, float& angle) {
++    for (const auto& attachment : this->m_puppet.attachments) {
++	if (attachment.name != name) {
++	    continue;
++	}
++	this->updatePuppetPose ();
++	glm::mat4 bone (1.0f);
++	if (this->m_puppetSkinned && static_cast<size_t> (attachment.bone) < this->m_puppetWorld.size ()) {
++	    bone = this->m_puppetWorld[attachment.bone];
++	} else {
++	    std::vector<glm::mat4> bind;
++	    Puppet::bindWorldMatrices (this->m_puppet, bind);
++	    bone = bind[attachment.bone];
++	}
++	const glm::mat4 world = bone * attachment.matrix;
++	offset = glm::vec2 (world[3]);
++	angle = std::atan2 (world[0][1], world[0][0]);
++	return true;
++    }
++    return false;
++}
++
+ void CImage::updatePuppetPositionBuffer (const glm::vec2& size) {
+     if (this->m_puppetRawPositions.empty ()) {
+ 	return;
+@@ -485,15 +527,38 @@ void CImage::updatePuppetPositionBuffer (const glm::vec2& size) {
+     glBufferData (GL_ARRAY_BUFFER, positions.size () * sizeof (GLfloat), positions.data (), GL_DYNAMIC_DRAW);
+ }
+ 
+-void CImage::setupPuppetGeometryCallback (Effects::CPass* pass) const {
++void CImage::updatePuppetScenePositionBuffer () {
++    // the layer pixel (u, v) of the copy quad to the scene quad (uploadGeometryBuffers pairs copy (0, h) with scene
++    // (m_pos.x, m_pos.y) and copy (w, 0) with (m_pos.z, m_pos.w))
++    const glm::vec2 size = this->getSize ();
++    if (this->m_puppetRawPositions.empty () || size.x <= 0.0f || size.y <= 0.0f) {
++	return;
++    }
++    std::vector<GLfloat> positions;
++    positions.reserve (this->m_puppetRawPositions.size ());
++    for (size_t i = 0; i + 2 < this->m_puppetRawPositions.size (); i += 3) {
++	const float u = size.x / 2.0f + this->m_puppetRawPositions[i];
++	const float v = size.y / 2.0f - this->m_puppetRawPositions[i + 1];
++	positions.push_back (this->m_pos.x + u / size.x * (this->m_pos.z - this->m_pos.x));
++	positions.push_back (this->m_pos.w + v / size.y * (this->m_pos.y - this->m_pos.w));
++	positions.push_back (0.0f);
++    }
++    if (this->m_puppetScenePosition == GL_NONE) {
++	glGenBuffers (1, &this->m_puppetScenePosition);
++    }
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetScenePosition);
++    glBufferData (GL_ARRAY_BUFFER, positions.size () * sizeof (GLfloat), positions.data (), GL_DYNAMIC_DRAW);
++}
++
++void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const {
+     pass->setGeometryCallback (
+-	[this, pass] () {
++	[this, pass, toScene] () {
+ 	    const GLint position = glGetAttribLocation (pass->getProgramID (), "a_Position");
+ 	    const GLint texCoord = glGetAttribLocation (pass->getProgramID (), "a_TexCoord");
+ 
+ 	    if (position >= 0) {
+ 		glEnableVertexAttribArray (position);
+-		glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetSpacePosition);
++		glBindBuffer (GL_ARRAY_BUFFER, toScene ? this->m_puppetScenePosition : this->m_puppetSpacePosition);
+ 		glVertexAttribPointer (position, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+ 	    }
+ 
+@@ -517,7 +582,7 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass) const {
+ 		);
+ 	    }
+ 	    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_puppetIndices);
+-	    glDrawElements (GL_TRIANGLES, this->m_puppetIndexCount, GL_UNSIGNED_SHORT, nullptr);
++	    glDrawElements (GL_TRIANGLES, this->m_puppetIndexCount, GL_UNSIGNED_INT, nullptr);
+ 	},
+ 	[pass] () {
+ 	    const GLint position = glGetAttribLocation (pass->getProgramID (), "a_Position");
+@@ -898,10 +963,6 @@ void CImage::setupPasses () {
+ 	    = (isFirstPass) ? &this->m_modelViewProjectionCopyInverse : &this->m_modelViewProjectionPassInverse;
+ 	first = false;
+ 
+-	if (isFirstPass && this->m_hasPuppetMesh) {
+-	    pass->setBlendingMode (BlendingMode_Translucent);
+-	    this->setupPuppetGeometryCallback (pass);
+-	}
+ 
+ 	pass->setModelMatrix (&this->m_modelMatrix);
+ 	pass->setViewProjectionMatrix (&this->m_viewProjectionMatrix);
+@@ -916,6 +977,13 @@ void CImage::setupPasses () {
+ 	    inverseProjection = &this->m_modelViewProjectionScreenInverse;
+ 	}
+ 
++	// the puppet mesh replaces the first pass's quad; a puppet without effects draws it straight to the scene, in
++	// the layer's scene-space rectangle (before, its layer pixels were drawn with the scene's projection)
++	if (isFirstPass && this->m_hasPuppetMesh) {
++	    pass->setBlendingMode (BlendingMode_Translucent);
++	    this->setupPuppetGeometryCallback (pass, spacePosition == this->getSceneSpacePosition ());
++	}
++
+ 	pass->setDestination (drawTo);
+ 	pass->setInput (asInput);
+ 	pass->setPreviousInput (inTargetEffectSequence ? effectInput : nullptr);
+@@ -1088,8 +1156,16 @@ void CImage::render () {
+     // g_Color4 is bound to m_color4: bring it up to this frame's colour and alpha
+     static_cast<void> (this->getColor4 ());
+ 
++    // the puppet's pose for this frame (G06/G08)
++    if (this->m_hasPuppetMesh) {
++	this->updatePuppetPose ();
++    }
++
+     // Always update screen transform (handles rotation + parallax dynamically)
+     this->updateScreenSpacePosition ();
++    if (this->m_hasPuppetMesh) {
++	this->updatePuppetScenePositionBuffer ();
++    }
+ 
+ #if !NDEBUG
+     std::string str = "Image ";
+@@ -1271,6 +1347,7 @@ CImage::ResolvedTransform CImage::updateGeometryBuffers () {
+     const glm::vec2 previousSize = this->m_size;
+     this->m_size = size;
+     if (this->m_hasPuppetMesh && size != previousSize) {
++	this->m_puppetSize = size;
+ 	this->updatePuppetPositionBuffer (size);
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 16235ee..7900e82 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -11,6 +11,7 @@
+ 
+ #include "../TextureProvider.h"
+ #include "WallpaperEngine/Scripting/ScriptableObject.h"
++#include "Puppet.h"
+ 
+ #include <glm/vec3.hpp>
+ 
+@@ -66,6 +67,13 @@ public:
+      */
+     void pinpongFramebuffer (std::shared_ptr<const CFBO>* drawTo, std::shared_ptr<const TextureProvider>* asInput);
+ 
++    /**
++     * A puppet attachment's place in this layer at the current pose: its offset from the layer's origin in the
++     * layer's own pixels (y up, before the layer's scale and angle) and its z angle. False when there's none by that
++     * name (G09; the attachment is the bone's posed world · the MDAT matrix)
++     */
++    [[nodiscard]] bool attachmentTransform (const std::string& name, glm::vec2& offset, float& angle);
++
+ protected:
+     /**
+      * Gives the layer a new size: its composite FBOs and its effects' FBOs (at their scale) are resized in place, so the
+@@ -96,7 +104,14 @@ protected:
+ private:
+     bool loadPuppetMesh (const glm::vec2& size);
+     void updatePuppetPositionBuffer (const glm::vec2& size);
+-    void setupPuppetGeometryCallback (Effects::CPass* pass) const;
++    /** Poses the puppet for the scene's current time (once per time): advances the layers' clocks, mixes them and
++     *  skins the mesh */
++    void updatePuppetPose ();
++    /** autosize: the canvas grown (symmetrically) to hold the mesh in every frame of every animation */
++    [[nodiscard]] glm::vec2 puppetCanvasSize (const glm::vec2& size) const;
++    /** `toScene`: the pass draws to the scene (no effects), with the mesh in the layer's scene rectangle */
++    void setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const;
++    void updatePuppetScenePositionBuffer ();
+     ResolvedTransform updateGeometryBuffers ();
+     [[nodiscard]] glm::vec2 resolveGeometrySize (float sceneWidth, float sceneHeight, glm::vec3& origin) const;
+     void updateScenePosition (
+@@ -116,11 +131,26 @@ private:
+     GLuint m_texcoordCopy;
+     GLuint m_texcoordPass;
+     GLuint m_puppetSpacePosition = GL_NONE;
++    GLuint m_puppetScenePosition = GL_NONE;
+     GLuint m_puppetTexCoord = GL_NONE;
+     GLuint m_puppetIndices = GL_NONE;
+     GLsizei m_puppetIndexCount = 0;
+     bool m_hasPuppetMesh = false;
++    /** the puppet's vertices (every mesh's, in order), as posed last; y up, centred */
+     std::vector<GLfloat> m_puppetRawPositions = {};
++    std::vector<Puppet::Vertex> m_puppetVertices = {};
++    Puppet::Model m_puppet = {};
++    std::vector<Puppet::Key> m_puppetBind = {};
++    std::vector<glm::mat4> m_puppetBindWorldInverse = {};
++    std::vector<glm::mat4> m_puppetWorld = {};
++    struct PuppetLayerState {
++	Puppet::Clock clock;
++	bool blendIn = false;
++    };
++    std::vector<PuppetLayerState> m_puppetLayers = {};
++    float m_puppetPoseTime = -1.0f;
++    bool m_puppetSkinned = false;
++    glm::vec2 m_puppetSize = glm::vec2 (0.0f);
+ 
+     glm::mat4 m_modelViewProjectionScreen = {};
+     glm::mat4 m_modelViewProjectionPass = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+new file mode 100644
+index 0000000..b0e0ddc
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -0,0 +1,579 @@
++#include "Puppet.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstring>
++#include <stdexcept>
++
++#define GLM_ENABLE_EXPERIMENTAL
++#include <glm/gtx/matrix_decompose.hpp>
++#undef GLM_ENABLE_EXPERIMENTAL
++
++namespace WallpaperEngine::Render::Objects::Puppet {
++namespace {
++// the vertex format's components in file order and their sizes (GH 0x1402873f0 sums these; tables 0x1404c4da0 and
++// 0x1404c4e10): position (vec3 or vec4), normal, tangent, blend indices, blend weights, texcoord 0..5 (2-4 floats
++// each), colour
++constexpr uint32_t kFormatBits[] = { 0x1,      0x10000,  0x2000000, 0x2,      0x4,      0x800000, 0x1000000,
++				     0x8,      0x10,     0x20,      0x40,     0x80,     0x100,    0x200,
++				     0x400,    0x800,    0x1000,    0x2000,   0x4000,   0x20000,  0x40000,
++				     0x80000,  0x100000, 0x200000,  0x400000, 0x8000 };
++constexpr uint32_t kFormatSizes[] = { 12, 16, 12, 12, 16, 16, 16, 8, 12, 16, 8, 12, 16,
++				      8,  12, 16, 8,  12, 16, 8,  12, 16, 8, 12, 16, 16 };
++
++struct Reader {
++    const char* data;
++    size_t size;
++    size_t at = 0;
++
++    void need (size_t bytes) const {
++	if (at + bytes > size) {
++	    throw std::runtime_error ("truncated at " + std::to_string (at));
++	}
++    }
++    template <typename T> T get () {
++	need (sizeof (T));
++	T value;
++	std::memcpy (&value, data + at, sizeof (T));
++	at += sizeof (T);
++	return value;
++    }
++    uint32_t u32 () { return get<uint32_t> (); }
++    int32_t i32 () { return get<int32_t> (); }
++    uint16_t u16 () { return get<uint16_t> (); }
++    uint8_t u8 () { return get<uint8_t> (); }
++    float f32 () { return get<float> (); }
++    std::string str () {
++	const void* end = at < size ? std::memchr (data + at, 0, size - at) : nullptr;
++	if (end == nullptr) {
++	    throw std::runtime_error ("unterminated string at " + std::to_string (at));
++	}
++	std::string value (data + at, static_cast<const char*> (end));
++	at = static_cast<size_t> (static_cast<const char*> (end) - data) + 1;
++	return value;
++    }
++    /** a u32 length and that many bytes; returns where they start */
++    size_t blob (uint32_t& length) {
++	length = u32 ();
++	need (length);
++	const size_t start = at;
++	at += length;
++	return start;
++    }
++    void skipBlob () {
++	uint32_t length;
++	blob (length);
++    }
++    glm::mat4 mat4 (size_t from) const {
++	glm::mat4 m;
++	std::memcpy (&m, data + from, sizeof (m));
++	return m;
++    }
++};
++
++/** the 4-digit version after a 4-letter tag, -1 when the tag differs */
++int versionOf (const std::string& marker, const char* tag) {
++    if (marker.size () != 8 || marker.compare (0, 4, tag) != 0) {
++	return -1;
++    }
++    return std::atoi (marker.c_str () + 4);
++}
++
++void parseMeshes (Reader& r, int version, Model& out) {
++    const uint32_t defaultFormat = r.u32 ();
++    const uint32_t stringsPerMesh = r.u32 ();
++    const uint32_t meshCount = r.u32 ();
++    if (meshCount == 0 || meshCount > 64 || stringsPerMesh > 16) {
++	throw std::runtime_error ("bad mesh header");
++    }
++
++    for (uint32_t m = 0; m < meshCount; m++) {
++	Mesh mesh;
++	for (uint32_t s = 0; s < stringsPerMesh; s++) {
++	    std::string value = r.str ();
++	    if (s == 0) {
++		mesh.material = std::move (value);
++	    }
++	}
++	const uint32_t flags = version >= 4 ? r.u32 () : 0;
++	if (flags & 2) {
++	    r.u32 (); // influences per vertex (≤ 4)
++	}
++	uint32_t format = defaultFormat;
++	if (version >= 17) {
++	    for (int i = 0; i < 6; i++) {
++		r.f32 (); // bounds
++	    }
++	    format = r.u32 ();
++	} else if (version >= 15) {
++	    format = r.u32 ();
++	}
++
++	const size_t stride = vertexStride (format);
++	if (stride == 0) {
++	    throw std::runtime_error ("unsupported vertex format");
++	}
++	// component offsets
++	size_t offsets[std::size (kFormatBits)] = {};
++	size_t offset = 0;
++	for (size_t i = 0; i < std::size (kFormatBits); i++) {
++	    offsets[i] = offset;
++	    if (format & kFormatBits[i]) {
++		offset += kFormatSizes[i];
++	    }
++	}
++	const bool hasPosition = (format & 0x1) || (format & 0x10000);
++	const size_t positionAt = (format & 0x1) ? offsets[0] : offsets[1];
++	const bool hasBones = (format & 0x800000) && (format & 0x1000000);
++	const bool hasUv = format & (0x8 | 0x10 | 0x20);
++	const size_t uvAt = (format & 0x8) ? offsets[7] : (format & 0x10) ? offsets[8] : offsets[9];
++	if (!hasPosition) {
++	    throw std::runtime_error ("vertex format without a position");
++	}
++
++	uint32_t vertexBytes, indexBytes;
++	const size_t vertices = r.blob (vertexBytes);
++	const size_t indices = r.blob (indexBytes);
++	const size_t indexSize = (flags & 1) ? 4 : 2;
++	if (vertexBytes % stride != 0 || indexBytes % (indexSize * 3) != 0) {
++	    throw std::runtime_error ("vertex/index data not a whole number of records");
++	}
++
++	const size_t vertexCount = vertexBytes / stride;
++	mesh.vertices.resize (vertexCount);
++	for (size_t v = 0; v < vertexCount; v++) {
++	    const char* base = r.data + vertices + v * stride;
++	    Vertex& vertex = mesh.vertices[v];
++	    std::memcpy (&vertex.position, base + positionAt, sizeof (glm::vec3));
++	    vertex.uv = glm::vec2 (0.0f);
++	    if (hasUv) {
++		std::memcpy (&vertex.uv, base + uvAt, sizeof (glm::vec2));
++	    }
++	    vertex.bones = glm::uvec4 (0);
++	    vertex.weights = glm::vec4 (0.0f);
++	    if (hasBones) {
++		std::memcpy (&vertex.bones, base + offsets[5], sizeof (glm::uvec4));
++		std::memcpy (&vertex.weights, base + offsets[6], sizeof (glm::vec4));
++	    }
++	}
++	const size_t indexCount = indexBytes / indexSize;
++	mesh.indices.resize (indexCount);
++	for (size_t i = 0; i < indexCount; i++) {
++	    uint32_t index = 0;
++	    std::memcpy (&index, r.data + indices + i * indexSize, indexSize);
++	    if (index >= vertexCount) {
++		throw std::runtime_error ("index out of range");
++	    }
++	    mesh.indices[i] = index;
++	}
++
++	if (version >= 21) {
++	    if (r.u8 ()) {
++		r.u32 ();
++		r.skipBlob ();
++	    }
++	    if (r.u8 ()) {
++		r.skipBlob ();
++	    }
++	}
++	if (version >= 23) {
++	    const uint32_t groups = r.u32 ();
++	    for (uint32_t g = 0; g < groups; g++) {
++		r.need (8);
++		r.at += 8;
++		r.str ();
++		r.u32 ();
++		const uint32_t a = r.u32 ();
++		r.need (size_t (a) * 4);
++		r.at += size_t (a) * 4;
++		const uint32_t b = r.u32 ();
++		r.need (size_t (b) * 4);
++		r.at += size_t (b) * 4;
++	    }
++	}
++	out.meshes.push_back (std::move (mesh));
++    }
++}
++
++// the extra per-skeleton counts MDLA's later versions repeat per animation (MDLS ≥ 2)
++struct SkeletonCounts {
++    uint32_t targets = 0; // u16 list of 0x80-byte records
++    uint32_t constraints = 0; // u32 list
++};
++
++void parseSkeleton (Reader& r, int version, Model& out, SkeletonCounts& counts) {
++    const uint32_t boneCount = r.u32 ();
++    if (boneCount > 0x80) {
++	throw std::runtime_error ("too many bones");
++    }
++    for (uint32_t b = 0; b < boneCount; b++) {
++	Bone bone;
++	bone.name = r.str ();
++	bone.flags = r.u32 ();
++	bone.parent = r.i32 ();
++	if (bone.parent != -1 && (bone.parent < 0 || static_cast<uint32_t> (bone.parent) >= b)) {
++	    throw std::runtime_error ("bone parent out of order");
++	}
++	uint32_t length;
++	const size_t at = r.blob (length);
++	float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
++	std::memcpy (m, r.data + at, std::min<size_t> (length, sizeof (m)));
++	std::memcpy (&bone.local, m, sizeof (m));
++	r.str (); // simulation settings (JSON)
++	out.bones.push_back (std::move (bone));
++    }
++    if (version >= 2) {
++	counts.targets = r.u16 ();
++	for (uint32_t i = 0; i < counts.targets; i++) {
++	    r.str ();
++	    r.u32 ();
++	    r.u32 ();
++	    r.need (64);
++	    r.at += 64;
++	}
++	if (r.u8 ()) {
++	    // explicit matrices for the bones and the targets (the inverse binds WE recomputes anyway)
++	    const size_t bytes = size_t (boneCount + counts.targets) * 64;
++	    r.need (bytes);
++	    r.at += bytes;
++	}
++	counts.constraints = r.u32 ();
++	for (uint32_t i = 0; i < counts.constraints; i++) {
++	    r.u32 ();
++	    r.u32 ();
++	    r.u32 ();
++	    const uint32_t flags = version > 3 ? r.u32 () : 0;
++	    if (flags & 2) {
++		r.u32 ();
++		r.f32 ();
++	    }
++	}
++	// the rest of the section (IK chains, physics) is skipped by the section offset
++    }
++}
++
++void skipFloatTracks (Reader& r, uint32_t count) {
++    for (uint32_t i = 0; i < count; i++) {
++	r.u32 ();
++	r.skipBlob ();
++    }
++}
++
++void parseAnimations (Reader& r, int version, const SkeletonCounts& counts, Model& out) {
++    const uint32_t count = r.u32 ();
++    if (count > 0x400) {
++	throw std::runtime_error ("too many animations");
++    }
++    for (uint32_t a = 0; a < count; a++) {
++	Animation animation;
++	animation.id = r.u32 ();
++	r.u32 ();
++	animation.name = r.str ();
++	const std::string mode = r.str ();
++	animation.mode = mode == "mirror" ? Mode::Mirror : mode == "single" ? Mode::Single : Mode::Loop;
++	animation.fps = r.f32 ();
++	animation.frames = r.u32 ();
++	const uint32_t flags = r.u32 ();
++	const uint32_t tracks = r.u32 ();
++	const size_t samples = size_t (animation.frames) + 1;
++	for (uint32_t t = 0; t < tracks; t++) {
++	    Track track;
++	    track.flags = r.u32 ();
++	    uint32_t length;
++	    const size_t at = r.blob (length);
++	    if (length != samples * 36) {
++		throw std::runtime_error ("track length isn't (frames + 1) · 36");
++	    }
++	    track.keys.resize (samples);
++	    for (size_t k = 0; k < samples; k++) {
++		float f[9];
++		std::memcpy (f, r.data + at + k * 36, sizeof (f));
++		track.keys[k].position = glm::vec3 (f[0], f[1], f[2]);
++		track.keys[k].rotation = glm::quat (glm::vec3 (f[3], f[4], f[5]));
++		track.keys[k].scale = glm::vec3 (f[6], f[7], f[8]);
++	    }
++	    animation.tracks.push_back (std::move (track));
++	}
++	if (version > 1) {
++	    skipFloatTracks (r, counts.targets);
++	    skipFloatTracks (r, counts.constraints);
++	}
++	if (version > 2) {
++	    const uint32_t curves = r.u32 ();
++	    if (curves > 16) {
++		throw std::runtime_error ("too many curves");
++	    }
++	    skipFloatTracks (r, curves);
++	    if (r.u8 ()) {
++		skipFloatTracks (r, tracks); // per-bone alpha
++	    }
++	}
++	if (version > 3 && r.u8 ()) {
++	    // blend-shape weights per mesh
++	    for (size_t m = 0; m < out.meshes.size (); m++) {
++		if (r.u32 () & 1) {
++		    r.u32 ();
++		    const uint16_t shapes = r.u16 ();
++		    for (uint16_t s = 0; s < shapes; s++) {
++			r.u16 ();
++			r.skipBlob ();
++		    }
++		}
++	    }
++	}
++	if (version > 4) {
++	    for (int i = 0; i < 6; i++) {
++		r.u32 ();
++	    }
++	}
++	if (version > 5 && r.u8 ()) {
++	    skipFloatTracks (r, tracks);
++	}
++	if (flags & 1) {
++	    r.need (18);
++	    r.at += 18; // root motion
++	}
++	const uint32_t events = r.u32 ();
++	for (uint32_t e = 0; e < events; e++) {
++	    r.u32 ();
++	    r.str ();
++	}
++	if (animation.fps > 0.0f && animation.frames > 0) {
++	    out.animations.push_back (std::move (animation));
++	}
++    }
++}
++
++void parseAttachments (Reader& r, Model& out) {
++    const uint16_t count = r.u16 ();
++    for (uint16_t i = 0; i < count; i++) {
++	Attachment attachment;
++	attachment.bone = r.u16 ();
++	attachment.name = r.str ();
++	r.need (64);
++	attachment.matrix = r.mat4 (r.at);
++	r.at += 64;
++	out.attachments.push_back (std::move (attachment));
++    }
++}
++} // namespace
++
++size_t vertexStride (uint32_t format) {
++    // bit 25 is rejected, and exactly one of the two position forms is required
++    if ((format & 0x2000000) || ((format & 0x1) != 0) == ((format & 0x10000) != 0)) {
++	return 0;
++    }
++    size_t stride = 0;
++    for (size_t i = 0; i < std::size (kFormatBits); i++) {
++	if (format & kFormatBits[i]) {
++	    stride += kFormatSizes[i];
++	}
++    }
++    return stride;
++}
++
++bool parse (const char* data, size_t size, Model& out, std::string& error) {
++    out = Model ();
++    Reader r { data, size };
++    try {
++	const int version = versionOf (r.str (), "MDLV");
++	// WE takes MDLV up to 0023 (GH 0x1402873f0 compares with "MDLV0023")
++	if (version < 1 || version > 23) {
++	    error = "not an MDLV file (or newer than MDLV0023)";
++	    return false;
++	}
++	out.version = version;
++	parseMeshes (r, version, out);
++
++	// then the sections: a tag, the offset of the section's end, its body
++	SkeletonCounts counts;
++	while (r.at + 9 <= size) {
++	    const std::string marker = r.str ();
++	    if (marker.size () != 8 || marker.compare (0, 2, "MD") != 0) {
++		break;
++	    }
++	    const uint32_t end = r.u32 ();
++	    if (end < r.at || end > size) {
++		throw std::runtime_error ("bad section end for " + marker);
++	    }
++	    if (const int v = versionOf (marker, "MDLS"); v >= 1) {
++		parseSkeleton (r, v, out, counts);
++	    } else if (const int v = versionOf (marker, "MDLA"); v >= 1) {
++		parseAnimations (r, v, counts, out);
++	    } else if (versionOf (marker, "MDAT") >= 1) {
++		parseAttachments (r, out);
++	    }
++	    r.at = end;
++	}
++    } catch (const std::exception& ex) {
++	error = ex.what ();
++	return !out.meshes.empty ();
++    }
++    // tracks and attachments must match the skeleton
++    const auto bones = out.bones.size ();
++    out.animations.erase (std::remove_if (out.animations.begin (), out.animations.end (),
++					   [bones] (const Animation& a) { return a.tracks.size () != bones; }),
++			  out.animations.end ());
++    out.attachments.erase (std::remove_if (out.attachments.begin (), out.attachments.end (),
++					    [bones] (const Attachment& a) {
++						return a.bone < 0 || static_cast<size_t> (a.bone) >= bones;
++					    }),
++			   out.attachments.end ());
++    return true;
++}
++
++float length (const Animation& animation) {
++    return animation.fps > 0.0f ? static_cast<float> (animation.frames) / animation.fps : 0.0f;
++}
++
++void advance (const Animation& animation, Clock& clock, float dt) {
++    const float len = length (animation);
++    if (len <= 0.0f || clock.finished) {
++	return;
++    }
++    switch (animation.mode) {
++	case Mode::Single:
++	    clock.time += dt;
++	    if (clock.time >= len) {
++		clock.time = len;
++		clock.finished = true;
++	    }
++	    break;
++	case Mode::Mirror:
++	    clock.time += clock.reversed ? -dt : dt;
++	    if (!clock.reversed && clock.time >= len) {
++		clock.time = len - std::fmod (clock.time, len);
++		clock.reversed = true;
++	    } else if (clock.reversed && clock.time <= 0.0f) {
++		clock.time = std::fabs (std::fmod (clock.time, len));
++		clock.reversed = false;
++	    }
++	    break;
++	case Mode::Loop:
++	    clock.time += dt;
++	    if (clock.time < 0.0f) {
++		clock.time = std::fmod (clock.time + len, len);
++	    }
++	    if (clock.time >= len) {
++		clock.time = std::fmod (clock.time, len);
++	    }
++	    break;
++    }
++}
++
++float layerWeight (const Animation& animation, const Clock& clock, float blend, bool& blendIn, bool blendOut,
++		   float blendTime) {
++    constexpr float kEpsilon = 1.1920928955078125e-07f;
++    const float len = length (animation);
++    float weight = blend;
++    if (blendIn) {
++	float fade = 1.0f;
++	if (std::min (len, blendTime) > kEpsilon) {
++	    fade = std::min (clock.time / std::min (len * 0.5f, blendTime), 1.0f);
++	}
++	weight = fade * blend;
++	if (animation.mode != Mode::Single && fade >= 1.0f) {
++	    blendIn = false;
++	}
++    }
++    if (blendOut && std::min (len, blendTime) > kEpsilon) {
++	weight *= std::min ((len - clock.time) / std::min (len * 0.5f, blendTime), 1.0f);
++    }
++    return weight;
++}
++
++std::vector<Key> bindPose (const Model& model) {
++    std::vector<Key> pose (model.bones.size ());
++    for (size_t b = 0; b < model.bones.size (); b++) {
++	glm::vec3 skew;
++	glm::vec4 perspective;
++	glm::quat rotation;
++	if (!glm::decompose (model.bones[b].local, pose[b].scale, rotation, pose[b].position, skew, perspective)) {
++	    pose[b] = Key ();
++	    pose[b].position = glm::vec3 (model.bones[b].local[3]);
++	    continue;
++	}
++	pose[b].rotation = rotation;
++    }
++    return pose;
++}
++
++namespace {
++glm::quat nlerp (const glm::quat& from, const glm::quat& to, float t) {
++    const float sign = glm::dot (from, to) < 0.0f ? -1.0f : 1.0f;
++    const glm::quat q = from * (1.0f - t) + to * (t * sign);
++    const float len = glm::length (q);
++    return len > 0.0f ? q / len : from;
++}
++} // namespace
++
++void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation& animation, float time, float weight,
++	  bool additive) {
++    // GH 0x1401a00a0: a = clamp (⌊t / frame⌋, 0, frames − 1), b = min (a + 1, frames), the fraction within the frame
++    const float frame = 1.0f / animation.fps;
++    const int frames = static_cast<int> (animation.frames);
++    const int a = std::clamp (static_cast<int> (time / frame), 0, std::max (frames - 1, 0));
++    const int b = std::min (a + 1, frames);
++    const float f = std::fmod (time, frame) / frame;
++
++    for (size_t i = 0; i < pose.size () && i < animation.tracks.size (); i++) {
++	const Track& track = animation.tracks[i];
++	if (track.flags & 1 || track.keys.size () <= static_cast<size_t> (b)) {
++	    continue;
++	}
++	const Key& ka = track.keys[a];
++	const Key& kb = track.keys[b];
++	Key sample;
++	sample.position = ka.position * (1.0f - f) + kb.position * f;
++	sample.rotation = nlerp (ka.rotation, kb.rotation, f);
++	sample.scale = ka.scale * (1.0f - f) + kb.scale * f;
++
++	Key& out = pose[i];
++	if (additive) {
++	    out.position += (sample.position - bind[i].position) * weight;
++	    out.scale += (sample.scale - bind[i].scale) * weight;
++	    const glm::quat delta = sample.rotation * glm::conjugate (bind[i].rotation);
++	    out.rotation = glm::normalize (nlerp (glm::quat (1.0f, 0.0f, 0.0f, 0.0f), delta, weight) * out.rotation);
++	} else {
++	    out.position = sample.position * weight + out.position * (1.0f - weight);
++	    out.scale = sample.scale * weight + out.scale * (1.0f - weight);
++	    out.rotation = nlerp (out.rotation, sample.rotation, weight);
++	}
++    }
++}
++
++void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vector<glm::mat4>& world) {
++    world.resize (model.bones.size ());
++    for (size_t b = 0; b < model.bones.size (); b++) {
++	const Key& k = pose[b];
++	const glm::mat4 local
++	    = glm::translate (glm::mat4 (1.0f), k.position) * glm::mat4_cast (k.rotation) * glm::scale (glm::mat4 (1.0f), k.scale);
++	const int parent = model.bones[b].parent;
++	world[b] = parent >= 0 ? world[parent] * local : local;
++    }
++}
++
++void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world) {
++    world.resize (model.bones.size ());
++    for (size_t b = 0; b < model.bones.size (); b++) {
++	const int parent = model.bones[b].parent;
++	world[b] = parent >= 0 ? world[parent] * model.bones[b].local : model.bones[b].local;
++    }
++}
++
++glm::vec3 skin (const Vertex& vertex, const std::vector<glm::mat4>& skinning) {
++    const glm::vec4 p (vertex.position, 1.0f);
++    glm::vec3 result (0.0f);
++    float total = 0.0f;
++    for (int c = 0; c < 4; c++) {
++	const float w = vertex.weights[c];
++	const uint32_t bone = vertex.bones[c];
++	if (w == 0.0f || bone >= skinning.size ()) {
++	    continue;
++	}
++	result += w * glm::vec3 (skinning[bone] * p);
++	total += w;
++    }
++    return total == 0.0f ? vertex.position : result;
++}
++} // namespace WallpaperEngine::Render::Objects::Puppet
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+new file mode 100644
+index 0000000..8f1018e
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -0,0 +1,132 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include <glm/glm.hpp>
++#include <glm/gtc/matrix_transform.hpp>
++#include <glm/gtc/quaternion.hpp>
++
++/**
++ * Puppet warp: WE's MDL puppet files (MDLV mesh, MDLS skeleton, MDLA animations, MDAT attachments) and the
++ * animation-layer mixing that poses them. Decoded from wallpaper64.exe 2.8.485:
++ *  - the loader GH 0x1402873f0 (sections, vertex layout, bones, tracks, attachments);
++ *  - the layer clock GH 0x1401d4d00 / 0x1401d6a00 and its frame lookup GH 0x1401a00a0;
++ *  - the layer weight GH 0x140291f60 and the per-frame mixing GH 0x140228470 with its normal blend GH 0x140223b90
++ *    and additive blend GH 0x140224390;
++ *  - the bind world matrices GH 0x1402261c0.
++ * Everything here is in the mesh's own space: x right, y up, the image's centre at 0, in the image's pixels.
++ */
++namespace WallpaperEngine::Render::Objects::Puppet {
++struct Vertex {
++    glm::vec3 position;
++    glm::vec2 uv;
++    glm::uvec4 bones;
++    glm::vec4 weights;
++};
++
++struct Mesh {
++    std::string material;
++    std::vector<Vertex> vertices;
++    std::vector<uint32_t> indices;
++};
++
++struct Bone {
++    std::string name;
++    uint32_t flags = 0;
++    int parent = -1;
++    /** the bind transform relative to the parent */
++    glm::mat4 local = glm::mat4 (1.0f);
++};
++
++/** one sample of a bone: WE converts the stored Euler angles to a quaternion at load (R = Rz · Ry · Rx) */
++struct Key {
++    glm::vec3 position = glm::vec3 (0.0f);
++    glm::quat rotation = glm::quat (1.0f, 0.0f, 0.0f, 0.0f);
++    glm::vec3 scale = glm::vec3 (1.0f);
++};
++
++struct Track {
++    /** bit 0: the bone isn't animated by this animation (it keeps the pose under it) */
++    uint32_t flags = 0;
++    /** frames + 1 samples */
++    std::vector<Key> keys;
++};
++
++enum class Mode { Loop, Mirror, Single };
++
++struct Animation {
++    uint32_t id = 0;
++    std::string name;
++    Mode mode = Mode::Loop;
++    float fps = 30.0f;
++    uint32_t frames = 0;
++    std::vector<Track> tracks;
++};
++
++struct Attachment {
++    int bone = -1;
++    std::string name;
++    /** relative to the bone */
++    glm::mat4 matrix = glm::mat4 (1.0f);
++};
++
++struct Model {
++    int version = 0;
++    std::vector<Mesh> meshes;
++    std::vector<Bone> bones;
++    std::vector<Animation> animations;
++    std::vector<Attachment> attachments;
++};
++
++/** The size in bytes of a vertex of this MDLV format word, 0 when WE rejects it (GH 0x1402873f0, tables 0x1404c4da0) */
++size_t vertexStride (uint32_t format);
++
++/** Parses a whole .mdl file. `error` says why it failed */
++bool parse (const char* data, size_t size, Model& out, std::string& error);
++
++/** A layer's clock (GH 0x1401d4d00): time in seconds within [0, length] */
++struct Clock {
++    float time = 0.0f;
++    bool reversed = false;
++    bool finished = false;
++};
++
++/** The animation's length in seconds: frames / fps */
++float length (const Animation& animation);
++
++/** Advances the clock by dt (already × the layer's rate): loop wraps, mirror bounces, single stops (GH 0x1401d6a00) */
++void advance (const Animation& animation, Clock& clock, float dt);
++
++/**
++ * The layer's weight (GH 0x140291f60): blend, × the blend-in ramp t / min (length / 2, blendtime) while `blendIn`
++ * (cleared once it reaches 1, except in a single animation) and × the blend-out ramp (length − t) / that
++ */
++float layerWeight (const Animation& animation, const Clock& clock, float blend, bool& blendIn, bool blendOut,
++                   float blendTime);
++
++/** The bind pose: every bone's local bind matrix, decomposed */
++std::vector<Key> bindPose (const Model& model);
++
++/**
++ * Mixes one layer into `pose` (GH 0x140223b90 / 0x140224390). The animation is sampled between frames
++ * a = ⌊t · fps⌋ and a + 1 (nlerp), then:
++ *  - normal: pose = lerp (pose, sample, weight) (rotation nlerp on the shorter arc);
++ *  - additive: position += (sample − bind) · weight; rotation = nlerp (1, sample · bind⁻¹, weight) · rotation;
++ *    scale += (sample − bind) · weight.
++ * A track with flag bit 0 leaves its bone alone
++ */
++void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation& animation, float time, float weight,
++          bool additive);
++
++/** World matrices of a pose: world = parent world · local */
++void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vector<glm::mat4>& world);
++
++/** The bind world matrices (GH 0x1402261c0) */
++void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world);
++
++/** Skins a vertex: Σ weightᵢ · world[boneᵢ] · bindWorld⁻¹[boneᵢ] · position; weights summing to 0 keep it */
++glm::vec3 skin (const Vertex& vertex, const std::vector<glm::mat4>& skinning);
++} // namespace WallpaperEngine::Render::Objects::Puppet

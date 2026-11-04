@@ -277,3 +277,15 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Not done yet (in TODO): rain splashes lying flat on the ground, rope/trail shader options, and WE captures
     of a couple of these scenes to check them against WE itself.
 
+
+- **Scenes, batch B12 (fork patch 0054, pin `36ad6a0`):** puppet characters (WE's "puppet warp") now move and fit
+  together the way Wallpaper Engine does it. The loader for WE's puppet files was decoded from wallpaper64.exe.
+  - All 14 puppet scenes load their meshes now. Before, 7 used a file version LWE refused, so they showed the flat
+    sheet of parts.
+  - The characters breathe, blink and sway with their animations. Layered animations (a base motion plus added
+    breathing or blinking) mix the way WE mixes them.
+  - Parts pinned to a bone stay on it. 3463520581's Asuna has her hair again (she was bald), and 3233141951's girl
+    has her face back.
+  - All 93 scenes that load still load; none went blank.
+  - Not done yet (in TODO): a WE capture to check the poses against WE itself, and blend shapes, physics hair and
+    bone fading, which a few scenes also use.

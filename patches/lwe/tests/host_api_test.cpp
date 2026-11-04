@@ -1711,6 +1711,188 @@ static bool particle_control_points () {
     return true;
 }
 
+// B12: puppet warp (docs/player/spikes/we-lwe-gap-audit.md G06-G09), decoded from wallpaper64.exe 2.8.485: the MDL
+// loader GH 0x1402873f0, the layer clock GH 0x1401d6a00, the mixing GH 0x140228470 (normal GH 0x140223b90, additive
+// GH 0x140224390), the attachment transform GH 0x1401b5170
+
+// an .mdl file written field by field
+struct MdlWriter {
+    std::string out;
+    MdlWriter& u8 (unsigned v) { out.push_back (static_cast<char> (v)); return *this; }
+    MdlWriter& u16 (unsigned v) { out.append (reinterpret_cast<const char*> (&v), 2); return *this; }
+    MdlWriter& u32 (uint32_t v) { out.append (reinterpret_cast<const char*> (&v), 4); return *this; }
+    MdlWriter& f32 (float v) { out.append (reinterpret_cast<const char*> (&v), 4); return *this; }
+    MdlWriter& str (const std::string& s) { out += s; out.push_back ('\0'); return *this; }
+    MdlWriter& identity () {
+        for (int i = 0; i < 16; i++) {
+            f32 (i % 5 == 0 ? 1.0f : 0.0f);
+        }
+        return *this;
+    }
+    // a section: its tag, the offset of its end, then `body`
+    MdlWriter& section (const std::string& tag, const std::string& body) {
+        str (tag);
+        u32 (static_cast<uint32_t> (out.size () + 4 + body.size ()));
+        out += body;
+        return *this;
+    }
+};
+
+// a 4 x 4 square centred on the mesh's origin, every vertex on bone 0. MDLV0016 has format 0x1800009 (position,
+// blend indices, weights, uv: 52 B) and 16-bit indices; MDLV0023 here 0x180000f (+ normal, tangent: 80 B) and 32-bit
+static std::string puppet_mesh (int version) {
+    const bool v23 = version == 23;
+    const uint32_t format = v23 ? 0x180000f : 0x1800009;
+    MdlWriter w;
+    w.str (v23 ? "MDLV0023" : "MDLV0016").u32 (0x1800009).u32 (1).u32 (1).str ("materials/puppet.json");
+    w.u32 (v23 ? 1 : 0); // flags: bit 0 = 32-bit indices
+    if (v23) {
+        for (int i = 0; i < 6; i++) {
+            w.f32 (0.0f);
+        }
+    }
+    w.u32 (format);
+    MdlWriter verts;
+    const float corners[4][2] = { { -2, -2 }, { 2, -2 }, { 2, 2 }, { -2, 2 } };
+    for (const auto& c : corners) {
+        verts.f32 (c[0]).f32 (c[1]).f32 (0.0f);
+        if (v23) {
+            verts.f32 (0).f32 (0).f32 (1).f32 (1).f32 (0).f32 (0).f32 (1);
+        }
+        verts.u32 (0).u32 (0).u32 (0).u32 (0).f32 (1).f32 (0).f32 (0).f32 (0);
+        verts.f32 (0.5f).f32 (0.5f);
+    }
+    w.u32 (static_cast<uint32_t> (verts.out.size ()));
+    w.out += verts.out;
+    const unsigned tris[6] = { 0, 1, 2, 0, 2, 3 };
+    w.u32 (v23 ? 24 : 12);
+    for (unsigned t : tris) {
+        v23 ? w.u32 (t) : w.u16 (t);
+    }
+    if (v23) {
+        w.u8 (0).u8 (0).u32 (0);
+    }
+    return w.out;
+}
+
+// one root bone at the origin
+static std::string puppet_skeleton (int version) {
+    MdlWriter b;
+    b.u32 (1).str ("").u32 (1).u32 (0xffffffff).u32 (64).identity ().str ("");
+    if (version >= 2) {
+        b.u16 (0).u8 (0).u32 (0);
+    }
+    return b.out;
+}
+
+// animations moving the bone to (x, 0) in both of their 2 samples: (id, x)
+static std::string puppet_animations (int version, const std::vector<std::pair<int, float>>& anims) {
+    MdlWriter a;
+    a.u32 (static_cast<uint32_t> (anims.size ()));
+    for (const auto& [id, x] : anims) {
+        a.u32 (id).u32 (0).str ("anim").str ("loop").f32 (1.0f).u32 (1).u32 (0).u32 (1);
+        a.u32 (0).u32 (72);
+        for (int k = 0; k < 2; k++) {
+            a.f32 (x).f32 (0).f32 (0).f32 (0).f32 (0).f32 (0).f32 (1).f32 (1).f32 (1);
+        }
+        if (version > 2) {
+            a.u32 (0).u8 (0);
+        }
+        if (version > 3) {
+            a.u8 (0);
+        }
+        if (version > 4) {
+            for (int i = 0; i < 6; i++) {
+                a.u32 (0);
+            }
+        }
+        if (version > 5) {
+            a.u8 (0);
+        }
+        a.u32 (0); // events
+    }
+    return a.out;
+}
+
+// two 32 x 32 puppets on a 64 x 32 scene (y up). Layer 1 (MDLV0016, at x 16) plays one animation that moves its
+// bone 8 px right: its 4 px square covers x 22..25. Layer 2 (MDLV0023, at x 48) has a normal layer to +4 and an
+// additive layer to +8 at blend 0.5: +4 + 4 = +8, x 54..57. Its attachment "tip" sits on the bone; the black 4 px
+// square pinned to it 8 px up follows: x 54..57, rows 6..9. Neither has an effect, so each draws straight to the
+// scene. Unpatched: MDLV0016 was rejected (the whole 32 px quad), the MDLV0023 mesh was misread (nothing drawn) and
+// the attached square sat on the parent's origin (x 46..49)
+static bool puppet_warp_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 8.0f } }));
+    MdlWriter b;
+    b.out = puppet_mesh (23);
+    MdlWriter attach;
+    attach.u16 (1).u16 (0).str ("tip").identity ();
+    b.section ("MDLS0004", puppet_skeleton (4)).section ("MDAT0001", attach.out)
+        .section ("MDLA0006", puppet_animations (6, { { 1, 4.0f }, { 2, 8.0f } }));
+
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"16 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]},"
+          "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"48 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false},"
+          "{\"id\":12,\"animation\":2,\"blend\":0.5,\"additive\":true}]},"
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "\"origin\":\"0 8 0\",\"parent\":2,\"attachment\":\"tip\"}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pb.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pb.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    write_file (dir + "/models/pb.mdl", b.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pb.json", "models/pa.mdl", "models/pb.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    auto lit = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 128;
+    };
+    auto span = [&] (int y, int from, int to) {
+        std::string s;
+        for (int x = from; x <= to; x++) {
+            s += lit (x, y) ? '#' : '.';
+        }
+        return s;
+    };
+    if (getenv ("SCRIPT_TEST_DEBUG")) {
+        for (int y = 0; y < 32; y++) {
+            std::string line;
+            for (int x = 0; x < 64; x++) {
+                unsigned char px[4] = { 0, 0, 0, 0 };
+                read_pixel (rig.fbo, x, y, px);
+                line += px[0] > 128 ? '#' : px[2] < 64 ? 'o' : '.';
+            }
+            printf ("    %2d %s\n", y, line.c_str ());
+        }
+    }
+    printf ("    row 16 x 0..31: %s, x 32..63: %s\n", span (16, 0, 31).c_str (), span (16, 32, 63).c_str ());
+    auto dark = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[2] < 64;
+    };
+    CHECK (lit (24, 16) && !lit (5, 16) && !lit (16, 16), "MDLV0016 puppet isn't the skinned 4 px square at x 22..25");
+    CHECK (lit (55, 16) && lit (56, 16) && !lit (47, 16) && !lit (51, 16), "normal + additive layers aren't at +8 (x 54..57)");
+    CHECK (dark (55, 7) && !dark (47, 7), "the attached square doesn't follow the bone (x 54..57, rows 6..9)");
+    return true;
+}
+
 // B5: parallax and camera (docs/player/spikes/we-lwe-gap-audit.md G10-G12, G14/E1, G15-G19), decoded from
 // wallpaper64.exe 2.8.485: the camera update GH 0x1401b8af0, the per-object offset in the render loop GH 0x1401b9b50,
 // the shake GH 0x1401c7680, the zoom in the scene tick GH 0x1401afbf0. The pointer is native scene px, y down
@@ -3424,6 +3606,7 @@ int main (int argc, char** argv) {
     run ("particle_operators_as_we", particle_operators_as_we);
     run ("particle_children_run", particle_children_run);
     run ("particle_control_points", particle_control_points);
+    run ("puppet_warp_as_we", puppet_warp_as_we);
     run ("parallax_follows_the_pointer", parallax_follows_the_pointer);
     run ("parallax_position_uniform", parallax_position_uniform);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
