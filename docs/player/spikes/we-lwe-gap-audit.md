@@ -1331,7 +1331,40 @@ layer's region).
 Left:
 - WE captures of 2883756643 (blend modes) and 3414858021 / 3432999904 (copybackground: false) to confirm the inferred
   parts.
-- The 3 newly blank scenes (3426575339, 3432876246, 3556794116) and the 2 black ones (3046119914, 3432999904,
-  the second of which is a B7 target: compose + blend 12 + `copybackground: false` + text children).
+- ~~The 3 newly blank scenes (3426575339, 3432876246, 3556794116) and the 2 black ones (3046119914, 3432999904,
+  the second of which is a B7 target: compose + blend 12 + `copybackground: false` + text children).~~ All five
+  were the smoke, not the core: see "Blank-scene result" below.
 - The compose subtree is rendered in scene space at scene resolution rather than in the layer's ortho space. This
   matters only for a rotated or scaled compose layer whose children's texel density differs.
+
+### Blank-scene result (liascape commit, no fork change, 2026-11-04)
+
+- **Not a regression.** The three scenes are blank in `--lwe-smoke` on 3eaac6e (the E41 pin) and c4eea29 alike
+  (E41's worker on both cores by `LD_LIBRARY_PATH`: 3426575339 lit 0, 3432876246 lit 118 188 px of 11.2 M = its
+  particle trail only, 3556794116 lit 0, nothing changed 1 s → 3 s). E41's own smoke has 3432876246 at `ok: false`
+  too, and B5's (`/tmp/claude-1000/b5sm`) 3426575339. They never rendered in a smoke; 0038–0045 aren't involved.
+  The scenes on disk are unchanged since 2025.
+- **Cause.** Each one's main layer is a video texture (an mp4 inside the `.tex`, 50–560 MB pkgs). The core's
+  `CTexture` plays it through libmpv (`GLPlayer`, untimed), which decodes on its own thread in real time. The smoke
+  rendered 3 s of scene time in under 0.1 s of wall time, so no frame had been decoded before the last one and the
+  layer drew black. The player is paced by the compositor and was never affected (the corpus has them changing
+  93–99 %).
+- **Fix** (`liascape-scene-worker`, `lwe.rs`): the smoke paces frame f to (f−1)/30 s of wall time after the
+  first; `--unpaced` keeps the old run. A 3 s smoke now takes about 3 s per scene.
+- **Smoke, all 96 scenes** on c4eea29 (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), the same worker unpaced vs
+  paced:
+  - **Unpaced 88 ok, paced 93 ok.** The only failures left are the three 3D load failures (3276522107,
+    3477054430, 3509243656). No scene got worse.
+  - The three: 3426575339 lit 0 → 99.3 %, 3432876246 1.1 → 100 %, 3556794116 0 → 100 %; all animate. Also
+    rendering now: 3046119914 (0 → 99.8 %) and 3432999904 (0 → 100 %), the two "black" ones, which are video
+    scenes too.
+  - 12 scenes in the corpus have a video texture, and they are the ones that changed: the five above plus
+    2886313155 (lit 0.7 → 100 %), 3028473503 (13 → 100 %), 3326873240 (0.2 → 99.7 %), 3089687436, 2890767643,
+    3413117423 (≈0 → ≈100 %) and 2883756643 (56 % of pixels differ). So earlier smoke numbers for these 12,
+    including B7's blend-mode comparison of 2883756643, were taken with the video layer black.
+  - The other 81: ≤ 0.06 % except 3419466417 at 1.7 % (no video; it varied 4 % between cores in B7 too).
+  - Player tests (DEBUG): 737 passed, 0 failed, 3 ignored.
+  - Frame time rises with pacing: +0.47 ms median on the 81 without video (the GPU clocks down between paced
+    frames) and more on the video scenes, whose frames now include libmpv's work. Compare frame times only
+    within one mode.
+

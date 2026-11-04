@@ -242,3 +242,10 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - All 88 scenes that load still load, and frame time is unchanged. 3426575339, 3432876246 and 3556794116 render
     blank on every core, including the previous one, so that is a separate fault to look at.
 
+
+- **The "blank" scenes weren't broken.** 3426575339, 3432876246 and 3556794116 were blank only in the test
+  renderer (`--lwe-smoke`), and on every core going back to before E41, so nothing in B10/B8 broke them. Their
+  picture is a video, which plays in real time, and the test ran 3 s of the scene in a fraction of a second, so the
+  video never got its first frame. Your player was never affected. The test now runs in real time: all three
+  render, and so do 3046119914 and 3432999904 (the two "black" ones). 93 of 96 scenes pass; the 3 left are the known
+  3D scenes. Earlier test numbers for the 12 video scenes were taken with the video black.

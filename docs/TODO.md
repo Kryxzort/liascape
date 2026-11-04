@@ -1036,8 +1036,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           (default true) on the composite FBOs, compose layers draw their subtree, `_a`/`_b` parity. See the
           audit's "B7 result".
           - [ ] WE captures of 2883756643 and 3414858021 / 3432999904 to confirm the inferred parts.
-          - [ ] 3426575339, 3432876246, 3556794116 smoke blank on every core incl. 592fdff (new since E41; not B7);
-                3046119914 / 3432999904 still black.
+          - [x] 3426575339, 3432876246, 3556794116 smoke blank on every core incl. 592fdff. **Not a regression**
+                (blank on 3eaac6e, cc6f1c9 and in B5's smoke too): their main layer is a video texture, libmpv
+                decodes it in real time, and the smoke ran 3 s of scene time in ~30 ms. The smoke now paces
+                frames to the wall clock (`--unpaced` for the old run); all three render. The player was never
+                affected. 3046119914 / 3432999904 ("black") were the same thing and render too. See the
+                audit's "Blank-scene result".
+          - [ ] Re-check B7's 2883756643 blend modes now that its video layer shows in the smoke.
     - [x] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
           **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a
