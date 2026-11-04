@@ -1,0 +1,850 @@
+From 0ed07a1aa990fa98e89642f7601d5c2e222cb935 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 08:45:51 +0530
+Subject: [PATCH 52/53] render: particle systems run their child systems
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`children` was parsed and nothing read it. Decoded from wallpaper64.exe 2.8.485:
+
+- Each child entry is a template of its own system (parser 0x1401fe52a; keys and defaults GH
+  0x1401eec40: the file is `name`, type static, probability 1, maxcount 10). Types (0x1401feff4):
+  static 1, eventfollow 2, eventspawn 3, eventdeath 4. Children share the object's instance
+  overrides (GH 0x140251f70 patches them from the same table).
+- static: one instance, always on.
+- eventfollow / eventspawn: for every spawned particle, each such child under its maxcount rolls
+  its probability and takes an instance, a reused one reset (GH 0x140254f50) and prewarmed
+  (GH 0x14025cfe0). A follow child moves with its particle every step; when the particle dies, its
+  emitters stop (GH 0x140254ed0) and it lives out its particles.
+- eventdeath: the same per dead particle, where it died (GH 0x14025c2e0).
+- An instance's transform is translate (its particle) × the child's origin, angles and scale
+  (GH 0x1402507e0). Here a child simulates in its parent's space: its particles spawn at that
+  offset, turned and scaled by it, and stay where they were emitted.
+- An event instance goes back to the pool when it has no particles and no emitter that can still
+  emit (GH 0x1402524c0; inferred). A hidden parent clears its children's instances too.
+- Inferred: a child with a controlpointstartindex takes its parent's control points from there on
+  for those it doesn't define; children draw after their parent.
+
+Event instances only simulate: one renderer per child entry draws them all in one pass (sprites)
+or one instance at a time (ropes), so 350 rain splashes don't compile 350 shader passes.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B11 (P2)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   8 +
+ .../Data/Parsers/ObjectParser.cpp             |  59 ++-
+ .../Data/Parsers/ObjectParser.h               |   2 +-
+ .../Render/Objects/CParticle.cpp              | 399 +++++++++++++++++-
+ .../Render/Objects/CParticle.h                |  61 +++
+ 5 files changed, 510 insertions(+), 19 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 4f41632..8cbd4cb 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -558,9 +558,15 @@ struct ParticleRenderer {
+ /**
+  * Child particle system
+  */
++class Particle;
++
+ struct ParticleChild {
++    /** "static" (always on), "eventfollow" / "eventspawn" (one per spawned particle, following it or left where it
++     *  spawned), "eventdeath" (one per particle that dies, where it died); WE's types 1–4 (parser 0x1401feff4) */
+     std::string type;
++    /** the child system's file (WE's `name`) */
+     std::string name;
++    /** at most this many instances of an event child at once (WE's default 10, GH 0x1401eec40) */
+     int maxCount;
+     int controlPointStartIndex;
+     float probability;
+@@ -568,6 +574,8 @@ struct ParticleChild {
+     glm::vec3 origin;
+     glm::vec3 scale;
+     std::string particleFile;
++    /** the child system, parsed like a particle object (null when its file doesn't load) */
++    std::shared_ptr<Particle> particle;
+ };
+ 
+ /**
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 6e39a09..8405829 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -510,7 +510,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 	const auto childrenIt = particleJson.optional ("children");
+ 	if (childrenIt.has_value () && childrenIt->is_array ()) {
+ 	    for (const auto& child : *childrenIt) {
+-		children.push_back (parseParticleChild (child, project));
++		children.push_back (parseParticleChild (child, project, it, base));
+ 	    }
+ 	}
+ 
+@@ -908,8 +908,15 @@ ParticleControlPoint ObjectParser::parseParticleControlPoint (const JSON& it) {
+     };
+ }
+ 
+-ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& project) {
+-    std::string particleFile = "";
++ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& project, const JSON& object,
++					       const ObjectData& base) {
++    // WE's child keys and defaults (GH 0x1401eec40; read at parser 0x1401fe592): the file is `name`
++    std::string name = "";
++    const auto nameIt = it.find ("name");
++    if (nameIt != it.end () && nameIt->is_string ()) {
++	name = nameIt->get<std::string> ();
++    }
++    std::string particleFile = name;
+     const auto particleIt = it.find ("particle");
+     if (particleIt != it.end () && particleIt->is_string ()) {
+ 	particleFile = particleIt->get<std::string> ();
+@@ -921,12 +928,6 @@ ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& p
+ 	type = typeIt->get<std::string> ();
+     }
+ 
+-    std::string name = "";
+-    const auto nameIt = it.find ("name");
+-    if (nameIt != it.end () && nameIt->is_string ()) {
+-	name = nameIt->get<std::string> ();
+-    }
+-
+     // Helper lambda to parse vec3 fields that might be strings, arrays, single numbers, or missing
+     auto parseVec3 = [&] (const char* fieldName, const glm::vec3& defaultValue) -> glm::vec3 {
+ 	const auto fieldIt = it.find (fieldName);
+@@ -947,16 +948,54 @@ ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& p
+ 	return defaultValue;
+     };
+ 
++    // the child system itself: a particle object of the parent's id with the same instance overrides (WE's children
++    // share the object's override table: GH 0x140251f70 patches them from it), at the parent's place. A cycle of
++    // children is cut at depth 4
++    std::shared_ptr<Particle> particle;
++    static thread_local int depth = 0;
++    if (!particleFile.empty () && depth < 4) {
++	JSON childObject = JSON::object ();
++	childObject["particle"] = particleFile;
++	const auto overrideIt = object.find ("instanceoverride");
++	if (overrideIt != object.end ()) {
++	    childObject["instanceoverride"] = *overrideIt;
++	}
++	ObjectData childBase {
++	    .id = base.id,
++	    .name = base.name + "/" + particleFile,
++	    .dependencies = {},
++	    .parent = std::nullopt,
++	    .origin = Builders::UserSettingBuilder::fromValue (glm::vec3 (0.0f)),
++	    .groupScale = Builders::UserSettingBuilder::fromValue (glm::vec3 (1.0f)),
++	    .groupAngles = Builders::UserSettingBuilder::fromValue (glm::vec3 (0.0f)),
++	    .groupVisible = Builders::UserSettingBuilder::fromValue (true),
++	    .groupParallaxDepth = Builders::UserSettingBuilder::fromValue (glm::vec2 (1.0f)),
++	    .cameraZoom = nullptr,
++	    .solid = false,
++	};
++	depth++;
++	try {
++	    auto parsed = parseParticle (childObject, project, std::move (childBase));
++	    if (parsed != nullptr && parsed->material != nullptr && parsed->material->material != nullptr) {
++		particle = std::shared_ptr<Particle> (std::move (parsed));
++	    }
++	} catch (const std::exception& e) {
++	    sLog.error ("Cannot load child particle system ", particleFile, ": ", e.what ());
++	}
++	depth--;
++    }
++
+     return ParticleChild {
+ 	.type = type,
+ 	.name = name,
+-	.maxCount = it.optional ("maxcount", 20),
++	.maxCount = it.optional ("maxcount", 10),
+ 	.controlPointStartIndex = it.optional ("controlpointstartindex", 0),
+ 	.probability = it.optional ("probability", 1.0f),
+ 	.angles = parseVec3 ("angles", glm::vec3 (0.0f)),
+ 	.origin = parseVec3 ("origin", glm::vec3 (0.0f)),
+ 	.scale = parseVec3 ("scale", glm::vec3 (1.0f)),
+ 	.particleFile = particleFile,
++	.particle = std::move (particle),
+     };
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+index 525b955..2a04b4b 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+@@ -39,7 +39,7 @@ private:
+     static ParticleOperatorUniquePtr parseParticleOperator (const JSON& it, const Properties& properties);
+     static ParticleRenderer parseParticleRenderer (const JSON& it);
+     static ParticleControlPoint parseParticleControlPoint (const JSON& it);
+-    static ParticleChild parseParticleChild (const JSON& it, const Project& project);
++    static ParticleChild parseParticleChild (const JSON& it, const Project& project, const JSON& object, const ObjectData& base);
+     static ParticleInstanceOverride parseParticleInstanceOverride (const JSON& it, const Properties& properties);
+ };
+ } // namespace WallpaperEngine::Data::Parsers
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 161279b..bcf3e9c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include <algorithm>
+ #include <limits>
++#include <unordered_map>
+ #include <cmath>
+ #include <glad/glad.h>
+ #include <glm/gtc/constants.hpp>
+@@ -78,6 +79,34 @@ CParticle::CParticle (Wallpapers::CScene& scene, const Particle& particle) :
+     }
+ }
+ 
++CParticle::CParticle (
++    Wallpapers::CScene& scene, const Particle& particle, CParticle& parent, const ParticleChild& child, bool simulateOnly
++) :
++    CParticle (scene, particle) {
++    // an event child's instances only simulate: one renderer per child entry draws them all (each instance with
++    // its own shader pass cost a compile per instance; WE's instances share their template's material)
++    m_simulateOnly = simulateOnly;
++    if (simulateOnly) {
++	m_vertices = {};
++	m_indices = {};
++    }
++    // a child system (P2): it simulates in its parent's space, its particles spawning at an offset (the child's
++    // origin, plus the particle it belongs to for an event child) turned and scaled by its angles and scale; WE gives
++    // the instance that transform (GH 0x1402507e0: translate (particle) × the child's origin/angles/scale)
++    m_parentSystem = &parent;
++    m_childDef = &child;
++    glm::vec3 angles = child.angles;
++    glm::mat4 linear (1.0f);
++    // the system's own rotation convention (updateMatrices) in this y-up space
++    linear = glm::rotate (linear, -angles.z, glm::vec3 (0, 0, 1));
++    linear = glm::rotate (linear, angles.y, glm::vec3 (0, 1, 0));
++    linear = glm::rotate (linear, -angles.x, glm::vec3 (1, 0, 0));
++    linear = glm::scale (linear, child.scale);
++    m_childLinear = glm::mat3 (linear);
++    m_childLinearInverse = glm::inverse (m_childLinear);
++    m_childSizeScale = (std::abs (child.scale.x) + std::abs (child.scale.y)) * 0.5f;
++}
++
+ CParticle::~CParticle () {
+     delete m_pass;
+ 
+@@ -107,6 +136,7 @@ void CParticle::setup () {
+     m_lastScreenHeight = getScene ().getCamera ().getHeight ();
+ 
+     refreshTransform ();
++    takeParentTransform ();
+ 
+     // Load particle material constants
+     if (m_particle.material && m_particle.material->material && !m_particle.material->material->passes.empty ()) {
+@@ -134,7 +164,9 @@ void CParticle::setup () {
+     setupEmitters ();
+     setupInitializers ();
+     setupOperators ();
+-    setupPass ();
++    if (!m_simulateOnly) {
++	setupPass ();
++    }
+ 
+     // colorn's reference colour (GH 0x1401f2210): the first colour initializer, else the first colorchange
+     for (const auto& initializer : m_particle.initializers) {
+@@ -157,6 +189,7 @@ void CParticle::setup () {
+     m_controlPoints.resize (8);
+     for (const auto& cp : m_particle.controlPoints) {
+ 	if (cp.id >= 0 && cp.id < 8) {
++	    m_ownControlPoints |= 1u << cp.id;
+ 	    m_controlPoints[cp.id].offset = cp.offset;
+ 	    // Link to mouse if either flags bit 0 is set
+ 	    m_controlPoints[cp.id].linkMouse = (cp.flags & 1) != 0;
+@@ -176,11 +209,42 @@ void CParticle::setup () {
+ 	}
+     }
+ 
++    m_opControlPoints = m_controlPoints;
++
++    // the child systems (P2): a static one runs from the start; event ones come with particle events
++    for (const auto& child : m_particle.children) {
++	if (child.particle == nullptr) {
++	    continue;
++	}
++	ChildSet set;
++	set.child = &child;
++	set.type = child.type == "eventfollow" ? 2 : child.type == "eventspawn" ? 3 : child.type == "eventdeath" ? 4 : 1;
++	m_hasEventChildren |= set.type != 1;
++	m_children.push_back (std::move (set));
++    }
++
+     m_initialized = true;
++    if (m_drawOnly) {
++	return;
++    }
++
++    for (auto& set : m_children) {
++	if (set.type == 1) {
++	    auto instance = makeChild (set, glm::vec3 (0.0f));
++	    if (instance) {
++		set.active.push_back (std::move (instance));
++	    }
++	}
++    }
++
++    prewarm ();
++}
+ 
++void CParticle::prewarm () {
+     // `starttime` prewarm (GH 0x140254cc0): step the system in 0.05 s steps (0.2 s from maxcount 500 up)
+     // until the simulated time reaches starttime, so it starts at its steady state instead of empty. At
+-    // least one step, as WE's do-while; not scaled by the `rate` override (that is applied per frame)
++    // least one step, as WE's do-while; not scaled by the `rate` override (that is applied per frame). WE
++    // prewarms every new or reused child instance the same way
+     if (m_particle.startTime > 0.0f) {
+ 	const float step = m_particle.maxCount < 500 ? 0.05f : 0.2f;
+ 	float simulated = 0.0f;
+@@ -191,6 +255,230 @@ void CParticle::setup () {
+     }
+ }
+ 
++void CParticle::takeParentTransform () {
++    if (m_parentSystem == nullptr) {
++	return;
++    }
++    m_transformedOrigin = m_parentSystem->m_transformedOrigin;
++    m_resolvedScale = m_parentSystem->m_resolvedScale;
++    m_resolvedAngle = m_parentSystem->m_resolvedAngle;
++    m_transformValid = true;
++}
++
++std::unique_ptr<CParticle> CParticle::makeChild (ChildSet& set, const glm::vec3& at) {
++    std::unique_ptr<CParticle> instance;
++    if (!set.pool.empty ()) {
++	// a finished instance is reused: reset (GH 0x140254f50) and prewarmed again
++	instance = std::move (set.pool.back ());
++	set.pool.pop_back ();
++	instance->m_childOffset = at + instance->m_childOrigin;
++	instance->m_boundId = -1;
++	instance->resetSystem ();
++	instance->m_simTime = 0.0f;
++	instance->prewarm ();
++	return instance;
++    }
++    try {
++	instance = std::make_unique<CParticle> (getScene (), *set.child->particle, *this, *set.child, set.type != 1);
++	glm::vec3 origin = set.child->origin;
++	origin.y = -origin.y;
++	instance->m_childOrigin = origin;
++	instance->m_childOffset = at + origin;
++	instance->setup ();
++    } catch (const std::exception& e) {
++	sLog.error ("Cannot create child particle system ", set.child->particleFile, ": ", e.what ());
++	instance.reset ();
++    }
++    return instance;
++}
++
++bool CParticle::childAlive () const {
++    // WE keeps an event child while it has particles or an emitter that can still emit (GH 0x1402524c0, inferred)
++    if (m_particleCount > 0) {
++	return true;
++    }
++    for (const auto& [emitter, state] : m_emitterStates) {
++	if (state->stopped) {
++	    continue;
++	}
++	if (emitter->duration > 0.0f && state->durationLeft <= 0.0f) {
++	    continue;
++	}
++	if (emitter->rate > 0.0f || state->burst > 0 || (emitter->flags & 4) != 0 || state->delay > 0.0f) {
++	    return true;
++	}
++    }
++    for (const auto& set : m_children) {
++	for (const auto& instance : set.active) {
++	    if (instance->childAlive ()) {
++		return true;
++	    }
++	}
++    }
++    return false;
++}
++
++void CParticle::stopEmitters () {
++    // a follow child whose particle died stops emitting, it and its children (GH 0x140254ed0)
++    for (auto& [emitter, state] : m_emitterStates) {
++	state->stopped = true;
++    }
++    for (auto& set : m_children) {
++	for (auto& instance : set.active) {
++	    instance->stopEmitters ();
++	}
++    }
++}
++
++void CParticle::spawnEventChildren (int type, uint32_t id, const glm::vec3& at) {
++    // per particle event, each event child of that type under its maxcount: a probability roll, then an instance
++    // (GH 0x14025cfe0 for follow / spawn, GH 0x14025c2e0 for death)
++    for (auto& set : m_children) {
++	if (set.type != type && !(type == 3 && set.type == 2)) {
++	    continue;
++	}
++	if (static_cast<int> (set.active.size ()) >= set.child->maxCount) {
++	    continue;
++	}
++	if (WallpaperEngine::Maths::randomFloat (m_rng, 0.0f, 1.0f) > set.child->probability) {
++	    continue;
++	}
++	auto instance = makeChild (set, at);
++	if (!instance) {
++	    continue;
++	}
++	if (set.type == 2) {
++	    instance->m_boundId = id;
++	}
++	set.active.push_back (std::move (instance));
++    }
++}
++
++void CParticle::updateChildren (float dt) {
++    if (m_children.empty ()) {
++	return;
++    }
++    // where the particles a follow child is bound to are now
++    std::unordered_map<uint32_t, uint32_t> where;
++    bool follows = false;
++    for (const auto& set : m_children) {
++	follows |= set.type == 2 && !set.active.empty ();
++    }
++    if (follows) {
++	where.reserve (m_particleCount);
++	for (uint32_t i = 0; i < m_particleCount; i++) {
++	    where.emplace (m_particles[i].id, i);
++	}
++    }
++    for (auto& set : m_children) {
++	for (size_t i = 0; i < set.active.size ();) {
++	    auto& instance = set.active[i];
++	    if (set.type == 2 && instance->m_boundId >= 0) {
++		const auto it = where.find (static_cast<uint32_t> (instance->m_boundId));
++		if (it != where.end ()) {
++		    instance->m_childOffset = m_particles[it->second].position + instance->m_childOrigin;
++		} else {
++		    // its particle died: it stops emitting and lives out its particles (GH 0x14025c2e0, type 2)
++		    instance->m_boundId = -1;
++		    instance->stopEmitters ();
++		}
++	    }
++	    instance->m_frameTime = m_frameTime;
++	    instance->takeParentTransform ();
++	    instance->update (dt);
++	    if (set.type != 1 && !instance->childAlive ()) {
++		set.pool.push_back (std::move (instance));
++		set.active.erase (set.active.begin () + static_cast<std::ptrdiff_t> (i));
++		continue;
++	    }
++	    i++;
++	}
++    }
++}
++
++void CParticle::drawFrom (const std::vector<const CParticle*>& instances) {
++    // draws other instances' particles in this system's pass: all at once for sprites, one instance at a time for
++    // ropes (a rope joins its particles in order)
++    if (m_pass == nullptr) {
++	return;
++    }
++    auto draw = [this] (uint32_t count) {
++	m_particleCount = count;
++	if (count > 0) {
++	    if (m_useRopeRenderer) {
++		renderRope ();
++	    } else {
++		renderSprites ();
++	    }
++	}
++	m_particleCount = 0;
++    };
++    if (m_useRopeRenderer) {
++	for (const auto* instance : instances) {
++	    const uint32_t n = std::min<uint32_t> (instance->m_particleCount, static_cast<uint32_t> (m_particles.size ()));
++	    std::copy_n (instance->m_particles.begin (), n, m_particles.begin ());
++	    draw (n);
++	}
++	return;
++    }
++    uint32_t total = 0;
++    for (const auto* instance : instances) {
++	total += instance->m_particleCount;
++    }
++    if (total > m_particles.size ()) {
++	m_particles.resize (total);
++	m_vertices.resize (static_cast<size_t> (total) * 4 * SPRITE_FLOATS_PER_VERTEX);
++	m_indices.resize (static_cast<size_t> (total) * 6);
++    }
++    uint32_t at = 0;
++    for (const auto* instance : instances) {
++	std::copy_n (instance->m_particles.begin (), instance->m_particleCount, m_particles.begin () + at);
++	at += instance->m_particleCount;
++    }
++    draw (total);
++}
++
++void CParticle::drawChildren () {
++    for (auto& set : m_children) {
++	if (set.type == 1) {
++	    for (auto& instance : set.active) {
++		if (instance->m_particleCount > 0 && instance->m_pass != nullptr) {
++		    if (instance->m_useRopeRenderer) {
++			instance->renderRope ();
++		    } else {
++			instance->renderSprites ();
++		    }
++		}
++		instance->drawChildren ();
++	    }
++	    continue;
++	}
++	if (set.active.empty ()) {
++	    continue;
++	}
++	if (!set.renderer) {
++	    try {
++		set.renderer = std::make_unique<CParticle> (getScene (), *set.child->particle, *this, *set.child, false);
++		set.renderer->m_drawOnly = true;
++		set.renderer->setup ();
++	    } catch (const std::exception& e) {
++		sLog.error ("Cannot draw child particle system ", set.child->particleFile, ": ", e.what ());
++		set.renderer.reset ();
++		continue;
++	    }
++	}
++	std::vector<const CParticle*> instances;
++	instances.reserve (set.active.size ());
++	for (const auto& instance : set.active) {
++	    instances.push_back (instance.get ());
++	}
++	set.renderer->drawFrom (instances);
++	for (auto& instance : set.active) {
++	    instance->drawChildren ();
++	}
++    }
++}
++
+ void CParticle::resetSystem () {
+     m_particleCount = 0;
+     for (auto& p : m_particles) {
+@@ -199,6 +487,19 @@ void CParticle::resetSystem () {
+     for (auto& [emitter, state] : m_emitterStates) {
+ 	resetEmitter (*emitter, *state);
+     }
++    // and its children's instances (GH 0x140255430): event ones go back to the pool, static ones restart
++    for (auto& set : m_children) {
++	for (size_t i = 0; i < set.active.size ();) {
++	    if (set.type == 1) {
++		set.active[i]->resetSystem ();
++		i++;
++	    } else {
++		set.active[i]->resetSystem ();
++		set.pool.push_back (std::move (set.active[i]));
++		set.active.erase (set.active.begin () + static_cast<std::ptrdiff_t> (i));
++	    }
++	}
++    }
+ }
+ 
+ void CParticle::render () {
+@@ -258,6 +559,11 @@ void CParticle::render () {
+ 	    renderSprites ();
+ 	}
+     }
++    // then the child systems' (drawn after their parent: inferred), in the parent's matrices
++    if (!m_children.empty ()) {
++	updateMatrices ();
++	drawChildren ();
++    }
+ }
+ 
+ namespace {
+@@ -347,6 +653,7 @@ glm::vec3 CParticle::tintColor (const glm::vec3& color) const {
+ void CParticle::update (float dt) {
+     m_simTime += dt;
+     patchColor ();
++    m_spawned.clear ();
+ 
+     // Detect resolution changes and recalculate transformed origin
+     float screenWidth = static_cast<float> (getScene ().getWidth ());
+@@ -381,10 +688,40 @@ void CParticle::update (float dt) {
+ 	}
+     }
+ 
++    // the operators' control points, in the parent's space for a child: its own ones (in its space: an emitter's
++    // default control point 0 is the child's origin) and, with a controlpointstartindex, its parent's from there on
++    // for those it doesn't define (FUN_140250a00; inferred)
++    if (m_parentSystem != nullptr) {
++	const int start = m_childDef->controlPointStartIndex;
++	for (int i = 0; i < 8; i++) {
++	    auto& cp = m_controlPoints[i];
++	    glm::vec3 parentSpace;
++	    if ((m_ownControlPoints & (1u << i)) == 0 && start > 0 && start + i < 8) {
++		parentSpace = m_parentSystem->m_opControlPoints[start + i].position;
++		cp.position = m_childLinearInverse * (parentSpace - m_childOffset);
++	    } else if (cp.linkMouse) {
++		parentSpace = cp.position;
++		cp.position = m_childLinearInverse * (parentSpace - m_childOffset);
++	    } else {
++		parentSpace = m_childOffset + m_childLinear * cp.position;
++	    }
++	    m_opControlPoints[i] = cp;
++	    m_opControlPoints[i].position = parentSpace;
++	}
++    } else {
++	m_opControlPoints = m_controlPoints;
++    }
++
+     // Emit particles
+     for (auto& emitter : m_emitters) {
+ 	emitter (m_particles, m_particleCount, dt);
+     }
++    // the spawned particles' follow and spawn children (GH 0x14025cfe0)
++    if (m_hasEventChildren) {
++	for (const auto& [id, at] : m_spawned) {
++	    spawnEventChildren (3, id, at);
++	}
++    }
+ 
+     // Update particle age; size, alpha and colour go back to their spawn values for the operators to multiply
+     // (the head of WE's operator interpreter, GH 0x140265800)
+@@ -402,7 +739,7 @@ void CParticle::update (float dt) {
+ 
+     // Apply operators to living particles (including alphafade)
+     for (auto& op : m_operators) {
+-	op (m_particles, m_particleCount, m_controlPoints, m_simTime, dt);
++	op (m_particles, m_particleCount, m_opControlPoints, m_simTime, dt);
+     }
+ 
+     // Update animation frames
+@@ -444,15 +781,25 @@ void CParticle::update (float dt) {
+     // We never kill based on size — particles may fade in/out with oscillating size.
+     // Compaction preserves spawn order so array index 0 is always the oldest particle.
+     uint32_t writeIdx = 0;
++    std::vector<std::pair<uint32_t, glm::vec3>> died;
+     for (uint32_t readIdx = 0; readIdx < m_particleCount; readIdx++) {
+ 	if (m_particles[readIdx].isAlive ()) {
+ 	    if (writeIdx != readIdx) {
+ 		m_particles[writeIdx] = m_particles[readIdx];
+ 	    }
+ 	    writeIdx++;
++	} else if (m_hasEventChildren) {
++	    died.emplace_back (m_particles[readIdx].id, m_particles[readIdx].position);
+ 	}
+     }
+     m_particleCount = writeIdx;
++
++    // the children: follow ones move with their particles, then every instance steps; dead particles' death
++    // children start where they died (GH 0x14025c2e0)
++    updateChildren (dt);
++    for (const auto& [id, at] : died) {
++	spawnEventChildren (4, id, at);
++    }
+ }
+ 
+ const Particle& CParticle::getParticle () const { return m_particle; }
+@@ -516,10 +863,14 @@ void CParticle::resetEmitter (const ParticleEmitter& emitter, EmitterState& stat
+     state.accumulator = 0.0f;
+     state.periodicTimer = 0.0f;
+     state.burst = emitter.instantaneous;
++    state.stopped = false;
+ }
+ 
+ uint32_t CParticle::emitCount (const ParticleEmitter& emitter, EmitterState& state, float dt) {
+-    // WE's emitter step (GH 0x14025cfe0), shared by every emitter type
++    // WE's emitter step (GH 0x14025cfe0), shared by every emitter type; a stopped emitter (bit 31) emits nothing
++    if (state.stopped) {
++	return 0;
++    }
+     if (state.delay > 0.0f) {
+ 	state.delay -= dt;
+ 	return 0;
+@@ -820,6 +1171,17 @@ void CParticle::spawnParticle (ParticleInstance& p, const glm::vec3& velocity) {
+ 	init (p);
+     }
+ 
++    // a child system's particles start in its parent's space: at its offset, turned and scaled by it
++    if (m_parentSystem != nullptr) {
++	p.position = m_childOffset + m_childLinear * p.position;
++	p.velocity = m_childLinear * p.velocity;
++	p.size *= m_childSizeScale;
++    }
++    p.id = m_nextParticleId++;
++    if (m_hasEventChildren) {
++	m_spawned.emplace_back (p.id, p.position);
++    }
++
+     p.initial.color = p.color;
+     p.initial.alpha = p.alpha;
+     p.initial.size = p.size;
+@@ -1783,7 +2145,7 @@ void CParticle::setupPass () {
+     // black reads on NVIDIA. By placing a copy FBO with the same name in our FBOProvider,
+     // CPass resolves g_Texture3 to the copy instead. We blit the scene content before each render.
+     if (m_hasRefract) {
+-	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
++	auto sceneFBO = getScene ().getTargetFor (drawingObject ());
+ 	float w = static_cast<float> (sceneFBO->getRealWidth ());
+ 	float h = static_cast<float> (sceneFBO->getRealHeight ());
+ 	m_refractFBO = m_passFBOProvider->create (
+@@ -1795,7 +2157,7 @@ void CParticle::setupPass () {
+     m_pass = new Effects::CPass (*this, m_passFBOProvider, firstPass, *m_passOverride, m_passBinds, std::nullopt);
+ 
+     // Set destination to scene FBO and input to particle texture
+-    m_pass->setDestination (getScene ().getTargetFor (this->getObject ()));
++    m_pass->setDestination (getScene ().getTargetFor (drawingObject ()));
+     m_pass->setInput (getTexture ());
+ 
+     // Set matrix pointers - CPass will dereference these each frame
+@@ -1962,7 +2324,28 @@ void CParticle::refreshTransform () {
+     }
+ }
+ 
++const Object& CParticle::drawingObject () const {
++    // a child draws where its top-level system draws
++    return m_parentSystem != nullptr ? m_parentSystem->drawingObject () : this->getObject ();
++}
++
+ void CParticle::updateMatrices () {
++    if (m_parentSystem != nullptr) {
++	// a child is drawn in its parent's matrices (its particles are in the parent's space)
++	m_modelMatrix = m_parentSystem->m_modelMatrix;
++	m_modelMatrixInverse = m_parentSystem->m_modelMatrixInverse;
++	m_viewProjectionMatrix = m_parentSystem->m_viewProjectionMatrix;
++	m_mvpMatrix = m_parentSystem->m_mvpMatrix;
++	m_mvpMatrixInverse = m_parentSystem->m_mvpMatrixInverse;
++	m_eyePosition = m_parentSystem->m_eyePosition;
++	m_orientationUp = m_parentSystem->m_orientationUp;
++	m_orientationRight = m_parentSystem->m_orientationRight;
++	m_orientationForward = m_parentSystem->m_orientationForward;
++	m_viewUp = m_parentSystem->m_viewUp;
++	m_viewRight = m_parentSystem->m_viewRight;
++	this->updateParticleRenderVars ();
++	return;
++    }
+     glm::vec3 scale = m_resolvedScale;
+     glm::vec3 angles = m_particle.angles->value->getVec3 ();
+     // z turns with the parents' (resolveTransform's angle is the chain's sum); x and y are the system's own
+@@ -2194,7 +2577,7 @@ void CParticle::renderSprites () {
+     // This gives the shader a snapshot of what's behind the particles for refraction,
+     // without a feedback loop (rendering to scene FBO while reading from copy FBO).
+     if (m_hasRefract && m_refractFBO) {
+-	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
++	auto sceneFBO = getScene ().getTargetFor (drawingObject ());
+ 	GLint w = static_cast<GLint> (sceneFBO->getRealWidth ());
+ 	GLint h = static_cast<GLint> (sceneFBO->getRealHeight ());
+ 	glBindFramebuffer (GL_READ_FRAMEBUFFER, sceneFBO->getFramebuffer ());
+@@ -2430,7 +2813,7 @@ void CParticle::renderRope () {
+ 
+     // For REFRACT: blit current scene content into the copy FBO before rendering
+     if (m_hasRefract && m_refractFBO) {
+-	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
++	auto sceneFBO = getScene ().getTargetFor (drawingObject ());
+ 	GLint w = static_cast<GLint> (sceneFBO->getRealWidth ());
+ 	GLint h = static_cast<GLint> (sceneFBO->getRealHeight ());
+ 	glBindFramebuffer (GL_READ_FRAMEBUFFER, sceneFBO->getFramebuffer ());
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index 8a6fce1..decb787 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -48,6 +48,8 @@ struct ParticleInstance {
+ 
+     /** one random value in [0, 1) per particle, drawn at spawn: oscillate* and turbulence read it (WE: system +0x338) */
+     float random { 0.0f };
++    /** a per-system serial number: the particle a follow child is bound to (WE binds by particle id) */
++    uint32_t id { 0 };
+ 
+     // Initial values for resets/multipliers
+     struct {
+@@ -96,6 +98,11 @@ class CParticle final : public CRenderable, public Scripting::ScriptableObject {
+ 
+ public:
+     CParticle (Wallpapers::CScene& scene, const Particle& particle);
++    /** a child system's instance (P2), simulated in `parent`'s space */
++    CParticle (
++	Wallpapers::CScene& scene, const Particle& particle, CParticle& parent, const ParticleChild& child,
++	bool simulateOnly
++    );
+     ~CParticle ();
+ 
+     void setup () override;
+@@ -127,6 +134,8 @@ protected:
+ 	/** > 0: the time left of a periodic "on" window; <= 0: minus the time left of an "off" one */
+ 	float periodicTimer { 0.0f };
+ 	uint32_t burst { 0 };
++	/** a follow child's particle died: no more emission (WE's bit 31, GH 0x140254ed0) */
++	bool stopped { false };
+     };
+     std::shared_ptr<EmitterState> addEmitterState (const ParticleEmitter& emitter);
+     static void resetEmitter (const ParticleEmitter& emitter, EmitterState& state);
+@@ -141,6 +150,33 @@ protected:
+     /** a colour shifted in HSV by (colorn − reference), WE's patch op 0xb */
+     glm::vec3 tintColor (const glm::vec3& color) const;
+ 
++    /** the starttime prewarm (GH 0x140254cc0) */
++    void prewarm ();
++
++    /** the child systems of one entry of `children` (P2): its live instances and the finished ones kept for reuse */
++    struct ChildSet {
++	const ParticleChild* child { nullptr };
++	/** 1 static, 2 eventfollow, 3 eventspawn, 4 eventdeath (WE's numbering) */
++	int type { 1 };
++	std::vector<std::unique_ptr<CParticle>> active;
++	std::vector<std::unique_ptr<CParticle>> pool;
++	/** an event child's one drawing instance (it never simulates): the live instances' particles go through it */
++	std::unique_ptr<CParticle> renderer;
++    };
++    std::unique_ptr<CParticle> makeChild (ChildSet& set, const glm::vec3& at);
++    /** the event children of a particle event: 3 = spawned (follow and spawn children), 4 = died */
++    void spawnEventChildren (int type, uint32_t id, const glm::vec3& at);
++    void updateChildren (float dt);
++    void drawChildren ();
++    /** draws these instances' particles with this system's pass */
++    void drawFrom (const std::vector<const CParticle*>& instances);
++    [[nodiscard]] bool childAlive () const;
++    void stopEmitters ();
++    /** the object whose target a system draws into (a child: its top-level system's) */
++    [[nodiscard]] const Object& drawingObject () const;
++    /** a child takes its parent's place and matrices */
++    void takeParentTransform ();
++
+     // Emitter creators
+     EmitterFunc createBoxEmitter (const ParticleEmitter& emitter);
+     EmitterFunc createSphereEmitter (const ParticleEmitter& emitter);
+@@ -204,6 +240,31 @@ private:
+     std::vector<OperatorFunc> m_operators;
+ 
+     std::vector<ControlPointData> m_controlPoints;
++    /** the control points the operators see: m_controlPoints, in the parent's space for a child */
++    std::vector<ControlPointData> m_opControlPoints;
++    /** the control points the system's JSON defines (bit per id) */
++    uint32_t m_ownControlPoints { 0 };
++
++    // child systems (P2)
++    std::vector<ChildSet> m_children;
++    bool m_hasEventChildren { false };
++    /** this step's spawned particles (id, position), for the event children */
++    std::vector<std::pair<uint32_t, glm::vec3>> m_spawned;
++    uint32_t m_nextParticleId { 0 };
++    /** a child instance's parent and definition, its offset (origin + its particle) and turn/scale */
++    CParticle* m_parentSystem { nullptr };
++    const ParticleChild* m_childDef { nullptr };
++    glm::vec3 m_childOrigin { 0.0f };
++    glm::vec3 m_childOffset { 0.0f };
++    glm::mat3 m_childLinear { 1.0f };
++    glm::mat3 m_childLinearInverse { 1.0f };
++    float m_childSizeScale { 1.0f };
++    /** an event child's instance: simulated, drawn through its child entry's renderer (no GL objects of its own) */
++    bool m_simulateOnly { false };
++    /** an event child entry's renderer: set up to draw, never simulated (no children, no prewarm) */
++    bool m_drawOnly { false };
++    /** the particle a follow child is bound to, -1 when none */
++    int64_t m_boundId { -1 };
+ 
+     std::vector<float> m_vertices;
+     std::vector<uint32_t> m_indices;

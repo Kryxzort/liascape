@@ -1089,8 +1089,23 @@ Two bug classes kept recurring; fix the class, not the instance:
           camera zoom, S4's instanceoverride/maxwidth/brightness scripts; S17 registerAudioBuffers (B8) is now the
           commonest script error. 3414858021's date texts now leave the screen until text parents (G04, B4).
           Result: the audit's "B10 result" (§ 5).
-    - [ ] **B11 Particles, extended.** Child systems, the missing initializers/operators, control points, rope/trail
-          combos (P2, P10, P15, P22–P35). 29 scenes. L; first read the operator interpreter from asm.
+    - [x] **B11 Particles, extended.** Child systems, the missing initializers/operators, control points, rope/trail
+          combos (P2, P10, P15, P22–P35). 29 scenes. L; first read the operator interpreter from asm. **Done
+          2026-11-04** (fork patches 0051 operators as WE's interpreter runs them + 0052 child systems + 0053 control
+          points, pin `2559b88`): P2, P10, P15, P22, P28, P31–P35. GH 0x140265800 decompiled in REA (no decompile
+          timeout); opcodes, record layouts and the forms of movement, the ramps, oscillate*, attract, vortex and
+          turbulence are in the audit's "B11 result". host_api_test 61/61 (3 new, failing on e372e44); corpus 93 ok
+          on both cores, none newly blank; player tests 737/0/3.
+          - [ ] WE captures of 3174556087 (rain splash children), 2288455459 (firefly trails) and an oscillating
+                scene to confirm the decoded forms against WE itself.
+          - [ ] P29 sprite `orientation` (3174556087's splashes lie flat in WE) and P30 rope/trail combos
+                (TRAILSUBDIVISION, ORIENTATION, TRAILFADE*).
+          - [ ] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`mirror`/`axis` (3 scenes; decode the
+                spawn interpreter's case).
+          - [ ] `controlpointangle0-7`, system flags bit 0 (world-space simulation, 16 scenes), WE's simplex
+                gradient hash (GH 0x14012c280), vortex_v2 (case 0x10, 0 scenes), P24 cone, P25/P26 (0 scenes).
+          - [ ] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0);
+                both are inferred now.
     - [ ] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
           unmerged). 14 scenes. L.
     - [ ] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M.

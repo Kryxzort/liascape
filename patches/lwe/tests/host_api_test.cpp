@@ -1493,6 +1493,224 @@ static bool particle_hide_resets_and_overrides_live () {
     return true;
 }
 
+// B11 (docs/player/spikes/we-lwe-gap-audit.md P15, P22, P28, P32, P33): the operators as WE's interpreter (GH 0x140265800)
+// runs them. A 64x32 scene of three systems, read on its centre row:
+//   x 8:  two alphachange 0.5 → 0.5 on a white particle compose to 0.25 (unpatched: the second overwrote, 0.5)
+//   x 26: box particles 10 px either side of a control point with threshold 15 are pulled in (unpatched: half the
+//         threshold, so they stayed at x 16 and 36)
+//   x 50: sizerandom 8 with size override 2 and a sizechange 1 → 1 is 16 px wide (the override twice; unpatched 8)
+// and a second scene: a box particle 4 px out with speedmin = speedmax 40 leaves its spawn point (unpatched: at rest)
+static bool particle_operators_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    const std::string one = ",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1";
+    auto box = [&] (const char* distance, const char* speed, int count, const std::string& top, const std::string& ops) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":10") + top
+             + ",\"emitter\":[{\"name\":\"boxrandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 1\",\"distancemin\":\""
+             + distance + "\",\"distancemax\":\"" + distance + "\"" + speed + ",\"rate\":0,\"instantaneous\":"
+             + std::to_string (count) + "}],\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4}," + white
+             + "," + life + "],\"operator\":[" + ops + "]}\n";
+    };
+    std::string halves = particle_system ("opaque", ",\"maxcount\":5", one, white + "," + life);
+    halves.insert (halves.rfind ('}'), ",\"operator\":[{\"name\":\"alphachange\",\"startvalue\":0.5,\"endvalue\":0.5},"
+                                        "{\"name\":\"alphachange\",\"startvalue\":0.5,\"endvalue\":0.5}]");
+    const std::string pulled = box ("10 0 0", "", 6, ",\"controlpoint\":[{\"id\":0,\"offset\":\"0 0 0\"}]",
+        "{\"name\":\"movement\",\"drag\":3},{\"name\":\"controlpointattract\",\"controlpoint\":0,\"scale\":600,\"threshold\":15}");
+    std::string sized = particle_system ("opaque", ",\"maxcount\":5", one, white + "," + life);
+    sized.replace (sized.find ("\"min\":12,\"max\":12"), 17, "\"min\":8,\"max\":8");
+    sized.insert (sized.rfind ('}'), ",\"operator\":[{\"name\":\"sizechange\",\"startvalue\":1,\"endvalue\":1}]");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "halves.json", 8, 16) + "," + particle_object (2, "pulled.json", 26, 16) + ","
+            + particle_object (3, "sized.json", 50, 16, "\"size\":2"),
+        "0 0 0", { { "halves.json", halves }, { "pulled.json", pulled }, { "sized.json", sized } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 30; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 8, 16, px);
+    const int halvesRed = px[0];
+    // the pulled particles: lit columns of the centre row near their spawn points (x 14-18, 34-38) and at the point
+    int atSpawn = 0, atPoint = 0;
+    for (int x = 14; x <= 38; x++) {
+        read_pixel (rig.fbo, x, 16, px);
+        const bool lit = px[0] > 64;
+        atSpawn += lit && (x <= 18 || x >= 34);
+        atPoint += lit && x >= 22 && x <= 30;
+    }
+    int sizedWidth = 0;
+    for (int x = 38; x < 64; x++) {
+        read_pixel (rig.fbo, x, 16, px);
+        sizedWidth += px[0] > 64;
+    }
+    printf ("    two alphachange 0.5: red %d (want ~64); pulled particles: %d px lit at their spawn points, %d px at the "
+            "point; sizechange + size 2: %d px wide (want 16)\n",
+            halvesRed, atSpawn, atPoint, sizedWidth);
+    CHECK (halvesRed >= 54 && halvesRed <= 74, "two alphachange 0.5 compose to %d/255", halvesRed);
+    CHECK (atSpawn == 0 && atPoint > 0, "the particles weren't pulled to the point (%d px at the spawn points, %d at it)",
+           atSpawn, atPoint);
+    CHECK (sizedWidth >= 15 && sizedWidth <= 17, "sizechange with size 2: %d px", sizedWidth);
+
+    std::vector<std::string> files2;
+    const std::string dir2 = particle_scene (particle_object (1, "boxed.json", 32, 16), "0 0 0",
+        { { "boxed.json", box ("4 0 0", ",\"speedmin\":40,\"speedmax\":40", 1, "", "{\"name\":\"movement\"}") } }, files2);
+    ScriptRig rig2;
+    CHECK (particle_rig_open (rig2, dir2, files2), "load/build of %s failed", dir2.c_str ());
+    for (int i = 0; i < 15; i++) {
+        rig2.step ();
+    }
+    int nearSpawn = 0, out = 0;
+    for (int x = 0; x < 64; x++) {
+        read_pixel (rig2.fbo, x, 16, px);
+        const bool lit = px[0] > 64;
+        nearSpawn += lit && x >= 24 && x <= 40;
+        out += lit && (x < 24 || x > 40);
+    }
+    printf ("    box particle with speed 40 after 0.5 s: %d px lit within 8 px of the centre, %d px further out\n", nearSpawn, out);
+    CHECK (nearSpawn == 0 && out > 0, "the box particle didn't move out (%d px near the centre, %d out)", nearSpawn, out);
+    return true;
+}
+
+// B11 (P2): child systems. WE parses `children` into child templates (parser 0x1401fe52a) and runs them: a static one
+// always, event ones per particle event (GH 0x14025cfe0, 0x14025c2e0), each in its parent's space at its origin plus,
+// for an event child, its particle's position. Unpatched, `children` was parsed and nothing read it. Rows of a 64x32
+// scene (white 2 px child particles that never move; the parents' own particles are black; object y is WE's, up):
+//   y 8:  a static child with origin "12 0 0" of a system at x 8: lit at x 20
+//   y 16: a parent particle moving right at 20 px/s from x 10 with an eventfollow child emitting 30/s: a trail
+//   y 24: a parent particle living 0.3 s at x 48 with an eventdeath child (one particle): lit at x 48 after it died;
+//         a second, moving parent from x 4 with an eventspawn child: lit only where it spawned
+static bool particle_children_run () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string black = "{\"name\":\"colorrandom\",\"min\":\"0 0 0\",\"max\":\"0 0 0\"}";
+    auto sys = [] (const std::string& top, const char* rate, const char* instantaneous, const std::string& inits,
+                   const std::string& extra) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":100") + top
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":" + rate + ",\"instantaneous\":" + instantaneous + "}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4}," + inits + "]" + extra + "}\n";
+    };
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    const std::string dot = sys ("", "0", "1", white + "," + life, "");
+    const std::string trail = sys ("", "30", "0", white + "," + life, "");
+    const std::string moving = ",{\"name\":\"velocityrandom\",\"min\":\"20 0 0\",\"max\":\"20 0 0\"}";
+    const std::string staticParent = sys (",\"children\":[{\"name\":\"particles/dot.json\",\"origin\":\"12 0 0\"}]", "0", "0", black + "," + life, "");
+    const std::string followParent = sys (",\"children\":[{\"name\":\"particles/trail.json\",\"type\":\"eventfollow\"}]", "0", "1",
+        black + "," + life + moving, ",\"operator\":[{\"name\":\"movement\"}]");
+    const std::string deathParent = sys (",\"children\":[{\"name\":\"particles/dot.json\",\"type\":\"eventdeath\"}]", "0", "1",
+        black + ",{\"name\":\"lifetimerandom\",\"min\":0.3,\"max\":0.3}", "");
+    const std::string spawnParent = sys (",\"children\":[{\"name\":\"particles/trail.json\",\"type\":\"eventspawn\"}]", "0", "1",
+        black + "," + life + moving, ",\"operator\":[{\"name\":\"movement\"}]");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "static.json", 8, 24) + "," + particle_object (2, "follow.json", 10, 16) + ","
+            + particle_object (3, "death.json", 48, 8) + "," + particle_object (4, "spawn.json", 4, 8),
+        "0 0 0",
+        { { "dot.json", dot }, { "trail.json", trail }, { "static.json", staticParent }, { "follow.json", followParent },
+          { "death.json", deathParent }, { "spawn.json", spawnParent } },
+        files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 30; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    auto lit = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 128;
+    };
+    const bool staticLit = lit (20, 8);
+    int trailFrom = -1, trailTo = -1;
+    for (int x = 0; x < 64; x++) {
+        if (lit (x, 16)) {
+            trailFrom = trailFrom < 0 ? x : trailFrom;
+            trailTo = x;
+        }
+    }
+    const bool deathLit = lit (48, 24);
+    int spawnLit = 0;
+    for (int x = 0; x < 32; x++) {
+        spawnLit += lit (x, 24);
+    }
+    printf ("    static child at x 20: %s; follow trail lit x %d..%d (the parent went 10 → ~30); death child at x 48: %s; "
+            "spawn child: %d px lit on row 24 left of x 32 (want its spawn point only, ~4)\n",
+            staticLit ? "lit" : "dark", trailFrom, trailTo, deathLit ? "lit" : "dark", spawnLit);
+    CHECK (staticLit, "the static child isn't drawn");
+    CHECK (trailFrom >= 6 && trailFrom <= 10 && trailTo >= 24 && trailTo <= 34, "the follow trail spans x %d..%d", trailFrom, trailTo);
+    CHECK (deathLit, "the death child isn't drawn");
+    CHECK (spawnLit >= 2 && spawnLit <= 6, "the spawn child covers %d px", spawnLit);
+    return true;
+}
+
+// B11 (P10, P34, P35): control points. Systems whose sphererandom emitter spawns at control point 1, read on the centre
+// row of a 64x32 scene:
+//   x 8:  control point 1's offset 0 0 0, instanceoverride controlpoint1 "12 0 0": spawns at x 20 (unpatched: x 8,
+//         the override wasn't read)
+//   x 40 (scale 2): control point 1 in the scene's space (flags 2) at "56 16": spawns at x 56 whatever the system's
+//         scale (unpatched: the offset was read as centred and not unscaled, x 136)
+// and control point 1 offset "0 8 0" lands where an emitter origin "0 8 0" does (both are WE's y-up particle space;
+// unpatched the control point went the other way)
+static bool particle_control_points () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const std::string& cp1, const char* origin) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":5,\"controlpoint\":[{\"id\":0},") + cp1 + "],"
+             + "\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"" + origin + "\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":1,\"controlpoint\":1}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4}," + white + "," + life + "]}\n";
+    };
+    const std::string overridden = sys ("{\"id\":1,\"offset\":\"0 0 0\"}", "0 0 0");
+    const std::string world = sys ("{\"id\":1,\"flags\":2,\"offset\":\"56 16 0\"}", "0 0 0");
+    const std::string up = sys ("{\"id\":1,\"offset\":\"0 8 0\"}", "0 0 0");
+    const std::string upOrigin = sys ("{\"id\":1,\"offset\":\"0 0 0\"}", "0 8 0");
+    std::vector<std::string> files;
+    std::string scaled = particle_object (2, "world.json", 40, 16);
+    scaled.replace (scaled.find ("\"scale\":\"1 1 1\""), 15, "\"scale\":\"2 2 1\"");
+    const std::string dir = particle_scene (
+        particle_object (1, "over.json", 8, 16, "\"controlpoint1\":\"12 0 0\"") + "," + scaled + ","
+            + particle_object (3, "up.json", 28, 16) + "," + particle_object (4, "uporigin.json", 34, 16),
+        "0 0 0", { { "over.json", overridden }, { "world.json", world }, { "up.json", up }, { "uporigin.json", upOrigin } },
+        files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 10; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    auto lit = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 128;
+    };
+    // the up pair: the row each is lit on, in column 28 and 34
+    auto rowOf = [&] (int x) {
+        for (int y = 0; y < 32; y++) {
+            if (lit (x, y)) {
+                return y;
+            }
+        }
+        return -1;
+    };
+    const bool overAt20 = lit (20, 16), overAt8 = lit (8, 16), worldAt56 = lit (56, 16);
+    const int upRow = rowOf (28), originRow = rowOf (34);
+    printf ("    controlpoint1 override: x 20 %s, x 8 %s; scene-space point at x 56 of a scale-2 system: %s; control "
+            "point \"0 8 0\" on row %d, emitter origin \"0 8 0\" on row %d\n",
+            overAt20 ? "lit" : "dark", overAt8 ? "lit" : "dark", worldAt56 ? "lit" : "dark", upRow, originRow);
+    CHECK (overAt20 && !overAt8, "the controlpoint1 override isn't where the particle spawns");
+    CHECK (worldAt56, "the scene-space control point isn't at x 56");
+    CHECK (upRow >= 0 && std::abs (upRow - originRow) <= 1, "control point up (row %d) vs origin up (row %d)", upRow, originRow);
+    return true;
+}
+
 // B5: parallax and camera (docs/player/spikes/we-lwe-gap-audit.md G10-G12, G14/E1, G15-G19), decoded from
 // wallpaper64.exe 2.8.485: the camera update GH 0x1401b8af0, the per-object offset in the render loop GH 0x1401b9b50,
 // the shake GH 0x1401c7680, the zoom in the scene tick GH 0x1401afbf0. The pointer is native scene px, y down
@@ -3203,6 +3421,9 @@ int main (int argc, char** argv) {
     run ("particle_colorrandom_one_t", particle_colorrandom_one_t);
     run ("particle_colorn_hsv_shift", particle_colorn_hsv_shift);
     run ("particle_hide_resets_and_overrides_live", particle_hide_resets_and_overrides_live);
+    run ("particle_operators_as_we", particle_operators_as_we);
+    run ("particle_children_run", particle_children_run);
+    run ("particle_control_points", particle_control_points);
     run ("parallax_follows_the_pointer", parallax_follows_the_pointer);
     run ("parallax_position_uniform", parallax_position_uniform);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);

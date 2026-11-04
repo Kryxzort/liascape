@@ -262,3 +262,18 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     black (117 colour settings in your scenes are written that way; e.g. 2134765860's clock).
   - Compared with the sizes WE's editor saved, 44 of 50 texts match in height within 2 px.
   - Also re-checked B7's blend modes on 2883756643 now that its video shows: still right.
+
+- **Scenes, batch B11 (fork patches 0051–0053, pin `2559b88`):** particles now move the way Wallpaper Engine moves
+  them (its particle operator code, decoded from wallpaper64.exe for the first time).
+  - Fades, size and colour changes and flicker combine instead of overriding each other.
+  - Drag, gravity, swirl (vortex), cursor attraction and turbulence use WE's formulas. Cursor attraction reaches
+    twice as far as before and eases off near its edge.
+  - **Child systems run**, which 29 of your scenes use: sparks and trails that follow particles, rain splashes
+    where drops land, glows on embers. Before, they were missing entirely.
+  - Box emitters with a speed now throw their particles outward; they used to sit still.
+  - Particle "control points" take the positions the author set for them (birds' flight paths, lens flares), and
+    cursor-following particles stay under the cursor in scaled or rotated systems.
+  - All 93 scenes that load still load; none went blank. Frame time is unchanged (3.8 → 3.6 ms mean).
+  - Not done yet (in TODO): rain splashes lying flat on the ground, rope/trail shader options, and WE captures
+    of a couple of these scenes to check them against WE itself.
+

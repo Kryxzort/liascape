@@ -1,0 +1,258 @@
+From 2559b885765913300aa3157ed49fb61e724c831b Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 08:49:53 +0530
+Subject: [PATCH 53/53] render: particle control points take their overrides,
+ scene space and the system's transform
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decoded from wallpaper64.exe 2.8.485 (GH 0x140251f70 → 0x1402504f0, the instance table GH
+0x140273180):
+
+- instanceoverride controlpoint0..7 replace the control points' offsets unless the point follows
+  the pointer or has flags 0x10004 (mask 0x10005). They are read every step, so a user property
+  or a script moves the point. They weren't parsed (P10).
+- Flags bit 1: the offset is in the scene's space (WE's world: y up from the bottom-left); the
+  system turns it into its own space by the inverse of its whole transform. Control point 0
+  ignores the bit. LWE read the offset as already centred, subtracted only the origin and applied
+  the bit to point 0 too (P34).
+- A pointer control point is unscaled and unrotated the same way: the cursor followers of a
+  scaled or turned system sat off the cursor (P35).
+- A local offset is WE's y-up particle space, mirrored like an emitter's origin; it was taken
+  as is, so a point "0 8 0" went the other way from an emitter at "0 8 0" (8 library scenes have
+  a control point offset with y).
+
+Not ported: controlpointangle0..7 (the control points' rotation, which turns operator offsets
+relative to them).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B11 (P10, P34, P35)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |  5 ++
+ .../Data/Parsers/ObjectParser.cpp             |  8 +++
+ .../Render/Objects/CParticle.cpp              | 71 +++++++++++++------
+ .../Render/Objects/CParticle.h                |  3 +
+ 4 files changed, 64 insertions(+), 23 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 8cbd4cb..5001303 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <array>
++
+ #include <map>
+ #include <optional>
+ #include <string>
+@@ -593,6 +595,9 @@ struct ParticleInstanceOverride {
+     UserSettingUniquePtr colorn; // Tints the system: an HSV shift against its reference colour (CParticle)
+     /** colorn is in the object's instanceoverride (WE tints nothing otherwise) */
+     bool colornSet = false;
++    /** `controlpoint0`..`controlpoint7`: replace the control points' offsets (WE's instance table +0xf0 + 12i, applied by
++     *  GH 0x140251f70 unless the control point's flags have 0x10005); null where the object doesn't set one */
++    std::array<UserSettingUniquePtr, 8> controlPoint {};
+ };
+ 
+ struct ParticleData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 8405829..f4081ad 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -1001,6 +1001,13 @@ ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& p
+ 
+ ParticleInstanceOverride ObjectParser::parseParticleInstanceOverride (const JSON& it, const Properties& properties) {
+     const bool colornSet = it.find ("colorn") != it.end ();
++    std::array<UserSettingUniquePtr, 8> controlPoints {};
++    for (int i = 0; i < 8; i++) {
++	const std::string key = "controlpoint" + std::to_string (i);
++	if (it.find (key) != it.end ()) {
++	    controlPoints[i] = it.user (key, properties, glm::vec3 (0.0f));
++	}
++    }
+     return ParticleInstanceOverride {
+ 	.enabled = it.user ("enabled", properties, true),
+ 	.alpha = it.user ("alpha", properties, 1.0f),
+@@ -1012,5 +1019,6 @@ ParticleInstanceOverride ObjectParser::parseParticleInstanceOverride (const JSON
+ 	.color = it.user ("color", properties, glm::vec3 (1.0f)),
+ 	.colorn = it.user ("colorn", properties, glm::vec3 (1.0f)),
+ 	.colornSet = colornSet,
++	.controlPoint = std::move (controlPoints),
+     };
+ }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index bcf3e9c..8076031 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -97,7 +97,7 @@ CParticle::CParticle (
+     m_childDef = &child;
+     glm::vec3 angles = child.angles;
+     glm::mat4 linear (1.0f);
+-    // the system's own rotation convention (updateMatrices) in this y-up space
++    // the system's own rotation convention (updateMatrices), in its mirrored (y-down) space
+     linear = glm::rotate (linear, -angles.z, glm::vec3 (0, 0, 1));
+     linear = glm::rotate (linear, angles.y, glm::vec3 (0, 1, 0));
+     linear = glm::rotate (linear, -angles.x, glm::vec3 (1, 0, 0));
+@@ -191,9 +191,11 @@ void CParticle::setup () {
+ 	if (cp.id >= 0 && cp.id < 8) {
+ 	    m_ownControlPoints |= 1u << cp.id;
+ 	    m_controlPoints[cp.id].offset = cp.offset;
++	    m_controlPoints[cp.id].flags = cp.flags;
+ 	    // Link to mouse if either flags bit 0 is set
+ 	    m_controlPoints[cp.id].linkMouse = (cp.flags & 1) != 0;
+-	    m_controlPoints[cp.id].worldSpace = (cp.flags & 2) != 0;
++	    // bit 1: the offset is in the scene's space; control point 0 ignores it (GH 0x1402504f0)
++	    m_controlPoints[cp.id].worldSpace = (cp.flags & 2) != 0 && cp.id != 0;
+ 
+ 	    // Initialize position to offset for non-mouse-linked control points
+ 	    // Mouse-linked CPs will have their position updated in update()
+@@ -666,25 +668,36 @@ void CParticle::update (float dt) {
+ 	refreshTransform ();
+     }
+ 
+-    // Update control points with mouse position
++    // the control points this step (GH 0x140251f70 → 0x1402504f0). An instanceoverride `controlpointN` replaces the
++    // offset unless the control point follows the pointer or has flags 0x10004; live, so a slider or script moves it
++    // (P10). A scene-space point (bit 1, not control point 0) is turned into the system's space by the inverse of
++    // its whole transform, and so is a pointer one (P34, P35: they ignored the system's scale and angles)
++    const glm::mat3 toLocal = localFromScene ();
+     const glm::vec2* mousePos = getScene ().getMousePosition ();
+-    if (mousePos) {
+-
+-	for (auto& cp : m_controlPoints) {
+-	    if (cp.linkMouse) {
++    for (int i = 0; i < 8; i++) {
++	auto& cp = m_controlPoints[i];
++	glm::vec3 offset = cp.offset;
++	const auto& override = m_particle.instanceOverride.controlPoint[i];
++	if (override != nullptr && (cp.flags & 0x10005) == 0) {
++	    offset = override->value->getVec3 ();
++	}
++	if (cp.linkMouse) {
++	    if (mousePos) {
+ 		// Convert mouse position from normalized [0,1] to centered screen space
+ 		glm::vec3 position;
+ 		position.x = (mousePos->x * screenWidth) - (screenWidth / 2.0f);
+ 		position.y = (screenHeight / 2.0f) - (mousePos->y * screenHeight);
+ 		position.z = 0.0f;
+-
+-		// Apply control point offset
+-		position += cp.offset;
+-
+-		// Convert to particle local space to prevent double transformation by model matrix
+-		// Both world-space and local-space CPs are handled the same way now
+-		cp.position = position - m_transformedOrigin;
++		// its offset, like any, is WE's y-up one
++		cp.position = toLocal * (position + glm::vec3 (offset.x, -offset.y, offset.z) - m_transformedOrigin);
+ 	    }
++	} else if (cp.worldSpace) {
++	    // the scene's space (WE's world: y up from the bottom-left) to this centred one, as the origin's
++	    const glm::vec3 centred (offset.x - screenWidth / 2.0f, screenHeight / 2.0f - offset.y, offset.z);
++	    cp.position = toLocal * (centred - m_transformedOrigin);
++	} else {
++	    // WE's particle space is y-up: mirrored, as the emitters' origins
++	    cp.position = glm::vec3 (offset.x, -offset.y, offset.z);
+ 	}
+     }
+ 
+@@ -1776,7 +1789,7 @@ OperatorFunc CParticle::createTurbulenceOperator (const TurbulenceOperator& op)
+     // phase range +0x80, timescale +0xd0, masked axes +0xd4). Per particle, with its one random r:
+     //   phase = r·(phasemax − phasemin) + time·timescale; q = (position + phase)·scale
+     //   v.x += noise (q.x, q.y, q.z)·speed·mask.x·fdt, v.y += noise (q.z, q.x, q.y)·…, v.z += noise (q.y, q.z, q.x)·…
+-    // with speed = speedmin + r·(speedmax − speedmin). Each masked axis is a scalar 3D noise in WE's (y-down) space;
++    // with speed = speedmin + r·(speedmax − speedmin). Each masked axis is a scalar 3D noise in WE's (y-up) space;
+     // it was a normalised curl with one phase and speed per operator. phasemin is never read by the case;
+     // timescale is bound to the `rate` override (parser 0x1401fb45a)
+     return [this, scaleValue, speedMinValue, speedMaxValue, timeScaleValue, maskValue, phaseMinValue, phaseMaxValue,
+@@ -1798,7 +1811,7 @@ OperatorFunc CParticle::createTurbulenceOperator (const TurbulenceOperator& op)
+ 	for (uint32_t i = 0; i < count; i++) {
+ 	    auto& p = particles[i];
+ 	    const float phase = p.random * phaseRange + time;
+-	    // WE's particle space is y-down
++	    // in WE's (y-up) particle space
+ 	    const glm::vec3 q = (glm::vec3 (p.position.x, -p.position.y, p.position.z) + phase) * scale;
+ 	    const float speed = (speedMin + p.random * speedRange) * speedScale;
+ 	    glm::vec3 n (0.0f);
+@@ -1841,7 +1854,7 @@ OperatorFunc CParticle::createVortexOperator (const VortexOperator& op) {
+ 	       std::vector<ParticleInstance>& particles, uint32_t count,
+ 	       const std::vector<ControlPointData>& controlPoints, float, float
+ 	   ) {
+-	// WE's y-down axis and offset in this y-up space
++	// WE's (y-up) axis and offset in this mirrored space
+ 	glm::vec3 axis = axisValue->getVec3 ();
+ 	axis.y = -axis.y;
+ 	const float axisLength = glm::length (axis);
+@@ -1868,7 +1881,7 @@ OperatorFunc CParticle::createVortexOperator (const VortexOperator& op) {
+ 		continue;
+ 	    }
+ 	    const float t = span != 0.0f ? std::clamp ((distance - inner) / span, 0.0f, 1.0f) : 0.0f;
+-	    // r̂ × axis in WE's y-down space is axis × r̂ here (a mirror flips the cross product)
++	    // r̂ × axis in WE's space is axis × r̂ here (a mirror flips the cross product)
+ 	    const glm::vec3 tangent = glm::cross (axis, r / distance);
+ 	    p.velocity += tangent * (speedInner + t * speedRange) * speedScale;
+ 	}
+@@ -2092,7 +2105,7 @@ OperatorFunc CParticle::createOscillatePositionOperator (const OscillatePosition
+ 	    const float b = a + glm::two_pi<float> () * p.random;
+ 	    const float dx = s * (std::sin (f * a) - std::sin (f * (a - dt)));
+ 	    const float dy = s * (std::sin (f * b) - std::sin (f * (b - dt)));
+-	    // WE's y-down space
++	    // WE's particle space is y-up
+ 	    p.position += glm::vec3 (dx * mask.x, -dy * mask.y, dx * mask.z);
+ 	}
+     };
+@@ -2315,13 +2328,25 @@ void CParticle::refreshTransform () {
+ 
+     m_transformedOrigin = origin;
+     m_transformValid = true;
++    // (the control points follow in update (): a scene-space one stays where it is in the scene)
++}
+ 
+-    // world-space control points stay where they are in the world
+-    for (auto& cp : m_controlPoints) {
+-	if (!cp.linkMouse && cp.worldSpace) {
+-	    cp.position = cp.offset - m_transformedOrigin;
++glm::mat3 CParticle::localFromScene () const {
++    // the inverse of the system's rotation and scale (updateMatrices' order)
++    glm::vec3 angles = m_particle.angles->value->getVec3 ();
++    angles.z = m_resolvedAngle;
++    glm::mat4 m (1.0f);
++    m = glm::rotate (m, -angles.z, glm::vec3 (0, 0, 1));
++    m = glm::rotate (m, angles.y, glm::vec3 (0, 1, 0));
++    m = glm::rotate (m, -angles.x, glm::vec3 (1, 0, 0));
++    glm::vec3 scale = m_resolvedScale;
++    for (int i = 0; i < 3; i++) {
++	if (std::abs (scale[i]) < 1e-6f) {
++	    scale[i] = 1e-6f;
+ 	}
+     }
++    m = glm::scale (m, scale);
++    return glm::inverse (glm::mat3 (m));
+ }
+ 
+ const Object& CParticle::drawingObject () const {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index decb787..1ce4194 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -75,6 +75,7 @@ struct ControlPointData {
+     glm::vec3 offset { 0.0f };
+     bool linkMouse { false };
+     bool worldSpace { false };
++    uint32_t flags { 0 };
+ };
+ 
+ /**
+@@ -172,6 +173,8 @@ protected:
+     void drawFrom (const std::vector<const CParticle*>& instances);
+     [[nodiscard]] bool childAlive () const;
+     void stopEmitters ();
++    /** from the scene's centred space to the system's: the inverse of its rotation and scale */
++    [[nodiscard]] glm::mat3 localFromScene () const;
+     /** the object whose target a system draws into (a child: its top-level system's) */
+     [[nodiscard]] const Object& drawingObject () const;
+     /** a child takes its parent's place and matrices */
