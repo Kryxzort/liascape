@@ -382,6 +382,25 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Health report rerun:** 86 clean / 10 degraded / 0 failed (was 75 / 21), script errors 38 → 11, no scene worse
   (the shader agent's patches, in the same pin, took dropped effects 57 → 0). By eye: 3243449890 now draws its
   triangle clock and the character, 3219908811 its cherry-blossom background and ring.
+## 2026-11-04 night — F1: shadows and light cookies
+
+- **3D scenes can cast shadows now** (fork patch 0071, pin `4b85ae7`). A light with "cast shadow" and the models with
+  "cast shadow" are drawn into a shadow map, the same way WE does it. That covers spot lights, and point lights in all
+  six directions. Spot lights can also project a light "cookie" texture (WE's default is a flashlight ring). Tube
+  lights and directional lights now light models too; before, LWE ignored them.
+- **None of your 96 scenes uses any of this.** The one scene with lights, 3477054430, has its shadows turned off. So
+  I checked it on a test scene I made: cubes on a floor.
+  - Before: no shadows, and the spot was a plain disc.
+  - Now: each cube casts a shadow from both lights, and the spot shows the flashlight pattern. At first there were
+    shadow stripes on the floor; I removed them by tuning the depth bias.
+- **Every scene uses less video memory: about 10 MB less at 1080p, 76 MB less on the 6880×2880 scene.** LWE kept an
+  unused full-screen buffer in every scene for the shadow map. Frame times are unchanged. A scene with shadows costs
+  about 0.3 ms more per frame (on the test scene).
+- Health report: 86 clean / 10 degraded / 0 failed, the same as before, and no scene changed. Shader sweep: 47 → 16
+  failing compiles, none new. The shadow shaders WE ships now build; the few combinations that still fail are for
+  animated (skinned) models, which LWE doesn't do yet (batch F4).
+- Left: shadows from directional lights (WE splits them into "cascades"), WE's light clustering for scenes with many
+  lights, the "ultra" soft-shadow mode, and a shadow-quality setting (it's WE's default, medium).
 
 ## 2026-11-04 night — the small WE-coverage gaps (F7–F9, fork patches 0072–0077)
 - **Sprite orientation as WE does it** (0072): particle sprites set to `upright` / `fixed` (3174556087's rain

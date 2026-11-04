@@ -29,10 +29,10 @@
 
 ## Summary
 
-| Area | Items | Before (42f301d): impl / partial / missing / n/a | 0065–0070 (deeb4da) | Now (0072–0077) |
+| Area | Items | Before (42f301d): impl / partial / missing / n/a | 0065–0070 (deeb4da) | Now (0071 F1, 0072–0077) |
 |---|---|---|---|---|
 | SceneScript: every member, event, module export and global of the d.ts | 453 | 329 / 3 / 120 / 1 | 421 / 14 / 17 / 1 | **424 / 12 / 16 / 1** |
-| Scene and object keys the library uses | 162 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 |
+| Scene and object keys the library uses | 162 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 | **138 / 3 / 15 / 6** (F1: castshadow) |
 | Effect keys the library uses | 41 | 25 / 0 / 2 / 14 | 25 / 0 / 2 / 14 | **27 / 0 / 0 / 14** |
 | Material keys the library uses | 13 | 12 / 0 / 1 / 0 | 12 / 0 / 1 / 0 | **13 / 0 / 0 / 0** |
 | Model keys the library uses | 19 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 |
@@ -42,7 +42,7 @@
 | .tex formats | 14 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) |
 | .tex flags (known + seen) | 9 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 |
 | FBO formats | 13 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 |
-| Object types | 12 | 9 / 2 / 1 / 0 | 9 / 2 / 1 / 0 | 9 / 2 / 1 / 0 |
+| Object types | 12 | 9 / 2 / 1 / 0 | 9 / 2 / 1 / 0 | **10 / 1 / 1 / 0** (F1: lights) |
 | Effect pass options | 7 | 6 / 0 / 1 / 0 | 6 / 0 / 1 / 0 | **7 / 0 / 0 / 0** |
 
 The SceneScript count is every member of every class/interface in the d.ts, the 17 events, the 3 modules' exports
@@ -145,7 +145,7 @@ worth a row. Row ids in brackets are the gap audit's.
 |---|---|---|---|---|
 | `version` (scene, effect) | 80 | 87 | n/a | format version; WE reads it, nothing to apply |
 | objects.`locktransforms`, `muteineditor` | 61, 55 | 18, 0 | n/a | editor-only |
-| objects.`castshadow` | 44 | 19 | missing | always false in the library; shadows are a future batch (L) |
+| objects.`castshadow` | 44 | 19 | impl (F1) | always false in the library; models and point/spot lights cast into the shadow atlas (fork patch 0071) |
 | objects.`backgroundcolor` / `opaquebackground` / `backgroundbrightness` (text box) | 43 / 43 / 40 | 3 | missing | `opaquebackground` is false in all 278 uses; S when one is true |
 | general.`perspectiveoverridefov` | 42 | 77 | missing | [G20] use unknown (default 95); with `perspective` layers |
 | objects.`ledsource` | 34 | 11 | n/a | RGB-device lighting (iCUE/Chroma) |
@@ -159,7 +159,7 @@ worth a row. Row ids in brackets are the gap audit's.
 | objects.`particlesrc` | 3 | 21 | n/a | editor source reference |
 | objects.`effects.username` | 1 | 2 | n/a | editor label |
 | objects.`density`, `volumetricsexponent` (VolumeLight) | 1 | 1 | missing | with the `shape` object (below) |
-| general.`lightconfig` | 1 | 2 | missing | 3D light quality config; with lights/shadows |
+| general.`lightconfig` | 1 | 2 | missing | 2.8.485 reads only `directional` (≤ 3) and `directionalshadow`; 3477054430's `{"spot": 4}` is an older form. LWE counts the directional lights itself (F1) |
 | general.`camerapreview`, `hdr`, `fov`, `farz`, `zoom`, objects.`fov`/`zoom` | — | — | impl | (not in the exe's narrow strings: wide strings) |
 
 ### Material / effect / model keys
@@ -205,7 +205,7 @@ the health report (their runtime is in the operator interpreter, not read). Stoc
 | FBO `format` | rgba_backbuffer, rgba8888, rgb888, rg88, r8, rgb565, rgba16161616f, rgb161616f, rg1616f, r16f, rgba1010102 | 41 / 9 / – / 5 / 1 | 7 / 81 / … | impl | impl |
 | | normalmap | 0 | 2 | partial (as rgba8888) | partial |
 | object type | image, compose (passthrough), fullscreen, solidlayer, text, particle, sound, camera, group, model (static MDL) | 96 / 11 / … / 45 / 78 / 55 / 11 / 16 / 2 | | impl | impl |
-| | light `lpoint` / `lspot` | 0 / 1 | 2 / 0 | partial (B14: lit models, no shadows/cookies) | partial |
+| | light `lpoint` / `lspot` / `ltube` / `ldirectional` | 0 / 1 / 0 / 0 | 2 / 0 / 0 / 0 | impl (F1: shadows, spot cookies, tubes, directional; no directional cascades, no clusters) | impl |
 | | `shape` (VolumeLight) | 1 (3319542538) | 3 | missing | missing (L: volumetrics) |
 | effect pass | material, target, bind, compose, source, command copy (3) | 5–82 | | impl | impl |
 | | command `swap` | 0 | 2 | missing (refused) | **impl**: WE's command 2 (GH 0x1402131b0); the two FBOs exchange their storage, swaps after the last draw run after it (**Inferred** from the stock fluid simulation's ping-pong) |
@@ -235,6 +235,25 @@ dropped 3 → 0, effects dropped 57 → 0 (the shader patches, not this batch), 
 3243449890 now draws its triangle clock and the character; 3219908811 its cherry-blossom background and ring;
 3516174947, 3516106265 and 2890767643 unchanged apart from animation. One run timed out 3432876246 once (exit
 124); five reruns alone took 4–5 s, so a one-off.
+
+## Implemented: F1 shadows and light cookies (fork patch 0071, 2026-11-04)
+
+- **0071 render: shadows, light cookies, tube and directional lights.**
+  - Lights read `castshadow`, `usecookie`, `cookie` (default `cookie/flashlight1`), `controlpoint` (a tube's far
+    end) and `lightsourcesize`; `ltube` and `ldirectional` are lights now. Models read `castshadow`.
+  - The shadow atlas is a depth texture (2 x 2 until a light casts a shadow, then one 256 px tile per light). It was
+    a scene-sized RGBA8 target that nothing drew: every scene saves about 8 MB of VRAM at 1080p.
+  - The casters (the stock shadowcaster, shadowcasterfoliage4 and shadowcasterfur4) draw into each viewport, a spot's
+    one or a point light's six cube faces.
+  - PerformLighting_V1 samples the shadows and the spot cookies and adds the tube and directional lights.
+  - Decoded addresses, and what's inferred, are in the audit's "F1 result".
+- **No library scene uses it.** 3477054430's four spots have castshadow false. The check is a synthetic scene.
+- **Tests** (host_api_test; each RED on `deeb4da`): `shadow_casters_compile`, `shadow_occludes_a_lit_point`,
+  `cookie_projects_its_texture`, `tube_and_directional_lights`.
+- **Shader sweep:** 47 → 16 failures, 0 new. The 10 caster checks left are SKINNING / MORPHING combos, which no static
+  mesh sets (F4).
+- **Left:** the directional cascades, WE's light clusters, 2.8.485's PCSS, the `shadows` quality setting,
+  `lightconfig`.
 
 ## Implemented (fork patches 0072–0077, 2026-11-04: the small gaps F7–F9)
 
@@ -282,7 +301,7 @@ Tests (host_api_test, each RED on deeb4da): `sprite_orientation_as_we`, `alphawr
 
 | Batch | What | Library | Size |
 |---|---|---|---|
-| F1 Shadows and light cookies | `castshadow`, the shadow atlas, `lightconfig`, spot cookies (B14's "left") | 2–3 (3D) | L |
+| ~~F1 Shadows and light cookies~~ **done** (0071, below) | `castshadow`, the shadow atlas, spot cookies, tube and directional lights; left: directional cascades, clusters, `lightconfig` | 0 (3477054430's spots don't cast) | L |
 | F2 Volumetric lights | `shape` objects (VolumeLight), `density`, `volumetricsexponent` | 1 (3319542538) | L |
 | F3 Bone physics + blend shapes | `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them), blend-shape weights | 0 scripted; physics data unknown | L |
 | F4 Skinned / animated 3D models | IModelLayer animation layers, `rootmotion`, `createModelData` (script meshes) | 0–2 | L |
