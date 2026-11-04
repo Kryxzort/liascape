@@ -5305,6 +5305,101 @@ static bool perspective_layers_in_2d () {
     return true;
 }
 
+// a 2D layer scene (camera_scene) that names `camera.paths` = ["camera_paths.json"] with `paths` as that file's list
+static std::string path_scene (const std::string& general, const std::string& paths, const std::string& objects) {
+    const std::string dir = camera_scene (general, objects);
+    std::string scene = read_file (dir + "/scene.json");
+    scene.replace (scene.find ("\"camera\":{"), 10, "\"camera\":{\"paths\":[\"camera_paths.json\"],");
+    write_file (dir + "/scene.json", scene);
+    write_file (dir + "/camera_paths.json", "{\"paths\":[" + paths + "]}\n");
+    return dir;
+}
+
+// camera paths (GH 0x1401c6ef0 parses them, GH 0x1401b8af0 plays them while no camera object is active: a cubic
+// Hermite between keys with both tangents half the difference, so the midpoint is the mean; a key's zoom replaces
+// general.zoom) and camerafade (GH 0x1401afbf0: 1 − 2 t over the first 0.5 s of a path, fade.json's colour).
+// Unpatched: `camera.paths` and `camerafade` were not read
+static bool camera_paths_and_fade () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string sq = square (1, "\"origin\":\"32 16 0\"");
+    const std::string zoomPath = "{\"duration\":4,\"transforms\":[{\"eye\":\"0 0 0\",\"zoom\":2},{\"eye\":\"0 0 0\",\"zoom\":2}]}";
+    ScriptRig zoomed;
+    zoomed.extra = { "camera_paths.json" };
+    CHECK (zoomed.open (path_scene ("\"camerafade\":false", zoomPath, sq)), "load failed (zoom path)");
+    zoomed.step ();
+    const std::string z2 = zoomed.row ();
+
+    ScriptRig withCamera;
+    withCamera.extra = { "camera_paths.json" };
+    CHECK (withCamera.open (path_scene ("\"camerafade\":false", zoomPath,
+                                        sq + ",{\"id\":2,\"name\":\"cam\",\"camera\":\"default\",\"zoom\":1}")),
+           "load failed (camera object)");
+    withCamera.step ();
+    const std::string cam = withCamera.row ();
+
+    // the eye from x 0 to 16 over 2 s: at 1 s it is at 8, the square 8 px left
+    const std::string movePath = "{\"duration\":2,\"transforms\":[{\"eye\":\"0 0 0\"},{\"eye\":\"16 0 0\"}]}";
+    ScriptRig moving;
+    moving.extra = { "camera_paths.json" };
+    CHECK (moving.open (path_scene ("\"camerafade\":true", movePath, sq)), "load failed (moving path)");
+    moving.step ();
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (moving.fbo, 2, 2, px);
+    const int blueEarly = px[2];
+    for (int i = 0; i < 28; i++) {
+        moving.step ();
+    }
+    const std::string mid = moving.row ();
+    read_pixel (moving.fbo, 2, 2, px);
+    const int blueMid = px[2];
+    printf ("    path zoom 2:          %s\n    with a camera object: %s\n    eye 8 at 1 s:         %s\n"
+            "    camerafade: clear blue %d at the start, %d mid-path (want < 70, ~128)\n",
+            z2.c_str (), cam.c_str (), mid.c_str (), blueEarly, blueMid);
+    CHECK (z2 == covered (24, 39), "the path's zoom 2 didn't double the square");
+    CHECK (cam == covered (28, 35), "a camera object didn't take precedence over the paths");
+    const int left = left_edge (mid);
+    CHECK (left >= 18 && left <= 22, "the path's eye at 1 s didn't move the square 8 px left (left edge %d)", left);
+    CHECK (blueEarly < 70 && blueMid > 110, "camerafade: %d at the start, %d mid-path", blueEarly, blueMid);
+    return true;
+}
+
+// a 3D scene's transparentsorting key (GH 0x1401b6660, comparator GH 0x1401cc550): sortorder ascending, then
+// farthest first along the view. Unpatched: sortorder wasn't read (the distance alone ordered the run)
+static bool transparent_sort_takes_sortorder () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (int nearOrder, int farOrder, bool& redOnTop) {
+        const std::string near = "{\"id\":1,\"name\":\"g\",\"image\":\"models/b15green.json\",\"size\":\"200 200\","
+                                 "\"scale\":\"0.01 0.01 0.01\",\"origin\":\"0 0 2\",\"sortorder\":" + std::to_string (nearOrder) + "}";
+        const std::string far = "{\"id\":2,\"name\":\"r\",\"image\":\"models/b15red.json\",\"size\":\"200 200\","
+                                "\"scale\":\"0.01 0.01 0.01\",\"origin\":\"0 0 0\",\"sortorder\":" + std::to_string (farOrder) + "}";
+        const std::string dir = world_scene (",\"transparentsorting\":true", near + "," + far);
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = b7_layer (dir, "b15red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+        const auto green = b7_layer (dir, "b15green", "gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);");
+        rig.extra.insert (rig.extra.end (), green.begin (), green.end ());
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        redOnTop = is_red (pixel_xy (rig, kW3 / 2, kH3 / 2));
+        return true;
+    };
+    bool plain = true, ordered = false;
+    CHECK (centre (0, 0, plain), "load failed (same order)");
+    CHECK (centre (0, 1, ordered), "load failed (far sortorder 1)");
+    printf ("    same sortorder: %s on top; the far layer's sortorder 1: %s on top\n", plain ? "red (far)" : "green (near)",
+            ordered ? "red (far)" : "green (near)");
+    CHECK (!plain, "back to front: the near layer isn't on top");
+    CHECK (ordered, "the far layer's higher sortorder didn't draw it last");
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -5414,6 +5509,8 @@ int main (int argc, char** argv) {
     run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
     run ("audio_reaches_shaders_scripts_and_emitters", audio_reaches_shaders_scripts_and_emitters);
     run ("perspective_layers_in_2d", perspective_layers_in_2d);
+    run ("camera_paths_and_fade", camera_paths_and_fade);
+    run ("transparent_sort_takes_sortorder", transparent_sort_takes_sortorder);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
