@@ -1099,7 +1099,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
           tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
           2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
-          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
+          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found, also not via the RSSetViewports sites — 2026-11-05; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
           don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
           **E41 done 2026-11-03** (fork patch 0037, pin `3eaac6e`): an effect's `visible` (user property or script)
           turns it on/off live — built when it can be visible, the pass chain re-picked and retargeted on a change.
@@ -1133,9 +1133,10 @@ Two bug classes kept recurring; fix the class, not the instance:
                 GH 0x14024fd30; 3174556087's splashes follow WE's axes).
           - [x] P30 rope/trail combos — done 2026-11-05 as far as the library goes (0097): a segment is subdivision + 1
                 pieces (WE's TRAILSUBDIVISION in genericropeparticle.geom); every library rope is ORIENTATION 0 and
-                sets no TRAILSCROLL/FADE key. Left: WE's per-segment bezier (its CPU spline buffer isn't read; the shader
-                side is decoded: controls start + 0.15 · (end − CP0), end + 0.15 · (start − CP1), within 10 % of
-                LWE's Catmull-Rom if CP0 / CP1 are the neighbours — 2026-11-05).
+                sets no TRAILSCROLL/FADE key. The CPU spline buffer is read too (2026-11-05, GH 0x140255e50): CP0 / CP1
+                are the neighbouring particles, clamped to the segment's own ends, as in LWE's Catmull-Rom.
+          - [ ] P30 tangent factor: WE's bezier inner points use 0.15 where LWE's Catmull-Rom has 1/6 (≤ 0.6 px per
+                100 px of segment). Needs a rope test rig (deterministic particle positions) before porting.
           - [x] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`axis` — the 3 scenes use WE's defaults
                 (GH 0x1401e8c90), which is what LWE does; other values are reported to the health report (0072).
           - [ ] P27 non-default bounds / limitbehavior / axis semantics (decode the spawn interpreter's case; 0
@@ -1166,8 +1167,11 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
           - [x] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale — done
                 2026-11-05: the additive scale is the position's rule (confirmed); the attachment is (bone matrix ·
-                MDAT) · local (GH 0x14024b530). Left: whether WE's bone array there is the posed world or the skin
-                matrix (its writer), and WE applies the whole matrix where LWE keeps translation + z turn.
+                MDAT) · local (GH 0x14024b530).
+          - [x] The whole attachment matrix — done 2026-11-05 (fork patch 0101, pin `7b2517c`): the animator's +0x30
+                is the posed bone world (GH 0x140243600), and LWE now applies bone · MDAT whole (2D: offset, z turn and
+                the axes' scale; worldMatrixOf and the script matrices: the whole matrix). No library scene changes
+                (every library bone / MDAT is unit scale). Audit "Attachment result".
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
     - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
@@ -1210,6 +1214,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 script property with descriptor flag 4 (GH 0x14020dcc0), getAttachmentAngles returns degrees
                 (GH 0x14020db20; constants at 0x1404d4460 / 0x1404d411c), WE's baseclasses.js is degrees throughout.
                 The bridge's use of flag 4 itself wasn't located.
+          - [ ] Flag 4's reader (2026-11-05, audit "Attachment result"): not in the exe nor found in scenescript64.dll;
+                flag 4 also marks shader constants annotated `"conversion":"rad2deg"` (GH 0x140192430), which a script
+                would see in degrees in WE and radians in LWE — 0 library scenes script or bind one.
     - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported

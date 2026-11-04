@@ -2856,3 +2856,82 @@ copies (0x1812ed0a0 / 0x1812ed080) are read only by four V8 builtins.
   other scene as before.
 - Shader sweep (4085 checks vs the leftovers'): 6 failing before, 6 still failing, 0 fixed, 0 newly failing.
 - Player tests (DEBUG, on this core): 743 passed, 0 failed, 3 ignored.
+
+### Attachment result: the whole attachment matrix, and what the last three leftovers decode to (fork patch 0101, pin `7b2517c`, 2026-11-05)
+
+The four items the "Decode leftovers result" left open. The same wallpaper64.exe 2.8.485 (`all.c` / `all.asm`) and
+scenescript64.dll 2.8.485 (objdump). **Observed** = read in the binary; **Inferred** = ours, marked.
+
+**Puppet attachments, the whole matrix (0101; 3 library scenes have attached children).** **Observed**: the bone
+array the attachment builder reads (the animator, image +0x2d8, its +0x30 array of 64-byte matrices) is the **posed
+bone world in the model's space**, not a skinning matrix. The animator is built in GH 0x1402423b0: +0x18 gets each
+bone's bind world (its MDL matrix · the parent's), then inverted in place (GH 0x140060c00), so +0x18 is the inverse
+bind; +0x30 is sized to the bone count. Each frame GH 0x140243600 writes +0x30[i] = the bone's local pose (from the
+mixer's SoA block: scale, rotation, position) composed with +0x30[parent] (root bones: the local pose alone; without
+an animation the MDL bind matrices composed the same way), and then +0x90[i] = +0x30[i] composed with the image's
+world matrix (vtable +0x80). So LWE's reading (its `m_puppetWorld`, the posed world; skinning = that · inverse bind)
+holds. The multiply GH 0x14005ff00 (out, a, b) is b · a in row-major storage, i.e. in column form "apply b, then a":
+GH 0x14024b530 makes `local ← bone ∘ MDAT ∘ local` — the child's own transform first, then the MDAT matrix, then the
+bone; world = parent world · that (GH 0x1401b5170). `getAttachmentAngles` (GH 0x14020db20) decomposes the layer's
+matrix times the same product (vtable +0x78 applied to identity).
+
+LWE kept only that product's translation and z turn. Now (0101): `CImage::attachmentMatrix` returns bone · MDAT
+whole; the 2D transform (`CObject::resolveTransform`) also multiplies the child's scale by the product's axis lengths
+(so the bone's and the MDAT's scale reach the child and its own offset), `CScene::worldMatrixOf` multiplies the whole
+product in (g_LayerModelMatrix, world-placed layers, the script matrices), and the bridge's `__attachments` hands out
+the whole matrix (getAttachmentMatrix / Origin / Angles). Rotations about x / y and shear still can't reach a 2D layer
+(LWE draws a 2D layer from origin + scale + z angle); in 2D they would show as a foreshortened child.
+
+The library: 3 scenes pin children to attachments — 3463520581 (58 children: hair, cloth, accessories),
+3414858021 (6), 3363252053 (1); 3233141951 has none. Their attached layers' canvas boxes in the health run (frames 1
+and 31, 124 layer-frames) are identical to the `f50bc82` run to the pixel: every library bone and MDAT matrix there is
+rotation + translation (unit scale), so the whole product draws what offset + z turn drew. The change matters for a
+puppet whose bones scale (an animated squash on a bone carrying a child) and for scripts reading
+getAttachmentMatrix; nothing in the library looks different. (Their 3 s frames differ from the earlier run by as much
+as two `f50bc82` runs differ from each other: 3414858021 50.5 % vs 50.6 %, the puppets' animation phase.)
+
+**SceneScript `angles` flag 4 (not located; one more use found).** **Observed**: descriptor flag 4 is the "radians
+inside, degrees to the script" mark, and `angles` is not its only user: a material constant's descriptor gets it too
+(GH 0x140183570, `test [param +0xac], 0x20` at 0x14018472e) when the shader uniform's annotation has
+`"conversion":"rad2deg"` (GH 0x140192430 / 0x140192580 set param bit 0x20; `"startdelta"` sets 0x40). The stock effects
+that declare it: waterripple, godrays_cast, transform, chromatic_aberration and others, materials `angle`,
+`direction`, `scrolldirection`, `shadingdirection` (and two typos/label names in workshop copies). The reader of the
+flag wasn't found: the only rad → deg multiply in the exe (0x1404d4460) is getAttachmentAngles; no
+`test byte [reg+0x60], 4` (direct, or after a load) in the exe or the DLL is a descriptor's (the hits are MSVC's regex
+lexer flags at 0x1401113a6 / 0x1809c799c); the descriptor list leaves the exe through each class's list method
+(GH 0x14020ecd0, lookup GH 0x14020eba0, the static map 0x14052a6f0) towards the DLL, so the conversion is Inferred to
+be in scenescript64.dll's accessor builder, keyed on the flag. What 0057 covers: `thisLayer.angles` reads and writes,
+property scripts on `angles`, `getAttachmentAngles` (now from the whole matrix, above) and the jsclasses in degrees.
+What it doesn't: a script (or a property script) on a `rad2deg` shader constant would see radians in LWE. **Library:
+0** — no scene binds a script or a user property to one of those constants (61 scenes set them as plain values, which
+are radians in both). Not changed.
+
+**E9 `g_TexelSize` (still not found).** Also ruled out this time: the render context is the object that image +0xc8
+points at (its +0x970 / +0xa30 matrices are written by GH 0x1401c56e0 and GH 0x1402176a0, its +0x1810 is the material
+cache); no RSSetViewports call (ID3D11DeviceContext vtable +0x160, 13 sites) passes a viewport at a context's +0x6c
+(which would put Width / Height at +0x74 / +0x78: **Inferred** layout, not seen); the paired +0x74 / +0x78 stores in
+the exe (10 sites) are other classes (settings maxima at GH 0x140143e86, an animator swap at GH 0x140251b60, …). LWE
+keeps 1 / the scene size.
+
+**P30 rope spline buffer (decoded; LWE matches but for the factor).** **Observed** (GH 0x140255e50, the system update,
+into the rope geometry at system +0x208, drawn by GH 0x14025bc30 for renderer record type 3): per segment k of the
+particle order list (system +0x218, GH 0x140114600), with a = order[k − 1], b = order[k], c = order[k + 1], d =
+order[k + 2]: a_PositionVec4 = (pos b, size b), a_TexCoordVec4 = (pos c, trail length), C1 = (pos a, k + the scroll
+offset), C2 = (pos d, size c), then the colours of c and b; 0x60 bytes. The first segment has CP0 = its own start, the
+last CP1 = its own end (fewer than 3 particles: both). So CP0 / CP1 are the neighbours, clamped at the ends — what LWE's
+Catmull-Rom uses. The only difference left is the tangent factor: WE's bezier inner points are start + 0.15 · (end −
+CP0) and end + 0.15 · (start − CP1); uniform Catmull-Rom is the same bezier with 1/6. The curve moves by at most
+3/8 · 0.0167 · |end − CP0| (about 0.6 px per 100 px of segment at a 90° bend). Not changed: no test rig places rope
+particles deterministically, and the shift is under a pixel for segments shorter than ~150 px (the library's rope
+segment lengths weren't measured). The order list's sort key wasn't read (LWE: spawn order).
+
+**Fork test** (`host_api_test`, 116 → 117 passed): `attachment_matrix_is_whole` — a 32 × 32 puppet whose attachment
+"tip" is the MDAT matrix scale 2; the 4 × 4 square pinned to it at "0 4 0" sits 8 px up and is 8 px wide (x 28..35,
+rows 4..11). On `f50bc82`: 4 px wide, 4 px up (rows 10..13).
+
+**Gates.**
+
+- Health (`scene-health.md`, 96 scenes): **89 clean / 7 degraded / 0 failed**, as before; no scene changed class,
+  loss, problem count or errors.
+- Shader sweep (4085 checks vs the decode leftovers'): 6 failing before, 6 still failing, 0 fixed, 0 newly failing.
+- Player tests (DEBUG, on this core): 743 passed, 0 failed, 3 ignored.

@@ -500,3 +500,16 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   and the rope curve (WE's control points sit within 10 % of LWE's). Not found: what WE's g_TexelSize divides by.
 - Health report 89 clean / 7 degraded / 0 failed (no scene worse, none newly blank); shader sweep the same 6
   failing, none new; player tests 743 passed.
+
+## 2026-11-05 — the last decode leftovers (fork 0101, pin `7b2517c`)
+- **Puppet attachments apply WE's whole matrix.** WE pins a child (3463520581's hair, cloth and accessories) with the
+  bone's full matrix times the attachment's; LWE used only its position and turn. Read from WE's code which matrices
+  those are (the posed bones, as LWE assumed) and ported the rest (a bone's scale now reaches the child). Nothing in
+  your library looks different: all its puppet bones keep unit scale, and the attached layers sit exactly where they
+  did.
+- Read, not changed: the rope curve's control points (the neighbouring particles, as LWE has; only a 0.15 vs 1/6
+  tangent factor differs, under a pixel for a segment up to ~150 px), and the SceneScript degrees flag (it also marks
+  shader angles WE shows scripts in degrees; no scene of yours scripts one). Still not found: what WE's g_TexelSize
+  divides by.
+- Health report 89 clean / 7 degraded / 0 failed (no scene changed); shader sweep the same 6 failing, none new;
+  player tests 743 passed.
