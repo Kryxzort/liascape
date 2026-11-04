@@ -1990,6 +1990,61 @@ static bool puppet_warp_as_we () {
     return true;
 }
 
+// the attachment matrix whole (GH 0x14024b530: local ← (bone · MDAT) · local): a 32 x 32 puppet at (32, 16) on a
+// 64 x 32 scene whose attachment "tip" is the MDAT matrix scale 2 on the bone (bind pose); a black 4 x 4 square pinned
+// to it at "0 4 0" sits 2 · 4 = 8 px up and is 8 px wide: x 28..35, rows 4..11. Unpatched: only the attachment's
+// offset and z turn were kept, so the square was 4 px wide 4 px up (x 30..33, rows 10..13)
+static bool attachment_matrix_is_whole () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter b;
+    b.out = puppet_mesh (23);
+    MdlWriter attach;
+    attach.u16 (1).u16 (0).str ("tip");
+    for (int i = 0; i < 16; i++) {
+        attach.f32 (i == 15 ? 1.0f : i % 5 == 0 ? 2.0f : 0.0f);
+    }
+    b.section ("MDLS0004", puppet_skeleton (4)).section ("MDAT0001", attach.out)
+        .section ("MDLA0006", puppet_animations (6, { { 1, 0.0f } }));
+    const std::string objects
+        = "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false}]},"
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "\"origin\":\"0 4 0\",\"parent\":2,\"attachment\":\"tip\"}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pb.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pb.mdl\"}\n");
+    write_file (dir + "/models/pb.mdl", b.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pb.json", "models/pb.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    auto dark = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[2] < 64;
+    };
+    std::string column;
+    for (int y = 0; y < 16; y++) {
+        column += dark (32, y) ? '#' : '.';
+    }
+    std::string row;
+    for (int x = 24; x < 40; x++) {
+        row += dark (x, 8) ? '#' : '.';
+    }
+    printf ("    x 32 rows 0..15: %s; row 8 x 24..39: %s\n", column.c_str (), row.c_str ());
+    CHECK (dark (28, 5) && dark (35, 10) && !dark (31, 13) && !dark (27, 8) && !dark (36, 8),
+           "the attached square isn't the 8 px square 8 px up (x 28..35, rows 4..11)");
+    return true;
+}
+
 // F3 IK (the audit's "F2 result"): a bone whose simulation JSON has "ik": true is the end of a chain `ikd` bones long
 // that reaches for its type 0 IK target (MDLS v2's target list), which the animation moves (MDLA v2's target tracks).
 // A three-bone arm along x (root at -8, elbow at 0, hand at +8; a 4 px square on the hand), its hand's target animated
@@ -6548,6 +6603,7 @@ int main (int argc, char** argv) {
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
     run ("texture_components_define_combos", texture_components_define_combos);
     run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
+    run ("attachment_matrix_is_whole", attachment_matrix_is_whole);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);
