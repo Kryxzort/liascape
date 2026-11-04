@@ -1136,8 +1136,12 @@ Two bug classes kept recurring; fix the class, not the instance:
           drawn in place. All in the audit's "B12 result". host_api_test 62/62 (1 new, failing on 2559b88); corpus 93
           ok on both cores, none newly blank.
           - [ ] A WE capture of 3463520581 or 3233141951 to check poses and the attachment's (inferred) form.
-          - [ ] GPU skinning (SKINNING / g_Bones), bone alpha (SKINNING_ALPHA), blend shapes (MDLE/MDMP, 13 files),
-                IK and physics bones, root motion, animation events, `autosort`/`index` layer order.
+          - [x] Bone alpha (SKINNING_ALPHA), blend shapes (MDMP; MDLE turned out to be a copy of the bones' local
+                matrices) — done in F3 (0079); GPU skinning for 3D models in F4 (0080; puppets stay CPU-posed);
+                animation events in F7 (0077).
+          - [ ] IK (3042492564's arm, one bone) and physics bones (none enabled in the library): the solver lives in
+                the mixer GH 0x140228470, unread; root motion (MDLA flags bit 0, 18 bytes, undecoded);
+                `autosort`/`index` layer order (0 users, not in the exe's strings).
           - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
           - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
@@ -1197,7 +1201,7 @@ Two bug classes kept recurring; fix the class, not the instance:
                 shaders): 313 → 47 failures, each explained in the audit's "Shader preprocessing result".
                 WE's own `TEX<n>FORMAT` per bound texture: done 2026-11-04 (fork patch 0075,
                 GH 0x1401d2a20). The stock shadow casters' `gl_ViewportIndex` write: done in F1 (one draw per
-                viewport; sweep 47 → 16, the 10 caster checks left are SKINNING / MORPHING combos, F4).
+                viewport; sweep 47 → 16, the 10 caster checks left are SKINNING / MORPHING combos: fixed in F4, 0078).
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
@@ -1210,7 +1214,16 @@ Two bug classes kept recurring; fix the class, not the instance:
                 point lights, the stock casters), spot cookies, tube and directional lights; result in the audit's "F1
                 result". No library scene uses them (synthetic check). host_api_test +4 (RED on `deeb4da`).
                 - [ ] Left: directional cascades (`g_LFeature_Shadow*`), WE's light clusters, 2.8.485's PCSS (quality
-                      4), the `shadows` quality as a setting (medium now), `lightconfig`; skinned/morphed casters (F4).
+                      4), the `shadows` quality as a setting (medium now), `lightconfig`. (Skinned/morphed casters: done in F4, 0078/0080.)
+          - [x] **F3 blend shapes + bone alpha, F4 skinned / morphed models + createModelData — done 2026-11-04**
+                (fork patches 0078–0081, pin `1072720`): the casters' SKINNING / MORPHING combos compile (sweep: the
+                10 caster checks pass), MDMP blend shapes with their MDLA weight tracks and bone alpha on puppets
+                (+ get/setBlendShapeWeight), skinned and morphed 3D models posed by their animation layers,
+                createModelData / IModelData / createLayer ({ model }). Result in the audit's "F3/F4 result".
+                host_api_test +4 (RED on 24adeff).
+                - [ ] Left: IK and bone physics (+ applyBonePhysicsImpulse, gravity/wind), root motion /
+                      `rootmotion`, MORPHING_MODIFIERS, IModelLayer's animation-layer API on models, `perspective`
+                      model layers, MDLA v6's per-bone float track.
           - [x] **F5 perspective layers + F6 the stock-only particle operators — done 2026-11-04** (fork patches
                 0082–0085): an orthographic scene's perspective camera (`perspectiveoverridefov`, GH 0x1401b4fd0) for
                 `perspective` layers and perspective particles (35 scenes' systems now WE's size and depth), camera
@@ -1222,8 +1235,7 @@ Two bug classes kept recurring; fix the class, not the instance:
                       0x13 and the spawn interpreter GH 0x140260d80), vortex_v2, a camera object's own `path`/`queuemode`
                       (all empty in the library), text `depthtest`, customsortorder, the 3D zoom/parallax, WE captures
                       of the element previews (`assets/scenes/particleelementpreviews`).
-          - [ ] F2 volumetric lights (L), F3 bone physics + blend shapes (L),
-                F4 skinned / animated 3D models + createModelData (L), F7 puppet hit boxes (S–M).
+          - [ ] F2 volumetric lights (L), F7 puppet hit boxes (S–M).
           - [x] F8 `resizeScreen` + `engine.screenResolution` + `cursorScreenPosition` in screen pixels (0076; the
                 worker hints `max_size`), F9 (0072–0075: `alphawriting`, `fbos.fit/width/height/uvs`, `command: swap`,
                 sprite `orientation`, mapsequence defaults, `TEX<n>FORMAT`), F7's MDLA animation events (0077) —

@@ -2206,6 +2206,146 @@ smoke, old core vs new):
 Pin `4b85ae7`. Player tests (DEBUG): 740 passed, 0 failed, 3 ignored. In the full run, the timing test
 `four_workers_latch_independently` failed once and passed alone.
 
+### F3/F4 result: blend shapes, bone alpha, skinned and morphed models, createModelData (fork patches 0078–0081, pin `1072720`, 2026-11-04)
+
+Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` (the MDL loader GH 0x1402873f0 and the puppet
+combo builder GH 0x140230ec0 decompiled there), the stock shaders of the owner's 2.8.42 assets (genericimage4,
+generic4, the casters, `base/model_vertex_v1.h`) and 2.8.485's `base/morph_vertex_v1.h` from the Windows install. No
+REA session was needed. Library numbers come from the Python MDL port (B12's `b12/mdl.py`, extended in the scratchpad's
+`f3/`), over every `.mdl` in the 16 Workshop scenes that have one.
+
+**What the library has** (the 50 puppet files and the 3D models):
+
+| Feature | Library | Notes |
+|---|---|---|
+| MDMP0001 blend shapes | 1 file: 3490034653's 人物1, one target "Shape 895" (25 eyelid points) | its "眨眼" (blink) animation weights it |
+| MDLA v4 blend-shape weight tracks | 3490034653's 眨眼 | weight 1 at frames 0–10, about 0.5–0.6 at 199–218 (of 450) |
+| MDLA v3 bone alpha tracks | 0 | |
+| target alphas below 1 | 0 | 人物1's alpha blob is all 32767 (1.0) |
+| MDLE0002 | 13 files | not blend shapes (B12 guessed so): a byte count and a copy of the bones' local matrices |
+| IK (`"ik":true` in a bone's JSON) | 1 bone: 3042492564's 海果-手臂 (`ikd` 2, two IK targets) | not ported (below) |
+| bone physics | 0 enabled | every bone JSON with physics keys has `se` / `re` / `ge` false, `s` 0 |
+| root motion (MDLA flags bit 0) | 0 | |
+| a 3D model with a skeleton or blend shapes | 0 | 3276522107, 3477054430, 3509243656's models are static |
+| `autosort` / `index` on layers | 0 | no scene.json has either |
+| applyBonePhysicsImpulse, createModelData, get/setBlendShape* | 0 scripts | |
+
+**Decoded (Observed):**
+
+- **MDMP0001** (the loader's 4th section branch): per mesh a u16 target count (≤ 0x100). With targets: an f32 position
+  scale (mesh +0x60) and a u32 point count N (+0x64). Per target: a u64 id, a name, a blob of N · 6 bytes (WE takes
+  min (N, blob / 6) and requires them equal). By the mesh's flags (+0x18): 0x400 another N · 6 (normal deltas),
+  0x1000 N · 2 (alphas), 0x2000 a u32 bone (< the bone count), a u32, two f32s (MORPHING_MODIFIERS' rule).
+- **The values are snorm16**: 2.8.485's `DecodeMorphSnorm16` is max (int16 / 32767, −1), × `g_MorphPositionScale`
+  (= the mesh's scale; 2.8.42 passes it as `g_MorphWeights[0]`, `MORPH_POSITION_SCALE (weights)`).
+- **A puppet vertex's point** is its vec4 position's w (format 0x10000): genericimage4 indexes the morph map with
+  `CASTU (a_PositionVec4.w) + g_MorphOffsets[1 + t]` and skips w 0. 人物1's 4787 vertices: w 1..25 on 25, 0 on the rest.
+  A 3D mesh (generic4, the casters) indexes it with `gl_VertexID` (a dense target).
+- **MDLA v4 weights**: per mesh u32 flags; with bit 0, an f32 (the scale again), a u16 count, per track a u16 target
+  index and frames + 1 floats. MDLA v3's alpha tracks: a flag byte, then per bone a u32 and frames + 1 floats. MDLA v6's
+  last per-bone float track is present in 人物1 (53 bones 0, 2 bones 1): not decoded.
+- **The combos** (GH 0x140230ec0, the puppet image's material): BONECOUNT = the bone count (vtable +0xd8), SKINNING 1,
+  SKINNING_ALPHA when the model's flags +0x18 bit 2, MORPHING when the mesh format has 0x10000 (with texture slot 5
+  set to the model's morph texture), MORPHING_MODIFIERS when MORPHING and flags bit 0x2000.
+- **The shaders**: morph first, then skin; v_VertexAlpha = Π (morphAlpha · w + 1 − w) × saturate (Σ weight ·
+  g_BonesAlpha[bone]); `color.a *= v_VertexAlpha`. generic4 / model_vertex_v1.h read their map as a float stream, 3
+  floats a (vertex, target) entry (6 with MORPHING_NORMALS), at (vertex + offset) · 3, packed into RGBA texels, y =
+  index / height (a square texture).
+- **g_Texture0Texel … g_Texture9Texel** are engine uniforms (WE's name table GH 0x140002a20, ids 0x49–0x52), like
+  the Resolution ones.
+
+**Ported** (fork patches, in order):
+
+| Patch | What |
+|---|---|
+| 0078 shader | The casters' SKINNING / MORPHING compile: BONECOUNT ≥ 1 under SKINNING; an undeclared g_Texture<n>Texel is declared (CPass feeds (1 / w, 1 / h, w, h)); the call-argument rule reads parameter lists with macro calls (`DECLARE_SAMPLER2D_PARAMETER`) and leaves array parameters alone (fur4's `ApplyMorphPosition (gl_VertexID, …)`) |
+| 0079 render | Puppet blend shapes, their weight tracks and bone alpha (CPU, before the skin, as genericimage4 orders them); `getBlendShapeIndex` / `getBlendShapeWeight` / `setBlendShapeWeight` |
+| 0080 render | 3D models with a skeleton: `animationlayers` on the model object, posed like a puppet, skinned on the GPU (SKINNING, g_Bones as mat4x3, a_BlendIndices / a_BlendWeights); blend shapes through MORPHING over a morph map in g_Texture5 (the casters' g_Texture1) |
+| 0081 script | `createModelData`, `IModelData` (applyData, replaceData, POSITION … COLOR), `createLayer ({ model })`, `destroyModelData`; model layers are scriptable and draw in 2D scenes |
+
+**Ours / Inferred:**
+
+- **Puppets stay on the CPU** (B12's path): morph, then skin, per vertex. The vertex alpha reaches genericimage4's
+  fragment through its VERTEXCOLOR (`a_Color` = 1 1 1 alpha; `color *= v_Color` comes right after WE's `color.a *=
+  v_VertexAlpha`). Only a puppet with an alpha track or a target alpha below 1 gets the combo: no library puppet does.
+  genericimage2 (15 of the library's 77 puppet layers) has neither path, in WE too.
+- **How layers mix weights and alphas** (Inferred; the mixer GH 0x140228470 wasn't read that far): as positions,
+  normal lerps toward the sample (weights from 0, alphas from 1), additive adds (sample − rest) · weight.
+- **A script's weight** (`setBlendShapeWeight`) holds over the animations' until set again (Inferred), as the bone
+  overrides do.
+- **Which targets draw** when more than 11 are weighted (the uniforms hold 11): the first 11 weighted ≠ 0 (ours).
+- **The model morph map** is half float (RGBA16F) holding the snorm values; WE 2.8.485 reads a snorm16 buffer.
+- **createModelData in a 2D scene**: WE's world pixels (y up) through the layers' projection, z squashed into its
+  depth range; the 2D target has no depth buffer, so faces draw in index order. COLOR is read past; the bounding box
+  members are ignored.
+- **A model layer is a ScriptableObject** now, so getLayer / createLayer return it (it was undefined).
+
+**Not done (Left):**
+
+- IK and bone physics. The bone JSON's keys are known (`ik`, `ikd` chain depth, `ikrd`, `ikrmin/max`, `ikce`, `ikg`,
+  `ikr`; `r`/`t` rotation / translation simulation with `rs`/`ts` stiffness, `rf`/`tf` friction, `ri`/`ti`, `m` mass,
+  `gd` gravity direction, `ge`/`re`/`se` enables, `la`/`lamin`/`lamax`/`lt`/`ltmax` limits; parser GH 0x14028bbd0),
+  and MDLS v2's IK target records, but the solver and the simulation live in the 4500-line mixer GH 0x140228470,
+  which wasn't read. One library bone uses IK (3042492564's arm), none physics. applyBonePhysicsImpulse /
+  resetBonePhysicsSimulation stay no-ops; gravity / wind (`general.gravity*`, `wind*`) aren't read by anything.
+- MORPHING_MODIFIERS (the 0x2000 bone rule: parsed, not applied), MORPHING_NORMALS' normal deltas on puppets.
+- Root motion (MDLA flags bit 0: 18 bytes, a 0xc0-byte runtime record; not decoded), `IModelLayer.rootmotion`.
+- The IModelLayer script API on models (getAnimationLayer … go through the puppet layer API, which a model lacks).
+- MDLA v6's per-bone float track, MDLE's role (a copy of the local matrices: perhaps physics' rest pose).
+- `autosort` / `index` layer order (no library user; not found in the exe's strings either).
+
+**Fork tests** (`host_api_test`): 99/99 on `1072720`, 4 new, each failing on 24adeff.
+
+| Test | What it checks | On 24adeff |
+|---|---|---|
+| `skinned_casters_compile` | shadowcaster, shadowcasterfoliage4, shadowcasterfur4 with SKINNING, MORPHING, MORPHING + MORPHING_NORMALS (BONECOUNT 1) and SKINNING + MORPHING (BONECOUNT 4): 12 builds | 10 of 12 fail (array size 0, `g_Texture1Texel` undeclared, no `ApplyMorphPosition` overload) |
+| `puppet_blend_shapes_and_alpha` | four genericimage4 puppets (vec4 positions, MDMP with "stretch" +6 px and "fade" alpha 0): an animation's stretch weight widens A to x 4..13; B's script sets stretch by name and reads the weights back (x 24..33); C's bone alpha 0 and D's fade weight 1 hide them | A and B 4 px wide, C and D drawn, the script checks fail |
+| `model_skins_and_morphs` | a 3D model's skeleton moved +2 units by its animation layer (x 0..4, ±4 px), and with the stretch weight 1 its right edge at 10 units | nothing drawn where expected (the static quad) |
+| `create_model_data_draws` | createModelData (POSITION, NORMAL, UV; a Uint16Array) + createLayer ({ model, origin 48 24 }) is the 8 px square at x 44..51, rows 4..11; applyData moves it 30 px left | nothing drawn |
+
+**Library scenes, old core (24adeff) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the same release worker with
+each core on its LD_LIBRARY_PATH; scratchpad `f3/pairs/`):
+
+| Scene | Kind | ok | lit px old → new | frame ms old → new | pixels changed (1 s, 6 s) |
+|---|---|---|---|---|---|
+| 3490034653 | puppet, MDMP blink | True / True | 4953522 → 4953522 | 4.3 → 4.7 | 0, 0 |
+| 3463520581 | puppet (MDLE) | True / True | 8294390 → 8294390 | 4.3 → 2.9 | 0, 0 |
+| 3233141951 | puppet, 6 files | True / True | 9404239 → 9404239 | 67.7 → 66.5 | 0, 0 |
+| 3414858021 | puppet (MDLE) | True / True | 8292354 → 8292354 | 9.7 → 10.3 | 0, 0.018 % (a 138 × 39 px box at the right edge) |
+| 3363252053 | puppet (MDLE) | True / True | 8294387 → 8294387 | 7.4 → 5.6 | 0, 0 |
+| 3013489778 | puppet (MDLE) | True / True | 2073566 → 2073566 | 4.6 → 3.6 | 0, 0 |
+| 3479521040 | puppet (MDLE) | True / True | 8293845 → 8293845 | 5.1 → 5.2 | 0, 0 |
+| 3042492564 | puppet with the IK bone | True / True | 8294136 → 8294136 | 8.4 → 8.0 | 0, 0 |
+| 2375914945 | puppet, MDLV0013 | True / True | 8294305 → 8294305 | 3.5 → 3.7 | 0, 0 |
+| 3276522107 | 3D (static models) | True / True | 357607 → 357607 | 8.4 → 8.4 | 0, 0 |
+| 3477054430 | 3D (static models, spots) | True / True | 905142 → 905142 | 1.2 → 1.3 | 0, 0 |
+| 3509243656 | 3D (static models) | True / True | 2057791 → 2057806 | 7.5 → 8.2 | 0, 0.012 % (a box over the planet: its texts fade in) |
+
+- **No library scene changes visibly.** The only blend shape (3490034653's blink) moves its 25 eyelid points by at
+  most 4.5 layer px, weighted 1 at frames 0–10 and 0.5–0.6 at 199–218 of 450; captured at 0.3 s, 1 s, 6 s and 6.9 s the
+  frames are identical to the old core's (the deltas are applied: the per-vertex log showed them; on screen they are
+  under a pixel or covered). The two 6 s differences are animated content, the same size on reruns of one core in
+  earlier batches.
+- **Cost: none measurable.** A puppet without blend shapes or alpha tracks runs B12's path; one with them adds a
+  per-vertex morph (25 points here). Static models are unchanged (no SKINNING / MORPHING combos). 3233141951 ran at
+  67 ms on both cores in this run (machine load; B12 measured 6–7 ms).
+
+**Shader sweep** (4085 compiles, the new core): 16 → 6 failures, the 10 SKINNING / MORPHING caster checks fixed, 0 newly
+failing; the 6 left are as in F1 (`puppettexturechannels`' BLENDROWCOUNT, two workshop `auto_sway`, one `depthparallax`).
+"WE: an engine texel uniform declared" applies to 3 checks.
+
+**Health** (`scene-health.md`, 96 scenes, pin `1072720`): 86 clean / 10 degraded / 0 failed, as on 24adeff; no
+scene's class, loss, errors, warnings or built objects changed. In the full run 2883756643 (a video scene) timed out
+at the 90 s limit under load; alone it is clean in 15 s, and the report carries that rerun (the timed-out run is kept
+in the scratchpad's `f3/health-2883-timeout`).
+
+Player tests (DEBUG, pin `1072720`): 740 run, 729 passed, 3 ignored, 11 failed in the full run under a load of 10–26
+(another agent's build): `align_end_hands_off_as_a_last_frame_ends`, `i5_open_burst_is_capped_and_none_lost`,
+`i6_every_onset_waits_for_flowing_audio`, `outbox_is_bounded`, `outbox_persists_across_restart_and_acks`,
+`render_worker_never_composes_a_torn_frame`, `render_worker_quit_is_bounded`, `scene_over_vram_limit_is_stopped_not_crashed`,
+`scene_path_changes_and_folder_spellings_share_one_measurement`, `scene_reopen_continues_the_end_of_play_measurement`,
+`scene_worker_exit_never_skips_bus_cycles` (timeouts and timing). Each passed alone.
+
 ### F5/F6 result: perspective layers, camera paths, the transparent sort, the stock particle operators (fork patches 0082–0085, 2026-11-04)
 
 Decoded from wallpaper64.exe 2.8.485 (`all.c`, the asm `all.asm`, the B11 decompile of the operator interpreter

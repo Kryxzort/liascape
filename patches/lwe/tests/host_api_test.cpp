@@ -3804,6 +3804,204 @@ static bool puppet_animation_events () {
     return true;
 }
 
+// F3: a 4 x 4 puppet square with vec4 positions (format 0x181000e: position4, normal, tangent, blend indices,
+// weights, uv; 84 B), every vertex a morph point (w 1..4), and an MDMP0001 of two targets at scale 8 (mesh flag 0x1000:
+// alphas): "stretch" moves the right edge (points 2, 3) +6 px (snorm 0.75 · 8), "fade" moves nothing and has alpha 0
+static std::string morph_puppet () {
+    MdlWriter w;
+    w.str ("MDLV0023").u32 (0x181000e).u32 (1).u32 (1).str ("materials/morph.json");
+    w.u32 (1 | 0x1000);
+    for (int i = 0; i < 6; i++) {
+        w.f32 (0.0f);
+    }
+    w.u32 (0x181000e);
+    MdlWriter verts;
+    const float corners[4][2] = { { -2, -2 }, { 2, -2 }, { 2, 2 }, { -2, 2 } };
+    for (int v = 0; v < 4; v++) {
+        verts.f32 (corners[v][0]).f32 (corners[v][1]).f32 (0.0f).f32 (static_cast<float> (v + 1));
+        verts.f32 (0).f32 (0).f32 (1).f32 (1).f32 (0).f32 (0).f32 (1);
+        verts.u32 (0).u32 (0).u32 (0).u32 (0).f32 (1).f32 (0).f32 (0).f32 (0);
+        verts.f32 (0.5f).f32 (0.5f);
+    }
+    w.u32 (static_cast<uint32_t> (verts.out.size ()));
+    w.out += verts.out;
+    const unsigned tris[6] = { 0, 1, 2, 0, 2, 3 };
+    w.u32 (24);
+    for (unsigned t : tris) {
+        w.u32 (t);
+    }
+    w.u8 (0).u8 (0).u32 (0);
+    return w.out;
+}
+
+static std::string morph_targets () {
+    MdlWriter m;
+    m.u16 (2).f32 (8.0f).u32 (4);
+    const auto target = [&m] (uint32_t id, const char* name, bool stretch, int16_t alpha) {
+        m.u32 (id).u32 (0).str (name).u32 (24);
+        for (int p = 0; p < 4; p++) {
+            m.u16 (stretch && (p == 1 || p == 2) ? 24575 : 0).u16 (0).u16 (0);
+        }
+        m.u32 (8);
+        for (int p = 0; p < 4; p++) {
+            m.u16 (static_cast<uint16_t> (alpha));
+        }
+    };
+    target (1, "stretch", true, 32767);
+    target (2, "fade", false, 0);
+    return m.out;
+}
+
+// one animation (id `id`, 2 samples) holding the bone still, with (MDLA v3) a bone alpha track of `alpha` when it's
+// ≥ 0, and (v4) a weight track of 1 for target `shape` when it's ≥ 0
+static std::string morph_animation (int id, float alpha, int shape, float x = 0.0f) {
+    MdlWriter a;
+    a.u32 (1);
+    a.u32 (id).u32 (0).str ("anim").str ("loop").f32 (1.0f).u32 (1).u32 (0).u32 (1);
+    a.u32 (0).u32 (72);
+    for (int k = 0; k < 2; k++) {
+        a.f32 (x).f32 (0).f32 (0).f32 (0).f32 (0).f32 (0).f32 (1).f32 (1).f32 (1);
+    }
+    a.u32 (0); // curves
+    if (alpha >= 0.0f) {
+        a.u8 (1).u32 (0).u32 (8).f32 (alpha).f32 (alpha);
+    } else {
+        a.u8 (0);
+    }
+    if (shape >= 0) {
+        a.u8 (1).u32 (1).f32 (8.0f).u16 (1).u16 (shape).u32 (8).f32 (1.0f).f32 (1.0f);
+    } else {
+        a.u8 (0);
+    }
+    for (int i = 0; i < 6; i++) {
+        a.u32 (0);
+    }
+    a.u8 (0).u32 (0);
+    return a.out;
+}
+
+// blend shapes (MDMP0001 + MDLA v4 weight tracks) and bone alpha (MDLA v3 alpha tracks), decoded from the loader GH
+// 0x1402873f0 and genericimage4's MORPHING / SKINNING_ALPHA. Four puppets on the 64 x 32 scene (y up), genericimage4:
+// A at x 6 whose animation weights "stretch" 1: its square reaches x 4..13 (unpatched 4..7); B at x 26 whose script
+// sets "stretch" to 1 by name (and checks getBlendShapeIndex / getBlendShapeWeight; a failed check hides it): x 24..33;
+// C at x 44 whose animation's bone alpha is 0, and D at x 56 whose animation weights "fade" (alpha 0) 1: both hidden
+// (unpatched drawn)
+static bool puppet_blend_shapes_and_alpha () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    const auto model = [] (float alpha, int shape) {
+        MdlWriter m;
+        m.out = morph_puppet ();
+        m.section ("MDLS0004", puppet_skeleton (4)).section ("MDLA0006", morph_animation (7, alpha, shape))
+            .section ("MDMP0001", morph_targets ());
+        return m.out;
+    };
+    const std::string script = checked_once (
+        "check('index', thisLayer.getBlendShapeIndex('fade') === 1 && thisLayer.getBlendShapeIndex('nope') === -1);\n"
+        "check('unset', thisLayer.getBlendShapeWeight('stretch') === 0);\n"
+        "thisLayer.setBlendShapeWeight('stretch', 1);\n"
+        "check('weight', Math.abs(thisLayer.getBlendShapeWeight(0) - 1) < 1e-6 && thisLayer.getBlendShapeWeight('fade') === 0);\n");
+    const auto layer = [] (int id, const char* json, int x, const std::string& extra) {
+        return "{\"id\":" + std::to_string (id) + ",\"name\":\"p" + std::to_string (id) + "\",\"image\":\"models/" + json
+             + "\",\"origin\":\"" + std::to_string (x) + " 16 0\",\"size\":\"20 20\","
+               "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]" + extra + "}";
+    };
+    const std::string objects = layer (1, "ma.json", 6, "") + "," + layer (2, "mb.json", 26, "," + scripted ("visible", "true", script)) + ","
+                                + layer (3, "mc.json", 44, "") + "," + layer (4, "md.json", 56, "");
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/morph.json", material);
+    const std::pair<const char*, std::string> files[] = { { "ma", model (-1.0f, 0) }, { "mb", model (-1.0f, -1) }, { "mc", model (0.0f, -1) }, { "md", model (-1.0f, 1) } };
+    ScriptRig rig;
+    rig.extra = { "materials/morph.json" };
+    for (const auto& [name, mdl] : files) {
+        write_file (dir + "/models/" + name + ".json", std::string ("{\"material\":\"materials/morph.json\",\"puppet\":\"models/") + name + ".mdl\"}\n");
+        write_file (dir + "/models/" + name + ".mdl", mdl);
+        rig.extra.push_back (std::string ("models/") + name + ".json");
+        rig.extra.push_back (std::string ("models/") + name + ".mdl");
+    }
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    auto lit = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 128;
+    };
+    std::string row;
+    for (int x = 0; x < 64; x++) {
+        row += lit (x, 16) ? '#' : '.';
+    }
+    printf ("    row 16: %s\n", row.c_str ());
+    CHECK (lit (5, 16) && lit (12, 16) && !lit (15, 16), "the animation's stretch weight doesn't widen A to x 4..13");
+    CHECK (lit (25, 16) && lit (32, 16) && !lit (35, 16), "B's script weight doesn't widen it to x 24..33 (or a check failed, see FAILS)");
+    CHECK (!lit (44, 16), "C's bone alpha 0 didn't hide it");
+    CHECK (!lit (56, 16), "D's fade target (alpha 0) at weight 1 didn't hide it");
+    return true;
+}
+
+// F4: IScene.createModelData (d.ts 2.8) builds a model from script buffers, createLayer ({ model: data }) draws it (in
+// a 2D scene, "1 unit = 1 pixel", the layer's origin its origin), and IModelData.applyData moves it. An 8 x 8 square
+// (POSITION, NORMAL, UV; a Uint16Array index buffer) at (48, 24): x 44..51, rows 4..11 of the y-down image; at frame
+// 10 applyData shifts its vertices 30 px left. Unpatched: createModelData returned undefined (nothing drawn)
+static bool create_model_data_draws () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script =
+        "let frames = 0, data, made;\n"
+        "const square = (dx) => new Float32Array([-4 + dx, -4, 0, 0, 0, 1, 0, 1,  4 + dx, -4, 0, 0, 0, 1, 1, 1,\n"
+        "  4 + dx, 4, 0, 0, 0, 1, 1, 0,  -4 + dx, 4, 0, 0, 0, 1, 0, 0]);\n"
+        "export function update(value) {\n"
+        "  frames++;\n"
+        "  if (frames == 1) {\n"
+        "    data = thisScene.createModelData({ shapes: [{ vertexBuffer: square(0), indexBuffer: new Uint16Array([0, 1, 2, 0, 2, 3]),\n"
+        "      vertexFormat: [IModelData.POSITION, IModelData.NORMAL, IModelData.UV], material: engine.registerAsset('materials/md.json') }] });\n"
+        "    made = thisScene.createLayer({ model: data, origin: new Vec3(48, 24, 0) });\n"
+        "    if (!(data instanceof IModelData) || made === undefined || data.UV !== 'uv') { console.log('FAILS create'); return false; }\n"
+        "  }\n"
+        "  if (frames == 10) { data.applyData({ vertexBuffer: square(-30) }); }\n"
+        "  return true;\n"
+        "}";
+    const std::string dir = script_scene (square (1, scripted ("visible", "true", script) + ",\"origin\":\"4 28 0\""));
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/materials/md.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                             "\"combos\":{\"LIGHTING\":0,\"FOG\":0}}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/md.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    auto lit = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 128;
+    };
+    auto rowAt = [&] (int y) {
+        std::string row;
+        for (int x = 0; x < 64; x++) {
+            row += lit (x, y) ? '#' : '.';
+        }
+        return row;
+    };
+    while (rig.frames < 5) {
+        rig.step ();
+    }
+    const std::string made = rowAt (8);
+    const bool madeOk = lit (45, 8) && lit (50, 8) && !lit (42, 8) && !lit (53, 8) && !lit (45, 14);
+    while (rig.frames < 15) {
+        rig.step ();
+    }
+    const std::string moved = rowAt (8);
+    printf ("    row 8 at frame 5: %s\n    row 8 at frame 15: %s\n", made.c_str (), moved.c_str ());
+    CHECK (madeOk, "the script model isn't the 8 px square at x 44..51, rows 4..11");
+    CHECK (lit (15, 8) && lit (20, 8) && !lit (48, 8), "applyData didn't move it to x 14..21");
+    return true;
+}
+
 // IParticleSystem: instance overrides read and write (count, a control point), stop () takes every particle away,
 // pause () + emitParticles (5) shows those 5 and no more, isPlaying. Unpatched: instance was undefined, play / stop /
 // pause did nothing on a particle system
@@ -5189,6 +5387,91 @@ static bool shadow_casters_compile () {
     return true;
 }
 
+// F4: the casters' SKINNING / MORPHING combos build (the shader sweep's 10 failures). WE sets BONECOUNT to the bone count
+// with SKINNING (GH 0x140230ec0); shadowcasterfoliage4 reads the engine's g_Texture1Texel without declaring it, and
+// shadowcasterfur4 passes gl_VertexID (int) to ApplyMorphPosition's uint, which HLSL converts. Unpatched: "array size
+// must be a positive integer", "'g_Texture1Texel' : undeclared identifier", "no matching overloaded function"
+static bool skinned_casters_compile () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\"}");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = b14_model (dir, "\"LIGHTING\":1");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    const char* casters[] = { "shadowcaster", "shadowcasterfoliage4", "shadowcasterfur4" };
+    const char* combos[] = {
+        "{\"SKINNING\":1}",
+        "{\"MORPHING\":1}",
+        "{\"BONECOUNT\":1,\"MORPHING\":1,\"MORPHING_NORMALS\":1}",
+        "{\"BONECOUNT\":4,\"MORPHING\":1,\"SKINNING\":1}",
+    };
+    bool ok = true;
+    for (const char* shader : casters) {
+        for (const char* c : combos) {
+            const std::string request = std::string ("{\"combos\":") + c + "}";
+            std::string out (8192, '\0');
+            wp_project_shader_check (rig.p, shader, request.c_str (), out.data (), out.size ());
+            out.resize (strlen (out.c_str ()));
+            const bool built = out.find ("\"ok\":true") != std::string::npos;
+            printf ("    %s %s: %s\n", shader, c, built ? "ok" : out.substr (0, 300).c_str ());
+            ok = ok && built;
+        }
+    }
+    CHECK (ok, "a skinned or morphed caster didn't build");
+    return true;
+}
+
+// F4: a model object with a skeleton and blend shapes is posed by its animation layers and skinned / morphed on the
+// GPU (generic4's SKINNING with g_Bones and BONECOUNT, MORPHING over the g_Texture5 morph map; GH 0x140230ec0 sets the
+// combos). The 4 x 4 quad (morph_puppet's mesh, all on bone 0) seen from z 40 (1 unit ≈ 29 px): its animation moves
+// the bone +2 units, so the quad covers x 0..4; with the "stretch" weight 1 its right edge goes 6 more, x 0..10.
+// Unpatched: the static quad at x −2..2 (models had no animation layers)
+static bool model_skins_and_morphs () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const auto edges = [] (int shape, std::pair<int, int>& span) {
+        const std::string object = "{\"id\":1,\"name\":\"m\",\"model\":\"models/skin.mdl\",\"origin\":\"0 0 0\","
+                                   "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]}";
+        const std::string dir = world_scene ("", object, "0 0 40");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        MdlWriter m;
+        m.out = morph_puppet ();
+        m.section ("MDLS0004", puppet_skeleton (4)).section ("MDLA0006", morph_animation (7, -1.0f, shape, 2.0f))
+            .section ("MDMP0001", morph_targets ());
+        write_file (dir + "/models/skin.mdl", m.out);
+        write_file (dir + "/materials/morph.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                   "\"combos\":{\"LIGHTING\":0,\"FOG\":0}}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/skin.mdl", "materials/morph.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        for (int i = 0; i < 3; i++) {
+            rig.step ();
+        }
+        span = span_x (rig, kH3 / 2, [] (const std::array<unsigned char, 4>& px) { return px[0] > 128; });
+        return true;
+    };
+    std::pair<int, int> skinned, morphed;
+    CHECK (edges (-1, skinned), "load/build failed (skinned)");
+    CHECK (edges (0, morphed), "load/build failed (skinned + stretch)");
+    const double unit = kH3 / (80.0 * std::tan (25.0 * M_PI / 180.0));
+    printf ("    1 unit = %.1f px; skinned x %d..%d (want %.0f..%.0f), + stretch %d..%d (want ..%.0f)\n", unit, skinned.first,
+            skinned.second, kW3 / 2.0, kW3 / 2.0 + 4 * unit, morphed.first, morphed.second, kW3 / 2.0 + 10 * unit);
+    CHECK (std::abs (skinned.first - kW3 / 2) <= 4 && std::abs (skinned.second - (kW3 / 2 + 4 * unit)) <= 4,
+           "the bone's animation didn't move the quad to x 0..4");
+    CHECK (std::abs (morphed.first - kW3 / 2) <= 4 && std::abs (morphed.second - (kW3 / 2 + 10 * unit)) <= 4,
+           "the stretch weight didn't move the right edge to x 10");
+    return true;
+}
+
 // a tube light lights from the nearest point of its segment (origin to `controlpoint`, GH 0x1401bf270's second
 // loop: g_LCluster_Direction = the far end) and a directional light from its −x axis at any distance
 // (g_LDirectional_*, ComputePBRLightShadowInfinite); unpatched both were "Other" lights, the quad black
@@ -5735,6 +6018,8 @@ int main (int argc, char** argv) {
     run ("model_draws_and_lights", model_draws_and_lights);
     run ("fog_and_depth", fog_and_depth);
     run ("shadow_casters_compile", shadow_casters_compile);
+    run ("skinned_casters_compile", skinned_casters_compile);
+    run ("model_skins_and_morphs", model_skins_and_morphs);
     run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
     run ("tube_and_directional_lights", tube_and_directional_lights);
@@ -5746,10 +6031,12 @@ int main (int argc, char** argv) {
     run ("script_controls_a_sound", script_controls_a_sound);
     run ("layer_transform_api", layer_transform_api);
     run ("create_layer_builds_layers", create_layer_builds_layers);
+    run ("create_model_data_draws", create_model_data_draws);
     run ("script_strings_and_regexp", script_strings_and_regexp);
     run ("video_texture_api", video_texture_api);
     run ("animation_layer_api", animation_layer_api);
     run ("puppet_animation_events", puppet_animation_events);
+    run ("puppet_blend_shapes_and_alpha", puppet_blend_shapes_and_alpha);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);

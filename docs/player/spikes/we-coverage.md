@@ -100,12 +100,12 @@ so those counts are upper bounds, marked ~). Stock = WE asset files.
 | ITextLayer | 15 | 7 | partial | partial | font, anchor, padding, limitrows, limitwidth, opaquebackground now read; writes to those (and `backgroundcolor`) are kept on the layer but don't re-lay the text (S) |
 | IParticleSystemInstance | 15 | 0–16 | missing | impl | the instanceoverride values, live (controlpoint0..7 made from the control point when the scene sets none) |
 | IParticleSystem | play pause stop isPlaying emitParticles instance | ~22 | missing (sound only) | impl | |
-| IImageLayer | 25 | 7 | partial | partial | alignment, getVideoTexture, animation layers, bones now; `applyBonePhysicsImpulse`/`resetBonePhysicsSimulation` and blend shapes are no-ops (LWE has no bone physics, no blend shapes) |
-| IModelLayer | perspective, rootmotion, animation layers | 0 | missing | partial | LWE's models are static meshes: 0 animation layers; rootmotion/perspective missing (with skinned models, L) |
+| IImageLayer | 25 | 7 | partial | partial | alignment, getVideoTexture, animation layers, bones, blend shapes (`getBlendShapeIndex/Weight`, `setBlendShapeWeight`: F3, 0079) now; `applyBonePhysicsImpulse`/`resetBonePhysicsSimulation` are no-ops (LWE has no bone physics; no library bone enables it) |
+| IModelLayer | perspective, rootmotion, animation layers | 0 | missing | partial | a model's scene `animationlayers` pose its skeleton (F4, 0080) and a model layer is a script layer; the IModelLayer animation-layer methods, `rootmotion` and `perspective` are missing |
 | ICamera {fov zoom} | 2 | 0 | missing | impl | a camera object's zoom/fov are layer properties (scriptable) |
-| IModelData / createModelData | 7 | 0 | missing | **missing** | stubs return undefined: building meshes from script data is a render feature (L) |
+| IModelData / createModelData | 7 | 0 | missing | impl | createModelData, applyData, replaceData, the format constants, createLayer ({ model }), destroyModelData (F4, 0081); COLOR is read past, the bounding box ignored |
 | ILayer | origin angles scale parallaxDepth name visible + 13 methods | 22 / 5 (getTransformMatrix) | partial | impl | getTransformMatrix, rotateObjectSpace, lookAt, lookAtYaw (the layer's −z towards the target: **inferred**), setParent (adjustTransforms, attachment), getAttachment*; getParent is undefined unparented (was null) |
-| IScene | 15 methods + 19 properties | 11 (getLayer), 4 (createLayer) | partial | impl | createLayer/destroyLayer, getLayerByID, getInitialLayerConfig, get/setCameraTransforms, getAnimation now; createModelData/destroyModelData stubs |
+| IScene | 15 methods + 19 properties | 11 (getLayer), 4 (createLayer) | partial | impl | createLayer/destroyLayer, getLayerByID, getInitialLayerConfig, get/setCameraTransforms, getAnimation now; createModelData/destroyModelData (F4) |
 | IConsole | log, error | 14 | impl | impl | + warn/info/debug |
 | IRenderContext | (empty) | 0 | missing | impl | `renderContext = {}` |
 | IInput | cursorWorldPosition, cursorScreenPosition, cursorLeftDown | 7 | impl | impl | cursorScreenPosition in screen pixels (d.ts "on the screen in pixels"; 3509243656 centres it with screenResolution / 2; it was 0..1): the scene covering the host's screen, y down (**Inferred**) |
@@ -305,6 +305,35 @@ built objects the same as on `deeb4da` and on F1's `4b85ae7`. Shader sweep: 4085
 failing (47 → 47 on these patches alone). host_api_test 95/95; player tests 739 passed, 1 timing failure
 (`mpv_source_teardown_never_skips_bus_cycles`, passed alone).
 
+## Implemented: F3 blend shapes and bone alpha, F4 skinned models and createModelData (fork patches 0078–0081, 2026-11-04)
+
+Decoded from wallpaper64.exe 2.8.485 (`all.c`: the MDL loader GH 0x1402873f0, the puppet combos GH 0x140230ec0) and
+the stock shaders (genericimage4, generic4, the casters, `base/model_vertex_v1.h`; 2.8.485's `base/morph_vertex_v1.h`);
+what isn't is marked **Inferred**. The full write-up is the audit's "F3/F4 result".
+- **0078 shader: the casters' SKINNING / MORPHING compile.** BONECOUNT ≥ 1 with SKINNING (WE sets it to the bone count,
+  GH 0x140230ec0); g_Texture<n>Texel declared when a unit reads it undeclared (engine uniforms, GH 0x140002a20 ids
+  0x49–0x52; value (1 / w, 1 / h, w, h): **Inferred**); fur4's `ApplyMorphPosition (gl_VertexID, …)` converts its int.
+  Shader sweep: the 10 caster checks pass.
+- **0079 render: puppet blend shapes and bone alpha.** MDMP0001 (per mesh: targets, an f32 scale, N points; per
+  target snorm16 xyz deltas, by mesh flags normals 0x400, alphas 0x1000, a bone rule 0x2000), a vertex's point = its
+  vec4 position's w − 1; MDLA v4 weight tracks and v3 bone alpha tracks; morph before skin, vertex alpha as
+  genericimage4's v_VertexAlpha (through its VERTEXCOLOR: LWE's puppets are CPU-posed). get/setBlendShapeWeight,
+  getBlendShapeIndex. **Inferred**: the layers' blend of weights and alphas, a script weight holding. Library:
+  3490034653's 人物1 blink ("眨眼": 25 eyelid points, up to 4.5 layer px).
+- **0080 render: skinned and morphed 3D models.** A model's `animationlayers` pose its MDLS skeleton (the puppet's
+  clock and mixing); generic4's SKINNING (g_Bones mat4x3, a_BlendIndices / a_BlendWeights, BONECOUNT) and MORPHING
+  (model_vertex_v1.h's float-stream morph map in g_Texture5, the casters' g_Texture1); the casters get the same. No
+  library model has a skeleton.
+- **0081 script: createModelData.** IModelData (applyData, replaceData, POSITION/NORMAL/TANGENT_SIGNED/UV/COLOR),
+  createLayer ({ model }) / createLayer (data), destroyModelData; model layers are scriptable and draw in 2D scenes in
+  world pixels (**ours**: z squashed, no depth buffer). 0 library users.
+
+Not done: IK (3042492564's arm: one bone with `"ik":true`), bone physics and applyBonePhysicsImpulse (no library bone
+enables it), root motion, MORPHING_MODIFIERS, IModelLayer's animation-layer API, `autosort` / `index` (0 users).
+
+Tests (host_api_test, each RED on 24adeff): `skinned_casters_compile`, `puppet_blend_shapes_and_alpha`,
+`model_skins_and_morphs`, `create_model_data_draws`.
+
 ## Implemented: F5 perspective layers and F6 the stock particle operators (fork patches 0082–0085, 2026-11-04)
 
 Decoded addresses and what's inferred: the audit's "F5/F6 result".
@@ -329,8 +358,8 @@ unturned; no scene has camera paths). Tests (host_api_test, each RED on `24adeff
 |---|---|---|---|
 | ~~F1 Shadows and light cookies~~ **done** (0071, below) | `castshadow`, the shadow atlas, spot cookies, tube and directional lights; left: directional cascades, clusters, `lightconfig` | 0 (3477054430's spots don't cast) | L |
 | F2 Volumetric lights | `shape` objects (VolumeLight), `density`, `volumetricsexponent` | 1 (3319542538) | L |
-| F3 Bone physics + blend shapes | `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them), blend-shape weights | 0 scripted; physics data unknown | L |
-| F4 Skinned / animated 3D models | IModelLayer animation layers, `rootmotion`, `createModelData` (script meshes) | 0–2 | L |
+| F3 Bone physics + blend shapes | blend shapes, their weight tracks, bone alpha **done (0079)**; left: IK (1 library bone), bone physics (0 enabled), `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them), root motion | 1 (3490034653's blink) | L |
+| F4 Skinned / animated 3D models | skinned / morphed models, the casters' combos, `createModelData` **done (0078, 0080, 0081)**; left: IModelLayer's animation-layer methods, `rootmotion` | 0 | L |
 | ~~F5 World-space perspective layers~~ **done (0082–0083)** | `perspectiveoverridefov`, image/text `perspective`, perspective particles in 2D, camera paths + camerafade, `sortorder`; left: text `depthtest`, `customsortorder`'s reader, the 3D zoom / parallax, a camera object's own path | 4 layers + 35 particle scenes | M |
 | ~~F6 Stock-only particle operators~~ **done (0084–0085)** | the stock-only types above; left: `layerimage`, collisionmodel, the inferred parts (boids' forces, remap's shapes, the initializers' runtime) | 0 (stock presets) | M |
 | F7 Puppet hit boxes + MDLA events | CursorEvent.hitBox (left: layout not decoded); puppet animationEvent **done (0077)** | 0 known | S–M |
