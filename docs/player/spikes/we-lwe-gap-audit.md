@@ -2048,3 +2048,157 @@ compiles** through the core's own preprocessing, glslang + SPIRV-Cross and the G
 
 Tests (host_api_test, all four red on `42f301d`): `shaders_include_in_place`, `fragment_varying_takes_vertex_type`,
 `hlsl_conversions_compile`, `hlsl_names_and_leftovers_compile`; `shaders_compile_like_hlsl` (0059) still passes.
+
+### F1 result: shadows, light cookies, tube and directional lights (fork patch 0071, 2026-11-04)
+
+No library scene uses any of it. 3477054430 is the only scene with lights: four spots, all `castshadow: false`,
+no `usecookie`, and its `lightconfig` is `{"spot": 4}`. No scene has a tube or directional light. Of the 44 objects
+with a `castshadow` key, all are false. So the visual check is a synthetic scene (a floor, four cubes, a spot with
+castshadow + usecookie and the stock `cookie/flashlight1`, a point light with castshadow). Everything was decoded
+from wallpaper64.exe 2.8.485 (`all.c` plus the unpacked exe for constants and asm). The owner's Linux install ships
+2.8.42's assets and a packed exe, so 2.8.42's generator itself could not be read.
+
+**Decoded (Observed):**
+
+- **Light properties** (GH 0x140283df0's table):
+  - `castshadow` sets bit 0 of the flags at +0x2c4, `usecookie` bit 1 (GH 0x1401c9430), `castvolumetrics` bit 2.
+  - `controlpoint` is a vec3 at +0x2d8 (parser GH 0x1401d0bc0: "x y z"). It is a tube's far end, in the light's
+    own space.
+  - `lightsourcesize` +0x314, `penumbra` +0x318, `distance` and `cascadedistance0–2` (directional cascades).
+  - The type byte at +0x2c0 indexes a table: `lpoint` 0, `lspot` 1, `ltube` 2, `ldirectional` 3.
+  - A light with usecookie loads its `cookie` texture, by default `cookie/flashlight1` (GH 0x140282140).
+- **Shadow quality.** The app setting `shadows` is parsed by GH 0x14013f3f0: disabled 0, low 1, medium 2 (the
+  default), high 3, ultra 4. A light's tile size comes from GH 0x140282540 (asm): 256 px below high, 512 at high,
+  1024 at ultra.
+- **The atlas** (GH 0x1401bf270):
+  - `_rt_shadowAtlas` is created at 2 x 2 and recreated larger when the tiles don't fit.
+  - Tiles are skyline-packed. `ProjectionTransform` = (x / W, y / H, size / W, size / H).
+  - The texel is (1 / W, 1 / H).
+  - At most 16 projections.
+- **Packing**, per point or spot light (GH 0x1401bf270):
+  - `g_LCluster_Extra.y` holds the flags: 1 shadow, 2 cookie, 4 projected. A spot with a shadow or a cookie gets
+    `4 | cookie·2 | shadow·1`. A point light with a shadow gets 1.
+  - `.z` is the projection index. `.w` is the penumbra term (only 2.8.485's PCSS reads it).
+  - For a shadowed point light, `g_LCluster_Direction.xy` holds the faces' projection scale.
+  - `g_LCluster_Counts` = (point and spot lights, tubes, projections).
+  - Tubes come after the point and spot lights:
+    - origin = (the light's position, radius);
+    - direction = (world · (controlpoint, 1), 0);
+    - extra.x = 1.
+  - Directional lights fill `g_LDirectional_Color` = (rgb · intensity, 0) and `g_LDirectional_Direction` = the zero
+    vector minus the light's x axis. Their count is the `LIGHTS_DIRECTIONAL` combo; 2.8.485's `lightconfig` reads only
+    `directional` (≤ 3) and `directionalshadow`.
+- **The light's projection** (FUN_140282580):
+  - Spot: a perspective with fov = 2 · outercone and aspect 1, looking down its x axis with its y axis up.
+  - Point: six faces. Each face's fov is 94° at low and medium, 92° at high, 91.2° at ultra (DAT_1404d4488/84/80),
+    which matches common_pbr_2.h's `viewportPointCompensation` of 0.47 / 0.48 / 0.49.
+  - Near = 0.05, or the light source size if larger (point lights). Far = max (radius, near + 0.01).
+  - `g_LCluster_PointProjection` = the projection's (m22, m32, m23, m33): D3D, row vectors.
+- **The pass** (GH 0x1401c4f30): the atlas is bound and its depth cleared once. The casters are drawn in batches of
+  up to six viewports, one instance per viewport: the casters read `g_ViewportViewProjectionMatrices[gl_InstanceID]`
+  and write `gl_ViewportIndex`.
+- **Casters.** The caster material is `materials/util/shadowcaster.json`, with its shader taken from a
+  table keyed by the mesh material's shader (GH 0x140185230).
+- **The generated lighting** (GH 0x140197e20): as below. It emits the shadow code only when
+  `LIGHTS_SHADOW_MAPPING_QUALITY` is non-zero, and the cluster form only for clustered scenes.
+
+**Ported:**
+
+| Piece | LWE now | Was |
+|---|---|---|
+| Light keys | castshadow, usecookie, cookie, controlpoint, lightsourcesize; `ltube`, `ldirectional` | point and spot only, no flags |
+| Model key | `castshadow` | ignored |
+| `_rt_shadowAtlas` | a 24-bit depth texture with comparison (GL_LEQUAL, linear: hardware 2 x 2 PCF), 2 x 2 until a light casts a shadow, then one 256 px tile per projection, four per row, grown and never shrunk | a scene-sized RGBA8 target nothing drew (8 MB at 1080p in *every* scene) |
+| `_alias_lightCookie` | a 1 x 1 placeholder; a model pass that samples it gets the scene's cookie (the last spot with usecookie, as WE keeps one) | an alias of the RGBA8 atlas |
+| The shadow pass | before the scene's clear, each caster into each viewport | none |
+| Receivers | `LIGHTS_SHADOW_MAPPING` 1 + `_QUALITY` 2 when a light casts a shadow, `LIGHTS_COOKIE` when there's a cookie, `LIGHTS_DIRECTIONAL` n | none |
+| PerformLighting_V1 | the point/spot loop with the cookie and shadow lookups, the tube loop (`PointSegmentDelta`), the directional loop (`ComputePBRLightShadowInfinite`) | the point/spot loop only |
+| `texSample2DCompare` | `vec4(texture(…))` (the header reads `.r`) | a float: `.r` failed |
+
+**Ours (not decoded, or adapted):**
+
+- **One draw per viewport.** WE's six-instance draw needs `gl_ViewportIndex` from the vertex unit: GLSL 4.10, or
+  `GL_ARB_shader_viewport_layer_array`. The NVIDIA EGL context has it (GL 4.6, plus `GL_NV_viewport_array2` and
+  `GL_AMD_vertex_shader_viewport_index`), but LWE compiles at 3.30. LWE instead draws each viewport separately: its
+  rect bound with `glViewportIndexedf` (GL 4.1, else `glViewport`), its matrix in
+  `g_ViewportViewProjectionMatrices[0]`, and the vertex unit's `gl_ViewportIndex` write dropped (a health `compat`
+  record). This builds on any GL, including Mesa. The cost is six draws per point-light caster instead of one.
+- **The render matrices** are built so that what the lit material's header computes lands on what was drawn:
+  - `CalculateProjectedCoords` takes `g_LCluster_Projection` = a D3D right-handed perspective (depth 0 … 1) · the
+    spot's lookAt;
+  - the caster draws through the same matrix with y negated (the header's v grows down the texture, the tile's
+    first row) and z remapped to GL's −1 … 1, so the depth buffer holds the D3D depth the header compares;
+  - a point light's faces use the header's own view matrices, with x and y scaled by 2 · 0.47. WE renders them at
+    94°, which is about equal.
+- **The bias** is `glPolygonOffset (4, 16)`. WE's rasterizer state for the pass wasn't read. 1.5 / 8 left acne at
+  grazing angles: the 9-tap filter reaches about two texels.
+- **The caster table.** foliage4 → shadowcasterfoliage4 and fur4 → shadowcasterfur4 (from the names), anything else →
+  shadowcaster. The mesh material's combos are copied (ALPHATOCOVERAGE and the like). Depth test and write are on,
+  culling off.
+- **Quality** is medium, WE's default (LWE has no setting).
+- **The directional direction.** The "zero minus the axis" is read from the packer's FUN_140060830 being the zero
+  vector, which is inferred.
+- **Two header versions.** The generator follows the common_pbr_2.h the assets ship. With 2.8.42's (the owner's
+  Linux install) it calls `PerformShadowMapping (coords, transform)`, `CalculateProjectedCoordsPoint (pos, origin,
+  info, transform)` and `PerformPointShadowMapping (coords)`. With 2.8.485's (it has `vec2 projectionScale`) it uses
+  the 2.8.485 generator's calls, passing zero for the PCSS receiver-plane terms. Both compile (`shadow_casters_compile`
+  against 2.8.42, and a sweep job against the Windows install's 2.8.485 assets).
+
+**Not done (Left):**
+
+- WE's light clusters (LWE takes the first 16 point, spot and tube lights).
+- The directional cascades (`g_LFeature_Shadow*`, `CalculateProjectedCoordsCascades`, `cascadedistance*`,
+  `directionalshadow`).
+- 2.8.485's PCSS (quality 4: penumbra, noise, receiver-plane).
+- The `shadows` quality as a setting.
+- `lightconfig`'s counts.
+- Skinned or morphed casters: SKINNING / MORPHING, with F4.
+- Volumetrics: `castvolumetrics`, F2.
+
+**Fork tests** (`host_api_test`): 89/89 on the new commit. The 4 new tests fail on `deeb4da`.
+
+| Test | What it checks | On `deeb4da` |
+|---|---|---|
+| `shadow_casters_compile` | the 3 stock casters (defaults; ALPHATOCOVERAGE) and generic4 with shadows + cookie, and with 2 directional lights | `'gl_ViewportIndex' : undeclared identifier` |
+| `shadow_occludes_a_lit_point` | a spot, then a point light, over a floor with an invisible 1 x 1 occluder between them: the centre is dark, 1.6 units away it's lit exactly as without the caster (no acne); without the occluder's castshadow nothing changes | centre 255 |
+| `cookie_projects_its_texture` | a red / green 2 x 1 cookie on a spot lights the floor's left red and its right green; without usecookie both are white | white both sides |
+| `tube_and_directional_lights` | a tube light 1 unit over the quad lights it (dimmer 18 units away), a directional light lights it from its −x axis and not when turned away | 0 (an `Other` light) |
+
+**The synthetic scene** (a floor, four cubes, a spot with castshadow + usecookie, a point light with castshadow;
+smoke, old core vs new):
+
+- Old core: the cubes are lit with no shadows, and the spot is a plain disc.
+- New core: each cube casts a shadow from both lights (a warm one from the spot, a blue one from the point light),
+  and the spot shows flashlight1's ring pattern.
+- At a 1.5 / 8 bias there were acne stripes at grazing angles; at 4 / 16 there are none.
+- Shadow edges are stair-stepped at 256 px per tile, as WE's medium quality.
+
+**Cost** (6 s smokes, VRAM sampled at 4 s with nvidia-smi, two runs each, old → new):
+
+| Scene | Frame (mean) | VRAM |
+|---|---|---|
+| the synthetic shadow scene (5 casters, 7 viewports) | 0.9–1.0 → 1.2 ms | 57 → 49 MiB |
+| the same without lights | 0.7–1.0 → 0.5–0.9 ms | 57 → 47 MiB |
+| 3477054430 (spot-lit, no shadows) | ~0.9 → ~0.9 ms | 149 → 139 MiB |
+| 2182433068 (2D) | 0.5–0.7 → 0.65–0.74 ms | 92 → 82 MiB |
+| 3042865984 (2D, 6880 x 2880) | 12.3 → 12.1 ms | 2141 → 2065 MiB |
+
+- **A scene without shadow lights does no extra work.** The pass returns at once; `updateLights` runs only in 3D
+  scenes, as before.
+- **Every scene saves the old scene-sized RGBA8 atlas:** about 8 MB at 1080p, 79 MB at 6880 x 2880.
+- **A shadow scene pays one draw per caster per viewport:** 35 draws here.
+
+**Health** (`scene-health.md`, 96 scenes, this core): 86 clean / 10 degraded / 0 failed, the same as on `deeb4da`.
+
+- No scene is worse, newly blank or failed.
+- No scene's lit pixels moved by more than 3 %.
+- 3593587273 exits 1, as before: a still image, by design.
+- In the report 3042865984's frame reads 11.7 → 28.8 ms. The isolated runs above show that was load: its first old
+  run took 41 ms.
+
+**Shader sweep** (4085 compiles): 47 → 16 failures, 31 fixed, 0 newly failing.
+
+- The 10 shadow-caster checks left are SKINNING with BONECOUNT 0 (`g_Bones[0]`), and MORPHING
+  (`g_Texture1Texel`, and 2.8.42's `ApplyMorphPosition` overload in fur4). Both are skinned / morphed mesh
+  combos, which LWE's static meshes never set (F4).
+- The other 6 are as before.

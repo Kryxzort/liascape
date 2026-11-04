@@ -1154,8 +1154,9 @@ Two bug classes kept recurring; fix the class, not the instance:
           also carries B13's 0055): G24, G22, G25, G26 point/spot (E13), G28 (E14), `transparentsorting`, camera
           objects and the 3D shake; decoded addresses in the audit's "B14 result". host_api_test 68/68 (4 new,
           failing on 36ad6a0); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
-          - [ ] Left: shadows (`_rt_shadowAtlas`), light cookies, volumetrics, tube/directional lights; shape objects
-                (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
+          - [x] Shadows (`_rt_shadowAtlas`), light cookies, tube and directional lights — done in F1 (fork patch
+                0071, below).
+          - [ ] Left: directional shadow cascades, light clusters, volumetrics; shape objects (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
                 particle shaders; the 3D camera's parallax, zoom and paths; G20 perspectiveoverridefov, G21/E43
                 `perspective` and `depthtest` layers, G23 camerafade, sortorder/customsortorder; hit-testing
                 world-placed layers; WE's sort key and an output-sized 3D target; WE captures of the three scenes.
@@ -1188,8 +1189,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 expression, #if tokens). Health: 75 → 79 clean, 21 → 17 degraded, 0 shader errors left, none worse.
                 Shader sweep (`src/player/tests/onmachine/shader_sweep.py`, 4085 compiles of 124 stock + 272 library
                 shaders): 313 → 47 failures, each explained in the audit's "Shader preprocessing result".
-                Left: the stock shadow casters write `gl_ViewportIndex` from the vertex unit (GLSL 4.10; LWE has no
-                shadow pass); WE's own `TEX<n>FORMAT` per bound texture (LWE: 0 for all but texture 0).
+                Left: WE's own `TEX<n>FORMAT` per bound texture (LWE: 0 for all but texture 0). The stock shadow
+                casters' `gl_ViewportIndex` write: done in F1 (one draw per viewport; sweep 47 → 16, the 10 caster
+                checks left are SKINNING / MORPHING combos, F4).
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
@@ -1198,7 +1200,12 @@ Two bug classes kept recurring; fix the class, not the instance:
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object
           types, pass options) with library / stock usage and sizes. Pick work from its "Future batches":
-          - [ ] F1 shadows + light cookies (L), F2 volumetric lights (L), F3 bone physics + blend shapes (L),
+          - [x] **F1 shadows + light cookies — done 2026-11-04** (fork patch 0071): the shadow pass and atlas (spot and
+                point lights, the stock casters), spot cookies, tube and directional lights; result in the audit's "F1
+                result". No library scene uses them (synthetic check). host_api_test +4 (RED on `deeb4da`).
+                - [ ] Left: directional cascades (`g_LFeature_Shadow*`), WE's light clusters, 2.8.485's PCSS (quality
+                      4), the `shadows` quality as a setting (medium now), `lightconfig`; skinned/morphed casters (F4).
+          - [ ] F2 volumetric lights (L), F3 bone physics + blend shapes (L),
                 F4 skinned / animated 3D models + createModelData (L), F5 perspective layers (M), F6 the 20 stock-only
                 particle operators (M), F7 puppet hit boxes + MDLA events (S–M), F8 `resizeScreen` (S), F9 small keys
                 (`alphawriting`, `fbos.fit`, sprite `orientation`, mapsequence bounds, `command: swap`; S each).
