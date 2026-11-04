@@ -648,6 +648,9 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
 /// decoded by libmpv in real time, so an unpaced run (all of `S` s in a few ms) shows them black
 /// (3426575339, 3432876246, 3556794116). `--unpaced` renders as fast as it can, as before.
+/// `--shots T,T…` also writes the frames at those scene times (`lwe-smoke-<T>s.png`; the run lasts at least the
+/// last of them), and `--shot-width W` box-filters every smoke PNG down to at most `W` px wide — the preview
+/// compare (`tests/onmachine/scene_preview_compare.sh`) takes small frames at 0.5 / 2 / 5 s.
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
@@ -657,6 +660,8 @@ pub fn smoke(args: &[String]) -> ! {
     let mut tone = 0.0f32;
     let mut paced = true;
     let mut pointer: Option<[f64; 4]> = None;
+    let mut shot_at: Vec<f32> = Vec::new();
+    let mut shot_width = 0u32;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
     let mut props_at: Vec<(f32, String, serde_json::Value)> = Vec::new();
     let prop = |kv: Option<&String>| -> Option<(String, serde_json::Value)> {
@@ -674,6 +679,13 @@ pub fn smoke(args: &[String]) -> ! {
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--tone" => tone = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--unpaced" => paced = false,
+            "--shots" => {
+                shot_at = it
+                    .next()
+                    .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+                    .unwrap_or_default()
+            }
+            "--shot-width" => shot_width = it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--pointer" => {
                 pointer = it.next().and_then(|v| {
                     let n: Vec<f64> = v.split([',', ':']).filter_map(|x| x.parse().ok()).collect();
@@ -692,7 +704,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced] [--shots T,T…] [--shot-width W]"
         );
         std::process::exit(2)
     };
@@ -708,6 +720,7 @@ pub fn smoke(args: &[String]) -> ! {
         tone,
         paced,
         pointer,
+        (&shot_at, shot_width),
         &props,
         &props_at,
     );
@@ -777,6 +790,7 @@ fn run_smoke(
     tone: f32,
     paced: bool,
     pointer: Option<[f64; 4]>,
+    (shot_at, shot_width): (&[f32], u32),
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
 ) -> Result<String, String> {
@@ -837,7 +851,14 @@ fn run_smoke(
     };
 
     // 30 fps of scene time from 0 to `seconds`
-    let frames = (seconds * 30.0).round().max(30.0) as u32;
+    let last_shot = shot_at.iter().copied().fold(0.0f32, f32::max);
+    let frames = (seconds.max(last_shot) * 30.0).round().max(30.0) as u32;
+    let shot_frames: Vec<u32> = shot_at.iter().map(|t| (t * 30.0).round().max(1.0) as u32).collect();
+    let write_shot = |gfx: &Gfx, path: &Path| -> Result<(), String> {
+        let px = gfx.read_back(&tex, false);
+        let px = if shot_width > 0 { px.shrink(shot_width) } else { px };
+        px.write_png(path).map_err(|e| format!("{}: {e}", path.display()))
+    };
     let mut frame_ms = Vec::new();
     let mut at_1s = Vec::new();
     let mut shots = Vec::new();
@@ -856,8 +877,7 @@ fn run_smoke(
         if live.peek().is_some_and(|(at, _, _)| *at <= t) {
             opaque(&gfx);
             let path = out.join(format!("lwe-smoke-before-{}s.png", (t * 10.0).round() / 10.0));
-            gfx.write_png_source(&tex, &path)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
+            write_shot(&gfx, &path)?;
             shots.push(path.display().to_string());
             while let Some((_, k, v)) = live.next_if(|(at, _, _)| *at <= t) {
                 if let Err(e) = scene.set_property(k, v) {
@@ -884,12 +904,11 @@ fn run_smoke(
         scene.render(t, fbo_id);
         unsafe { gfx.gl.finish() }; // a diagnostic: time the GPU too
         frame_ms.push(s.elapsed().as_secs_f64() * 1e3);
-        if f == 30 || f == frames {
+        if f == 30 || f == frames || shot_frames.contains(&f) {
             opaque(&gfx);
             let name = format!("lwe-smoke-{}s.png", (t * 10.0).round() / 10.0);
             let path = out.join(&name);
-            gfx.write_png_source(&tex, &path)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
+            write_shot(&gfx, &path)?;
             shots.push(path.display().to_string());
             if f == 30 {
                 at_1s = read(&gfx);

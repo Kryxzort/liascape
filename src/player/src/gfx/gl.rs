@@ -372,6 +372,60 @@ impl Readback {
     pub fn write_png(self, path: impl AsRef<Path>) -> io::Result<()> {
         encode_png(path.as_ref(), self.w, self.h, &self.pixels, self.flip)
     }
+
+    /// The picture box-filtered down by the smallest whole factor that brings its width to at most
+    /// `max_w` (itself when it already fits) — small diagnostic PNGs (the smoke's `--shot-width`).
+    pub fn shrink(self, max_w: u32) -> Readback {
+        let k = self.w.div_ceil(max_w.max(1)).max(1) as usize;
+        if k == 1 {
+            return self;
+        }
+        let (w, h) = (self.w as usize / k, self.h as usize / k);
+        let stride = self.w as usize * 4;
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 4];
+                for dy in 0..k {
+                    let row = (y * k + dy) * stride + x * k * 4;
+                    for p in self.pixels[row..row + k * 4].chunks_exact(4) {
+                        for c in 0..4 {
+                            acc[c] += p[c] as u32;
+                        }
+                    }
+                }
+                let o = (y * w + x) * 4;
+                for c in 0..4 {
+                    px[o + c] = (acc[c] / (k * k) as u32) as u8;
+                }
+            }
+        }
+        Readback {
+            w: w as u32,
+            h: h as u32,
+            pixels: px,
+            flip: self.flip,
+        }
+    }
+}
+
+#[cfg(test)]
+mod shrink_tests {
+    use super::Readback;
+
+    #[test]
+    fn shrink_box_filters_by_a_whole_factor() {
+        // 4 x 2, two 2 x 2 blocks: 0/100/200/40 and 255s → 2 x 1 at max width 2
+        let mut pixels = Vec::new();
+        for _ in 0..2 {
+            pixels.extend([0, 0, 0, 0, 100, 100, 100, 100, 255, 255, 255, 255, 255, 255, 255, 255]);
+        }
+        let r = Readback { w: 4, h: 2, pixels, flip: false }.shrink(2);
+        assert_eq!((r.w, r.h), (2, 1));
+        assert_eq!(r.pixels, vec![50, 50, 50, 50, 255, 255, 255, 255]);
+        let same = Readback { w: 4, h: 2, pixels: vec![0; 32], flip: true }.shrink(4);
+        assert_eq!((same.w, same.h, same.flip), (4, 2, true));
+    }
 }
 
 /// A pixel-pack buffer of `len` bytes, free for another [`Gfx::start_read_back`] (a GL
