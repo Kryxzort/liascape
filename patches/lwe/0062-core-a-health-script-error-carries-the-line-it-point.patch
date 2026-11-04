@@ -1,0 +1,73 @@
+From 42f301d76c55fff7e03e6d52d6c7ef309a9c5d19 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 16:52:37 +0530
+Subject: [PATCH 62/62] core: a health script error carries the line it points
+ at
+
+QuickJS names no callee in "TypeError: not a function" (13 errors in 7 of the library's scenes read only
+that), so the scene health report couldn't tell one missing SceneScript API from another. A `script_error`
+record now carries the line and column of the stack's first frame in the script and that source line, which
+names the call.
+
+Origin: ours
+Why: docs/player/reports/scene-health.md (the per-scene health report)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Scripting/ScriptEngine.cpp                | 37 +++++++++++++++----
+ 1 file changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 148fe2f..e8cfc0d 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1,5 +1,6 @@
+ #include "ScriptEngine.h"
+ #include "WallpaperEngine/Health.h"
++#include <cstdlib>
+ 
+ #include "Adapters/ScriptableObjectAdapter.h"
+ #include "ScriptPropertiesObject.h"
+@@ -906,14 +907,34 @@ void ScriptEngine::logModuleError (LoadedModule& module, const char* what) {
+ 	const bool silent = JS_VALUE_GET_TAG (exception) == JS_TAG_UNINITIALIZED;
+ 	if (WallpaperEngine::Health::enabled ()) {
+ 	    const auto cut = module.key.rfind ('_');
+-	    WallpaperEngine::Health::report (
+-		"script_error",
+-		{ { "object", module.object.getId () }, { "object_name", module.object.getObject ().name },
+-		  { "property", cut == std::string::npos ? module.key : module.key.substr (0, cut) }, { "phase", what },
+-		  { "message", silent ? std::string ("a native call failed without an error (an API LWE doesn't implement?)")
+-				      : WallpaperEngine::Health::brief (message ? message : "<exception>", 300) },
+-		  { "stack", WallpaperEngine::Health::brief (stack, 300) } }
+-	    );
++	    nlohmann::json record = {
++		{ "object", module.object.getId () }, { "object_name", module.object.getObject ().name },
++		{ "property", cut == std::string::npos ? module.key : module.key.substr (0, cut) }, { "phase", what },
++		{ "message", silent ? std::string ("a native call failed without an error (an API LWE doesn't implement?)")
++				    : WallpaperEngine::Health::brief (message ? message : "<exception>", 300) },
++		{ "stack", WallpaperEngine::Health::brief (stack, 300) }
++	    };
++	    // QuickJS names no callee in "not a function": the source line the stack's first frame points at does
++	    // ("(<key>:<line>:<column>)")
++	    if (const auto at = stack.find ("(" + module.key + ":"); at != std::string::npos) {
++		const int line = std::atoi (stack.c_str () + at + module.key.size () + 2);
++		const auto colon = stack.find (':', at + module.key.size () + 2);
++		const int column = colon != std::string::npos ? std::atoi (stack.c_str () + colon + 1) : 0;
++		size_t begin = 0;
++		for (int i = 1; i < line && begin != std::string::npos; i++) {
++		    begin = module.source.find ('\n', begin);
++		    begin = begin == std::string::npos ? begin : begin + 1;
++		}
++		if (line > 0 && begin != std::string::npos) {
++		    const auto end = module.source.find ('\n', begin);
++		    record["line"] = line;
++		    record["column"] = column;
++		    record["source_line"] = WallpaperEngine::Health::brief (
++			module.source.substr (begin, end == std::string::npos ? std::string::npos : end - begin), 200
++		    );
++		}
++	    }
++	    WallpaperEngine::Health::report ("script_error", std::move (record));
+ 	}
+ 	sLog.error (
+ 	    "ScriptEngine [", module.key, ".", what, "]: ",

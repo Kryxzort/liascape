@@ -1172,6 +1172,22 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — check in WE.
           - [ ] Locate WE's SceneScript angles binding (xrefs of 0x1404928d0 / 0x140492628) to make the degrees
                 Observed in the binary, not only in scene scripts.
+    - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
+          `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
+          — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
+          features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96. Report only; batched by cause:
+          - [ ] script `thisLayer.getTransformMatrix()` not a function (5 scenes; + the `.x of undefined` that follows
+                it, 7) — a missing ILayer API.
+          - [ ] GL `C7011 implicit cast from vec4 to vec2` after glslang accepted the source (4 scenes; drops the
+                `音频光环` / `test_shader` compose layers of 3243449890, 3184155462 whole — the top losses).
+          - [ ] glslang `'M_PI' undeclared` — `auto_sway` (3 scenes, 14 layers; the item above).
+          - [ ] glslang `syntax error, unexpected DOT` (3: chromatic_aberration, clipping_mask) and `unexpected
+                LEFT_PAREN` (2: tone_mapping — drops 3432999904's compose layer).
+          - [ ] glslang `'input' : Reserved word` (custom_user_texture, 24 layers of 3516106265), `non-constant
+                initializer` (3354740764's color grading, 30 % of its canvas), `function does not return a value`,
+                `l-value required a_TexCoord`, `boolean expression expected`, `#if unexpected tokens` (1 scene each).
+          - [ ] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
+                parallaxDepth of undefined` (2 each), user property type `Text` unsupported, VolumeLight objects.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy

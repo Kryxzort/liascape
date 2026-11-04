@@ -92,3 +92,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0058-render-a-pointer-linked-particle-control-point-is-y-.patch` | render: a pointer-linked particle control point is y down | ours (the conversion was upstream's, #400) | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0059-render-compile-effect-shaders-as-leniently-as-WE-s-H.patch` | render: compile effect shaders as leniently as WE's HLSL path | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0060-render-a-parent-that-wasn-t-built-still-places-its-c.patch` | render: a parent that wasn't built still places its children | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0061-core-a-scene-health-report-WPENGINE_HEALTH.patch` | core: a scene health report (WPENGINE_HEALTH) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0062-core-a-health-script-error-carries-the-line-it-point.patch` | core: a health script error carries the line it points at | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

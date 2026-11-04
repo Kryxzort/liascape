@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <initializer_list>
+#include <sstream>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2327,6 +2329,109 @@ static bool shaders_compile_like_hlsl () {
     return true;
 }
 
+// WPENGINE_HEALTH=<path>: the core writes what it built and what it left out as JSON lines — a layer whose shaders
+// don't compile is `dropped` (its glslang error a `shader_error` naming the layer and shader), a script that throws is a
+// `script_error` with its layer and property, and each drawn layer's canvas bbox (y down) at frame 1 is in `layers`, so a
+// layer placed off the canvas shows. Unset, nothing is written (unpatched: no such switch, the file stays empty)
+static std::vector<std::string> health_lines (const std::string& path) {
+    std::vector<std::string> out;
+    std::istringstream in (read_file (path));
+    for (std::string line; std::getline (in, line);) {
+        if (!line.empty ()) {
+            out.push_back (line);
+        }
+    }
+    return out;
+}
+
+static const std::string* health_find (const std::vector<std::string>& lines, std::initializer_list<const char*> parts) {
+    for (const auto& line : lines) {
+        bool all = true;
+        for (const char* part : parts) {
+            all = all && line.find (part) != std::string::npos;
+        }
+        if (all) {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+static bool health_reports_what_was_dropped () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // 1: a drawn square, its centre at WE's (16, 8) — canvas rows 20..28 (y down); 2: a layer whose fragment shader
+    // doesn't parse; 3: a square off the canvas (x 200); 4: a square whose origin script throws
+    const std::string objects = "{\"id\":1,\"name\":\"good\",\"image\":\"models/b9.json\",\"size\":\"8 8\",\"origin\":\"16 8 0\"},"
+                                "{\"id\":2,\"name\":\"broken\",\"image\":\"models/c4.json\",\"size\":\"8 8\",\"origin\":\"40 16 0\"},"
+                                "{\"id\":3,\"name\":\"away\",\"image\":\"models/b9.json\",\"size\":\"8 8\",\"origin\":\"200 16 0\"},"
+                              + square (4, scripted ("origin", "\"48 16 0\"", "export function update(value) {\n  return value.nothing.here;\n}"));
+    const std::string dir = script_scene (objects);
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    write_file (dir + "/shaders/c4.vert", "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                                          "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n");
+    write_file (dir + "/shaders/c4.frag", "void main() {\n\tgl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) +;\n}\n");
+    write_file (dir + "/materials/c4.json", "{\"passes\":[{\"shader\":\"c4\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/models/c4.json", "{\"material\":\"materials/c4.json\",\"solidlayer\":true}\n");
+
+    const std::string path = dir + "/health.jsonl";
+    setenv ("WPENGINE_HEALTH", path.c_str (), 1);
+    std::vector<std::string> lines;
+    {
+        ScriptRig rig;
+        const bool opened = rig.open (dir);
+        unsetenv ("WPENGINE_HEALTH");
+        CHECK (opened, "load/build of %s failed", dir.c_str ());
+        rig.step ();
+        lines = health_lines (path);
+        printf ("    %zu health lines\n", lines.size ());
+        if (getenv ("HEALTH_TEST_DEBUG")) {
+            for (const auto& line : lines) {
+                printf ("    %s\n", line.c_str ());
+            }
+        }
+        CHECK (health_find (lines, { "\"ev\":\"scene\"", "\"objects\":4", "\"width\":64" }), "no scene record");
+        CHECK (health_find (lines, { "\"ev\":\"object\"", "\"object\":1,", "\"built\":true" }), "layer 1 not reported built");
+        CHECK (health_find (lines, { "\"ev\":\"object\"", "\"object\":2,", "\"built\":false" }), "layer 2 not reported unbuilt");
+        CHECK (health_find (lines, { "\"ev\":\"dropped\"", "\"object\":2,", "\"object_name\":\"broken\"", "\"reason\":" }),
+               "layer 2's drop has no reason");
+        CHECK (health_find (lines, { "\"ev\":\"shader_error\"", "\"object\":2,", "\"shader\":\"c4\"", "\"unit\":\"fragment\"" }),
+               "layer 2's shader error isn't attributed");
+        CHECK (health_find (lines, { "\"ev\":\"script_error\"", "\"object\":4,", "\"property\":\"origin\"" }),
+               "layer 4's script error isn't attributed");
+        // the source line the stack's first frame points at (QuickJS names no callee in "not a function")
+        CHECK (health_find (lines, { "\"ev\":\"script_error\"", "\"line\":", "\"source_line\":\"" }),
+               "layer 4's script error has no source line");
+        const std::string* good = health_find (lines, { "\"ev\":\"layers\"", "\"frame\":1,", "\"object\":1," });
+        CHECK (good != nullptr, "no frame-1 layer record for layer 1");
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        const auto at = good->find ("\"bbox\":[");
+        CHECK (at != std::string::npos && sscanf (good->c_str () + at + 8, "%f,%f,%f,%f", &x0, &y0, &x1, &y1) == 4,
+               "no bbox: %s", good->c_str ());
+        printf ("    layer 1 bbox %.1f %.1f %.1f %.1f\n", x0, y0, x1, y1);
+        CHECK (std::abs (x0 - 12) < 0.6 && std::abs (x1 - 20) < 0.6 && std::abs (y0 - 20) < 0.6 && std::abs (y1 - 28) < 0.6,
+               "want 12 20 20 28");
+        const std::string* away = health_find (lines, { "\"ev\":\"layers\"", "\"frame\":1,", "\"object\":3," });
+        CHECK (away != nullptr && away->find ("\"on_canvas_px\":0.0") != std::string::npos, "layer 3 isn't off the canvas: %s",
+               away ? away->c_str () : "(none)");
+    }
+
+    // unset: a project loaded now (one with a script that throws) writes nothing, to the old file or anywhere
+    const size_t before = lines.size ();
+    const std::string quiet = script_scene (square (1, scripted ("origin", "\"8 16 0\"", "export function update(value) {\n  return value.nothing.here;\n}")));
+    {
+        ScriptRig rig;
+        CHECK (rig.open (quiet), "load of %s failed", quiet.c_str ());
+        rig.step ();
+        CHECK (health_lines (path).size () == before, "a load without WPENGINE_HEALTH wrote to the file");
+    }
+    unlink (path.c_str ());
+    rmdir (dir.c_str ());
+    return true;
+}
+
 // g_Frametime (the frame's dt), g_PointerState (xy held, z the press frame), g_Daytime (the local time of day) and
 // g_Time wrapped at 432000 s are fed (unpatched: the first three read 0, g_Time ran on)
 static bool engine_uniforms_are_fed () {
@@ -4082,6 +4187,7 @@ int main (int argc, char** argv) {
     run ("particle_pointer_is_y_down", particle_pointer_is_y_down);
     run ("script_angles_are_degrees", script_angles_are_degrees);
     run ("shaders_compile_like_hlsl", shaders_compile_like_hlsl);
+    run ("health_reports_what_was_dropped", health_reports_what_was_dropped);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);

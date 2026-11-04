@@ -1,7 +1,7 @@
 From e78d94d13f23755b48fda34cb3d0f1195d7e5096 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 29 Oct 2026 21:42:25 +0530
-Subject: [PATCH 21/60] scripting: a layer property the object lacks reads
+Subject: [PATCH 21/62] scripting: a layer property the object lacks reads
  undefined quietly
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

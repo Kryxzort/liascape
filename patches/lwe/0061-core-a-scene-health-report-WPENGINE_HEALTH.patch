@@ -1,0 +1,1403 @@
+From bca5629f389d54d1e553e0bf6cee50f2dd006f52 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 15:56:20 +0530
+Subject: [PATCH 61/62] core: a scene health report (WPENGINE_HEALTH)
+
+A scene that loads and draws something can still have lost a layer, an effect or a script on the way (3414858021
+lost its head's compose layer to four glslang errors for months, and nothing outside the log said so). With
+WPENGINE_HEALTH=<path> set when a project loads, the core appends JSON lines saying what it built and what it
+left out: one `object` record per scene object (built or not; an unbuilt image's scene-data box), `dropped` /
+`effect_dropped` with the reason, `shader_error` (glslang or GL, vertex / fragment / link), `missing_asset`
+(texture, font, model, puppet, particle, material, sound, shader module), `script_error` (layer, property,
+phase), `unsupported` features LWE logs as such, the HLSL-lenient rewrites in use (`compat`), and each drawable's
+canvas bbox, alpha and transform finiteness at render frames 1 and 31 (`layers`). Thread-local scopes (object,
+effect, shader) name the layer an error deep in a shader compile belongs to. Off by default: every call site is
+one relaxed atomic load; nothing the renderer does depends on it.
+
+Origin: ours
+Why: docs/player/reports/scene-health.md (the per-scene health report)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/CMakeLists.txt                       |   1 +
+ .../WallpaperEngine/Assets/AssetLocator.cpp   |   2 +
+ .../Data/Parsers/MaterialParser.cpp           |   5 +
+ .../Data/Parsers/ObjectParser.cpp             |  26 ++++
+ .../Data/Parsers/PropertyParser.cpp           |   2 +
+ .../WallpaperEngine/FileSystem/Container.cpp  |   2 +
+ src/core/WallpaperEngine/Health.cpp           | 115 ++++++++++++++
+ src/core/WallpaperEngine/Health.h             |  53 +++++++
+ src/core/WallpaperEngine/Project.cpp          |  21 ++-
+ src/core/WallpaperEngine/Render/CFBO.cpp      |   2 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  98 ++++++++++++
+ .../WallpaperEngine/Render/Objects/CImage.h   |   7 +
+ .../WallpaperEngine/Render/Objects/CModel.cpp |   6 +
+ .../Render/Objects/CParticle.cpp              |   4 +
+ .../WallpaperEngine/Render/Objects/CSound.cpp |   2 +
+ .../WallpaperEngine/Render/Objects/CText.cpp  |   6 +
+ .../Render/Objects/Effects/CPass.cpp          |  16 ++
+ .../Render/Shaders/GLSLContext.cpp            |   9 ++
+ .../Render/Shaders/ShaderUnit.cpp             |   8 +
+ .../Render/Wallpapers/CScene.cpp              | 140 ++++++++++++++++++
+ .../Render/Wallpapers/CScene.h                |   6 +
+ .../Scripting/ConsoleObject.cpp               |   2 +
+ .../Scripting/EngineObject.cpp                |   2 +
+ .../Scripting/ScriptEngine.cpp                |  14 ++
+ 24 files changed, 545 insertions(+), 4 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Health.cpp
+ create mode 100644 src/core/WallpaperEngine/Health.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 8849e64..7d4dd4d 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -104,6 +104,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Scripting/ScriptEngine.cpp
+ 
+     WallpaperEngine/Configuration.cpp
++    WallpaperEngine/Health.cpp
+     WallpaperEngine/Context.cpp
+     WallpaperEngine/Project.cpp)
+ set(TARGET_LIBRARIES
+diff --git a/src/core/WallpaperEngine/Assets/AssetLocator.cpp b/src/core/WallpaperEngine/Assets/AssetLocator.cpp
+index 8d092d2..7ce9dc3 100644
+--- a/src/core/WallpaperEngine/Assets/AssetLocator.cpp
++++ b/src/core/WallpaperEngine/Assets/AssetLocator.cpp
+@@ -1,4 +1,5 @@
+ #include "AssetLocator.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "AssetLoadException.h"
+ 
+@@ -23,6 +24,7 @@ std::string AssetLocator::shader (const std::filesystem::path& filename) const {
+ 		    std::string contents = this->m_filesystem->readString (shader);
+ 
+ 		    sLog.out ("Replaced ", filename, " with compat ", shader);
++		    WPENGINE_HEALTH ("compat", { { "what", "shader replaced by its zcompat copy" }, { "path", shader.string () } });
+ 
+ 		    return contents;
+ 		} catch (std::filesystem::filesystem_error&) {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+index e61fd7f..54e8ae1 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+@@ -1,4 +1,5 @@
+ #include "MaterialParser.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "../Model/Material.h"
+ #include "../Model/Project.h"
+@@ -84,6 +85,7 @@ BlendingMode MaterialParser::parseBlendMode (const std::string& mode) {
+     }
+ 
+     sLog.error ("Unknown blending mode: ", mode, " defaulting to normal");
++    WPENGINE_HEALTH ("unsupported", { { "what", "material blending mode " + std::string (mode) + " (as normal)" } });
+     return BlendingMode_Normal;
+ }
+ 
+@@ -97,6 +99,7 @@ CullingMode MaterialParser::parseCullMode (const std::string& mode) {
+     }
+ 
+     sLog.error ("Unknown culling mode: ", mode, " defaulting to nocull");
++    WPENGINE_HEALTH ("unsupported", { { "what", "material culling mode " + std::string (mode) + " (as nocull)" } });
+     return CullingMode_Disable;
+ }
+ 
+@@ -110,6 +113,7 @@ DepthtestMode MaterialParser::parseDepthtestMode (const std::string& mode) {
+     }
+ 
+     sLog.error ("Unknown depthtest mode: ", mode, " defaulting to disabled");
++    WPENGINE_HEALTH ("unsupported", { { "what", "material depthtest mode " + std::string (mode) + " (as disabled)" } });
+     return DepthtestMode_Disabled;
+ }
+ 
+@@ -123,5 +127,6 @@ DepthwriteMode MaterialParser::parseDepthwriteMode (const std::string& mode) {
+     }
+ 
+     sLog.error ("Unknown depthwrite mode: ", mode, " defaulting to disabled");
++    WPENGINE_HEALTH ("unsupported", { { "what", "material depthwrite mode " + std::string (mode) + " (as disabled)" } });
+     return DepthwriteMode_Disabled;
+ }
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index c971a66..e3d8617 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -9,6 +9,7 @@
+ #include "TextureParser.h"
+ #include "UserSettingParser.h"
+ #include "WallpaperEngine/Data/Builders/ColorBuilder.h"
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include <algorithm>
+@@ -56,6 +57,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	};
+     } catch (const std::exception& e) {
+ 	sLog.error ("Error parsing object base data: ", e.what ());
++	WPENGINE_HEALTH ("parse_error", { { "message", std::string ("object base data: ") + e.what () } });
+ 	const auto idIt = it.find ("id");
+ 	const auto nameIt = it.find ("name");
+ 	int id = (idIt != it.end () && idIt->is_number ()) ? idIt->get<int> () : -1;
+@@ -83,6 +85,10 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	};
+     }
+ 
++    // WPENGINE_HEALTH: what the parse of this object reports names it
++    const WallpaperEngine::Health::Scope healthObject ("object", basedata.id);
++    const WallpaperEngine::Health::Scope healthName ("object_name", basedata.name);
++
+     if (isCamera && it.find ("fov") != it.end ()) {
+ 	basedata.cameraFov = it.user ("fov", project.properties, 50.0f);
+     }
+@@ -105,6 +111,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	return parseLight (it, project, std::move (basedata));
+     } else if (shapeIt != it.end ()) {
+ 	sLog.error ("VolumeLight objects are not supported yet");
++	WPENGINE_HEALTH ("unsupported", { { "what", "VolumeLight (shape) object" } });
+     } else if (isCamera) {
+ 	// a camera object: plain object data, read by CScene::updateCamera
+     } else {
+@@ -113,6 +120,13 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    // TODO: RE-EVALUATE IF THIS MAKES SENSE, THERE'S OBJECTS THAT CONTAIN OTHER OBJECTS AND THUS AREN'T REALLY
+ 	    // ANYTHING SPECIAL
+ 	    sLog.error ("Unknown object type found: ", it.dump ());
++	    if (WallpaperEngine::Health::enabled ()) {
++		nlohmann::json keys = nlohmann::json::array ();
++		for (const auto& [key, value] : it.items ()) {
++		    keys.push_back (key);
++		}
++		WallpaperEngine::Health::report ("unknown_object", { { "keys", keys } });
++	    }
+ 	}
+     }
+ 
+@@ -419,6 +433,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 
+ 	if (particleIt == it.end ()) {
+ 	    sLog.error ("Particle object must have a particle definition");
++	    WPENGINE_HEALTH ("parse_error", { { "message", "particle object without a particle definition" } });
+ 	    return std::make_unique<Particle> (
+ 		std::move (base),
+ 		ParticleData {
+@@ -467,6 +482,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 		    = WallpaperEngine::Data::JSON::JSON::parse (project.assetLocator->readString (particleFile));
+ 	    } catch (std::runtime_error& e) {
+ 		sLog.error ("Cannot load particle file: ", particleFile, " - ", e.what ());
++		WPENGINE_HEALTH ("missing_asset", { { "kind", "particle" }, { "path", particleFile }, { "message", WallpaperEngine::Health::brief (e.what ()) } });
+ 	    }
+ 	} else if (particleIt->is_object ()) {
+ 	    particleJson = *particleIt;
+@@ -593,6 +609,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 		});
+ 	    } catch (std::runtime_error& e) {
+ 		sLog.error ("Cannot load particle material: ", materialIt->get<std::string> (), " - ", e.what ());
++		WPENGINE_HEALTH ("missing_asset", { { "kind", "material" }, { "path", materialIt->get<std::string> () }, { "message", WallpaperEngine::Health::brief (e.what ()) } });
+ 	    }
+ 	}
+ 
+@@ -654,6 +671,7 @@ ParticleUniquePtr ObjectParser::parseParticle (const JSON& it, const Project& pr
+ 	);
+     } catch (nlohmann::json::exception& e) {
+ 	sLog.error ("Error parsing particle '", base.name, "': ", e.what ());
++	WPENGINE_HEALTH ("parse_error", { { "message", std::string ("particle: ") + e.what () } });
+ 	sLog.error ("Particle JSON: ", it.dump ());
+ 	throw;
+     }
+@@ -742,6 +760,7 @@ ParticleEmitter ObjectParser::parseParticleEmitter (const JSON& it) {
+ 	};
+     } catch (nlohmann::json::exception& e) {
+ 	sLog.error ("Error parsing emitter: ", e.what ());
++	WPENGINE_HEALTH ("parse_error", { { "message", std::string ("particle emitter: ") + e.what () } });
+ 	sLog.error ("Emitter JSON: ", it.dump ());
+ 	throw;
+     }
+@@ -801,6 +820,7 @@ ParticleInitializerUniquePtr ObjectParser::parseParticleInitializer (const JSON&
+ 	);
+     }
+ 
++    WPENGINE_HEALTH ("unsupported", { { "what", "particle initializer " + (name.empty () ? std::string ("(unnamed)") : name) } });
+     return nullptr;
+ }
+ 
+@@ -888,6 +908,7 @@ ParticleOperatorUniquePtr ObjectParser::parseParticleOperator (const JSON& it, c
+ 	);
+     }
+ 
++    WPENGINE_HEALTH ("unsupported", { { "what", "particle operator " + (name.empty () ? std::string ("(unnamed)") : name) } });
+     return nullptr;
+ }
+ 
+@@ -898,6 +919,10 @@ ParticleRenderer ObjectParser::parseParticleRenderer (const JSON& it) {
+ 	name = nameIt->get<std::string> ();
+     }
+ 
++    if (name != "sprite" && name != "spritetrail" && name != "rope" && name != "ropetrail") {
++	WPENGINE_HEALTH ("unsupported", { { "what", "particle renderer " + name + " (drawn as sprite)" } });
++    }
++
+     // Renderer-type-specific defaults
+     float subdivisionDefault = (name == "rope") ? 4.0f : 1.0f;
+     float lengthDefault = (name == "ropetrail") ? 1.0f : 0.05f;
+@@ -1018,6 +1043,7 @@ ParticleChild ObjectParser::parseParticleChild (const JSON& it, const Project& p
+ 	    }
+ 	} catch (const std::exception& e) {
+ 	    sLog.error ("Cannot load child particle system ", particleFile, ": ", e.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "particle" }, { "path", particleFile }, { "message", "child system: " + WallpaperEngine::Health::brief (e.what ()) } });
+ 	}
+ 	depth--;
+     }
+diff --git a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+index 06648d2..2a43cbb 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+@@ -1,4 +1,5 @@
+ #include "PropertyParser.h"
++#include "WallpaperEngine/Health.h"
+ #include "../Model/Property.h"
+ 
+ using namespace WallpaperEngine::Data::Parsers;
+@@ -55,6 +56,7 @@ PropertySharedPtr PropertyParser::parse (const JSON& it, const std::string& name
+     if (type.has_value () && type != "group") {
+ 	// show the error and ignore this property
+ 	sLog.error ("Unexpected type for property: ", type);
++	WPENGINE_HEALTH ("unsupported", { { "what", "user property type " + (type->is_string () ? type->get<std::string> () : type->dump ()) }, { "property", name } });
+ 	sLog.error (it.dump ());
+     }
+ 
+diff --git a/src/core/WallpaperEngine/FileSystem/Container.cpp b/src/core/WallpaperEngine/FileSystem/Container.cpp
+index 7118f3b..15374ca 100644
+--- a/src/core/WallpaperEngine/FileSystem/Container.cpp
++++ b/src/core/WallpaperEngine/FileSystem/Container.cpp
+@@ -2,6 +2,7 @@
+ #include <memory>
+ 
+ #include "Container.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "../../../common/WallpaperEngine/Logging/Log.h"
+ #include "Adapters/Directory.h"
+@@ -148,6 +149,7 @@ std::pair<Adapter&, std::filesystem::path> Container::resolve (const std::filesy
+ 	    const auto corrected = addRoot ? found.string ().substr (1) : found.string ();
+ 
+ 	    sLog.out ("Found ", normalized, " as ", corrected, " (case differs)");
++	    WPENGINE_HEALTH ("compat", { { "what", "file found ignoring case" }, { "path", normalized } });
+ 
+ 	    return { *adapter, corrected };
+ 	}
+diff --git a/src/core/WallpaperEngine/Health.cpp b/src/core/WallpaperEngine/Health.cpp
+new file mode 100644
+index 0000000..68f1f8d
+--- /dev/null
++++ b/src/core/WallpaperEngine/Health.cpp
+@@ -0,0 +1,115 @@
++#include "Health.h"
++
++#include <atomic>
++#include <cstdio>
++#include <cstdlib>
++#include <mutex>
++#include <unordered_set>
++#include <utility>
++#include <vector>
++
++namespace WallpaperEngine::Health {
++namespace {
++std::atomic<bool> g_enabled { false };
++std::mutex g_mutex;
++FILE* g_file = nullptr;
++std::string g_path;
++std::unordered_set<std::string> g_written;
++size_t g_lines = 0;
++/** a runaway (a script erroring with a new message every frame) can't fill the disk */
++constexpr size_t kMaxLines = 50000;
++
++thread_local std::vector<std::pair<std::string, nlohmann::json>> t_scopes;
++} // namespace
++
++void configure () noexcept {
++    std::lock_guard lock (g_mutex);
++    const char* env = std::getenv ("WPENGINE_HEALTH");
++    const std::string path = env != nullptr ? env : "";
++
++    if (path == g_path && (g_file != nullptr || path.empty ())) {
++	return;
++    }
++    if (g_file != nullptr) {
++	std::fclose (g_file);
++	g_file = nullptr;
++    }
++    g_written.clear ();
++    g_lines = 0;
++    g_path = path;
++    if (!path.empty ()) {
++	g_file = std::fopen (path.c_str (), "a");
++    }
++    g_enabled.store (g_file != nullptr, std::memory_order_relaxed);
++}
++
++bool enabled () noexcept { return g_enabled.load (std::memory_order_relaxed); }
++
++void report (const char* event, nlohmann::json fields) noexcept {
++    if (!enabled ()) {
++	return;
++    }
++    try {
++	nlohmann::json record = nlohmann::json::object ();
++	record["ev"] = event;
++	for (const auto& [key, value] : t_scopes) {
++	    record[key] = value;
++	}
++	if (fields.is_object ()) {
++	    for (auto& [key, value] : fields.items ()) {
++		record[key] = value;
++	    }
++	}
++	// invalid UTF-8 in a message (a font name, a shader log) is replaced, not thrown
++	std::string line = record.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
++
++	std::lock_guard lock (g_mutex);
++	if (g_file == nullptr || g_lines >= kMaxLines || !g_written.insert (line).second) {
++	    return;
++	}
++	g_lines++;
++	line += '\n';
++	std::fwrite (line.data (), 1, line.size (), g_file);
++	std::fflush (g_file);
++    } catch (...) {
++	// a health record never breaks the renderer
++    }
++}
++
++Scope::Scope (const char* key, int value) noexcept {
++    if (enabled ()) {
++	try {
++	    t_scopes.emplace_back (key, value);
++	    m_pushed = true;
++	} catch (...) {
++	}
++    }
++}
++
++Scope::Scope (const char* key, const std::string& value) noexcept {
++    if (enabled ()) {
++	try {
++	    t_scopes.emplace_back (key, value);
++	    m_pushed = true;
++	} catch (...) {
++	}
++    }
++}
++
++Scope::~Scope () {
++    if (m_pushed && !t_scopes.empty ()) {
++	t_scopes.pop_back ();
++    }
++}
++
++std::string brief (const std::string& message, size_t max) {
++    std::string out = message.substr (0, message.find ("Compiled source code:"));
++    while (!out.empty () && (out.back () == '\n' || out.back () == ' ')) {
++	out.pop_back ();
++    }
++    if (out.size () > max) {
++	out = out.substr (0, max) + "…";
++    }
++    return out;
++}
++} // namespace WallpaperEngine::Health
+diff --git a/src/core/WallpaperEngine/Health.h b/src/core/WallpaperEngine/Health.h
+new file mode 100644
+index 0000000..f260dbb
+--- /dev/null
++++ b/src/core/WallpaperEngine/Health.h
+@@ -0,0 +1,53 @@
++#pragma once
++
++#include <string>
++
++#include <nlohmann/json.hpp>
++
++/**
++ * Scene health: what the core built, what it left out and why, as JSON lines.
++ *
++ * Off unless `WPENGINE_HEALTH=<path>` is set when a project loads (`wp_project_load_*`): then every record below is
++ * appended to that file, one JSON object per line, `{"ev": <event>, …}`, plus the keys of the scopes open on this
++ * thread (`object`, `object_name`, `effect`, `shader`, …) so an error deep in a shader compile names its layer.
++ * Identical lines are written once. Nothing the renderer does depends on it: each call site is
++ * `WPENGINE_HEALTH (…)`, one load of a bool when it is off.
++ *
++ * Events: `scene` (size, object count), `object` (one per scene object after the build: id, name, type, parent,
++ * built), `dropped` (an object not built, its reason), `effect_dropped`, `shader_error` (glslang / GL compile or
++ * link), `missing_asset` (kind: texture, font, model, puppet, particle, material, sound, shader_module), `script_error`
++ * (the script's key, object, property, phase), `unsupported` (a feature LWE logs as not supported), `compat` (an
++ * HLSL-lenient rewrite or a case-insensitive file match — informational), `layers` (per drawable at render frames 1
++ * and 31: effective visibility, alpha, canvas bbox, non-finite transforms), `load_failed`, `renderer_failed`.
++ */
++namespace WallpaperEngine::Health {
++/** Reads `WPENGINE_HEALTH` and opens (or closes) the output; called when a project loads */
++void configure () noexcept;
++/** True while `WPENGINE_HEALTH` named a file that opened */
++[[nodiscard]] bool enabled () noexcept;
++/** Appends `{"ev": event, <open scopes>, <fields>}` (fields win over scopes); a no-op when off */
++void report (const char* event, nlohmann::json fields = nlohmann::json::object ()) noexcept;
++
++/** A key every record on this thread carries until the scope closes (nests; an inner key shadows) */
++class Scope {
++public:
++    Scope (const char* key, int value) noexcept;
++    Scope (const char* key, const std::string& value) noexcept;
++    ~Scope ();
++    Scope (const Scope&) = delete;
++    Scope& operator= (const Scope&) = delete;
++
++private:
++    bool m_pushed = false;
++};
++
++/** The first `max` bytes of a log message, without a "Compiled source code:" dump */
++[[nodiscard]] std::string brief (const std::string& message, size_t max = 600);
++} // namespace WallpaperEngine::Health
++
++#define WPENGINE_HEALTH(...)                                                                                           \
++    do {                                                                                                               \
++	if (::WallpaperEngine::Health::enabled ()) {                                                                   \
++	    ::WallpaperEngine::Health::report (__VA_ARGS__);                                                           \
++	}                                                                                                              \
++    } while (0)
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 2bd2ccc..16ea537 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -1,5 +1,6 @@
+ #include "Project.h"
+ #include "Context.h"
++#include "Health.h"
+ #include "Data/Dumpers/StringPrinter.h"
+ #include "Data/Model/Property.h"
+ #include "Data/Parsers/ProjectParser.h"
+@@ -196,6 +197,8 @@ AssetLocatorUniquePtr wp_setup_asset_locator (
+ WallpaperEngine::Project::Project (
+     Context* context, wp_mouse_input* mouse_input, const std::filesystem::path& project
+ ) : context (*context), framebuffer (GL_NONE) {
++    // WPENGINE_HEALTH is read per project: a host (or a test) can turn it on for one load
++    WallpaperEngine::Health::configure ();
+     if (!std::filesystem::exists (project) || !std::filesystem::is_directory (project)) {
+ 	sLog.exception ("Cannot find project file");
+     }
+@@ -273,9 +276,14 @@ void WallpaperEngine::Project::render () {
+     if (this->renderContext == nullptr) {
+ 	// initialize render if not available
+ 	this->renderContext = std::make_unique<RenderContext> (this->context, *this->ref->assetLocator);
+-	this->wallpaper = CWallpaper::fromWallpaper (
+-	    *this->ref->wallpaper, *this->renderContext, *this->context.audio, this->mouse_input
+-	);
++	try {
++	    this->wallpaper = CWallpaper::fromWallpaper (
++		*this->ref->wallpaper, *this->renderContext, *this->context.audio, this->mouse_input
++	    );
++	} catch (const std::exception& e) {
++	    WPENGINE_HEALTH ("renderer_failed", { { "message", WallpaperEngine::Health::brief (e.what ()) } });
++	    throw;
++	}
+ 	this->wallpaper->setDestinationFramebuffer (this->framebuffer);
+ 	// give hint about size to the wallpaper only if web
+ 	if (this->wallpaper->is<Wallpapers::CWeb> ()) {
+@@ -613,5 +621,10 @@ WallpaperEngine::Project::loadId (Context* context, wp_mouse_input* mouse_input,
+ 
+ WallpaperEngine::Project*
+ WallpaperEngine::Project::loadFolder (Context* context, wp_mouse_input* mouse_input, const char* folder) {
+-    return new Project (context, mouse_input, folder);
++    try {
++	return new Project (context, mouse_input, folder);
++    } catch (const std::exception& e) {
++	WPENGINE_HEALTH ("load_failed", { { "message", WallpaperEngine::Health::brief (e.what ()) } });
++	throw;
++    }
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/CFBO.cpp b/src/core/WallpaperEngine/Render/CFBO.cpp
+index ecb3b3c..22d16fb 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.cpp
++++ b/src/core/WallpaperEngine/Render/CFBO.cpp
+@@ -1,4 +1,5 @@
+ #include "CFBO.h"
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ using namespace WallpaperEngine::Render;
+@@ -182,6 +183,7 @@ void CFBO::attachDepthBuffer () const {
+ 
+     if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+ 	sLog.error ("The depth buffer of ", this->m_name, " left the framebuffer incomplete, drawing without depth");
++	WPENGINE_HEALTH ("pass_error", { { "message", "depth buffer of " + this->m_name + " left its framebuffer incomplete" } });
+ 	glFramebufferRenderbuffer (GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0);
+ 	glDeleteRenderbuffers (1, &this->m_depthbuffer);
+ 	this->m_depthbuffer = GL_NONE;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index e2b592b..c368e96 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -13,6 +13,7 @@
+ #include "WallpaperEngine/Data/Model/Material.h"
+ #include "WallpaperEngine/Data/Model/Object.h"
+ #include "WallpaperEngine/Data/Parsers/MaterialParser.h"
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+ 
+ using namespace WallpaperEngine;
+@@ -347,10 +348,12 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	std::string error;
+ 	if (!Puppet::parse (data.data (), data.size (), this->m_puppet, error)) {
+ 	    sLog.error ("Could not load puppet ", file, ": ", error);
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "puppet" }, { "path", file }, { "message", error } });
+ 	    return false;
+ 	}
+ 	if (!error.empty ()) {
+ 	    sLog.error ("Puppet ", file, " partly loaded: ", error);
++	    WPENGINE_HEALTH ("asset_error", { { "kind", "puppet" }, { "path", file }, { "message", "partly loaded: " + error } });
+ 	}
+ 
+ 	std::vector<GLfloat> texcoords;
+@@ -369,6 +372,7 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	}
+ 	if (this->m_puppetVertices.empty () || indices.empty ()) {
+ 	    sLog.error ("Puppet ", file, " has no triangles");
++	    WPENGINE_HEALTH ("asset_error", { { "kind", "puppet" }, { "path", file }, { "message", "no triangles" } });
+ 	    return false;
+ 	}
+ 
+@@ -412,6 +416,7 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	return true;
+     } catch (const std::exception& ex) {
+ 	sLog.error ("Could not load puppet mesh ", file, ": ", ex.what ());
++	WPENGINE_HEALTH ("missing_asset", { { "kind", "puppet" }, { "path", file }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	return false;
+     }
+ }
+@@ -655,6 +660,9 @@ void CImage::setup () {
+ 	int effectIndex = -1;
+ 	for (const auto& cur : this->m_image.effects) {
+ 	    effectIndex++;
++	    // WPENGINE_HEALTH: what fails while this effect builds (its shaders, textures) names it
++	    const WallpaperEngine::Health::Scope healthEffect ("effect", cur->id);
++	    const WallpaperEngine::Health::Scope healthEffectName ("effect_name", cur->effect != nullptr && !cur->effect->name.empty () ? cur->effect->name : cur->name);
+ 	    if (std::find (debug.skipEffects.begin (), debug.skipEffects.end (), static_cast<int> (cur->id))
+ 		!= debug.skipEffects.end ()) {
+ 		continue;
+@@ -716,21 +724,25 @@ void CImage::setup () {
+ 		if (!(*curEffect)->material.has_value ()) {
+ 		    if (!(*curEffect)->command.has_value ()) {
+ 			sLog.error ("Pass without material and command not supported");
++			WPENGINE_HEALTH ("unsupported", { { "what", "effect pass without material and command" } });
+ 			continue;
+ 		    }
+ 
+ 		    if (!(*curEffect)->source.has_value ()) {
+ 			sLog.error ("Pass without material and source not supported");
++			WPENGINE_HEALTH ("unsupported", { { "what", "effect pass without material and source" } });
+ 			continue;
+ 		    }
+ 
+ 		    if (!(*curEffect)->target.has_value ()) {
+ 			sLog.error ("Pass without material and target not supported");
++			WPENGINE_HEALTH ("unsupported", { { "what", "effect pass without material and target" } });
+ 			continue;
+ 		    }
+ 
+ 		    if ((*curEffect)->command != Command_Copy) {
+ 			sLog.error ("Only copy command is supported for pass without material");
++			WPENGINE_HEALTH ("unsupported", { { "what", "effect pass command other than copy" } });
+ 			continue;
+ 		    }
+ 
+@@ -773,10 +785,12 @@ void CImage::setup () {
+ 		// a passthrough/fullscreen layer exists only to post-process what's below it: part of its effect
+ 		// chain is an arbitrary picture (measured: a black screen over 3432999904), so it still goes whole
+ 		if (this->m_image.model->passthrough || this->m_image.model->fullscreen) {
++		    WPENGINE_HEALTH ("effect_dropped", { { "reason", WallpaperEngine::Health::brief (e.what ()) }, { "takes_layer", true } });
+ 		    throw;
+ 		}
+ 
+ 		sLog.error ("Leaving out effect ", cur->id, " (", cur->name, ") of object ", this->m_image.id, ": ", e.what ());
++		WPENGINE_HEALTH ("effect_dropped", { { "reason", WallpaperEngine::Health::brief (e.what ()) }, { "takes_layer", false } });
+ 
+ 		while (this->m_passes.size () > passesBefore) {
+ 		    delete this->m_passes.back ();
+@@ -1036,6 +1050,10 @@ bool CImage::configurePassTarget (
+ 	    "Pass target FBO '", target, "' could not be resolved for object ", pass->getRenderable ().getId (),
+ 	    " shader=", pass->getPass ().shader
+ 	);
++	WPENGINE_HEALTH (
++	    "pass_error", { { "object", pass->getRenderable ().getId () }, { "shader", pass->getPass ().shader },
++			    { "message", "target FBO '" + target + "' not resolved" } }
++	);
+ 	return false;
+     }
+ 
+@@ -1441,6 +1459,86 @@ void CImage::updateScreenSpacePosition () {
+ 
+ const Image& CImage::getImage () const { return this->m_image; }
+ 
++nlohmann::json CImage::healthLayer () const {
++    const float width = static_cast<float> (this->getScene ().getWidth ());
++    const float height = static_cast<float> (this->getScene ().getHeight ());
++    const auto transform = this->resolveTransform (this->getImage ());
++    const glm::vec2 size = this->m_size;
++    bool finite = std::isfinite (transform.origin.x) && std::isfinite (transform.origin.y)
++	&& std::isfinite (transform.origin.z) && std::isfinite (transform.scale.x) && std::isfinite (transform.scale.y)
++	&& std::isfinite (transform.angle) && std::isfinite (size.x) && std::isfinite (size.y);
++    for (int col = 0; col < 4; col++) {
++	for (int row = 0; row < 4; row++) {
++	    finite = finite && std::isfinite (this->m_modelViewProjectionScreen[col][row]);
++	}
++    }
++
++    // the quad the screen MVP takes: the drawing space's corners (2D), or the layer's own pixels (a 3D scene's world)
++    glm::vec2 corners[4];
++    if (this->isWorldPlaced ()) {
++	glm::vec2 centre = this->m_localOffset.value_or (glm::vec2 (0.0f));
++	if (!this->m_localOffset.has_value ()) {
++	    const std::string& alignment = this->getImage ().alignment;
++	    centre.y = alignment.find ("top") != std::string::npos ? -size.y / 2.0f
++		: alignment.find ("bottom") != std::string::npos   ? size.y / 2.0f
++								   : 0.0f;
++	    centre.x = alignment.find ("left") != std::string::npos ? size.x / 2.0f
++		: alignment.find ("right") != std::string::npos    ? -size.x / 2.0f
++								   : 0.0f;
++	}
++	corners[0] = centre - size / 2.0f;
++	corners[1] = { centre.x - size.x / 2.0f, centre.y + size.y / 2.0f };
++	corners[2] = { centre.x + size.x / 2.0f, centre.y - size.y / 2.0f };
++	corners[3] = centre + size / 2.0f;
++    } else {
++	corners[0] = { this->m_pos.x, this->m_pos.y };
++	corners[1] = { this->m_pos.x, this->m_pos.w };
++	corners[2] = { this->m_pos.z, this->m_pos.y };
++	corners[3] = { this->m_pos.z, this->m_pos.w };
++    }
++
++    glm::vec4 box (INFINITY, INFINITY, -INFINITY, -INFINITY);
++    bool behind = false;
++    for (const auto& corner : corners) {
++	const glm::vec4 clip = this->m_modelViewProjectionScreen * glm::vec4 (corner, 0.0f, 1.0f);
++	if (!(clip.w > 0.0f)) {
++	    behind = true;
++	    continue;
++	}
++	// NDC → canvas pixels, y down (the PNG's rows): the scene draws upside down into its target (the host flips
++	// it), so NDC +y is the canvas's bottom
++	const float x = (clip.x / clip.w + 1.0f) * 0.5f * width;
++	const float y = (1.0f + clip.y / clip.w) * 0.5f * height;
++	box = { std::min (box.x, x), std::min (box.y, y), std::max (box.z, x), std::max (box.w, y) };
++    }
++    if (this->getImage ().model->fullscreen) {
++	box = { 0.0f, 0.0f, width, height };
++    }
++
++    nlohmann::json out = {
++	{ "alpha", this->getImage ().alpha->value->getFloat () },
++	{ "size", { size.x, size.y } },
++	{ "finite", finite },
++	{ "passthrough", this->getImage ().model->passthrough },
++	{ "fullscreen", this->getImage ().model->fullscreen },
++	{ "passes", this->m_passes.size () },
++    };
++    if (behind) {
++	out["behind_camera"] = true;
++    }
++    if (std::isfinite (box.x) && std::isfinite (box.y) && std::isfinite (box.z) && std::isfinite (box.w)) {
++	const float area = (box.z - box.x) * (box.w - box.y);
++	const float onW = std::max (0.0f, std::min (box.z, width) - std::max (box.x, 0.0f));
++	const float onH = std::max (0.0f, std::min (box.w, height) - std::max (box.y, 0.0f));
++	out["bbox"] = { box.x, box.y, box.z, box.w };
++	out["area_px"] = area;
++	out["on_canvas_px"] = onW * onH;
++    } else {
++	out["bbox"] = nullptr;
++    }
++    return out;
++}
++
+ bool CImage::hitTest (const glm::vec2& world, glm::vec2& local) const {
+     // a layer in a 3D scene's world isn't hit-tested (the cursor would have to be cast into the world)
+     if (this->isWorldPlaced ()) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 3a91eea..9cd66b6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -2,6 +2,8 @@
+ 
+ #include <optional>
+ 
++#include <nlohmann/json.hpp>
++
+ #include "CRenderable.h"
+ #include "WallpaperEngine/Render/CObject.h"
+ #include "WallpaperEngine/Render/Objects/Effects/CPass.h"
+@@ -47,6 +49,11 @@ public:
+      * `local` gets the point in the layer, 0..size (CursorEvent.localPosition), y up
+      */
+     [[nodiscard]] bool hitTest (const glm::vec2& world, glm::vec2& local) const;
++    /**
++     * WPENGINE_HEALTH: where the layer's quad lands this frame — its canvas bbox (scene px, x right, y down, from the
++     * quad's corners through the screen MVP), the part of it on the canvas, alpha, and whether the transform is finite
++     */
++    [[nodiscard]] nlohmann::json healthLayer () const;
+ 
+     [[nodiscard]] GLuint getSceneSpacePosition () const;
+     [[nodiscard]] GLuint getCopySpacePosition () const;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+index 106d43b..3d5f32f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -1,4 +1,5 @@
+ #include "CModel.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include <iterator>
+ 
+@@ -233,6 +234,7 @@ void CModel::setup () {
+     if (!this->getScene ().getCamera ().isPerspective ()) {
+ 	// (a model in a 2D scene: none in the corpus; there's no depth buffer to draw it against)
+ 	sLog.error ("Model ", file, " is in a 2D scene: not drawn");
++	WPENGINE_HEALTH ("unsupported", { { "what", "model object in a 2D scene (not drawn)" }, { "path", file } });
+ 	return;
+     }
+ 
+@@ -243,13 +245,16 @@ void CModel::setup () {
+ 
+ 	if (!Puppet::parse (data.data (), data.size (), this->m_model, error)) {
+ 	    sLog.error ("Could not load model ", file, ": ", error);
++WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "message", error } });
+ 	    return;
+ 	}
+ 	if (!error.empty ()) {
+ 	    sLog.error ("Model ", file, " partly loaded: ", error);
++	    WPENGINE_HEALTH ("asset_error", { { "kind", "model" }, { "path", file }, { "message", "partly loaded: " + error } });
+ 	}
+     } catch (const std::exception& ex) {
+ 	sLog.error ("Could not load model ", file, ": ", ex.what ());
++	WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	return;
+     }
+ 
+@@ -296,6 +301,7 @@ void CModel::setup () {
+ 	    }
+ 	} catch (const std::exception& ex) {
+ 	    sLog.error ("Leaving out mesh ", mesh.material, " of model ", file, ": ", ex.what ());
++	    WPENGINE_HEALTH ("asset_error", { { "kind", "material" }, { "path", mesh.material }, { "message", "mesh left out: " + WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 26e8c65..e8ae53c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -1,4 +1,5 @@
+ #include "CParticle.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "WallpaperEngine/Audio/AudioContext.h"
+ #include "WallpaperEngine/Context.h"
+@@ -289,6 +290,7 @@ std::unique_ptr<CParticle> CParticle::makeChild (ChildSet& set, const glm::vec3&
+ 	instance->setup ();
+     } catch (const std::exception& e) {
+ 	sLog.error ("Cannot create child particle system ", set.child->particleFile, ": ", e.what ());
++	WPENGINE_HEALTH ("asset_error", { { "kind", "particle" }, { "path", set.child->particleFile }, { "message", "child system not created: " + WallpaperEngine::Health::brief (e.what ()) } });
+ 	instance.reset ();
+     }
+     return instance;
+@@ -854,6 +856,7 @@ void CParticle::setupEmitters () {
+ 	    func = createSphereEmitter (emitter);
+ 	} else {
+ 	    sLog.out ("Unknown emitter type: ", emitter.name);
++	    WPENGINE_HEALTH ("unsupported", { { "what", "particle emitter " + emitter.name } });
+ 	    continue;
+ 	}
+ 
+@@ -2117,6 +2120,7 @@ OperatorFunc CParticle::createOscillatePositionOperator (const OscillatePosition
+ void CParticle::setupPass () {
+     if (!m_particle.material || !m_particle.material->material || m_particle.material->material->passes.empty ()) {
+ 	sLog.error ("No valid material for particle ", m_particle.name);
++	WPENGINE_HEALTH ("asset_error", { { "kind", "material" }, { "message", "particle without a valid material: not drawn" } });
+ 	return;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CSound.cpp b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+index 27d2968..fa804a9 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CSound.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CSound.cpp
+@@ -4,6 +4,7 @@
+ #include <cstdlib>
+ 
+ #include "CSound.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/FileSystem/Container.h"
+@@ -138,6 +139,7 @@ void CSound::start () {
+ 	stream = new Audio::AudioStream (this->getScene ().getAudioContext (), this->getAssetLocator ().read (file));
+     } catch (const std::exception& e) {
+ 	sLog.error ("Cannot play sound ", file, " of object ", this->getId (), ": ", e.what ());
++	WPENGINE_HEALTH ("missing_asset", { { "kind", "sound" }, { "object", this->getId () }, { "path", file }, { "message", WallpaperEngine::Health::brief (e.what ()) } });
+ 	this->swapStream (nullptr);
+ 	this->m_gap = -1.0;
+ 	return;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index 2bccaa6..0f3f94b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -1,4 +1,5 @@
+ #include "CText.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -93,9 +94,11 @@ void CText::setup () {
+ 		from = font;
+ 	    } else {
+ 		sLog.error ("CText: cannot open font '", font, "' of '", this->m_text.name, "', using systemfont_arial");
++		WPENGINE_HEALTH ("missing_asset", { { "kind", "font" }, { "path", font }, { "message", "cannot open (not a font FreeType reads); arial used" } });
+ 	    }
+ 	} catch (const std::exception& e) {
+ 	    sLog.error ("CText: cannot read font '", font, "' of '", this->m_text.name, "': ", e.what (), ", using systemfont_arial");
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "font" }, { "path", font }, { "message", WallpaperEngine::Health::brief (e.what ()) + "; arial used" } });
+ 	}
+     }
+ 
+@@ -109,8 +112,10 @@ void CText::setup () {
+     this->m_hasFont = this->m_fonts.loaded ();
+     if (this->m_hasFont) {
+ 	sLog.out ("CText: '", this->m_text.name, "' (", this->m_text.id, ") font ", font.empty () ? "(none)" : font, " -> ", from);
++	WPENGINE_HEALTH ("font", { { "requested", font }, { "used", from }, { "system", systemFont } });
+     } else {
+ 	sLog.error ("CText: no usable font for '", this->m_text.name, "' (", font, "): fontconfig found none");
++	WPENGINE_HEALTH ("missing_asset", { { "kind", "font" }, { "path", font }, { "message", "no usable font (fontconfig found none): the text draws nothing" } });
+     }
+ 
+     // laid out before the passes are built: the effects' FBOs take the layer's size
+@@ -140,6 +145,7 @@ void CText::initScriptLayer () {
+ 
+     if (this->m_layerHandle == Scripting::kInvalidLayerHandle) {
+ 	sLog.error ("CText: createLayerScript failed for '", this->m_text.name, "'");
++	WPENGINE_HEALTH ("script_error", { { "object", this->m_text.id }, { "property", "text" }, { "phase", "create" }, { "message", "createLayerScript failed" } });
+     }
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index a46bfb5..152c5e6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -1,4 +1,5 @@
+ #include "CPass.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "WallpaperEngine/Context.h"
+ 
+@@ -546,11 +547,13 @@ void CPass::render () {
+ 
+     if (this->m_drawTo == nullptr) {
+ 	sLog.error ("Skipping render pass for object ", this->m_renderable.getId (), ": no destination FBO set");
++	WPENGINE_HEALTH ("pass_error", { { "object", this->m_renderable.getId () }, { "shader", this->m_pass.shader }, { "message", "render pass skipped: no destination FBO set" } });
+ 	return;
+     }
+ 
+     if (this->m_input == nullptr) {
+ 	sLog.error ("Skipping render pass for object ", this->m_renderable.getId (), ": no input texture set");
++	WPENGINE_HEALTH ("pass_error", { { "object", this->m_renderable.getId () }, { "shader", this->m_pass.shader }, { "message", "render pass skipped: no input texture set" } });
+ 	return;
+     }
+ 
+@@ -646,6 +649,10 @@ GLuint CPass::compileShader (const char* shader, GLuint type) {
+ 	delete[] logBuffer;
+ 
+ 	if (result == GL_FALSE) {
++	    WPENGINE_HEALTH (
++		"shader_error", { { "stage", "gl" }, { "unit", type == GL_VERTEX_SHADER ? "vertex" : "fragment" },
++				  { "message", WallpaperEngine::Health::brief (buffer.str ()) } }
++	    );
+ 	    // shader compilation failed completely, throw an exception
+ 	    sLog.exception (buffer.str ());
+ 	} else {
+@@ -690,6 +697,8 @@ void CPass::setupShaders () {
+ 	this->m_override.textures, this->m_override.constants
+     );
+ 
++    // WPENGINE_HEALTH: a compile error names the shader
++    const WallpaperEngine::Health::Scope healthShader ("shader", shaderName);
+     const auto [vertex, fragment]
+ 	= Shaders::GLSLContext::get ().toGlsl (this->m_shader->vertex (), this->m_shader->fragment ());
+ 
+@@ -720,6 +729,7 @@ void CPass::setupShaders () {
+ 	// free the buffer
+ 	delete[] logBuffer;
+ 	if (result == GL_FALSE) {
++	    WPENGINE_HEALTH ("shader_error", { { "stage", "gl" }, { "unit", "link" }, { "message", WallpaperEngine::Health::brief (message) } });
+ 	    // shader compilation failed completely, throw an exception
+ 	    sLog.exception (message);
+ 	} else {
+@@ -776,6 +786,7 @@ void CPass::setupTextureUniforms () {
+ 	    });
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve texture ", textureName, " for fragment shader ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "texture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+@@ -794,6 +805,7 @@ void CPass::setupTextureUniforms () {
+ 	    this->m_textures[index] = chain;
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve texture ", textureName, " for fragment shader ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "texture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+@@ -812,6 +824,7 @@ void CPass::setupTextureUniforms () {
+ 	    this->m_textures[index] = chain;
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve texture ", textureName, " for pass ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "texture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+@@ -835,6 +848,7 @@ void CPass::setupTextureUniforms () {
+ 	    this->m_textures[index] = chain;
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve user texture ", textureName, " for pass ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "usertexture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+@@ -854,6 +868,7 @@ void CPass::setupTextureUniforms () {
+ 	    this->m_textures[index] = chain;
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve texture ", textureName, " for override ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "texture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+@@ -877,6 +892,7 @@ void CPass::setupTextureUniforms () {
+ 	    this->m_textures[index] = chain;
+ 	} catch (std::runtime_error& ex) {
+ 	    sLog.error ("Cannot resolve user texture ", textureName, " for override ", ex.what ());
++	    WPENGINE_HEALTH ("missing_asset", { { "kind", "usertexture" }, { "path", textureName }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
+ 	}
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+index a1631a8..85b1475 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+@@ -1,4 +1,5 @@
+ #include "GLSLContext.h"
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include <cassert>
+@@ -187,6 +188,7 @@ std::string dropUnmatchedEndifs (const std::string& source) {
+ 	} else if (std::regex_search (line, closes)) {
+ 	    if (depth == 0) {
+ 		sLog.out ("Dropping an #endif with no #if: ", line);
++		WPENGINE_HEALTH ("compat", { { "what", "glslang: unmatched #endif dropped" } });
+ 		out += line.back () == '\n' ? "\n" : "";
+ 		begin = end;
+ 		continue;
+@@ -261,6 +263,7 @@ bool truncateWiderOperands (std::string& source, const std::string& log) {
+ 
+     rebuilt += text.substr (at);
+     sLog.out ("Truncating to vec", narrower, " as HLSL does, line ", line, ": ", rebuilt);
++    WPENGINE_HEALTH ("compat", { { "what", "glslang: wider vector truncated as HLSL does" } });
+     source.replace (begin, end - begin, rebuilt);
+     return true;
+ }
+@@ -286,6 +289,7 @@ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& sou
+ 	shader.reset ();
+ 	if (attempt >= 16 || !truncateWiderOperands (source, log)) {
+ 	    sLog.error ("GLSL ", what, " unit parsing Failed: ", log);
++	    WPENGINE_HEALTH ("shader_error", { { "stage", "glslang" }, { "unit", what }, { "message", WallpaperEngine::Health::brief (log) } });
+ 	    return nullptr;
+ 	}
+     }
+@@ -295,6 +299,10 @@ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& sou
+ std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vertexIn, const std::string& fragmentIn) {
+     std::string vertex = dropUnmatchedEndifs (spliceLines (vertexIn));
+     std::string fragment = dropUnmatchedEndifs (spliceLines (fragmentIn));
++    if (WallpaperEngine::Health::enabled () && (vertex.size () != vertexIn.size () || fragment.size () != fragmentIn.size ())
++	&& (spliceLines (vertexIn) != vertexIn || spliceLines (fragmentIn) != fragmentIn)) {
++	WallpaperEngine::Health::report ("compat", { { "what", "glslang: backslash line continuation spliced" } });
++    }
+     const auto vertexShader = parseUnit (EShLangVertex, vertex, "vertex");
+ 
+     if (vertexShader == nullptr) {
+@@ -312,6 +320,7 @@ std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vert
+ 
+     if (!program.link (EShMsgDefault)) {
+ 	sLog.error ("Program Linking Failed: ", program.getInfoLog ());
++	WPENGINE_HEALTH ("shader_error", { { "stage", "glslang" }, { "unit", "link" }, { "message", WallpaperEngine::Health::brief (program.getInfoLog ()) } });
+ 	return { "", "" };
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index f5018db..66e91dd 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -1,5 +1,6 @@
+ #include "ShaderUnit.h"
+ 
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ #include <cstdlib>
+ #include <regex>
+@@ -361,6 +362,7 @@ std::string ShaderUnit::resolveRequireModule (const std::string& moduleName) con
+     }
+ 
+     sLog.error ("Unknown #require module: ", moduleName, " in shader ", this->m_file);
++    WPENGINE_HEALTH ("missing_asset", { { "kind", "shader_module" }, { "path", moduleName }, { "file", this->m_file } });
+     return "";
+ }
+ 
+@@ -468,6 +470,7 @@ std::string ShaderUnit::applyFragmentVaryingDeclarations (std::string source) co
+     }
+ 
+     sLog.out ("Declaring in the fragment unit of ", this->m_file, " the varyings only its vertex unit has: ", missing);
++    WPENGINE_HEALTH ("compat", { { "what", "shader: vertex-only varyings declared in the fragment" } });
+     return missing + source;
+ }
+ 
+@@ -491,6 +494,7 @@ std::string ShaderUnit::applyFragmentTexCoordCompatibility (std::string source)
+ 
+     if (source != original) {
+ 	sLog.out ("Applied fragment TexCoord vec2 compatibility in ", this->m_file);
++	WPENGINE_HEALTH ("compat", { { "what", "shader: fragment TexCoord vec2 compatibility" } });
+     }
+ 
+     return source;
+@@ -550,6 +554,7 @@ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const
+     }
+ 
+     sLog.out ("Copying the varyings the fragment unit of ", this->m_file, " writes to:", fill);
++    WPENGINE_HEALTH ("compat", { { "what", "shader: fragment writes to varyings (copied to globals)" } });
+     return head + fill + body;
+ }
+ 
+@@ -560,6 +565,7 @@ void ShaderUnit::parseComboConfiguration (const std::string& content, const int
+ 	data = JSON::parse (content);
+     } catch (const std::exception& e) {
+ 	sLog.error ("Cannot parse combo metadata in shader ", this->m_file, ": ", e.what ());
++	WPENGINE_HEALTH ("shader_warning", { { "file", this->m_file }, { "message", std::string ("combo metadata unparsable: ") + e.what () } });
+ 	return;
+     }
+     const auto combo = data.require<std::string> ("combo", "cannot parse combo information");
+@@ -639,6 +645,7 @@ void ShaderUnit::parseParameterConfiguration (
+ 	data = JSON::parse (content);
+     } catch (const std::exception& e) {
+ 	sLog.error ("Cannot parse parameter metadata for ", name, " in shader ", this->m_file, ": ", e.what ());
++	WPENGINE_HEALTH ("shader_warning", { { "file", this->m_file }, { "message", std::string ("parameter metadata unparsable: ") + e.what () } });
+ 	return;
+     }
+     const auto material = data.optional ("material");
+@@ -772,6 +779,7 @@ void ShaderUnit::parseParameterConfiguration (
+ 	return;
+     } else {
+ 	sLog.error ("Unknown parameter type: ", type, " for ", name, " in shader ", this->m_file);
++	WPENGINE_HEALTH ("unsupported", { { "what", "shader parameter type " + type }, { "file", this->m_file } });
+ 	return;
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 0219b0b..ac63913 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -14,6 +14,7 @@
+ #include <glm/gtc/matrix_transform.hpp>
+ 
+ #include "WallpaperEngine/Context.h"
++#include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include "WallpaperEngine/Data/Model/Wallpaper.h"
+@@ -140,6 +141,132 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     }
+ 
+     this->setupBloom (*scene, sceneWidth, sceneHeight);
++
++    if (WallpaperEngine::Health::enabled ()) {
++	this->reportHealthBuild ();
++    }
++}
++
++namespace {
++const char* healthType (const Object& object) {
++    if (object.is<Text> ()) {
++	return "text";
++    }
++    if (object.is<Image> ()) {
++	return object.as<Image> ()->model != nullptr && object.as<Image> ()->model->passthrough ? "compose" : "image";
++    }
++    if (object.is<Sound> ()) {
++	return "sound";
++    }
++    if (object.is<Particle> ()) {
++	return "particle";
++    }
++    if (object.is<MeshObject> ()) {
++	return "model";
++    }
++    if (object.is<Light> ()) {
++	return "light";
++    }
++    if (object.cameraZoom != nullptr) {
++	return "camera";
++    }
++    return "group";
++}
++
++bool healthFinite (const glm::vec3& v) { return std::isfinite (v.x) && std::isfinite (v.y) && std::isfinite (v.z); }
++} // namespace
++
++void CScene::reportHealthBuild () const {
++    const auto& scene = this->getScene ();
++    const float width = static_cast<float> (this->getWidth ());
++    const float height = static_cast<float> (this->getHeight ());
++
++    WallpaperEngine::Health::report (
++	"scene", { { "width", this->getWidth () }, { "height", this->getHeight () }, { "objects", scene.objects.size () },
++		   { "built", this->m_objects.size () - (this->m_bloomObject != nullptr ? 1 : 0) },
++		   { "perspective", this->m_camera->isPerspective () }, { "hdr", this->m_hdr } }
++    );
++
++    for (const auto& object : scene.objects) {
++	const bool built = this->m_objects.contains (object->id);
++	nlohmann::json record = { { "object", object->id }, { "object_name", object->name },
++				  { "type", healthType (*object) }, { "built", built } };
++	if (object->parent.has_value ()) {
++	    record["parent"] = *object->parent;
++	}
++	if (object->is<Image> ()) {
++	    const auto* image = object->as<Image> ();
++	    record["visible"] = image->visible->value->getBool ();
++	    record["alpha"] = image->alpha->value->getFloat ();
++	    record["effects"] = image->effects.size ();
++	} else if (object->groupVisible != nullptr) {
++	    record["visible"] = object->groupVisible->value->getBool ();
++	}
++	record["effectively_visible"] = this->isEffectivelyVisible (*object);
++
++	// a layer that wasn't built: where it would have been, from the scene data (its size × scale about its origin,
++	// parents included, unrotated) — how much of the picture it takes with it
++	if (!built && object->is<Image> ()) {
++	    const auto* image = object->as<Image> ();
++	    const CObject probe (const_cast<CScene&> (*this), *object);
++	    const auto transform = probe.resolveTransform (*object);
++	    glm::vec2 size = image->size;
++	    if ((size.x == 0.0f || size.y == 0.0f) && image->model != nullptr && image->model->width.has_value ()
++		&& image->model->height.has_value ()) {
++		size = { static_cast<float> (*image->model->width), static_cast<float> (*image->model->height) };
++	    }
++	    glm::vec4 box;
++	    if (image->model != nullptr && (image->model->fullscreen || image->model->passthrough)) {
++		box = { 0.0f, 0.0f, width, height };
++	    } else {
++		const glm::vec2 half = glm::abs (size * glm::vec2 (transform.scale)) / 2.0f;
++		// WE's world is y up: the canvas row is height − y
++		box = { transform.origin.x - half.x, height - transform.origin.y - half.y, transform.origin.x + half.x,
++			height - transform.origin.y + half.y };
++	    }
++	    const float onW = std::max (0.0f, std::min (box.z, width) - std::max (box.x, 0.0f));
++	    const float onH = std::max (0.0f, std::min (box.w, height) - std::max (box.y, 0.0f));
++	    record["estimated_bbox"] = { box.x, box.y, box.z, box.w };
++	    record["estimated_on_canvas_px"] = std::isfinite (onW * onH) ? onW * onH : 0.0f;
++	}
++	WallpaperEngine::Health::report ("object", record);
++    }
++}
++
++void CScene::reportHealthLayers (int frame) const {
++    const float width = static_cast<float> (this->getWidth ());
++    const float height = static_cast<float> (this->getHeight ());
++
++    for (const auto& [id, cur] : this->m_objects) {
++	if (cur == this->m_bloomObject) {
++	    continue;
++	}
++	const Object& object = cur->getObject ();
++	nlohmann::json record;
++
++	if (cur->is<Objects::CImage> ()) {
++	    record = cur->as<Objects::CImage> ()->healthLayer ();
++	} else if (cur->is<Objects::CParticle> () || cur->is<Objects::CModel> ()) {
++	    const auto transform = cur->resolveTransform (object);
++	    const bool finite = healthFinite (transform.origin) && healthFinite (transform.scale) && std::isfinite (transform.angle);
++	    record = { { "finite", finite } };
++	    if (!this->m_camera->isPerspective ()) {
++		// a 2D scene: where the system's origin is on the canvas (y down)
++		const float x = transform.origin.x, y = height - transform.origin.y;
++		record["origin_px"] = { x, y };
++		record["origin_on_canvas"] = x >= 0.0f && x <= width && y >= 0.0f && y <= height;
++	    }
++	} else {
++	    continue;
++	}
++	record["object"] = id;
++	record["object_name"] = object.name;
++	record["type"] = healthType (object);
++	record["frame"] = frame;
++	record["effectively_visible"] = this->isEffectivelyVisible (object);
++	record["drawn_by"] = this->drawingOwnerOf (object).has_value () ? nlohmann::json (*this->drawingOwnerOf (object)) : nlohmann::json ("scene");
++	WallpaperEngine::Health::report ("layers", record);
++    }
+ }
+ 
+ void CScene::setupBloom (const Scene& scene, const uint32_t sceneWidth, const uint32_t sceneHeight) {
+@@ -261,6 +388,7 @@ void CScene::setupBloom (const Scene& scene, const uint32_t sceneWidth, const ui
+ 	    }
+ 	} catch (const std::exception& e) {
+ 	    sLog.error ("Cannot build the bloom passes, the scene renders without bloom: ", e.what ());
++	    WPENGINE_HEALTH ("effect_dropped", { { "object", -1 }, { "object_name", "bloom" }, { "reason", WallpaperEngine::Health::brief (e.what ()) }, { "takes_layer", false } });
+ 	    this->m_bloomObject = nullptr;
+ 	}
+ 
+@@ -403,6 +531,9 @@ Render::CObject* CScene::createObject (const Object& object) {
+ 
+ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+     Render::CObject* renderObject = nullptr;
++    // WPENGINE_HEALTH: what fails while this object builds (its textures, shaders, fonts) names it
++    const WallpaperEngine::Health::Scope healthObject ("object", object.id);
++    const WallpaperEngine::Health::Scope healthName ("object_name", object.name);
+ 
+     // a text object is an image layer too (WE's text class extends its image class): test it first
+     if (object.is<Text> ()) {
+@@ -421,6 +552,7 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 
+ 	if (particleData.material == nullptr || particleData.material->material == nullptr) {
+ 	    sLog.error ("Ignoring particle system without a material: ", particleData.name);
++	    WPENGINE_HEALTH ("dropped", { { "object", object.id }, { "object_name", object.name }, { "reason", "particle system without a material" } });
+ 	    return nullptr;
+ 	}
+ 
+@@ -439,6 +571,7 @@ Render::CObject* CScene::dispatchObjectType (const Object& object) {
+ 	renderObject->setup ();
+     } catch (const std::exception& e) {
+ 	sLog.error ("Failed to setup object ", object.id, ": ", e.what ());
++	WPENGINE_HEALTH ("dropped", { { "object", object.id }, { "object_name", object.name }, { "reason", WallpaperEngine::Health::brief (e.what ()) } });
+ 	delete renderObject;
+ 	renderObject = nullptr;
+     }
+@@ -600,6 +733,13 @@ void CScene::renderFrame () {
+ 
+ 	cur->render ();
+     }
++
++    if (WallpaperEngine::Health::enabled ()) {
++	this->m_healthFrames++;
++	if (this->m_healthFrames == 1 || this->m_healthFrames == 31) {
++	    this->reportHealthLayers (this->m_healthFrames);
++	}
++    }
+ }
+ 
+ void CScene::updateMouse () {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index ad053eb..c260eba 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -147,6 +147,10 @@ private:
+     void addObjectToRenderOrder (const Object& object);
+     /** Builds the bloom image: WE's LDR chain, or the HDR chain of `m_hdrLevels` levels when rendersHDR */
+     void setupBloom (const Scene& scene, uint32_t sceneWidth, uint32_t sceneHeight);
++    /** WPENGINE_HEALTH: the scene and one `object` record per scene object (built or not), after the build */
++    void reportHealthBuild () const;
++    /** WPENGINE_HEALTH: one `layers` record per drawable object (visibility, alpha, canvas bbox, finite transform) */
++    void reportHealthLayers (int frame) const;
+     /** Points the HDR bloom image's passes at their inputs (tap offsets, strength, knee, tint, scatter) */
+     void connectHDRBloom (Objects::CImage& image);
+     /** The HDR chain's live inputs (GH 0x1401b42b0), from general's bloomhdr* values */
+@@ -166,6 +170,8 @@ private:
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
+     std::mt19937 m_particleRng;
++    /** frames rendered while WPENGINE_HEALTH is on (layers are reported on the 1st and the 31st) */
++    int m_healthFrames = 0;
+     /** composeOwnerOf, by object id (built on first use from the scene data) */
+     mutable std::map<int, std::optional<int>> m_composeOwners = {};
+     mutable bool m_composeOwnersBuilt = false;
+diff --git a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+index be206a4..656579e 100644
+--- a/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/ConsoleObject.cpp
+@@ -1,4 +1,5 @@
+ #include "ConsoleObject.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "EngineObject.h"
+ #include "ScriptEngine.h"
+@@ -41,6 +42,7 @@ JSValue console_error (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
+     }
+ 
+     sLog.error (stream.str ());
++WPENGINE_HEALTH ("script_console_error", { { "message", WallpaperEngine::Health::brief (stream.str (), 300) } });
+ 
+     return JS_UNDEFINED;
+ }
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index cf2f7b5..21f6c6d 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -1,4 +1,5 @@
+ #include "EngineObject.h"
++#include "WallpaperEngine/Health.h"
+ #include "ScriptEngine.h"
+ #include "WallpaperEngine/Audio/AudioContext.h"
+ #include "WallpaperEngine/Context.h"
+@@ -388,6 +389,7 @@ void EngineObject::call (JSValue callback) {
+ 	JSValue exception = JS_GetException (ctx);
+ 	const char* message = JS_ToCString (ctx, exception);
+ 	sLog.error ("ScriptEngine [timer]: ", message ? message : "<exception>");
++	WPENGINE_HEALTH ("script_error", { { "object", -1 }, { "property", "timer" }, { "phase", "timer" }, { "message", WallpaperEngine::Health::brief (message ? message : "<exception>", 300) } });
+ 	JS_FreeCString (ctx, message);
+ 	JS_FreeValue (ctx, exception);
+     }
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 5cdb160..148fe2f 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1,4 +1,5 @@
+ #include "ScriptEngine.h"
++#include "WallpaperEngine/Health.h"
+ 
+ #include "Adapters/ScriptableObjectAdapter.h"
+ #include "ScriptPropertiesObject.h"
+@@ -450,6 +451,7 @@ static void logJSException (JSContext* ctx, const char* context) {
+ 	const char* str = JS_ToCString (ctx, exc);
+ 	if (str) {
+ 	    sLog.error ("ScriptEngine [", context, "]: ", str);
++	    WPENGINE_HEALTH ("script_error", { { "object", -1 }, { "property", context }, { "phase", "engine" }, { "message", WallpaperEngine::Health::brief (str, 300) } });
+ 	    JS_FreeCString (ctx, str);
+ 	}
+     }
+@@ -507,6 +509,7 @@ void ScriptEngine::installPrelude () {
+ 
+     if (prelude.empty ()) {
+ 	sLog.error ("ScriptEngine: no ", path, " in the assets; scripts get bare Vec2/Vec3/Vec4 classes");
++	WPENGINE_HEALTH ("missing_asset", { { "kind", "script" }, { "path", path }, { "message", "WE script classes missing from the assets" } });
+     } else {
+ 	JSValue result = JS_Eval (ctx, prelude.c_str (), prelude.size (), path.c_str (), JS_EVAL_TYPE_GLOBAL);
+ 	ok = !JS_IsException (result);
+@@ -901,6 +904,17 @@ void ScriptEngine::logModuleError (LoadedModule& module, const char* what) {
+ 
+ 	// a native call that returned JS_EXCEPTION without throwing leaves no error object behind
+ 	const bool silent = JS_VALUE_GET_TAG (exception) == JS_TAG_UNINITIALIZED;
++	if (WallpaperEngine::Health::enabled ()) {
++	    const auto cut = module.key.rfind ('_');
++	    WallpaperEngine::Health::report (
++		"script_error",
++		{ { "object", module.object.getId () }, { "object_name", module.object.getObject ().name },
++		  { "property", cut == std::string::npos ? module.key : module.key.substr (0, cut) }, { "phase", what },
++		  { "message", silent ? std::string ("a native call failed without an error (an API LWE doesn't implement?)")
++				      : WallpaperEngine::Health::brief (message ? message : "<exception>", 300) },
++		  { "stack", WallpaperEngine::Health::brief (stack, 300) } }
++	    );
++	}
+ 	sLog.error (
+ 	    "ScriptEngine [", module.key, ".", what, "]: ",
+ 	    silent ? "a native call failed without an error (an API LWE doesn't implement?)"

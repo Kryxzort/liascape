@@ -532,6 +532,8 @@ impl Drop for Scene {
 /// `--pointer X0,Y0:X1,Y1` moves the pointer (native scene px, y down, as the host feeds it) in a straight
 /// line from the first point at frame 1 to the second at the last frame — a scripted cursor path, so a
 /// pointer-driven layer (a trail, parallax, a cursor-follow script) can be checked for direction.
+/// The core's build report (`WPENGINE_HEALTH`, fork patch 0061: each object built or dropped and why, shader /
+/// script / asset errors, each layer's canvas bbox at frames 1 and 31) goes to `<out>/health.json` beside the PNGs.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` every frame (synthetic: nothing is
 /// played), for audio-responsive scenes — compare with a run without it.
 /// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
@@ -586,7 +588,9 @@ pub fn smoke(args: &[String]) -> ! {
         std::process::exit(2)
     };
     props_at.sort_by(|a, b| a.0.total_cmp(&b.0));
-    match run_smoke(
+    // the core's build report (fork patch 0061): WPENGINE_HEALTH is read when the project loads
+    let health_lines = health_path(Path::new(&out));
+    let result = run_smoke(
         Path::new(&scene_dir),
         Path::new(&assets),
         Path::new(&out),
@@ -597,7 +601,15 @@ pub fn smoke(args: &[String]) -> ! {
         pointer,
         &props,
         &props_at,
-    ) {
+    );
+    if let Some(lines) = health_lines {
+        let smoke = match &result {
+            Ok(json) => serde_json::from_str(json).unwrap_or(serde_json::Value::Null),
+            Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        };
+        write_health(Path::new(&out), &lines, &scene_dir, smoke);
+    }
+    match result {
         Ok(json) => {
             println!("{json}");
             std::process::exit(0)
@@ -607,6 +619,44 @@ pub fn smoke(args: &[String]) -> ! {
             std::process::exit(1)
         }
     }
+}
+
+/// The smoke's health dump: unless the caller set `WPENGINE_HEALTH` itself (then it's theirs, raw), the core writes
+/// its JSON lines to `<out>/health.jsonl` (a fresh file per run) and [`write_health`] gathers them into
+/// `<out>/health.json` beside the PNGs. Returns the lines file when the smoke owns it.
+fn health_path(out: &Path) -> Option<std::path::PathBuf> {
+    if std::env::var_os("WPENGINE_HEALTH").is_some() {
+        return None;
+    }
+    std::fs::create_dir_all(out).ok()?;
+    let lines = out.join("health.jsonl");
+    let _ = std::fs::remove_file(&lines);
+    // SAFETY: the smoke mode is single-threaded until the scene loads
+    unsafe { std::env::set_var("WPENGINE_HEALTH", &lines) };
+    Some(lines)
+}
+
+/// `<out>/health.json`: `{scene, smoke (the smoke's own JSON line, or its error), events (the core's records, in
+/// order), counts (records per event)}` — the scene health report (`tests/onmachine/scene_health.sh`) reads it.
+fn write_health(out: &Path, lines: &Path, scene: &str, smoke: serde_json::Value) {
+    let text = std::fs::read_to_string(lines).unwrap_or_default();
+    let events: Vec<serde_json::Value> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let mut counts = serde_json::Map::new();
+    for e in &events {
+        let ev = e.get("ev").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+        let n = counts.get(&ev).and_then(|v| v.as_u64()).unwrap_or(0);
+        counts.insert(ev, (n + 1).into());
+    }
+    let json = serde_json::json!({
+        "scene": scene,
+        "smoke": smoke,
+        "events": events,
+        "counts": counts,
+    });
+    let _ = std::fs::write(out.join("health.json"), serde_json::to_vec_pretty(&json).unwrap_or_default());
 }
 
 fn run_smoke(
