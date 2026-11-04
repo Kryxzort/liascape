@@ -160,7 +160,11 @@ mod tests {
         // The 2 s miss window still holds 60 fps frames: no second cut yet.
         assert_eq!(b.observe(s(1000), 5.0, 14.0, 30.0), None);
         assert_eq!(b.observe(s(2000), 5.0, 14.0, 30.0), None);
-        assert_eq!(b.observe(s(2500), 5.0, 14.0, 30.0), Some(15.0), "settled: halve again");
+        assert_eq!(
+            b.observe(s(2500), 5.0, 14.0, 30.0),
+            Some(15.0),
+            "settled: halve again"
+        );
         // Misses between the thresholds: neither cut (not > 2 %) nor calm (not < 0.5 %).
         assert_eq!(b.observe(s(5000), 1.0, 14.0, 15.0), None);
         // Clean from 6 s: the first step at 11 s.
@@ -173,10 +177,18 @@ mod tests {
             t += 500;
         }
         assert_eq!(steps[0], (11_000, 18.75), "{steps:?}");
-        assert_eq!(steps[1], (16_000, 23.4375), "one step per calm 5 s: {steps:?}");
+        assert_eq!(
+            steps[1],
+            (16_000, 23.4375),
+            "one step per calm 5 s: {steps:?}"
+        );
         assert_eq!(steps[2], (21_000, 29.296875), "{steps:?}");
         assert_eq!(steps[3], (26_000, 36.62109375), "{steps:?}");
-        assert_eq!(steps.last().unwrap().1, 60.0, "back at the demand: {steps:?}");
+        assert_eq!(
+            steps.last().unwrap().1,
+            60.0,
+            "back at the demand: {steps:?}"
+        );
         assert_eq!(b.cap(), None, "unthrottled");
         assert_eq!(b.rate(), 60.0);
     }
@@ -199,13 +211,25 @@ mod tests {
     #[test]
     fn budget_floor_is_10() {
         let mut b = Budget::new(30.0);
-        assert_eq!(b.observe(s(0), 10.0, 50.0, 12.0), Some(10.0), "12/2 → the floor");
+        assert_eq!(
+            b.observe(s(0), 10.0, 50.0, 12.0),
+            Some(10.0),
+            "12/2 → the floor"
+        );
         for i in 1..20 {
-            assert_eq!(b.observe(s(i * 3000), 10.0, 50.0, 10.0), None, "never below 10");
+            assert_eq!(
+                b.observe(s(i * 3000), 10.0, 50.0, 10.0),
+                None,
+                "never below 10"
+            );
         }
         assert_eq!(b.rate(), 10.0);
         let mut low = Budget::new(8.0);
-        assert_eq!(low.observe(s(0), 50.0, 100.0, 8.0), None, "8 fps demand: untouched");
+        assert_eq!(
+            low.observe(s(0), 50.0, 100.0, 8.0),
+            None,
+            "8 fps demand: untouched"
+        );
         assert_eq!(low.rate(), 8.0);
     }
 
