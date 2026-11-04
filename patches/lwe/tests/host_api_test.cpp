@@ -5210,52 +5210,78 @@ static bool hdr_bloom_is_wes_chain () {
 
 // an effect FBO is the format it names: rg88 keeps red and green only (blue reads 0), rgba_backbuffer is half float
 // in an HDR scene (2.0 · 0.25 = 0.5) and 8-bit otherwise (clipped: 1 · 0.25). Unpatched: every FBO was RGBA8
+// a white square through an rg88 effect FBO (`rg`, x 16) and one through an rgba_backbuffer FBO of 2.0 read · 0.25
+// (`wide`, x 48), in a scene with `general` (bloom on with strength 0 leaves the picture as it is)
+static bool b13_fbo_run (const std::string& general, std::array<unsigned char, 4>& rg, std::array<unsigned char, 4>& wide) {
+    const std::string dir = camera_scene (general,
+        b7_object (1, "b13base", 16, "8 8", ",\"effects\":[{\"id\":2,\"name\":\"rg\",\"file\":\"effects/b13rg/effect.json\",\"visible\":true}]")
+            + "," + b7_object (3, "b13base", 48, "8 8",
+                               ",\"effects\":[{\"id\":4,\"name\":\"w\",\"file\":\"effects/b13wide/effect.json\",\"visible\":true}]"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b13base", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    const std::string sampler = "uniform sampler2D g_Texture0;\n";
+    for (const auto& f : { b7_layer (dir, "b13put", "gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13big", "gl_FragColor = vec4(2.0, 0.0, 0.0, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13get", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13qtr", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb * 0.25, 1.0);", "", true,
+                                     sampler) }) {
+        rig.extra.insert (rig.extra.end (), f.begin (), f.end ());
+    }
+    mkdir ((dir + "/effects").c_str (), 0755);
+    const auto effect = [&dir, &rig] (const std::string& name, const std::string& format, const std::string& put, const std::string& get) {
+        mkdir ((dir + "/effects/" + name).c_str (), 0755);
+        write_file (dir + "/effects/" + name + "/effect.json",
+                    "{\"name\":\"" + name + "\",\"fbos\":[{\"name\":\"_x\",\"format\":\"" + format + "\",\"scale\":1}],\"passes\":["
+                    "{\"material\":\"materials/" + put + ".json\",\"target\":\"_x\"},"
+                    "{\"material\":\"materials/" + get + ".json\",\"bind\":[{\"name\":\"_x\",\"index\":0}]}]}\n");
+        rig.extra.push_back ("effects/" + name + "/effect.json");
+    };
+    effect ("b13rg", "rg88", "b13put", "b13get");
+    effect ("b13wide", "rgba_backbuffer", "b13big", "b13qtr");
+    if (!rig.open (dir)) {
+        return false;
+    }
+    rig.step ();
+    rg = pixel_at (rig, 16);
+    wide = pixel_at (rig, 48);
+    return true;
+}
+
+static const char* const kB13Bloom0 = ",\"bloom\":true,\"bloomstrength\":0,\"bloomhdrstrength\":0";
+
 static bool fbo_formats_as_written () {
     if (!script_tests_can_run ()) {
         return true;
     }
-    auto run = [] (bool hdr, std::array<unsigned char, 4>& rg, std::array<unsigned char, 4>& wide) {
-        const std::string dir = camera_scene (hdr ? "\"hdr\":true" : "\"hdr\":false",
-            b7_object (1, "b13base", 16, "8 8", ",\"effects\":[{\"id\":2,\"name\":\"rg\",\"file\":\"effects/b13rg/effect.json\",\"visible\":true}]")
-                + "," + b7_object (3, "b13base", 48, "8 8",
-                                   ",\"effects\":[{\"id\":4,\"name\":\"w\",\"file\":\"effects/b13wide/effect.json\",\"visible\":true}]"));
-        ScriptRig rig;
-        rig.extra = b7_layer (dir, "b13base", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
-        const std::string sampler = "uniform sampler2D g_Texture0;\n";
-        for (const auto& f : { b7_layer (dir, "b13put", "gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13big", "gl_FragColor = vec4(2.0, 0.0, 0.0, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13get", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13qtr", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb * 0.25, 1.0);", "", true,
-                                         sampler) }) {
-            rig.extra.insert (rig.extra.end (), f.begin (), f.end ());
-        }
-        mkdir ((dir + "/effects").c_str (), 0755);
-        const auto effect = [&dir, &rig] (const std::string& name, const std::string& format, const std::string& put, const std::string& get) {
-            mkdir ((dir + "/effects/" + name).c_str (), 0755);
-            write_file (dir + "/effects/" + name + "/effect.json",
-                        "{\"name\":\"" + name + "\",\"fbos\":[{\"name\":\"_x\",\"format\":\"" + format + "\",\"scale\":1}],\"passes\":["
-                        "{\"material\":\"materials/" + put + ".json\",\"target\":\"_x\"},"
-                        "{\"material\":\"materials/" + get + ".json\",\"bind\":[{\"name\":\"_x\",\"index\":0}]}]}\n");
-            rig.extra.push_back ("effects/" + name + "/effect.json");
-        };
-        effect ("b13rg", "rg88", "b13put", "b13get");
-        effect ("b13wide", "rgba_backbuffer", "b13big", "b13qtr");
-        if (!rig.open (dir)) {
-            return false;
-        }
-        rig.step ();
-        rg = pixel_at (rig, 16);
-        wide = pixel_at (rig, 48);
-        return true;
-    };
     std::array<unsigned char, 4> rgH {}, wideH {}, rgL {}, wideL {};
-    CHECK (run (true, rgH, wideH), "load/build of the HDR scene failed");
-    CHECK (run (false, rgL, wideL), "load/build of the LDR scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":true") + kB13Bloom0, rgH, wideH), "load/build of the HDR scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":false") + kB13Bloom0, rgL, wideL), "load/build of the LDR scene failed");
     printf ("    rg88 FBO of (0.2 0.4 0.6): %d %d %d (want 51 102 0); rgba_backbuffer of 2.0, read · 0.25: HDR %d (want 127), "
             "LDR %d (want 64)\n", rgL[0], rgL[1], rgL[2], wideH[0], wideL[0]);
     CHECK (rgb_near (rgL, 51, 102, 0) && rgb_near (rgH, 51, 102, 0), "the rg88 FBO isn't red-green only (%d %d %d)", rgL[0], rgL[1], rgL[2]);
     CHECK (near (wideH[0], 127, 3), "rgba_backbuffer isn't half float in an HDR scene (r=%d)", wideH[0]);
     CHECK (near (wideL[0], 64, 3), "rgba_backbuffer isn't 8-bit in an LDR scene (r=%d)", wideL[0]);
+    return true;
+}
+
+// WE renders a scene HDR only when scene.json's general has `bloom` and `hdr` both the literal true (its project
+// classifier GH 0x14013f860 tests rapidjson's bool flag on each, then the "postprocessing" setting "ultra" sets the
+// renderer's 0x2000). hdr without bloom (2511663284), or with bloom bound to a user property, is an LDR scene: the
+// rgba_backbuffer FBO is 8-bit (2.0 clipped, · 0.25 = 64). Unpatched: `hdr` alone made it half float (127)
+static bool hdr_needs_literal_bloom () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<unsigned char, 4> rg {}, noBloom {}, userBloom {}, both {};
+    CHECK (b13_fbo_run ("\"hdr\":true,\"bloom\":false", rg, noBloom), "load/build of the hdr-only scene failed");
+    CHECK (b13_fbo_run ("\"hdr\":true,\"bloom\":{\"user\":\"b\",\"value\":true},\"bloomstrength\":0", rg, userBloom),
+           "load/build of the user-bloom scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":true") + kB13Bloom0, rg, both), "load/build of the hdr+bloom scene failed");
+    printf ("    rgba_backbuffer of 2.0, read · 0.25: hdr + bloom false %d (want 64), hdr + user bloom %d (want 64), "
+            "hdr + bloom true %d (want 127)\n", noBloom[0], userBloom[0], both[0]);
+    CHECK (near (noBloom[0], 64, 3), "hdr without bloom rendered HDR (r=%d)", noBloom[0]);
+    CHECK (near (userBloom[0], 64, 3), "hdr with a user-bound bloom rendered HDR (r=%d)", userBloom[0]);
+    CHECK (near (both[0], 127, 3), "hdr with bloom true didn't render HDR (r=%d)", both[0]);
     return true;
 }
 
@@ -6432,6 +6458,7 @@ int main (int argc, char** argv) {
     run ("compose_layer_draws_its_children", compose_layer_draws_its_children);
     run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
     run ("fbo_formats_as_written", fbo_formats_as_written);
+    run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
