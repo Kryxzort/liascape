@@ -2475,7 +2475,7 @@ Pin `78128d1` (which also carries the rig agent's F3/F4 0078–0081). host_api_t
 rig agent's tests merged in). Player tests (DEBUG): 738 passed, 2 failed, 3 ignored; the 2
 (`no_trim_once_shutdown_started`, `align_end_hands_off_as_a_last_frame_ends`) are timing tests and passed alone.
 
-### F2 result: shape objects, volumetric lights, puppet IK (fork patches 0086–0089, pin `c1df824`, 2026-11-05)
+### F2 result: shape objects, volumetric lights, puppet IK (fork patches 0086–0090, pin `f4aa7c5`, 2026-11-05)
 
 Decoded from wallpaper64.exe 2.8.485 (the sound spike's `all.c` plus the exe for vtables, constants and asm; no REA
 session was needed) and the stock assets (2.8.42's `effects/lightshafts`, `materials/util/volumetrics_*`,

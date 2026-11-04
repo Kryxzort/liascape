@@ -367,7 +367,7 @@ unturned; no scene has camera paths). Tests (host_api_test, each RED on `24adeff
 | F8 Resize events | `resizeScreen` when the output size changes — **done (0076)** | 1 | S |
 | F9 Small parser keys | **done (0072–0075)**: `alphawriting`, `fbos.fit/uvs`, sprite `orientation`, mapsequence bounds (defaults), `command: swap`; left: texture flags 64/2²¹/2²³ (meaning not decoded) | 31 / 1 / 5 / 3 / 0 / 3 | S each |
 
-## Implemented: F2 shape objects and volumetric lights, F3's puppet IK (fork patches 0086–0089, 2026-11-05)
+## Implemented: F2 shape objects and volumetric lights, F3's puppet IK (fork patches 0086–0090, 2026-11-05)
 
 Decoded addresses and what's inferred: the audit's "F2 result".
 - **0086 render: shape objects.** What upstream called a VolumeLight is WE's shape class (factory GH 0x1401be650,
@@ -382,7 +382,7 @@ Decoded addresses and what's inferred: the audit's "F2 result".
 - **0087 render: puppet IK.** `ik` / `ikd` / `ikr` bones, MDLS v2's IK targets and MDLA v2's target tracks (Observed);
   the solver is **Inferred** (two-bone law of cosines toward the pole, CCD for longer chains). 3042492564's arm now
   follows its animated hand target.
-- **0089**: the factory address in the comments.
+- **0089, 0090**: the factory address in the comments; a shape's placeholder picture 1 x 1 (it was the square: 18 MB at 4K).
 
 Not done: bone physics and applyBonePhysicsImpulse / gravity / wind (0 library bones enable physics; WE's simulation
 sits on an unread rigid-body helper family), root motion, MORPHING_MODIFIERS.

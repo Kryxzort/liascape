@@ -1237,8 +1237,8 @@ Two bug classes kept recurring; fix the class, not the instance:
                       0x13 and the spawn interpreter GH 0x140260d80), vortex_v2, a camera object's own `path`/`queuemode`
                       (all empty in the library), text `depthtest`, customsortorder, the 3D zoom/parallax, WE captures
                       of the element previews (`assets/scenes/particleelementpreviews`).
-          - [x] **F2 shape objects + volumetric lights, F3's puppet IK — done 2026-11-05** (fork patches 0086–0089,
-                pin `c1df824`): the "VolumeLight" is WE's shape class (3319542538's light shafts now draw), point and
+          - [x] **F2 shape objects + volumetric lights, F3's puppet IK — done 2026-11-05** (fork patches 0086–0090,
+                pin `f4aa7c5`): the "VolumeLight" is WE's shape class (3319542538's light shafts now draw), point and
                 spot `castvolumetrics` with WE's volumetrics pass and shaders (synthetic check; 0 library users), puppet
                 IK chains (3042492564's arm follows its hand target; solver inferred). Result in the audit's "F2
                 result". host_api_test +3 (RED on `78128d1`).
