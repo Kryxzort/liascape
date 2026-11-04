@@ -667,6 +667,7 @@ impl Renderer {
             assets: assets.as_deref(),
             steam_dir: steam.as_deref(),
             properties: &s.properties,
+            screen: (s.max_size[0], s.max_size[1]),
         };
         let t = Instant::now();
         let mut results = Vec::new();
@@ -830,6 +831,11 @@ impl Renderer {
         let Some(r) = self.ring.as_ref() else {
             return; // not started: the restart's/Start's max_size already carries it
         };
+        // the scripts' screen follows the output, even when the ring keeps its size
+        #[cfg(feature = "lwe")]
+        if let Some(SceneImpl::Lwe(s)) = self.scene.as_ref() {
+            s.hint_screen(max_size[0], max_size[1]);
+        }
         let (w, h) = cover_size(self.native, (max_size[0], max_size[1]));
         if (w, h) == (r.w, r.h) {
             return;
