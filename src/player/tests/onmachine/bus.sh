@@ -4,7 +4,7 @@
 #
 #   1. `serve` creates the bus: `pactl list sinks short` has exactly one liascape-player-bus; the
 #      identity contract (pw-dump + `pactl list sink-inputs`); `pw-link -l` shows the bus
-#      playback linked to the default sink; Bus::latency() <= 1 quantum + 5 ms.
+#      playback linked to the default sink; Bus::latency() <= 2 async hops + 1 quantum + 5 ms.
 #   2. A Solid clip (440 Hz, -20 dBFS peak) plays through the bus: `meter.window
 #      {last_ms:1000}` median within -23 +- 3 dBFS; its mpv runs
 #      audio-device=pipewire/liascape-player-bus and audio-delay = -latency.
@@ -281,9 +281,12 @@ BUS=$(ctl probe '{"name":"bus"}') || fail "probe bus: $BUS"
 LAT=$(jq -r .latency_ms <<<"$BUS")
 QMS=$(jq -r .quantum_ms <<<"$BUS")
 echo "Bus::latency() = $LAT ms ($(jq -r .latency_samples <<<"$BUS") samples; quantum $QMS ms; target $(jq -r .target <<<"$BUS"))"
-jq -e --argjson l "$LAT" --argjson q "$QMS" -n '$l <= $q + 5' >/dev/null \
-    || fail "latency $LAT ms > 1 quantum ($QMS ms) + 5 ms"
-ok "latency gate: $LAT ms <= $QMS + 5 ms"
+# The loopback's own delay (measured, 0 here) + the two async hops every stream of the
+# process carries (F7: producer -> bus, playback -> sink; `audio::bus::ASYNC_HOPS`), one
+# quantum each, within one more quantum + 5 ms.
+jq -e --argjson l "$LAT" --argjson q "$QMS" -n '$l <= 3 * $q + 5' >/dev/null \
+    || fail "latency $LAT ms > 2 async hops + 1 quantum ($QMS ms each) + 5 ms"
+ok "latency gate: $LAT ms <= 3 * $QMS + 5 ms"
 
 [[ $(sink_count) == 1 ]] || fail "pactl list sinks short: $(sink_count) liascape-player-bus sinks"
 ok "pactl list sinks short has liascape-player-bus"

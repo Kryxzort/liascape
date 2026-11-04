@@ -34,7 +34,10 @@
 //! (the loopback's input) and the bus playback stream's output; the difference of the two
 //! arrival times (same graph cycles, so same clock) is what the bus adds. Three shots, the
 //! median is kept. The quantum is pinned to 10 ms for it (`node.latency = 480/48000`, the
-//! meter's request, which holds while the player runs).
+//! meter's request, which holds while the player runs). Since every stream of this process
+//! is an async node ([`ASYNC_STREAMS`]) the measurement's two captures each sit one cycle
+//! behind what they watch, so it still reads the loopback's own delay (0 here) and the
+//! [`ASYNC_HOPS`] (producer → bus, playback → sink: one quantum each) are added to it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -78,6 +81,47 @@ pub const METER_NAME: &str = "liascape-player-bus.meter";
 pub const DEVICE: &str = "pipewire/liascape-player-bus";
 /// The bus format: 48 kHz, F32, stereo.
 pub const RATE: u32 = 48_000;
+/// `PIPEWIRE_PROPS` for the compositor process — every PipeWire stream it (or libmpv inside
+/// it) connects is an **ASYNC node** (`node.async`, read by libpipewire at
+/// `pw_stream_connect`, then by the server). An async producer is never waited for inside a
+/// graph cycle: its consumer reads the buffer it queued one cycle earlier, and its leaving
+/// can't stall anyone. **F7 residual (2026-11-04):** with synchronous links the bus's cycle
+/// counted every stream playing into it, and a stream *deactivating* (a scene worker's quit,
+/// mpv's `pw_stream_set_active(false)` on pause, its `pw_stream_destroy` at teardown) hit a
+/// libpipewire race — the client marks its own activation INACTIVE at once, the server
+/// drops it from the bus's dependency count only after a protocol roundtrip; a driver cycle
+/// starting in that window skips the stream (inactive) yet the bus still waits for it, the
+/// graph xruns and the sink gets one quantum of zeros (the server's profiler: 7 of 7 lost
+/// cycles in 60 full-live switches, each 1.5–6 ms after A's `Quit`; with async producers
+/// 0 of 60, and `tests/api.rs::{scene_worker_exit,mpv_source_teardown}_never_skips_bus_cycles`).
+/// mpv's AO has no other way to carry a stream property, so the whole process is async: the
+/// loopback halves (the capture was already *asked* async by module-loopback; the server only
+/// honours the property), the meter and the latency probes included. Cost: one quantum of
+/// latency per async hop — [`ASYNC_HOPS`] on the bus path, added to [`Bus::latency`].
+pub const ASYNC_STREAMS: &str = "{ node.async = true }";
+/// Async hops on a source's path to the sink that the impulse measurement can't see (its
+/// captures sit one hop later on both sides, so it still reads the loopback's own 0):
+/// producer → bus, and bus playback → sink. Each is one graph quantum.
+pub const ASYNC_HOPS: u32 = 2;
+
+/// Set [`ASYNC_STREAMS`] as the process's `PIPEWIRE_PROPS` (keeping any keys already there:
+/// ours go first inside the object, so a user's value for the same key wins — the last
+/// occurrence does in SPA JSON).
+///
+/// # Safety
+/// Must run while the process is still single-threaded (`serve_main`, before the runtime,
+/// the bus thread or libmpv exist): `setenv` races `getenv` in other threads.
+pub unsafe fn set_async_streams_env() {
+    let merged = match std::env::var("PIPEWIRE_PROPS") {
+        Ok(v) if v.trim().starts_with('{') && v.trim().ends_with('}') => {
+            let inner = v.trim();
+            let inner = &inner[1..inner.len() - 1];
+            format!("{{ node.async = true {inner} }}")
+        }
+        _ => ASYNC_STREAMS.to_string(),
+    };
+    unsafe { std::env::set_var("PIPEWIRE_PROPS", merged) };
+}
 /// The latency probes' quantum request: 10 ms. The meter no longer requests one (R68 fix
 /// round) — this is kept only for `measure_latency`'s transient streams.
 pub const QUANTUM: u32 = 480;
@@ -1222,6 +1266,11 @@ fn session(
             i.state = BusState::Up;
             i.reason = None;
             i.connecting = false;
+            // The measured loopback delay plus the async hops the measurement sits behind
+            // (`ASYNC_HOPS`): a source's samples reach the sink that many quanta after
+            // it queued them.
+            let hops_ns = (ASYNC_HOPS as f64 * quantum as f64 * 1e9 / RATE as f64) as i64;
+            let lat_ns = lat_ns + if quantum > 0 { hops_ns } else { 0 };
             i.latency_ms = lat_ns as f64 / 1e6;
             i.latency_samples = (lat_ns as f64 * RATE as f64 / 1e9).round() as u64;
             i.quantum_ms = quantum as f64 * 1000.0 / RATE as f64;

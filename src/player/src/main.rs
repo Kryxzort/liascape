@@ -164,6 +164,10 @@ fn serve_main(args: &[String]) -> ExitCode {
         // Exec'd as /proc/self/exe: comm would be "exe".
         unsafe { libc::prctl(libc::PR_SET_NAME, c"liascape-player".as_ptr()) };
     }
+    // SAFETY: the compositor is still single-threaded here (no runtime, bus thread or libmpv
+    // yet); every PipeWire stream this process connects — the bus loopback, the meter, mpv's
+    // AOs, and the scene workers it spawns with this environment — is an async node (F7).
+    unsafe { liascape_player::audio::bus::set_async_streams_env() };
     let opts = ServeOpts {
         outputs,
         clock,

@@ -350,15 +350,24 @@ step_onsetrec() {
     serve_up "headless:640x360@$hz"
     env "${PW_ENV[@]}" pw-record --target hermetic-sink -P '{ stream.capture.sink = true }' --rate 48000 --channels 2 --format f32 "$wav" &
     TONE_PID=$!
+    # ONSET_PROFILE=1: the private server's profiler alongside (every graph cycle: each
+    # node's status and timing — which node misses a lost cycle) + the graph's node ids.
+    local prof_pid=
+    if [[ -n ${ONSET_PROFILE:-} ]]; then
+        env "${PW_ENV[@]}" pw-profiler -J -o "$RESULTS/onsetrec-profiler.json" >"$RESULTS/onsetrec-profiler.log" 2>&1 &
+        prof_pid=$!
+    fi
     sleep 1
     ctl transition "$(jq -nc --argjson to "$s1" '{outputs:"out:*", to:$to}')" >/dev/null
     sleep 2.5
+    [[ -n $prof_pid ]] && env "${PW_ENV[@]}" pw-dump >"$RESULTS/onsetrec-pw-dump.json" 2>/dev/null
     for ((i = 0; i < n; i++)); do
         drop_switch "$s2" "$m" now SS "$hz" "S→S"
         drop_switch "$s1" "$m" now SS "$hz" "S→S"
     done
     sleep 1
     kill -INT "$TONE_PID" 2>/dev/null; wait "$TONE_PID" 2>/dev/null; TONE_PID=
+    [[ -n $prof_pid ]] && { kill -INT "$prof_pid" 2>/dev/null; wait "$prof_pid" 2>/dev/null; }
     ctl logs '{"limit":100000,"min_level":"debug"}' >"$RESULTS/onsetrec-events.json" 2>/dev/null
     serve_down
     local res

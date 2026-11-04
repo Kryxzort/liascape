@@ -7202,17 +7202,29 @@ fn tone_scene(hz: f64) -> SyntheticSpec {
 
 /// A real-clock server on a private PipeWire (bus up), synthetic scenes allowed.
 fn scene_audio_serve(pw: &PrivatePw, root: PathBuf, serial: MutexGuard<'static, ()>) -> Serve {
+    scene_audio_serve_at(pw, root, serial, &[])
+}
+
+/// [`scene_audio_serve`] with extra `serve` arguments (e.g. `--outputs 1920x1080@144`).
+fn scene_audio_serve_at(
+    pw: &PrivatePw,
+    root: PathBuf,
+    serial: MutexGuard<'static, ()>,
+    extra: &[&str],
+) -> Serve {
     let run = pw.run_dir();
+    let mut args = vec![
+        "--ao",
+        "pipewire",
+        "--clock",
+        "real",
+        "--log-level",
+        "debug",
+    ];
+    args.extend_from_slice(extra);
     let srv = Serve::spawn_env(
         root,
-        &[
-            "--ao",
-            "pipewire",
-            "--clock",
-            "real",
-            "--log-level",
-            "debug",
-        ],
+        &args,
         &[
             ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
             ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
@@ -7667,10 +7679,13 @@ fn scene_crossfades_are_equal_power_on_the_bus() {
 /// leave the graph cleanly first — it used to `exit` with its stream still connected, and the
 /// bus then skipped whole graph cycles: an independent `pw-record` of the sink held 64–384
 /// samples of exact silence once per switch, in B's sound, as A's worker went (frozen S→S at
-/// 240 Hz: 60 of 61 switches). Frozen S→S switches between two tone scenes (A's worker exits
-/// at each handoff while B ramps in), the private sink recorded throughout: no run of exact
-/// silence inside sound (bar one single cycle, below). RED before the worker's clean leave
-/// (`audio::Control::quit`).
+/// 240 Hz: 60 of 61 switches). Full-live S→S switches between two tone scenes (A's worker
+/// exits at each handoff while B plays at full level — frozen hides the instant: B is still
+/// silent when A's stream goes), the private sink recorded throughout: no run of exact
+/// silence inside sound. RED before the worker's clean leave (`audio::Control::quit`: every
+/// switch), RED before the worker's stream was ASYNC (`node.async`: 1 in ~10 switches —
+/// the deactivation race, see `audio::Control::quit`'s doc; 20 switches catch it in ~9 of
+/// 10 runs, each lost cycle one 64-frame quantum of zeros).
 #[test]
 fn scene_worker_exit_never_skips_bus_cycles() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -7688,44 +7703,142 @@ fn scene_worker_exit_never_skips_bus_cycles() {
     wait_for(Duration::from_secs(10), "the first tone on the bus", || {
         (bus_db(&mut c, 200.0) > -30.0).then_some(())
     });
-    const SWITCHES: usize = 6;
+    const SWITCHES: usize = 20;
     for i in 0..SWITCHES {
         let to = if i % 2 == 0 { &s2 } else { &s1 };
-        let corr = c.ok(
-            "transition",
-            json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(to)},
-                   "effect_id": "fade", "duration_ms": 300, "method": "frozen"}),
-        )["corr"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        wait_for(Duration::from_secs(10), "transition.done", || {
-            c.ok(
-                "logs",
-                json!({"corr": corr, "kind_prefix": "transition.done", "limit": 10}),
-            )["events"]
-                .as_array()
-                .is_some_and(|e| !e.is_empty())
-                .then_some(())
-        });
-        // A's worker is gone well within this (its stream leaves at its exit).
-        std::thread::sleep(Duration::from_millis(600));
+        switch_and_wait(&mut c, json!({"kind": "scene", "path": s(to)}));
     }
     let (left, runs) = stop_sink_recording(rec, &wav);
     let audible = left.iter().filter(|v| v.abs() > 0.01).count();
     println!(
-        "F7: {SWITCHES} frozen S→S, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
+        "F7: {SWITCHES} full-live S→S, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
         left.len() as f64 / 48_000.0,
         audible as f64 / 48_000.0
     );
     assert!(audible > 48_000, "the recording holds the tones");
-    // RED: one run per switch (6 of 6, 64–192 samples). What is left after the clean leave is
-    // a rare single 64-frame cycle at the stream's deactivation (a PipeWire graph change seen
-    // through the in-process bus loopback — ~1 in 15 full-live switches, 0 in 121 frozen ones
-    // in release; once in 18 here): at most one, never longer than one cycle.
+    assert_no_lost_cycles(&mut c, &left, &runs, (-2.0, 40.0), SWITCHES);
+}
+
+/// One full-live fade to `to` (300 ms), waited for `transition.done`, then 600 ms for A's
+/// teardown (its stream leaves the graph then).
+fn switch_and_wait(c: &mut Client, to: Value) {
+    let corr = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": to, "effect_id": "fade", "duration_ms": 300,
+               "method": "full-live"}),
+    )["corr"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for(Duration::from_secs(10), "transition.done", || {
+        c.ok(
+            "logs",
+            json!({"corr": corr, "kind_prefix": "transition.done", "limit": 10}),
+        )["events"]
+            .as_array()
+            .is_some_and(|e| !e.is_empty())
+            .then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(600));
+}
+
+/// F7 residual, the mpv side (Phase 3 battery: 23 single 64-frame runs of exact silence at
+/// the sink in 2874 s of program switches, V↔V among them): an mpv source's PipeWire stream
+/// leaves the graph at its teardown (`pw_stream_destroy` inside mpv's AO) and is deactivated
+/// on every pause (`pw_stream_set_active(false)` in its `reset`) — each a graph change with
+/// the same race as the worker's: libpipewire marks the stream INACTIVE in this process
+/// before the server has dropped it from the bus's dependency count, a cycle starting in
+/// that window waits for it in vain, the graph xruns, the sink gets one quantum of zeros.
+/// Full-live V→V switches between two looping tone clips (A torn down at each handoff while
+/// B plays at full level), the sink recorded: no run of exact silence inside sound. RED
+/// before the compositor's streams were ASYNC (`audio::bus::ASYNC_STREAMS`).
+#[test]
+fn mpv_source_teardown_never_skips_bus_cycles() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root.clone(), serial);
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
+    let wav = root.join("sink.wav");
+    let rec = record_sink(&pw, &wav);
+    std::thread::sleep(Duration::from_millis(500));
+    let a = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(5), "the first tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -26.0).then_some(())
+    });
+    const SWITCHES: usize = 20;
+    for i in 0..SWITCHES {
+        let to = if i % 2 == 0 { &blue } else { &red };
+        switch_and_wait(&mut c, json!({"path": to, "loop": true}));
+    }
+    let (left, runs) = stop_sink_recording(rec, &wav);
+    let audible = left.iter().filter(|v| v.abs() > 0.01).count();
+    println!(
+        "F7/mpv: {SWITCHES} full-live V→V, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
+        left.len() as f64 / 48_000.0,
+        audible as f64 / 48_000.0
+    );
+    assert!(audible > 48_000, "the recording holds the tones");
+    assert_no_lost_cycles(&mut c, &left, &runs, (-2.0, 300.0), SWITCHES);
+}
+
+/// The invariant behind the two recordings above, read off the graph: every stream that
+/// plays into the bus (a scene worker's, an mpv source's) is an ASYNC node, so its link into
+/// the bus is `link.async` — the bus never waits for it inside a cycle, and its leaving can't
+/// stall the bus. RED before: neither link carried the flag.
+#[test]
+fn bus_producers_link_asynchronously() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root, serial);
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
+    // The mpv source plays (its stream on the bus) whether shown or not; a scene's worker
+    // only runs while the scene is on an output — so show mpv first, then the scene.
+    let v = create_src(&mut c, json!({"path": red, "loop": true}));
+    show_all(&mut c, &v);
+    wait_for(Duration::from_secs(5), "the clip's tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -26.0).then_some(())
+    });
+    let sc = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&common::synthetic_scene("api-async-s", &tone_scene(660.0)))}),
+    );
+    show_all(&mut c, &sc);
+    wait_for(Duration::from_secs(10), "the scene's sound flowing", || {
+        has_event(&mut c, "source.audio_flowing", |e| e["id"] == json!(sc)).then_some(())
+    });
+    // The links appear once WirePlumber has wired the new nodes.
+    let into_bus = wait_for(Duration::from_secs(10), "both streams linked into the bus", || {
+        let d = pw.dump();
+        let objs = d.as_array()?;
+        let node_name = |id: &Value| {
+            objs.iter()
+                .find(|o| o["id"] == *id && o["type"] == json!("PipeWire:Interface:Node"))
+                .map(|o| o["info"]["props"]["node.name"].as_str().unwrap_or("").to_string())
+                .unwrap_or_default()
+        };
+        let links: Vec<(String, Value)> = objs
+            .iter()
+            .filter(|o| o["type"] == json!("PipeWire:Interface:Link"))
+            .filter(|o| node_name(&o["info"]["input-node-id"]) == "liascape-player-bus")
+            .map(|o| (node_name(&o["info"]["output-node-id"]), o["info"]["props"]["link.async"].clone()))
+            .collect();
+        let has = |p: &str| links.iter().any(|(n, _)| n.starts_with(p));
+        (has("liascape-player-scene.") && has("liascape-player")).then_some(links)
+    });
+    println!("links into the bus (producer, link.async): {into_bus:?}");
+    let sync: Vec<_> = into_bus
+        .iter()
+        .filter(|(_, a)| *a != json!(true) && *a != json!("true"))
+        .collect();
     assert!(
-        runs.len() <= 1 && runs.iter().all(|(_, n)| *n <= 64),
-        "skipped graph cycles at the sink: {runs:?}"
+        sync.is_empty(),
+        "streams linked synchronously into the bus (their leaving can stall it): {sync:?}"
     );
 }
 
@@ -7786,6 +7899,101 @@ fn stop_sink_recording(mut rec: std::process::Child, wav: &Path) -> (Vec<f32>, V
         i = e;
     }
     (left, runs)
+}
+
+/// The recording's clock anchored on the player's: its first non-zero sample is the first
+/// `source.audio_flowing` (the first tone's first buffer). `None` without either.
+fn recording_anchor(ev: &[Value], left: &[f32]) -> Option<f64> {
+    let first = left.iter().position(|v| *v != 0.0)?;
+    let flow = ev
+        .iter()
+        .find(|e| e["kind"] == json!("source.audio_flowing"))
+        .and_then(|e| e["t_mono_ms"].as_f64())?;
+    Some(flow - first as f64 / 48.0)
+}
+
+/// Each run of exact silence against the player's events: `(run, events within ±40 ms,
+/// at a leaving stream)` — the last is the deactivation race's signature: the run sits
+/// `window` ms after a `worker.stopped` (a scene worker's stream leaves 1.5–6 ms after its
+/// `Quit`) or a `source.drop` (an mpv source's AO is destroyed on a worker thread 30–240 ms
+/// later). Printed in full; a debug build on a loaded machine can also lose a cycle to plain
+/// lateness, which lands anywhere.
+fn classify_runs(
+    c: &mut Client,
+    left: &[f32],
+    runs: &[(f64, usize)],
+    window: (f64, f64),
+) -> Vec<((f64, usize), Vec<String>, bool)> {
+    if runs.is_empty() {
+        return Vec::new();
+    }
+    let ev = c.ok(
+        "logs",
+        json!({"min_level": "debug", "limit": 100_000}),
+    )["events"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let t0 = recording_anchor(&ev, left);
+    runs.iter()
+        .map(|run| {
+            let Some(t0) = t0 else {
+                return (*run, vec!["no anchor".into()], false);
+            };
+            let tm = t0 + run.0 * 1000.0;
+            let near: Vec<String> = ev
+                .iter()
+                .filter(|e| {
+                    let k = e["kind"].as_str().unwrap_or("");
+                    !k.starts_with("api.") && !k.starts_with("source.position")
+                })
+                .filter_map(|e| {
+                    let dt = e["t_mono_ms"].as_f64()? - tm;
+                    (dt.abs() < 40.0).then(|| {
+                        format!("{dt:+.1} ms {} {}", e["kind"].as_str().unwrap_or(""), e["id"].as_str().unwrap_or(""))
+                    })
+                })
+                .collect();
+            let leaving = ev.iter().any(|e| {
+                let k = e["kind"].as_str().unwrap_or("");
+                (k == "worker.stopped" || k == "source.drop")
+                    && e["t_mono_ms"]
+                        .as_f64()
+                        .is_some_and(|t| tm - t >= window.0 && tm - t <= window.1)
+            });
+            println!(
+                "  run at {:.3} s ({} samples, t_mono {tm:.1} ms){}: {near:?}",
+                run.0,
+                run.1,
+                if leaving { " AT A LEAVING STREAM" } else { "" }
+            );
+            (*run, near, leaving)
+        })
+        .collect()
+}
+
+/// The recording tests' verdict on their runs: none at a leaving stream (the race), and no
+/// more than one in ten switches anywhere (plain lateness in a loaded debug run is tolerated
+/// to that extent and printed; a release build on a quiet machine has none).
+fn assert_no_lost_cycles(
+    c: &mut Client,
+    left: &[f32],
+    runs: &[(f64, usize)],
+    window: (f64, f64),
+    switches: usize,
+) {
+    let classified = classify_runs(c, left, runs, window);
+    let at_leaving: Vec<_> = classified.iter().filter(|(_, _, l)| *l).map(|(r, n, _)| (*r, n.clone())).collect();
+    assert!(
+        at_leaving.is_empty(),
+        "graph cycles lost as a stream left the bus (the deactivation race): {at_leaving:?}"
+    );
+    assert!(
+        runs.len() <= switches / 10,
+        "{} runs of exact silence in {switches} switches, none at a leaving stream — a loaded \
+         run, or a new cause: {runs:?}",
+        runs.len()
+    );
 }
 
 /// TODO F4 (`docs/player/reports/phase3.md` § 1): with `--debug` the dropout detector's own

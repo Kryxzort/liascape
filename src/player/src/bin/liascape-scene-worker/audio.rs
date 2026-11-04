@@ -640,6 +640,18 @@ fn run_pw(
         "node.latency" => latency.as_str(),
         "state.restore-props" => "false",
         "state.restore-target" => "false",
+        // F7 residual: an ASYNC node — the bus (any consumer) never waits for this stream
+        // inside a graph cycle; it reads the buffer we queued one cycle earlier. Without it
+        // the link is synchronous and the bus's cycle counts us: when this stream
+        // deactivates (quit, a route change), libpipewire marks our activation INACTIVE in
+        // THIS process before the server has taken us out of the bus's dependency count,
+        // and a driver cycle starting in that window skips us but still waits for us — the
+        // bus never runs that cycle, the whole graph xruns and the sink gets one quantum of
+        // zeros (measured with the server's profiler: 7 of 7 lost cycles in 60 full-live
+        // switches were exactly this, 1.5–6 ms after A's `Quit`). The property is what the
+        // server reads (`PW_STREAM_FLAG_ASYNC` alone only marks the client side). Cost: one
+        // quantum of latency on the scene's sound (1.3 ms at the owner's 64-frame quantum).
+        "node.async" => "true",
     };
     if let Some(t) = target {
         props.insert("target.object", t);
