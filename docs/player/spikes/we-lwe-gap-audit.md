@@ -2331,7 +2331,7 @@ each core on its LD_LIBRARY_PATH; scratchpad `f3/pairs/`):
   67 ms on both cores in this run (machine load; B12 measured 6–7 ms).
 
 **Shader sweep** (4085 compiles, the new core): 16 → 6 failures, the 10 SKINNING / MORPHING caster checks fixed, 0 newly
-failing; the 6 left are as in F1 (' BLENDROWCOUNT, two workshop , one ).
+failing; the 6 left are as in F1 (`puppettexturechannels`' BLENDROWCOUNT, two workshop `auto_sway`, one `depthparallax`).
 "WE: an engine texel uniform declared" applies to 3 checks.
 
-**Health**: see the refreshed  (the commit after the pin).
+**Health**: see the refreshed `scene-health.md` (the commit after the pin).
