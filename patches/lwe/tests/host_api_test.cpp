@@ -5606,10 +5606,10 @@ static bool shadow_occludes_a_lit_point () {
 }
 
 // a TEXV0005 / TEXB0003 ARGB8888 texture, `w` x `h`, no interpolation, clamped
-static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba) {
+static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba, uint32_t flags = 1 | 2) {
     MdlWriter t;
     t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
-    t.u32 (0).u32 (1 | 2).u32 (w).u32 (h).u32 (w).u32 (h).u32 (0);
+    t.u32 (0).u32 (flags).u32 (w).u32 (h).u32 (w).u32 (h).u32 (0);
     t.out += std::string ("TEXB0003", 8) + '\0';
     t.u32 (1).u32 (0xffffffff);
     t.u32 (1).u32 (w).u32 (h).u32 (0).u32 (w * h * 4).u32 (w * h * 4);
@@ -5617,6 +5617,43 @@ static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba) 
         t.u8 (px >> 24).u8 ((px >> 16) & 0xff).u8 ((px >> 8) & 0xff).u8 (px & 0xff);
     }
     return t.out;
+}
+
+// a sampler's "components" combos follow the bound texture's flags 0x100000 << i (WE's shader preamble GH 0x14019b550;
+// resourcecompiler64.exe sets the bit for each channel built from a component image): a mask with 0x800000 (the alpha
+// component, as 3509243656's PBR masks) defines the fourth component's combo, one with 0xa00000 (3477054430's) the
+// second and fourth, one without neither. Unpatched: none ever defined (the flags were ignored)
+static bool texture_components_define_combos () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (uint32_t flags, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene ("\"bloom\":false", b7_object (1, "c1", 16, "8 8"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "c1", "gl_FragColor = vec4(C_G > 0 ? 1.0 : 0.0, 0.0, C_A > 0 ? 1.0 : 0.0, 1.0);",
+                              "[\"util/white\",\"c1mask\"]", true,
+                              "uniform sampler2D g_Texture1; // {\"combo\":\"C1MASK\",\"components\":[{\"combo\":\"C_R\"},"
+                              "{\"combo\":\"C_G\"},{\"combo\":\"C_B\"},{\"combo\":\"C_A\"}]}\n"
+                              "#ifndef C_G\n#define C_G 0\n#endif\n#ifndef C_A\n#define C_A 0\n#endif\n");
+        write_file (dir + "/materials/c1mask.tex", f1_texture (1, 1, { 0xffffffff }, flags));
+        rig.extra.push_back ("materials/c1mask.tex");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 16);
+        return true;
+    };
+    std::array<unsigned char, 4> plain {}, alpha {}, both {};
+    CHECK (run (1 | 2, plain), "load/build with the plain mask failed");
+    CHECK (run (0x800002, alpha), "load/build with the 0x800000 mask failed");
+    CHECK (run (0xa00002, both), "load/build with the 0xa00000 mask failed");
+    printf ("    C_G / C_A as red / blue: flags 3 %d %d, 0x800002 %d %d, 0xa00002 %d %d\n", plain[0], plain[2], alpha[0], alpha[2],
+            both[0], both[2]);
+    CHECK (plain[0] < 10 && plain[2] < 10, "a mask without component bits defined a component combo (%d %d)", plain[0], plain[2]);
+    CHECK (alpha[0] < 10 && alpha[2] > 245, "0x800000 didn't define the alpha component's combo alone (%d %d)", alpha[0], alpha[2]);
+    CHECK (both[0] > 245 && both[2] > 245, "0xa00000 didn't define the green and alpha components' combos (%d %d)", both[0], both[2]);
+    return true;
 }
 
 // a spot with usecookie projects its `cookie` texture (GH 0x140282140 loads it, default cookie/flashlight1; the
@@ -6478,6 +6515,7 @@ int main (int argc, char** argv) {
     run ("model_skins_and_morphs", model_skins_and_morphs);
     run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
+    run ("texture_components_define_combos", texture_components_define_combos);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);
