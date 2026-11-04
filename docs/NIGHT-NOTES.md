@@ -345,3 +345,25 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Not done: the hair/cloth sway effect in this scene still doesn't run (making it compile made the left curtain
     vanish, so I left it off — in TODO); "WEDNESDAY" still touches the right edge.
   - Corpus 96/96 ok on both cores, none newly blank; host_api_test 71/71 (3 new, red before); player tests 740/0/3.
+
+## 2026-11-04 evening — Wallpaper Engine coverage audit + the SceneScript API
+
+- **The master gap list: `docs/player/spikes/we-coverage.md`.** Everything Wallpaper Engine supports, item by item,
+  against our fork: SceneScript (all 453 items of WE's official type definitions), scene / object / effect /
+  material / model / particle keys (what the 96 library scenes and WE's stock assets use), blend modes, texture and
+  FBO formats, object types, effect pass options. Each row: implemented / partial / missing, how many scenes use it,
+  a size.
+- **SceneScript: 329 → 421 of 453 implemented** (fork patches 0065–0070). Scripts can now create and destroy
+  layers (the visualiser bars in 3 scenes, WE's clock preset), read a layer's world matrix (5 scenes picked their
+  screen side from it), drive video textures (2), puppet animation layers and bones (3; the sway layers of
+  3363252053 / 3414858021), particle systems, effect shader constants, the camera, and get the
+  applyGeneralSettings / animationEvent / destroy events. `alphatocoverage` materials now draw as WE's cutouts.
+- Found on the way: **every scene with a video texture cleared to black instead of its clear colour** (mpv left its
+  own clear colour behind) — fixed.
+- The 17 items still missing are render features (shadows, volumetric lights, bone physics, blend shapes, skinned
+  models, script-built meshes) or unknowns; they're the "Future batches" at the end of that page.
+- Six library scripts fail in Wallpaper Engine too (a script with two `update`s, a typo'd constant, …): listed on
+  that page, left alone.
+- **Health report rerun:** 86 clean / 10 degraded / 0 failed (was 75 / 21), script errors 38 → 11, no scene worse
+  (the shader agent's patches, in the same pin, took dropped effects 57 → 0). By eye: 3243449890 now draws its
+  triangle clock and the character, 3219908811 its cherry-blossom background and ring.
