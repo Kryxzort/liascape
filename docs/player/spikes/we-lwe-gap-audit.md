@@ -418,7 +418,7 @@ property table GH 0x140273180 places overrides at object+0x760.
 | P27 | mapsequencearoundcontrolpoint extras | **Observed**: reads `count, bounds, limitbehavior, mirror, controlpoint, speedmin, speedmax, axis`, with count bound to the count override. | Reads controlpoint, count and speeds only. `bounds`, `limitbehavior`, `mirror` and `axis` are ignored (`OP.cpp:685-690`). | 3 use bounds+limitbehavior (2288455459, 3233141951, 3413117423) | Ring or sequence spacing differs. | S |
 | P28 | controlpointattract keys | **Observed**: WE reads `offset, scale, threshold, deletethreshold, flags, controlpoint` (defaults GH 0x1401eb290). `origin` is not read. | Reads `origin` as the offset and halves `threshold` (`OP.cpp:749-752`, `CP.cpp:1463`). `deletethreshold` and `flags` are ignored. **Unknown**: WE force law. | 18. Nonzero `origin` in 1 (2679248947). | Attract radius likely half of WE's. Particles near the cursor are not deleted. | S (verify the threshold) **Done in B11, Observed**: `offset` (not `origin`), the full threshold, step = scale·fdt·(1 − d/threshold), flags 2 = never past the point, flags 1 = delete within deletethreshold (GH 0x140265800 case 0xa). |
 | P29 | Sprite renderer `orientation`/`axis` | **Observed**: `orientation` = screen(0) / upright(1) / fixed(2), plus `axis` and `flags` (GH 0x1401efc50). | Not parsed. Always screen-facing (`CP.cpp:1847-1851`). | 1 uses upright/fixed (3174556087, rain splash children) | Splashes face the camera instead of lying flat (moot until P2). | S |
-| P30 | Rope/trail shader combos | **Observed**: for rope types WE sets `TRAILSUBDIVISION`=subdivision and `ORIENTATION`, plus `TRAILSCROLLALPHA` (uvscrolling), `TRAILFADEALPHA` (fadealpha) and `TRAILFADESIZE` (fadesize) (GH 0x1401fffb0). | Only THICKFORMAT and TRAILRENDERER, with CPU Catmull-Rom geometry (`CP.cpp:1651-1660, 2098+`). | rope 11, ropetrail 9 (fade/scroll keys: 0) | **Unknown**: possibly a different ribbon shape or UV. | M |
+| P30 | Rope/trail shader combos | **Observed**: for rope types WE sets `TRAILSUBDIVISION`=subdivision and `ORIENTATION`, plus `TRAILSCROLLALPHA` (uvscrolling), `TRAILFADEALPHA` (fadealpha) and `TRAILFADESIZE` (fadesize) (GH 0x1401fffb0). | Only THICKFORMAT and TRAILRENDERER, with CPU Catmull-Rom geometry (`CP.cpp:1651-1660, 2098+`). | rope 11, ropetrail 9 (fade/scroll keys: 0) | **Unknown**: possibly a different ribbon shape or UV. | M **Done in the leftovers as far as the library goes** (0097): subdivision + 1 pieces per segment (TRAILSUBDIVISION in genericropeparticle.geom); every library rope is ORIENTATION 0, no fade/scroll keys. Left: WE's bezier from its CPU spline buffer. |
 | P31 | colorchange semantics | **Observed**: WE uses colorchange `startvalue` as the system's reference colour (GH 0x1401f2210), which hints at absolute colours. **Unknown**: runtime math (operator interpreter not decompiled). | Multiplies the initial colour by lerp(start, end) (`CP.cpp:1199-1228`). | 4 (2679885269, 3022080536, 3233141951…) | Possibly wrong colours. | S once known **Observed in B11**: relative, as LWE had it (a ramp multiplying the spawn colour); its values are colorn-shifted (patch op 0xc). |
 | P32 | sizechange × size override | **Observed**: sizechange start/end values are themselves bound to the size override (asm 0x1401f97d8; gated by template flag 0x80). **Unknown**: whether runtime size is absolute or relative. | Relative multiplier of the initial size, which already includes the size override (`CP.cpp:1138-1165`). | 32 sizechange; 51 size≠1 | **Unknown**: size could be off by a factor of the size override. | S once known **Observed in B11**: relative, and sizechange's values carry the size override too, so it applies twice (patch op 7, 0x1401f97d8). Done (0051). |
 | P33 | Operator math unverified | **Unknown**: movement drag form, turbulence noise and scale, vortex, oscillate*, alphafade curve (defaults 0.5/0.5 match, GH 0x1401ea170). The interpreter GH 0x140265800 is not decompiled. | Hand-tuned heuristics: turbulence ×2 scale, one phase/speed per operator (`CP.cpp:1240-1300`); turbulentvelocityrandom position×0.1 and cone clamp (`CP.cpp:820-900`); oscillate phase range +2π (`CP.cpp:1523`). | turbulence 21, turbulentvelocityrandom 30, oscillate* 27/24/5, vortex 7 | Motion differs in unknown ways. | L: asm-level RE of GH 0x140265800 **Done in B11** (0051): GH 0x140265800 decoded (a fresh REA/Ghidra pass with no decompile timeout): movement and angularmovement drag, alphafade, the change ramps, oscillate*, controlpointattract, turbulence, vortex. Turbulence's noise is a standard simplex (WE's gradient hash not ported); vortex_v2 not decoded (0 scenes). |
@@ -427,7 +427,7 @@ property table GH 0x140273180 places overrides at object+0x760.
 | P36 | Parented particle systems | **Unknown** for particles specifically (parenting is generic in WE). | `updateMatrices` uses only the object's own origin, angles and scale (`CP.cpp:1828-1841`). | 13 (3042492564, 3163060610, 3174556087…) | Effects don't follow the moving or animated parent. | M (shared with the hierarchy section) |
 | P37 | Frame-time handling | **Observed**: no dt clamp seen in GH 0x140255e50 or GH 0x14025c2e0. When the scene FPS setting is 1-20, each frame is simulated as two half steps (GH 0x14025c2e0 tail). | dt capped at 0.1 s (`CP.cpp:197`). No substeps. | all 78 | At <10 fps (or on hitches) LWE sim time runs slower than wall time. | S |
 | P38 | Random source | **Observed**: one scene-level RNG (`*scene+0x1f08`, GH 0x140223090). | `std::random_device` per system (`CP.cpp:31`). randomframe uses the particle *address* as seed (`CP.cpp:283-287`). | 21 randomframe | randomframe frames repeat per pool slot (patterned). | S |
-| P39 | Particle-level `flags` | **Observed**: only the low 8 bits are kept (`movzx`, asm 0x1401f3379). bit1 or randomframe disables sheet blend. Bit 0x4 sets template+4=0x80. 0x10/0x20/0x40/0x80 opt out of speed/count/lifetime/size override binding. | Uses only bit2 (perspective: 3D spawn shell, separate projection) (`CP.cpp:578, 904, 1883`). | bit0 16, bit1 11, bit2 36 | **Unknown** for bit0 (WE meaning not identified). | S |
+| P39 | Particle-level `flags` | **Observed**: only the low 8 bits are kept (`movzx`, asm 0x1401f3379). bit1 or randomframe disables sheet blend. Bit 0x4 sets template+4=0x80. 0x10/0x20/0x40/0x80 opt out of speed/count/lifetime/size override binding. | Uses only bit2 (perspective: 3D spawn shell, separate projection) (`CP.cpp:578, 904, 1883`). | bit0 16, bit1 11, bit2 36 | **Unknown** for bit0 (WE meaning not identified). | S **Done in the leftovers** (0092): bit 0 is the editor's "Worldspace" (wallpaperui.exe's flag strings); its particles stay where they were emitted (the carry inferred). |
 | P40 | Scene gravity/wind | **Unknown**: `general.gravitydirection/strength`, `windenabled/direction/strength` live in the scene property table (GH 0x1401d…; scene+0x3a8…). No particle-side reader found. Likely bone or puppet physics. | Not parsed. | 22 particle scenes set gravitystrength | Probably none for particles. | n/a |
 | P41 | `maxcount` absent / default size | **Observed**: maxcount absent → 0. The spawn default size is 0.5 and is multiplied by sizerandom (GH 0x140260d80 init: lifetime 1, size 0.5), so LWE's `/2` (`CP.cpp:738`) matches. | Default pool is 1000 when 0. Default size is 20×override (no sizerandom). | 0 (all 78 set maxcount and sizerandom) | none | — |
 
@@ -2582,3 +2582,173 @@ Player tests (DEBUG, pin `f4aa7c5`): 740 passed, 0 failed, 3 ignored.
 change: 3319542538 loses its "unsupported: VolumeLight (shape) object" error (6 → 5 errors, loss 2 → 1 %: the `Text`
 user property is what's left); no other scene's class, loss, errors or warnings moved. VolumeLight is gone from the
 report.
+
+### Leftovers result: stereo audio feed, HarfBuzz text, world-space particles, health findings (fork patches 0091–0097, pin `262d97b`, 2026-11-05)
+
+The remaining "Left:" items of B1–B14, F1–F9, the health report and the coverage doc, worked in order of library
+usage (scan of `~/.local/share/Steam/steamapps/workshop/content/431960`, 96 scenes). Decoded from the same
+wallpaper64.exe 2.8.485 with the sound spike's `all.c`, plus wallpaperui.exe's and mediaextensions64.dll's
+strings/asm. **Observed** = read in the binary; **Inferred** = ours, marked.
+
+**B8 stereo feed (41 audio scenes; player side + no fork change).** The worker fed LWE's legacy `wp_audio_input_mix`:
+SysMon's mono average of every stream as 1024 u8 samples, a snapshot of the newest 1024 per tick, taken as
+44.1 kHz. Now:
+
+- SysMon keeps each stream's frames in **stereo** on the graph clock (`pw_buffer.time` → a 48 kHz frame index; a
+  buffer within a quantum of the ring's end continues it, a skipped one leaves silence, a jump back starts over) and
+  mixes them by their place on that clock up to the settled point (the oldest stream's end, never > 4096 frames behind
+  the newest), into one stereo stream every reader takes from its own cursor (`SysMon::visual_since`).
+- Each scene source appends what it gets (newest 4096 frames kept); a `Tick` carries the frames since the last one
+  (`AudioInput`: 48 kHz s16 stereo, base64 — JSON carries a tick's floats badly; protocol 4 → 5).
+- The worker pushes them in order through `wp_context_audio_input_push` (2 channels, 48 kHz), so LWE's WE-exact
+  analysis (B8, 0045) runs per channel on a continuous stream: `g_AudioSpectrum*Left` ≠ `*Right` now.
+- `--lwe-smoke --tone HZ` feeds the same way (48 kHz stereo, in order); `--tone-channel left|right`, `--tone noise`,
+  `--tone-sweep HZ1`; the JSON reports the 16-band left/right spectrum.
+
+**The audio scenes that didn't react to a 110 Hz tone (B8: 17 of 39 loading scenes).** With the in-order stereo feed,
+37 of the 41 react to 110 Hz or white noise (was 22). Why the old feed missed them (**Inferred**): each 1280-sample
+analysis window was spliced from two overlapping 1024-sample snapshots with a phase jump, so a pure tone's band level
+fell under the scenes' `audiobounds` (pulse/shake smoothstep 0.5..1, Simple Audio Bars' thresholds). Of the rest:
+
+- 2290002190: its audio is a script on the particle system's `instanceoverride.rate` — **such scripts never ran**
+  (CParticle registered only scale/angles/visible/parallaxDepth). Fixed in 0094 for all 11 library scenes that script
+  an override (rate 4, size 3, count 3, speed 1, controlpoint1 2, colorn 2, alpha 1).
+- 2388299037, 3509243656: every audio effect in the default configuration has `AUDIOPROCESSING` 0 (off), or the
+  visualiser sits under a hidden-by-default layer; content, not ours.
+- 3445973124: `background`'s pulse has `AUDIOPROCESSING` 1 (left), bands 0–1, bounds 0.5–1, visible: by the shader
+  (and the spectrum the smoke reports, left 0.65 / 0.96) it should tint; the 3 s frames differ by ≤ 1 level. Not
+  explained by static reading — a WE capture with music is the check.
+
+**Scene sound peaks (`volume²` above 1).** **Observed** (mediaextensions64.dll, SFML 3's miniaudio): after the data
+callback (and the master volume, 0x18002b000), `noClip` off (device +0x66) and an f32 device (+0x334 == 5) run the
+in-place clip loop 0x180029cb0 (`minps`/`cmpltps` against ±1.0) over frames × channels — WE hard-clips its summed
+output at ±1, after each sound's `volume²` and the wallpaper's level. The worker now clamps its output to ±1 **after**
+the stream's own gain (the wallpaper level, a transition, the normalization) — WE's order, so a lower gain still leaves
+peaks whole; 2375914945 at `musicvolume` 2 (peaks 2.04) clips at 0 dBFS as in WE. Inferred: SFML leaves `noClip` at
+its default (false).
+
+**B4 HarfBuzz shaping + WE's fallback chain (45 text scenes, 0091).** **Observed** (GH 0x1401da3c0): each line is cut
+into runs of one face — every character's face from the font, else the chain; tab, LF, CR, space and ZWJ stay in the
+run before them (mask 0x100002600, 0x200d) — and each run is shaped (FUN_1401e1c00 / 0x1401e0eb0, not read further).
+The chain is the table at 0x1404c5030, in order, a slot opened when no open face has the character: arial.ttf,
+seguiemj.ttf, arialuni.ttf, segoeui.ttf, `fonts/TwemojiMozilla.ttf` (WE's own asset), seguisym.ttf, msyh.ttc,
+Malgun.ttf (flag 1 = the Windows fonts folder). LWE now shapes each run with `hb_shape` on an `hb_ft` font of the
+face (advances `x_advance >> 6`, offsets applied), and resolves each Windows slot by its family, then families
+fontconfig commonly has in its place, accepted only under that exact name (Liberation Sans / Arimo, Noto Emoji, Noto
+Sans / DejaVu Sans, Selawik / Noto Sans / Open Sans, Noto Sans Symbols 2, Noto Sans CJK SC …, Noto Sans CJK KR …);
+TwemojiMozilla from the assets; fontconfig's own choice stays as a last resort (ours). Inferred: hb_ft's default load
+flags, script and direction guessed per run.
+
+Size check (as B4's: `WPENGINE_TEXT_DEBUG=1`, the editor's saved `size`, 66 literal texts now that the 3D scenes load):
+
+| | f4aa7c5 | 0091 |
+|---|---|---|
+| width and height within 0 px | 4 | 22 |
+| within 2 px | 12 | 29 |
+| width within 3 % | 46 | 53 |
+| mean width error | 3.5 % | 2.5 % |
+
+Scene fonts now match the editor to the pixel in most texts (Atami, Mikodacs, TAHOMAB0, 书法字体, NotoSans, 2.ttf);
+the misses left are Arimo / Comic Neue standing in for Arial / Comic Sans (metric substitutes kern differently) and
+3480481965's Gogh-ExtraBold.
+
+**World-space particles (system flags bit 0, 16 scenes, 0092).** **Documented** (wallpaperui.exe's particle-system
+strings: `worldspace` among the disable-colour/lifetime/count/speed/size overrides = flags 8/0x40/0x20/0x10/0x80;
+bit 1 the sheet-blend opt-out, bit 2 perspective, so "Worldspace" is bit 0 by elimination). Its particles stay where
+they were emitted when the system moves, turns or scales: 3104056709's `zzz` follows the cursor layer by script and
+now leaves its trail. **Inferred** (the simulation's world-space branch wasn't read): the particles stay in the
+system's space and are carried across each change of its transform (M_now⁻¹ · M_last; the parallax, a view offset,
+excluded). The other 15 scenes' systems don't move.
+
+**Health-report findings (0093).**
+
+- 3516106265's 24 missing `materials/launcherN.tex`: a usertexture naming a `usershortcut` property — WE binds the
+  picked shortcut's icon (**Observed**: GH 0x140184980 names it `"usershortcut_" + property`, type 2); none picked
+  keeps the slot's texture (**Inferred**: the author's `default_dock_icon` there). A picked Windows shortcut's icon
+  can't be read on Linux: the slot keeps its texture (logged).
+- 3042865984's `materials/.tex`: refract's `g_Texture2` annotation `"default": ""` names no file; the pass sets the
+  texture. Not looked up any more.
+- 3319542538's `unsupported: user property type Text` ×5: value-less link labels; read as `text` labels (nothing in a
+  scene reads a label, so no picture depends on WE's spelling rule, which wasn't read).
+- The 10 remaining script errors, each checked against WE (content, they throw in WE too): 3432999904's two `export
+  function update` (a module SyntaxError in any engine); 3219908811 / 3243449890 `value.x =` on a boolean (strict-mode
+  TypeError); 3326873240's global `scene` (WE's globals are thisScene/thisLayer/thisObject/engine/input/shared/
+  console/localStorage); 3042492564's `event` in `applyUserProperties` (no such parameter); 3163060610's
+  `engine.AUDIO_RESOtime_switchingION_16` (undefined → WE's own `RangeError: Resolution must be either 16, 32 or 64.`,
+  a string in scenescript64.dll); 2890767643's lookups of layers the scene doesn't have (`playeroutlineanim` and the
+  `.mp3` sound layers).
+
+**Particle instanceoverride scripts (0094).** Above: the overrides an object sets are registered as script
+properties; their keyframe animations already played.
+
+**Shared parent/children timelines (5 scenes, 0095).** **Observed** (GH 0x1401d1740): an animation's `options.parent.key`
+is read; the editor writes it on the child with `options.children` on the parent. The parser records each animation
+with the JSON object holding it and its key; after the scene parse a child is linked to the parentless sibling it
+names, and its time is the parent's (held at its own length), advanced after the parents. 3163060610's Size and opacity
+now wait for their scripted, `startpaused` Radius timeline instead of running at load. **Inferred**: the shared clock.
+
+**WE's simplex hash (B11, 21 turbulence scenes, 0096 comment only).** **Observed**: GH 0x14012c280 is Gustavson's 3D
+simplex noise (skew 1/3, unskew 1/6, 0.6 − r², t⁴, × 32, the 12 edge gradients) with Perlin's permutation (0x1404c3520,
+512 bytes, equal to LWE's `PERLIN_PERM`) and permMod12 = perm % 12 (0x1404c37b0): what LWE computes. Nothing to port.
+
+**Rope subdivision (P30, rope 11 + ropetrail 9 scenes, 19 in all, 0097).** **Observed**: WE sets `TRAILSUBDIVISION` = the
+renderer's `subdivision` (defaults 4 rope / 1 ropetrail, GH 0x1401ee560 / 0x1401ee8c0) and genericropeparticle.geom
+emits that many points between a segment's ends: subdivision + 1 pieces (LWE drew max (1, subdivision)). `ORIENTATION`
+is 0 in every library rope (eye-facing, what LWE's CPU ribbon does in 2D); no library rope sets uvscrolling /
+fadealpha / fadesize. Not ported: WE's per-segment bezier (control points `start + CP · 0.15` from the CPU buffer's
+spline points, whose builder wasn't read) — LWE keeps its Catmull-Rom.
+
+**`SPRITESHEETBLENDNPOT` (B3, 2 sheets in 3 scenes: 3445973124, 3479521040, 3490034653's birds).** **Observed**: WE sets
+it for a sheet padded to a power-of-two texture; common_particles.h's NPOT walk wraps a row at the image's width
+(`g_Texture0Resolution.z / .x`). Tried and reverted: LWE uploads a mip at its stored size, and these two sheets are
+stored at their image size (2048 × 1024 / 1024² headers over 1603 × 616 / 516² images), so LWE's plain walk
+(frameWidth = 1 / cols) already is WE's; the NPOT walk over that upload cut the birds up (smoke pair). Comment in 0097.
+
+**Fork tests** (`host_api_test`, 108 → 113 passed): the 5 new ones fail on `f4aa7c5`.
+
+| Test | What it checks | On `f4aa7c5` |
+|---|---|---|
+| `text_shapes_with_harfbuzz` | NotoSans 20 pt "AVAVAVAV" 24 px narrower than "AAAAVVVV" (GPOS kerning; 384 vs 408) | 412 = 412 |
+| `particle_world_space_stays` | a flags-1 system moved 20 → 50 by script leaves its particle at x 25; a flags-0 one carries it to x 49 | both at x 49 |
+| `unset_slots_are_not_missing` | a `"default": ""` sampler + a `usershortcut` usertexture keep the pass's white texture with no missing asset; a `Text` label property isn't "unsupported" | `materials/.tex` missing |
+| `particle_override_scripts_run` | an instanceoverride `size` scripted to 3 draws the particle 3 × wide (6 px) | 2 px |
+| `animation_follows_its_parent` | an alpha fade with `parent.key` origin holds at its first key under a paused origin timeline, ends under a playing one | both ended (r 0) |
+
+Player units (new; the first two can't exist before — the old mix was a mono u8 average): sysmon
+`visual_mix_is_stereo_and_clock_aligned`, `ring_follows_the_clock`; proto `audio_input_keeps_both_channels`; worker
+`output_clips_at_full_scale_after_the_gain` (fails on the old Dsp: peak 2.0).
+
+**Gates.**
+
+- Health (`scene-health.md`, 96 scenes): 86 clean / 10 degraded → **89 clean / 7 degraded** / 0 failed. 3042865984,
+  3319542538 and 3516106265 are clean (missing assets 25 → 0, unsupported 5 → 0); no scene worse in class or errors;
+  the 7 left are the content script errors above.
+- The 96-scene smoke (the health run's PNGs vs F2's): none newly blank (lit pixels within 50 % on all 95 that render).
+- Shader sweep (4085 checks vs F2's): 6 failed before, 6 still failing, 0 fixed, 0 newly failing.
+- Audio: 110 Hz and white-noise runs of the 41 audio scenes (`--tone`, scratchpad `lo/t110`, `lo/tnoise`).
+- Player tests (DEBUG, pin `262d97b`): 743 passed, 0 failed, 3 ignored (740 on `f4aa7c5`).
+
+**Listed, not ported (no library user and no readable WE code, or no library user and nothing visible):**
+
+- `controlpointangle0`–`7` (0 library users; their reader is in the unread spawn interpreter GH 0x140260d80),
+  vortex_v2 (operator case 0x10, 0 library users, 5 stock presets; not decoded), P24 cone and P25/P26 (0 scenes), P27's
+  non-default bounds / limitbehavior / axis (0 scenes: all on WE's defaults), the `layerimage` emitter and
+  `collisionmodel` (0 library users; the CPU layer-pixel path wasn't found), `customsortorder` (0 users; reader not
+  found), the 3D camera's zoom / parallax (0 3D scenes use either), a camera object's own `path` / `queuemode` (all 11
+  files are `{"paths": []}`).
+- Directional shadow cascades, light clusters (> 16 lights; no library scene has that many), 2.8.485's PCSS (quality 4),
+  the `shadows` / `volumetrics` quality settings, SHADOW / COOKIE / fog / directional volumetrics: 0 library scenes cast
+  shadows or volumetrics. `lightconfig`: 3477054430's `{"spot": 4}` is an older form 2.8.485 doesn't read (it reads only
+  `directional` / `directionalshadow`): WE ignores it too, nothing to port.
+- Root motion (MDLA flags bit 0), MORPHING_MODIFIERS, MDLA v6's per-bone float track, bone physics (no library bone
+  enables it), IK limits (`ikce`, `ikrmin`/`ikrmax`: 0 users), puppet hit boxes (`CursorEvent.hitBox`: 0 readers; the
+  layout isn't in MDLE/MDMP), `transformAttachmentToTexture` (0 callers), ITextLayer writes re-laying the text (0
+  writers), `timeofday` animations (0 users), T6/T7 text background / outline / shadow / MSDF (0 scenes), text
+  `depthtest` (2D only: no depth to test).
+
+**Still open (users or readable code, not done in this run):** the `.tex` flags 2²¹ (1 library texture) and 2²³ (2):
+their reader wasn't looked for in this run; `general.hdr`'s gate on the post-processing setting (GH 0x14013f860,
+5 HDR scenes); E9 / E11 (`g_LayerModelMatrix`, 3516106265) / E20 / E38; the fdt frame-time source and the child
+"alive" test (GH 0x1402524c0); the puppet attachment builder and the additive scale; WE's rope bezier; the SceneScript
+angles binding's address. WE captures (owner): 3414858021's "WEDNESDAY" (centred at the scripted x8 = 0.967 × canvas,
+it reaches the edge here; whether WE's layout does the same needs WE), 3445973124 with music, the B-batch captures.
