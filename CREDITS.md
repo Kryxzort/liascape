@@ -117,3 +117,7 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0083-render-camera-paths-camerafade-and-the-transparent-s.patch` | render: camera paths, camerafade and the transparent sort's sortorder | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0084-particle-the-operators-and-initializers-of-WE-s-stoc.patch` | particle: the operators and initializers of WE's stock presets | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0085-particle-remap-ranges-as-vectors-the-stock-operators.patch` | particle: remap ranges as vectors, the stock operators' blend-in | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0086-render-shape-objects-draw-their-effect-straight-into.patch` | render: shape objects draw their effect straight into the scene | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0087-render-puppet-IK-chains-reach-for-their-animated-tar.patch` | render: puppet IK chains reach for their animated targets | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0088-render-volumetric-point-and-spot-lights-castvolumetr.patch` | render: volumetric point and spot lights (castvolumetrics) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0089-render-name-the-object-factory-s-address-right-in-th.patch` | render: name the object factory's address right in the shape and light notes | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

@@ -1,7 +1,7 @@
 From 4b85ae769c2201935fdafe50bed64fddf41a1edd Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:37:34 +0530
-Subject: [PATCH 71/85] render: shadows, light cookies, tube and directional
+Subject: [PATCH 71/89] render: shadows, light cookies, tube and directional
  lights
 
 WE's shadow pass and the rest of its generated lighting (decoded from wallpaper64.exe 2.8.485):

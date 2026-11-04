@@ -1,0 +1,414 @@
+From d467a716a292bb3340d36785e897c6a587e12302 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 23:46:32 +0530
+Subject: [PATCH 86/89] render: shape objects draw their effect straight into
+ the scene
+
+A `"shape": "quad"` object (upstream logged it as an unsupported VolumeLight) is, in
+wallpaper64.exe 2.8.485, its own class (vtable 0x1404d36e8, built by the object factory's
+`shape` branch): a square of the scene's orthographic height (GH 0x140285b40), its corners
+the first effect's point0..point3 (uv = the point, WE's two triangles 0 2 1 / 0 3 2;
+GH 0x1402861b0, the plain quad without them), every pass compiled with DIRECTDRAW 1
+(GH 0x140285f40), and the last effect's passes drawn into the scene with the layer's
+transform (GH 0x140285b70), the last one additively (GH 0x1402866d0 sets the pass's
+blending to 2 = additive). The stock lightshafts effect is the one that uses it
+(3319542538's "Rayons lumineux").
+
+CImage builds such an image with no base pass and no colour-blend or tint pass, 1 x 1
+composites, and a 6-vertex quad recomputed per frame from the layer's scene rectangle.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "F2 result" (3319542538, health: unsupported VolumeLight)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   8 ++
+ .../Data/Parsers/ObjectParser.cpp             |  86 ++++++++++++-
+ .../Data/Parsers/ObjectParser.h               |   2 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 115 +++++++++++++++++-
+ .../WallpaperEngine/Render/Objects/CImage.h   |   8 ++
+ 5 files changed, 209 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index a481462..d7aa42a 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -169,6 +169,14 @@ struct ImageData {
+     std::vector<ImageEffectUniquePtr> effects;
+     /** The animation layers used in the puppet warp */
+     std::vector<ImageAnimationLayerUniquePtr> animationLayers;
++    /**
++     * A `shape` object (`"shape": "quad"`, WE's class with vtable 0x1404d36e8, built by the object factory
++     * GH 0x1401bec50's `shape` branch): no picture of its own, a square of the scene's height whose corners are its
++     * first effect's point0..point3 (GH 0x1402861b0); its last effect's passes draw straight into the scene with
++     * DIRECTDRAW 1 (GH 0x140285f40, GH 0x140285b70), the last one additively (GH 0x1402866d0). Empty for any other
++     * image
++     */
++    std::string shape = {};
+ };
+ 
+ class Image : public Object, public ImageData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 386e30a..7eb517a 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -25,7 +25,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+     const auto particleIt = it.find ("particle");
+     const auto textIt = it.find ("text");
+     const auto lightIt = it.find ("light");
+-    // use shape to refer to VolumeLight
++    // a shape object (WE's "shape": "quad"; upstream took it for a VolumeLight, which is a light's castvolumetrics)
+     const auto shapeIt = it.find ("shape");
+     // a camera object ("camera": "default"): its zoom frames the scene (CScene::updateCamera)
+     const auto cameraIt = it.find ("camera");
+@@ -120,9 +120,13 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	return parseText (it, project, std::move (basedata));
+     } else if (lightIt != it.end () && lightIt->is_string ()) {
+ 	return parseLight (it, project, std::move (basedata));
+-    } else if (shapeIt != it.end ()) {
+-	sLog.error ("VolumeLight objects are not supported yet");
+-	WPENGINE_HEALTH ("unsupported", { { "what", "VolumeLight (shape) object" } });
++    } else if (shapeIt != it.end () && shapeIt->is_string ()) {
++	if (shapeIt->get<std::string> () == "quad") {
++	    return parseShape (it, project, std::move (basedata));
++	}
++	// WE's factory takes any string `shape` (GH 0x1401bec50) and its mesh builder only ever builds the quad
++	sLog.error ("Shape '", shapeIt->get<std::string> (), "' is not supported");
++	WPENGINE_HEALTH ("unsupported", { { "what", "shape object '" + shapeIt->get<std::string> () + "'" } });
+     } else if (isCamera) {
+ 	// a camera object: plain object data, read by CScene::updateCamera
+     } else {
+@@ -343,6 +347,80 @@ ObjectParser::parseImage (const JSON& it, const Project& project, ObjectData bas
+     return result;
+ }
+ 
++ImageUniquePtr ObjectParser::parseShape (const JSON& it, const Project& project, ObjectData base) {
++    const auto& properties = project.properties;
++    const auto& effects = it.optional ("effects");
++    const std::string target = "_rt_shape_" + std::to_string (base.id);
++
++    // no picture: the base pass is never drawn (CImage builds only the effects' passes for a shape), it only names
++    // the layer's (transparent) texture
++    auto material = std::make_unique<Material> (Material { .filename = target, .passes = {} });
++    material->passes.push_back (std::make_unique<MaterialPass> (MaterialPass {
++	.blending = BlendingMode_Normal,
++	.cullmode = CullingMode_Disable,
++	.depthtest = DepthtestMode_Disabled,
++	.depthwrite = DepthwriteMode_Disabled,
++	.shader = "genericimage2",
++	.textures = {},
++	.usertextures = {},
++	.combos = {},
++	.constants = {},
++    }));
++    auto model = std::make_unique<ModelStruct> (ModelStruct {
++	.filename = target,
++	.material = std::move (material),
++	.solidlayer = false,
++	.fullscreen = false,
++	.passthrough = false,
++	.autosize = false,
++	.nopadding = false,
++	.width = std::nullopt,
++	.height = std::nullopt,
++	.puppet = std::nullopt,
++    });
++
++    auto parsedEffects = effects.has_value () ? parseEffects (*effects, project) : std::vector<ImageEffectUniquePtr> {};
++    // every pass of a shape's effects compiles with DIRECTDRAW 1 (GH 0x140285f40 sets combos.DIRECTDRAW in the pass):
++    // the stock lightshafts then reads no layer picture and maps the quad's corners back to its unit square
++    for (const auto& effect : parsedEffects) {
++	const size_t passes = effect->effect != nullptr ? effect->effect->passes.size () : 0;
++	while (effect->passOverrides.size () < std::max<size_t> (passes, 1)) {
++	    effect->passOverrides.push_back (std::make_unique<ImageEffectPassOverride> (ImageEffectPassOverride {
++		.id = -1, .combos = {}, .constants = {}, .textures = {}, .usertextures = {} }));
++	}
++	for (const auto& pass : effect->passOverrides) {
++	    pass->combos.insert_or_assign ("DIRECTDRAW", 1);
++	}
++    }
++
++    auto result = std::make_unique<Image> (
++	std::move (base),
++	ImageData {
++	    .scale = it.user ("scale", properties, glm::vec3 (1.0f)),
++	    .angles = it.user ("angles", properties, glm::vec3 (0.0f)),
++	    .visible = it.user ("visible", properties, true),
++	    .alpha = it.user ("alpha", properties, 1.0f),
++	    .color = it.color ("color", properties, Builders::ColorBuilder::White),
++	    .alignment = "center",
++	    // the shape's square is the scene's height (GH 0x140285b40: both sides from the scene's ortho height);
++	    // CImage sizes it, as the scene knows that height
++	    .size = glm::vec2 (0.0f),
++	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
++	    .perspective = it.user ("perspective", properties, false),
++	    .colorBlendMode = it.user ("colorBlendMode", properties, 0),
++	    .brightness = it.user ("brightness", properties, 1.0f),
++	    .copyBackground = it.user ("copybackground", properties, true),
++	    .clampUVs = it.user ("clampuvs", properties, true),
++	    .noInterpolation = it.user ("nointerpolation", properties, false),
++	    .model = std::move (model),
++	    .effects = std::move (parsedEffects),
++	    .animationLayers = {},
++	    .shape = it.optional ("shape", std::string ("quad")),
++	}
++    );
++    return result;
++}
++
+ std::vector<ImageEffectUniquePtr> ObjectParser::parseEffects (const JSON& it, const Project& project) {
+     if (!it.is_array ()) {
+ 	return {};
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+index 69564a6..6841714 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.h
+@@ -24,6 +24,8 @@ private:
+     parseImage (const JSON& it, const Project& project, ObjectData base, const std::string& image);
+     static ParticleUniquePtr parseParticle (const JSON& it, const Project& project, ObjectData base);
+     static TextUniquePtr parseText (const JSON& it, const Project& project, ObjectData base);
++    /** A `shape` object: an image with no picture whose effects draw straight into the scene (ImageData::shape) */
++    static ImageUniquePtr parseShape (const JSON& it, const Project& project, ObjectData base);
+     static LightUniquePtr parseLight (const JSON& it, const Project& project, ObjectData base);
+     static std::vector<ImageEffectUniquePtr> parseEffects (const JSON& it, const Project& project);
+     static ImageEffectUniquePtr parseEffect (const JSON& it, const Project& project);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index fed13e5..c308a7d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -91,6 +91,12 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     glm::vec3 origin = transform.origin;
+     glm::vec2 size = this->getSize ();
+     glm::vec3 scale = transform.scale;
++    const bool isShape = !this->m_image.shape.empty ();
++
++    // a shape is a square of the scene's (orthographic) height, both sides (GH 0x140285b40 reads the height twice)
++    if (isShape) {
++	size = { scene_height, scene_height };
++    }
+ 
+     this->detectTexture ();
+ 
+@@ -199,11 +205,13 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+ 	       : 0);
+ 
+     // WE's composites are half float in an HDR scene (GH 0x140216080: format 0xe when the renderer's flag 0x2000)
++    // a shape draws its passes straight into the scene: its composites are never drawn to (1 x 1, not the square)
++    const glm::vec2 compositeSize = isShape ? glm::vec2 (1.0f) : size;
+     const auto mainFBO = scene.create (
+-	nameA.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
++	nameA.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, compositeSize, compositeSize
+     );
+     const auto subFBO = scene.create (
+-	nameB.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
++	nameB.str (), scene.getFBO ()->getFormat (), compositeFlags, 1, compositeSize, compositeSize
+     );
+     this->m_currentMainFBO = this->m_mainFBO = mainFBO;
+     this->m_currentSubFBO = this->m_subFBO = subFBO;
+@@ -346,6 +354,12 @@ CImage::~CImage () {
+     if (this->m_puppetScenePosition != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetScenePosition);
+     }
++    if (this->m_shapeScenePosition != GL_NONE) {
++	glDeleteBuffers (1, &this->m_shapeScenePosition);
++    }
++    if (this->m_shapeTexCoord != GL_NONE) {
++	glDeleteBuffers (1, &this->m_shapeTexCoord);
++    }
+     if (this->m_puppetSpacePosition != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetSpacePosition);
+     }
+@@ -783,6 +797,53 @@ void CImage::updatePuppetScenePositionBuffer () {
+     glBufferData (GL_ARRAY_BUFFER, positions.size () * sizeof (GLfloat), positions.data (), GL_DYNAMIC_DRAW);
+ }
+ 
++void CImage::updateShapeBuffers () {
++    const glm::vec2 size = this->getSize ();
++    if (size.x <= 0.0f || size.y <= 0.0f) {
++	return;
++    }
++    // the corners: the first effect's first pass's point0..point3, all four or none (GH 0x1402861b0 falls back to the
++    // plain quad, GH 0x140219570)
++    glm::vec2 points[4] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
++    if (!this->m_image.effects.empty () && !this->m_image.effects.front ()->passOverrides.empty ()) {
++	const auto& constants = this->m_image.effects.front ()->passOverrides.front ()->constants;
++	glm::vec2 found[4];
++	bool all = true;
++	for (int i = 0; i < 4 && all; i++) {
++	    const auto it = constants.find ("point" + std::to_string (i));
++	    if (it == constants.end () || it->second == nullptr || it->second->value == nullptr) {
++		all = false;
++	    } else {
++		found[i] = it->second->value->getVec2 ();
++	    }
++	}
++	if (all) {
++	    std::copy (std::begin (found), std::end (found), std::begin (points));
++	}
++    }
++    // WE's vertices: (S · (p.x − 0.5), S · (0.5 − p.y)) about the origin, y up, uv = p; here the layer pixel (p · S)
++    // (y down) on the layer's scene rectangle, as the puppet's mesh (updatePuppetScenePositionBuffer)
++    constexpr int order[6] = { 0, 2, 1, 0, 3, 2 };
++    GLfloat positions[18];
++    GLfloat texcoords[12];
++    for (int i = 0; i < 6; i++) {
++	const glm::vec2& p = points[order[i]];
++	positions[i * 3 + 0] = this->m_pos.x + p.x * (this->m_pos.z - this->m_pos.x);
++	positions[i * 3 + 1] = this->m_pos.w + p.y * (this->m_pos.y - this->m_pos.w);
++	positions[i * 3 + 2] = 0.0f;
++	texcoords[i * 2 + 0] = p.x;
++	texcoords[i * 2 + 1] = p.y;
++    }
++    if (this->m_shapeScenePosition == GL_NONE) {
++	glGenBuffers (1, &this->m_shapeScenePosition);
++	glGenBuffers (1, &this->m_shapeTexCoord);
++    }
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_shapeScenePosition);
++    glBufferData (GL_ARRAY_BUFFER, sizeof (positions), positions, GL_DYNAMIC_DRAW);
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_shapeTexCoord);
++    glBufferData (GL_ARRAY_BUFFER, sizeof (texcoords), texcoords, GL_DYNAMIC_DRAW);
++}
++
+ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const {
+     pass->setGeometryCallback (
+ 	[this, pass, toScene] () {
+@@ -890,8 +951,13 @@ void CImage::setup () {
+ 	}
+     }
+ 
+-    // copy pass to the composite layer
++    const bool isShape = !this->m_image.shape.empty ();
++
++    // copy pass to the composite layer (a shape has none: only its effects draw)
+     for (const auto& cur : this->getImage ().model->material->passes) {
++	if (isShape) {
++	    break;
++	}
+ 	this->m_passes.push_back (
+ 	    new CPass (*this, std::make_shared<FBOProvider> (this), *cur, std::nullopt, std::nullopt, std::nullopt)
+ 	);
+@@ -909,6 +975,10 @@ void CImage::setup () {
+ 	int effectIndex = -1;
+ 	for (const auto& cur : this->m_image.effects) {
+ 	    effectIndex++;
++	    // a shape draws its last effect only (GH 0x140285b70 takes the effect list's back ())
++	    if (isShape && cur != this->m_image.effects.back ()) {
++		continue;
++	    }
+ 	    // WPENGINE_HEALTH: what fails while this effect builds (its shaders, textures) names it
+ 	    const WallpaperEngine::Health::Scope healthEffect ("effect", cur->id);
+ 	    const WallpaperEngine::Health::Scope healthEffectName ("effect_name", cur->effect != nullptr && !cur->effect->name.empty () ? cur->effect->name : cur->name);
+@@ -1054,7 +1124,7 @@ void CImage::setup () {
+ 	}
+     }
+ 
+-    if (!debug.baseOnly) {
++    if (!debug.baseOnly && !isShape) {
+ 	const auto magentaCompositeTint = findMagentaCompositeTint (this->m_image, debug.skipEffects);
+ 	if (magentaCompositeTint.has_value ()) {
+ 	    auto tintOverride = std::make_unique<ImageEffectPassOverride> (ImageEffectPassOverride {
+@@ -1085,7 +1155,7 @@ void CImage::setup () {
+     // no BLENDMODE pass, and the layer's last draw blends additively (GH 0x140214b50, 0x1402321d0; the BLENDMODE combo
+     // is 0 for modes 0 and 31, GH 0x140211f90)
+     const int colorBlendMode = this->m_image.colorBlendMode->value->getInt ();
+-    if (!debug.baseOnly && colorBlendMode > 0 && colorBlendMode != 31) {
++    if (!debug.baseOnly && !isShape && colorBlendMode > 0 && colorBlendMode != 31) {
+ 	this->m_materials.colorBlending.material
+ 	    = MaterialParser::load (this->getScene ().getScene ().project, "materials/util/effectpassthrough.json");
+ 	this->m_materials.colorBlending.override = std::make_unique<ImageEffectPassOverride> (ImageEffectPassOverride {
+@@ -1111,6 +1181,11 @@ void CImage::setup () {
+ 
+     CRenderable::setup ();
+ 
++    // a shape's quad buffers exist before its passes take them
++    if (isShape) {
++	this->updateShapeBuffers ();
++    }
++
+     this->updateActivePasses ();
+     this->m_initialized = true;
+ }
+@@ -1172,7 +1247,8 @@ void CImage::updateActivePasses () {
+ 
+     // if there's more than one pass the blendmode has to be moved from the beginning to the end (of the passes that
+     // run: a hidden last effect hands the layer's blending to the pass before it)
+-    if (this->m_activePasses.size () > 1) {
++    // (a shape's passes each draw into the scene with their own blending, GH 0x1402176a0 per pass)
++    if (this->m_activePasses.size () > 1 && this->m_image.shape.empty ()) {
+ 	const auto first = this->m_activePasses.front ();
+ 	const auto last = this->m_activePasses.back ();
+ 
+@@ -1180,6 +1256,12 @@ void CImage::updateActivePasses () {
+ 	first->setBlendingMode (BlendingMode_Normal);
+     }
+ 
++    // a shape's last pass draws additively (GH 0x1402176a0 calls the shape's vtable +0x108, GH 0x1402866d0, which sets
++    // the pass's blending to 2 = additive, GH 0x140182410's names): its rays add to the scene
++    if (!this->m_image.shape.empty () && !this->m_activePasses.empty ()) {
++	this->m_activePasses.back ()->setBlendingMode (BlendingMode_Additive);
++    }
++
+     // the layer's last draw: additive for colour blend mode 31; translucent for a passthrough layer that doesn't copy
+     // the background (it starts transparent, GH 0x1402321d0)
+     if (!this->m_activePasses.empty ()) {
+@@ -1249,6 +1331,24 @@ void CImage::setupPasses () {
+ 	    inverseProjection = &this->m_modelViewProjectionScreenInverse;
+ 	}
+ 
++	// a shape: every pass draws its quad straight into the scene (GH 0x140285b70), reading no layer picture
++	if (!this->m_image.shape.empty ()) {
++	    writesToTarget = false;
++	    spacePosition = this->m_shapeScenePosition;
++	    drawTo = this->getScene ().getTargetFor (this->m_image);
++	    projection = &this->m_modelViewProjectionScreen;
++	    inverseProjection = &this->m_modelViewProjectionScreenInverse;
++	    pass->setDestination (drawTo);
++	    pass->setInput (this->getTexture ());
++	    pass->setPreviousInput (nullptr);
++	    pass->setPosition (spacePosition);
++	    pass->setTexCoord (this->m_shapeTexCoord);
++	    pass->setModelViewProjectionMatrix (projection);
++	    pass->setModelViewProjectionMatrixInverse (inverseProjection);
++	    drawTo = prevDrawTo;
++	    continue;
++	}
++
+ 	// the puppet mesh replaces the first pass's quad; a puppet without effects draws it straight to the scene, in
+ 	// the layer's scene-space rectangle (before, its layer pixels were drawn with the scene's projection)
+ 	if (isFirstPass && this->m_hasPuppetMesh) {
+@@ -1443,6 +1543,9 @@ void CImage::render () {
+     if (this->m_hasPuppetMesh) {
+ 	this->updatePuppetScenePositionBuffer ();
+     }
++    if (!this->m_image.shape.empty ()) {
++	this->updateShapeBuffers ();
++    }
+ 
+ #if !NDEBUG
+     std::string str = "Image ";
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index b58c72f..fa389c5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -177,6 +177,11 @@ private:
+     /** `toScene`: the pass draws to the scene (no effects), with the mesh in the layer's scene rectangle */
+     void setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const;
+     void updatePuppetScenePositionBuffer ();
++    /**
++     * A shape (ImageData::shape): its quad's corners in the scene, this frame — the first effect's point0..point3
++     * (GH 0x1402861b0; the unit square without them) on the layer's square, as two triangles (0 2 1, 0 3 2)
++     */
++    void updateShapeBuffers ();
+     ResolvedTransform updateGeometryBuffers ();
+     [[nodiscard]] glm::vec2 resolveGeometrySize (float sceneWidth, float sceneHeight, glm::vec3& origin) const;
+     void updateScenePosition (
+@@ -195,6 +200,9 @@ private:
+     GLuint m_passSpacePosition;
+     GLuint m_texcoordCopy;
+     GLuint m_texcoordPass;
++    /** a shape's quad: scene positions and its corners as texture coordinates (6 vertices) */
++    GLuint m_shapeScenePosition = GL_NONE;
++    GLuint m_shapeTexCoord = GL_NONE;
+     GLuint m_puppetSpacePosition = GL_NONE;
+     GLuint m_puppetScenePosition = GL_NONE;
+     GLuint m_puppetTexCoord = GL_NONE;

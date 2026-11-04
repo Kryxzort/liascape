@@ -1,0 +1,53 @@
+From c1df824e43f7259cc897ed6b659120efc0983e7d Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 00:10:39 +0530
+Subject: [PATCH 89/89] render: name the object factory's address right in the
+ shape and light notes
+
+The comments on ImageData::shape, LightData's volumetrics and the parser's shape branch cited
+GH 0x1401bec50; WE's object factory (its `shape` branch and the lights' defaults) is GH 0x1401be650.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "F2 result" (the citation)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h           | 4 ++--
+ src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 360f276..ba85235 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -171,7 +171,7 @@ struct ImageData {
+     std::vector<ImageAnimationLayerUniquePtr> animationLayers;
+     /**
+      * A `shape` object (`"shape": "quad"`, WE's class with vtable 0x1404d36e8, built by the object factory
+-     * GH 0x1401bec50's `shape` branch): no picture of its own, a square of the scene's height whose corners are its
++     * GH 0x1401be650's `shape` branch): no picture of its own, a square of the scene's height whose corners are its
+      * first effect's point0..point3 (GH 0x1402861b0); its last effect's passes draw straight into the scene with
+      * DIRECTDRAW 1 (GH 0x140285f40, GH 0x140285b70), the last one additively (GH 0x1402866d0). Empty for any other
+      * image
+@@ -256,7 +256,7 @@ struct LightData {
+     /**
+      * Volumetrics (GH 0x140283df0's table): `castvolumetrics` sets bit 2 of the flags at +0x2c4; `density` +0x2f8
+      * (2), `volumetricsscattering` +0x2fc (0.5), `volumetricsexponent` +0x300 (1) — the defaults the factory sets
+-     * (GH 0x1401bec50). The volumetrics pass (GH 0x1401c56e0) marches the light's volume with them
++     * (GH 0x1401be650). The volumetrics pass (GH 0x1401c56e0) marches the light's volume with them
+      */
+     UserSettingUniquePtr castVolumetrics = nullptr;
+     float density = 2.0f;
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 6378de3..81bcd39 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -124,7 +124,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	if (shapeIt->get<std::string> () == "quad") {
+ 	    return parseShape (it, project, std::move (basedata));
+ 	}
+-	// WE's factory takes any string `shape` (GH 0x1401bec50) and its mesh builder only ever builds the quad
++	// WE's factory takes any string `shape` (GH 0x1401be650) and its mesh builder only ever builds the quad
+ 	sLog.error ("Shape '", shapeIt->get<std::string> (), "' is not supported");
+ 	WPENGINE_HEALTH ("unsupported", { { "what", "shape object '" + shapeIt->get<std::string> () + "'" } });
+     } else if (isCamera) {

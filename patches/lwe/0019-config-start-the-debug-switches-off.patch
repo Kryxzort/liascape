@@ -1,7 +1,7 @@
 From ac160dfd8b0a5027da627a1c941c42f72fbb3d14 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 29 Oct 2026 21:34:17 +0530
-Subject: [PATCH 19/85] config: start the debug switches off
+Subject: [PATCH 19/89] config: start the debug switches off
 
 Configuration's constructor never initialised baseOnly, noSolidFinal and
 passLog, so each held whatever was on the heap. A non-zero noSolidFinal

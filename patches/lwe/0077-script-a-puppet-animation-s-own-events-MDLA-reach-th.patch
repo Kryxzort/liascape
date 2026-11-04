@@ -1,7 +1,7 @@
 From 24adeff3d8cfd296853ace47a78ef885721c0572 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:52:53 +0530
-Subject: [PATCH 77/85] script: a puppet animation's own events (MDLA) reach
+Subject: [PATCH 77/89] script: a puppet animation's own events (MDLA) reach
  the layer's scripts
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

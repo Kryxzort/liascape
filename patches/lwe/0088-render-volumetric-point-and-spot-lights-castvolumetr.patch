@@ -1,0 +1,723 @@
+From 44e4a00ce97ba0998215d02f08b1d92aa11f25b0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 00:07:04 +0530
+Subject: [PATCH 88/89] render: volumetric point and spot lights
+ (castvolumetrics)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A light with `castvolumetrics` (flags +0x2c4 bit 2; `density` +0x2f8 default 2,
+`volumetricsscattering` +0x2fc 0.5, `volumetricsexponent` +0x300 1: GH 0x140283df0's table, the
+factory's defaults) is marched as wallpaper64.exe 2.8.485's volumetrics pass (GH 0x1401c56e0)
+does, with WE's own materials and shaders: per light its volume's back faces' depth into
+_rt_volumetricsSingle (volumetrics_back), then its front faces (volumetrics_front), or a
+full-screen quad while the eye's probe (eye + forward · 0.2) is inside it (volumetrics_fullscreen),
+march from the front face to the nearer of the back face and the scene's depth (_rt_volumetricsBack)
+into _rt_volumetricsLightBuffer (additive, an eighth of the scene at the default medium quality,
+GH 0x140048ca0), blurred by blur_k3 across and down through _rt_volumetricsLightBufferB and added
+to the scene (volumetrics_combine). The volume is a 32-segment cone in the spot's clip space
+(GH 0x140282d40) or a sphere of the point light's radius; g_RenderVar1..4 are packed as WE does
+(radius · 0.99, cos inner, cos outer, intensity; origin, density; the spot's x axis;
+colour · scattering, volumetricsexponent), QUALITY 2, POINTLIGHT for a point light.
+
+Ours: the volumetricsfront shader compares GL depth-texture values with D3D-style clip depth, so
+the front pass draws through the view-projection with z remapped to 0 … w and unprojects through
+its inverse; the depth targets are y-flipped (the shader's screen uv grows down): the scene's depth
+is blitted flipped, the back faces drawn through a y-flipped view-projection (which also turns
+them to the material's culling). Light buffers are half float. sampler2DBackBuffer annotations
+parse as samplers. Not done: SHADOW and COOKIE volumetrics, fog in the march, directional
+volumetrics (2.8.485's volumetrics_directional, not in 2.8.42's assets), the quality setting.
+Where WE runs the pass in the frame is inferred (after the objects, before the fade).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "F2 result" (batch F2, castvolumetrics)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/CMakeLists.txt                       |   1 +
+ src/core/WallpaperEngine/Data/Model/Object.h  |   9 +
+ .../Data/Parsers/ObjectParser.cpp             |   4 +
+ src/core/WallpaperEngine/Render/CFBO.cpp      |  38 ++
+ src/core/WallpaperEngine/Render/CFBO.h        |   5 +
+ .../Render/Objects/CLightVolumes.cpp          | 381 ++++++++++++++++++
+ .../Render/Objects/CLightVolumes.h            |  89 ++++
+ .../Render/Shaders/ShaderUnit.cpp             |   2 +-
+ .../Render/Wallpapers/CScene.cpp              |  13 +
+ .../Render/Wallpapers/CScene.h                |   3 +
+ 10 files changed, 544 insertions(+), 1 deletion(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/CLightVolumes.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/Objects/CLightVolumes.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 4853423..f39edd8 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -60,6 +60,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Render/Objects/CImage.cpp
+     WallpaperEngine/Render/Objects/Puppet.cpp
+     WallpaperEngine/Render/Objects/CModel.cpp
++    WallpaperEngine/Render/Objects/CLightVolumes.cpp
+     WallpaperEngine/Render/Objects/CSound.cpp
+     WallpaperEngine/Render/Objects/CText.cpp
+     WallpaperEngine/Render/Objects/TextLayout.cpp
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index d7aa42a..360f276 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -253,6 +253,15 @@ struct LightData {
+     std::string cookie = "cookie/flashlight1";
+     glm::vec3 controlPoint = glm::vec3 (0.0f);
+     float lightSourceSize = 0.0f;
++    /**
++     * Volumetrics (GH 0x140283df0's table): `castvolumetrics` sets bit 2 of the flags at +0x2c4; `density` +0x2f8
++     * (2), `volumetricsscattering` +0x2fc (0.5), `volumetricsexponent` +0x300 (1) — the defaults the factory sets
++     * (GH 0x1401bec50). The volumetrics pass (GH 0x1401c56e0) marches the light's volume with them
++     */
++    UserSettingUniquePtr castVolumetrics = nullptr;
++    float density = 2.0f;
++    float scattering = 0.5f;
++    float volumetricsExponent = 1.0f;
+ };
+ 
+ class Light : public Object, public LightData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 7eb517a..6378de3 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -171,6 +171,10 @@ LightUniquePtr ObjectParser::parseLight (const JSON& it, const Project& project,
+ 	    .cookie = it.optional ("cookie", std::string ("cookie/flashlight1")),
+ 	    .controlPoint = it.optional ("controlpoint", glm::vec3 (0.0f)),
+ 	    .lightSourceSize = it.optional ("lightsourcesize", 0.0f),
++	    .castVolumetrics = it.user ("castvolumetrics", project.properties, false),
++	    .density = it.optional ("density", 2.0f),
++	    .scattering = it.optional ("volumetricsscattering", 0.5f),
++	    .volumetricsExponent = it.optional ("volumetricsexponent", 1.0f),
+ 	}
+     );
+ }
+diff --git a/src/core/WallpaperEngine/Render/CFBO.cpp b/src/core/WallpaperEngine/Render/CFBO.cpp
+index 8c57f9a..af1a9dd 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.cpp
++++ b/src/core/WallpaperEngine/Render/CFBO.cpp
+@@ -256,6 +256,44 @@ void CFBO::makeShadowAtlas () {
+     this->m_shadowAtlas = true;
+ }
+ 
++void CFBO::makeDepthTexture (bool withStencil) {
++    GLint previousFramebuffer = 0;
++    glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
++
++    glBindTexture (GL_TEXTURE_2D, this->m_texture);
++    glTexImage2D (
++	GL_TEXTURE_2D, 0, withStencil ? GL_DEPTH24_STENCIL8 : GL_DEPTH_COMPONENT24, static_cast<GLsizei> (this->m_resolution.x),
++	static_cast<GLsizei> (this->m_resolution.y), 0, withStencil ? GL_DEPTH_STENCIL : GL_DEPTH_COMPONENT,
++	withStencil ? GL_UNSIGNED_INT_24_8 : GL_UNSIGNED_INT, nullptr
++    );
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
++    if (withStencil) {
++	glTexParameteri (GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_DEPTH_COMPONENT);
++    }
++
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_framebuffer);
++    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
++    glFramebufferTexture2D (
++	GL_FRAMEBUFFER, withStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, this->m_texture, 0
++    );
++    glDrawBuffer (GL_NONE);
++    glReadBuffer (GL_NONE);
++
++    if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++	sLog.error ("The depth target ", this->m_name, " is an incomplete framebuffer");
++	WPENGINE_HEALTH ("pass_error", { { "message", "depth target " + this->m_name + " is an incomplete framebuffer" } });
++    }
++
++    glDepthMask (GL_TRUE);
++    glClearDepth (1.0);
++    glClear (GL_DEPTH_BUFFER_BIT);
++    glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
++}
++
+ bool CFBO::isShadowAtlas () const { return this->m_shadowAtlas; }
+ 
+ void CFBO::swapContents (CFBO& other) {
+diff --git a/src/core/WallpaperEngine/Render/CFBO.h b/src/core/WallpaperEngine/Render/CFBO.h
+index d852616..2af1e0b 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.h
++++ b/src/core/WallpaperEngine/Render/CFBO.h
+@@ -50,6 +50,11 @@ public:
+      * SamplerComparisonState, inferred), cleared to 1. A resize keeps it one
+      */
+     void makeShadowAtlas ();
++    /**
++     * A depth texture sampled as a value (no comparison), nearest: depth + stencil (DEPTH24_STENCIL8) so a scene's
++     * depth renderbuffer blits into it, or depth only (DEPTH_COMPONENT24) to draw into
++     */
++    void makeDepthTexture (bool withStencil);
+     [[nodiscard]] bool isShadowAtlas () const;
+     /**
+      * Exchanges what the two FBOs hold (their GL framebuffer, texture, depth buffer and size) in place: a pass's
+diff --git a/src/core/WallpaperEngine/Render/Objects/CLightVolumes.cpp b/src/core/WallpaperEngine/Render/Objects/CLightVolumes.cpp
+new file mode 100644
+index 0000000..2731f89
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/CLightVolumes.cpp
+@@ -0,0 +1,381 @@
++#include "CLightVolumes.h"
++
++#include <algorithm>
++#include <cmath>
++
++#include <glm/gtc/matrix_transform.hpp>
++
++#include "WallpaperEngine/Data/Model/Project.h"
++#include "WallpaperEngine/Data/Model/Wallpaper.h"
++#include "WallpaperEngine/Data/Parsers/MaterialParser.h"
++#include "WallpaperEngine/Health.h"
++#include "WallpaperEngine/Logging/Log.h"
++
++using namespace WallpaperEngine::Render::Objects;
++using namespace WallpaperEngine::Render::Objects::Effects;
++using namespace WallpaperEngine::Data::Parsers;
++
++namespace {
++constexpr int kSegments = 32; // WE's cone: 32 steps of 2π / 32 (GH 0x140282d40)
++constexpr int kStacks = 16;
++// the default `volumetrics` quality, medium (GH 0x140048ca0's default "medium" = 2): the light buffer is an eighth
++// of the scene (GH 0x1401c56e0: a divisor of 8 up to medium, 4 above) and is blurred
++constexpr int kQuality = 2;
++constexpr int kDivisor = 8;
++
++bool castsVolumetrics (const Light& light) {
++    return (light.kind == LightData::Kind::Point || light.kind == LightData::Kind::Spot) && light.castVolumetrics != nullptr
++	&& (light.castVolumetrics->value->getBool () || light.castVolumetrics->property != nullptr
++	    || light.castVolumetrics->value->getScriptSource ().has_value ());
++}
++
++/** GL's clip z (−w … w) to D3D's (0 … w): the depth WE's volumetrics shader compares (a GL depth texture's value) */
++glm::mat4 d3dDepth () {
++    glm::mat4 m (1.0f);
++    m[2][2] = 0.5f;
++    m[3][2] = 0.5f;
++    return m;
++}
++
++void push (std::vector<float>& out, const glm::vec3& v) {
++    out.push_back (v.x);
++    out.push_back (v.y);
++    out.push_back (v.z);
++}
++
++/**
++ * The spot's volume in its own clip space: a cylinder of radius 1 (the circle inside the frustum's square is the outer
++ * cone) from the near plane (z −1) to the far one (+1), capped; wound so that, through inverse (light VP) and the
++ * camera, its outside faces the eye (checked by the depth its back faces leave)
++ */
++std::vector<float> coneMesh () {
++    std::vector<float> out;
++    for (int i = 0; i < kSegments; i++) {
++	const float a = 6.2831855f * static_cast<float> (i) / kSegments;
++	const float b = 6.2831855f * static_cast<float> (i + 1) / kSegments;
++	const glm::vec3 na (std::sin (a), -std::cos (a), -1.0f), nb (std::sin (b), -std::cos (b), -1.0f);
++	const glm::vec3 fa (na.x, na.y, 1.0f), fb (nb.x, nb.y, 1.0f);
++	// the side, the near cap, the far cap
++	for (const glm::vec3& v : { na, fb, fa, na, nb, fb }) {
++	    push (out, v);
++	}
++	for (const glm::vec3& v : { glm::vec3 (0.0f, 0.0f, -1.0f), nb, na }) {
++	    push (out, v);
++	}
++	for (const glm::vec3& v : { glm::vec3 (0.0f, 0.0f, 1.0f), fa, fb }) {
++	    push (out, v);
++	}
++    }
++    return out;
++}
++
++/** A unit sphere (circumscribed: its facets reach the radius), its outside counter-clockwise */
++std::vector<float> sphereMesh () {
++    std::vector<float> out;
++    const float grow = 1.0f / std::cos (3.1415927f / kSegments) / std::cos (3.1415927f / (2 * kStacks));
++    const auto at = [grow] (int stack, int slice) {
++	const float theta = 3.1415927f * static_cast<float> (stack) / kStacks;
++	const float phi = 6.2831855f * static_cast<float> (slice) / kSegments;
++	return glm::vec3 (std::sin (theta) * std::cos (phi), std::cos (theta), std::sin (theta) * std::sin (phi)) * grow;
++    };
++    for (int s = 0; s < kStacks; s++) {
++	for (int i = 0; i < kSegments; i++) {
++	    const glm::vec3 a = at (s, i), b = at (s, i + 1), c = at (s + 1, i), d = at (s + 1, i + 1);
++	    for (const glm::vec3& v : { a, d, b, a, c, d }) {
++		push (out, v);
++	    }
++	}
++    }
++    return out;
++}
++} // namespace
++
++std::unique_ptr<CLightVolumes> CLightVolumes::create (Wallpapers::CScene& scene) {
++    std::vector<const Light*> lights;
++    for (const auto& object : scene.getScene ().objects) {
++	if (object->is<Light> () && castsVolumetrics (*object->as<Light> ())) {
++	    lights.push_back (object->as<Light> ());
++	}
++    }
++    if (lights.empty () || !scene.getCamera ().isPerspective ()) {
++	return nullptr;
++    }
++
++    const auto& project = scene.getScene ().project;
++    Materials materials;
++    try {
++	materials.back = MaterialParser::load (project, "materials/util/volumetrics_back.json");
++	materials.front = MaterialParser::load (project, "materials/util/volumetrics_front.json");
++	materials.fullscreen = MaterialParser::load (project, "materials/util/volumetrics_fullscreen.json");
++	materials.frontPoint = MaterialParser::load (project, "materials/util/volumetrics_front.json");
++	materials.fullscreenPoint = MaterialParser::load (project, "materials/util/volumetrics_fullscreen.json");
++	materials.blurH = MaterialParser::load (project, "materials/util/volumetrics_blur_h.json");
++	materials.blurV = MaterialParser::load (project, "materials/util/volumetrics_blur_v.json");
++	materials.combine = MaterialParser::load (project, "materials/util/volumetrics_combine.json");
++    } catch (const std::exception& e) {
++	sLog.error ("Cannot load the volumetrics materials, the lights draw without volumetrics: ", e.what ());
++	WPENGINE_HEALTH ("effect_dropped", { { "object", lights.front ()->id }, { "object_name", "volumetrics" }, { "reason", WallpaperEngine::Health::brief (e.what ()) }, { "takes_layer", false } });
++	return nullptr;
++    }
++
++    // the back faces' depth: WE's material leaves depth to the defaults (on); LWE's parser defaults it off
++    for (auto& pass : materials.back->passes) {
++	pass->depthtest = DepthtestMode_Enabled;
++	pass->depthwrite = DepthwriteMode_Enabled;
++    }
++    // the front pass's combos (GH 0x1401c56e0): QUALITY (the volumetrics quality), POINTLIGHT for a point light, SHADOW
++    // with a shadow (not done here), COOKIE with usecookie (not done)
++    for (auto* material : { materials.front.get (), materials.fullscreen.get (), materials.frontPoint.get (), materials.fullscreenPoint.get () }) {
++	for (auto& pass : material->passes) {
++	    pass->combos.insert_or_assign ("QUALITY", kQuality);
++	    pass->combos.insert_or_assign ("SHADOW", 0);
++	    pass->combos.insert_or_assign ("FOG", 0);
++	}
++    }
++    for (auto* material : { materials.frontPoint.get (), materials.fullscreenPoint.get () }) {
++	for (auto& pass : material->passes) {
++	    pass->combos.insert_or_assign ("POINTLIGHT", 1);
++	}
++    }
++
++    const Light& first = *lights.front ();
++    try {
++	auto volumes = std::unique_ptr<CLightVolumes> (new CLightVolumes (scene, first, std::move (lights), std::move (materials)));
++	volumes->setup ();
++	return volumes;
++    } catch (const std::exception& e) {
++	sLog.error ("Cannot build the volumetrics passes, the lights draw without volumetrics: ", e.what ());
++	WPENGINE_HEALTH ("effect_dropped", { { "object", first.id }, { "object_name", "volumetrics" }, { "reason", WallpaperEngine::Health::brief (e.what ()) }, { "takes_layer", false } });
++	return nullptr;
++    }
++}
++
++CLightVolumes::CLightVolumes (
++    Wallpapers::CScene& scene, const Light& first, std::vector<const Light*> lights, Materials materials
++) :
++    CObject (scene, first), CRenderable (scene, first, *materials.back), m_lights (std::move (lights)),
++    m_materials (std::move (materials)) { }
++
++CLightVolumes::~CLightVolumes () {
++    for (auto* pass : this->m_passes) {
++	delete pass;
++    }
++    for (GLuint* buffer : { &this->m_cone, &this->m_sphere, &this->m_quad, &this->m_quadUV }) {
++	if (*buffer != GL_NONE) {
++	    glDeleteBuffers (1, buffer);
++	}
++    }
++}
++
++CPass* CLightVolumes::makePass (const Material& material) {
++    auto* pass = new CPass (*this, std::make_shared<FBOProvider> (this), *material.passes.front (), std::nullopt, std::nullopt, std::nullopt);
++    this->m_passes.push_back (pass);
++    pass->setModelMatrix (&this->m_inverseViewProjection);
++    pass->setViewProjectionMatrix (&this->m_viewProjection);
++    pass->setModelViewProjectionMatrix (&this->m_identity);
++    pass->setModelViewProjectionMatrixInverse (&this->m_identity);
++    pass->addUniform ("g_AltViewProjectionMatrix", &this->m_volume);
++    pass->addUniform ("g_AltModelMatrix", &this->m_lightProjection);
++    pass->addUniform ("g_RenderVar0", &this->m_renderVar[0]);
++    pass->addUniform ("g_RenderVar1", &this->m_renderVar[1]);
++    pass->addUniform ("g_RenderVar2", &this->m_renderVar[2]);
++    pass->addUniform ("g_RenderVar3", &this->m_renderVar[3]);
++    pass->addUniform ("g_RenderVar4", &this->m_renderVar[4]);
++    pass->addUniform ("g_EyePosition", &this->m_eye);
++    pass->setPosition (this->m_quad);
++    pass->setTexCoord (this->m_quadUV);
++    return pass;
++}
++
++void CLightVolumes::meshGeometry (CPass* pass, const GLuint& vbo, const GLsizei& count) {
++    const GLuint program = pass->getProgramID ();
++    const GLint position = glGetAttribLocation (program, "a_Position");
++    pass->setGeometryCallback (
++	[position, &vbo] () {
++	    if (position >= 0) {
++		glEnableVertexAttribArray (position);
++		glBindBuffer (GL_ARRAY_BUFFER, vbo);
++		glVertexAttribPointer (position, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
++	    }
++	},
++	[&count] () { glDrawArrays (GL_TRIANGLES, 0, count); },
++	[position] () {
++	    if (position >= 0) {
++		glDisableVertexAttribArray (position);
++	    }
++	}
++    );
++}
++
++void CLightVolumes::setup () {
++    auto& scene = this->getScene ();
++    const auto width = static_cast<float> (scene.getFBO ()->getRealWidth ());
++    const auto height = static_cast<float> (scene.getFBO ()->getRealHeight ());
++    const glm::vec2 small (std::max (1.0f, std::floor (width / kDivisor)), std::max (1.0f, std::floor (height / kDivisor)));
++
++    // WE's targets (GH 0x1401c56e0): the scene's depth, the volume's back faces' depth, the light buffer and its blur
++    // partner. Ours: half float light buffers; the depth copies are textures LWE blits / draws into
++    this->m_sceneDepth = scene.create ("_rt_volumetricsBack", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { width, height }, { width, height });
++    this->m_sceneDepth->makeDepthTexture (true);
++    this->m_volumeDepth = scene.create ("_rt_volumetricsSingle", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, small, small);
++    this->m_volumeDepth->makeDepthTexture (false);
++    this->m_lightBuffer = scene.create ("_rt_volumetricsLightBuffer", TextureFormat_RGBA16161616f, TextureFlags_ClampUVs, 1.0, small, small);
++    this->m_lightBufferB = scene.create ("_rt_volumetricsLightBufferB", TextureFormat_RGBA16161616f, TextureFlags_ClampUVs, 1.0, small, small);
++    this->m_texture = this->m_lightBuffer;
++
++    const auto upload = [] (GLuint& vbo, const std::vector<float>& data) {
++	glGenBuffers (1, &vbo);
++	glBindBuffer (GL_ARRAY_BUFFER, vbo);
++	glBufferData (GL_ARRAY_BUFFER, static_cast<GLsizeiptr> (data.size () * sizeof (float)), data.data (), GL_STATIC_DRAW);
++    };
++    const auto cone = coneMesh ();
++    const auto sphere = sphereMesh ();
++    upload (this->m_cone, cone);
++    upload (this->m_sphere, sphere);
++    this->m_coneCount = static_cast<GLsizei> (cone.size () / 3);
++    this->m_sphereCount = static_cast<GLsizei> (sphere.size () / 3);
++    // the full-screen quad in clip space; its uv (0, 0) at the bottom left, as the buffers are drawn
++    upload (this->m_quad, { -1, -1, 0, -1, 1, 0, 1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 });
++    upload (this->m_quadUV, { 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1 });
++
++    CRenderable::setup ();
++
++    this->m_back = this->makePass (*this->m_materials.back);
++    this->m_front = this->makePass (*this->m_materials.front);
++    this->m_frontPoint = this->makePass (*this->m_materials.frontPoint);
++    this->m_fullscreen = this->makePass (*this->m_materials.fullscreen);
++    this->m_fullscreenPoint = this->makePass (*this->m_materials.fullscreenPoint);
++    this->m_blurH = this->makePass (*this->m_materials.blurH);
++    this->m_blurV = this->makePass (*this->m_materials.blurV);
++    this->m_combine = this->makePass (*this->m_materials.combine);
++
++    // the back pass draws with the y-flipped view-projection: its back faces end up front-facing for the material's
++    // culling, and its depth lands where the front pass's D3D-style screen uv (y down) reads it
++    this->m_back->setViewProjectionMatrix (&this->m_backViewProjection);
++    for (auto* pass : { this->m_back, this->m_front, this->m_frontPoint }) {
++	this->meshGeometry (pass, this->m_meshVbo, this->m_meshCount);
++    }
++    for (auto* pass : { this->m_front, this->m_frontPoint, this->m_fullscreen, this->m_fullscreenPoint }) {
++	pass->setTexture (1, this->m_sceneDepth);
++	pass->setTexture (3, this->m_volumeDepth);
++	pass->setInput (this->m_sceneDepth);
++	pass->setDestination (this->m_lightBuffer);
++    }
++    this->m_back->setInput (this->m_lightBuffer);
++    this->m_back->setDestination (this->m_volumeDepth);
++    this->m_blurH->setInput (this->m_lightBuffer);
++    this->m_blurH->setDestination (this->m_lightBufferB);
++    this->m_blurV->setInput (this->m_lightBufferB);
++    this->m_blurV->setDestination (this->m_lightBuffer);
++    this->m_combine->setInput (this->m_lightBuffer);
++    this->m_combine->setDestination (scene.getFBO ());
++}
++
++void CLightVolumes::render () {
++    auto& scene = this->getScene ();
++    const auto& camera = scene.getCamera ();
++
++    std::vector<const Light*> lit;
++    for (const auto* light : this->m_lights) {
++	if (light->castVolumetrics->value->getBool () && scene.isEffectivelyVisible (*light)) {
++	    lit.push_back (light);
++	}
++    }
++    if (lit.empty ()) {
++	return;
++    }
++
++    GLint previous = 0;
++    glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previous);
++    GLfloat clear[4] = {};
++    glGetFloatv (GL_COLOR_CLEAR_VALUE, clear);
++
++    const auto& source = *scene.getFBO ();
++    const auto W = static_cast<GLint> (source.getRealWidth ()), H = static_cast<GLint> (source.getRealHeight ());
++    // the scene's depth, y flipped (the shader's screen uv grows down)
++    glBindFramebuffer (GL_READ_FRAMEBUFFER, source.getFramebuffer ());
++    glBindFramebuffer (GL_DRAW_FRAMEBUFFER, this->m_sceneDepth->getFramebuffer ());
++    glBlitFramebuffer (0, 0, W, H, 0, H, W, 0, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_lightBuffer->getFramebuffer ());
++    glColorMask (true, true, true, true);
++    glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
++    glClear (GL_COLOR_BUFFER_BIT);
++
++    const glm::mat4 viewProjection = camera.getWorldViewProjection ();
++    this->m_viewProjection = d3dDepth () * viewProjection;
++    this->m_inverseViewProjection = glm::inverse (this->m_viewProjection);
++    this->m_backViewProjection = glm::scale (glm::mat4 (1.0f), glm::vec3 (1.0f, -1.0f, 1.0f)) * viewProjection;
++    this->m_eye = camera.getWorldEye ();
++    // the eye's point the inside test takes: 0.2 along the view (GH 0x1401c56e0: eye + forward · 0.2)
++    const glm::mat4 inverse = glm::inverse (viewProjection);
++    const glm::vec4 nearAt = inverse * glm::vec4 (0.0f, 0.0f, -1.0f, 1.0f);
++    const glm::vec4 farAt = inverse * glm::vec4 (0.0f, 0.0f, 1.0f, 1.0f);
++    const glm::vec3 forward = glm::normalize (glm::vec3 (farAt) / farAt.w - glm::vec3 (nearAt) / nearAt.w);
++    const glm::vec3 probe = this->m_eye + forward * 0.2f;
++
++    for (const auto* light : lit) {
++	const glm::mat4 world = scene.worldMatrixOf (*light);
++	const glm::vec3 origin (world[3]);
++	const bool point = light->kind == LightData::Kind::Point;
++	const float radius = std::max (light->radius, 0.06f);
++	bool inside;
++
++	if (point) {
++	    this->m_volume = glm::translate (glm::mat4 (1.0f), origin) * glm::scale (glm::mat4 (1.0f), glm::vec3 (radius));
++	    this->m_lightProjection = glm::mat4 (1.0f);
++	    this->m_renderVar[3] = glm::vec4 (0.0f);
++	    this->m_meshVbo = this->m_sphere;
++	    this->m_meshCount = this->m_sphereCount;
++	    inside = glm::length (probe - origin) < radius;
++	} else {
++	    // the spot's projection (as F1's: looking down its x axis, y up, fov 2 · outercone, near 0.05, far = radius),
++	    // GL's here: the cone mesh is in its clip space
++	    const glm::vec3 x = glm::length (glm::vec3 (world[0])) > 0.0f ? glm::normalize (glm::vec3 (world[0])) : glm::vec3 (1.0f, 0.0f, 0.0f);
++	    const glm::vec3 y = glm::length (glm::vec3 (world[1])) > 0.0f ? glm::normalize (glm::vec3 (world[1])) : glm::vec3 (0.0f, 1.0f, 0.0f);
++	    const float fov = 2.0f * glm::radians (std::clamp (light->outerCone, 0.5f, 89.5f));
++	    this->m_lightProjection = glm::perspective (fov, 1.0f, 0.05f, std::max (radius, 0.06f)) * glm::lookAt (origin, origin + x, y);
++	    this->m_volume = glm::inverse (this->m_lightProjection);
++	    this->m_renderVar[3] = glm::vec4 (x, 0.0f);
++	    this->m_meshVbo = this->m_cone;
++	    this->m_meshCount = this->m_coneCount;
++	    const glm::vec4 clip = this->m_lightProjection * glm::vec4 (probe, 1.0f);
++	    inside = clip.w > 0.0f && std::abs (clip.z) < clip.w && glm::length (glm::vec2 (clip) / clip.w) < 1.0f;
++	}
++	// GH 0x1401c56e0's packing: RenderVar1 = (radius · 0.99, cos inner, cos outer, intensity), 2 = (origin, density),
++	// 3 = the spot's forward (its x axis), 4 = (colour · scattering, volumetricsexponent). RenderVar0 (the shadow
++	// map's transform) only matters with SHADOW
++	this->m_renderVar[0] = glm::vec4 (0.0f);
++	this->m_renderVar[1] = glm::vec4 (
++	    radius * 0.99f, std::cos (glm::radians (light->innerCone)), std::cos (glm::radians (light->outerCone)),
++	    light->intensity->value->getFloat ()
++	);
++	this->m_renderVar[2] = glm::vec4 (origin, light->density);
++	this->m_renderVar[4] = glm::vec4 (light->color->value->getVec3 () * light->scattering, light->volumetricsExponent);
++
++	// the back faces' depth (cleared to the far plane)
++	glBindFramebuffer (GL_FRAMEBUFFER, this->m_volumeDepth->getFramebuffer ());
++	glDepthMask (GL_TRUE);
++	glClearDepth (1.0);
++	glClear (GL_DEPTH_BUFFER_BIT);
++	this->m_back->render ();
++	glDisable (GL_DEPTH_TEST);
++	glDepthMask (GL_FALSE);
++
++	// the march: its front faces, or the whole buffer from inside (GH 0x1401c56e0 picks volumetrics_fullscreen)
++	if (inside) {
++	    (point ? this->m_fullscreenPoint : this->m_fullscreen)->render ();
++	} else {
++	    (point ? this->m_frontPoint : this->m_front)->render ();
++	}
++    }
++    glDisable (GL_CULL_FACE);
++
++    // the blur (medium quality: blur_k3 across, then down) and the buffer added to the scene
++    this->m_blurH->render ();
++    this->m_blurV->render ();
++    this->m_combine->render ();
++
++    glClearColor (clear[0], clear[1], clear[2], clear[3]);
++    glBindFramebuffer (GL_FRAMEBUFFER, previous);
++}
+diff --git a/src/core/WallpaperEngine/Render/Objects/CLightVolumes.h b/src/core/WallpaperEngine/Render/Objects/CLightVolumes.h
+new file mode 100644
+index 0000000..db9c6d8
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Objects/CLightVolumes.h
+@@ -0,0 +1,89 @@
++#pragma once
++
++#include <memory>
++#include <vector>
++
++#include "CRenderable.h"
++#include "WallpaperEngine/Data/Model/Material.h"
++#include "WallpaperEngine/Data/Model/Object.h"
++#include "WallpaperEngine/Render/Objects/Effects/CPass.h"
++#include "WallpaperEngine/Render/Wallpapers/CScene.h"
++
++namespace WallpaperEngine::Render::Objects {
++/**
++ * A 3D scene's volumetric lights (`castvolumetrics`, light flag bit 2): WE's volumetrics pass (GH 0x1401c56e0), run
++ * after the scene's objects. Per light, its volume's back faces' depth into `_rt_volumetricsSingle`
++ * (materials/util/volumetrics_back.json), then its front faces — or a full-screen quad while the eye is inside it —
++ * march the light (volumetrics_front / volumetrics_fullscreen, WE's volumetricsfront shader) from the front face to
++ * the nearer of the back face and the scene's depth (`_rt_volumetricsBack`) into `_rt_volumetricsLightBuffer`
++ * (additive, an eighth of the scene at the default medium quality); then the buffer is blurred (blur_k3 across and
++ * down, through `_rt_volumetricsLightBufferB`) and added to the scene (volumetrics_combine)
++ */
++class CLightVolumes final : public CRenderable {
++public:
++    /** Null when the scene has no point or spot light that can cast volumetrics, or a material doesn't build */
++    static std::unique_ptr<CLightVolumes> create (Wallpapers::CScene& scene);
++    ~CLightVolumes () override;
++
++    void setup () override;
++    /** The pass, for the lights casting volumetrics now (nothing when none does) */
++    void render () override;
++
++    [[nodiscard]] const float& getBrightness () const override { return this->m_one; }
++    [[nodiscard]] const float& getUserAlpha () const override { return this->m_one; }
++    [[nodiscard]] const float& getAlpha () const override { return this->m_one; }
++    [[nodiscard]] const glm::vec3& getColor () const override { return this->m_white; }
++    [[nodiscard]] const glm::vec4& getColor4 () const override { return this->m_white4; }
++    [[nodiscard]] const glm::vec3& getCompositeColor () const override { return this->m_white; }
++
++private:
++    struct Materials {
++	MaterialUniquePtr back, front, fullscreen, frontPoint, fullscreenPoint, blurH, blurV, combine;
++    };
++    CLightVolumes (Wallpapers::CScene& scene, const Light& first, std::vector<const Light*> lights, Materials materials);
++
++    Effects::CPass* makePass (const Material& material);
++    /** a pass drawing `vbo` (positions, 3 floats) as `count` triangles' vertices */
++    void meshGeometry (Effects::CPass* pass, const GLuint& vbo, const GLsizei& count);
++
++    std::vector<const Light*> m_lights;
++    Materials m_materials;
++    std::vector<Effects::CPass*> m_passes = {};
++    Effects::CPass* m_back = nullptr;
++    Effects::CPass* m_front = nullptr;
++    Effects::CPass* m_fullscreen = nullptr;
++    Effects::CPass* m_frontPoint = nullptr;
++    Effects::CPass* m_fullscreenPoint = nullptr;
++    Effects::CPass* m_blurH = nullptr;
++    Effects::CPass* m_blurV = nullptr;
++    Effects::CPass* m_combine = nullptr;
++
++    std::shared_ptr<CFBO> m_sceneDepth = nullptr;
++    std::shared_ptr<CFBO> m_volumeDepth = nullptr;
++    std::shared_ptr<CFBO> m_lightBuffer = nullptr;
++    std::shared_ptr<CFBO> m_lightBufferB = nullptr;
++
++    GLuint m_cone = GL_NONE;
++    GLsizei m_coneCount = 0;
++    GLuint m_sphere = GL_NONE;
++    GLsizei m_sphereCount = 0;
++    GLuint m_quad = GL_NONE;
++    GLuint m_quadUV = GL_NONE;
++    /** what the passes of the light being drawn read */
++    GLuint m_meshVbo = GL_NONE;
++    GLsizei m_meshCount = 0;
++
++    glm::mat4 m_viewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_backViewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_inverseViewProjection = glm::mat4 (1.0f);
++    glm::mat4 m_volume = glm::mat4 (1.0f);
++    glm::mat4 m_lightProjection = glm::mat4 (1.0f);
++    glm::mat4 m_identity = glm::mat4 (1.0f);
++    glm::vec4 m_renderVar[5] = {};
++    glm::vec3 m_eye = glm::vec3 (0.0f);
++
++    float m_one = 1.0f;
++    glm::vec3 m_white = glm::vec3 (1.0f);
++    glm::vec4 m_white4 = glm::vec4 (1.0f);
++};
++} // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index b77f770..204f486 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -702,7 +702,7 @@ void ShaderUnit::parseParameterConfiguration (
+ 	parameter = new Variables::ShaderVariableFloat (floatDefault (defaultValue));
+     } else if (type == "int") {
+ 	parameter = new Variables::ShaderVariableInteger (intDefault (defaultValue));
+-    } else if (type == "sampler2D" || type == "sampler2DComparison") {
++    } else if (type == "sampler2D" || type == "sampler2DComparison" || type == "sampler2DBackBuffer") {
+ 	// samplers can have special requirements, check what sampler we're working with and create definitions
+ 	// if needed
+ 	const auto textureName = data.find ("default");
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 247c74b..ca57e3d 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1,5 +1,6 @@
+ #include "WallpaperEngine/Render/Objects/CGroup.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
++#include "WallpaperEngine/Render/Objects/CLightVolumes.h"
+ #include "WallpaperEngine/Render/Objects/CModel.h"
+ #include "WallpaperEngine/Render/Objects/CParticle.h"
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+@@ -172,6 +173,9 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ 
+     this->setupBloom (*scene, sceneWidth, sceneHeight);
+ 
++    // the volumetric lights (castvolumetrics), drawn after the objects
++    this->m_lightVolumes = Objects::CLightVolumes::create (*this);
++
+     if (WallpaperEngine::Health::enabled ()) {
+ 	this->reportHealthBuild ();
+     }
+@@ -508,6 +512,7 @@ CScene::~CScene () {
+ 
+     // bloom object is in the objects list, so no need to explicitly delete it
+     this->m_bloomObject = nullptr;
++    this->m_lightVolumes.reset ();
+ 
+     for (const auto& val : this->m_objects | std::views::values) {
+ 	delete val;
+@@ -814,6 +819,14 @@ void CScene::renderFrame () {
+ 	cur->render ();
+     }
+ 
++    // WE's volumetrics pass (GH 0x1401c56e0) over what was drawn. Inferred: where WE runs it in the frame wasn't traced
++    // (it's reached through a vtable); here after the objects, before the fade
++    if (this->m_lightVolumes != nullptr) {
++	this->m_lightVolumes->render ();
++	glBindFramebuffer (GL_FRAMEBUFFER, this->getWallpaperFramebuffer ());
++	glViewport (0, 0, this->m_sceneFBO->getRealWidth (), this->m_sceneFBO->getRealHeight ());
++    }
++
+     this->renderFade ();
+ 
+     if (WallpaperEngine::Health::enabled ()) {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 98967f0..2fab9e2 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -19,6 +19,7 @@ class CObject;
+ }
+ 
+ namespace WallpaperEngine::Render::Objects {
++class CLightVolumes;
+ class CSound;
+ class CImage;
+ }
+@@ -251,6 +252,8 @@ private:
+ 
+     std::unique_ptr<Scripting::ScriptEngine> m_scriptEngine;
+     std::unique_ptr<Camera> m_camera;
++    /** the volumetric lights' pass (a 3D scene with a light that casts volumetrics), else null */
++    std::unique_ptr<Objects::CLightVolumes> m_lightVolumes;
+     ObjectUniquePtr m_bloomObjectData;
+     CObject* m_bloomObject = nullptr;
+     std::map<int, CObject*> m_objects = {};

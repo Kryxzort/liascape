@@ -1,0 +1,384 @@
+From 85d640ceaaf484939112ebc6d32968834cc1b358 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 23:54:01 +0530
+Subject: [PATCH 87/89] render: puppet IK chains reach for their animated
+ targets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A puppet bone whose simulation JSON (MDLS, parsed by GH 0x14028bbd0) has `ik` (settings flag
+0x4000) ends an IK chain `ikd` bones long (≥ 1, settings +0x5c); `ikr` (flag 0x40) turns it to
+its target's rotation. MDLS v2's u16 list of IK targets (a name, the bone, a type, a 64-byte
+matrix in the mesh's space) is read: type 0 is the chain end's goal, type 1 the pole. MDLA v2's
+per-target tracks (keys as the bones') are read and mixed with the animation layers like the
+bones. 3042492564's arm (海果-手臂, ikd 2) has static bone tracks and a hand target moving 24 px:
+its arm now follows the target instead of staying in the bind pose.
+
+Inferred: WE's solver itself wasn't found in the mixer (GH 0x140228470 holds the Euler limits
+and the physics); two-bone chains use the law of cosines with the elbow on the pole's side,
+longer ones CCD, in the puppet's plane. ikce / ikrmin / ikrmax (constraints) are not applied.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "F2 result" (F3's leftover IK, 3042492564)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp |   7 +
+ .../WallpaperEngine/Render/Objects/CImage.h   |   2 +
+ .../WallpaperEngine/Render/Objects/Puppet.cpp | 163 +++++++++++++++++-
+ .../WallpaperEngine/Render/Objects/Puppet.h   |  36 ++++
+ 4 files changed, 201 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index c308a7d..4ca6768 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -426,6 +426,7 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	}
+ 
+ 	this->m_puppetBind = Puppet::bindPose (this->m_puppet);
++	this->m_puppetTargetBind = Puppet::targetBindPose (this->m_puppet);
+ 	Puppet::bindWorldMatrices (this->m_puppet, this->m_puppetBindWorldInverse);
+ 	for (auto& m : this->m_puppetBindWorldInverse) {
+ 	    m = glm::inverse (m);
+@@ -528,6 +529,8 @@ void CImage::updatePuppetPose () {
+ 
+     // GH 0x140228470: from the bind pose, every visible layer in order; its clock runs at dt · rate
+     std::vector<Puppet::Key> pose = this->m_puppetBind;
++    // the IK targets move with the animations as the bones do (their MDLA v2 tracks)
++    std::vector<Puppet::Key> targets = this->m_puppetTargetBind;
+     std::vector<float> boneAlpha (this->m_puppet.bones.size (), 1.0f);
+     std::vector<std::vector<float>> shapeWeights = this->m_puppetShapeWeights;
+     for (auto& weights : shapeWeights) {
+@@ -561,6 +564,7 @@ void CImage::updatePuppetPose () {
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+ 	Puppet::mix (pose, this->m_puppetBind, *match, state.clock.time, weight, layer.additive);
++	Puppet::mixTargets (targets, this->m_puppetTargetBind, *match, state.clock.time, weight, layer.additive);
+ 	Puppet::mixExtras (boneAlpha, shapeWeights, *match, state.clock.time, weight, layer.additive);
+     }
+     for (const auto& [index, weight] : this->m_shapeOverrides) {
+@@ -573,6 +577,9 @@ void CImage::updatePuppetPose () {
+     // a single animation that played is removed (playSingleAnimation)
+     std::erase_if (this->m_puppetLayers, [] (const PuppetLayerState& state) { return state.single && state.clock.finished; });
+ 
++    // IK chains reach for their targets (3042492564's arm follows its hand's target)
++    Puppet::solveIk (this->m_puppet, pose, targets);
++
+     this->m_puppetPose = pose;
+     // a script's bone poses (setLocalBoneTransform …) over the animations'
+     for (const auto& [bone, local] : this->m_boneOverrides) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index fa389c5..382312a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -214,6 +214,8 @@ private:
+     std::vector<Puppet::Vertex> m_puppetVertices = {};
+     Puppet::Model m_puppet = {};
+     std::vector<Puppet::Key> m_puppetBind = {};
++    /** the IK targets' bind keys (Puppet::targetBindPose) */
++    std::vector<Puppet::Key> m_puppetTargetBind = {};
+     std::vector<glm::mat4> m_puppetBindWorldInverse = {};
+     std::vector<glm::mat4> m_puppetWorld = {};
+     std::vector<PuppetLayerState> m_puppetLayers = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index 25f8ee0..f113f50 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -7,6 +7,7 @@
+ 
+ #define GLM_ENABLE_EXPERIMENTAL
+ #include <glm/gtx/matrix_decompose.hpp>
++#include <nlohmann/json.hpp>
+ #undef GLM_ENABLE_EXPERIMENTAL
+ 
+ namespace WallpaperEngine::Render::Objects::Puppet {
+@@ -231,17 +232,36 @@ void parseSkeleton (Reader& r, int version, Model& out, SkeletonCounts& counts)
+ 	float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+ 	std::memcpy (m, r.data + at, std::min<size_t> (length, sizeof (m)));
+ 	std::memcpy (&bone.local, m, sizeof (m));
+-	r.str (); // simulation settings (JSON)
++	// the simulation settings (JSON, GH 0x14028bbd0): the IK keys
++	const std::string settings = r.str ();
++	if (settings.find ("\"ik\"") != std::string::npos) {
++	    const auto json = nlohmann::json::parse (settings, nullptr, false);
++	    if (json.is_object ()) {
++		const auto flag = [&json] (const char* key) {
++		    const auto it = json.find (key);
++		    return it != json.end () && it->is_boolean () && it->get<bool> ();
++		};
++		bone.ik = flag ("ik");
++		bone.ikRotate = flag ("ikr");
++		if (const auto it = json.find ("ikd"); it != json.end () && it->is_number ()) {
++		    // fewer than 2 reads as 1 (the parser's clamp)
++		    bone.ikDepth = std::max (it->get<int> (), 1);
++		}
++	    }
++	}
+ 	out.bones.push_back (std::move (bone));
+     }
+     if (version >= 2) {
+ 	counts.targets = r.u16 ();
+ 	for (uint32_t i = 0; i < counts.targets; i++) {
+-	    r.str ();
+-	    r.u32 ();
+-	    r.u32 ();
++	    IkTarget target;
++	    target.name = r.str ();
++	    target.bone = static_cast<int> (r.u32 ());
++	    target.type = r.u32 ();
+ 	    r.need (64);
++	    std::memcpy (&target.matrix, r.data + r.at, 64);
+ 	    r.at += 64;
++	    out.ikTargets.push_back (std::move (target));
+ 	}
+ 	if (r.u8 ()) {
+ 	    // explicit matrices for the bones and the targets (the inverse binds WE recomputes anyway)
+@@ -388,7 +408,24 @@ void parseAnimations (Reader& r, int version, const SkeletonCounts& counts, Mode
+ 	    animation.tracks.push_back (std::move (track));
+ 	}
+ 	if (version > 1) {
+-	    skipFloatTracks (r, counts.targets);
++	    // the IK targets' tracks: keys as the bones' (an empty or odd one leaves its target at its bind)
++	    for (uint32_t t = 0; t < counts.targets; t++) {
++		Track track;
++		track.flags = r.u32 ();
++		uint32_t length;
++		const size_t at = r.blob (length);
++		if (length == samples * 36) {
++		    track.keys.resize (samples);
++		    for (size_t k = 0; k < samples; k++) {
++			float f[9];
++			std::memcpy (f, r.data + at + k * 36, sizeof (f));
++			track.keys[k].position = glm::vec3 (f[0], f[1], f[2]);
++			track.keys[k].rotation = glm::quat (glm::vec3 (f[3], f[4], f[5]));
++			track.keys[k].scale = glm::vec3 (f[6], f[7], f[8]);
++		    }
++		}
++		animation.targetTracks.push_back (std::move (track));
++	    }
+ 	    skipFloatTracks (r, counts.constraints);
+ 	}
+ 	if (version > 2) {
+@@ -665,8 +702,24 @@ glm::quat nlerp (const glm::quat& from, const glm::quat& to, float t) {
+ }
+ } // namespace
+ 
++namespace {
++void mixTracks (std::vector<Key>& pose, const std::vector<Key>& bind, const std::vector<Track>& tracks,
++		const Animation& animation, float time, float weight, bool additive);
++}
++
+ void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation& animation, float time, float weight,
+ 	  bool additive) {
++    mixTracks (pose, bind, animation.tracks, animation, time, weight, additive);
++}
++
++void mixTargets (std::vector<Key>& targets, const std::vector<Key>& bind, const Animation& animation, float time,
++		 float weight, bool additive) {
++    mixTracks (targets, bind, animation.targetTracks, animation, time, weight, additive);
++}
++
++namespace {
++void mixTracks (std::vector<Key>& pose, const std::vector<Key>& bind, const std::vector<Track>& tracks,
++		const Animation& animation, float time, float weight, bool additive) {
+     // GH 0x1401a00a0: a = clamp (⌊t / frame⌋, 0, frames − 1), b = min (a + 1, frames), the fraction within the frame
+     const float frame = 1.0f / animation.fps;
+     const int frames = static_cast<int> (animation.frames);
+@@ -674,8 +727,8 @@ void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation&
+     const int b = std::min (a + 1, frames);
+     const float f = std::fmod (time, frame) / frame;
+ 
+-    for (size_t i = 0; i < pose.size () && i < animation.tracks.size (); i++) {
+-	const Track& track = animation.tracks[i];
++    for (size_t i = 0; i < pose.size () && i < tracks.size (); i++) {
++	const Track& track = tracks[i];
+ 	if (track.flags & 1 || track.keys.size () <= static_cast<size_t> (b)) {
+ 	    continue;
+ 	}
+@@ -700,6 +753,8 @@ void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation&
+     }
+ }
+ 
++} // namespace
++
+ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vector<glm::mat4>& world) {
+     world.resize (model.bones.size ());
+     for (size_t b = 0; b < model.bones.size (); b++) {
+@@ -711,6 +766,100 @@ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vecto
+     }
+ }
+ 
++std::vector<Key> targetBindPose (const Model& model) {
++    std::vector<Key> keys (model.ikTargets.size ());
++    for (size_t t = 0; t < model.ikTargets.size (); t++) {
++	glm::vec3 skew;
++	glm::vec4 perspective;
++	glm::quat rotation;
++	if (glm::decompose (model.ikTargets[t].matrix, keys[t].scale, rotation, keys[t].position, skew, perspective)) {
++	    keys[t].rotation = rotation;
++	} else {
++	    keys[t] = Key ();
++	    keys[t].position = glm::vec3 (model.ikTargets[t].matrix[3]);
++	}
++    }
++    return keys;
++}
++
++namespace {
++float angleOf (const glm::vec2& v) { return std::atan2 (v.y, v.x); }
++float zAngle (const glm::mat4& m) { return std::atan2 (m[0][1], m[0][0]); }
++/** turns bone `b` by `delta` (radians, about z) in the world: its local z turn (the puppet's plane, no mirroring) */
++void turn (std::vector<Key>& pose, int b, float delta) {
++    pose[b].rotation = glm::normalize (glm::angleAxis (delta, glm::vec3 (0.0f, 0.0f, 1.0f)) * pose[b].rotation);
++}
++} // namespace
++
++void solveIk (const Model& model, std::vector<Key>& pose, const std::vector<Key>& targets) {
++    if (model.ikTargets.empty ()) {
++	return;
++    }
++    std::vector<glm::mat4> world;
++    for (size_t e = 0; e < model.bones.size (); e++) {
++	const Bone& end = model.bones[e];
++	if (!end.ik) {
++	    continue;
++	}
++	const int endBone = static_cast<int> (e);
++	int goal = -1, pole = -1;
++	for (size_t t = 0; t < model.ikTargets.size () && t < targets.size (); t++) {
++	    if (model.ikTargets[t].bone == endBone) {
++		(model.ikTargets[t].type == 0 ? goal : pole) = static_cast<int> (t);
++	    }
++	}
++	if (goal < 0) {
++	    continue;
++	}
++	// the chain: the ikDepth bones above the end, root first
++	std::vector<int> chain;
++	for (int b = end.parent; b >= 0 && static_cast<int> (chain.size ()) < end.ikDepth; b = model.bones[b].parent) {
++	    chain.insert (chain.begin (), b);
++	}
++	if (chain.empty ()) {
++	    continue;
++	}
++	const glm::vec2 goalAt (targets[goal].position);
++	const auto at = [&world] (int b) { return glm::vec2 (world[b][3]); };
++	worldMatrices (model, pose, world);
++
++	if (chain.size () == 2) {
++	    // two bones: the law of cosines, the elbow on the pole's side (or where it bends now)
++	    const int root = chain[0], mid = chain[1];
++	    const glm::vec2 r = at (root), m = at (mid), x = at (endBone);
++	    const float a = glm::length (m - r), b = glm::length (x - m);
++	    const glm::vec2 toGoal = goalAt - r;
++	    if (a > 1e-5f && b > 1e-5f && glm::length (toGoal) > 1e-5f) {
++		const float reach = std::clamp (glm::length (toGoal), std::abs (a - b) + 1e-4f, a + b - 1e-4f);
++		const float cosA = std::clamp ((a * a + reach * reach - b * b) / (2.0f * a * reach), -1.0f, 1.0f);
++		const glm::vec2 hint = pole >= 0 ? glm::vec2 (targets[pole].position) - r : m - r;
++		const float cross = toGoal.x * hint.y - toGoal.y * hint.x;
++		const float side = cross < 0.0f ? -1.0f : 1.0f;
++		const float upper = angleOf (toGoal) + side * std::acos (cosA);
++		turn (pose, root, upper - angleOf (m - r));
++		worldMatrices (model, pose, world);
++		turn (pose, mid, angleOf (goalAt - at (mid)) - angleOf (at (endBone) - at (mid)));
++	    }
++	} else {
++	    // one bone points at the goal; longer chains: cyclic coordinate descent, end first
++	    for (int iteration = 0; iteration < (chain.size () == 1 ? 1 : 16); iteration++) {
++		for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
++		    worldMatrices (model, pose, world);
++		    const glm::vec2 j = at (*it);
++		    if (glm::length (goalAt - j) > 1e-5f && glm::length (at (endBone) - j) > 1e-5f) {
++			turn (pose, *it, angleOf (goalAt - j) - angleOf (at (endBone) - j));
++		    }
++		}
++	    }
++	}
++	if (end.ikRotate) {
++	    worldMatrices (model, pose, world);
++	    const float want = zAngle (glm::mat4_cast (targets[goal].rotation));
++	    turn (pose, endBone, want - zAngle (world[e]));
++	}
++    }
++}
++
+ void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world) {
+     world.resize (model.bones.size ());
+     for (size_t b = 0; b < model.bones.size (); b++) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index 07f80a6..781213b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -74,6 +74,13 @@ struct Bone {
+     int parent = -1;
+     /** the bind transform relative to the parent */
+     glm::mat4 local = glm::mat4 (1.0f);
++    /**
++     * The bone's simulation JSON (MDLS, parsed by GH 0x14028bbd0): `ik` (settings flag 0x4000) makes it the end of an
++     * IK chain `ikd` bones long (≥ 1, settings +0x5c); `ikr` (flag 0x40) turns it to its target's rotation
++     */
++    bool ik = false;
++    int ikDepth = 1;
++    bool ikRotate = false;
+ };
+ 
+ /** one sample of a bone: WE converts the stored Euler angles to a quaternion at load (R = Rz · Ry · Rx) */
+@@ -90,6 +97,18 @@ struct Track {
+     std::vector<Key> keys;
+ };
+ 
++/**
++ * An IK target (MDLS v2's u16 list: a name, the bone it serves, a type, a 64-byte matrix in the mesh's space, y up):
++ * type 0 is where the chain's end goes, type 1 the pole its bend turns toward (3042492564's arm: the hand's target
++ * at the hand, the pole by the elbow)
++ */
++struct IkTarget {
++    std::string name;
++    int bone = -1;
++    uint32_t type = 0;
++    glm::mat4 matrix = glm::mat4 (1.0f);
++};
++
+ enum class Mode { Loop, Mirror, Single };
+ 
+ struct Animation {
+@@ -99,6 +118,8 @@ struct Animation {
+     float fps = 30.0f;
+     uint32_t frames = 0;
+     std::vector<Track> tracks;
++    /** MDLA v2: one track per IK target (as the bones': position, angles, scale per frame) */
++    std::vector<Track> targetTracks;
+     /**
+      * MDLA v3+: the bones' alpha tracks (a flag byte, then per bone its flags and frames + 1 floats; empty when the
+      * flag is 0). genericimage4's SKINNING_ALPHA: v_VertexAlpha = saturate (Σ weight · alpha[bone])
+@@ -129,6 +150,7 @@ struct Model {
+     std::vector<Bone> bones;
+     std::vector<Animation> animations;
+     std::vector<Attachment> attachments;
++    std::vector<IkTarget> ikTargets;
+ };
+ 
+ /** The size in bytes of a vertex of this MDLV format word, 0 when WE rejects it (GH 0x1402873f0, tables 0x1404c4da0) */
+@@ -186,6 +208,20 @@ void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation&
+ /** World matrices of a pose: world = parent world · local */
+ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vector<glm::mat4>& world);
+ 
++/** The IK targets' bind keys (their matrices decomposed), in the model's order */
++std::vector<Key> targetBindPose (const Model& model);
++
++/** An animation's IK target tracks mixed into `targets` as mix () mixes the bones */
++void mixTargets (std::vector<Key>& targets, const std::vector<Key>& bind, const Animation& animation, float time,
++		 float weight, bool additive);
++
++/**
++ * Turns each IK chain (a bone with `ik` and the `ikDepth` bones above it) so the end bone's origin reaches its type 0
++ * target, bending toward its type 1 target; with `ikRotate` the end bone takes the target's rotation. In the puppet's
++ * plane (z turns). Inferred: WE's solver wasn't read (two bones: the law of cosines; longer chains: CCD)
++ */
++void solveIk (const Model& model, std::vector<Key>& pose, const std::vector<Key>& targets);
++
+ /** The bind world matrices (GH 0x1402261c0) */
+ void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world);
+ 
