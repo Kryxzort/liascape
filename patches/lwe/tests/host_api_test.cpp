@@ -3889,6 +3889,49 @@ static bool blending_sets_combos () {
 }
 
 
+// F9/E39: a material pass's `alphawriting` (WE: default / enabled / disabled, GH 0x140186aa0). The layer's pass
+// writes (1, 1, 1, 0.25) into its composite and an effect after it shows that alpha as grey: by default a pass that
+// isn't the last writes alpha (64), with "disabled" it doesn't (the composite's alpha before it). Unpatched the key
+// wasn't read: both 64
+static bool alphawriting_masks_alpha () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"show\",\"file\":\"effects/show/effect.json\"}]}";
+    std::string normal = b9_object (1, 16), masked = "{\"id\":2,\"name\":\"off\",\"image\":\"models/b9off.json\","
+                                                     "\"size\":\"8 8\",\"origin\":\"48 16 0\"}";
+    normal.pop_back ();
+    masked.pop_back ();
+    const std::string dir = camera_scene ("\"zoom\":1", normal + effect + "," + masked + effect, "");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 0.25);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/show").c_str (), 0755);
+    write_file (dir + "/shaders/show.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/show.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tfloat a = texSample2D(g_Texture0, v_TexCoord).a;\n\tgl_FragColor = vec4(a, a, a, 1.0);\n}\n");
+    write_file (dir + "/materials/show.json", "{\"passes\":[{\"shader\":\"show\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/show/effect.json", "{\"name\":\"show\",\"passes\":[{\"material\":\"materials/show.json\"}]}\n");
+    std::string off = read_file (dir + "/materials/b9.json");
+    off.replace (off.find ("\"blending\""), 10, "\"alphawriting\":\"disabled\",\"blending\"");
+    write_file (dir + "/materials/b9off.json", off);
+    write_file (dir + "/models/b9off.json", "{\"material\":\"materials/b9off.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/b9off.json", "models/b9off.json", "effects/show/effect.json", "shaders/show.vert",
+                  "shaders/show.frag", "materials/show.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char written[4] = {}, kept[4] = {};
+    read_pixel (rig.fbo, 16, 16, written);
+    read_pixel (rig.fbo, 48, 16, kept);
+    printf ("    the composite's alpha as grey: default %d, alphawriting disabled %d\n", written[0], kept[0]);
+    CHECK (written[0] >= 55 && written[0] <= 75, "the default pass didn't write its alpha 0.25 (%d)", written[0]);
+    CHECK (kept[0] < 40 || kept[0] > 90, "the alphawriting-disabled pass wrote its alpha (%d)", kept[0]);
+    return true;
+}
+
 // IScene: get/setCameraTransforms (the scene's camera, a CameraTransforms), getInitialLayerConfig (the object as the
 // scene file has it), getAnimation (a named keyframe timeline), getLayerByID; a camera object's ICamera zoom;
 // renderContext exists. Unpatched: none of these existed (getAnimation, the camera methods: not functions)
@@ -4891,6 +4934,7 @@ int main (int argc, char** argv) {
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("blending_sets_combos", blending_sets_combos);
+    run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
     run ("scene_camera_and_config_api", scene_camera_and_config_api);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
