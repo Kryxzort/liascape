@@ -1788,7 +1788,8 @@ static std::string puppet_skeleton (int version) {
 }
 
 // animations moving the bone to (x, 0) in both of their 2 samples: (id, x)
-static std::string puppet_animations (int version, const std::vector<std::pair<int, float>>& anims) {
+static std::string puppet_animations (int version, const std::vector<std::pair<int, float>>& anims,
+                                      const std::vector<std::pair<uint32_t, std::string>>& events = {}) {
     MdlWriter a;
     a.u32 (static_cast<uint32_t> (anims.size ()));
     for (const auto& [id, x] : anims) {
@@ -1811,7 +1812,10 @@ static std::string puppet_animations (int version, const std::vector<std::pair<i
         if (version > 5) {
             a.u8 (0);
         }
-        a.u32 (0); // events
+        a.u32 (static_cast<uint32_t> (events.size ())); // events: a frame, a name
+        for (const auto& [frame, name] : events) {
+            a.u32 (frame).str (name);
+        }
     }
     return a.out;
 }
@@ -3757,6 +3761,49 @@ static bool animation_layer_api () {
     return true;
 }
 
+// F7: a puppet animation's own events (MDLA's event list: a frame, a name) reach the layer's scripts as
+// animationEvent (event, value) when the clock passes them: a one-second loop with events at frames 0 and 1, played
+// 1.5 s, gives start:0, end:1, start:0. Unpatched the list was skipped: no events
+static bool puppet_animation_events () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16);
+    a.section ("MDLS0001", puppet_skeleton (1))
+        .section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }, { { 0, "start" }, { 1, "end" } }));
+    const std::string script =
+        "let frames = 0, result;\n"
+        "export function animationEvent(event, value) { (shared.ev = shared.ev || []).push(event.name + ':' + event.frame); }\n"
+        "export function update(value) {\n"
+        "  if (++frames == 45) {\n" + js_checks (
+        "check('events', shared.ev !== undefined && shared.ev.join(',') == 'start:0,end:1,start:0');\n"
+        "if (fails.length) console.log('events ' + shared.ev);\n") + "    result = fails.length == 0;\n  }\n"
+        "  return frames < 45 ? true : result;\n}";
+    const std::string objects = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"16 16 0\",\"size\":\"32 32\","
+                                "\"animationlayers\":[{\"id\":10,\"name\":\"walk\",\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}],"
+                                + scripted ("visible", "true", script) + "}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 48) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 16, 16, px);
+    printf ("    the puppet after 1.6 s: %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (px[0] > 128, "the puppet is hidden: a failed check, see FAILS above");
+    return true;
+}
+
 // IParticleSystem: instance overrides read and write (count, a control point), stop () takes every particle away,
 // pause () + emitParticles (5) shows those 5 and no more, isPlaying. Unpatched: instance was undefined, play / stop /
 // pause did nothing on a particle system
@@ -5087,6 +5134,7 @@ int main (int argc, char** argv) {
     run ("script_strings_and_regexp", script_strings_and_regexp);
     run ("video_texture_api", video_texture_api);
     run ("animation_layer_api", animation_layer_api);
+    run ("puppet_animation_events", puppet_animation_events);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
