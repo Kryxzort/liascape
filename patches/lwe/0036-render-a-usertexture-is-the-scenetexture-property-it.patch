@@ -1,7 +1,7 @@
 From cc6f1c9544a6952efa30aca2ff3d522637f816c6 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:32:46 +0530
-Subject: [PATCH 036/101] render: a usertexture is the scenetexture property it
+Subject: [PATCH 036/102] render: a usertexture is the scenetexture property it
  names
 
 A pass's `usertextures` entry that is not a system texture names a

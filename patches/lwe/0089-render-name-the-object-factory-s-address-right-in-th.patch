@@ -1,7 +1,7 @@
 From c1df824e43f7259cc897ed6b659120efc0983e7d Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 00:10:39 +0530
-Subject: [PATCH 089/101] render: name the object factory's address right in
+Subject: [PATCH 089/102] render: name the object factory's address right in
  the shape and light notes
 
 The comments on ImageData::shape, LightData's volumetrics and the parser's shape branch cited

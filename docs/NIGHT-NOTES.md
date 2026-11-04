@@ -513,3 +513,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   divides by.
 - Health report 89 clean / 7 degraded / 0 failed (no scene changed); shader sweep the same 6 failing, none new;
   player tests 743 passed.
+
+## 2026-11-05 — rope curves bend as WE's (fork 0102, pin `9683b9c`)
+- **A rope's curve now uses WE's own tangent factor** (0.15 where LWE's Catmull-Rom had 1/6): a bent rope bows about
+  10 % less, as in WE. Under a pixel for ordinary rope segments, so nothing in your 20 rope scenes looks different in
+  the smoke frames beyond run-to-run particle noise. New test rig: a rope of particles at fixed spots (one emitter per
+  particle), the test fails on the old pin (7.0 px bow) and passes now (4.0 px; WE's maths says 4.2).
+- Gates: the 20 rope scenes' health 15 clean / 5 degraded / 0 failed on both pins (no class or loss changed); shader
+  sweep the same 6 failing checks, none new; player tests 743 passed.

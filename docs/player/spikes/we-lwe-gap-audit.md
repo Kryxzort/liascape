@@ -2921,9 +2921,16 @@ offset), C2 = (pos d, size c), then the colours of c and b; 0x60 bytes. The firs
 last CP1 = its own end (fewer than 3 particles: both). So CP0 / CP1 are the neighbours, clamped at the ends — what LWE's
 Catmull-Rom uses. The only difference left is the tangent factor: WE's bezier inner points are start + 0.15 · (end −
 CP0) and end + 0.15 · (start − CP1); uniform Catmull-Rom is the same bezier with 1/6. The curve moves by at most
-3/8 · 0.0167 · |end − CP0| (about 0.6 px per 100 px of segment at a 90° bend). Not changed: no test rig places rope
-particles deterministically, and the shift is under a pixel for segments shorter than ~150 px (the library's rope
-segment lengths weren't measured). The order list's sort key wasn't read (LWE: spawn order).
+3/8 · 0.0167 · |end − CP0| (about 0.6 px per 100 px of segment at a 90° bend). **Ported (fork patch 0102, pin
+`9683b9c`)**: `CParticle::renderRope` evaluates that bezier with 0.15 (`ropeBezier`) instead of the Catmull-Rom; the
+sub-points and CP0 / CP1 clamping are unchanged. The order list's sort key wasn't read (LWE: spawn order).
+
+**Fork test** (`host_api_test`, 117 → 118 passed): `rope_spline_tangent_factor` — the rig for deterministic rope
+particles is one emitter per particle (sphererandom, distance 0, rate 0, `instantaneous` 1; emitters emit in array
+order, so the rope order is the emitter order; no velocity initializer, so they stay put). a (30, 244), b (−30, 20),
+c (30, 20), d (−30, 244): the b → c chord is off the 64 × 32 view and the segment bows 0.72 · f · 224 back across it
+(subdivision 4, the flat t 0.4..0.6 piece crosses x 32). Column 32: the 2 px rope's centre 4.0 px off the centre row
+(predicted 4.2); on `7b2517c` 7.0 (predicted 6.9).
 
 **Fork test** (`host_api_test`, 116 → 117 passed): `attachment_matrix_is_whole` — a 32 × 32 puppet whose attachment
 "tip" is the MDAT matrix scale 2; the 4 × 4 square pinned to it at "0 4 0" sits 8 px up and is 8 px wide (x 28..35,

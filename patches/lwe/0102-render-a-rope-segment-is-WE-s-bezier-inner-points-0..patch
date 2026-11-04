@@ -1,0 +1,65 @@
+From 9683b9c367e2cb021341e4682995ae64bdfee841 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 04:39:45 +0530
+Subject: [PATCH 102/102] render: a rope segment is WE's bezier, inner points
+ 0.15 along the neighbours' chord
+
+WE's rope buffer (GH 0x140255e50) writes per segment b -> c the neighbours a and d as CP0 / CP1
+(clamped to the segment's own ends at the first and last), and genericropeparticle.vert builds
+the bezier b, b + 0.15 (c - a), c + 0.15 (b - d), c. LWE evaluated a uniform Catmull-Rom: the
+same bezier with 1/6, so a bent rope bowed about 11 % further out than WE's.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Attachment result" (P30 rope spline buffer)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/CParticle.cpp              | 20 +++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 6fadc36..db2d870 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2835,9 +2835,7 @@ void CParticle::renderRope () {
+     // compaction in update(). All particles in [0, m_particleCount) are alive.
+     const uint32_t aliveCount = m_particleCount;
+ 
+-    // Build vertex data with Catmull-Rom spline subdivision.
+-    // Each segment between consecutive particles is subdivided into m_ropeSubdivision
+-    // sub-segments for smooth curves instead of harsh corners at particle positions.
++    // Build vertex data with WE's rope spline, subdivided into ropeSubSegments () pieces per segment.
+     //
+     // Rope vertex layout (26 floats per vertex, THICKFORMAT):
+     // [0-3]   a_PositionVec4:   startPos.xyz, sizeStart
+@@ -2851,13 +2849,15 @@ void CParticle::renderRope () {
+     const uint32_t numSegments = aliveCount - 1;
+     const int subdivision = this->ropeSubSegments ();
+ 
+-    // Catmull-Rom spline evaluation
+-    auto catmullRom = [] (const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
++    // WE's rope segment b -> c (GH 0x140255e50 writes b, c and the neighbours a / d as CP0 / CP1, clamped to the
++    // segment's own ends) is the bezier genericropeparticle.vert builds: inner points b + 0.15 (c - a) and
++    // c + 0.15 (b - d). Uniform Catmull-Rom (what LWE had) is the same bezier with 1/6
++    auto ropeBezier = [] (const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
+ 			  float t) -> glm::vec3 {
+-	float t2 = t * t, t3 = t2 * t;
+-	return 0.5f
+-	    * ((2.0f * p1) + (-p0 + p2) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2
+-	       + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
++	const glm::vec3 c1 = p1 + 0.15f * (p2 - p0);
++	const glm::vec3 c2 = p2 + 0.15f * (p1 - p3);
++	const float u = 1.0f - t;
++	return u * u * u * p1 + 3.0f * u * u * t * c1 + 3.0f * u * t * t * c2 + t * t * t * p2;
+     };
+ 
+     // First pass: evaluate spline to get all interpolated points
+@@ -2877,7 +2877,7 @@ void CParticle::renderRope () {
+ 	    float t = static_cast<float> (k) / static_cast<float> (subdivision);
+ 	    uint32_t idx = i * subdivision + k;
+ 
+-	    splinePositions[idx] = catmullRom (p0.position, p1.position, p2.position, p3.position, t);
++	    splinePositions[idx] = ropeBezier (p0.position, p1.position, p2.position, p3.position, t);
+ 	    splineSizes[idx] = glm::mix (p1.size, p2.size, t);
+ 	    splineColors[idx] = glm::mix (glm::vec4 (p1.color, p1.alpha), glm::vec4 (p2.color, p2.alpha), t);
+ 	}

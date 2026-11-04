@@ -1713,6 +1713,54 @@ static bool particle_control_points () {
     return true;
 }
 
+// P30 rope spline (the audit's "Attachment result" → rope spline buffer): WE's rope segment b → c is a bezier whose inner
+// points are b + 0.15 · (c − a) and c + 0.15 · (b − d) (a, d its neighbours; genericropeparticle.vert), uniform
+// Catmull-Rom (LWE's) the same bezier with 1/6. Four emitters, each one particle at a fixed origin (no velocity), in
+// emitter order a (30, 244), b (−30, 20), c (30, 20), d (−30, 244): the b → c chord is 20 px off the centre, outside
+// the 64 × 32 view, and the segment bows 0.72 · f · 224 back across it (default subdivision 4: its flat middle piece
+// t 0.4..0.6 crosses x 32). WE's 0.15: the rope's centre is 4.2 px off the centre row; Catmull-Rom: 6.9 px
+static bool rope_spline_tangent_factor () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto emitter = [] (const char* origin) {
+        return std::string ("{\"name\":\"sphererandom\",\"origin\":\"") + origin
+             + "\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1}";
+    };
+    const std::string sys = std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":8,")
+                          + "\"renderer\":[{\"name\":\"rope\"}],\"emitter\":[" + emitter ("30 244 0") + ","
+                          + emitter ("-30 20 0") + "," + emitter ("30 20 0") + "," + emitter ("-30 244 0") + "],"
+                          + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":2,\"max\":2},"
+                          + "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+                          + "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (particle_object (1, "rope.json", 32, 16), "0 0 0", { { "rope.json", sys } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    std::string column;
+    double sum = 0;
+    int lit = 0;
+    for (int y = 0; y < 32; y++) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, 32, y, px);
+        const bool on = px[0] > 128;
+        column += on ? '#' : '.';
+        if (on) {
+            sum += y + 0.5;
+            lit++;
+        }
+    }
+    const double off = lit ? std::abs (sum / lit - 16.0) : -1.0;
+    printf ("    x 32 rows 0..31: %s; the rope's centre %.2f px off the centre row (0.15: 4.2, 1/6: 6.9)\n", column.c_str (),
+            off);
+    CHECK (lit > 0 && lit <= 6, "no thin rope across x 32 (%d px lit)", lit);
+    CHECK (off >= 3.0 && off <= 5.5, "the rope bows %.2f px off the centre (WE's 0.15 factor: 4.2; Catmull-Rom: 6.9)", off);
+    return true;
+}
+
 // system flags bit 0 is the editor's "Worldspace" (Leftovers): a particle stays where it was emitted in the scene when
 // its system moves on. Two systems emit one particle each at the start and then move right by 3 px a frame to x 50
 // (a script on the origin); the local one's particle goes with it, the world-space one's stays near x 20 (unpatched:
@@ -6640,6 +6688,7 @@ int main (int argc, char** argv) {
     run ("transparent_sort_takes_sortorder", transparent_sort_takes_sortorder);
     run ("particle_stock_motion_operators", particle_stock_motion_operators);
     run ("particle_world_space_stays", particle_world_space_stays);
+    run ("rope_spline_tangent_factor", rope_spline_tangent_factor);
     run ("particle_override_scripts_run", particle_override_scripts_run);
     run ("particle_stock_collisions", particle_stock_collisions);
     run ("particle_stock_initializers", particle_stock_initializers);

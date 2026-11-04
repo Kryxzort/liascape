@@ -1135,8 +1135,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 pieces (WE's TRAILSUBDIVISION in genericropeparticle.geom); every library rope is ORIENTATION 0 and
                 sets no TRAILSCROLL/FADE key. The CPU spline buffer is read too (2026-11-05, GH 0x140255e50): CP0 / CP1
                 are the neighbouring particles, clamped to the segment's own ends, as in LWE's Catmull-Rom.
-          - [ ] P30 tangent factor: WE's bezier inner points use 0.15 where LWE's Catmull-Rom has 1/6 (≤ 0.6 px per
-                100 px of segment). Needs a rope test rig (deterministic particle positions) before porting.
+          - [x] P30 tangent factor — done 2026-11-05 (0102): a rope segment is WE's bezier with inner points 0.15 along
+                the neighbours' chord (LWE's Catmull-Rom had 1/6). Rig + test: host_api_test
+                `rope_spline_tangent_factor` (one fixed-origin emitter per particle).
           - [x] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`axis` — the 3 scenes use WE's defaults
                 (GH 0x1401e8c90), which is what LWE does; other values are reported to the health report (0072).
           - [ ] P27 non-default bounds / limitbehavior / axis semantics (decode the spawn interpreter's case; 0
