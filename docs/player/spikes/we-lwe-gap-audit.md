@@ -2049,7 +2049,7 @@ compiles** through the core's own preprocessing, glslang + SPIRV-Cross and the G
 Tests (host_api_test, all four red on `42f301d`): `shaders_include_in_place`, `fragment_varying_takes_vertex_type`,
 `hlsl_conversions_compile`, `hlsl_names_and_leftovers_compile`; `shaders_compile_like_hlsl` (0059) still passes.
 
-### F1 result: shadows, light cookies, tube and directional lights (fork patch 0071, 2026-11-04)
+### F1 result: shadows, light cookies, tube and directional lights (fork patch 0071, pin `4b85ae7`, 2026-11-04)
 
 No library scene uses any of it. 3477054430 is the only scene with lights: four spots, all `castshadow: false`,
 no `usecookie`, and its `lightconfig` is `{"spot": 4}`. No scene has a tube or directional light. Of the 44 objects
@@ -2202,3 +2202,6 @@ smoke, old core vs new):
   (`g_Texture1Texel`, and 2.8.42's `ApplyMorphPosition` overload in fur4). Both are skinned / morphed mesh
   combos, which LWE's static meshes never set (F4).
 - The other 6 are as before.
+
+Pin `4b85ae7`. Player tests (DEBUG): 740 passed, 0 failed, 3 ignored. In the full run, the timing test
+`four_workers_latch_independently` failed once and passed alone.
