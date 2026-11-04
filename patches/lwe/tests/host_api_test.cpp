@@ -3405,6 +3405,321 @@ static bool script_strings_and_regexp () {
 }
 
 
+// a 1 s, 16 x 16, 10 fps red H.264 video (ffmpeg -f lavfi -i color=c=red:s=16x16:d=1:r=10 -pix_fmt yuv420p -c:v libx264
+// -crf 40 -movflags +faststart), as a TEXV0005 / TEXB0004 mp4 texture holds it
+static const char kTinyMp4[] =
+    "\x00\x00\x00\x20\x66\x74\x79\x70\x69\x73\x6f\x6d\x00\x00\x02\x00\x69\x73\x6f\x6d\x69\x73\x6f\x32\x61\x76\x63\x31\x6d\x70\x34\x31\x00\x00\x03\x8b\x6d\x6f\x6f\x76"
+    "\x00\x00\x00\x6c\x6d\x76\x68\x64\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\xe8\x00\x00\x03\xe8\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x02\xb6\x74\x72\x61\x6b\x00\x00\x00\x5c"
+    "\x74\x6b\x68\x64\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x03\xe8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00"
+    "\x00\x10\x00\x00\x00\x10\x00\x00\x00\x00\x00\x24\x65\x64\x74\x73\x00\x00\x00\x1c\x65\x6c\x73\x74\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x03\xe8\x00\x00\x08\x00"
+    "\x00\x01\x00\x00\x00\x00\x02\x2e\x6d\x64\x69\x61\x00\x00\x00\x20\x6d\x64\x68\x64\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x28\x00\x00\x00\x28\x00"
+    "\x55\xc4\x00\x00\x00\x00\x00\x2d\x68\x64\x6c\x72\x00\x00\x00\x00\x00\x00\x00\x00\x76\x69\x64\x65\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x56\x69\x64\x65"
+    "\x6f\x48\x61\x6e\x64\x6c\x65\x72\x00\x00\x00\x01\xd9\x6d\x69\x6e\x66\x00\x00\x00\x14\x76\x6d\x68\x64\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    "\x24\x64\x69\x6e\x66\x00\x00\x00\x1c\x64\x72\x65\x66\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x0c\x75\x72\x6c\x20\x00\x00\x00\x01\x00\x00\x01\x99\x73\x74\x62"
+    "\x6c\x00\x00\x00\xc1\x73\x74\x73\x64\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\xb1\x61\x76\x63\x31\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x10\x00\x48\x00\x00\x00\x48\x00\x00\x00\x00\x00\x00\x00\x01\x14\x4c\x61\x76\x63\x36\x33\x2e\x31\x2e\x31\x30\x32"
+    "\x20\x6c\x69\x62\x78\x32\x36\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x18\xff\xff\x00\x00\x00\x37\x61\x76\x63\x43\x01\x64\x00\x0a\xff\xe1\x00\x19\x67"
+    "\x64\x00\x0a\xac\x72\x04\x5e\xc0\x44\x00\x00\x03\x00\x04\x00\x00\x03\x00\x50\x3c\x48\x96\x11\x80\x01\x00\x07\x68\xe8\x43\x83\x92\xc8\xb0\xfd\xf8\xf8\x00\x00\x00"
+    "\x00\x10\x70\x61\x73\x70\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x14\x62\x74\x72\x74\x00\x00\x00\x00\x00\x00\x19\x90\x00\x00\x00\x00\x00\x00\x00\x18\x73\x74"
+    "\x74\x73\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x0a\x00\x00\x04\x00\x00\x00\x00\x14\x73\x74\x73\x73\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00"
+    "\x00\x38\x63\x74\x74\x73\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x01\x00\x00\x08\x00\x00\x00\x00\x01\x00\x00\x28\x00\x00\x00\x00\x01\x00\x00\x10\x00\x00\x00"
+    "\x00\x03\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x04\x00\x00\x00\x00\x1c\x73\x74\x73\x63\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x0a\x00\x00"
+    "\x00\x01\x00\x00\x00\x3c\x73\x74\x73\x7a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0a\x00\x00\x02\xbd\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00"
+    "\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x14\x73\x74\x63\x6f\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00"
+    "\x03\xbb\x00\x00\x00\x61\x75\x64\x74\x61\x00\x00\x00\x59\x6d\x65\x74\x61\x00\x00\x00\x00\x00\x00\x00\x21\x68\x64\x6c\x72\x00\x00\x00\x00\x00\x00\x00\x00\x6d\x64"
+    "\x69\x72\x61\x70\x70\x6c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x2c\x69\x6c\x73\x74\x00\x00\x00\x24\xa9\x74\x6f\x6f\x00\x00\x00\x1c\x64\x61\x74\x61\x00"
+    "\x00\x00\x01\x00\x00\x00\x00\x4c\x61\x76\x66\x36\x33\x2e\x31\x2e\x31\x30\x32\x00\x00\x00\x08\x66\x72\x65\x65\x00\x00\x03\x3a\x6d\x64\x61\x74\x00\x00\x02\xa2\x06"
+    "\x05\xff\xff\x9e\xdc\x45\xe9\xbd\xe6\xd9\x48\xb7\x96\x2c\xd8\x20\xd9\x23\xee\xef\x78\x32\x36\x34\x20\x2d\x20\x63\x6f\x72\x65\x20\x31\x36\x35\x20\x2d\x20\x48\x2e"
+    "\x32\x36\x34\x2f\x4d\x50\x45\x47\x2d\x34\x20\x41\x56\x43\x20\x63\x6f\x64\x65\x63\x20\x2d\x20\x43\x6f\x70\x79\x6c\x65\x66\x74\x20\x32\x30\x30\x33\x2d\x32\x30\x32"
+    "\x35\x20\x2d\x20\x68\x74\x74\x70\x3a\x2f\x2f\x77\x77\x77\x2e\x76\x69\x64\x65\x6f\x6c\x61\x6e\x2e\x6f\x72\x67\x2f\x78\x32\x36\x34\x2e\x68\x74\x6d\x6c\x20\x2d\x20"
+    "\x6f\x70\x74\x69\x6f\x6e\x73\x3a\x20\x63\x61\x62\x61\x63\x3d\x31\x20\x72\x65\x66\x3d\x31\x36\x20\x64\x65\x62\x6c\x6f\x63\x6b\x3d\x31\x3a\x30\x3a\x30\x20\x61\x6e"
+    "\x61\x6c\x79\x73\x65\x3d\x30\x78\x33\x3a\x30\x78\x31\x33\x33\x20\x6d\x65\x3d\x75\x6d\x68\x20\x73\x75\x62\x6d\x65\x3d\x31\x30\x20\x70\x73\x79\x3d\x31\x20\x70\x73"
+    "\x79\x5f\x72\x64\x3d\x31\x2e\x30\x30\x3a\x30\x2e\x30\x30\x20\x6d\x69\x78\x65\x64\x5f\x72\x65\x66\x3d\x31\x20\x6d\x65\x5f\x72\x61\x6e\x67\x65\x3d\x32\x34\x20\x63"
+    "\x68\x72\x6f\x6d\x61\x5f\x6d\x65\x3d\x31\x20\x74\x72\x65\x6c\x6c\x69\x73\x3d\x32\x20\x38\x78\x38\x64\x63\x74\x3d\x31\x20\x63\x71\x6d\x3d\x30\x20\x64\x65\x61\x64"
+    "\x7a\x6f\x6e\x65\x3d\x32\x31\x2c\x31\x31\x20\x66\x61\x73\x74\x5f\x70\x73\x6b\x69\x70\x3d\x31\x20\x63\x68\x72\x6f\x6d\x61\x5f\x71\x70\x5f\x6f\x66\x66\x73\x65\x74"
+    "\x3d\x2d\x32\x20\x74\x68\x72\x65\x61\x64\x73\x3d\x31\x20\x6c\x6f\x6f\x6b\x61\x68\x65\x61\x64\x5f\x74\x68\x72\x65\x61\x64\x73\x3d\x31\x20\x73\x6c\x69\x63\x65\x64"
+    "\x5f\x74\x68\x72\x65\x61\x64\x73\x3d\x30\x20\x6e\x72\x3d\x30\x20\x64\x65\x63\x69\x6d\x61\x74\x65\x3d\x31\x20\x69\x6e\x74\x65\x72\x6c\x61\x63\x65\x64\x3d\x30\x20"
+    "\x62\x6c\x75\x72\x61\x79\x5f\x63\x6f\x6d\x70\x61\x74\x3d\x30\x20\x63\x6f\x6e\x73\x74\x72\x61\x69\x6e\x65\x64\x5f\x69\x6e\x74\x72\x61\x3d\x30\x20\x62\x66\x72\x61"
+    "\x6d\x65\x73\x3d\x38\x20\x62\x5f\x70\x79\x72\x61\x6d\x69\x64\x3d\x32\x20\x62\x5f\x61\x64\x61\x70\x74\x3d\x32\x20\x62\x5f\x62\x69\x61\x73\x3d\x30\x20\x64\x69\x72"
+    "\x65\x63\x74\x3d\x33\x20\x77\x65\x69\x67\x68\x74\x62\x3d\x31\x20\x6f\x70\x65\x6e\x5f\x67\x6f\x70\x3d\x30\x20\x77\x65\x69\x67\x68\x74\x70\x3d\x32\x20\x6b\x65\x79"
+    "\x69\x6e\x74\x3d\x32\x35\x30\x20\x6b\x65\x79\x69\x6e\x74\x5f\x6d\x69\x6e\x3d\x31\x30\x20\x73\x63\x65\x6e\x65\x63\x75\x74\x3d\x34\x30\x20\x69\x6e\x74\x72\x61\x5f"
+    "\x72\x65\x66\x72\x65\x73\x68\x3d\x30\x20\x72\x63\x5f\x6c\x6f\x6f\x6b\x61\x68\x65\x61\x64\x3d\x36\x30\x20\x72\x63\x3d\x63\x72\x66\x20\x6d\x62\x74\x72\x65\x65\x3d"
+    "\x31\x20\x63\x72\x66\x3d\x34\x30\x2e\x30\x20\x71\x63\x6f\x6d\x70\x3d\x30\x2e\x36\x30\x20\x71\x70\x6d\x69\x6e\x3d\x30\x20\x71\x70\x6d\x61\x78\x3d\x36\x39\x20\x71"
+    "\x70\x73\x74\x65\x70\x3d\x34\x20\x69\x70\x5f\x72\x61\x74\x69\x6f\x3d\x31\x2e\x34\x30\x20\x61\x71\x3d\x31\x3a\x31\x2e\x30\x30\x00\x80\x00\x00\x00\x13\x65\x88\x81"
+    "\x00\x02\x3f\xfe\x24\x47\xc0\xa4\x87\xea\x60\x8e\x3c\xc8\x15\x61\x00\x00\x00\x09\x41\x9a\x09\x2d\x88\x6f\xff\xab\x80\x00\x00\x00\x09\x41\x9e\x10\x87\x10\x43\xff"
+    "\xe0\x81\x00\x00\x00\x09\x01\x9e\x18\x26\x88\x6f\xff\xe5\x80\x00\x00\x00\x09\x01\x9e\x18\x46\x88\x6f\xff\xe5\x81\x00\x00\x00\x09\x01\x9e\x18\x66\x88\x6f\xff\xe5"
+    "\x81\x00\x00\x00\x09\x01\x9e\x18\xad\x48\x6f\xff\xe5\x81\x00\x00\x00\x09\x01\x9e\x18\xcd\x48\x6f\xff\xe5\x81\x00\x00\x00\x09\x01\x9e\x18\xed\x48\x6f\xff\xe5\x80"
+    "\x00\x00\x00\x09\x01\x9e\x19\x0d\x48\x6f\xff\xe5\x80";
+
+static std::string video_texture () {
+    const std::string mp4 (kTinyMp4, sizeof kTinyMp4 - 1);
+    MdlWriter t;
+    t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
+    t.u32 (0).u32 (32 | 2).u32 (16).u32 (16).u32 (16).u32 (16).u32 (0);
+    t.out += std::string ("TEXB0004", 8) + '\0';
+    t.u32 (1).u32 (0xffffffff).u32 (1);
+    // one image, one mipmap: TEXB0004's editor fields, its size, uncompressed
+    t.u32 (1).u32 (0).u32 (0).str ("").u32 (0).u32 (16).u32 (16).u32 (0).u32 (static_cast<uint32_t> (mp4.size ()))
+        .u32 (static_cast<uint32_t> (mp4.size ()));
+    t.out += mp4;
+    return t.out;
+}
+
+// IVideoTexture: a layer whose texture is a video gives one (a plain layer undefined); stop / play / pause and
+// isPlaying, rate and loop read back, setCurrentTime reaches getCurrentTime, addEndedCallback takes a function.
+// Unpatched: getVideoTexture was not a function
+static bool video_texture_api () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks =
+        "const v = thisScene.getLayer('vid').getVideoTexture();\n"
+        "check('video', v !== undefined && typeof v.play === 'function');\n"
+        "check('plain', thisLayer.getVideoTexture() === undefined);\n"
+        "v.loop = false;\n"
+        "v.rate = 2;\n"
+        "check('settings', v.loop === false && Math.abs(v.rate - 2) < 1e-6);\n"
+        "v.stop();\n"
+        "check('stop', !v.isPlaying());\n"
+        "v.play();\n"
+        "check('play', v.isPlaying());\n"
+        "v.setCurrentTime(0.5);\n"
+        "check('seek', Math.abs(v.getCurrentTime() - 0.5) < 0.15);\n"
+        "v.pause();\n"
+        "check('pause', !v.isPlaying());\n"
+        "v.addEndedCallback(() => {});\n"
+        "check('duration', typeof v.duration === 'number');\n";
+    // the checks run on a plain square (shown when they pass); the video layers draw on mpv's clock
+    const std::string dir = script_scene (
+        "{\"id\":1,\"name\":\"vid\",\"image\":\"models/v.json\",\"size\":\"8 8\",\"origin\":\"8 16 0\"},"
+        + square (2, scripted ("visible", "false", checked_once (checks)) + ",\"origin\":\"40 16 0\"")
+        + ",{\"id\":3,\"name\":\"hidden\",\"image\":\"models/v.json\",\"size\":\"8 8\",\"origin\":\"24 16 0\",\"visible\":false}");
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/v.json", "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\","
+                                           "\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\","
+                                           "\"textures\":[\"v\"]}]}\n");
+    write_file (dir + "/materials/v.tex", video_texture ());
+    write_file (dir + "/models/v.json", "{\"material\":\"materials/v.json\"}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/v.json", "materials/v.tex", "models/v.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char checked[4] = {}, hidden[4] = {};
+    read_pixel (rig.fbo, 40, 16, checked);
+    read_pixel (rig.fbo, 24, 16, hidden);
+    printf ("    checks' square %d %d %d; hidden video layer %d %d %d\n", checked[0], checked[1], checked[2], hidden[0],
+            hidden[1], hidden[2]);
+    // mpv sets its own clear colour while it draws a frame: the scene's clear (0 0 0.5) still shows where nothing draws
+    CHECK (hidden[2] > 100 && hidden[0] < 30, "the scene's clear colour is gone where nothing draws");
+    CHECK (checked[2] < 64, "the checks' square is hidden: a failed check, see FAILS above");
+    return true;
+}
+
+// IAnimationLayer on a puppet: count, by name and index (the same object), fps / frameCount / name, pause / play /
+// isPlaying, rate, a script on the animation layer's visible sees it as thisObject, createAnimationLayer /
+// destroyAnimationLayer, addEndedCallback fires as a fast loop wraps; the bones: count, index, parent, a local
+// origin set by a script moves the mesh, blend 0 takes the animation off (the square leaves x 22..25 for 6..9).
+// Unpatched: getAnimationLayer and the bone methods were not functions
+static bool animation_layer_api () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 8.0f } }));
+    const std::string checks =
+        "check('count', thisLayer.getAnimationLayerCount() == 1);\n"
+        "const anim = thisLayer.getAnimationLayer('walk');\n"
+        "check('same', anim !== undefined && anim === thisLayer.getAnimationLayer(0));\n"
+        "check('info', anim.name == 'walk' && anim.fps == 1 && anim.frameCount == 1 && anim.duration == 1);\n"
+        "check('thisObject', shared.thisObjectIsLayer === true);\n"
+        "check('playing', anim.isPlaying());\n"
+        "anim.pause();\n"
+        "check('paused', !anim.isPlaying());\n"
+        "anim.play();\n"
+        "anim.rate = 40;\n"
+        "check('rate', anim.rate == 40);\n"
+        "anim.addEndedCallback(() => { shared.ends = (shared.ends || 0) + 1; });\n"
+        "const made = thisLayer.createAnimationLayer('anim', { blend: 0 });\n"
+        "check('create', made !== undefined && thisLayer.getAnimationLayerCount() == 2 && made.blend == 0);\n"
+        "check('destroy', thisLayer.destroyAnimationLayer(made) && thisLayer.getAnimationLayerCount() == 1);\n"
+        "check('bones', thisLayer.getBoneCount() == 1 && thisLayer.getBoneIndex('') == 0 && thisLayer.getBoneParentIndex(0) == -1);\n"
+        "anim.blend = 0;\n"
+        "check('origin', thisLayer.getLocalBoneOrigin(0).length() < 1e-3);\n"
+        "thisLayer.setLocalBoneOrigin(0, new Vec3(-8, 0, 0));\n"
+        "check('set', Math.abs(thisLayer.getLocalBoneOrigin(0).x + 8) < 1e-3);\n";
+    const std::string script = "let result, frames = 0;\nexport function update(value) {\n  if (result === undefined) {\n"
+                             + js_checks (checks) + "    result = fails.length == 0;\n  }\n"
+                               "  if (++frames == 6 && !(shared.ends > 0)) { console.log('FAILS ended'); result = false; }\n"
+                               "  return result;\n}";
+    const std::string onLayer = "export function init(value) { shared.thisObjectIsLayer = thisObject instanceof IAnimationLayer"
+                                " && typeof thisObject.addEndedCallback === 'function'; return value; }";
+    std::string animLayer = "{\"id\":10,\"name\":\"walk\",\"animation\":7,\"rate\":1,\"blend\":1," + scripted ("visible", "true", onLayer)
+                          + "}";
+    const std::string objects = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"16 16 0\",\"size\":\"32 32\","
+                                "\"animationlayers\":[" + animLayer + "]," + scripted ("visible", "true", script) + "}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 8; i++) {
+        rig.step ();
+    }
+    auto lit = [&] (int x) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, 16, px);
+        return px[0] > 128;
+    };
+    printf ("    x 7 %d, x 16 %d, x 24 %d\n", lit (7), lit (16), lit (24));
+    CHECK (lit (7) && !lit (16) && !lit (24), "the square isn't at x 6..9 (hidden: a failed check, see FAILS above)");
+    return true;
+}
+
+// IParticleSystem: instance overrides read and write (count, a control point), stop () takes every particle away,
+// pause () + emitParticles (5) shows those 5 and no more, isPlaying. Unpatched: instance was undefined, play / stop /
+// pause did nothing on a particle system
+static bool particle_system_api () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string grey = "{\"name\":\"colorrandom\",\"min\":\"8 8 8\",\"max\":\"8 8 8\"}";
+    const std::string still = ",\"distancemin\":0,\"distancemax\":0,\"rate\":10";
+    const std::string longLived = particle_system ("add", ",\"maxcount\":100", still,
+        grey + ",{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}");
+    auto withScript = [] (std::string object, const std::string& script) {
+        object.insert (object.size () - 1, "," + scripted ("visible", "true", script));
+        return object;
+    };
+    const std::string stopped = withScript (particle_object (1, "long.json", 8, 16),
+        checked_once ("check('count', thisLayer.instance.count == 1);\n"
+                      "thisLayer.instance.count = 0.5;\n"
+                      "check('set', thisLayer.instance.count == 0.5 && thisLayer.instance === thisLayer.instance);\n"
+                      "thisLayer.instance.controlpoint1 = new Vec3(1, 2, 3);\n"
+                      "check('cp', thisLayer.instance.controlpoint1.z == 3);\n"
+                      "thisLayer.stop();\n"
+                      "check('stopped', !thisLayer.isPlaying());\n"));
+    const std::string burst = withScript (particle_object (2, "long.json", 24, 16),
+        "let done;\nexport function update(value) {\n  if (!done) { done = true; thisLayer.pause(); thisLayer.emitParticles(5); }\n  return true;\n}");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (stopped + "," + burst + "," + particle_object (3, "long.json", 40, 16), "0 0 0",
+                                            { { "long.json", longLived } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 31) {
+        rig.step ();
+    }
+    const double none = stacked (rig, 8, 16), five = stacked (rig, 24, 16), plain = stacked (rig, 40, 16);
+    printf ("    after 1 s: stopped %.1f, paused + 5 %.1f, plain %.1f\n", none, five, plain);
+    CHECK (none < 0.5, "a stopped system has particles (%.1f; or a failed check, see FAILS above)", none);
+    CHECK (five >= 4.5 && five <= 6.5, "paused + emitParticles (5): %.1f", five);
+    CHECK (plain >= 8, "the plain system emits (%.1f)", plain);
+    return true;
+}
+
+// applyGeneralSettings once on load with the language; animationEvent (event, value) as a keyframe timeline passes its
+// events (not one past the end); destroy () for a layer a script destroys. Unpatched: none of the three was sent
+static bool script_events_reach_scripts () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string onAlpha = "export function animationEvent(event, value) { (shared.events = shared.events || []).push(event.name + ':' + event.frame); }\n"
+                                "export function applyGeneralSettings(s) { shared.language = s.language; }";
+    const std::string alpha = animated ("alpha", "1", "\"c0\":[" + key (0, 1) + "," + key (20, 1) + "]",
+                                        "\"fps\":30,\"length\":20,\"mode\":\"single\",\"events\":[{\"frame\":0,\"name\":\"a\"},"
+                                        "{\"frame\":10,\"name\":\"b\"},{\"frame\":30,\"name\":\"never\"}]");
+    // the script goes beside the animation: {"value", "animation", "script"}
+    std::string escaped;
+    for (char c : onAlpha) {
+        if (c == '"' || c == '\\') {
+            escaped += '\\';
+        }
+        if (c == '\n') {
+            escaped += "\\n";
+            continue;
+        }
+        escaped += c;
+    }
+    std::string alphaScripted = alpha;
+    alphaScripted.insert (alphaScripted.size () - 1, ",\"script\":\"" + escaped + "\"");
+    const std::string watcher =
+        "let made, frames = 0, result;\n"
+        "export function init(value) {\n"
+        "  made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: '8 8', origin: '40 16 0',"
+        " visible: { value: true, script: 'export function destroy() { shared.destroyed = true; }' } });\n"
+        "}\n"
+        "export function update(value) {\n"
+        "  if (++frames == 3) { thisScene.destroyLayer(made); }\n"
+        "  if (frames == 16) {\n" + js_checks (
+        "check('language', typeof shared.language === 'string' && shared.language.length > 0);\n"
+        "check('events', shared.events !== undefined && shared.events.join(',') == 'a:0,b:10');\n"
+        "if (fails.length) console.log('events: ' + shared.events + ', language: ' + shared.language);\n"
+        "check('destroy', shared.destroyed === true);\n") + "    result = fails.length == 0;\n  }\n  return frames < 16 ? true : result;\n}";
+    const std::string dir = script_scene (square (1, alphaScripted + ",\"origin\":\"8 16 0\"") + ","
+                                          + square (2, scripted ("visible", "true", watcher) + ",\"origin\":\"24 16 0\""));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 20) {
+        rig.step ();
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    std::string want = covered (4, 11);
+    for (int x = 20; x <= 27; x++) {
+        want[x] = '#';
+    }
+    CHECK (got == want, "want %s (20..27 missing: a failed check, see FAILS above; 36..43: the layer wasn't destroyed)",
+           want.c_str ());
+    return true;
+}
+
+
+// a material's `alphatocoverage` blending sets the ALPHATOCOVERAGE combo (the stock shaders cut the alpha there and
+// discard on GLSL) and draws unblended, `additive` sets ADDITIVE (WE's GH 0x140183570). The layer's shader discards
+// under ALPHATOCOVERAGE and drops green under ADDITIVE. Unpatched: alphatocoverage was "unsupported, as normal" (the
+// white square drew), additive set no combo (white + blue)
+static bool blending_sets_combos () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 8) + ",{\"id\":2,\"name\":\"add\",\"image\":\"models/b9add.json\","
+                                          "\"size\":\"8 8\",\"origin\":\"40 16 0\"}");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);\n#if ALPHATOCOVERAGE\n\tdiscard;\n#endif\n"
+                       "#if ADDITIVE\n\tgl_FragColor.g = 0.0;\n#endif");
+    std::string material = read_file (dir + "/materials/b9.json");
+    const std::string add = material;
+    material.replace (material.find ("\"normal\""), 8, "\"alphatocoverage\"");
+    write_file (dir + "/materials/b9.json", material);
+    std::string additive = add;
+    additive.replace (additive.find ("\"normal\""), 8, "\"additive\"");
+    write_file (dir + "/materials/b9add.json", additive);
+    write_file (dir + "/models/b9add.json", "{\"material\":\"materials/b9add.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/b9add.json", "models/b9add.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char cut[4] = {}, summed[4] = {};
+    read_pixel (rig.fbo, 8, 16, cut);
+    read_pixel (rig.fbo, 40, 16, summed);
+    printf ("    alphatocoverage %d %d %d, additive %d %d %d\n", cut[0], cut[1], cut[2], summed[0], summed[1], summed[2]);
+    CHECK (cut[0] < 30 && cut[2] > 100, "the alphatocoverage layer drew (no ALPHATOCOVERAGE combo)");
+    CHECK (summed[0] > 200 && summed[1] < 30 && summed[2] > 200, "the additive layer isn't 1 0 1 over the clear (no ADDITIVE combo)");
+    return true;
+}
+
+
 // ISoundLayer from a script: play () starts a startsilent sound, pause () silences it and play () resumes it,
 // volume is live (0.5 → 0.25 gain), stop () silences it for good (unpatched: getLayer could not return a sound)
 static bool script_controls_a_sound () {
@@ -4358,6 +4673,11 @@ int main (int argc, char** argv) {
     run ("layer_transform_api", layer_transform_api);
     run ("create_layer_builds_layers", create_layer_builds_layers);
     run ("script_strings_and_regexp", script_strings_and_regexp);
+    run ("video_texture_api", video_texture_api);
+    run ("animation_layer_api", animation_layer_api);
+    run ("particle_system_api", particle_system_api);
+    run ("script_events_reach_scripts", script_events_reach_scripts);
+    run ("blending_sets_combos", blending_sets_combos);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
     run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
