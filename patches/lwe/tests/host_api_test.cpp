@@ -5647,7 +5647,7 @@ static bool particle_stock_initializers () {
             "    pointer stopped at %.0f, the particle drifted on: %s\n    event child of a red particle: %d %d %d\n",
             placed.c_str (), carried.c_str (), stop, drift.c_str (), childPx[0], childPx[1], childPx[2]);
     CHECK (fixedEnds.lit (12, 16) && fixedEnds.lit (32, 16) && fixedEnds.lit (52, 16), "the sequence isn't at 12, 32, 52 (%s)", placed.c_str ());
-    CHECK (between.lit (12, 16) && between.lit (40, 16) && between.lit (68 - 1, 16) == between.lit (63, 16) && !between.lit (32, 16),
+    CHECK (between.lit (12, 16) && between.lit (40, 16) && !between.lit (52, 16) && !between.lit (32, 16),
            "the segment didn't carry its particles (%s)", carried.c_str ());
     CHECK (left_edge (drift) > static_cast<int> (stop) + 4, "the particle didn't take the pointer's velocity (%s)", drift.c_str ());
     CHECK (childPx[0] > 200 && childPx[1] < 60 && childPx[2] < 60, "the event child didn't take its particle's colour");
