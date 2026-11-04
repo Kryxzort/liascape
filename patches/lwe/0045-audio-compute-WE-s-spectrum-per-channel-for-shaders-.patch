@@ -1,7 +1,7 @@
 From 592fdff26ad8a693d2e0f85ae4195555c17549e0 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 21:42:18 +0530
-Subject: [PATCH 45/77] audio: compute WE's spectrum, per channel, for shaders,
+Subject: [PATCH 45/85] audio: compute WE's spectrum, per channel, for shaders,
  scripts and emitters
 
 The audio response wallpaper64.exe 2.8.485 gives wallpapers, from its capture thread (GH 0x140103630) and

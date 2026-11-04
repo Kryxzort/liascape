@@ -1,0 +1,584 @@
+From 10727209f8a197d107e0a902fca2efaaf3553b1f Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 22:34:04 +0530
+Subject: [PATCH 81/85] script: IScene.createModelData, IModelData and model
+ layers from script geometry
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+createModelData (d.ts 2.8) builds a model from a script's buffers: per shape a Float32Array
+vertexBuffer laid out as its vertexFormat (IModelData.POSITION 3, NORMAL 3, TANGENT_SIGNED 4,
+UV 2, COLOR 4 floats, in that order), an optional Uint32Array / Uint16Array indexBuffer (none:
+the vertices in threes) and a material (a path or an IAssetHandle). The scene holds it;
+createLayer (data) or createLayer ({ model: data, … }) makes a model layer of it
+(`__modeldata/<id>`), drawn as a model's meshes are. IModelData.applyData changes only what a
+shape names and re-uploads that layer's buffers (dynamic buffers); replaceData rebuilds the
+layer's meshes (shapes may be added, a null one removed). destroyModelData drops the data; a
+layer keeps the copy it built. IModelData.POSITION … COLOR are on the class and its instances.
+
+A model layer is a ScriptableObject now (getLayer and createLayer return it). In a 2D scene a
+model draws in WE's world pixels (y up; "1 unit = 1 pixel") through the layers' projection.
+Ours: its z is squashed into that projection's depth range and the 2D target has no depth
+buffer, so faces draw in index order; the boundingBox members are ignored. COLOR is read past
+(Puppet's vertex has no colour). Scene natives are configurable now (builtins.js wraps
+createLayer).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F4 (createModelData)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CModel.cpp | 109 +++++++---
+ .../WallpaperEngine/Render/Objects/CModel.h   |  12 +-
+ .../Render/Wallpapers/CScene.cpp              |  17 ++
+ .../Render/Wallpapers/CScene.h                |  19 ++
+ .../WallpaperEngine/Scripting/SceneObject.cpp | 186 +++++++++++++++++-
+ .../Scripting/resources/builtins.js           |  34 +++-
+ 6 files changed, 348 insertions(+), 29 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+index 81f30c1..8e77dd4 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -184,6 +184,31 @@ void CModelMesh::uploadAnimationUniforms (GLuint program, int morphSlot) const {
+     }
+ }
+ 
++void CModelMesh::uploadGeometry () {
++    std::vector<GLfloat> vertices;
++    vertices.reserve (this->m_mesh.vertices.size () * kFloatsPerVertex);
++    for (const auto& v : this->m_mesh.vertices) {
++	vertices.insert (vertices.end (), { v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
++					    v.tangent.x, v.tangent.y, v.tangent.z, v.tangent.w, v.uv.x, v.uv.y,
++					    v.weights.x, v.weights.y, v.weights.z, v.weights.w });
++    }
++    if (this->m_vbo == GL_NONE) {
++	glGenBuffers (1, &this->m_vbo);
++    }
++    glBindBuffer (GL_ARRAY_BUFFER, this->m_vbo);
++    glBufferData (GL_ARRAY_BUFFER, vertices.size () * sizeof (GLfloat), vertices.data (), GL_DYNAMIC_DRAW);
++    if (this->m_ibo == GL_NONE) {
++	glGenBuffers (1, &this->m_ibo);
++    }
++    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_ibo);
++    glBufferData (
++	GL_ELEMENT_ARRAY_BUFFER, this->m_mesh.indices.size () * sizeof (uint32_t), this->m_mesh.indices.data (),
++	GL_DYNAMIC_DRAW
++    );
++    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
++    this->m_indexCount = static_cast<GLsizei> (this->m_mesh.indices.size ());
++}
++
+ void CModelMesh::setup () {
+     this->detectTexture ();
+ 
+@@ -211,13 +236,7 @@ void CModelMesh::setup () {
+ 
+     CRenderable::setup ();
+ 
+-    std::vector<GLfloat> vertices;
+-    vertices.reserve (this->m_mesh.vertices.size () * kFloatsPerVertex);
+-    for (const auto& v : this->m_mesh.vertices) {
+-	vertices.insert (vertices.end (), { v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
+-					    v.tangent.x, v.tangent.y, v.tangent.z, v.tangent.w, v.uv.x, v.uv.y,
+-					    v.weights.x, v.weights.y, v.weights.z, v.weights.w });
+-    }
++    this->uploadGeometry ();
+     if (this->m_bones != nullptr) {
+ 	std::vector<GLuint> bones;
+ 	bones.reserve (this->m_mesh.vertices.size () * 4);
+@@ -235,17 +254,6 @@ void CModelMesh::setup () {
+ 	this->buildMorphMap ();
+     }
+ 
+-    glGenBuffers (1, &this->m_vbo);
+-    glBindBuffer (GL_ARRAY_BUFFER, this->m_vbo);
+-    glBufferData (GL_ARRAY_BUFFER, vertices.size () * sizeof (GLfloat), vertices.data (), GL_STATIC_DRAW);
+-    glGenBuffers (1, &this->m_ibo);
+-    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_ibo);
+-    glBufferData (
+-	GL_ELEMENT_ARRAY_BUFFER, this->m_mesh.indices.size () * sizeof (uint32_t), this->m_mesh.indices.data (),
+-	GL_STATIC_DRAW
+-    );
+-    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+-    this->m_indexCount = static_cast<GLsizei> (this->m_mesh.indices.size ());
+ 
+     for (const auto& pass : this->m_meshMaterial.passes) {
+ 	auto* cpass = new CPass (*this, std::make_shared<FBOProvider> (this), *pass, std::nullopt, std::nullopt, std::nullopt);
+@@ -385,6 +393,15 @@ void CModelMesh::draw (const std::shared_ptr<const CFBO>& target, const glm::mat
+ 
+     this->m_modelMatrix = world;
+     this->m_viewProjection = camera.getWorldViewProjection ();
++    if (!camera.isPerspective ()) {
++	// a 2D scene ("flat", IModelLayer.perspective false; createModelData: "1 unit = 1 pixel"): WE's world pixels
++	// (y up) into LWE's scene space (x − w/2, h/2 − y), then the layers' projection. Ours: z is squashed into the
++	// 2D projection's depth range (in front of the eye), and the 2D target has no depth buffer
++	const float w = camera.getWidth (), h = camera.getHeight ();
++	const glm::mat4 toScene = glm::translate (glm::mat4 (1.0f), glm::vec3 (-w / 2.0f, h / 2.0f, -1.0f))
++	    * glm::scale (glm::mat4 (1.0f), glm::vec3 (1.0f, -1.0f, 1e-4f));
++	this->m_viewProjection = camera.getProjection () * camera.getLookAt () * toScene;
++    }
+     this->m_modelViewProjection = this->m_viewProjection * world;
+     this->m_modelViewProjectionInverse = glm::inverse (this->m_modelViewProjection);
+     this->m_normalMatrix = glm::transpose (glm::inverse (glm::mat3 (world)));
+@@ -504,7 +521,9 @@ const glm::vec4& CModelMesh::getColor4 () const { return this->m_white4; }
+ 
+ const glm::vec3& CModelMesh::getCompositeColor () const { return this->m_white; }
+ 
+-CModel::CModel (Wallpapers::CScene& scene, const MeshObject& object) : CObject (scene, object), m_object (object) { }
++// a script reaches a model layer (thisScene.getLayer, createLayer's result) as any layer: its object's transform
++CModel::CModel (Wallpapers::CScene& scene, const MeshObject& object) :
++    CObject (scene, object), Scripting::ScriptableObject (scene, object), m_object (object) { }
+ 
+ CModel::~CModel () = default;
+ 
+@@ -512,10 +531,18 @@ void CModel::setup () {
+     const auto& project = this->getScene ().getScene ().project;
+     const std::string& file = this->m_object.file;
+ 
+-    if (!this->getScene ().getCamera ().isPerspective ()) {
+-	// (a model in a 2D scene: none in the corpus; there's no depth buffer to draw it against)
+-	sLog.error ("Model ", file, " is in a 2D scene: not drawn");
+-	WPENGINE_HEALTH ("unsupported", { { "what", "model object in a 2D scene (not drawn)" }, { "path", file } });
++    // IScene.createModelData's geometry (createLayer ({ model: data })): the scene holds it
++    if (file.rfind ("__modeldata/", 0) == 0) {
++	this->m_scriptModelId = std::atoi (file.c_str () + 12);
++	const auto* data = this->getScene ().scriptModel (this->m_scriptModelId);
++	if (data == nullptr) {
++	    sLog.error ("createLayer: no model data ", file);
++	    return;
++	}
++	this->m_model = data->model;
++	this->m_scriptVersion = data->version;
++	this->m_scriptRebuilt = data->rebuilt;
++	this->buildMeshes ();
+ 	return;
+     }
+ 
+@@ -554,6 +581,13 @@ WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "me
+ 	    this->m_layers.push_back ({ .blendIn = layer->blendIn, .layer = layer.get () });
+ 	}
+     }
++    this->buildMeshes ();
++}
++
++void CModel::buildMeshes () {
++    const auto& project = this->getScene ().getScene ().project;
++    const std::string& file = this->m_object.file;
++    this->m_shapeWeights.clear ();
+     for (const auto& mesh : this->m_model.meshes) {
+ 	this->m_shapeWeights.emplace_back (mesh.morphs.size (), 0.0f);
+     }
+@@ -708,7 +742,36 @@ void CModel::updatePose () {
+     }
+ }
+ 
++void CModel::followScriptModel () {
++    if (this->m_scriptModelId <= 0) {
++	return;
++    }
++    const auto* data = this->getScene ().scriptModel (this->m_scriptModelId);
++    if (data == nullptr || data->version == this->m_scriptVersion) {
++	return;
++    }
++    this->m_scriptVersion = data->version;
++    if (data->rebuilt != this->m_scriptRebuilt || data->model.meshes.size () != this->m_model.meshes.size ()) {
++	// replaceData: the shapes (and their materials) built again
++	this->m_scriptRebuilt = data->rebuilt;
++	this->m_meshes.clear ();
++	this->m_materials.clear ();
++	this->m_model = data->model;
++	this->buildMeshes ();
++	return;
++    }
++    // applyData: the same shapes, new buffers ("a high performance method that you may call every frame")
++    for (size_t m = 0; m < this->m_model.meshes.size (); m++) {
++	this->m_model.meshes[m].vertices = data->model.meshes[m].vertices;
++	this->m_model.meshes[m].indices = data->model.meshes[m].indices;
++    }
++    for (const auto& mesh : this->m_meshes) {
++	mesh->uploadGeometry ();
++    }
++}
++
+ void CModel::render () {
++    this->followScriptModel ();
+     if (this->m_meshes.empty () || !this->getScene ().isEffectivelyVisible (this->m_object)) {
+ 	return;
+     }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.h b/src/core/WallpaperEngine/Render/Objects/CModel.h
+index 946f0eb..ea93dec 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.h
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.h
+@@ -4,6 +4,7 @@
+ #include <vector>
+ 
+ #include "CRenderable.h"
++#include "WallpaperEngine/Scripting/ScriptableObject.h"
+ #include "Puppet.h"
+ #include "WallpaperEngine/Data/Model/Object.h"
+ #include "WallpaperEngine/Render/Wallpapers/CScene.h"
+@@ -36,6 +37,8 @@ public:
+      * BONECOUNT), `weights` its blend-shape weights (MORPHING over g_Texture5's morph map); either may be null
+      */
+     void setAnimation (const std::vector<glm::mat4x3>* bones, const std::vector<float>* weights);
++    /** (Re)uploads the mesh's vertices and indices (IModelData.applyData) */
++    void uploadGeometry ();
+ 
+     [[nodiscard]] const float& getBrightness () const override;
+     [[nodiscard]] const float& getUserAlpha () const override;
+@@ -89,7 +92,7 @@ private:
+  * its meshes only (static: no skinning, morphs or animation), each mesh drawn with the material it names. A 3D
+  * scene's models depth test against the scene's depth buffer. A mesh whose material can't be built is left out
+  */
+-class CModel final : public CObject {
++class CModel final : public Scripting::ScriptableObject {
+ public:
+     CModel (Wallpapers::CScene& scene, const MeshObject& object);
+     ~CModel () override;
+@@ -117,6 +120,13 @@ private:
+     };
+     /** poses the skeleton for the scene's time (once per time) */
+     void updatePose ();
++    /** builds the meshes of m_model with their materials and casters */
++    void buildMeshes ();
++    /** a script model (createModelData) that changed: its buffers again, or its meshes after a replaceData */
++    void followScriptModel ();
++    int m_scriptModelId = 0;
++    uint32_t m_scriptVersion = 0;
++    uint32_t m_scriptRebuilt = 0;
+     std::vector<LayerState> m_layers = {};
+     std::vector<Puppet::Key> m_bind = {};
+     std::vector<glm::mat4> m_bindWorldInverse = {};
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 3b949e6..da5690b 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1649,6 +1649,23 @@ CObject* CScene::createLayer (const std::string& config) {
+     return object;
+ }
+ 
++int CScene::createScriptModel (Objects::Puppet::Model model) {
++    const int id = this->m_nextScriptModel++;
++    this->m_scriptModels[id] = ScriptModel { .model = std::move (model) };
++    return id;
++}
++
++CScene::ScriptModel* CScene::scriptModel (int id) {
++    const auto it = this->m_scriptModels.find (id);
++    return it == this->m_scriptModels.end () ? nullptr : &it->second;
++}
++
++bool CScene::destroyScriptModel (int id) {
++    // "if a layer still exists that is using this model, it will be deleted once that layer is removed": a layer keeps
++    // the copy it built from; the data goes now
++    return this->m_scriptModels.erase (id) > 0;
++}
++
+ bool CScene::destroyLayer (CObject* layer) {
+     const auto it = std::ranges::find (this->m_layers, layer);
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 4eb3fac..6d56622 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "WallpaperEngine/Render/Camera.h"
++#include "WallpaperEngine/Render/Objects/Puppet.h"
+ 
+ #include "WallpaperEngine/Render/CWallpaper.h"
+ #include "linux-wallpaperengine/project.h"
+@@ -175,6 +176,22 @@ public:
+      * given here), last in the layer list and drawn last (before the bloom). nullptr when it can't be built
+      */
+     CObject* createLayer (const std::string& config);
++
++    /**
++     * IScene.createModelData (F4): geometry a script built, as an MDL model's meshes (the loader's Puppet::Model).
++     * A model layer names it `__modeldata/<id>` (createLayer ({ model: modelData })). `version` counts applyData /
++     * replaceData; `rebuilt` the last replaceData (shapes or materials may have changed)
++     */
++    struct ScriptModel {
++	Objects::Puppet::Model model;
++	/** per shape its vertexFormat (IModelData.POSITION, NORMAL, TANGENT_SIGNED, UV, COLOR in that order) */
++	std::vector<std::vector<std::string>> formats;
++	uint32_t version = 0;
++	uint32_t rebuilt = 0;
++    };
++    int createScriptModel (Objects::Puppet::Model model);
++    [[nodiscard]] ScriptModel* scriptModel (int id);
++    bool destroyScriptModel (int id);
+     /** IScene.destroyLayer: the layer leaves the layer list and the draw order (it is freed with the scene) */
+     bool destroyLayer (CObject* layer);
+     /** Whether a layer is still in the scene (not destroyed: engine.isObjectValid) */
+@@ -236,6 +253,8 @@ private:
+     std::vector<ObjectUniquePtr> m_createdObjects = {};
+     /** the next id a created layer gets (above every id in the scene) */
+     int m_nextCreatedId = 0;
++    std::map<int, ScriptModel> m_scriptModels = {};
++    int m_nextScriptModel = 1;
+     /** layers a script destroyed: out of the lists, freed with the scene */
+     std::vector<CObject*> m_destroyed = {};
+     /** drawOrder's sorted copy of the render order */
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index fe79763..dbde9ee 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -9,6 +9,7 @@
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ 
+ #include <algorithm>
++#include <cstring>
+ #include <tuple>
+ #include <nlohmann/json.hpp>
+ 
+@@ -346,6 +347,183 @@ JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+     return layerValue (*container, container->getScene ().createLayer (config));
+ }
+ 
++namespace {
++/** a typed array's bytes and element size, nullptr when `value` isn't one */
++const uint8_t* typedBytes (JSContext* ctx, JSValueConst value, size_t& bytes, size_t& element) {
++    size_t offset = 0, length = 0, per = 0;
++    JSValue buffer = JS_GetTypedArrayBuffer (ctx, value, &offset, &length, &per);
++    if (JS_IsException (buffer)) {
++	JS_FreeValue (ctx, JS_GetException (ctx));
++	return nullptr;
++    }
++    size_t size = 0;
++    const uint8_t* data = JS_GetArrayBuffer (ctx, &size, buffer);
++    JS_FreeValue (ctx, buffer);
++    if (data == nullptr || offset + length > size) {
++	return nullptr;
++    }
++    bytes = length;
++    element = per;
++    return data + offset;
++}
++} // namespace
++
++// __modelData (id, shapes, replace): IScene.createModelData (id 0) and IModelData.applyData / replaceData (builtins.js).
++// A shape: vertexBuffer (Float32Array, laid out as vertexFormat: position 3, normal 3, tangentSigned 4, uv 2, color 4
++// floats, in that order), indexBuffer (Uint32Array / Uint16Array; none: the vertices in threes), vertexFormat, material
++// (a path or an IAssetHandle). applyData changes only what a shape names; replaceData may add shapes, and a null one
++// removes it. The model's id, or -1
++JSValue model_data (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    int id = 0;
++    if (argc < 3 || JS_ToInt32 (ctx, &id, argv[0]) < 0 || !JS_IsArray (argv[1])) {
++	return JS_NewInt32 (ctx, -1);
++    }
++    const bool replace = JS_ToBool (ctx, argv[2]) != 0;
++    auto& scene = container->getScene ();
++    using WallpaperEngine::Render::Wallpapers::CScene;
++    using namespace WallpaperEngine::Render::Objects;
++    CScene::ScriptModel data;
++    if (id > 0) {
++	const auto* existing = scene.scriptModel (id);
++	if (existing == nullptr) {
++	    return JS_NewInt32 (ctx, -1);
++	}
++	data = *existing;
++    }
++    uint32_t count = 0;
++    JSValue lengthValue = JS_GetPropertyStr (ctx, argv[1], "length");
++    JS_ToUint32 (ctx, &count, lengthValue);
++    JS_FreeValue (ctx, lengthValue);
++    std::vector<bool> removed (std::max<size_t> (count, data.model.meshes.size ()), false);
++    for (uint32_t i = 0; i < count && i < 64; i++) {
++	JSValue shape = JS_GetPropertyUint32 (ctx, argv[1], i);
++	if (!JS_IsObject (shape)) {
++	    if (replace && JS_IsNull (shape)) {
++		removed[i] = true;
++	    }
++	    JS_FreeValue (ctx, shape);
++	    continue;
++	}
++	if (i >= data.model.meshes.size ()) {
++	    data.model.meshes.resize (i + 1);
++	}
++	data.formats.resize (data.model.meshes.size (), { "position", "normal", "uv" });
++	auto& mesh = data.model.meshes[i];
++	auto& format = data.formats[i];
++
++	JSValue material = JS_GetPropertyStr (ctx, shape, "material");
++	JSValue file = JS_IsObject (material) ? JS_GetPropertyStr (ctx, material, "file") : JS_DupValue (ctx, material);
++	if (JS_IsString (file)) {
++	    mesh.material = jsString (ctx, file);
++	}
++	JS_FreeValue (ctx, file);
++	JS_FreeValue (ctx, material);
++
++	JSValue formatValue = JS_GetPropertyStr (ctx, shape, "vertexFormat");
++	if (JS_IsArray (formatValue)) {
++	    format.clear ();
++	    uint32_t n = 0;
++	    JSValue nv = JS_GetPropertyStr (ctx, formatValue, "length");
++	    JS_ToUint32 (ctx, &n, nv);
++	    JS_FreeValue (ctx, nv);
++	    for (uint32_t c = 0; c < n && c < 8; c++) {
++		JSValue part = JS_GetPropertyUint32 (ctx, formatValue, c);
++		format.push_back (jsString (ctx, part));
++		JS_FreeValue (ctx, part);
++	    }
++	}
++	JS_FreeValue (ctx, formatValue);
++
++	JSValue vertexBuffer = JS_GetPropertyStr (ctx, shape, "vertexBuffer");
++	size_t bytes = 0, element = 0;
++	if (const uint8_t* raw = JS_IsObject (vertexBuffer) ? typedBytes (ctx, vertexBuffer, bytes, element) : nullptr;
++	    raw != nullptr && element == 4) {
++	    // the components' sizes in the order IModelData lists them; a component left out takes the loader's default
++	    const auto has = [&format] (const char* name) { return std::ranges::find (format, name) != format.end (); };
++	    const size_t stride = (has ("position") ? 3 : 0) + (has ("normal") ? 3 : 0) + (has ("tangentSigned") ? 4 : 0)
++		+ (has ("uv") ? 2 : 0) + (has ("color") ? 4 : 0);
++	    const auto* floats = reinterpret_cast<const float*> (raw);
++	    const size_t total = bytes / 4;
++	    mesh.vertices.clear ();
++	    for (size_t at = 0; stride > 0 && at + stride <= total; at += stride) {
++		Puppet::Vertex v {};
++		v.bones = glm::uvec4 (0);
++		v.weights = glm::vec4 (0.0f);
++		size_t c = at;
++		if (has ("position")) {
++		    v.position = glm::vec3 (floats[c], floats[c + 1], floats[c + 2]);
++		    c += 3;
++		}
++		if (has ("normal")) {
++		    v.normal = glm::vec3 (floats[c], floats[c + 1], floats[c + 2]);
++		    c += 3;
++		}
++		if (has ("tangentSigned")) {
++		    v.tangent = glm::vec4 (floats[c], floats[c + 1], floats[c + 2], floats[c + 3]);
++		    c += 4;
++		}
++		if (has ("uv")) {
++		    v.uv = glm::vec2 (floats[c], floats[c + 1]);
++		}
++		mesh.vertices.push_back (v);
++	    }
++	}
++	JS_FreeValue (ctx, vertexBuffer);
++
++	JSValue indexBuffer = JS_GetPropertyStr (ctx, shape, "indexBuffer");
++	if (const uint8_t* raw = JS_IsObject (indexBuffer) ? typedBytes (ctx, indexBuffer, bytes, element) : nullptr;
++	    raw != nullptr && (element == 2 || element == 4)) {
++	    mesh.indices.clear ();
++	    for (size_t at = 0; at + element <= bytes; at += element) {
++		uint32_t index = 0;
++		std::memcpy (&index, raw + at, element);
++		mesh.indices.push_back (index);
++	    }
++	} else if (mesh.indices.empty () || (replace && JS_IsNull (indexBuffer))) {
++	    mesh.indices.resize (mesh.vertices.size () - mesh.vertices.size () % 3);
++	    for (size_t k = 0; k < mesh.indices.size (); k++) {
++		mesh.indices[k] = static_cast<uint32_t> (k);
++	    }
++	}
++	JS_FreeValue (ctx, indexBuffer);
++	// indices past the vertices (a shrinking buffer) would read out of the VBO
++	std::erase_if (mesh.indices, [&mesh] (uint32_t index) { return index >= mesh.vertices.size (); });
++	mesh.indices.resize (mesh.indices.size () - mesh.indices.size () % 3);
++	JS_FreeValue (ctx, shape);
++    }
++    for (size_t i = removed.size (); i-- > 0;) {
++	if (removed[i] && i < data.model.meshes.size ()) {
++	    data.model.meshes.erase (data.model.meshes.begin () + static_cast<std::ptrdiff_t> (i));
++	    data.formats.erase (data.formats.begin () + static_cast<std::ptrdiff_t> (i));
++	}
++    }
++    if (id == 0) {
++	const int made = scene.createScriptModel (std::move (data.model));
++	scene.scriptModel (made)->formats = std::move (data.formats);
++	return JS_NewInt32 (ctx, made);
++    }
++    auto* target = scene.scriptModel (id);
++    const bool reshaped = replace || target->model.meshes.size () != data.model.meshes.size ();
++    target->model = std::move (data.model);
++    target->formats = std::move (data.formats);
++    target->version++;
++    if (reshaped) {
++	target->rebuilt = target->version;
++    }
++    return JS_NewInt32 (ctx, id);
++}
++
++// __modelDataDestroy (id): IScene.destroyModelData
++JSValue model_data_destroy (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    int id = 0;
++    if (argc < 1 || JS_ToInt32 (ctx, &id, argv[0]) < 0) {
++	return JS_FALSE;
++    }
++    return JS_NewBool (ctx, container->getScene ().destroyScriptModel (id));
++}
++
+ // __cameraTransforms (): [eye, center, up, zoom] of the scene's camera (camera.eye/center/up, general.zoom)
+ JSValue camera_transforms (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+@@ -474,11 +652,15 @@ SceneObject::SceneObject (ScriptEngine& engine, Render::Wallpapers::CScene& scen
+ 	{ "getLayerIndex", get_layer_index }, { "sortLayer", sort_layer },	      { "createLayer", create_layer },
+ 	{ "destroyLayer", destroy_layer },     { "getAnimation", scene_get_animation },
+ 	{ "__cameraTransforms", camera_transforms }, { "__setCameraTransforms", set_camera_transforms },
+-	{ "__sceneJson", scene_json },
++	{ "__sceneJson", scene_json },		       { "__modelData", model_data },
++	{ "__modelDataDestroy", model_data_destroy },
+     };
+ 
+     for (const auto& [name, function] : methods) {
+-	JS_DefinePropertyValueStr (ctx, this->m_instance, name, JS_NewCFunction (ctx, function, name, 1), JS_PROP_ENUMERABLE);
++	// configurable: builtins.js wraps createLayer (an IModelData config)
++	JS_DefinePropertyValueStr (
++	    ctx, this->m_instance, name, JS_NewCFunction (ctx, function, name, 1), JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE
++	);
+     }
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index cf05939..dc71b3e 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -447,9 +447,37 @@ globalThis.__layerMethods = (function () {
+     const found = (initial.objects || []).find((o) => o && o.id === layer.id);
+     return found === undefined ? undefined : JSON.parse(JSON.stringify(found));
+   });
+-  // createModelData / destroyModelData: LWE builds no meshes from script data (no library scene does)
+-  define('createModelData', () => undefined);
+-  define('destroyModelData', () => {});
++  // IModelData (d.ts 2.8): geometry a script builds for a model layer, createLayer ({ model: data }) or createLayer
++  // (data). The shapes live in the engine (__modelData); a layer draws them in its own pixels in a 2D scene
++  const shapesOf = (s) => (Array.isArray(s) ? s : s !== null && typeof s === 'object' && Array.isArray(s.shapes) ? s.shapes : [s]);
++  class IModelData {
++    constructor(id) { Object.defineProperty(this, '__id', { value: id }); }
++    applyData(shapes) { scene.__modelData(this.__id, shapesOf(shapes), false); }
++    replaceData(shapes) { scene.__modelData(this.__id, shapesOf(shapes), true); }
++  }
++  const formats = { POSITION: 'position', NORMAL: 'normal', TANGENT_SIGNED: 'tangentSigned', UV: 'uv', COLOR: 'color' };
++  for (const [name, value] of Object.entries(formats)) {
++    Object.defineProperty(IModelData, name, { value, enumerable: true });
++    Object.defineProperty(IModelData.prototype, name, { value, enumerable: true });
++  }
++  globalThis.IModelData = IModelData;
++  define('createModelData', (config) => {
++    const id = scene.__modelData(0, shapesOf(config), true);
++    return id > 0 ? new IModelData(id) : undefined;
++  });
++  define('destroyModelData', (data) => {
++    if (data instanceof IModelData) { scene.__modelDataDestroy(data.__id); }
++  });
++  // createLayer takes an IModelData, or a configuration whose `model` is one
++  const createLayer = scene.createLayer;
++  define('createLayer', (config) => {
++    if (config instanceof IModelData) {
++      config = { model: '__modeldata/' + config.__id };
++    } else if (config !== null && typeof config === 'object' && config.model instanceof IModelData) {
++      config = Object.assign({}, config, { model: '__modeldata/' + config.model.__id });
++    }
++    return createLayer.call(scene, config);
++  });
+ })();
+ 
+ // renderContext: an empty interface in WE's definitions

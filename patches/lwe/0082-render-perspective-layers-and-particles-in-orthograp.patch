@@ -1,0 +1,284 @@
+From fca629cf016d75ce60ba1a4e540aedc3df889542 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 21:56:48 +0530
+Subject: [PATCH 82/85] render: perspective layers and particles in
+ orthographic scenes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An orthographic scene's `perspective` image and text layers (object flag 0x80 at +0x120, setter
+FUN_1401ca270) and its perspective particle systems (flags bit 2) are drawn by WE through the
+scene's perspective camera (GH 0x1401b4fd0, called from the image draw GH 0x140214b50 and the
+particle render GH 0x14025bc30): fov = general.perspectiveoverridefov (+0x144, default 95 — the
+camera update GH 0x1401b8af0 takes it as the effective fov when the ortho flag is set), the eye on
+the view's axis at d = (height / 2) / tan (fov / 2) (= −1 / (tan (fov / 2) · proj[1][1])), near
+5, far max (15000, d + 1000). So z 0 lands where the orthographic camera puts it, and a layer's
+own x/y angles and z (WE's object matrix) show.
+
+LWE ignored both keys: such layers were flat (no z, no x/y turn), and perspective particles had
+general.fov from an eye at z 1000 (z 0 drawn 1.16 x at fov 50). The view's zoom and shake apply
+as to the orthographic view. `perspective` is an IEffectLayer property (registered, live).
+Inferred: the parents' x/y angles are not followed (the 2D transform resolves z turns only);
+full-screen and compose layers keep covering the screen.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F5 (G20 perspectiveoverridefov, G21/E43 perspective)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |  6 ++++
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |  6 ++++
+ .../Data/Parsers/ObjectParser.cpp             |  2 ++
+ .../Data/Parsers/WallpaperParser.cpp          |  1 +
+ src/core/WallpaperEngine/Render/Camera.cpp    | 28 ++++++++++++++++++-
+ src/core/WallpaperEngine/Render/Camera.h      | 11 ++++++++
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 28 +++++++++++++++++--
+ .../WallpaperEngine/Render/Objects/CImage.h   |  2 ++
+ .../Render/Objects/CParticle.cpp              | 20 ++++---------
+ 9 files changed, 87 insertions(+), 17 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index e34f427..30915e6 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -137,6 +137,12 @@ struct ImageData {
+     glm::vec2 size;
+     /** Parallax depth used for parallax scrolling */
+     UserSettingUniquePtr parallaxDepth;
++    /**
++     * `perspective` (object flag 0x80 at +0x120, its setter FUN_1401ca270): in an orthographic scene the layer is
++     * drawn through the perspective camera of `perspectiveoverridefov` (GH 0x1401b4fd0, from the image draw
++     * GH 0x140214b50), with its own x/y angles and z. A 3D scene's layers are all in the world already
++     */
++    UserSettingUniquePtr perspective;
+     /** The color blending mode for this image */
+     UserSettingUniquePtr colorBlendMode;
+     /** The brightness of the image */
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index 5f3b959..a7247ad 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -113,6 +113,12 @@ struct SceneData {
+ 	    UserSettingUniquePtr nearz;
+ 	    UserSettingUniquePtr farz;
+ 	    UserSettingUniquePtr fov;
++	    /**
++	     * `general.perspectiveoverridefov` (scene +0x144, default 95: GH 0x1401b6c60): an orthographic scene's
++	     * effective fov (the camera update GH 0x1401b8af0 takes +0x144 instead of +0x140 when the ortho flag is
++	     * set), which its `perspective` layers and perspective particles (flags bit 2) are drawn with (GH 0x1401b4fd0)
++	     */
++	    UserSettingUniquePtr overrideFov;
+ 	    /**
+ 	     * No `orthogonalprojection` (absent or null): a 3D scene, seen through a perspective camera from
+ 	     * `camera.eye/center/up` with general fov/nearz/farz (the scene loader GH 0x1401b6c60 sets the ortho flag
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 6daa2a2..c7a5fe7 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -260,6 +260,7 @@ TextUniquePtr ObjectParser::parseText (const JSON& it, const Project& project, O
+ 	    .alignment = "center",
+ 	    .size = it.optional ("size", glm::vec2 (0.0f)),
+ 	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
++	    .perspective = it.user ("perspective", properties, false),
+ 	    .colorBlendMode = it.user ("colorBlendMode", properties, 0),
+ 	    .brightness = it.user ("brightness", properties, 1.0f),
+ 	    .copyBackground = it.user ("copybackground", properties, true),
+@@ -305,6 +306,7 @@ ObjectParser::parseImage (const JSON& it, const Project& project, ObjectData bas
+ 	    .alignment = it.optional ("horizontalalign", it.optional ("alignment", std::string ("center"))),
+ 	    .size = it.user ("size", properties, glm::vec2 (0.0f))->value->getVec2 (),
+ 	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
++	    .perspective = it.user ("perspective", properties, false),
+ 	    .colorBlendMode = it.user ("colorBlendMode", properties, 0),
+ 	    .brightness = it.user ("brightness", properties, 1.0f),
+ 	    .copyBackground = it.user ("copybackground", properties, true),
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 1a196ee..304907c 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -120,6 +120,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                     .nearz = general.user ("nearz", properties, 0.1f),
+                     .farz = general.user ("farz", properties, 10000.0f),
+                     .fov = general.user ("fov", properties, 50.0f),
++                    .overrideFov = general.user ("perspectiveoverridefov", properties, 95.0f),
+                     .isPerspective = perspective,
+                 },
+                 .zoom = general.user ("zoom", properties, 1.0f)
+diff --git a/src/core/WallpaperEngine/Render/Camera.cpp b/src/core/WallpaperEngine/Render/Camera.cpp
+index b9d9074..3a3db45 100644
+--- a/src/core/WallpaperEngine/Render/Camera.cpp
++++ b/src/core/WallpaperEngine/Render/Camera.cpp
+@@ -1,4 +1,5 @@
+ #include <algorithm>
++#include <cmath>
+ 
+ #include <glm/glm.hpp>
+ #include <glm/gtc/matrix_transform.hpp>
+@@ -28,7 +29,32 @@ const glm::mat4& Camera::getProjection () const { return this->m_projection; }
+ 
+ const glm::mat4& Camera::getLookAt () const { return this->m_view; }
+ 
+-void Camera::setViewAdjust (const glm::mat4& adjust) { this->m_view = this->m_lookat * adjust; }
++void Camera::setViewAdjust (const glm::mat4& adjust) {
++    this->m_adjust = adjust;
++    this->m_view = this->m_lookat * adjust;
++}
++
++float Camera::getOverrideFov () const {
++    const auto& fov = this->m_camera.projection.overrideFov;
++    return glm::clamp (fov == nullptr ? 95.0f : fov->value->getFloat (), 0.1f, 179.9f);
++}
++
++float Camera::getPerspective2DDistance () const {
++    // GH 0x1401b4fd0: view.z = −1 / (tan (fov / 2) · proj[1][1]), the orthographic projection's m11 being 2 / height
++    return (this->m_height / 2.0f) / std::tan (glm::radians (this->getOverrideFov ()) / 2.0f);
++}
++
++glm::mat4 Camera::getPerspective2DViewProjection () const {
++    const float d = this->getPerspective2DDistance ();
++    // near 5 (DAT_1404d43e0), far max (15000, d + 1000) (DAT_1404d44ec, DAT_1404d44d4). WE keeps the orthographic
++    // view's x/y and centres the axis on the visible area (view.xy −= size · crop fraction); LWE's 2D scene space is
++    // centred already, and its orthographic projection is translated by the eye, so the eye's x/y go the same way
++    const glm::mat4 projection = glm::perspective (
++	glm::radians (this->getOverrideFov ()), this->m_width / this->m_height, 5.0f, std::max (15000.0f, d + 1000.0f)
++    );
++    const glm::vec3 eye = this->getEye ();
++    return projection * glm::translate (glm::mat4 (1.0f), glm::vec3 (eye.x, eye.y, -d)) * this->m_adjust;
++}
+ 
+ bool Camera::isOrthogonal () const { return this->m_isOrthogonal; }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Camera.h b/src/core/WallpaperEngine/Render/Camera.h
+index 420f0d5..97c2060 100644
+--- a/src/core/WallpaperEngine/Render/Camera.h
++++ b/src/core/WallpaperEngine/Render/Camera.h
+@@ -54,6 +54,16 @@ public:
+     [[nodiscard]] const glm::mat4& getLookAt () const;
+     /** Sets the frame's world-space view adjustment (CScene::updateCamera) */
+     void setViewAdjust (const glm::mat4& adjust);
++    /**
++     * An orthographic scene's perspective camera (WE GH 0x1401b4fd0), in LWE's 2D scene space with the frame's view
++     * adjustment: `perspectiveoverridefov` (vertical), width / height, near 5, far max (15000, d + 1000), the eye on
++     * the view's axis at d = (height / 2) / tan (fov / 2), so that z 0 lands where the orthographic camera puts it.
++     * What `perspective` layers and perspective particles (flags bit 2) draw with
++     */
++    [[nodiscard]] glm::mat4 getPerspective2DViewProjection () const;
++    /** That camera's eye distance d (scene units) */
++    [[nodiscard]] float getPerspective2DDistance () const;
++    [[nodiscard]] float getOverrideFov () const;
+     [[nodiscard]] Wallpapers::CScene& getScene () const;
+     [[nodiscard]] bool isOrthogonal () const;
+     [[nodiscard]] float getWidth () const;
+@@ -75,6 +85,7 @@ private:
+     glm::mat4 m_projection = {};
+     glm::mat4 m_lookat = {};
+     glm::mat4 m_view = {};
++    glm::mat4 m_adjust = glm::mat4 (1.0f);
+     const SceneData::Camera& m_camera;
+     Wallpapers::CScene& m_scene;
+ };
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index cc3a2e4..fed13e5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -80,6 +80,8 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     this->registerProperty ("alpha", *image.alpha->value);
+     this->registerProperty ("color", *image.color->value);
+     this->registerProperty ("parallaxDepth", *image.parallaxDepth->value);
++    // IEffectLayer.perspective (G21): read live by isPerspectiveLayer
++    this->registerProperty ("perspective", *image.perspective->value);
+ 
+     // get scene width and height to calculate positions
+     auto scene_width = static_cast<float> (scene.getWidth ());
+@@ -1642,6 +1644,16 @@ bool CImage::isWorldPlaced () const {
+ 	&& !this->getImage ().model->passthrough && this->getId () >= 0;
+ }
+ 
++bool CImage::isPerspectiveLayer () const {
++    // the image draw (GH 0x140214b50) swaps in the perspective camera when the layer's flag 0x80 is set; a 3D scene's
++    // layers are world-placed already. Full-screen and compose layers keep covering the screen (ours: no library
++    // scene turns one)
++    const auto& image = this->getImage ();
++    return !this->getScene ().getCamera ().isPerspective () && image.perspective != nullptr
++	&& image.perspective->value->getBool () && !image.model->fullscreen && !image.model->passthrough
++	&& this->getId () >= 0;
++}
++
+ glm::mat4 CImage::screenViewProjection () const {
+     const auto& camera = this->getScene ().getCamera ();
+ 
+@@ -1697,8 +1709,19 @@ void CImage::updateScreenSpacePosition () {
+     // Build rotation from angles (already in radians from scene.json — see CParticle.cpp:2119)
+     // Negate X and Z rotations to account for Y-flipped coordinate system (CParticle.cpp:2120)
+     const float angle = transform.angle;
++    const bool perspective = this->isPerspectiveLayer ();
+     glm::mat4 rotModel = glm::mat4 (1.0f);
+-    if (angle != 0.0f) {
++    if (perspective) {
++	// a `perspective` layer of an orthographic scene: WE's object matrix (GH 0x1401b5170: R = Rz · Ry · Rx, then
++	// the origin with its z) about the layer's pivot, in LWE's y-down scene space (x and z turns negated, as above).
++	// The parents' x/y angles are not followed (the 2D transform resolves z turns only)
++	const glm::vec3 own = this->getImage ().angles->value->getVec3 ();
++	rotModel = glm::translate (rotModel, this->m_scenePivot + glm::vec3 (0.0f, 0.0f, transform.origin.z));
++	rotModel = glm::rotate (rotModel, -angle, glm::vec3 (0.0f, 0.0f, 1.0f));
++	rotModel = glm::rotate (rotModel, own.y, glm::vec3 (0.0f, 1.0f, 0.0f));
++	rotModel = glm::rotate (rotModel, -own.x, glm::vec3 (1.0f, 0.0f, 0.0f));
++	rotModel = glm::translate (rotModel, -this->m_scenePivot);
++    } else if (angle != 0.0f) {
+ 	rotModel = glm::translate (rotModel, this->m_scenePivot);
+ 	rotModel = glm::rotate (rotModel, -angle, glm::vec3 (0.0f, 0.0f, 1.0f));
+ 	rotModel = glm::translate (rotModel, -this->m_scenePivot);
+@@ -1707,7 +1730,8 @@ void CImage::updateScreenSpacePosition () {
+     // the mouse parallax moves the object in the world, after its own transform (WE: view · translate(offset), GH
+     // 0x1401b9b50); WE's y is up, this world's y is down
+     const glm::vec2 parallax = this->getScene ().getParallaxOffset (this->getImage ());
+-    const glm::mat4 mvp = this->screenViewProjection ()
++    const glm::mat4 mvp = (perspective ? this->getScene ().getCamera ().getPerspective2DViewProjection ()
++				       : this->screenViewProjection ())
+ 	* glm::translate (glm::mat4 (1.0f), glm::vec3 (parallax.x, -parallax.y, 0.0f)) * rotModel;
+ 
+     this->m_modelViewProjectionScreen = mvp;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 8bb99d1..b58c72f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -44,6 +44,8 @@ public:
+     [[nodiscard]] glm::vec2 getSize () const;
+     /** In a 3D scene's world (drawn with its world matrix and the perspective camera), not over the screen */
+     [[nodiscard]] bool isWorldPlaced () const;
++    /** A `perspective` layer of an orthographic scene: drawn through Camera::getPerspective2DViewProjection */
++    [[nodiscard]] bool isPerspectiveLayer () const;
+ 
+     /**
+      * Whether a point of the scene (WE's world: x right, y up, scene pixels) is on this layer as it was last drawn:
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index fdc0b66..4970514 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2536,20 +2536,12 @@ void CParticle::updateParticleViewProjection () {
+ 	m_viewProjectionMatrix = getScene ().getCamera ().getProjection () * getScene ().getCamera ().getLookAt ();
+ 	m_eyePosition = getScene ().getCamera ().getSceneEye ();
+     } else if ((m_particle.flags & 4) != 0) {
+-	// Perspective particles use a dedicated perspective projection
+-	float width = getScene ().getCamera ().getWidth ();
+-	float height = getScene ().getCamera ().getHeight ();
+-	float aspect = width / height;
+-	float fov = glm::radians (getScene ().getCamera ().getFov ());
+-	float nearz = getScene ().getCamera ().getNearZ ();
+-	float farz = getScene ().getCamera ().getFarZ ();
+-
+-	glm::mat4 perspectiveProj = glm::perspective (fov, aspect, nearz, farz);
+-	glm::mat4 perspectiveView
+-	    = glm::lookAt (glm::vec3 (0.0f, 0.0f, 1000.0f), glm::vec3 (0.0f, 0.0f, 0.0f), glm::vec3 (0.0f, 1.0f, 0.0f));
+-
+-	m_viewProjectionMatrix = perspectiveProj * perspectiveView;
+-	m_eyePosition = glm::vec3 (0.0f, 0.0f, 1000.0f);
++	// perspective particles (system flags bit 2) of an orthographic scene: the particle render (GH 0x14025bc30)
++	// swaps in the scene's perspective camera of `perspectiveoverridefov` (GH 0x1401b4fd0), which puts z 0 where
++	// the orthographic camera does. LWE had general.fov from an eye at z 1000 (z 0 drawn 1.16 x at fov 50)
++	const auto& camera = getScene ().getCamera ();
++	m_viewProjectionMatrix = camera.getPerspective2DViewProjection ();
++	m_eyePosition = glm::vec3 (0.0f, 0.0f, camera.getPerspective2DDistance ());
+     } else {
+ 	// Orthographic projection from scene camera
+ 	m_viewProjectionMatrix = getScene ().getCamera ().getProjection () * getScene ().getCamera ().getLookAt ();

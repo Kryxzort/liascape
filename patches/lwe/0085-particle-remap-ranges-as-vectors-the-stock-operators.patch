@@ -1,0 +1,135 @@
+From 78128d1ded058cf13111600851fa882c4f642613 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 22:49:38 +0530
+Subject: [PATCH 85/85] particle: remap ranges as vectors, the stock operators'
+ blend-in
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+remapvalue / remapinitialvalue's output ranges may be "x y z" (WE's parser keeps the vector
+and the float form): a colour output now ramps per component (the stock previews map the
+distance to a control point to red … blue; they drew black). blendinstart / blendinend, which
+the stock capvelocity and remapvalue set, weight the operator's effect over the particle's life
+(inferred: a clamped ramp, full when unset).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F6 (WE's particleelementpreviews, old vs new)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/CParticleStock.cpp         | 60 +++++++++++++++----
+ 1 file changed, 47 insertions(+), 13 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticleStock.cpp b/src/core/WallpaperEngine/Render/Objects/CParticleStock.cpp
+index 67eb342..e1f2d9f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticleStock.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticleStock.cpp
+@@ -155,7 +155,11 @@ struct Remap {
+     int inputComponent = 0; // all, x, y, z, sum, average, max, min
+     int outputComponent = 0;
+     int function = 0; // none, sine, square, saw, triangle, simplexnoise, fbmnoise
+-    float inMin = 0.0f, inMax = 1.0f, outMin = 0.0f, outMax = 1.0f;
++    float inMin = 0.0f, inMax = 1.0f;
++    /** the output range: a value or "x y z" (the parser keeps both forms, inputrangemin … outputrangemax) */
++    glm::vec3 outMin = glm::vec3 (0.0f), outMax = glm::vec3 (1.0f);
++    /** blendinstart / blendinend: how much of the result applies over the particle's life (inferred: a clamped ramp) */
++    float blendStart = 0.0f, blendEnd = 0.0f;
+     int cp0 = 0, cp1 = 1;
+     float inputScale = 2.0f;
+     int octaves = 3;
+@@ -186,8 +190,18 @@ struct Remap {
+ 	}
+ 	inMin = num (j, "inputrangemin", 0.0f);
+ 	inMax = num (j, "inputrangemax", 1.0f);
+-	outMin = num (j, "outputrangemin", 0.0f);
+-	outMax = num (j, "outputrangemax", 1.0f);
++	outMin = vec3 (j, "outputrangemin", glm::vec3 (0.0f));
++	outMax = vec3 (j, "outputrangemax", glm::vec3 (1.0f));
++	if (const auto* v = member (j, "outputrangemin"); v != nullptr && v->is_string ()
++	    && v->get<std::string> ().find (' ') == std::string::npos) {
++	    outMin = glm::vec3 (outMin.x);
++	}
++	if (const auto* v = member (j, "outputrangemax"); v != nullptr && v->is_string ()
++	    && v->get<std::string> ().find (' ') == std::string::npos) {
++	    outMax = glm::vec3 (outMax.x);
++	}
++	blendStart = num (j, "blendinstart", 0.0f);
++	blendEnd = num (j, "blendinend", 0.0f);
+ 	cp0 = integer (j, "inputcontrolpoint0", 0);
+ 	cp1 = integer (j, "inputcontrolpoint1", 1);
+ 	inputScale = num (j, "transforminputscale", 2.0f);
+@@ -216,6 +230,20 @@ struct Remap {
+ 	}
+     }
+ };
++/**
++ * The operators' blendinstart / blendinend (stock capvelocity and remapvalue set them): the share of the operator's
++ * effect over the particle's life, 0 before blendinstart, 1 after blendinend (inferred: a clamped ramp; 1 when unset)
++ */
++float blendWeight (const ParticleInstance& p, float start, float end) {
++    if (start <= 0.0f && end <= 0.0f) {
++	return 1.0f;
++    }
++    const float life = p.lifetime > 0.0f ? p.age / p.lifetime : 1.0f;
++    if (end <= start) {
++	return life >= start ? 1.0f : 0.0f;
++    }
++    return std::clamp ((life - start) / (end - start), 0.0f, 1.0f);
++}
+ } // namespace
+ 
+ float CParticle::stockDefault (float world, float pixels) const {
+@@ -229,14 +257,16 @@ OperatorFunc CParticle::createGenericOperator (const GenericParticleOperator& op
+     if (name == "capvelocity") {
+ 	// case 0x12 (Observed): v ×= min (1, maxspeed / |v|); maxspeed (1 | 100) carries the speed override
+ 	const float maxSpeed = num (j, "maxspeed", stockDefault (1.0f, 100.0f));
+-	return [this, maxSpeed] (std::vector<ParticleInstance>& particles, uint32_t count, const std::vector<ControlPointData>&,
+-				 float, float) {
++	const float blendStart = num (j, "blendinstart", 0.0f), blendEnd = num (j, "blendinend", 0.0f);
++	return [this, maxSpeed, blendStart, blendEnd] (std::vector<ParticleInstance>& particles, uint32_t count,
++						       const std::vector<ControlPointData>&, float, float) {
+ 	    const float cap = maxSpeed * speedOverride ();
+ 	    for (uint32_t i = 0; i < count; i++) {
+ 		auto& p = particles[i];
+ 		const float speed = glm::length (p.velocity);
+ 		if (speed > cap && speed > 0.0f) {
+-		    p.velocity *= cap / speed;
++		    const float w = blendWeight (p, blendStart, blendEnd);
++		    p.velocity *= 1.0f + (cap / speed - 1.0f) * w;
+ 		}
+ 	    }
+ 	};
+@@ -584,21 +614,25 @@ void CParticle::applyRemap (const void* remapPtr, ParticleInstance& p, const std
+     }
+     const float span = remap.inMax - remap.inMin;
+     const float t = std::clamp (span != 0.0f ? (scalar - remap.inMin) / span : 0.0f, 0.0f, 1.0f);
+-    const float out = remap.outMin + remap.transform (t, p.random) * (remap.outMax - remap.outMin);
++    const glm::vec3 out3 = remap.outMin + remap.transform (t, p.random) * (remap.outMax - remap.outMin);
++    const float out = out3.x;
++    const float weight = blendWeight (p, remap.blendStart, remap.blendEnd);
+ 
+-    auto apply = [&remap] (float current, float value) {
++    auto apply = [&remap, weight] (float current, float value) {
++	float next;
+ 	switch (remap.operation) {
+-	    case 1: return current * value;
+-	    case 2: return current + value;
+-	    case 3: return current - value;
+-	    default: return value;
++	    case 1: next = current * value; break;
++	    case 2: next = current + value; break;
++	    case 3: next = current - value; break;
++	    default: next = value; break;
+ 	}
++	return current + (next - current) * weight;
+     };
+     auto applyVec = [&] (glm::vec3 v, bool flip) {
+ 	glm::vec3 we = flip ? mirrored (v) : v;
+ 	for (int c = 0; c < 3; c++) {
+ 	    if (remap.outputComponent == 0 || remap.outputComponent - 1 == c || remap.outputComponent > 3) {
+-		we[c] = apply (we[c], out);
++		we[c] = apply (we[c], remap.outputComponent == 0 ? out3[c] : out);
+ 	    }
+ 	}
+ 	return flip ? mirrored (we) : we;

@@ -1,0 +1,533 @@
+From e1e7837e7436c41b20e07a225a428ca64597cbb0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 22:02:20 +0530
+Subject: [PATCH 83/85] render: camera paths, camerafade and the transparent
+ sort's sortorder
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`camera.paths` names a camera paths file (GH 0x1401c6ef0: paths[] of {duration, disabled,
+transforms[] of {eye, center, up, zoom = 1, timestamp (else i / (n − 1) · duration), disabled}};
+the loader GH 0x1401b6c60 reads each string entry into the same list, so the last wins). The
+camera update GH 0x1401b8af0 plays them while no camera object is active: a key holds before its
+time; between two keys a cubic Hermite with both tangents (b − a) / 2; the path index wraps.
+A 3D scene takes the eye, centre and up; a 2D scene the key's zoom (in place of general.zoom)
+and the eye's offset from the scene camera's. camerafade (general flag 4) draws
+materials/util/fade.json over the scene (GH 0x1401afbf0): alpha 1 − 2 · remaining over a
+path's last 0.5 s, 1 − 2 · t over its first; its colour the `schemecolor` property · 0.7
+(fade.frag; the binding inferred from usershadervalues).
+
+transparentsorting's key is WE's (GH 0x1401b6660, stable sort, comparator GH 0x1401cc550):
+the objects' `sortorder` (base object int +0x124) ascending, then farthest first along the
+view direction. LWE sorted by the distance from the eye and ignored sortorder.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F5 (G23 camerafade, camera paths, sortorder)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   5 +
+ .../WallpaperEngine/Data/Model/Wallpaper.h    |  23 ++-
+ .../Data/Parsers/ObjectParser.cpp             |   2 +
+ .../Data/Parsers/WallpaperParser.cpp          |  80 +++++++++
+ src/core/WallpaperEngine/Render/Camera.cpp    |   5 +
+ src/core/WallpaperEngine/Render/Camera.h      |   3 +
+ .../Render/Wallpapers/CScene.cpp              | 161 +++++++++++++++++-
+ .../Render/Wallpapers/CScene.h                |  13 ++
+ 8 files changed, 285 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 30915e6..60631eb 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -47,6 +47,11 @@ struct ObjectData {
+     std::optional<std::string> attachment = std::nullopt;
+     /** A camera object's `fov` (null otherwise, or when it has none): a 3D scene's view angle while it is active */
+     UserSettingUniquePtr cameraFov = nullptr;
++    /**
++     * `sortorder` (the base object's int at +0x124, its table GH 0x14020dcc0): a 3D scene's transparent sort
++     * (GH 0x1401b6660) orders by it first, ascending, then back to front
++     */
++    int sortOrder = 0;
+ };
+ 
+ /**
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index a7247ad..f7e5c65 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -48,8 +48,29 @@ struct SceneData {
+      * Camera configuration
+      */
+     struct Camera {
+-	/** Enable fade effect */
++	/**
++	 * `camerafade` (general flag 4 at +0xe0, FUN_1401c9d10): while camera paths play, the scene fades out over the
++	 * last 0.5 s of a path and in over the first 0.5 s of the next (materials/util/fade.json, GH 0x1401afbf0)
++	 */
+ 	UserSettingUniquePtr fade;
++	/** A camera path keyframe (a `transforms` entry, the 0x2c-byte record of GH 0x1401c6ef0) */
++	struct PathKey {
++	    float time;
++	    glm::vec3 eye;
++	    glm::vec3 center;
++	    glm::vec3 up;
++	    float zoom;
++	};
++	/** A camera path (`paths` entry of a camera paths file): its keyframes, played for `duration` seconds */
++	struct Path {
++	    float duration;
++	    std::vector<PathKey> keys;
++	};
++	/**
++	 * `camera.paths` (scene +0x2d0): the camera paths file the scene names (the loader GH 0x1401b6c60 reads each
++	 * string entry into the same list, so the last one wins), played in order while no camera object is active
++	 */
++	std::vector<Path> paths;
+ 	/** Used by the software to allow the users to preview the background or not? */
+ 	bool preview;
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index c7a5fe7..1824daf 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -54,6 +54,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	    .solid = it.optional ("solid", true),
+ 	    .attachment = it.optional<std::string> ("attachment"),
++	    .sortOrder = it.optional ("sortorder", 0),
+ 	};
+     } catch (const std::exception& e) {
+ 	sLog.error ("Error parsing object base data: ", e.what ());
+@@ -82,6 +83,7 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+ 	    .cameraZoom = isCamera ? it.user ("zoom", project.properties, 1.0f) : nullptr,
+ 	    .solid = it.optional ("solid", true),
+ 	    .attachment = it.optional<std::string> ("attachment"),
++	    .sortOrder = it.optional ("sortorder", 0),
+ 	};
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 304907c..18342a2 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -1,6 +1,7 @@
+ #include "WallpaperParser.h"
+ 
+ #include <cmath>
++#include <cstdlib>
+ 
+ #include "../Model/Project.h"
+ #include "../Model/Wallpaper.h"
+@@ -46,6 +47,84 @@ SceneData::Fog parseFog (const JSON& general) {
+ 	.heightParams = range ("fogheightstart", "fogheightend", "fogheightstartdensity", "fogheightenddensity"),
+     };
+ }
++
++/** a "x y z" string (WE's strtod per component, 0 where missing), or 0 0 0 */
++glm::vec3 pathVec3 (const JSON& key, const char* name) {
++    const auto it = key.find (name);
++    glm::vec3 out (0.0f);
++    if (it == key.end () || !it->is_string ()) {
++	return out;
++    }
++    const std::string text = it->get<std::string> ();
++    const char* at = text.c_str ();
++    for (int i = 0; i < 3 && *at != '\0'; i++) {
++	char* end = nullptr;
++	out[i] = std::strtof (at, &end);
++	at = end == at ? at + 1 : end;
++	while (*at == ' ') {
++	    at++;
++	}
++    }
++    return out;
++}
++
++/**
++ * A camera paths file (GH 0x1401c6ef0): { "paths": [ { "duration", "disabled", "transforms": [ { "eye", "center",
++ * "up", "zoom" (1), "timestamp", "disabled" } ] } ] }. A path without transforms ends the list; a keyframe without a
++ * timestamp is spread over the duration (i / (n − 1) · duration)
++ */
++std::vector<SceneData::Camera::Path> parseCameraPaths (const JSON& camera, const Project& project) {
++    std::vector<SceneData::Camera::Path> result;
++    const auto paths = camera.optional ("paths");
++    if (!paths.has_value () || !paths->is_array ()) {
++	return result;
++    }
++    for (const auto& entry : *paths) {
++	result.clear ();
++	if (!entry.is_string ()) {
++	    continue;
++	}
++	try {
++	    const auto file = JSON::parse (project.assetLocator->readString (entry.get<std::string> ()));
++	    const auto list = file.find ("paths");
++	    if (list == file.end () || !list->is_array ()) {
++		continue;
++	    }
++	    for (const auto& path : *list) {
++		const auto transforms = path.find ("transforms");
++		if (!path.is_object () || transforms == path.end () || !transforms->is_array () || transforms->empty ()) {
++		    break;
++		}
++		if (path.value ("disabled", false)) {
++		    continue;
++		}
++		SceneData::Camera::Path out { .duration = path.value ("duration", 0.0f), .keys = {} };
++		const size_t n = transforms->size ();
++		for (size_t i = 0; i < n; i++) {
++		    const auto& key = (*transforms)[i];
++		    if (!key.is_object () || key.value ("disabled", false)) {
++			continue;
++		    }
++		    float time = 0.0f;
++		    if (const auto ts = key.find ("timestamp"); ts != key.end () && ts->is_number ()) {
++			time = ts->get<float> ();
++		    } else if (i != 0) {
++			time = static_cast<float> (i) / static_cast<float> (n - 1) * out.duration;
++		    }
++		    out.keys.push_back ({ .time = time,
++					  .eye = pathVec3 (key, "eye"),
++					  .center = pathVec3 (key, "center"),
++					  .up = pathVec3 (key, "up"),
++					  .zoom = key.contains ("zoom") && key["zoom"].is_number () ? key["zoom"].get<float> () : 1.0f });
++		}
++		result.push_back (std::move (out));
++	    }
++	} catch (const std::exception& e) {
++	    sLog.error ("Cannot load camera paths ", entry.get<std::string> (), ": ", e.what ());
++	}
++    }
++    return result;
++}
+ } // namespace
+ 
+ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project) {
+@@ -79,6 +158,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+             },
+             .camera = {
+                 .fade = general.user ("camerafade", properties, false),
++                .paths = parseCameraPaths (camera, project),
+                 .preview = general.optional ("camerapreview", false),
+                 .bloom = {
+                     .enabled = general.user ("bloom", properties, false),
+diff --git a/src/core/WallpaperEngine/Render/Camera.cpp b/src/core/WallpaperEngine/Render/Camera.cpp
+index 3a3db45..4087124 100644
+--- a/src/core/WallpaperEngine/Render/Camera.cpp
++++ b/src/core/WallpaperEngine/Render/Camera.cpp
+@@ -72,6 +72,8 @@ const glm::mat4& Camera::getWorldViewProjection () const { return this->m_worldV
+ 
+ const glm::vec3& Camera::getWorldEye () const { return this->m_worldEye; }
+ 
++const glm::vec3& Camera::getWorldForward () const { return this->m_worldForward; }
++
+ glm::vec3 Camera::getSceneEye () const {
+     return { this->m_worldEye.x - this->m_width / 2.0f, this->m_height / 2.0f - this->m_worldEye.y, this->m_worldEye.z };
+ }
+@@ -111,6 +113,9 @@ void Camera::setPerspectiveView (const glm::vec3& eye, const glm::vec3& center,
+     const glm::mat4 view = glm::lookAt (eye, center, up);
+ 
+     this->m_worldEye = eye;
++    if (glm::length (center - eye) > 1e-6f) {
++	this->m_worldForward = glm::normalize (center - eye);
++    }
+     this->m_worldViewProjection = this->m_worldProjection * view;
+     // LWE's scene space (x − w/2, h/2 − y, z) back to WE's world, then the view: what getProjection () · getLookAt ()
+     // gives the objects that place themselves in scene space (particles)
+diff --git a/src/core/WallpaperEngine/Render/Camera.h b/src/core/WallpaperEngine/Render/Camera.h
+index 97c2060..b3391d1 100644
+--- a/src/core/WallpaperEngine/Render/Camera.h
++++ b/src/core/WallpaperEngine/Render/Camera.h
+@@ -38,6 +38,8 @@ public:
+     [[nodiscard]] const glm::mat4& getWorldViewProjection () const;
+     /** The eye in WE's world (3D: with the shake) */
+     [[nodiscard]] const glm::vec3& getWorldEye () const;
++    /** The 3D view's direction in WE's world (normalised centre − eye) */
++    [[nodiscard]] const glm::vec3& getWorldForward () const;
+     /**
+      * The eye in LWE's scene space (x − width/2, height/2 − y, z), which particles use. In a 3D scene
+      * getProjection () · getLookAt () takes LWE's scene space too: the world view after the y flip and the centring
+@@ -81,6 +83,7 @@ private:
+     glm::mat4 m_worldViewProjection = glm::mat4 (1.0f);
+     glm::mat4 m_worldProjection = glm::mat4 (1.0f);
+     glm::vec3 m_worldEye = glm::vec3 (0.0f);
++    glm::vec3 m_worldForward = glm::vec3 (0.0f, 0.0f, -1.0f);
+     float m_perspectiveFov = -1.0f;
+     glm::mat4 m_projection = {};
+     glm::mat4 m_lookat = {};
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index da5690b..247c74b 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -18,6 +18,8 @@
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include "WallpaperEngine/Data/Model/Wallpaper.h"
++#include "WallpaperEngine/Data/Model/Property.h"
++#include "WallpaperEngine/Data/Model/Project.h"
+ #include "WallpaperEngine/Data/Parsers/ObjectParser.h"
+ #include "WallpaperEngine/Render/Objects/CText.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+@@ -812,6 +814,8 @@ void CScene::renderFrame () {
+ 	cur->render ();
+     }
+ 
++    this->renderFade ();
++
+     if (WallpaperEngine::Health::enabled ()) {
+ 	this->m_healthFrames++;
+ 	if (this->m_healthFrames == 1 || this->m_healthFrames == 31) {
+@@ -1161,13 +1165,15 @@ const std::vector<CObject*>& CScene::drawOrder () {
+ 	return this->m_objectsByRenderOrder;
+     }
+ 
+-    // transparentsorting: every run of objects placed in the world is drawn back to front by the distance of their
+-    // origins from the eye (the order of what draws flat over the screen — full-screen layers, the bloom — stays).
+-    // WE's sort key is not decoded: this is ours
++    // transparentsorting: every run of objects placed in the world is drawn sorted (the order of what draws flat over
++    // the screen — full-screen layers, the bloom — stays). WE's key (GH 0x1401b6660, stable sort, comparator
++    // GH 0x1401cc550): `sortorder` ascending, then the depth along the view direction, farthest first
++    // (dot (origin, forward), descending). Ours: the runs, and the forward as the eye's line of sight
+     this->m_sortedOrder = this->m_objectsByRenderOrder;
+     const glm::vec3 eye = this->m_camera->getWorldEye ();
+-    auto distance = [this, &eye] (const CObject* object) {
+-	return glm::length (glm::vec3 (this->worldMatrixOf (object->getObject ())[3]) - eye);
++    const glm::vec3 forward = this->m_camera->getWorldForward ();
++    auto distance = [this, &eye, &forward] (const CObject* object) {
++	return glm::dot (glm::vec3 (this->worldMatrixOf (object->getObject ())[3]) - eye, forward);
+     };
+ 
+     auto begin = this->m_sortedOrder.begin ();
+@@ -1182,7 +1188,10 @@ const std::vector<CObject*>& CScene::drawOrder () {
+ 	    run.emplace_back (distance (*end), *end);
+ 	    ++end;
+ 	}
+-	std::stable_sort (run.begin (), run.end (), [] (const auto& a, const auto& b) { return a.first > b.first; });
++	std::stable_sort (run.begin (), run.end (), [] (const auto& a, const auto& b) {
++	    const int sa = a.second->getObject ().sortOrder, sb = b.second->getObject ().sortOrder;
++	    return sa != sb ? sa < sb : a.first > b.first;
++	});
+ 	for (auto& [d, object] : run) {
+ 	    *begin++ = object;
+ 	}
+@@ -1443,8 +1452,127 @@ std::shared_ptr<const CFBO> CScene::getShadowAtlas () const { return this->m_sha
+ 
+ const CScene::SceneLights& CScene::getLights () const { return this->m_lights; }
+ 
++bool CScene::samplePath (float dt, SceneData::Camera::PathKey& out) {
++    const auto& paths = this->getScene ().camera.paths;
++    this->m_fadeAlpha = 0.0f;
++    if (paths.empty ()) {
++	return false;
++    }
++    if (this->m_pathIndex >= paths.size ()) {
++	this->m_pathIndex = 0;
++	this->m_pathKey = 0;
++	this->m_pathTime = 0.0f;
++    }
++    const auto& path = paths[this->m_pathIndex];
++    if (path.keys.empty ()) {
++	this->m_pathIndex = (this->m_pathIndex + 1) % paths.size ();
++	return false;
++    }
++    const auto& keys = path.keys;
++    const size_t k = std::min (this->m_pathKey, keys.size () - 1);
++    const auto& a = keys[k];
++    float boundary;
++
++    // GH 0x1401b8af0, literally: before its key's time a key holds (until the next key's time plus its own), the last
++    // key holds until the duration less its time; between two keys a cubic Hermite whose tangents are both half the
++    // difference: p = h00 a + h10 m + h01 b + h11 m, m = (b − a) / 2
++    if (this->m_pathTime < a.time) {
++	boundary = (k + 1 < keys.size () ? keys[k + 1].time : 0.0f) + a.time;
++	out = a;
++    } else if (k + 1 >= keys.size ()) {
++	boundary = path.duration - a.time;
++	out = a;
++    } else {
++	const auto& b = keys[k + 1];
++	boundary = b.time;
++	const float span = b.time - a.time;
++	const float s = span > 0.0f ? (this->m_pathTime - a.time) / span : 1.0f;
++	const float s2 = s * s, s3 = s2 * s;
++	const float h00 = 2.0f * s3 - 3.0f * s2 + 1.0f, h10 = s3 - 2.0f * s2 + s, h01 = 3.0f * s2 - 2.0f * s3,
++		    h11 = s3 - s2;
++	auto hermite = [&] (auto p0, auto p1) {
++	    const auto m = (p1 - p0) * 0.5f;
++	    return p0 * h00 + m * h10 + p1 * h01 + m * h11;
++	};
++	out.time = this->m_pathTime;
++	out.eye = hermite (a.eye, b.eye);
++	out.center = hermite (a.center, b.center);
++	out.up = hermite (a.up, b.up);
++	out.zoom = hermite (a.zoom, b.zoom);
++    }
++
++    this->m_pathTime += dt;
++    if (boundary < this->m_pathTime) {
++	const size_t next = k + 1;
++	if (next >= keys.size () || path.duration <= keys[next].time) {
++	    this->m_pathIndex = (this->m_pathIndex + 1) % paths.size ();
++	    this->m_pathKey = 0;
++	    this->m_pathTime = 0.0f;
++	} else {
++	    this->m_pathKey = next;
++	}
++    }
++
++    // camerafade (GH 0x1401afbf0): over the last 0.5 s of the path the scene fades out, over its first 0.5 s in
++    if (this->getScene ().camera.fade != nullptr && this->getScene ().camera.fade->value->getBool ()) {
++	const auto& now = paths[this->m_pathIndex];
++	const float remaining = now.duration - this->m_pathTime;
++	float fade = 0.0f;
++	if (remaining < 0.5f) {
++	    fade = 1.0f - 2.0f * remaining;
++	} else if (remaining > now.duration - 0.5f) {
++	    fade = 1.0f - 2.0f * (now.duration - remaining);
++	}
++	this->m_fadeAlpha = glm::clamp (fade, 0.0f, 1.0f);
++    }
++    return true;
++}
++
++void CScene::renderFade () {
++    if (this->m_fadeAlpha <= 0.0f) {
++	return;
++    }
++    if (this->m_fadeProgram == 0) {
++	const char* vs = "#version 330\nconst vec2 p[3] = vec2[3] (vec2 (-1.0, -1.0), vec2 (3.0, -1.0), vec2 (-1.0, 3.0));\n"
++			 "void main () { gl_Position = vec4 (p[gl_VertexID], 0.0, 1.0); }\n";
++	const char* fs = "#version 330\nuniform vec4 u_Color;\nout vec4 o_Color;\nvoid main () { o_Color = u_Color; }\n";
++	const GLuint v = glCreateShader (GL_VERTEX_SHADER), f = glCreateShader (GL_FRAGMENT_SHADER);
++	glShaderSource (v, 1, &vs, nullptr);
++	glCompileShader (v);
++	glShaderSource (f, 1, &fs, nullptr);
++	glCompileShader (f);
++	this->m_fadeProgram = glCreateProgram ();
++	glAttachShader (this->m_fadeProgram, v);
++	glAttachShader (this->m_fadeProgram, f);
++	glLinkProgram (this->m_fadeProgram);
++	glDeleteShader (v);
++	glDeleteShader (f);
++    }
++    // fade.frag: vec4 (color · 0.7, g_Alpha), `color` the material's tint ← the project's `schemecolor`
++    // (usershadervalues; the shader's default 0.315 0.135 0.1125). Inferred: the binding of a project property
++    // named schemecolor
++    glm::vec3 tint (0.315f, 0.135f, 0.1125f);
++    const auto& properties = this->getScene ().project.properties;
++    if (const auto it = properties.find ("schemecolor"); it != properties.end () && it->second != nullptr) {
++	tint = it->second->getVec3 ();
++    }
++    glBindFramebuffer (GL_FRAMEBUFFER, this->getWallpaperFramebuffer ());
++    glViewport (0, 0, this->m_sceneFBO->getRealWidth (), this->m_sceneFBO->getRealHeight ());
++    glDisable (GL_DEPTH_TEST);
++    glDisable (GL_CULL_FACE);
++    glEnable (GL_BLEND);
++    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++    glColorMask (true, true, true, false);
++    glUseProgram (this->m_fadeProgram);
++    glUniform4f (glGetUniformLocation (this->m_fadeProgram, "u_Color"), tint.r * 0.7f, tint.g * 0.7f, tint.b * 0.7f,
++		 this->m_fadeAlpha);
++    glDrawArrays (GL_TRIANGLES, 0, 3);
++    glColorMask (true, true, true, true);
++}
++
+ void CScene::updateCamera () {
+     const auto& camera = this->getScene ().camera;
++    this->m_fadeAlpha = 0.0f;
+ 
+     if (this->m_camera->isPerspective ()) {
+ 	// a 3D scene's view (GH 0x1401b8af0): the active camera object's — the last visible one — places the eye at
+@@ -1455,6 +1583,7 @@ void CScene::updateCamera () {
+ 	glm::vec3 center = this->m_camera->getCenter ();
+ 	glm::vec3 up = this->m_camera->getUp ();
+ 	float fov = this->m_camera->getFov ();
++	bool cameraObject = false;
+ 
+ 	for (auto it = this->getScene ().objects.rbegin (); it != this->getScene ().objects.rend (); ++it) {
+ 	    const Object& object = **it;
+@@ -1462,6 +1591,7 @@ void CScene::updateCamera () {
+ 	    if (object.cameraZoom == nullptr || !this->isEffectivelyVisible (object)) {
+ 		continue;
+ 	    }
++	    cameraObject = true;
+ 
+ 	    const glm::mat4 world = this->worldMatrixOf (object);
+ 	    eye = glm::vec3 (world[3]);
+@@ -1473,6 +1603,16 @@ void CScene::updateCamera () {
+ 	    break;
+ 	}
+ 
++	// no active camera object: the camera paths play (an active one takes precedence, GH 0x1401b8af0)
++	if (SceneData::Camera::PathKey key {}; !cameraObject
++	    && this->samplePath (std::max (0.0f, this->getContext ().getContext ().renderTime
++						     - this->getContext ().getContext ().renderTimeLast),
++				 key)) {
++	    eye = key.eye;
++	    center = key.center;
++	    up = key.up;
++	}
++
+ 	glm::vec3 offset (0.0f);
+ 
+ 	if (camera.shake.enabled->value->getBool ()) {
+@@ -1527,6 +1667,7 @@ void CScene::updateCamera () {
+ 
+     // the zoom: general.zoom times the active camera object's (the last visible one whose parents are visible)
+     float zoom = camera.zoom == nullptr ? 1.0f : camera.zoom->value->getFloat ();
++    bool cameraObject = false;
+ 
+     for (auto it = this->getScene ().objects.rbegin (); it != this->getScene ().objects.rend (); ++it) {
+ 	const Object& object = **it;
+@@ -1537,10 +1678,18 @@ void CScene::updateCamera () {
+ 
+ 	if (this->isEffectivelyVisible (object)) {
+ 	    zoom *= object.cameraZoom->value->getFloat ();
++	    cameraObject = true;
+ 	    break;
+ 	}
+     }
+ 
++    // no active camera object: the camera paths play. A key's zoom replaces general.zoom (+0x114 takes it instead
++    // of +0x13c) and its eye moves the camera from the scene's (y up, scene units)
++    if (SceneData::Camera::PathKey key {}; !cameraObject && this->samplePath (dt, key)) {
++	zoom = key.zoom;
++	cameraPosition += glm::vec2 (key.eye - this->m_camera->getEye ());
++    }
++
+     // the mouse parallax: a target from the cursor (y up), centred at mouseinfluence 0, eased in by
+     // k = min (1, (1 − delay / 3) · 10 · dt), or snapped to with a delay ≤ 0
+     if (camera.parallax.enabled->value->getBool () && !this->getContext ().getContext ().config.disableParallax) {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 6d56622..98967f0 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -216,6 +216,13 @@ protected:
+     void advanceAnimations ();
+     /** The camera update (WE GH 0x1401b8af0): shake, the active camera object's zoom, general.zoom, the parallax */
+     void updateCamera ();
++    /**
++     * Camera paths (GH 0x1401b8af0): the frame's sample of `camera.paths`, advanced by dt; false without paths.
++     * Sets m_fadeAlpha (camerafade, GH 0x1401afbf0)
++     */
++    bool samplePath (float dt, SceneData::Camera::PathKey& out);
++    /** camerafade's overlay: fade.json's colour (the `schemecolor` property · 0.7) at m_fadeAlpha over the scene */
++    void renderFade ();
+     /** Packs the 3D scene's lights for this frame (getLights), and lays out the shadow atlas (getShadowViews) */
+     void updateLights ();
+     /** WE's shadow pass (GH 0x1401c4f30): the casters into each shadow viewport of the atlas */
+@@ -282,6 +289,12 @@ private:
+     glm::vec2 m_mousePositionNormalized = {};
+     /** the smoothed parallax position (WE scene+0x300) in scene units, y up; starts at the centre */
+     glm::vec2 m_parallaxPosition = {};
++    /** the camera paths' playback (scene +0xe4 path, +0xe8 key, +0xec time) */
++    size_t m_pathIndex = 0;
++    size_t m_pathKey = 0;
++    float m_pathTime = 0.0f;
++    float m_fadeAlpha = 0.0f;
++    GLuint m_fadeProgram = 0;
+     glm::vec2 m_parallaxPositionNormalized = { 0.5f, 0.5f };
+     std::shared_ptr<const CFBO> _rt_4FrameBuffer = nullptr;
+     std::shared_ptr<const CFBO> _rt_8FrameBuffer = nullptr;

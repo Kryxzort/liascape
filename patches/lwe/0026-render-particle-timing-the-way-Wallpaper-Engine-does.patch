@@ -1,7 +1,7 @@
 From 2177a69dcd4d646e6ccd4a6787f195045423bd7c Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 01:01:46 +0530
-Subject: [PATCH 26/77] render: particle timing the way Wallpaper Engine does
+Subject: [PATCH 26/85] render: particle timing the way Wallpaper Engine does
 
 Against WE 2.8.485 (addresses are wallpaper64.exe functions):
 
