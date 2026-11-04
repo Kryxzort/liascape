@@ -297,6 +297,11 @@ Tests (host_api_test, each RED on deeb4da): `sprite_orientation_as_we`, `alphawr
 `effect_fbo_fit_and_swap`, `texture_format_combos_per_slot`, `resize_screen_reaches_scripts`,
 `puppet_animation_events`.
 
+Health (pin `24adeff`, with F1): 86 clean / 10 degraded / 0 failed, every scene's class, loss, errors, warnings and
+built objects the same as on `deeb4da` and on F1's `4b85ae7`. Shader sweep: 4085 checks, 16 failing (F1's), 0 newly
+failing (47 → 47 on these patches alone). host_api_test 95/95; player tests 739 passed, 1 timing failure
+(`mpv_source_teardown_never_skips_bus_cycles`, passed alone).
+
 ## Future batches (render features, not done here)
 
 | Batch | What | Library | Size |
