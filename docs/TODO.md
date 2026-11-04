@@ -1108,7 +1108,16 @@ Two bug classes kept recurring; fix the class, not the instance:
                 both are inferred now.
     - [ ] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
           unmerged). 14 scenes. L.
-    - [ ] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M.
+    - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
+          `c62d777`): a `general.hdr` scene renders into half float targets and blooms with WE's HDR chain
+          (hdr_downsample_bloom → hdr_downsample levels → hdr_upsample(_cubic) back up → combine, decoded GH
+          0x1401afbf0 / 0x1401b3b10 / 0x1401b42b0); effect FBOs take the format they name (rg88, r8, the f formats,
+          rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 63/63; corpus 93/96
+          on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
+          - [ ] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
+          - [ ] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 (set from the "postprocessing" setting
+                `ultra`, GH 0x14013f860). Today: HDR whenever `general.hdr`, unless WPENGINE_HDR=0.
+          - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
     - [ ] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
           E14, E43). The 3 load_failed scenes below. L.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh

@@ -131,7 +131,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B10 SceneScript API surface** — **done 2026-11-03** except S16 (resize/animation events), S26 (video textures, puppet layers, …), S37 (createLayer) (patches 0038–0044; see "B10 result" in § 5) | S8, S10–S16, S19–S27, S29–S32, S36, S37 | 1–28 each | M–L | Cursor hit-test + events (`solid`). Media events from liascape's MPRIS (`wp_project_notify_*`). `applyUserProperties` + `engine.userProperties`. `getLayer` by index for all layer types. ISoundLayer `play/stop/pause` (unblocks `startsilent`, A7). Persistent `localStorage`. Layer writes. Missing engine/scene members. Needs B1. | Per feature, a fork test script. Smoke 2325974975 (sounds + menu), 2890767643 (media widget with a fake MPRIS). Headless pointer clicks for cursor events. |
 | **B11 Particles, extended** | P2, P10, P15, P22, P24–P30, P34, P35, P37 | 29 | L | Child systems (static / eventfollow / eventspawn / eventdeath). The missing initializers and operators. Control-point overrides and transforms. Rope/trail combos. Needs the operator interpreter (GH 0x140265800) read from asm first (P31–P33). | Smoke the 29 child-system scenes before/after: sub-effects present. WE captures for 2 of them. |
 | **B12 Puppet warp** | G06, G07, G08, G09 | 14 | L | Start from PR #625's MDL parsing (unmerged, so cherry-pick into our own commit). Add MDLV 0016/0017/0019. GPU skinning. Animation-layer mixing. Bone attachments. | Smoke the 14 puppet scenes at 2 timestamps: the mesh deforms. WE capture of 1 scene. |
-| **B13 HDR bloom and FBO formats** | E35, E23, E37 | 5 | M | WE's HDR chain (`hdr_downsample`, `combine_hdr_upsample`) with RGBA16F targets when `general.hdr`. | Smoke 2511663284 vs a WE capture. |
+| **B13 HDR bloom and FBO formats** — **done 2026-11-04** (see "B13 result" in § 5; E37 was B9) | E35, E23, E37 | 5 | M | WE's HDR chain (`hdr_downsample`, `combine_hdr_upsample`) with RGBA16F targets when `general.hdr`. | Smoke 2511663284 vs a WE capture. |
 | **B14 3D scenes** | G24–G29, G20–G22, E13, E14, E43 | 3 (+4 with `perspective` layers) | L | A perspective camera with optional `orthogonalprojection`. 3D image layers and depth/transparent sort (3276522107 first, M). Then the MDLV static-mesh loader + `generic4`. Then lights, shadow atlas, fog. | Corpus: 3276522107 → ok, then 3477054430 and 3509243656. WE captures. |
 
 Rows not in a batch are parity, editor-only or not used by the library. Their rows say so, for example T6, T7, A6,
@@ -164,7 +164,7 @@ capture of the same scene:
 | 3243449890, 2469881470 | rotation pivot with alignment (G31); `perspective` layer (G21) | B6 / B14 |
 | 2883756643; 3414858021 or 3432999904 | blend modes (E27/E28); `copybackground:false` (E30) | B7 |
 | 2134765860 (cursor near the emitter) | controlpointattract threshold (P28) | B11 |
-| 2511663284 | HDR bloom (E35) | B13 |
+| 3395587987 or 3019192537, WE at post-processing **Ultra** | HDR bloom (E35): glow only on what is brighter than 1 | B13 |
 | any scene, a clip of its first second | `camerafade` (G23) | — |
 | a 16:9 scene on an ultrawide or portrait output | crop vs letterbox, and whether `anchor` moves layers (G32, C5) | B5 |
 
@@ -315,7 +315,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E20 | `TEXnFORMAT` for samplers ≠ 0 (`formatcombo`) | **Observed** `TEX0FORMAT` built in GH 0x1401fffb0; the other slots are **Inferred** from `"formatcombo":true` and `TEX1/2/4FORMAT` in shaders | only `TEX0FORMAT` for the renderable's texture (CPass.cpp:606-612) | 1: 3319542538 (lightshafts gradient r8, `TEX2FORMAT`) | an r8 gradient is read as RGBA (red tint), only when `RENDERING=1` | S |
 | E21 | Engine-set defines | **Observed** strings and uses: `SKINNING`/`BONECOUNT`/`MORPHING`/`PRELIGHTING`/`REFLECTION` (GH 0x140230ec0), `SHADERVERSION` (GH 0x14019cb90), `WRITEALPHA`/`OPACITYMASK` (GH 0x140201470), `HDR`, `REVERSEDEPTH`, `SPRITESHEETBLEND`, `CLIPPINGUVS`/`CLIPPINGTARGET` | only `GLSL 1` plus combos (ShaderUnit.cpp:21-51) | puppet objects in ≥ 4 scenes (77 puppet-model objects); the rest 0 active | puppet warp isn't skinned (puppet area owns it); `HDR` blocks affect EMISSIVE only (0) | M-L |
 | E22 | `[COMBO]` / sampler `require` | **Observed** WE writes `require` in its own stock shaders (an editor and compile rule) | ignored for combos (ShaderUnit.cpp:442); the sampler-require logic looks inverted (ShaderUnit.cpp:553-590) | 0 (no used annotation has combo+require+default) | none today | S |
-| E23 | FBO `format` ignored | **Observed** formats in effect.json: `rgba_backbuffer` (Inferred 16F when HDR), `rgba8888`, `rg88`, `r8` | always GL_RGBA8 (FBOProvider.cpp:9-16, CFBO.cpp:20) | rgba_backbuffer 38, rg88 5, r8 1 | precision loss in HDR scenes only (see E35) | S |
+| E23 | FBO `format` ignored | **Observed** formats in effect.json: `rgba_backbuffer` (Inferred 16F when HDR), `rgba8888`, `rg88`, `r8` | always GL_RGBA8 (FBOProvider.cpp:9-16, CFBO.cpp:20) | rgba_backbuffer 38, rg88 5, r8 1 | precision loss in HDR scenes only (see E35) | S. **Done (B13)**: CFBO allocates the named format (rg88 RG8, r8 R8, the f formats half float); `rgba_backbuffer`/`rgb_backbuffer` are half float in an HDR scene (GH 0x140216080, names GH 0x1402116c0) |
 | E24 | FBO `fit` / `width` / `height` / `uvs` ignored | **Observed** keys in stock effects (glitter: 256×256 r8 `uvs:repeat`; cursorripple `fit:512`) | parseFBOs reads name/format/scale/unique only (EffectParser.cpp:99-115); size = image size / scale; wrap taken from the image texture's flags | 2: 3445973124 (glitter), 3184155462 (cursorripple) | glitter tiles stretched (no repeat, wrong size); cursorripple simulates at layer resolution | S |
 | E25 | Effect pass `"compose": true` ignored | **Observed** parsed: sets pass flag 0x200000000 and increments a compose counter (GH 0x1402131b0); semantics **Unknown** (old-format two-pass effects without binds) | not parsed (EffectParser.cpp:48-75) | 5: 2511663284, 2672425887, 2890767643 (+1 blurprecise, 3042865984 refraction) | old blurprecise / refraction may sample the wrong input in pass 2 | M (needs RE) |
 | E26 | Pass `command:"swap"` | **Observed** `copy`=1, `swap`=2 (GH 0x1402131b0) | copy only (CImage.cpp:674) | 0 (copy in 3: motionblur) | none | S |
@@ -327,7 +327,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E32 | Image `nointerpolation` | **Observed** property (GH 0x140219c60) | ignored | 0 | none | S |
 | E33 | Which of `_rt_imageLayerComposite_<id>_a/_b` holds the result | **Unknown** | ping-pong parity decides which buffer holds the final image; "TODO: determine when … is used" (CImage.cpp:254-257) | 9 reference it: 2189783622, 2469881470, 3243449890 | a layer that uses another layer as a mask/texture may get an intermediate pass | M **Done in B7, Observed**: the ping-pong starts by pass parity, so `_a` is what the last pass reads and `_b` the stage before (GH 0x140214b50). |
 | E34 | Effects on non-image objects | **Inferred** WE renders them (the editor attaches effects to text) | `parseText` keeps no effects (ObjectParser.cpp:142-160); a group object with effects becomes a placeholder `CObject` | 25 text: 2134765860, 2325974975, 2890767643; 1 group: 3319542538 (lightshafts) | text drawn without its blurprecise/pulse/shift_hue/reflection/shine/godrays | L (text → FBO + effect chain) |
-| E35 | `general.hdr` ignored | **Observed** HDR scenes load `hdr_downsample`, `hdr_downsample_bloom`, `hdr_upsample(_cubic)`, `combine_hdr_upsample`/`combine_srgb`; LDR scenes load `downsample_quarter_bloom`, `downsample_eighth_blur_v`, `blur_h_bloom`, `combine_ldr` (GH 0x1401afbf0); HDR params `bloomstrength`/`blend`/`bloomtint`/`scatter` from `bloomhdr*` (GH 0x1401b42b0, keys GH 0x1401c7880) | always the LDR chain with `bloomstrength`/`bloomthreshold` (CScene.cpp:117-165); RGBA8 everywhere; `hdr` and `bloomhdr*` never read (WallpaperParser.cpp:41-53) | 5 hdr=true: 2511663284, 2542468435, 3019192537, 3395587987 (+1); 4 of them bloom | HDR bloom (threshold 1.0, iterative scatter) replaced by LDR bloom with other params; values > 1 clip | L |
+| E35 | `general.hdr` ignored | **Observed** HDR scenes load `hdr_downsample`, `hdr_downsample_bloom`, `hdr_upsample(_cubic)`, `combine_hdr_upsample`/`combine_srgb`; LDR scenes load `downsample_quarter_bloom`, `downsample_eighth_blur_v`, `blur_h_bloom`, `combine_ldr` (GH 0x1401afbf0); HDR params `bloomstrength`/`blend`/`bloomtint`/`scatter` from `bloomhdr*` (GH 0x1401b42b0, keys GH 0x1401c7880) | always the LDR chain with `bloomstrength`/`bloomthreshold` (CScene.cpp:117-165); RGBA8 everywhere; `hdr` and `bloomhdr*` never read (WallpaperParser.cpp:41-53) | 5 hdr=true: 2511663284, 2542468435, 3019192537, 3395587987 (+1); 4 of them bloom | HDR bloom (threshold 1.0, iterative scatter) replaced by LDR bloom with other params; values > 1 clip | L. **Done (B13)**: WE's HDR chain and half float targets when `general.hdr` (inferred gate: WE only at Ultra post-processing; here unless WPENGINE_HDR=0) |
 | E36 | `bloomtint` ignored | **Observed** set on the LDR chain too (GH 0x1401b42b0); shader `g_BloomTint` default "1 1 1" | not passed to the bloom passes (CScene.cpp:139-153) | 1 non-white (3490034653), 1 user-bound | bloom tinted white instead of warm | S |
 | E37 | Bloom params frozen at load | **Observed** GH 0x1401b42b0 re-applies them to the materials | strength and threshold are written as JSON literals into the virtual effect at construction; the bloom object exists only if `bloom` was true at load (CScene.cpp:117-162) | `bloom`/`bloomstrength`/`bloomthreshold` user- or script-bound in 4-5 (e.g. 2 `bloom.script`) | changing the user property or script doesn't change bloom | S |
 | E38 | Material `alphatocoverage` | **Observed** blending enum normal 0 / translucent 1 / additive 2 / alphatocoverage 3 (GH 0x140182410, parse GH 0x140182450) | logged and treated as `normal` (MaterialParser.cpp:73-87) | 1: 3354740764 | cutout edges opaque instead of A2C | S: alpha test or blend |
@@ -1623,3 +1623,93 @@ Left (in TODO):
 - controlpointangleN, system flag bit 0 (world-space simulation, 16 scenes), WE's simplex hash, vortex_v2.
 - P24 cone, P25/P26 (0 scenes).
 - The fdt frame-time source (+0x14c) and the child "alive" test (GH 0x1402524c0) to read.
+
+### B13 result (fork patch 0055, pin `c62d777`, 2026-11-04)
+
+Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` and
+`all.asm`; constants and strings read from the same bytes. The pin also carries B12's 0054.
+
+**Decoded (Observed):**
+
+- **Keys and defaults.** `hdr` is general flag 0x400 (setter GH 0x1401c95e0). `bloomhdrstrength`, `…threshold`,
+  `…feather`, `…scatter`, `…iterations` are general +0x388/+0x38c/+0x390/+0x394/+0x398 (key table GH 0x1401c7880).
+  The scene constructor GH 0x1401b6c60 sets them to 2, 1, 0.1, 1.619, 8, and `bloomstrength`/`bloomthreshold` to
+  2 / 0.65. LWE's LDR defaults were 0 / 0; they are WE's now.
+- **Which chain.** The scene tick GH 0x1401afbf0 reads the renderer's flag 0x2000. With it, it loads
+  `combine_hdr_upsample` (`combine_dhdr_upsample` with 0x4000, an HDR display), `combine_srgb`, `hdr_downsample`,
+  `hdr_downsample_bloom`, `hdr_upsample` and `hdr_upsample_cubic`, and not the LDR materials. With bloom on it runs the
+  chain (GH 0x1401b3b10) and the combine; with bloom off, `combine_srgb`.
+- **Targets** (GH 0x1401af5b0). With the flag the scene FBO is RGB161616f. One bloom level per halving of the smaller
+  side, up to 8, is named `"_rt_" + (2 << level) + "FrameBuffer"` (strings 0x1404cf9b0) and is RGB161616f. Without it
+  the LDR `_rt_4FrameBuffer`, `_rt_8FrameBuffer` and `_rt_Bloom` are made instead.
+- **The chain** (GH 0x1401b3b10):
+  - level 0 = `hdr_downsample_bloom` from the scene; level i = `hdr_downsample` from level i − 1;
+  - g_RenderVar0 = (1, 1, −1, −1) · 2^i / the scene size (constants 0x1404d4238 = 1, 0x1404d4548 = −1): one source
+    texel for the four taps;
+  - then from the last level up, each onto the one above, additive: `hdr_upsample_cubic` for the two coarsest steps,
+    `hdr_upsample` after, g_RenderVar0 · 2^level (half a source texel);
+  - the combine reads the scene (g_Texture0) and level 0 (slot +0xd8).
+- **Parameters** (GH 0x1401b42b0, re-run when general changes):
+  - levels n = min (`bloomhdriterations`, levels made), at least 1;
+  - g_BloomStrength = strength / (scatter^(max (n, 2) − 2) + 1). The call at 0x1401b436a takes (scatter, n − 2) and
+    has a CRT powf's shape: **inferred** powf;
+  - `blend` = (t, t − t·f, 2·t·f, 0.25 / (t·f + 1e-5)), a soft knee (0x1404d4184 = 0.25, 0x1404d40e0 = 1e-5);
+  - `bloomtint`; both upsample materials' `scatter`.
+- **FBO formats** (E23). The effect FBO parse (GH 0x140216080) maps `rgba_backbuffer` to 0xe (RGBA16161616f) with the
+  flag, else 0; `rgb_backbuffer` to 0xf / 1; other names through GH 0x1402116c0's table, which is the .tex enum
+  (`rgba8888` 0, `rgb888` 1, `rgb565` 2, `rg88` 8, `r8` 9, `rg1616f` 10, `r16f` 11, `rgba16161616f` 14,
+  `rgb161616f` 15, `rgba1010102` 13, …). Image composites are 0xe with the flag, else 0.
+
+**Ours:**
+
+- CFBO allocates the format it is given: RG8, R8, RG16F, R16F, RGBA16F, RGB10_A2. An RGB format is RGBA16F with alpha
+  read as 1. Before, every FBO was RGBA8.
+- An HDR scene's FBO, composites, compose-layer targets and sampling copies are RGBA16F. LWE keeps alpha (compose layers
+  and blend modes read it). The output copy into the host's framebuffer converts to its format and clamps, as WE's
+  saturate does, so the dmabuf the compositor imports is unchanged.
+- The HDR chain is a bloom image like the LDR one, from a virtual effect per level count (`bloomhdr<n>.json`). CScene
+  points its passes at g_RenderVar0, the strength, knee, tint and scatter, and recomputes them every frame.
+- The combine is `combine_hdr_upsample_linear` (no `lin ()`). WE's `combine_hdr` and `combine_srgb` apply `lin ()`
+  and × g_RenderVar0.x. That only round-trips through an sRGB backbuffer view, which is **inferred** (an HDR scene
+  without bloom would otherwise look darker in WE than in its editor). We write to a plain RGBA8 target.
+
+**Inferred / not WE's:**
+
+- **The gate.** WE sets the renderer's 0x2000 from its "postprocessing" setting `ultra` (0x6000 for `displayhdr`;
+  GH 0x14013f860, passed to the renderer at GH 0x140141520). How `general.hdr` gates it was not found. Below Ultra,
+  WE shows these scenes with the LDR chain. LWE has no quality setting: a `general.hdr` scene renders HDR unless
+  `WPENGINE_HDR=0`.
+- `bloomhdriterations` is read at load. `hdr` is read at load.
+- g_TexelSize stays LWE's 1 / scene size. WE's is 1 / the current target (renderer +0x74).
+
+**Fork tests** (`host_api_test`): 63/63, 2 new, both failing on 2559b88.
+
+| Test | What it checks | On 2559b88 |
+|---|---|---|
+| `hdr_bloom_is_wes_chain` | two additive 0.6 squares (1.2) glow 3 px out (11 11); a single 0.6 one doesn't (0 0); the same scene with `hdr: false` blooms both through the LDR chain | 6 6 past the dim square: LDR chain, threshold 0.3, 1.2 clipped |
+| `fbo_formats_as_written` | an rg88 FBO of (0.2 0.4 0.6) reads 51 102 0; `rgba_backbuffer` of 2.0 read × 0.25 is 127 in an HDR scene, 64 otherwise | 51 102 153; 64 in both |
+
+**Smoke**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 2559b88 then the B13 core (before the
+rebase onto B12):
+
+- **All 96: 93 ok on both, the same 3 known 3D failures, none newly blank.** Lit pixels within 1 % everywhere but
+  2883756643, whose video frame differs between runs (60 vs 100 %; same on reruns of the old core).
+- Mean frame time 4.24 → 4.63 ms, with another agent loading the machine. The outliers (3489263099, 3243449890,
+  2375914945) are LDR scenes; interleaved reruns show them within noise.
+- The 4 HDR scenes that load (3509243656 is a 3D failure):
+
+| Scene | bloom | frame ms old → new | Look |
+|---|---|---|---|
+| 2511663284 | off | 2.8 → 4.0 | unchanged (half float targets only) |
+| 2542468435 | on, 2 levels | 1.3 → 2.4 | close; the LDR wash on mid-tones is gone |
+| 3019192537 | on, 8 levels | 1.7 → 2.4 | glow only on the brightest parts |
+| 3395587987 | on, 8 levels | 0.7 → 1.2 | the LDR chain's threshold 0 washed the whole frame; now the snow and highlights glow |
+
+Half float targets cost about 1 ms per frame at 4K here. VRAM rises by half the size of each RGBA8 target they replace:
+for a 3840 × 2160 scene, ~33 MB for the scene FBO, the same per composite.
+
+Left (in TODO):
+- A WE capture of 3395587987 or 3019192537 at post-processing **Ultra**, to check the look and the inferred gate.
+- Whether `general.hdr` alone gates WE's HDR path (the renderer flag's link to it wasn't found).
+- `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (flag 0x10000) are not ported.
+

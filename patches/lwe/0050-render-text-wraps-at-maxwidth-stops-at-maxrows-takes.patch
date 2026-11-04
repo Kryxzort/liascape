@@ -1,7 +1,7 @@
 From e372e44cacc1b3afa2fb6d724e5633ede21721b6 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 07:16:09 +0530
-Subject: [PATCH 50/53] render: text wraps at maxwidth, stops at maxrows, takes
+Subject: [PATCH 50/55] render: text wraps at maxwidth, stops at maxrows, takes
  spacing and script-set alignment
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

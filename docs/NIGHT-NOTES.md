@@ -277,3 +277,14 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Not done yet (in TODO): rain splashes lying flat on the ground, rope/trail shader options, and WE captures
     of a couple of these scenes to check them against WE itself.
 
+- **Scenes, batch B13 (fork patch 0055, pin `c62d777`, which also carries B12's 0054):** scenes marked HDR now
+  render the way Wallpaper Engine does at its **Ultra** post-processing setting (decoded from wallpaper64.exe).
+  - They draw into higher-precision buffers, so bright additive parts (sparks, snow, light) can go above white, and
+    only those glow, through WE's own HDR bloom. Before, HDR scenes used the normal bloom with different settings:
+    3395587987 was washed out all over; now its snow and highlights glow and the rest is crisp.
+  - Effects that ask for a special buffer format get it (e.g. a 2-channel depth-of-field mask, half-float fluid
+    buffers).
+  - 4 of your scenes are HDR (2511663284, 2542468435, 3019192537, 3395587987). They cost about 1 ms more per frame.
+  - All 93 scenes that load still load; none went blank.
+  - One assumption: WE only does this at Ultra post-processing. If you run WE below Ultra, it shows these scenes
+    with the normal bloom. `WPENGINE_HDR=0` gives that look here. A WE capture of 3395587987 at Ultra is on your list.

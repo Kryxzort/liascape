@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`2559b88`** (fork, 2026-11-04: + 0051–0053, batch B11 particles; 0048–0050 = B4 text; 0046–0047 = B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`c62d777`** (fork, 2026-11-04: + 0055, batch B13 HDR bloom and FBO formats; 0054 = B12 puppet warp; 0051–0053 = B11 particles; 0048–0050 = B4 text; 0046–0047 = B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after
@@ -128,6 +128,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0051 render: particle operators as WE's interpreter runs them | B11 (P15, P22, P28, P31–P33): decoded GH 0x140265800 — size/alpha/colour reset per step and multiplied by each operator; WE's drag, oscillate*, controlpointattract (offset, full threshold, falloff, delete), plain vortex, per-axis simplex turbulence; override bindings with the 0x10/0x40/0x80 opt-outs; boxrandom speeds | candidate-for-upstream |
 | 0052 render: child particle systems | B11 (P2): static / eventfollow / eventspawn / eventdeath children (WE's defaults, shared overrides, pooled instances, one renderer per event child) | candidate-for-upstream |
 | 0053 render: control point overrides, scene space, transform | B11 (P10, P34, P35): instanceoverride controlpoint0–7 (live), flags bit 1 = scene space (not point 0), pointer/scene points unrotated and unscaled, local offsets mirrored like emitter origins | candidate-for-upstream |
+| 0055 render: HDR scenes and FBO formats | B13 (E35, E23), decoded (scene tick GH 0x1401afbf0, targets GH 0x1401af5b0, chain GH 0x1401b3b10, parameters GH 0x1401b42b0, keys GH 0x1401c7880, FBO formats GH 0x140216080 / 0x1402116c0): a `general.hdr` scene renders into RGBA16F (scene, composites, compose targets, copies) and blooms with WE's HDR chain (hdr_downsample_bloom, hdr_downsample levels `_rt_<2<<i>FrameBuffer`, hdr_upsample(_cubic) back up, combine_hdr_upsample_linear), bloomhdr* read and live; effect FBOs take their `format` (rg88, r8, the f formats; rgba_backbuffer half float with HDR); LDR bloom defaults 2 / 0.65. WE gates HDR on post-processing Ultra; LWE: unless WPENGINE_HDR=0 | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
 plumbed into `GLPlayer` through the frontend's `ApplicationContext` — no such setting in the core's C API, and
