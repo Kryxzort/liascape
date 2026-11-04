@@ -5496,6 +5496,91 @@ static bool tube_and_directional_lights () {
 }
 
 // ---------------------------------------------------------------------------------------------
+// F2 (the audit's "F2 result"): a `shape` object. WE builds a square of the scene's height (GH 0x140285b40) whose
+// corners are its first effect's point0..point3 (uv = the point, GH 0x1402861b0) and draws its LAST effect's passes
+// straight into the scene with DIRECTDRAW 1 (GH 0x140285f40, GH 0x140285b70): no layer picture, no composite; the last
+// pass adds to the scene whatever its material's blending (GH 0x1402866d0)
+
+// an effect `name` for a shape: red 1 under DIRECTDRAW (else 0), green where its uv.x > 0.5, or plain `fixed`
+static std::vector<std::string> f2_effect (const std::string& dir, const std::string& name, const std::string& fixed = "") {
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/" + name).c_str (), 0755);
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/shaders/" + name + ".vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/" + name + ".frag",
+                "varying vec2 v_TexCoord;\nvoid main() {\n#if DIRECTDRAW\n\tfloat r = 1.0;\n#else\n\tfloat r = 0.0;\n#endif\n\tgl_FragColor = "
+                    + (fixed.empty () ? std::string ("vec4(r, step(0.5, v_TexCoord.x), 0.0, 1.0)") : fixed) + ";\n}\n");
+    write_file (dir + "/materials/" + name + ".json", "{\"passes\":[{\"shader\":\"" + name + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                      "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/" + name + "/effect.json",
+                "{\"name\":\"" + name + "\",\"passes\":[{\"material\":\"materials/" + name + ".json\"}]}\n");
+    return { "effects/" + name + "/effect.json", "shaders/" + name + ".vert", "shaders/" + name + ".frag", "materials/" + name + ".json" };
+}
+
+static std::string f2_points (const char* p0, const char* p1, const char* p2, const char* p3) {
+    return std::string ("\"constantshadervalues\":{\"point0\":\"") + p0 + "\",\"point1\":\"" + p1 + "\",\"point2\":\"" + p2 + "\",\"point3\":\"" + p3 + "\"}";
+}
+
+static bool shape_draws_its_effect_in_place () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // A: the scene is 32 high, so its square is 32 px: corners x 0.25..0.75, y 0.25..0.5 of it = 16 x 8 px, 8 px above
+    // the origin (WE's y up: 0.5 − p.y); its uv.x > 0.5 on the right half. B: two effects, the first's corners (the
+    // square's right half) and only the second (green) drawn. A white 4 x 8 square at y 20 marks A's rows
+    const std::string a = "{\"id\":1,\"name\":\"a\",\"shape\":\"quad\",\"origin\":\"16 16 0\",\"effects\":[{\"id\":2,\"name\":\"s\","
+                          "\"file\":\"effects/f2r/effect.json\",\"passes\":[{\"id\":3,"
+                          + f2_points ("0.25 0.25", "0.75 0.25", "0.75 0.5", "0.25 0.5") + "}]}]}";
+    const std::string b = "{\"id\":4,\"name\":\"b\",\"shape\":\"quad\",\"origin\":\"48 16 0\",\"effects\":[{\"id\":5,\"name\":\"r\","
+                          "\"file\":\"effects/f2r/effect.json\",\"passes\":[{\"id\":6,"
+                          + f2_points ("0.5 0.25", "1 0.25", "1 0.75", "0.5 0.75") + "}]},"
+                          "{\"id\":7,\"name\":\"g\",\"file\":\"effects/f2g/effect.json\"}]}";
+    std::string mark = white_square (8, "\"origin\":\"32 20 0\"");
+    mark.replace (mark.find ("\"size\":\"8 8\""), 12, "\"size\":\"4 8\"");
+    const std::string dir = camera_scene ("\"zoom\":1", a + "," + b + "," + mark);
+    ScriptRig rig;
+    rig.extra = f2_effect (dir, "f2r");
+    for (const auto& f : f2_effect (dir, "f2g", "vec4(0.0, 1.0, 0.0, 1.0)")) {
+        rig.extra.push_back (f);
+    }
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    // the rows A covers at x 12 and the marker's at x 32
+    int aRows[2] = { -1, -1 }, mRows[2] = { -1, -1 };
+    for (int y = 0; y < 32; y++) {
+        const auto pa = pixel_xy (rig, 12, y);
+        const auto pm = pixel_xy (rig, 32, y);
+        if (pa[0] > 200) {
+            aRows[0] = aRows[0] < 0 ? y : aRows[0];
+            aRows[1] = y;
+        }
+        if (pm[0] > 200 && pm[1] > 200) {
+            mRows[0] = mRows[0] < 0 ? y : mRows[0];
+            mRows[1] = y;
+        }
+    }
+    const int ay = (mRows[0] + mRows[1]) / 2;
+    const auto left = pixel_xy (rig, 11, ay), right = pixel_xy (rig, 20, ay), outA = pixel_xy (rig, 5, ay);
+    const auto bOut = pixel_xy (rig, 44, 16), bIn = pixel_xy (rig, 56, 16);
+    printf ("    A rows %d..%d (marker %d..%d); A left %d %d %d, right %d %d %d, outside %d %d %d; B at 44 %d %d %d, at 56 %d %d %d\n",
+            aRows[0], aRows[1], mRows[0], mRows[1], left[0], left[1], left[2], right[0], right[1], right[2], outA[0], outA[1], outA[2],
+            bOut[0], bOut[1], bOut[2], bIn[0], bIn[1], bIn[2]);
+    CHECK (mRows[0] >= 0, "the marker square isn't drawn");
+    CHECK (aRows[0] >= 0 && std::abs (aRows[0] - mRows[0]) <= 1 && std::abs (aRows[1] - mRows[1]) <= 1,
+           "the shape's rows %d..%d aren't the marker's %d..%d", aRows[0], aRows[1], mRows[0], mRows[1]);
+    CHECK (left[0] > 200 && left[1] < 30, "the shape's left half isn't red (DIRECTDRAW, uv.x < 0.5)");
+    CHECK (left[2] > 100 && bIn[2] > 100, "the shape's draw isn't added to the scene (its blue is gone)");
+    CHECK (right[0] > 200 && right[1] > 200, "the shape's right half isn't red + green (uv.x > 0.5)");
+    CHECK (outA[0] < 30 && outA[1] < 30, "the shape covers more than its corners");
+    CHECK (bOut[0] < 30 && bOut[1] < 30, "B's quad isn't its first effect's corners (x 48..63)");
+    CHECK (bIn[1] > 200 && bIn[0] < 30, "B doesn't draw its last effect only (%d %d %d)", bIn[0], bIn[1], bIn[2]);
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
 // F5 (docs/player/spikes/we-coverage.md, the audit's "F5/F6 result"): an orthographic scene's perspective layers and
 // particles. WE's image draw (GH 0x140214b50) and particle render (GH 0x14025bc30) swap in the perspective camera of
 // GH 0x1401b4fd0 for a layer with `perspective` (flag 0x80) and a system with flags bit 2: fov =
@@ -6023,6 +6108,7 @@ int main (int argc, char** argv) {
     run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
     run ("tube_and_directional_lights", tube_and_directional_lights);
+    run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
