@@ -128,6 +128,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | 0051 render: particle operators as WE's interpreter runs them | B11 (P15, P22, P28, P31–P33): decoded GH 0x140265800 — size/alpha/colour reset per step and multiplied by each operator; WE's drag, oscillate*, controlpointattract (offset, full threshold, falloff, delete), plain vortex, per-axis simplex turbulence; override bindings with the 0x10/0x40/0x80 opt-outs; boxrandom speeds | candidate-for-upstream |
 | 0052 render: child particle systems | B11 (P2): static / eventfollow / eventspawn / eventdeath children (WE's defaults, shared overrides, pooled instances, one renderer per event child) | candidate-for-upstream |
 | 0053 render: control point overrides, scene space, transform | B11 (P10, P34, P35): instanceoverride controlpoint0–7 (live), flags bit 1 = scene space (not point 0), pointer/scene points unrotated and unscaled, local offsets mirrored like emitter origins | candidate-for-upstream |
+| 0054 render: puppet warp — WE's MDL loader, skinning, animation-layer mixing and attachments | B12 (G06–G09): decoded GH 0x1402873f0 (vertex layout from the format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT sections), CPU skinning, layer clock / weight / normal + additive mixing, `attachment`, effect-less puppets drawn in place; follows PR #625's parsing and autosize where WE agrees | candidate-for-upstream |
 | 0055 render: HDR scenes and FBO formats | B13 (E35, E23), decoded (scene tick GH 0x1401afbf0, targets GH 0x1401af5b0, chain GH 0x1401b3b10, parameters GH 0x1401b42b0, keys GH 0x1401c7880, FBO formats GH 0x140216080 / 0x1402116c0): a `general.hdr` scene renders into RGBA16F (scene, composites, compose targets, copies) and blooms with WE's HDR chain (hdr_downsample_bloom, hdr_downsample levels `_rt_<2<<i>FrameBuffer`, hdr_upsample(_cubic) back up, combine_hdr_upsample_linear), bloomhdr* read and live; effect FBOs take their `format` (rg88, r8, the f formats; rgba_backbuffer half float with HDR); LDR bloom defaults 2 / 0.65. WE gates HDR on post-processing Ultra; LWE: unless WPENGINE_HDR=0 | candidate-for-upstream |
 
 **Upstream `main` since `ddea3b4`, not picked** (2026-10-28): `a76a18a` #670 `--hwdec` (a frontend CLI option
@@ -170,7 +171,7 @@ it inside this repo's devShell). The source cache is `~/.cache/liascape/src/lwe-
    corpus runner (Phase 2 Task 13) over the owner's Workshop folder `431960` — the same set of
    scenes must start, none newly blank.
 6. Re-check upstream `main` (`gh api repos/Almamu/linux-wallpaperengine/compare/<last checked>...main`)
-   and the open candidate PRs (design spec §7): #625 (puppet-warp skeletal animation), #631 (hardening
+   and the open candidate PRs (design spec §7): #625 (puppet-warp skeletal animation; superseded by our 0054, which credits it), #631 (hardening
    binary parsers against malformed Workshop assets), #694 (PulseAudio capture-stream leak) — #692 and
    #677 are in (0014, 0010). An imported one becomes a fork commit (`git cherry-pick -x`: git's rename
    detection maps main's `src/WallpaperEngine/…` onto next-v2's `src/core/WallpaperEngine/…`) keeping the

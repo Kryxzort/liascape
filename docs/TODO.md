@@ -1106,13 +1106,24 @@ Two bug classes kept recurring; fix the class, not the instance:
                 gradient hash (GH 0x14012c280), vortex_v2 (case 0x10, 0 scenes), P24 cone, P25/P26 (0 scenes).
           - [ ] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0);
                 both are inferred now.
-    - [ ] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
-          unmerged). 14 scenes. L.
+    - [x] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
+          unmerged). 14 scenes. L. **Done 2026-11-04** (fork patch 0054, pin `36ad6a0`): WE's MDL loader (GH
+          0x1402873f0: the vertex layout from the mesh's format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT by section),
+          CPU skinning, the layer clock/weight/normal and additive mixing, attachments, and puppets without effects
+          drawn in place. All in the audit's "B12 result". host_api_test 62/62 (1 new, failing on 2559b88); corpus 93
+          ok on both cores, none newly blank.
+          - [ ] A WE capture of 3463520581 or 3233141951 to check poses and the attachment's (inferred) form.
+          - [ ] GPU skinning (SKINNING / g_Bones), bone alpha (SKINNING_ALPHA), blend shapes (MDLE/MDMP, 13 files),
+                IK and physics bones, root motion, animation events, `autosort`/`index` layer order.
+          - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
+          - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
+          - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
+                the layout but not kept yet).
     - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
           `c62d777`): a `general.hdr` scene renders into half float targets and blooms with WE's HDR chain
           (hdr_downsample_bloom → hdr_downsample levels → hdr_upsample(_cubic) back up → combine, decoded GH
           0x1401afbf0 / 0x1401b3b10 / 0x1401b42b0); effect FBOs take the format they name (rg88, r8, the f formats,
-          rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 63/63; corpus 93/96
+          rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 64/64 (2 new); corpus 93/96
           on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
           - [ ] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
           - [ ] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 (set from the "postprocessing" setting

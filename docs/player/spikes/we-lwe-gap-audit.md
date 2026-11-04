@@ -82,7 +82,7 @@ These are ranked by scenes × how visible the difference is.
 | 9 | P2 | **Particle `children` are ignored**, so whole sub-effects are missing. | 29 |
 | 10 | G03, G04 | **Hierarchy.** A hidden parent doesn't hide its children (12 scenes). Text and particle children ignore `parent` (19). | 12 + 19 |
 | 11 | S10, S11, S15 | **No cursor events, no media events, no `applyUserProperties`/`engine.userProperties`.** Interactive and "now playing" wallpapers are inert. | 22 / 19 / 18 |
-| 12 | G06–G08 | **Puppet warp.** No skeletal animation. 7 of the 14 puppet scenes use MDLV versions LWE rejects. | 14 |
+| 12 | G06–G08 | **(Fixed by B12, patch 0054.)** **Puppet warp.** No skeletal animation. 7 of the 14 puppet scenes use MDLV versions LWE rejects. | 14 |
 
 ### Corrections to earlier notes
 
@@ -191,10 +191,10 @@ The scripts that produced the counts are in `audit/work-scenegraph/` (`gen.py`, 
 | G03 | A hidden parent does not hide its children | **Observed**: `FUN_1401b50e0` is "effectively visible": the object's visible bit (+0x120 bit 0) AND, recursively, its parent's (parent ptr +0x180). About 15 render/update sites call it (ev_0e4f5eb3…, GH 0x1401b50e0; parent ptr from `getParent` = `mov rdx,[rcx+0x180]` asm 0x14020d915). | `Render/Objects/CImage.cpp:922` and `:862` test only the object's own `visible`. CText and CParticle never look at a parent. | 12 playing scenes have a visible child (image 11, text 7, particle 3) under a hidden ancestor (resolved default). e.g. 3042492564, 3163060610, 3319542538 | Layers that should be hidden draw on screen (wrong picture) | S: walk the parent chain in render() of image, text and particle |
 | G04 | Text and particle objects ignore `parent` (transform) | **Inferred**: a child's origin is parent-local. Every object type shares one base table with `setParent`/`getParent`/`getChildren`/`getTransformMatrix` (GH 0x14020dcc0), and the data agrees (text children sit at origins like (81,-147) under a parent at (3200,1320)). LWE's own `CImage::resolveTransform` assumes local origins. | `Render/Objects/CImage.cpp:99-156` resolves the chain for images only. `CText.cpp:408` uses the raw local origin. `CParticle.cpp` has no parent handling. | 19 (text children 18, particle children 11; 290 objects). e.g. 3013489778, 3163060610, 3480481965 | Clocks, music titles and particle emitters land near the bottom-left (misplaced) | S: move `resolveTransform` to CObject and use it in CText and CParticle (upstream PR #625 did this for text) |
 | G05 | Parent alpha is not inherited | **Unknown**: a bounded search found no parent read next to the image alpha (+0x33c) | No inheritance (`CImage::getAlpha` at `CImage.cpp:963`) | 11 playing scenes have children under an ancestor whose alpha ≠ 1 or is animated/scripted. e.g. 3013489778, 3289734539, 3319542538 | If WE inherits alpha, children are too opaque | ? (needs a WE check) |
-| G06 | Puppet warp: no skeletal animation | **Observed**: the model/puppet class table `FUN_14024da50` has `rootmotion`, `getAnimationLayer(Count)`, `createAnimationLayer`, `playSingleAnimation`, `destroyAnimationLayer` (GH 0x14024da50). The exe knows sections `MDLV0023`/`MDLS0004`/`MDLA0006`/`MDLE0002`. **Documented**: animation mixing, blend rules, IK, bone constraints, blend shapes (docs …/puppet-warp/*). | `Data/Parsers/ObjectParser.cpp:295-305` parses `animationlayers` (id, rate, visible, blend). Nothing reads them. `CImage.cpp:413-511` loads the MDLV mesh as a static bind-pose mesh. No MDLS/MDLA parsing and no skinning. | 14 have a puppet mesh; 11 have `animationlayers`. e.g. 2375914945, 3233141951, 3463520581 | Characters are frozen: no breathing, hair or arm motion | L: MDLS bones, MDLA tracks, CPU or GPU skinning (4 weights). Upstream PR #625 (closed, unmerged) did a single layer. |
-| G07 | Older puppet MDLV versions are rejected | **Observed**: the exe accepts the MDL family (strings above). Library files carry MDLV 0013/0016/0017/0019/0021/0023. | `CImage.cpp:430` accepts only `MDLV0021`/`MDLV0023` with an 80-byte stride. Any other version logs an error and falls back to the plain texture quad. | 7: 2375914945 (0013), 2679885269 (0013), 3013489778 (0019), 3022080536 (0016), 3042492564 (0017 ×9), 3233141951 (0019 ×4), 3243449890 (0019) | Puppet layers draw as the raw texture/sprite sheet (unassembled) where the mesh differs from the quad | S–M: per-version vertex stride (PR #625 found 0013 = 52 B stride) |
-| G08 | Animation-layer mixing (`additive`, `blend`, `rate`, multiple layers, `blendin/out/time`, bound `visible`) | **Documented**: puppet-warp/animationmixing.html, blendrules.html. Runtime fields Unknown beyond the parsed keys. | Parsed partly (`ObjectParser.cpp:298-304`), unused. `additive`, `blendin`, `blendout` and `blendtime` are not parsed. | additive 7, >1 layer 7, bound visible 5, user-bound rate/blend 2/1 | Wrong or missing motion once G06 exists | M (after G06) |
-| G09 | `attachment` (child pinned to a puppet bone) is ignored | **Documented**: ILayer `setParent(parent, attachment)`, `getAttachmentMatrix/Origin/Angles`. **Observed**: strings and the base-table methods (GH 0x14020dcc0). | Not parsed. The child follows the parent origin without the bone offset. | 3: 3363252053, 3414858021, 3463520581 | Attached parts drift off the character | M (needs G06 bones) |
+| G06 | **(Fixed by B12, patch 0054; see "B12 result".)** Puppet warp: no skeletal animation | **Observed**: the model/puppet class table `FUN_14024da50` has `rootmotion`, `getAnimationLayer(Count)`, `createAnimationLayer`, `playSingleAnimation`, `destroyAnimationLayer` (GH 0x14024da50). The exe knows sections `MDLV0023`/`MDLS0004`/`MDLA0006`/`MDLE0002`. **Documented**: animation mixing, blend rules, IK, bone constraints, blend shapes (docs …/puppet-warp/*). | `Data/Parsers/ObjectParser.cpp:295-305` parses `animationlayers` (id, rate, visible, blend). Nothing reads them. `CImage.cpp:413-511` loads the MDLV mesh as a static bind-pose mesh. No MDLS/MDLA parsing and no skinning. | 14 have a puppet mesh; 11 have `animationlayers`. e.g. 2375914945, 3233141951, 3463520581 | Characters are frozen: no breathing, hair or arm motion | L: MDLS bones, MDLA tracks, CPU or GPU skinning (4 weights). Upstream PR #625 (closed, unmerged) did a single layer. |
+| G07 | **(Fixed by B12, patch 0054; see "B12 result".)** Older puppet MDLV versions are rejected | **Observed**: the exe accepts the MDL family (strings above). Library files carry MDLV 0013/0016/0017/0019/0021/0023. | `CImage.cpp:430` accepts only `MDLV0021`/`MDLV0023` with an 80-byte stride. Any other version logs an error and falls back to the plain texture quad. | 7: 2375914945 (0013), 2679885269 (0013), 3013489778 (0019), 3022080536 (0016), 3042492564 (0017 ×9), 3233141951 (0019 ×4), 3243449890 (0019) | Puppet layers draw as the raw texture/sprite sheet (unassembled) where the mesh differs from the quad | S–M: per-version vertex stride (PR #625 found 0013 = 52 B stride) |
+| G08 | **(Fixed by B12, patch 0054; see "B12 result".)** Animation-layer mixing (`additive`, `blend`, `rate`, multiple layers, `blendin/out/time`, bound `visible`) | **Documented**: puppet-warp/animationmixing.html, blendrules.html. Runtime fields Unknown beyond the parsed keys. | Parsed partly (`ObjectParser.cpp:298-304`), unused. `additive`, `blendin`, `blendout` and `blendtime` are not parsed. | additive 7, >1 layer 7, bound visible 5, user-bound rate/blend 2/1 | Wrong or missing motion once G06 exists | M (after G06) |
+| G09 | **(Fixed by B12, patch 0054; see "B12 result".)** `attachment` (child pinned to a puppet bone) is ignored | **Documented**: ILayer `setParent(parent, attachment)`, `getAttachmentMatrix/Origin/Angles`. **Observed**: strings and the base-table methods (GH 0x14020dcc0). | Not parsed. The child follows the parent origin without the bone offset. | 3: 3363252053, 3414858021, 3463520581 | Attached parts drift off the character | M (needs G06 bones) |
 | G10 | Parallax `cameraparallaxdelay` is used as a bool, which freezes parallax | **Observed** (camera update `FUN_1401b8af0`): when delay ≤ 0 the position snaps to the target. Otherwise `k = min(1, (1 − delay/3) · 10 · dt)` and `pos += (target − pos)·k` (constants 3.0 @0x1404d43a8, 10.0 @0x1404d43f0; GH 0x1401b8af0). | `Render/Wallpapers/CScene.cpp:315-321`: `min(float(delay->getBool()), dt)`. `getBool()` of 0.1 is false (`Data/Model/DynamicValue.cpp:94` casts to int), so k = 0 and the displacement never moves. With delay ≥ 1, k = dt. | Of 25 parallax-on scenes, 14 have delay < 1 (0.1 ×10, 0.3 ×2, 0.04, 0.94), so parallax is dead. The other 11 (delay 1–2) move, with the wrong smoothing. | No mouse parallax in 14 scenes | S: use the WE formula |
 | G11 | Parallax target is not centred; mouse influence and y semantics differ | **Observed** (GH 0x1401b8af0): `target.x = W·(0.5·(1−infl) + mx·infl) + cam.x` and `target.y = H·(0.5·(1−infl) + (1−my)·infl) + cam.y`. `mx`/`my` are clamped 0..1. infl = `cameraparallaxmouseinfluence`, or 0 when some context flags `0x200200` are set. x is mirrored when a context flag (0x800) is set. | `CScene.cpp:320`: `disp = lerp(disp, mouse·amount·infl)` with mouse = px/size in 0..1, y down (`CScene.cpp:388-389`, the player's pointer is "y down"). A cursor at screen centre gives a constant offset of `(depth+amount)·0.5·amount·infl·W` (`CImage.cpp:1124-1126`). | 24 (25 minus influence 0 in 1556245028); visible today in the 11 with delay ≥ 1 | Layers sit off-centre and shift in the wrong direction or by the wrong amount; borders show | S |
 | G12 | Per-layer `parallaxDepth` formula: depth 0 still moves | **Documented**: depth 0 turns parallax off for that layer; X or Y = 0 locks that axis (…/parallax/introduction.html). **Unknown**: WE's exact per-layer offset. **Inferred**: proportional to `depth · amount · (pos − 0.5)`. | `CImage.cpp:1124-1125` and `CParticle.cpp:1874-1876` use `(depth + amount)·disp·W`, so depth 0 moves by `amount` and the amount is applied twice | 17 of 25 parallax scenes have depth-0 layers (e.g. 3184155462: 12 of 15) | "Fixed" layers (UI, frames) wobble; depth ratios are wrong | S |
@@ -1624,6 +1624,95 @@ Left (in TODO):
 - P24 cone, P25/P26 (0 scenes).
 - The fdt frame-time source (+0x14c) and the child "alive" test (GH 0x1402524c0) to read.
 
+### B12 result (fork patch 0054, pin `36ad6a0`, 2026-11-04)
+
+Done: G06, G07, G08, G09. Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` (the loader decompiled
+there in full; no REA session was needed). The decoded format parses every one of the library's 50 puppet `.mdl`
+files to each section's exact end (a Python port of the loader, scratchpad `b12/mdl.py`).
+
+**The MDL loader (GH 0x1402873f0, Observed):**
+
+- `MDLV00NN` (WE takes NN ≤ 23), then a default format word, strings per mesh, mesh count. Per mesh: the strings (the
+  material first), flags from v4 (bit 0 = 32-bit indices; bit 1 adds an influence count), six bounds floats from v17,
+  the format word from v15 (before, the header's), a vertex blob and an index blob. v21 adds two optional blobs, v23
+  a list of groups.
+- **The vertex layout is the format word**, not the version: components in the order of the tables at 0x1404c4da0
+  (masks) / 0x1404c4e10 (sizes): position 0x1 (12 B) or 0x10000 (vec4, 16 B; exactly one of the two), 0x2000000
+  rejected, normal 0x2 (12), tangent 0x4 (16), blend indices 0x800000 (4 × u32), weights 0x1000000 (4 × f32),
+  texcoord 0..5 (0x8/0x10/0x20, 0x40…: 8/12/16 B each), colour 0x8000 (16). The library has 0x1800009 (52 B: MDLV
+  0013/0016), 0x180000f (80 B: 0017–0023), 0x181000e (84 B, vec4 position: 3490034653's 人物1), 0x9 and 0xf (static).
+  PR #625's "per-version stride" was right only for the formats it met.
+- Then sections, each a tag and the absolute offset of its end (GH 0x1402872e0 skips by it): MDLS, MDLA, MDAT, MDMP,
+  MDLE.
+- **MDLS** (bones ≤ 0x80): name, flags, parent (−1 or earlier), the bind matrix as a sized blob (≤ 64 B, relative to
+  the parent: column-major, translation at 12–14), a JSON string (physics settings). From v2: a u16 list of 0x80-byte
+  IK targets, a flag + explicit matrices, a u32 constraint list (v4 adds flags), then more IK/physics data.
+- **MDLA**: per animation an 8-byte id (the low u32 is `animationlayers[].animation`), name, mode string, fps, frame
+  count F, flags, track count = bones. A track is its flags + (F + 1) × 9 floats (position, Euler angles, scale; the
+  loader turns the angles into a quaternion with `cosf`/`sinf` of the halves, GH 0x14028a10a: glm's `quat (vec3)`,
+  R = Rz·Ry·Rx). Per version after the tracks: v2 the targets' and constraints' tracks, v3 up to 16 curves and the
+  bones' alpha tracks, v4 blend-shape weights per mesh, v5 six u32s, v6 another per-bone float track, flags bit 0 an
+  18-byte root-motion record, then the events (frame, name). PR #625's "zero footer" was these blocks empty.
+- **MDAT**: u16 count; bone (u16), name, 64-byte matrix relative to the bone.
+
+**The animation (Observed unless marked):**
+
+- Bind world = parent world · local (GH 0x1402261c0); skin = world(pose) · bindWorld⁻¹, applied as
+  Σ weight · skin · position like genericimage2's SKINNING path. **No angle negation**: the bones and the mesh share
+  the image's y-up space (PR #625 negated x and z, mirroring every 2D rotation).
+- A layer's clock (GH 0x1401d4d00): frame 1/fps, length F/fps, mode loop / mirror (bit 0, bounces) / single (bit 1,
+  stops). It runs at dt · rate (GH 0x1401d6a00). Frames a = clamp (⌊t·fps⌋, 0, F − 1), b = min (a + 1, F), the
+  fraction within the frame (GH 0x1401a00a0); samples are lerped (position, scale) and nlerped on the shorter arc.
+- The layer object (GH 0x140291d20, properties GH 0x140292030): rate +0xc8 (1), blend +0xcc (1), flags +0xd0 (bit 0
+  visible, default on; bit 1 additive; bit 2 blendin; bit 3 blendout), blendtime +0x18c (0.5). Weight
+  (GH 0x140291f60) = blend × min (t / min (length/2, blendtime), 1) while blendin (cleared once 1 unless single) ×
+  min ((length − t) / that, 1) with blendout. Not clamped: the library has blends −1, −0.5 and 2.
+- Mixing (GH 0x140228470): from the bind pose (decomposed local matrices), each visible layer in order. Normal
+  (GH 0x140223b90): pose = lerp (pose, sample, w), rotation nlerp. Additive (GH 0x140224390): position += (sample −
+  bind) · w; rotation by nlerp (1, sample · bind⁻¹, w). A track whose flags have bit 0 leaves its bone alone (the
+  blendvps mask). **Inferred:** the additive scale (taken as position) and the product order of the additive
+  rotation (they commute for the 2D z turns these files use).
+- **Attachments**: `attachment` is looked up by name on the parent (GH 0x14020be30) and the world transform
+  (GH 0x1401b5170) is parent world · attachment · local. **Inferred**: the attachment is the bone's posed world · the
+  MDAT matrix (the vtable call +0x78 that builds it wasn't read).
+- Skinned z flattened, and `autosize` growing the canvas to the mesh's extent over every frame: **inferred**, kept
+  from PR #625.
+
+**What LWE did wrong (changed):**
+
+- `CImage::loadPuppetMesh` took only MDLV0021/0023, byte-scanned for a block that looked like 80-byte vertices and
+  read 16-bit indices: 7 scenes (MDLV 0013/0016/0017/0019) drew the whole sprite sheet. It drew the bind pose only.
+- `animationlayers`' `visible` defaulted to false, and `additive`, `blendin`, `blendout`, `blendtime` weren't parsed.
+- `attachment` wasn't parsed: 3463520581's hair, 3414858021's body parts and 3363252053's head sat on the parent's
+  origin (Asuna was bald).
+- A puppet layer without effects draws its only pass to the scene; LWE gave that pass the mesh in layer pixels
+  under the scene's projection, so it landed in the wrong place (only puppets with an effect looked right).
+
+**Fork tests** (`host_api_test`): 62/62, 1 new, failing on 2559b88.
+
+| Test | What it checks | On 2559b88 |
+|---|---|---|
+| `puppet_warp_as_we` | an MDLV0016 puppet (52-byte vertices) skinned by its animation to x 22..25; an MDLV0023 one (80-byte vertices, 32-bit indices) with a normal layer to +4 and an additive one to +8 at blend 0.5 at +8 (x 54..57); a square attached to its "tip" 8 px up at x 54..57 | the whole 32 px quad; nothing (misread); the square on the parent's origin (x 46..49) |
+
+**Smoke, all 96 scenes** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 2559b88 then 36ad6a0, with B13
+and B14 building on the machine:
+
+- **93 ok on both, none newly blank or failed**; the 3 failures are the known 3D ones. 2883756643 came out with its
+  video black in the new run only (lit 100 → 60 %); alone it is 100 % lit (a video start under load, as in the
+  blank-scene result).
+- The puppet scenes change most: 3233141951 29.6 % of pixels (the girl's face and the dragon's eye are drawn now),
+  3490034653 22 %, 3013489778 17 %, 3414858021 17 %, 2375914945 16 %, 3463520581 11 % (attached hair and head in
+  place), 3022080536 9 %, 3363252053 6 %. 3042492564 (MDLV0017 × 9) 0.9 %.
+- Frame time is within the load's noise (puppet scenes run alone: 2375914945 4.4 → 3.3 ms, 3233141951 6.2 → 7.2 ms
+  with 9 000 skinned vertices, 3243449890 12.1 → 9.6 ms).
+
+Left (in TODO):
+- A WE capture of 3463520581 or 3233141951 to compare poses (and the attachment's inferred form) against WE itself.
+- GPU skinning (SKINNING, `g_Bones`), bone alpha (SKINNING_ALPHA, MDLA v3's alpha tracks), blend shapes (MDLE, MDMP;
+  13 files), IK and physics bones (MDLS v2+, bone flag 2), root motion, animation events, the scripted layer API
+  (`getAnimationLayer`, `playSingleAnimation`, S26), `autosort`/`index` layer order.
+- Read the attachment builder (vtable +0x78 of the puppet image) and the additive scale.
+
 ### B13 result (fork patch 0055, pin `c62d777`, 2026-11-04)
 
 Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` and
@@ -1682,7 +1771,7 @@ Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 w
 - `bloomhdriterations` is read at load. `hdr` is read at load.
 - g_TexelSize stays LWE's 1 / scene size. WE's is 1 / the current target (renderer +0x74).
 
-**Fork tests** (`host_api_test`): 63/63, 2 new, both failing on 2559b88.
+**Fork tests** (`host_api_test`): 64/64 with B12's, 2 new, both failing on 2559b88.
 
 | Test | What it checks | On 2559b88 |
 |---|---|---|
