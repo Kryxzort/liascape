@@ -2334,7 +2334,10 @@ each core on its LD_LIBRARY_PATH; scratchpad `f3/pairs/`):
 failing; the 6 left are as in F1 (`puppettexturechannels`' BLENDROWCOUNT, two workshop `auto_sway`, one `depthparallax`).
 "WE: an engine texel uniform declared" applies to 3 checks.
 
-**Health**: see the refreshed `scene-health.md` (the commit after the pin).
+**Health** (`scene-health.md`, 96 scenes, pin `1072720`): 86 clean / 10 degraded / 0 failed, as on 24adeff; no
+scene's class, loss, errors, warnings or built objects changed. In the full run 2883756643 (a video scene) timed out
+at the 90 s limit under load; alone it is clean in 15 s, and the report carries that rerun (the timed-out run is kept
+in the scratchpad's `f3/health-2883-timeout`).
 
 Player tests (DEBUG, pin `1072720`): 740 run, 729 passed, 3 ignored, 11 failed in the full run under a load of 10–26
 (another agent's build): `align_end_hands_off_as_a_last_frame_ends`, `i5_open_burst_is_capped_and_none_lost`,
