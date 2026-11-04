@@ -413,6 +413,12 @@ const RED_3S: ClipSpec = ClipSpec::Solid {
     tone_hz: 440.0,
     tone_dbfs: -20.0,
 };
+const BLUE_3S: ClipSpec = ClipSpec::Solid {
+    rgb: [0, 0, 255],
+    secs: 3.0,
+    tone_hz: 660.0,
+    tone_dbfs: -20.0,
+};
 const RED_10S: ClipSpec = ClipSpec::Solid {
     rgb: [255, 0, 0],
     secs: 10.0,
@@ -7840,6 +7846,102 @@ fn bus_producers_link_asynchronously() {
         sync.is_empty(),
         "streams linked synchronously into the bus (their leaving can stall it): {sync:?}"
     );
+}
+
+/// F3 (Phase 3 battery, `docs/player/reports/phase3.md` § 1): a full-live `align: end` effect
+/// must hand off to B exactly when A's last frame has had its time — never cutting that frame
+/// short (B drawn over a frame the clip still owns), never holding it past its due. The
+/// reference is mpv's `Ended` (fired as A's last frame is presented, polled within a tick)
+/// plus one clip frame: the handoff must land within one 144 Hz output frame after it. RED
+/// before (the battery: handoff 7–20 ms after `Ended`, i.e. 13–26 ms into a 33 ms last frame,
+/// 28–33 ms before the clip's nominal end): the recipe aimed half a clip frame early on the
+/// assumption that its end estimate sat anywhere inside the last frame, while the minimum
+/// over a second of per-frame samples sits within a few ms of the true end.
+#[test]
+fn align_end_hands_off_as_a_last_frame_ends() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve_at(&pw, root, serial, &["--outputs", "1920x1080@144"]);
+    let mut c = srv.client();
+    let red = s(&ensure_clip("tr_red_3s", RED_3S)).to_string();
+    let blue = s(&ensure_clip("tr_blue_3s", BLUE_3S)).to_string();
+    let a = create_src(&mut c, json!({"path": red}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(5), "A ready", || {
+        has_event(&mut c, "source.ready", |e| e["id"] == json!(a)).then_some(())
+    });
+    const FRAME_MS: f64 = 1000.0 / 30.0;
+    const OUTPUT_FRAME_MS: f64 = 1000.0 / 144.0;
+    let mut deltas = Vec::new();
+    let mut cur = a.clone();
+    for i in 0..6 {
+        let to = if i % 2 == 0 { &blue } else { &red };
+        let corr = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "to": {"path": to}, "effect_id": "fade",
+                   "duration_ms": 1000, "method": "full-live", "align": "end"}),
+        )["corr"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        wait_for(Duration::from_secs(15), "transition.done", || {
+            c.ok(
+                "logs",
+                json!({"corr": corr, "kind_prefix": "transition.done", "limit": 10}),
+            )["events"]
+                .as_array()
+                .is_some_and(|e| !e.is_empty())
+                .then_some(())
+        });
+        let evs = c.ok("logs", json!({"corr": corr, "limit": 200}))["events"].clone();
+        let handoff = evs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == json!("transition.handoff"))
+            .and_then(|e| e["t_mono_ms"].as_f64())
+            .expect("a handoff");
+        let b = evs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == json!("transition.started"))
+            .and_then(|e| e["b"]["id"].as_str())
+            .expect("B's id")
+            .to_string();
+        let ended = c.ok(
+            "logs",
+            json!({"kind_prefix": "source.ended", "limit": 100}),
+        )["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["id"] == json!(cur))
+            .filter_map(|e| e["t_mono_ms"].as_f64())
+            .filter(|t| (*t - handoff).abs() < 2000.0)
+            .next_back()
+            .expect("A's source.ended near the handoff");
+        let delta = handoff - (ended + FRAME_MS);
+        println!(
+            "switch {i}: handoff {:+.1} ms after A's Ended → {delta:+.1} ms vs the end of A's last frame",
+            handoff - ended
+        );
+        deltas.push(delta);
+        cur = b;
+    }
+    println!("handoff vs the end of A's last frame, ms: {deltas:?}");
+    // Never cut (the last frame keeps its time; −3 ms is the `Ended` poll's slack), held at
+    // most two output frames: the handoff tick's own quantisation plus one for a late tick
+    // (debug builds under the full suite). Measured after the fix: +0.7…+7.3 ms (one output
+    // frame); before: −9.8…−13.7.
+    for d in &deltas {
+        assert!(
+            *d >= -3.0 && *d <= 2.0 * OUTPUT_FRAME_MS,
+            "handoff {d:+.1} ms vs the end of A's last frame (bound −3 … +{:.1}): {deltas:?}",
+            2.0 * OUTPUT_FRAME_MS
+        );
+    }
 }
 
 /// An independent recording of the private sink (`pw-record` of `hermetic-sink`'s monitor,

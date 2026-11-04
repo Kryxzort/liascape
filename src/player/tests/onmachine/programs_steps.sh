@@ -3,7 +3,11 @@
 
 FADE='"enabled":true,"effects":["fade"],"shuffle":false,"duration_ms":1000,"duration_max_ms":1000'
 ROT_ORIGIN='program:prog:main'
-FRAME_MS=33.4 # one frame of the 30 fps clips: a clip's end is only known to the frame (the report also gives the raw value)
+FRAME_MS=33.4 # one frame of the 30 fps clips (the report's `pred` column: from a `position` stale by ≤ 100 ms, loose)
+# F3 (2026-11-04): the handoff is due one clip frame after `source.ended` (A's last frame presented); it may be
+# held at most one output frame (DP-1 144 Hz: 6.9 ms, + the `Ended` poll's slack) and never cut (−3 ms).
+HANDOFF_HOLD_MS=10
+HANDOFF_CUT_MS=-3
 
 # ------------------------------------------------------------------ small helpers
 items_json() { jq -nc '[$ARGS.positional[] | {path: .}]' --args "$@"; }
@@ -89,6 +93,10 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
         local m
         m=$(jq -r .handoff_vs_a_end_pred_max_ms <<<"$c")
         check "$n handoff vs A's end" "$m ms (p95 $(jq -r .handoff_vs_a_end_pred_p95_ms <<<"$c"), n $(jq -r .align_end_n <<<"$c"))" "≤ $FRAME_MS ms" "$(pyb "$m <= $FRAME_MS")"
+        local lo hi
+        lo=$(jq -r .handoff_vs_a_last_frame_min_ms <<<"$c"); hi=$(jq -r .handoff_vs_a_last_frame_max_ms <<<"$c")
+        check "$n handoff vs the end of A's last frame" "$lo … $hi ms (n $(jq -r .handoff_vs_a_ended_n <<<"$c"))" \
+            "$HANDOFF_CUT_MS … +$HANDOFF_HOLD_MS ms (never cut, held ≤ one output frame)" "$(pyb "$lo >= $HANDOFF_CUT_MS and $hi <= $HANDOFF_HOLD_MS")"
     fi
 }
 serve_ready_for_cell() { kill -0 "${SERVE_PID:-0}" 2>/dev/null || serve_up ${P3_SERVE_ARGS---debug}; }

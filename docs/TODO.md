@@ -287,13 +287,33 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
           (frozen 60/61, full-live 30/30 at full level). The detector saw ~1 in 20 because the meter's capture lost
           the same cycles (`unmeasured`). The worker now deactivates, settles 20 ms and disconnects (roundtrips)
           before exiting: frozen 0/121, full-live 2–5/60, reveal 4–8/60 — single 64-frame cycles, see below.
-    - [ ] **F7 residual — a single graph cycle lost at a stream's deactivation** in ~1 of 15 full-live/reveal
+    - [x] **F7 residual — a single graph cycle lost at a stream's deactivation** in ~1 of 15 full-live/reveal
           switches (0 frozen): at the worker's `set_active(false)` (moved with it when the disconnect was delayed
           150 ms), through the in-process bus loopback (a `pw-play` killed into the bus: 1/10, straight into the
-          sink: 0/10). `target.delay.sec` on the loopback didn't help (5/60). Next: a loopback whose capture side
-          isn't rescheduled (an out-of-process loopback or a filter-chain), or hand B's stream the bus before A
-          leaves. Also seen once in 300+ frozen switches (not reproduced, no logs then): A audible again 90 ms after
-          its anti-click for the whole effect — `scenes.sh onsetrec` now dumps the event log to catch it.
+          sink: 0/10). `target.delay.sec` on the loopback didn't help (5/60).
+          **Root cause found and fixed 2026-11-04 ("Make Every Bus Stream An Async Node"; player-core.md § Audio
+          bus → "Async streams").** The private server's profiler (`scenes.sh onsetrec`, `ONSET_PROFILE=1`,
+          release, 240 Hz, full-live S→S) showed every lost cycle: the bus `not-triggered`, A's stream gone, B's
+          stream `finished` a whole cycle late, position jump 128 — 7 of 7 in 60 switches, each 1.5–6 ms after A's
+          `worker.stopped`. A libpipewire race on a *synchronous* link: `pw_stream_set_active(false)` marks the
+          client's activation INACTIVE at once, the server drops the stream from the bus's dependency count only
+          after a protocol roundtrip, and a driver cycle starting in between skips the stream yet the bus still waits
+          for it → the graph xruns, the sink gets one quantum of zeros. The loopback's capture *asked* to be async
+          (`PW_STREAM_FLAG_ASYNC`) but only the `node.async` property reaches the server, so every link into the bus
+          was synchronous. Fix: the scene worker's stream carries `node.async = true`, and the compositor sets
+          `PIPEWIRE_PROPS={ node.async = true }` for itself (mpv's AOs have no other way; the loopback halves, the
+          meter and the probes go async with it) — no consumer waits for a producer inside a cycle any more.
+          Before/after (release, 60 full-live switches): 6–7 → **0** zero runs, 7–8 → **0** xrun cycles (two runs
+          each); `latency_ms` 0 → 2.67 (the two async hops, `ASYNC_HOPS`, compensated through `audio_delay_bias`;
+          `bus.sh` gate ≤ 2 hops + 1 quantum + 5 ms). Tests: `tests/api.rs::bus_producers_link_asynchronously`
+          (`pw-dump`: every link into the bus `link.async`), `scene_worker_exit_never_skips_bus_cycles` (now
+          full-live, 20 switches, 0 runs), `mpv_source_teardown_never_skips_bus_cycles` (V→V; RED 1/20 before).
+          Both recordings judge their runs against the event log: a run in the race window after a
+          `worker.stopped` / `source.drop` fails; a debug build under the full suite can still lose a cycle to
+          plain lateness (seen at B's first render, 128–192 samples, no event near) — printed, tolerated up to 1 in
+          10 switches; release on a quiet machine: none.
+          The one-off "A audible again 90 ms after its anti-click" (once in 300+ frozen switches) was never
+          reproduced; `scenes.sh onsetrec` still dumps the event log for it.
     - [x] ~~**The bus meter's capture misses 1–5 ms when another stream leaves the graph** (proven
           measurement-only)~~ — **wrong (2026-10-29):** those were the real lost cycles of F7 (the earlier
           `pw-record` check looked for a phase step, which a cycle of zeros in place doesn't make); with F7 fixed,
@@ -1183,10 +1203,24 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] Phase 3 battery findings (`docs/player/reports/phase3.md`):
   - F1: `frozen`: B's ramp-in starts 2–5 ms late in about 1 of 15 onsets (recorded on the sink; mostly S→V). At most a
     faint tick. Probably the same graph change as "F7 residual".
+    **Closed 2026-11-04 with the F7 residual:** it is that lost cycle landing on B's first ramp samples — in frozen
+    S→V, A's worker quits at the handoff and its stream's deactivation (1.5–6 ms later) raced the graph exactly as B
+    (mpv, already flowing) ramped in; one quantum of zeros at the ramp's start reads as a 2–5 ms late onset. Async
+    producers lose no cycle (0 of 60, two profiler runs); the owner's battery re-run (`programs.sh dropout` with
+    `P3_RECORD`, real session) is the remaining confirmation on the real outputs.
   - F2: pause when covered takes 374–401 ms against the plan's 350 ms (300 ms debounce + 30 ms batch + the rest).
     Closed 2026-11-02: the bound is now 450 ms; the debounce stays.
   - F3: the plan's "handoff vs A's end ≤ 1 frame": measured 33 ms against the nominal end, 19.7 ms against
     `source.ended`. Passes as one 30 fps clip frame, fails as one output frame. **Owner:** which was meant?
+    **Fixed 2026-11-04 ("Hand Off When A's Last Frame Has Had Its Time") as "one output frame":** `source.ended`
+    fires as A's *last frame is presented*, so a handoff 7–20 ms after it (the battery) cut that 33 ms frame short
+    by 13–26 ms — B drawn over a frame the clip still owned. Cause: the full-live `align: end` aim subtracted half a
+    clip frame from its end estimate "to centre the error", but `time_pos` is mirrored every tick, so the minimum
+    already sits within a tick of the true end. Now aimed at the raw minimum. `tests/api.rs::
+    align_end_hands_off_as_a_last_frame_ends` (144 Hz headless, real libmpv, 6 switches, handoff vs `Ended` + one
+    clip frame): before −9.8…−13.7 ms (cut), after **+0.7…+7.3 ms** (held ≤ one output frame; bound −3…+2 output
+    frames). The report's "nominal end" column (`start_ms` + remaining from a rate-limited `position`) over-estimates
+    by up to 100 ms — not a reference.
   - F4: `--debug` only: the dropout probe costs 161 whole graph cycles of full-level silence in 460 s, right after each
     analysis; 0 without it. Find the cause before trusting a recording taken under `--debug`.
     **Fixed 2026-11-02 ("Spawn Dropout Decodes Without Forking The Player").** Cause: each analysis's ffmpeg
@@ -1208,6 +1242,9 @@ Two bug classes kept recurring; fix the class, not the instance:
     of them as a micro-gap and they are one fixed 64-frame size, so most likely the recorder/sink side (under
     load), not the player's output — unproven. More likely still: the same single-cycle loss as "F7 residual" below (a
     stream's deactivation through the bus loopback, 64 frames each, invisible to the meter) — for the handoff work. Recording kept out of the repo (1.1 GB).
+    **Settled 2026-11-04:** they were the F7 residual at mpv's streams (its AO deactivates on every pause and is
+    destroyed at each teardown — the same race, Phase 2 § F7 residual), fixed by the async streams; the meter can't
+    see them because its own capture sat in the same stalled cycle.
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
     3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
     `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.

@@ -1746,8 +1746,10 @@ fn s_to_s_each_method() {
     }
 }
 
-/// `align: end` from a video A onto a scene B: full-live ends at A's `Ended` (± 17 ms),
-/// reveal/frozen start at it (± one frame, as V→V) — B being a scene changes nothing.
+/// `align: end` from a video A onto a scene B: full-live ends one clip frame after A's
+/// `Ended` (± one tick; F3 — `Ended` fires as A's last frame is presented, and that frame
+/// keeps its 33 ms), reveal/frozen start at it (± one frame, as V→V) — B being a scene
+/// changes nothing.
 #[test]
 fn align_end_video_a_to_scene_b() {
     for method in METHODS {
@@ -1795,13 +1797,21 @@ fn align_end_video_a_to_scene_b() {
                 .into_iter()
                 .chain(wrapped_at)
                 .fold(f64::INFINITY, f64::min);
+            // F3 (2026-11-04): the effect ends when A's last frame has had its time — one clip
+            // frame after `Ended` (presented) or the wrap (`time_pos` drops while that frame
+            // still shows). Before, aimed half a frame early, it ended ~at `Ended` and cut the
+            // frame short. This harness ticks at wall pace up to one 60 Hz frame, and both the
+            // end estimate's samples and the `Ended` reference carry up to a tick of that, so
+            // two ticks here (measured −17…−7 ms); the precise bound is
+            // `tests/api.rs::align_end_hands_off_as_a_last_frame_ends` at 144 Hz.
+            let due = ended + 1000.0 / 30.0;
             println!(
-                "align_end V→S full-live: progress=1 − A's end = {:+.1} ms",
-                progress_one - ended
+                "align_end V→S full-live: progress=1 − (A's end + one frame) = {:+.1} ms",
+                progress_one - due
             );
             assert!(
-                (progress_one - ended).abs() <= 17.0,
-                "{method}: progress 1 at {progress_one:.1} ms, A's end at {ended:.1} ms"
+                (progress_one - due).abs() <= 34.0,
+                "{method}: progress 1 at {progress_one:.1} ms, A's last frame due until {due:.1} ms"
             );
         } else {
             let ended = h

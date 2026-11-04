@@ -168,6 +168,9 @@ def dropout(d, t0, t1, cell, method, recs_path):
     hist = lambda xs: {k: xs.count(k) for k in sorted(set(map(str, xs)))}
     dp = [abs(r["handoff_vs_a_end_pred_ms"]) for r in done if r["handoff_vs_a_end_pred_ms"] is not None]
     de = [abs(r["handoff_vs_a_ended_ms"]) for r in done if r["handoff_vs_a_ended_ms"] is not None]
+    # F3: `source.ended` fires as A's last frame is presented; the handoff is due one clip frame
+    # (30 fps) after it — this is the distance from that due instant (signed: + = held, − = cut).
+    dl = [r["handoff_vs_a_ended_ms"] - 1000.0 / 30.0 for r in done if r["handoff_vs_a_ended_ms"] is not None]
     return {
         "cell": cell, "method": method, "scheduled": len(recs), "done": len(done), "commits": len(cur),
         "reasons": hist([e.get("reason") for e in cur]),
@@ -186,6 +189,8 @@ def dropout(d, t0, t1, cell, method, recs_path):
         "handoff_vs_a_ended_n": len(de),
         "handoff_vs_a_ended_max_ms": round(max(de), 2) if de else None,
         "handoff_vs_a_ended_p95_ms": round(pctl(de, 0.95), 2) if de else None,
+        "handoff_vs_a_last_frame_min_ms": round(min(dl), 2) if dl else None,
+        "handoff_vs_a_last_frame_max_ms": round(max(dl), 2) if dl else None,
     }
 
 

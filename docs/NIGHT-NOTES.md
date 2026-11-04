@@ -314,3 +314,19 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Not done yet (in TODO): shadows, light cones you can see (volumetrics), the light-ray quads of 3319542538, and
     checking the three against Wallpaper Engine itself.
 
+- **Handoff work (Wednesday job, 2026-11-04): the lost audio cycles and the cut last frame are fixed.**
+  - **Audio — the single 64-frame cycle of silence at a handoff (F7 residual, Phase 3 F1, the 23 runs in your
+    battery re-run) had one root cause**, caught with PipeWire's own profiler: when a wallpaper's audio stream
+    left the bus (a scene worker quitting, mpv pausing or being torn down), PipeWire's client library marked the
+    stream inactive before the server had stopped counting it, and a graph cycle starting in that window waited
+    for it in vain — the whole graph skipped one cycle and the speakers got 1.3 ms of zeros. Every stream the
+    player opens is now an *async* node (nobody waits for it inside a cycle). Before/after on 60 full-live
+    scene switches (release, 240 Hz): 6–7 lost cycles → 0, in two runs each; a V→V test that lost a cycle 1 in 20
+    now loses none. Cost: audio reaches the speakers 2.7 ms later (two graph hops at your 64-frame quantum),
+    which the player compensates for mpv's lip sync.
+  - **Picture — "handoff vs A's end" (F3) is now one output frame, not one clip frame.** A's last frame used to be
+    cut 10–14 ms short (B drawn over it): the fade's end estimate subtracted half a clip frame "to centre an
+    error" that was already within a tick. Aimed at the raw estimate, B takes over 0.7–7.3 ms after A's last frame
+    has had its full 33 ms (6 switches at 144 Hz, real libmpv) — never before.
+  - Still yours: a battery re-run on the real session (`programs.sh dropout` with `P3_RECORD`) to see the
+    23 zero runs gone on your outputs.

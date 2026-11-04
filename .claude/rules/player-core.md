@@ -1663,9 +1663,14 @@ that never ends — a still or a **scene** (`never_ends`, Phase 2 Task 9: no dur
 alone): non-shared A gets `loop=false` at `start` (restored on
 cancel/failure — and seeked to 0 if it ended because of it). full-live *ends* at A's end:
 start = end − D, where end is the minimum over ticks of `now + (duration − time_pos)/speed`
-minus half a frame (`time_pos` is the shown frame's pts, so each sample over-estimates by
-0…1 frame; the frame step is the smallest `time_pos` increment) — measured within ±17 ms of
-A's real `Ended`; a speed change **rescales** that minimum (`t + (end − t)·s0/s1`, still an
+(`time_pos` is the shown frame's pts, mirrored into the graph every tick, so the minimum is
+taken right after a frame change and sits within a tick of the true end; the frame step is
+the smallest `time_pos` increment). **F3 (2026-11-04): no longer minus half a frame** — that
+"centring" assumed samples anywhere inside a frame and made the handoff land 10–14 ms
+*before* A's last frame had had its 33 ms (the Phase 3 battery: 7–20 ms after `Ended`), B
+drawn over a frame the clip still owned; aimed at the raw minimum it lands 0…one output frame
+after `Ended` + one clip frame (`tests/api.rs::align_end_hands_off_as_a_last_frame_ends`, 144 Hz
+headless, real libmpv: before −9.8…−13.7 ms, after within [−1, +1] output frame); a speed change **rescales** that minimum (`t + (end − t)·s0/s1`, still an
 over-estimate) instead of restarting it from a `time_pos` that may be 100 ms stale (`Position` is
 rate-limited — under a continuous drag no fresh sample arrived between two changes and the effect
 started late; `align_end_tracks_a_speed_dragged_continuously`). If the start instant passed between
@@ -2932,9 +2937,38 @@ arrival-time difference (same graph cycles → same clock) over 3 shots, median 
 `audio.bus.latency_shots {shots_ms, quantum_frames}` (debug). **Measured on this machine
 (PipeWire 1.6.9): 0 samples** — module-loopback triggers its playback from the capture's
 process (same cycle); the method reads an injected `target.delay.sec = 0.010` as
-9.999997 ms, so 0 is real. Gate (brief): ≤ 1 quantum + 5 ms. Sources get `audio_delay_bias
-= −latency` at open (§ Sources: the source's own `audio_delay` **adds** to it), so a
-non-zero bus latency on another PipeWire would be compensated; today it's 0.
+9.999997 ms, so 0 is real. **Plus the async hops (F7, below): every stream of the process
+is an async node, so the measurement's two captures each sit one cycle behind what they
+watch (it still reads the loopback's own 0) and `ASYNC_HOPS` = 2 quanta (producer → bus,
+playback → sink) are added — `latency_ms` 2.67 at the owner's 64-frame quantum.** Gate
+(`bus.sh`): ≤ 2 hops + 1 quantum + 5 ms. Sources get `audio_delay_bias = −latency` at open
+(§ Sources: the source's own `audio_delay` **adds** to it), so the hops are compensated for
+mpv's A/V sync.
+
+**Async streams (F7 residual, 2026-11-04).** `serve_main` sets the compositor's
+`PIPEWIRE_PROPS` to `{ node.async = true }` (`audio::bus::set_async_streams_env`, while the
+process is still single-threaded; scene workers inherit it and set the property themselves
+too): every PipeWire stream connected in the process — mpv's AOs, the loopback halves, the
+meter, the latency probes — is an **async node**, so no consumer waits for it inside a graph
+cycle (it reads the buffer queued one cycle earlier) and its leaving can't stall anyone.
+**Why (the "single lost 64-frame cycle" of F7 / Phase 3 F1 / the battery re-run's 23 zero
+runs):** with synchronous links the bus's cycle counted every stream playing into it, and a
+stream *deactivating* — a scene worker's quit (`set_active(false)`), mpv's
+`pw_stream_set_active(false)` on every pause (its AO `reset`), its `pw_stream_destroy` at a
+teardown — hit a libpipewire race: the client marks its own activation INACTIVE at once,
+the server drops it from the bus's dependency count only after a protocol roundtrip, and a
+driver cycle starting in that window skips the stream (inactive) yet the bus still waits for
+it → the whole graph xruns and the sink gets exactly one quantum of zeros. Proven with the
+server's profiler (`scenes.sh onsetrec` + `ONSET_PROFILE=1`, release, 240 Hz headless,
+full-live S→S): 7 of 7 lost cycles in 60 switches were this signature (the bus
+`not-triggered`, A's stream gone, B's `finished` a whole cycle late, `posjump 128`), each
+1.5–6 ms after A's `worker.stopped`; with async producers **0 of 60 (two runs), 0 xrun
+cycles**. The property is what the server reads: module-loopback's own `PW_STREAM_FLAG_ASYNC`
+only marked the client side, which is why the bus's links were synchronous before. Guards:
+`tests/api.rs::bus_producers_link_asynchronously` (`pw-dump`: every link into the bus is
+`link.async`), `scene_worker_exit_never_skips_bus_cycles` (full-live, 20 switches, recorded
+sink: 0 runs; RED 1 in ~10 switches before), `mpv_source_teardown_never_skips_bus_cycles`
+(V→V, RED before). Cost: one quantum per hop (the latency rule above).
 
 **Meter.** `Meter::start(&bus)` (a capture stream on the bus thread: 48 kHz F32 stereo,
 `node.latency = 480/48000` — a 10 ms *request*; the graph runs at the smallest request, on
@@ -4346,10 +4380,14 @@ scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`
   parks, never reconnecting). Exiting with the stream active in the graph cost the bus whole graph
   cycles of exact silence at the sink in *every* S→S switch (B's sound: 64–384 samples; frozen 60/61,
   full-live 30/30 — `tests/onmachine/scenes.sh onsetrec` records the sink independently); a bare
-  disconnect of the active stream still 18/60; deactivate-first leaves 2–8 single cycles per 60
-  full-live/reveal switches (0/121 frozen), at the deactivation — PipeWire's graph change through
-  the in-process loopback (TODO F7). Test `tests/api.rs::scene_worker_exit_never_skips_bus_cycles`
-  (RED 6/6 switches).
+  disconnect of the active stream still 18/60; deactivate-first left 2–8 single cycles per 60
+  full-live/reveal switches (0/121 frozen — B still silent at that instant, so invisible), at the
+  deactivation. **That residual was a libpipewire race on a synchronous link (2026-11-04):** the
+  worker's stream is now an **async node** (`node.async = true` in its props; § Audio bus → "Async
+  streams"), so the bus never waits for it and its deactivation can't cost a cycle: 0 runs in 60
+  full-live switches (two release runs, the server's profiler: 0 xrun cycles). Tests
+  `tests/api.rs::scene_worker_exit_never_skips_bus_cycles` (full-live, 20 switches; RED 6/6 before
+  the clean leave, 1 in ~10 before async), `bus_producers_link_asynchronously`.
 - **Envelope → dropout reference.** 1 ms max-channel RMS dBFS of the gated, pre-gain samples
   (`audio::meter::BlockMeter`; `meter::dbfs_block` is the shared one-block form), batched every
   50 blocks, stamped with the buffer's play time (`CLOCK_MONOTONIC` now + one buffer). The

@@ -1518,7 +1518,7 @@ impl Transitions {
             if ended {
                 return Some(now); // already holding its last frame
             }
-            centered_end(tr, g, &a)?
+            estimated_end(tr)?
         };
         let t = end - d;
         if t > now_s {
@@ -1564,13 +1564,12 @@ impl Transitions {
             return;
         };
         track_lead(tr, g, now);
-        // Moved? Judged on the raw estimate (an over-estimate by ≤ 1 frame, so an effect
-        // scheduled on the centred end is never "late" by its own centring); aimed at the
-        // centred end, like the start (`start_instant`).
-        let (Some(raw), Some(a_end)) = (tr.end_est, centered_end(tr, g, &a)) else {
+        // Moved? The estimate (the minimum, like the start's — `start_instant`) must have
+        // come forward by more than `COMPRESS_MIN_GAIN`.
+        let Some(a_end) = estimated_end(tr) else {
             return; // paused / no duration: nothing to follow
         };
-        if raw + hold > secs(tr.end_at) - secs(COMPRESS_MIN_GAIN) {
+        if a_end + hold > secs(tr.end_at) - secs(COMPRESS_MIN_GAIN) {
             return;
         }
         let want = a_end + hold;
@@ -2204,13 +2203,19 @@ impl Transitions {
     }
 }
 
-/// A's iteration end (player-clock s), centred: `time_pos` is the shown frame's pts, so
-/// every `end_est` sample over-estimates by its offset inside that frame (0…one frame) —
-/// the true end lies in [end_est − frame, end_est]; aim at the middle (error ≤ ½ frame).
-fn centered_end(tr: &Tr, g: &Graph, a: &str) -> Option<f64> {
-    let speed = get_f64(g, a, "speed").unwrap_or(1.0).max(0.01);
-    let half_frame = tr.frame_dt.map_or(0.0, |f| f / speed / 2.0);
-    Some(tr.end_est? - half_frame)
+/// A's iteration end (player-clock s): the minimum over every tick of `now + remaining`
+/// (`Tr::end_est`). `time_pos` is the shown frame's pts, so one sample over-estimates the end
+/// by its offset inside that frame — but the graph mirrors `time_pos` every tick, so the
+/// minimum is taken right after each frame change and sits within a tick of the true end.
+/// **F3 (2026-11-04):** this used to subtract half a frame "to centre the error", on the
+/// assumption that the samples fell anywhere inside a frame. Measured against mpv's `Ended`
+/// (A's last frame presented) + one clip frame, a 1 s full-live `align: end` handed off
+/// 10–14 ms *before* A's last frame had had its 33 ms (the Phase 3 battery: 7–20 ms after
+/// `Ended`) — B drawn over a frame the clip still owned. Aimed at the raw minimum the
+/// handoff lands 0…one output frame after it (`tests/api.rs::
+/// align_end_hands_off_as_a_last_frame_ends`).
+fn estimated_end(tr: &Tr) -> Option<f64> {
+    tr.end_est
 }
 
 /// The lead A's frame interval in player-clock seconds (observed, else 30 fps).

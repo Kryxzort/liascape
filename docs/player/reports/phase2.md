@@ -593,11 +593,23 @@ micro-gaps 5/60 → 0–1/60, the remaining one with no hole in the recording (t
 "`unmeasured` is measurement-only" was wrong:** its `pw-record` check looked for a phase step, and a cycle of
 zeros in place makes none.
 
-**Residual (open, TODO "F7 residual"):** a single 64-frame cycle in ~1 of 15 full-live/reveal switches, at the
-worker's deactivation (with the disconnect delayed to 150 ms the residual stayed at the teardown instant, while
-without the deactivation 18 of 60 moved to the disconnect) — a PipeWire graph change seen through the in-process
-loopback. Also seen once in ~300 frozen switches, not reproduced: A audible again ~90 ms after its anti-click for
-the rest of the effect (no event log then; `onsetrec` now dumps it).
+**Residual (CLOSED 2026-11-04, "Make Every Bus Stream An Async Node"):** a single 64-frame cycle in ~1 of 15
+full-live/reveal switches, at the worker's deactivation (with the disconnect delayed to 150 ms the residual stayed
+at the teardown instant, while without the deactivation 18 of 60 moved to the disconnect). **Root cause:** the
+private server's profiler (`scenes.sh onsetrec` with `ONSET_PROFILE=1`) showed each lost cycle as the bus
+`not-triggered`, A's stream already gone and B's stream finished one whole cycle late (`posjump 128`), 1.5–6 ms
+after A's `worker.stopped` — a libpipewire race on a *synchronous* link: `pw_stream_set_active(false)` marks the
+client's activation INACTIVE at once while the server removes the stream from the bus's dependency count only
+after a protocol roundtrip; a driver cycle starting in between skips the stream but the bus still waits for it,
+the graph xruns, the sink gets one quantum of zeros. The loopback's capture asks for `PW_STREAM_FLAG_ASYNC`, but
+only the `node.async` *property* reaches the server, so every link into the bus was synchronous. **Fix:** the
+worker's stream and (through `PIPEWIRE_PROPS`) every stream of the compositor — mpv's AOs too — are async nodes;
+no consumer waits for a producer inside a cycle. Release, 240 Hz headless, 60 full-live switches: zero runs
+6–7 → **0**, xrun cycles 7–8 → **0** (two runs each). Bus latency reads 2.67 ms now (the two async hops,
+compensated for mpv). Tests: `tests/api.rs::bus_producers_link_asynchronously`,
+`scene_worker_exit_never_skips_bus_cycles` (full-live, 20 switches), `mpv_source_teardown_never_skips_bus_cycles`.
+Also seen once in ~300 frozen switches, not reproduced: A audible again ~90 ms after its anti-click for the rest
+of the effect (no event log then; `onsetrec` now dumps it).
 
 ### On-machine checks for the owner (2026-10-29)
 
