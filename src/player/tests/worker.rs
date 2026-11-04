@@ -178,7 +178,12 @@ fn proto_roundtrip_with_fds() {
         ToWorker::Tick {
             seq: u64::MAX - 3,
             t: 12.345678,
-            input: Some((0..=255).cycle().take(1024).collect()),
+            input: Some(proto::AudioInput::from_stereo(
+                48_000,
+                &(0..2048)
+                    .map(|i| (i % 255) as f32 / 255.0 - 0.5)
+                    .collect::<Vec<_>>(),
+            )),
         },
         ToWorker::Route {
             audio: AudioRoute::Device("pipewire/liascape-player-bus".into()),

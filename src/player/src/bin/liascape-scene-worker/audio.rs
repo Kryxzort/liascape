@@ -39,8 +39,8 @@
 use std::cell::RefCell;
 use std::os::fd::{AsFd, OwnedFd};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::MutexGuard;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -414,8 +414,13 @@ impl Dsp {
             } else {
                 a + d * (i + 1) as f32 / n as f32
             };
+            // WE's device clips its f32 output to ±1 after every sound's volume² and the wallpaper's level
+            // (mediaextensions64.dll's miniaudio, 0x180013c35: `noClip` off and an f32 device → the clip loop
+            // 0x180029cb0): a `volume` above 1 clips there (2375914945 at musicvolume 2 peaked at 2.04). Here after
+            // the stream's own gain — the wallpaper level, a transition, the normalization — as WE's level is
+            // before its clip, so a lower gain still leaves the peaks whole
             for (o, x) in o.iter_mut().zip(x) {
-                *o = x * g;
+                *o = (x * g).clamp(-1.0, 1.0);
             }
         }
         self.applied = target;
@@ -825,6 +830,35 @@ mod tests {
         assert!(l.windows(2).all(|w| w[1] <= w[0]), "monotonic");
         assert!(max_step <= 1.0 / 479.0 + 1e-6, "max step {max_step}");
         assert!(out.chunks_exact(CH).all(|f| f[0] == f[1]), "both channels");
+    }
+
+    /// Scene sound peaks: WE's f32 device clip at ±1 comes after the levels, so a sound pushed past
+    /// full scale (`volume` 2: ×4) is clipped at 0 dB but whole once the gain brings it under.
+    #[test]
+    fn output_clips_at_full_scale_after_the_gain() {
+        struct Twos;
+        impl Pull for Twos {
+            fn pull(&mut self, out: &mut [f32]) {
+                for (i, v) in out.iter_mut().enumerate() {
+                    *v = if i % 4 < 2 { 2.0 } else { -2.0 };
+                }
+            }
+        }
+        let mut d = Dsp::new();
+        let mut out = vec![0.0; 480 * CH];
+        for _ in 0..6 {
+            d.process(&mut out, st(0.0), Some(&mut Twos), 0, true);
+        }
+        let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
+        assert_eq!(peak, 1.0, "clipped at full scale");
+        for _ in 0..2 {
+            d.process(&mut out, st(-12.0), Some(&mut Twos), 0, true);
+        }
+        let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
+        assert!(
+            (peak - 2.0 * gain_lin(-12.0)).abs() < 1e-3,
+            "under full scale it's whole: {peak}"
+        );
     }
 
     #[test]

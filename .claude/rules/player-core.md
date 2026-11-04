@@ -3367,7 +3367,9 @@ Map: protocol + lifecycle (here) · "Frame transport" · "LWE core" · "The `sce
 "Real scenes" · "Scene audio" · "Scene loudness" · "GPU budget and VRAM" · "Transitions with
 scenes" · "Crash policy" · "Scene corpus" · "Scene health".
 
-**Protocol (`worker/proto.rs`, `PROTOCOL` 4 — bumped by Task 6, audio, and twice by scene loudness; the
+**Protocol (`worker/proto.rs`, `PROTOCOL` 5 — bumped by Task 6, audio, twice by scene loudness and by the stereo
+visualiser input (`Tick.input` = `AudioInput {rate, s16}`: the frames since the last tick, 16-bit stereo LE, base64;
+it was 1024 u8 mono samples); the
 shapes below are Task 3's plus the additions named inline and in the later subsections: `Start` also
 carries `id`, `gain_db`, `no_audio`, `speed`, `properties`, `loudness`; `ToWorker::Speed`, `ToWorker::LoudnessMeter`; `FromWorker::Loudness`).** One JSON object per `SOCK_SEQPACKET`
 datagram, ≤ `MAX_MSG` (64 KiB), fds on the same datagram via `SCM_RIGHTS` (≤ `MAX_FDS` 8).
@@ -3752,9 +3754,11 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   the branch is pushed.
 - **Audio response** (`patches/lwe/0045`, B8): `wp_context_audio_input_push(ctx, f32 interleaved, frames, channels,
   rate)` feeds WE's spectrum (`g_AudioSpectrum*`, `engine.registerAudioBuffers`, audio-driven emitters);
-  `wp_context_audio_spectrum(ctx, 16|32|64, 0 left|1 right|2 average, out)` reads it. The worker still feeds the u8
-  mono mix (`wp_context_set_audio_input_mix`, taken as 44.1 kHz mono), so Left = Right until it sends f32 stereo.
-  Smoke: `--lwe-smoke … --tone HZ` puts a synthetic sine in the input mix (nothing plays).
+  `wp_context_audio_spectrum(ctx, 16|32|64, 0 left|1 right|2 average, out)` reads it. The worker pushes the
+  system audio it gets in each `Tick.input` (48 kHz stereo, every frame in order: `Scene::push_input`, render thread,
+  before the frame) — Left and Right apart (the Leftovers batch; the legacy u8 `wp_audio_input_mix` is unused).
+  Smoke: `--lwe-smoke … --tone HZ` feeds a synthetic sine the same way (nothing plays); `--tone-channel left|right`,
+  `--tone noise` (white, −6 dBFS RMS), `--tone-sweep HZ1`; the JSON's `spectrum` = the 16-band left/right the scene saw.
 - **The patched API** (`patches/lwe/0003`): `wp_config_set_audio_output(cfg, {sample_rate,
   channels})` before `wp_context_create` → the context uses `HostAudioDriver`: no SDL audio
   subsystem, no device. `wp_context_audio_pull(ctx, float*, frames)` = the sum of every stream, each
@@ -4245,16 +4249,22 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but
   loopback halves (`node.virtual`, which would double-count, e.g. our bus playback) — with a
   passive capture `liascape-player-visualiser.<id>` (`target.object` = its serial,
-  `node.dont-reconnect` + `node.dont-fallback`: never the microphone), keeping its last 1024
-  mono samples; `frame()` sums the streams that delivered within 150 ms → 1024 u8 (centre
-  128). Read-only, no routing changes; a lost connection retries every 1 s. The runtime
-  (`feed_visualisers`, start of `update_sources`) runs it only while ≥ 1 ready scene
-  `wants_audio_input`, puts the frame on each such scene's next `Tick.input` (others get
-  `null`), and drops it on a helper thread when none wants it. The worker hands it to LWE's
-  `wp_audio_input_mix`; the synthetic `input_level` draws the RMS (`input_level()`). Probe
-  `workers` → `wants_audio_input`, `input_dbfs`. Units `admit_takes_app_playback_streams_only`,
-  `mix_frame_sums_streams_at_their_newest_sample`. Deviation from the plan's text: streams
-  playing to a non-default sink are mixed too (WE's "everything that plays").
+  `node.dont-reconnect` + `node.dont-fallback`: never the microphone), keeping its last
+  `RING_FRAMES` (4096) **stereo** frames on the graph clock (`Ring::push`: `pw_buffer.time` → a 48 kHz frame
+  index; a buffer within a quantum of the ring's end continues it, a skipped one leaves silence, a jump back starts
+  over). `visual_since(cursor)` mixes the streams that delivered within 150 ms **by their place on that clock**
+  (`Mix::advance`: up to the oldest stream's end, never more than 4096 frames behind the newest — a buffer late this
+  cycle is summed in place next time; ±1 per channel) into one stereo stream (`MIX_FRAMES` 8192 kept) and returns the
+  frames after the reader's cursor (a first read: the newest 2048). Read-only, no routing changes; a lost connection
+  retries every 1 s. The runtime (`feed_visualisers`, start of `update_sources`) runs it only while ≥ 1 ready scene
+  `wants_audio_input`; each such scene source keeps its own cursor and appends what it gets (newest
+  `AUDIO_INPUT_MAX_FRAMES` 4096), sent with its next `Tick.input` (`AudioInput`; others get `null`); the monitor is
+  dropped on a helper thread when none wants it. The worker accumulates the ticks' frames and pushes them to LWE in
+  order (`wp_context_audio_input_push`, 2 channels, 48 kHz); the synthetic `input_level` draws their RMS
+  (`input_level()`). Probe `workers` → `wants_audio_input`, `input_dbfs`. Units
+  `admit_takes_app_playback_streams_only`, `visual_mix_is_stereo_and_clock_aligned`, `ring_follows_the_clock`,
+  proto `audio_input_keeps_both_channels`. Deviation from the plan's text: streams playing to a non-default sink are
+  mixed too (WE's "everything that plays").
 - **User properties (the editor's worker side).** Source prop **`scene_props`** (Map name →
   value; stored on every kind) is sent as `Start.properties` (applied after the load, before
   the first frame — so re-applied at every open) and, live, each new/changed entry as
@@ -4335,7 +4345,11 @@ scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`
   1 s; a `Route` change fades the old stream out on the gate (≤ 100 ms bound), then rebuilds.
 - **The signal path per buffer (`audio::Dsp`, pure, unit-tested):** pull (LWE's
   `wp_context_audio_pull`, or the synthetic `Tone` — `tone_hz`/`tone_dbfs` peak, `has_audio`)
-  through the time stretch → **gate** → envelope → **gain**.
+  through the time stretch → **gate** → envelope → **gain** → **clip**.
+  - **Clip**: every sample clamped to ±1 after the gain — Wallpaper Engine's device clip (mediaextensions64.dll's
+    miniaudio: `noClip` off + an f32 device → its clip loop, the Leftovers batch), which comes after each sound's
+    `volume²` and the wallpaper's level, so a lower gain (the user's level, the normalization) still leaves peaks
+    whole. Unit `output_clips_at_full_scale_after_the_gain`.
   - **Gain**: the compositor's `Gain {db}` (`Gains::effective_db()` of the source's `gain.*`
     slots, sent on every slot change — the 1 kHz `push_gain` path included — and re-sent at
     every `Ready`), interpolated **linearly in amplitude** from the previous to the latest across
@@ -4472,7 +4486,8 @@ add a max cap for people who will never change wallpaper)")**: measuring goes on
 every later play, continuing ONE integration over all of them, until a cap. The player measures and
 reports; the backend stores and applies (player-adapter.md § Scenes → "Loudness"). Code:
 `audio/loudness.rs` (pure), the worker's `audio.rs` (`Dsp`), `sources/scene.rs` (`Learner` per source),
-`PROTOCOL` **4** (3: `FromWorker::Loudness`; 4: `Start.loudness` + `ToWorker::LoudnessMeter`).
+`PROTOCOL` **5** (3: `FromWorker::Loudness`; 4: `Start.loudness` + `ToWorker::LoudnessMeter`; 5: `Tick.input` is
+`AudioInput`, stereo).
 
 - **BS.1770-4 / EBU R128, split across the two processes.** The worker's `SegmentMeter` K-weights (the
   standard's 48 kHz shelf + RLB high-pass biquads; the worker's stream is always 48 kHz stereo) the

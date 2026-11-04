@@ -3,8 +3,10 @@
 //!
 //! - **The visualiser's audio input** (Phase 2 Task 7, owner decision D4): **all system audio,
 //!   like Wallpaper Engine** — which listens to everything that plays, a wallpaper's own sound
-//!   included. [`SysMon::frame`] sums every stream that delivered within [`STALE`] into the 1024
-//!   u8 samples (centre 128) LWE's visualiser FFT takes (`wp_audio_input_mix`).
+//!   included. [`SysMon::visual_since`] sums every stream that delivered within [`STALE`], each
+//!   frame at its place on the graph clock (`pw_buffer.time`), into one **stereo** f32 stream
+//!   (B8 "feed stereo": WE analyses left and right apart) that each scene reads from its own
+//!   cursor and the worker hands to `wp_context_audio_input_push` in order.
 //! - **The in-player auto-mute's per-stream meter** (Phase 3 Task 14, `crate::signal::automute`;
 //!   rules recon §0.6 "share it rather than add a second one"): each capture's callback runs on
 //!   PipeWire's **real-time data thread** (`RT_PROCESS`, like the bus meter: a non-RT loop misses
@@ -54,8 +56,16 @@ use super::foreign::{self, Identity, MprisPlayer, OwnCtx, StreamVolume, Verdict}
 use super::meter::mono_ns;
 use crate::log::{self, Level};
 
-/// Samples per visualiser frame (`WP_AUDIO_INPUT_FRAME_SIZE`).
-pub const FRAME: usize = 1024;
+/// Stereo frames each stream's ring keeps (85 ms at 48 kHz): room for a few graph quanta and a
+/// runtime tick that came late.
+pub const RING_FRAMES: usize = 4096;
+/// Frames of the mixed stream kept for readers ([`SysMon::visual_since`]); a reader further
+/// behind gets a gap (fine for a visualiser: the core reads silence there).
+pub const MIX_FRAMES: usize = 8192;
+/// A stream lagging the newest by more than this no longer holds the mix back.
+const MIX_MAX_LAG: i64 = 4096;
+/// A first read (no cursor yet) gets this many of the newest mixed frames.
+const MIX_FIRST: usize = 2048;
 /// A stream that delivered nothing for this long counts as silent (a paused player keeps its
 /// node but sends no buffers).
 pub const STALE: Duration = Duration::from_millis(150);
@@ -147,20 +157,77 @@ pub fn admit(p: &StreamProps) -> bool {
     p.media_class == "Stream/Output/Audio" && !p.virtual_node
 }
 
-/// The mix of each stream's latest mono samples → `FRAME` u8 samples (centre 128, ±127 =
-/// full scale), clamped. Streams are aligned at their newest sample (a visualiser needs the
-/// spectrum, not phase alignment).
-pub fn mix_frame<'a>(streams: impl IntoIterator<Item = &'a VecDeque<f32>>) -> Vec<u8> {
-    let mut acc = vec![0f32; FRAME];
-    for s in streams {
-        let n = s.len().min(FRAME);
-        for (i, v) in s.iter().skip(s.len() - n).enumerate() {
-            acc[FRAME - n + i] += *v;
+/// The graph clock (CLOCK_MONOTONIC ns) as a frame index at [`super::bus::RATE`].
+fn frame_at(t_ns: i64) -> i64 {
+    (t_ns as i128 * super::bus::RATE as i128 / 1_000_000_000) as i64
+}
+
+/// The mixed stereo stream: frames up to `end` (absolute frame index), the newest [`MIX_FRAMES`]
+/// in `out`.
+#[derive(Default)]
+pub struct Mix {
+    out: VecDeque<[f32; 2]>,
+    end: Option<i64>,
+}
+
+impl Mix {
+    /// Mix every ring in `rings` (each `(its frames, the index after its newest)`) up to the
+    /// settled point: the oldest end among them, but never more than [`MIX_MAX_LAG`] behind the
+    /// newest (a stream whose buffer is late this cycle is added once it comes — frames are
+    /// summed by their place on the graph clock, not by arrival). Clamped to ±1 per channel.
+    pub fn advance(&mut self, rings: &[(&VecDeque<[f32; 2]>, i64)]) {
+        let Some(newest) = rings.iter().map(|r| r.1).max() else {
+            return;
+        };
+        let oldest = rings.iter().map(|r| r.1).min().unwrap_or(newest);
+        let target = oldest.max(newest - MIX_MAX_LAG);
+        let from = match self.end {
+            Some(e) if e <= target && target - e <= MIX_FRAMES as i64 => e,
+            Some(e) if e > target => return,
+            _ => target - MIX_FIRST as i64,
+        };
+        let n = (target - from) as usize;
+        let mut acc = vec![[0f32; 2]; n];
+        for (ring, end) in rings {
+            let start = end - ring.len() as i64;
+            let lo = from.max(start);
+            let hi = target.min(*end);
+            for i in lo..hi {
+                let v = ring[(i - start) as usize];
+                let a = &mut acc[(i - from) as usize];
+                a[0] += v[0];
+                a[1] += v[1];
+            }
         }
+        for a in acc {
+            if self.out.len() == MIX_FRAMES {
+                self.out.pop_front();
+            }
+            self.out
+                .push_back([a[0].clamp(-1.0, 1.0), a[1].clamp(-1.0, 1.0)]);
+        }
+        self.end = Some(target);
     }
-    acc.iter()
-        .map(|x| (128.0 + 127.0 * x.clamp(-1.0, 1.0)).round() as u8)
-        .collect()
+
+    /// The mixed frames after `cursor` (interleaved stereo) and the new cursor; `None` = a first
+    /// read (the newest [`MIX_FIRST`]).
+    pub fn since(&self, cursor: Option<i64>) -> (Vec<f32>, Option<i64>) {
+        let Some(end) = self.end else {
+            return (Vec::new(), cursor);
+        };
+        let start = end - self.out.len() as i64;
+        let from = match cursor {
+            Some(c) if c <= end => c.max(start),
+            _ => (end - MIX_FIRST as i64).max(start),
+        };
+        let v = self
+            .out
+            .iter()
+            .skip((from - start) as usize)
+            .flat_map(|f| [f[0], f[1]])
+            .collect();
+        (v, Some(end))
+    }
 }
 
 /// `dBFS → linear` for the threshold.
@@ -170,8 +237,42 @@ fn db_lin(db: f64) -> f32 {
 
 #[derive(Default)]
 struct Ring {
-    samples: VecDeque<f32>,
+    /// Stereo frames, the newest last; `end` = the frame index (graph clock) after the newest.
+    samples: VecDeque<[f32; 2]>,
+    end: i64,
     last: Option<Instant>,
+}
+
+impl Ring {
+    /// Append one interleaved stereo chunk starting at frame index `start`. A chunk within a
+    /// quantum of the ring's end continues it (clock jitter); a later one leaves a silent gap (a
+    /// skipped buffer), an earlier or far one starts the ring over.
+    fn push(&mut self, buf: &[f32], start: i64) {
+        let n = (buf.len() / 2) as i64;
+        if self.samples.is_empty() {
+            self.end = start;
+        } else if (start - self.end).abs() > n.max(256) {
+            if start > self.end && start - self.end < RING_FRAMES as i64 {
+                for _ in self.end..start {
+                    self.put([0.0, 0.0]);
+                }
+            } else {
+                self.samples.clear();
+            }
+            self.end = start;
+        }
+        for fr in buf.chunks_exact(2) {
+            self.put([fr[0], fr[1]]);
+        }
+        self.end += n;
+    }
+
+    fn put(&mut self, f: [f32; 2]) {
+        if self.samples.len() == RING_FRAMES {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(f);
+    }
 }
 
 /// One stream's capture: the visualiser's ring + the auto-mute meter (atomics, RT-written).
@@ -209,12 +310,10 @@ impl Tap {
         if shared.visual.load(Ordering::Relaxed)
             && let Ok(mut r) = self.ring.try_lock()
         {
-            for fr in buf.chunks_exact(2) {
-                if r.samples.len() == FRAME {
-                    r.samples.pop_front();
-                }
-                r.samples.push_back(0.5 * (fr[0] + fr[1]));
+            if r.samples.capacity() < RING_FRAMES {
+                r.samples.reserve_exact(RING_FRAMES); // once per stream
             }
+            r.push(buf, frame_at(t_ns));
             r.last = Some(Instant::now());
         }
         let ns_per_frame = 1e9 / f64::from(super::bus::RATE);
@@ -350,6 +449,7 @@ impl Shared {
 pub struct SysMon {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    mix: Mutex<Mix>,
 }
 
 impl SysMon {
@@ -368,11 +468,17 @@ impl SysMon {
             None,
             json!({}),
         );
-        SysMon { shared, thread }
+        SysMon {
+            shared,
+            thread,
+            mix: Mutex::default(),
+        }
     }
 
-    /// The latest visualiser frame: the mix of every live stream's last [`FRAME`] samples.
-    pub fn frame(&self) -> Vec<u8> {
+    /// The visualiser input after `cursor` (a reader's own; `None` the first time): every live
+    /// stream mixed in stereo at its place on the graph clock, interleaved f32 at
+    /// [`super::bus::RATE`], and the reader's next cursor. Several readers each get every frame.
+    pub fn visual_since(&self, cursor: Option<i64>) -> (Vec<f32>, Option<i64>) {
         let now = Instant::now();
         let taps: Vec<Arc<Tap>> = self
             .shared
@@ -382,16 +488,19 @@ impl SysMon {
             .values()
             .map(|e| e.tap.clone())
             .collect();
-        let live: Vec<VecDeque<f32>> = taps
+        let rings: Vec<_> = taps
             .iter()
-            .filter_map(|t| {
-                let r = t.ring.lock().unwrap_or_else(|e| e.into_inner());
-                r.last
-                    .filter(|l| now.duration_since(*l) <= STALE)
-                    .map(|_| r.samples.clone())
-            })
+            .map(|t| t.ring.lock().unwrap_or_else(|e| e.into_inner()))
             .collect();
-        mix_frame(live.iter())
+        let live: Vec<(&VecDeque<[f32; 2]>, i64)> = rings
+            .iter()
+            .filter(|r| r.last.is_some_and(|l| now.duration_since(l) <= STALE))
+            .map(|r| (&r.samples, r.end))
+            .collect();
+        let mut mix = self.mix.lock().unwrap_or_else(|e| e.into_inner());
+        mix.advance(&live);
+        drop(rings);
+        mix.since(cursor)
     }
 
     /// Every captured stream with its verdict (auto-mute; the `automute` probe).
@@ -1157,21 +1266,63 @@ mod tests {
         assert!(!admit(&props("Audio/Sink", false)), "a device");
     }
 
+    /// B8 "feed stereo": left and right stay apart, streams sum by their place on the graph
+    /// clock (a buffer that arrives a cycle late lands where it belongs), and every reader gets
+    /// every frame once.
     #[test]
-    fn mix_frame_sums_streams_at_their_newest_sample() {
-        assert_eq!(mix_frame(std::iter::empty()), vec![128u8; FRAME], "silence");
-        let a: VecDeque<f32> = std::iter::repeat_n(0.5, FRAME).collect();
-        let b: VecDeque<f32> = std::iter::repeat_n(0.25, 10).collect();
-        let f = mix_frame([&a, &b]);
-        assert_eq!(f.len(), FRAME);
-        assert_eq!(f[0], (128.0f32 + 63.5).round() as u8, "only a");
-        assert_eq!(
-            f[FRAME - 1],
-            (128.0f32 + 127.0 * 0.75).round() as u8,
-            "a + b"
+    fn visual_mix_is_stereo_and_clock_aligned() {
+        let chunk =
+            |l: f32, r: f32, n: usize| -> Vec<f32> { (0..n).flat_map(|_| [l, r]).collect() };
+        let ns = |frame: i64| frame * 1_000_000_000 / super::super::bus::RATE as i64;
+        let (mut a, mut b) = (Ring::default(), Ring::default());
+        // a: left only; b: right only, its second buffer pushed late (after the first mix)
+        a.push(&chunk(0.5, 0.0, 1024), frame_at(ns(48_000)));
+        b.push(&chunk(0.0, 0.25, 1024), frame_at(ns(48_000)));
+        a.push(&chunk(0.5, 0.0, 1024), frame_at(ns(49_024)));
+        let mut mix = Mix::default();
+        mix.advance(&[(&a.samples, a.end), (&b.samples, b.end)]);
+        let (first, c1) = mix.since(None);
+        // settled at b's end (49 024): a's second buffer waits for b's
+        assert_eq!(c1, Some(49_024));
+        assert_eq!(first.len(), 2 * MIX_FIRST);
+        let tail = &first[first.len() - 2048..];
+        assert!(tail.chunks(2).all(|f| f == [0.5, 0.25]), "a + b, apart");
+        b.push(&chunk(0.0, 0.25, 1024), frame_at(ns(49_024)));
+        mix.advance(&[(&a.samples, a.end), (&b.samples, b.end)]);
+        let (next, c2) = mix.since(c1);
+        assert_eq!(c2, Some(50_048));
+        assert_eq!(next.len(), 2 * 1024, "only the new frames");
+        assert!(
+            next.chunks(2).all(|f| f == [0.5, 0.25]),
+            "the late buffer summed in place"
         );
-        let loud: VecDeque<f32> = std::iter::repeat_n(0.9, FRAME).collect();
-        assert_eq!(mix_frame([&loud, &loud])[0], 255, "clamped");
+        // a second reader, still at c1, gets the same frames; one at the end gets none
+        assert_eq!(mix.since(c1).0, next);
+        assert!(mix.since(c2).0.is_empty());
+        // clamped per channel
+        let mut m2 = Mix::default();
+        let loud = {
+            let mut r = Ring::default();
+            r.push(&chunk(0.9, -0.9, 64), 1000);
+            r
+        };
+        m2.advance(&[(&loud.samples, loud.end), (&loud.samples, loud.end)]);
+        let (v, _) = m2.since(None);
+        assert_eq!(&v[v.len() - 2..], &[1.0, -1.0]);
+    }
+
+    #[test]
+    fn ring_follows_the_clock() {
+        let mut r = Ring::default();
+        r.push(&[0.1; 200], 100);
+        assert_eq!(r.end, 200);
+        r.push(&[0.1; 200], 203); // jitter: continues
+        assert_eq!((r.end, r.samples.len()), (300, 200));
+        r.push(&[0.1; 200], 1000); // a skipped buffer: a silent gap
+        assert_eq!((r.end, r.samples.len()), (1100, 1000));
+        assert_eq!(r.samples[250], [0.0, 0.0]);
+        r.push(&[0.1; 200], 10); // back in time: over
+        assert_eq!((r.end, r.samples.len()), (110, 100));
     }
 
     #[test]

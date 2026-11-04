@@ -2645,10 +2645,10 @@ impl Runtime {
             .sysmon
             .get_or_insert_with(crate::audio::sysmon::SysMon::start);
         mon.set_visual(true);
-        let frame = mon.frame();
         for id in want {
             if let Some(s) = self.host.scene_mut(&id) {
-                s.set_input(frame.clone());
+                let (v, cursor) = mon.visual_since(s.input_cursor());
+                s.set_input(&v, cursor);
             }
         }
     }

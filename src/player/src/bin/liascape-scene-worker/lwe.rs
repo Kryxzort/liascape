@@ -4,7 +4,7 @@
 //!
 //! Phase 2 Task 1–2 ship this as the link proof and the `--lwe-smoke` diagnostic
 //! ([`smoke`]); Task 7 builds the real renderer (`render.rs`) on [`Scene`] and adds the mouse
-//! (`wp_mouse_input`), the visualiser feed (`wp_audio_input_mix`) and the live user-property
+//! (`wp_mouse_input`), the visualiser feed (stereo `wp_context_audio_input_push`) and the live user-property
 //! setters (`wp_project_property_set_*_by_name`).
 //!
 //! Host rules (docs/player/spikes/lwe-core.md §6): the assets dir is passed explicitly; frame 0
@@ -14,7 +14,7 @@
 //! (row 0 = the image's top, our R25 source layout — no flip); alpha is 0 in every pixel.
 //! Audio goes through the host driver (patch 0003): no SDL device is ever opened.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::path::Path;
 
@@ -44,16 +44,6 @@ struct WpMouseInput {
     is_pressed: extern "C" fn(*mut c_void, c_int) -> c_int,
 }
 
-#[repr(C)]
-struct WpAudioInputMix {
-    user_parameter: *mut c_void,
-    is_frame_ready: extern "C" fn(*mut c_void) -> bool,
-    get_frame: extern "C" fn(*mut c_void) -> *mut u8,
-}
-
-/// `WP_AUDIO_INPUT_FRAME_SIZE`: u8 samples (centre 128) per visualiser frame.
-pub const INPUT_FRAME: usize = 1024;
-
 unsafe extern "C" {
     fn wp_config_create() -> *mut c_void;
     fn wp_config_destroy(config: *mut c_void);
@@ -65,7 +55,19 @@ unsafe extern "C" {
     fn wp_context_destroy(context: *mut c_void);
     fn wp_context_set_gl_proc_address(context: *mut c_void, address: *mut WpGlProcAddress);
     fn wp_context_set_time_counter(context: *mut c_void, counter: *mut WpTimeCounter);
-    fn wp_context_set_audio_input_mix(context: *mut c_void, mix: *mut WpAudioInputMix);
+    fn wp_context_audio_input_push(
+        context: *mut c_void,
+        interleaved: *const f32,
+        frames: usize,
+        channels: c_int,
+        sample_rate: c_int,
+    );
+    fn wp_context_audio_spectrum(
+        context: *mut c_void,
+        resolution: c_int,
+        channel: c_int,
+        out: *mut f32,
+    ) -> bool;
     fn wp_context_audio_pull(context: *mut c_void, interleaved: *mut f32, frames: usize) -> usize;
     fn wp_context_audio_stream_count(context: *mut c_void) -> c_int;
     fn wp_context_audio_driver_name(context: *mut c_void) -> *const c_char;
@@ -171,24 +173,6 @@ extern "C" fn mouse_pressed(user: *mut c_void, button: c_int) -> c_int {
     unsafe { ((*(user as *const Pointer)).buttons.get() as c_int) & button }
 }
 
-/// The visualiser frame LWE takes once per `wp_render_update_time` (only when a new one came).
-struct InputMix {
-    ready: Cell<bool>,
-    frame: RefCell<[u8; INPUT_FRAME]>,
-}
-
-extern "C" fn input_ready(user: *mut c_void) -> bool {
-    unsafe { (*(user as *const InputMix)).ready.get() }
-}
-
-extern "C" fn input_frame(user: *mut c_void) -> *mut u8 {
-    unsafe {
-        let m = &*(user as *const InputMix);
-        m.ready.set(false);
-        m.frame.as_ptr() as *mut u8
-    }
-}
-
 /// Where scenes' scripts keep their `localStorage` (one JSON file per project):
 /// `LIASCAPE_SCENE_STORAGE_DIR`, else `$XDG_STATE_HOME/liascape/scene-storage` (`~/.local/state/…`).
 fn storage_dir() -> Option<std::path::PathBuf> {
@@ -219,8 +203,6 @@ pub struct Scene {
     time: Box<Cell<f32>>,
     _mouse: Box<WpMouseInput>,
     pointer: Box<Pointer>,
-    _mix: Box<WpAudioInputMix>,
-    input: Box<InputMix>,
     built: bool,
     /// the "now playing" feed (B10), for a scene that takes media events
     media: Option<crate::media::Media>,
@@ -288,18 +270,8 @@ impl Scene {
                 get_y: mouse_y,
                 is_pressed: mouse_pressed,
             });
-            let input = Box::new(InputMix {
-                ready: Cell::new(false),
-                frame: RefCell::new([128u8; INPUT_FRAME]),
-            });
-            let mut mix = Box::new(WpAudioInputMix {
-                user_parameter: &*input as *const InputMix as *mut c_void,
-                is_frame_ready: input_ready,
-                get_frame: input_frame,
-            });
             wp_context_set_gl_proc_address(context, &mut *proc);
             wp_context_set_time_counter(context, &mut *clock);
-            wp_context_set_audio_input_mix(context, &mut *mix);
             let project = wp_project_load_folder(context, &mut *mouse, cdir.as_ptr());
             let scene = Scene {
                 config,
@@ -310,8 +282,6 @@ impl Scene {
                 time,
                 _mouse: mouse,
                 pointer,
-                _mix: mix,
-                input,
                 built: false,
                 media: None,
             };
@@ -419,14 +389,31 @@ impl Scene {
         self.pointer.set.set(true);
     }
 
-    /// A new visualiser frame (≤ [`INPUT_FRAME`] u8 samples, centre 128), taken by the next
-    /// `wp_render_update_time` (LWE's FFT runs once per new frame).
-    pub fn set_input(&self, samples: &[u8]) {
-        let mut f = self.input.frame.borrow_mut();
-        let n = samples.len().min(INPUT_FRAME);
-        f[..n].copy_from_slice(&samples[..n]);
-        f[n..].fill(128);
-        self.input.ready.set(true);
+    /// System audio, interleaved stereo f32 at `rate` Hz, every frame in order (B8 "feed
+    /// stereo"): the core runs WE's analysis on each channel apart as the frames come
+    /// (`wp_context_audio_input_push`; render thread, between frames).
+    pub fn push_input(&self, interleaved: &[f32], rate: u32) {
+        let frames = interleaved.len() / 2;
+        if frames > 0 {
+            unsafe {
+                wp_context_audio_input_push(
+                    self.context,
+                    interleaved.as_ptr(),
+                    frames,
+                    2,
+                    rate as c_int,
+                )
+            };
+        }
+    }
+
+    /// The spectrum the scene sees this frame: `channel` 0 left, 1 right, 2 their average.
+    pub fn spectrum(&self, resolution: usize, channel: i32) -> Option<Vec<f32>> {
+        let mut out = vec![0f32; resolution];
+        unsafe {
+            wp_context_audio_spectrum(self.context, resolution as c_int, channel, out.as_mut_ptr())
+        }
+        .then_some(out)
     }
 
     /// Set one user property (`project.json` `general.properties`): a bool → boolean, a
@@ -643,8 +630,11 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// pointer-driven layer (a trail, parallax, a cursor-follow script) can be checked for direction.
 /// The core's build report (`WPENGINE_HEALTH`, fork patch 0061: each object built or dropped and why, shader /
 /// script / asset errors, each layer's canvas bbox at frames 1 and 31) goes to `<out>/health.json` beside the PNGs.
-/// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` every frame (synthetic: nothing is
-/// played), for audio-responsive scenes — compare with a run without it.
+/// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` (synthetic: nothing is played), 48 kHz
+/// stereo, every frame's samples in order — compare with a run without it. `--tone-channel left|right`
+/// puts it on one channel only (the other silent); `--tone noise` is white noise (every band, like music
+/// that fills the spectrum) at −6 dBFS RMS; `--tone-sweep HZ1` glides from `HZ` to `HZ1`
+/// (log, over the run). The JSON's `spectrum` is the 16-band left/right spectrum the scene saw last.
 /// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
 /// decoded by libmpv in real time, so an unpaced run (all of `S` s in a few ms) shows them black
 /// (3426575339, 3432876246, 3556794116). `--unpaced` renders as fast as it can, as before.
@@ -654,7 +644,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut out = None;
     let mut seconds = 3.0f32;
     let mut audio_dump = 0.0f32;
-    let mut tone = 0.0f32;
+    let mut tone = Tone::default();
     let mut paced = true;
     let mut pointer: Option<[f64; 4]> = None;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
@@ -672,7 +662,20 @@ pub fn smoke(args: &[String]) -> ! {
             "--out" => out = it.next().cloned(),
             "--seconds" => seconds = it.next().and_then(|v| v.parse().ok()).unwrap_or(3.0),
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
-            "--tone" => tone = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            "--tone" => {
+                tone.hz = match it.next().map(String::as_str) {
+                    Some("noise") => -1.0,
+                    v => v.and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                }
+            }
+            "--tone-sweep" => tone.to_hz = it.next().and_then(|v| v.parse().ok()),
+            "--tone-channel" => {
+                tone.gains = match it.next().map(String::as_str) {
+                    Some("left") => [1.0, 0.0],
+                    Some("right") => [0.0, 1.0],
+                    _ => [1.0, 1.0],
+                }
+            }
             "--unpaced" => paced = false,
             "--pointer" => {
                 pointer = it.next().and_then(|v| {
@@ -692,7 +695,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced]"
         );
         std::process::exit(2)
     };
@@ -774,7 +777,7 @@ fn run_smoke(
     out: &Path,
     seconds: f32,
     audio_dump: f32,
-    tone: f32,
+    tone: Tone,
     paced: bool,
     pointer: Option<[f64; 4]>,
     props: &[(String, serde_json::Value)],
@@ -844,6 +847,7 @@ fn run_smoke(
     let mut live = props_at.iter().filter(|_| audio_dump <= 0.0).peekable();
     let mut live_errors = Vec::new();
     let start = std::time::Instant::now();
+    let mut tone_phase = 0.0f64;
     for f in 1..=frames {
         let t = f as f32 / 30.0;
         if paced {
@@ -865,16 +869,10 @@ fn run_smoke(
                 }
             }
         }
-        if tone > 0.0 {
-            // LWE takes the input mix as 44.1 kHz: the frame's last INPUT_FRAME samples, phase-continuous
-            let end = (t * 44_100.0) as usize;
-            let sine: Vec<u8> = (end.saturating_sub(INPUT_FRAME)..end)
-                .map(|n| {
-                    let x = (std::f32::consts::TAU * tone * n as f32 / 44_100.0).sin();
-                    (128.0 + 127.0 * x).round() as u8
-                })
-                .collect();
-            scene.set_input(&sine);
+        if tone.hz != 0.0 {
+            // this frame's 1/30 s of the tone, in order, as the worker feeds system audio
+            let pcm = tone.render(&mut tone_phase, (f - 1) as f32 / 30.0, t, seconds);
+            scene.push_input(&pcm, SAMPLE_RATE as u32);
         }
         if let Some([x0, y0, x1, y1]) = pointer {
             let k = if frames > 1 { (f - 1) as f64 / (frames - 1) as f64 } else { 1.0 };
@@ -947,6 +945,10 @@ fn run_smoke(
         "audio_driver": scene.audio_driver(),
         "audio_streams": scene.audio_streams(),
         "audio_peak": peak,
+        "spectrum": {
+            "left": scene.spectrum(16, 0),
+            "right": scene.spectrum(16, 1),
+        },
         "shots": shots,
         "audio_dump": dump,
         "prop_errors": prop_errors,
@@ -957,6 +959,59 @@ fn run_smoke(
         return Err(format!("not animating or blank: {json}"));
     }
     Ok(json.to_string())
+}
+
+/// The smoke's synthetic visualiser input (`--tone`, `--tone-channel`, `--tone-sweep`).
+#[derive(Clone, Copy)]
+struct Tone {
+    hz: f32,
+    to_hz: Option<f32>,
+    gains: [f32; 2],
+}
+
+impl Default for Tone {
+    fn default() -> Tone {
+        Tone {
+            hz: 0.0,
+            to_hz: None,
+            gains: [1.0, 1.0],
+        }
+    }
+}
+
+impl Tone {
+    /// Interleaved stereo f32 at 48 kHz for scene time `t0..t1` (of a `len` s run),
+    /// phase-continuous through `phase` (cycles).
+    fn render(&self, phase: &mut f64, t0: f32, t1: f32, len: f32) -> Vec<f32> {
+        let rate = SAMPLE_RATE as f64;
+        let (a, b) = ((t0 as f64 * rate) as i64, (t1 as f64 * rate) as i64);
+        let mut v = Vec::with_capacity(((b - a).max(0) * 2) as usize);
+        if self.hz < 0.0 {
+            // white noise, uniform ±0.87 (≈ −6 dBFS RMS), an xorshift on the frame index
+            for n in a..b {
+                let mut x = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let u = (x >> 11) as f32 / (1u64 << 53) as f32 * 2.0 - 1.0;
+                v.extend([0.87 * u * self.gains[0], 0.87 * u * self.gains[1]]);
+            }
+            return v;
+        }
+        for n in a..b {
+            let hz = match self.to_hz {
+                Some(to) if to > 0.0 => {
+                    let k = (n as f64 / rate / len.max(0.001) as f64).clamp(0.0, 1.0);
+                    self.hz as f64 * (to as f64 / self.hz as f64).powf(k)
+                }
+                _ => self.hz as f64,
+            };
+            *phase = (*phase + hz / rate).fract();
+            let x = (std::f64::consts::TAU * *phase).sin() as f32;
+            v.extend([x * self.gains[0], x * self.gains[1]]);
+        }
+        v
+    }
 }
 
 /// `--audio-dump S` (Task 6 diagnostic): `S` seconds of the scene's sound pulled at 1× in real
