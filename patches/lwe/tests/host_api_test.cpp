@@ -4743,6 +4743,175 @@ static bool fog_and_depth () {
     return true;
 }
 
+// F1: a generic4 quad material (white, lit), and an invisible one (additive black, no depth write) for an occluder
+// that only casts its shadow
+static void f1_materials (const std::string& dir, ScriptRig& rig) {
+    rig.extra = b14_model (dir, "\"LIGHTING\":1,\"FOG\":0");
+    write_file (dir + "/models/f1occluder.mdl", b14_mdl ("materials/f1occluder.json"));
+    write_file (dir + "/materials/f1occluder.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"additive\",\"depthwrite\":\"disabled\","
+                                                    "\"textures\":[\"util/white\"],\"combos\":{\"LIGHTING\":0,\"FOG\":0},"
+                                                    "\"constantshadervalues\":{\"color\":\"0.0 0.0 0.0\"}}]}\n");
+    rig.extra.insert (rig.extra.end (), { "models/f1occluder.mdl", "materials/f1occluder.json" });
+}
+
+static const char* kF1Black = ",\"ambientcolor\":\"0 0 0\",\"skylightcolor\":\"0 0 0\"";
+// pixels per world unit at z 0 (the camera 10 units away, fov 50, 1080 rows)
+static constexpr double kF1PxPerUnit = 540.0 / (10.0 * 0.46630765815);
+
+// the floor (a 4 x 4 quad at z 0), a 1 x 1 occluder at z 1.5 and a light at z 3 over the centre: the centre pixel
+// and one 1.6 units to the right, outside the shadow
+static bool f1_shadow_scene (const std::string& light, bool occluderCasts, std::array<unsigned char, 4>& centre,
+                             std::array<unsigned char, 4>& side) {
+    const std::string objects = std::string ("{\"id\":1,\"name\":\"floor\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\",\"castshadow\":true},")
+        + "{\"id\":2,\"name\":\"occluder\",\"model\":\"models/f1occluder.mdl\",\"origin\":\"0 0 1.5\",\"scale\":\"0.25 0.25 0.25\","
+          "\"castshadow\":" + (occluderCasts ? "true" : "false") + "}," + light;
+    const std::string dir = world_scene (kF1Black, objects);
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    f1_materials (dir, rig);
+    if (!rig.open (dir)) {
+        return false;
+    }
+    rig.step ();
+    centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
+    side = pixel_xy (rig, kW3 / 2 + static_cast<int> (1.6 * kF1PxPerUnit), kH3 / 2);
+    return true;
+}
+
+// a light with castshadow draws the casters into the shadow atlas and the lit model samples it (WE's shadow pass,
+// GH 0x1401bf270 / GH 0x1401c4f30; PerformLighting_V1's shadowFactor, GH 0x140197e20): the floor under a 1 x 1
+// occluder is dark, beside it lit; the occluder without castshadow casts nothing. For a spot (one projected tile)
+// and a point light (six cube faces). Unpatched: shadowFactor was always 1, the centre lit
+static bool shadow_occludes_a_lit_point () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string spot = "{\"id\":3,\"name\":\"l\",\"light\":\"lspot\",\"origin\":\"0 0 3\",\"angles\":\"0 1.5707964 0\",\"color\":\"1.0 1.0 1.0\","
+                             "\"intensity\":4,\"radius\":20,\"exponent\":1,\"innercone\":40,\"outercone\":45,\"castshadow\":true}";
+    const std::string point = "{\"id\":3,\"name\":\"l\",\"light\":\"lpoint\",\"origin\":\"0 0 3\",\"color\":\"1.0 1.0 1.0\",\"intensity\":4,"
+                              "\"radius\":20,\"exponent\":1,\"castshadow\":true}";
+    for (const auto& [name, light] : { std::pair<const char*, std::string> { "spot", spot }, { "point", point } }) {
+        std::array<unsigned char, 4> openC {}, openS {}, shadowC {}, shadowS {};
+        CHECK (f1_shadow_scene (light, false, openC, openS), "load failed (%s, occluder without castshadow)", name);
+        CHECK (f1_shadow_scene (light, true, shadowC, shadowS), "load failed (%s, occluder casts)", name);
+        printf ("    %s: no caster centre %d side %d; caster centre %d (want dark) side %d (want lit)\n", name, openC[0], openS[0],
+                shadowC[0], shadowS[0]);
+        CHECK (openC[0] > 40 && openS[0] > 40, "%s: the floor isn't lit without a caster (centre %d, side %d)", name, openC[0], openS[0]);
+        CHECK (shadowC[0] < 10, "%s: the occluder's shadow doesn't darken the centre (%d)", name, shadowC[0]);
+        CHECK (near (shadowS[0], openS[0], 3), "%s: beside the shadow the floor changed (%d vs %d): acne or a wrong tile", name,
+               shadowS[0], openS[0]);
+    }
+    return true;
+}
+
+// a TEXV0005 / TEXB0003 ARGB8888 texture, `w` x `h`, no interpolation, clamped
+static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba) {
+    MdlWriter t;
+    t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
+    t.u32 (0).u32 (1 | 2).u32 (w).u32 (h).u32 (w).u32 (h).u32 (0);
+    t.out += std::string ("TEXB0003", 8) + '\0';
+    t.u32 (1).u32 (0xffffffff);
+    t.u32 (1).u32 (w).u32 (h).u32 (0).u32 (w * h * 4).u32 (w * h * 4);
+    for (const uint32_t px : rgba) {
+        t.u8 (px >> 24).u8 ((px >> 16) & 0xff).u8 ((px >> 8) & 0xff).u8 (px & 0xff);
+    }
+    return t.out;
+}
+
+// a spot with usecookie projects its `cookie` texture (GH 0x140282140 loads it, default cookie/flashlight1; the
+// generated loop multiplies the light by it inside the projection, GH 0x140197e20): a red | green cookie lights the
+// left of the floor red, the right green. Unpatched: white on both sides
+static bool cookie_projects_its_texture () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<std::array<unsigned char, 4>, 2> plain {}, cookie {};
+    for (const bool use : { false, true }) {
+        const std::string light = std::string ("{\"id\":3,\"name\":\"l\",\"light\":\"lspot\",\"origin\":\"0 0 3\",\"angles\":\"0 1.5707964 0\",")
+            + "\"color\":\"1.0 1.0 1.0\",\"intensity\":4,\"radius\":20,\"exponent\":1,\"innercone\":40,\"outercone\":45,"
+              "\"usecookie\":" + (use ? "true" : "false") + ",\"cookie\":\"f1cookie\"}";
+        const std::string dir = world_scene (kF1Black, std::string ("{\"id\":1,\"name\":\"floor\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\","
+                                                                   "\"castshadow\":false},") + light);
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        f1_materials (dir, rig);
+        write_file (dir + "/materials/f1cookie.tex", f1_texture (2, 1, { 0xff0000ff, 0x00ff00ff }));
+        rig.extra.push_back ("materials/f1cookie.tex");
+        CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+        rig.step ();
+        auto& out = use ? cookie : plain;
+        out[0] = pixel_xy (rig, kW3 / 2 - static_cast<int> (1.2 * kF1PxPerUnit), kH3 / 2);
+        out[1] = pixel_xy (rig, kW3 / 2 + static_cast<int> (1.2 * kF1PxPerUnit), kH3 / 2);
+    }
+    printf ("    no cookie: left %d %d %d, right %d %d %d; cookie: left %d %d %d (want red), right %d %d %d (want green)\n",
+            plain[0][0], plain[0][1], plain[0][2], plain[1][0], plain[1][1], plain[1][2], cookie[0][0], cookie[0][1], cookie[0][2],
+            cookie[1][0], cookie[1][1], cookie[1][2]);
+    CHECK (plain[0][0] > 40 && near (plain[0][0], plain[0][1], 3) && near (plain[1][0], plain[1][1], 3), "without a cookie the light isn't white");
+    CHECK (cookie[0][0] > 40 && cookie[0][1] < 8 && cookie[0][2] < 8, "the cookie's red half doesn't light the left");
+    CHECK (cookie[1][1] > 40 && cookie[1][0] < 8 && cookie[1][2] < 8, "the cookie's green half doesn't light the right");
+    return true;
+}
+
+// the stock shadow casters build (their vertex unit writes gl_ViewportIndex: the cube faces and cascades are drawn one
+// viewport at a time instead), and so does generic4 with shadows and cookies on (unpatched: the casters failed,
+// "gl_ViewportIndex … not supported" at GLSL 3.30; the shadow sampler's .r on a float)
+static bool shadow_casters_compile () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\"}");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = b14_model (dir, "\"LIGHTING\":1");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    const std::pair<const char*, const char*> checks[] = {
+        { "shadowcaster", "{}" },
+        { "shadowcaster", "{\"combos\":{\"ALPHATOCOVERAGE\":1}}" },
+        { "shadowcasterfoliage4", "{}" },
+        { "shadowcasterfoliage4", "{\"combos\":{\"ALPHATOCOVERAGE\":1}}" },
+        { "shadowcasterfur4", "{}" },
+        { "generic4", "{\"combos\":{\"LIGHTING\":1,\"LIGHTS_SHADOW_MAPPING\":1,\"LIGHTS_SHADOW_MAPPING_QUALITY\":2,\"LIGHTS_COOKIE\":1}}" },
+        { "generic4", "{\"combos\":{\"LIGHTING\":1,\"LIGHTS_SHADOW_MAPPING\":1,\"LIGHTS_SHADOW_MAPPING_QUALITY\":1,\"LIGHTS_DIRECTIONAL\":2}}" },
+    };
+    bool ok = true;
+    for (const auto& [shader, request] : checks) {
+        std::string out (8192, '\0');
+        wp_project_shader_check (rig.p, shader, request, out.data (), out.size ());
+        out.resize (strlen (out.c_str ()));
+        const bool built = out.find ("\"ok\":true") != std::string::npos;
+        printf ("    %s %s: %s\n", shader, request, built ? "ok" : out.substr (0, 400).c_str ());
+        ok = ok && built;
+    }
+    CHECK (ok, "a shadow shader didn't build");
+    return true;
+}
+
+// a tube light lights from the nearest point of its segment (origin to `controlpoint`, GH 0x1401bf270's second
+// loop: g_LCluster_Direction = the far end) and a directional light from its −x axis at any distance
+// (g_LDirectional_*, ComputePBRLightShadowInfinite); unpatched both were "Other" lights, the quad black
+static bool tube_and_directional_lights () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<unsigned char, 4> tube {}, tubeFar {}, directional {}, away {};
+    const std::string t = ",{\"id\":2,\"name\":\"l\",\"light\":\"ltube\",\"color\":\"1.0 1.0 1.0\",\"intensity\":4,\"radius\":20,\"exponent\":1,"
+                          "\"controlpoint\":\"8 0 0\"";
+    CHECK (model_centre (kF1Black, "\"LIGHTING\":1,\"FOG\":0", t + ",\"origin\":\"-4 0 1\"}", tube), "load failed (tube)");
+    CHECK (model_centre (kF1Black, "\"LIGHTING\":1,\"FOG\":0", t + ",\"origin\":\"-4 0 18\"}", tubeFar), "load failed (tube far)");
+    const std::string d = ",{\"id\":2,\"name\":\"l\",\"light\":\"ldirectional\",\"origin\":\"40 0 300\",\"color\":\"1.0 1.0 1.0\",\"intensity\":1";
+    CHECK (model_centre (kF1Black, "\"LIGHTING\":1,\"FOG\":0", d + ",\"angles\":\"0 1.5707964 0\"}", directional), "load failed (directional)");
+    CHECK (model_centre (kF1Black, "\"LIGHTING\":1,\"FOG\":0", d + ",\"angles\":\"0 -1.5707964 0\"}", away), "load failed (directional away)");
+    printf ("    tube 1 unit over the quad %d, 18 units %d; directional at it %d, away %d\n", tube[0], tubeFar[0], directional[0], away[0]);
+    CHECK (tube[0] > 40 && tube[0] == tube[1], "the tube light doesn't light the quad");
+    CHECK (tubeFar[0] < tube[0], "the tube's falloff doesn't fall off");
+    CHECK (directional[0] > 40, "the directional light doesn't light the quad");
+    CHECK (away[0] < 8, "the directional light pointing away lights the quad");
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -4822,6 +4991,10 @@ int main (int argc, char** argv) {
     run ("layer_tilts_and_moves_in_depth", layer_tilts_and_moves_in_depth);
     run ("model_draws_and_lights", model_draws_and_lights);
     run ("fog_and_depth", fog_and_depth);
+    run ("shadow_casters_compile", shadow_casters_compile);
+    run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
+    run ("cookie_projects_its_texture", cookie_projects_its_texture);
+    run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
