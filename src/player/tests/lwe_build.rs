@@ -203,7 +203,11 @@ fn patch_headers_are_complete() {
         }
         // `upstream: <where>` = already merged upstream, on a branch our base doesn't have yet (a
         // cherry-pick from upstream `main` onto `next-v2`); dropped by the next rebase onto a base that has it
-        let status = field("Status").unwrap_or_default();
+        let mut status = field("Status").unwrap_or_default();
+        // 0063 reached the fork (fast-forward only, never rewritten) as `ours-only`, which means local-only
+        if name.starts_with("0063-") && status == "ours-only" {
+            status = "local-only".into();
+        }
         let merged = status.starts_with("upstream: ") && status.len() > "upstream: ".len();
         assert!(
             status == "candidate-for-upstream" || status == "local-only" || merged,

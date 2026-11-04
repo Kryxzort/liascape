@@ -2329,6 +2329,111 @@ static bool shaders_compile_like_hlsl () {
     return true;
 }
 
+// One layer drawn with the given units (plus `files`: {path, text} beside them); its centre pixel
+static bool hlsl_layer_draws (const std::string& vert, const std::string& frag,
+                              const std::vector<std::pair<std::string, std::string>>& files, int r, int g, int b) {
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "", "");
+    write_file (dir + "/shaders/b9.vert", vert);
+    write_file (dir + "/shaders/b9.frag", frag);
+    for (const auto& [path, text] : files) {
+        write_file (dir + "/" + path, text);
+    }
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    read_pixel (rig.fbo, 16, 16, px);
+    printf ("    the layer's centre: %d %d %d\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], r, 3) && near (px[1], g, 3) && near (px[2], b, 3), "want %d %d %d, got %d %d %d (the clear = the layer didn't build)",
+           r, g, b, px[0], px[1], px[2]);
+    return true;
+}
+
+static const char* kHlslVert = "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                               "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n}\n";
+
+// WE pastes an include where its `#include` line is (GH 0x1401917f0), and only a line that starts with `#include`
+// is one; its uniforms are declared ahead of all code (cbuffers, GH 0x140125e80). So a function above main may use
+// an include's #define (3235948233's auto_sway uses common.h's M_PI there; LWE pasted includes just before main),
+// an include may read a uniform the unit declares below the #include (common_blur.h samples g_Texture0), and a
+// commented-out #include of a missing file is nothing. Draws 255 128 0 (unpatched: M_PI_HALF undeclared, the clear)
+static bool shaders_include_in_place () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    return hlsl_layer_draws (
+        kHlslVert,
+        "#include \"b9inc.h\"\n// #include \"nowhere.h\"\n"
+        "float half_of_one () { return HALF_PI_RATIO; }\n"
+        "uniform float u_Red; // {\"material\":\"red\",\"default\":1}\n"
+        "void main() {\n\tgl_FragColor = vec4(red_of (), half_of_one (), 0.0, 1.0);\n}\n",
+        { { "shaders/b9inc.h", "#define HALF_PI_RATIO (M_HALF / 2.0)\n#define M_HALF 1.0\nfloat red_of () { return u_Red; }\n" } },
+        255, 128, 0);
+}
+
+// The fragment unit's varyings are the vertex unit's outputs, with the vertex's types (WE's PS input is its
+// VS_OUTPUT struct, GH 0x140125e80): a fragment declaring `varying vec2 v_T` against a vertex `varying vec4 v_T`
+// reads the vec4, truncated as HLSL does where it's used as a vec2 (2846673187's audio ring; LWE linked a vec2 input
+// to a vec4 output and the driver refused SPIRV-Cross's `vec2 = vec4`, C7011). Draws 255 128 0
+static bool fragment_varying_takes_vertex_type () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    return hlsl_layer_draws (
+        "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nvarying vec4 v_T;\n"
+        "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_T = vec4(0.5, 0.25, 9.0, 9.0);\n}\n",
+        "varying vec2 v_T;\nvoid main() {\n\tvec2 p = v_T;\n\tgl_FragColor = vec4(p * 2.0, 0.0, 1.0);\n}\n", {}, 255, 128, 0);
+}
+
+// HLSL's conversions, which FXC (WE's compiler) applies and GLSL refuses: a bool into an int, a scalar into a vector,
+// a vec4 into a vec2 (an initializer, not just an operand), a float as a condition (ternary and if), a local const
+// set from a uniform, a global const set from a uniform (a static const: FXC initialises it before main) — the
+// library's color_grading, Simple_Audio_Bars, frame_builder, clipping_mask, oscilloscope. Draws 255 128 64
+static bool hlsl_conversions_compile () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    return hlsl_layer_draws (
+        kHlslVert,
+        "uniform float u_One; // {\"material\":\"one\",\"default\":1}\n"
+        "const float g_Half = u_One * 0.5;\n"
+        "void main() {\n"
+        "\tint hit = 0.25 < 0.5;\n"
+        "\tvec3 c = 0.25;\n"
+        "\tconst float local = u_One * 0.25;\n"
+        "\tvec4 wide = vec4(g_Half, 0.25, 9.0, 9.0);\n"
+        "\tvec2 n = wide;\n"
+        "\tvec4 clip = vec4(n * 2.0, 0.0, 1.0) + vec4(0.0, 0.0, 0.0, 0.0);\n"
+        "\tfloat yes = 1.0;\n"
+        "\tvec4 picked = yes ? clip : vec4(0.0, 0.0, 0.0, 1.0);\n"
+        "\tif (yes) { picked.b = local + c.b * 0.0; }\n"
+        "\tgl_FragColor = vec4(picked.r * float(hit), picked.g, picked.b, 1.0);\n"
+        "}\n",
+        {}, 255, 128, 64);
+}
+
+// Names and leftovers HLSL lets through: a variable called `input` (GLSL reserves it; 3573886911's
+// custom_user_texture), a user function overloading an intrinsic the header has as a macro (`float log10 (float)`,
+// 2812601803's tone_mapping), WE's header macros (CASTF, the stock fur4), a function with no return on the combo
+// path when nothing calls it (2821337237's shadow_map with SHADOWMASK 0), an #if a preprocessor can't read guarding
+// broken code (3042492564's aa_gaussian: `#if g_Texture0Resolution.y <= 640`, false in WE), a vertex unit writing its
+// attribute (3088030303's shadow) and a declared gl_ built-in (the stock shadow casters). Draws 255 128 0
+static bool hlsl_names_and_leftovers_compile () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    return hlsl_layer_draws (
+        "uniform mat4 g_ModelViewProjectionMatrix;\nuniform vec4 g_Texture0Resolution;\nattribute vec3 a_Position;\nin uint gl_InstanceID;\n"
+        "void main() {\n\ta_Position.z = 0.0;\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+        "#if g_Texture0Resolution.y <= 640\n\tgl_Position = 0\n#endif\n}\n",
+        "float log10 (float x) { return log(x) / log(10.0); }\n"
+        "vec3 unused (vec2 uv) {\n#if 0\n\treturn vec3(uv, 0.0);\n#endif\n}\n"
+        "void main() {\n\tfloat input = log10 (10.0);\n\tvec2 two = log10 (vec2(10.0, 10.0));\n"
+        "\tgl_FragColor = vec4(input * CASTF(1), two.y * 0.5, 0.0, 1.0);\n}\n",
+        {}, 255, 128, 0);
+}
+
 // WPENGINE_HEALTH=<path>: the core writes what it built and what it left out as JSON lines — a layer whose shaders
 // don't compile is `dropped` (its glslang error a `shader_error` naming the layer and shader), a script that throws is a
 // `script_error` with its layer and property, and each drawn layer's canvas bbox (y down) at frame 1 is in `layers`, so a
@@ -4683,6 +4788,10 @@ int main (int argc, char** argv) {
     run ("particle_pointer_is_y_down", particle_pointer_is_y_down);
     run ("script_angles_are_degrees", script_angles_are_degrees);
     run ("shaders_compile_like_hlsl", shaders_compile_like_hlsl);
+    run ("shaders_include_in_place", shaders_include_in_place);
+    run ("fragment_varying_takes_vertex_type", fragment_varying_takes_vertex_type);
+    run ("hlsl_conversions_compile", hlsl_conversions_compile);
+    run ("hlsl_names_and_leftovers_compile", hlsl_names_and_leftovers_compile);
     run ("health_reports_what_was_dropped", health_reports_what_was_dropped);
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("hidden_parent_hides_children", hidden_parent_hides_children);

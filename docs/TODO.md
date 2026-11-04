@@ -1175,19 +1175,21 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
-          features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96. Rerun on pin `deeb4da`
-          (shader 0063–0064 + coverage 0065–0070): 86 clean, 10 degraded, 0 failed; script errors 38 → 11, effects
-          dropped 57 → 0 (the shader patches), layers dropped 3 → 0, no scene worse. Batched by cause:
+          features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96; after the shader rules (0064):
+          79 clean, 17 degraded; after the coverage batch (0065–0070, pin `deeb4da`): 86 clean, 10 degraded, 0 failed —
+          script errors 38 → 11, layers dropped 3 → 0, none worse. Batched by cause:
           - [x] script `thisLayer.getTransformMatrix()` not a function (5 scenes; + the `.x of undefined` that follows
                 it, 7) — a missing ILayer API. Done in the coverage batch (0065, below).
-          - [ ] GL `C7011 implicit cast from vec4 to vec2` after glslang accepted the source (4 scenes; drops the
-                `音频光环` / `test_shader` compose layers of 3243449890, 3184155462 whole — the top losses).
-          - [ ] glslang `'M_PI' undeclared` — `auto_sway` (3 scenes, 14 layers; the item above).
-          - [ ] glslang `syntax error, unexpected DOT` (3: chromatic_aberration, clipping_mask) and `unexpected
-                LEFT_PAREN` (2: tone_mapping — drops 3432999904's compose layer).
-          - [ ] glslang `'input' : Reserved word` (custom_user_texture, 24 layers of 3516106265), `non-constant
-                initializer` (3354740764's color grading, 30 % of its canvas), `function does not return a value`,
-                `l-value required a_TexCoord`, `boolean expression expected`, `#if unexpected tokens` (1 scene each).
+          - [x] **Shaders WE accepts — done (2026-11-04, fork patches 0063–0064, pin `affeeba`)**: WE's own shader path
+                ported (includes in place, declarations hoisted as its cbuffers, fragment varyings typed by the vertex
+                unit, its header macros) plus HLSL's conversions from glslang's errors; the earlier `auto_sway` / 左白巾
+                vanish was the writable-varying copy filled only in the first of three `main`s. Cleared every shader
+                row (C7011, M_PI, DOT, LEFT_PAREN, input, non-constant initializer, no return, l-value, boolean
+                expression, #if tokens). Health: 75 → 79 clean, 21 → 17 degraded, 0 shader errors left, none worse.
+                Shader sweep (`src/player/tests/onmachine/shader_sweep.py`, 4085 compiles of 124 stock + 272 library
+                shaders): 313 → 47 failures, each explained in the audit's "Shader preprocessing result".
+                Left: the stock shadow casters write `gl_ViewportIndex` from the vertex unit (GLSL 4.10; LWE has no
+                shadow pass); WE's own `TEX<n>FORMAT` per bound texture (LWE: 0 for all but texture 0).
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.

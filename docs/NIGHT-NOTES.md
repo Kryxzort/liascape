@@ -346,6 +346,21 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     vanish, so I left it off — in TODO); "WEDNESDAY" still touches the right edge.
   - Corpus 96/96 ok on both cores, none newly blank; host_api_test 71/71 (3 new, red before); player tests 740/0/3.
 
+- **Shaders now compile the way Wallpaper Engine's do (fork patches 0063–0064, pin `affeeba`).** I read how WE itself
+  prepares its shaders (it turns them into Direct3D shaders and compiles them with Microsoft's compiler) and made LWE
+  follow the same rules: include files land where the `#include` line is, the shader's declarations are visible to all
+  of its code, the pixel stage sees the vertex stage's outputs with their real types, and Microsoft's looser rules
+  (automatic conversions, scalar conditions, constants set from settings, …) are emulated. A new "shader sweep" compiles
+  all of WE's own 124 shaders and the 272 custom ones in your library in every combination of their options without
+  drawing: 313 failing compiles → 47, all explained (WE's shadow-casting shaders, which LWE doesn't use yet, and a few
+  option combinations the shaders' authors left broken — WE can't build those either).
+  - Scene health: **79 clean / 17 degraded** (was 75 / 21), none worse; no shader errors left — the rest are script
+    APIs and two unsupported features. 3243449890 gets its audio ring and the triangle clock clips back, 3219908811 its
+    blossom background, 2815800031 / 2469881470 the chromatic aberration, 3354740764 colour grading + tone mapping +
+    CRT, 3432999904 its tone-mapped compose layer, 3414858021 / 3516174947 / 3243449890 the hair and cloth sway.
+  - **3414858021: the left white cloth (左白巾) now sways and stays visible** — the earlier "it vanishes" was a bug in
+    how LWE copied a value the shader modifies: the shader has three versions of its main function and only the first
+    (unused) one got the copy.
 ## 2026-11-04 evening — Wallpaper Engine coverage audit + the SceneScript API
 
 - **The master gap list: `docs/player/spikes/we-coverage.md`.** Everything Wallpaper Engine supports, item by item,

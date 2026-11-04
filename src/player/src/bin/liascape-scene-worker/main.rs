@@ -118,6 +118,10 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--lwe-smoke") {
         lwe::smoke(&std::env::args().skip(1).collect::<Vec<_>>());
     }
+    #[cfg(feature = "lwe")]
+    if std::env::args().nth(1).as_deref() == Some("--shader-sweep") {
+        lwe::shader_sweep(&std::env::args().skip(1).collect::<Vec<_>>());
+    }
     // `liascape-player scene-check` asks what this build can render.
     if std::env::args().nth(1).as_deref() == Some("--features") {
         let mut f = vec!["stub", "synthetic"];
