@@ -2335,3 +2335,10 @@ failing; the 6 left are as in F1 (`puppettexturechannels`' BLENDROWCOUNT, two wo
 "WE: an engine texel uniform declared" applies to 3 checks.
 
 **Health**: see the refreshed `scene-health.md` (the commit after the pin).
+
+Player tests (DEBUG, pin `1072720`): 740 run, 729 passed, 3 ignored, 11 failed in the full run under a load of 10–26
+(another agent's build): `align_end_hands_off_as_a_last_frame_ends`, `i5_open_burst_is_capped_and_none_lost`,
+`i6_every_onset_waits_for_flowing_audio`, `outbox_is_bounded`, `outbox_persists_across_restart_and_acks`,
+`render_worker_never_composes_a_torn_frame`, `render_worker_quit_is_bounded`, `scene_over_vram_limit_is_stopped_not_crashed`,
+`scene_path_changes_and_folder_spellings_share_one_measurement`, `scene_reopen_continues_the_end_of_play_measurement`,
+`scene_worker_exit_never_skips_bus_cycles` (timeouts and timing). Each passed alone.
