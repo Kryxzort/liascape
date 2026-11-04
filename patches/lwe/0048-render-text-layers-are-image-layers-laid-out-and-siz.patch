@@ -1,7 +1,7 @@
 From 45eb8c9f0c7175e46ac64e9e20d4973393c191ff Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 07:12:49 +0530
-Subject: [PATCH 48/62] render: text layers are image layers, laid out and
+Subject: [PATCH 48/64] render: text layers are image layers, laid out and
  sized the way Wallpaper Engine does
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

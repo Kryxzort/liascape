@@ -94,3 +94,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0060-render-a-parent-that-wasn-t-built-still-places-its-c.patch` | render: a parent that wasn't built still places its children | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0061-core-a-scene-health-report-WPENGINE_HEALTH.patch` | core: a scene health report (WPENGINE_HEALTH) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0062-core-a-health-script-error-carries-the-line-it-point.patch` | core: a health script error carries the line it points at | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0063-core-a-shader-sweep-wp_project_shader_check.patch` | core: a shader sweep (wp_project_shader_check) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0064-render-preprocess-shaders-by-WE-s-rules-and-compile-.patch` | render: preprocess shaders by WE's rules, and compile them with HLSL's | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

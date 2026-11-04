@@ -1,23 +1,23 @@
 {
- "generated": "2026-11-04 17:06 IST",
+ "generated": "2026-11-04 18:39 IST",
  "run": {
   "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
   "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
-  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/health/src/player/target/release/liascape-scene-worker",
+  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/shaders/src/player/target/release/liascape-scene-worker",
   "seconds": 3,
-  "started": "2026-11-04T16:52:55+05:30",
-  "commit": "a8feb36+dirty",
-  "lwe": "dev:/home/kryxzort/.cache/liascape/src/lwe-health",
-  "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
-  "pin": "42f301d76c55"
+  "started": "2026-11-04T18:30:09+05:30",
+  "commit": "75541ba+dirty",
+  "lwe": "dev:/home/kryxzort/.cache/liascape/src/lwe-shaders",
+  "pin": "42f301d76c55",
+  "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
  },
- "commit": "a8feb36",
+ "commit": "9d3fdf4",
  "summary": {
-  "clean": 75,
-  "degraded": 21,
+  "clean": 79,
+  "degraded": 17,
   "failed": 0,
   "total": 96,
-  "clean_with_warnings": 32
+  "clean_with_warnings": 34
  },
  "causes": [
   {
@@ -95,108 +95,6 @@
    ]
   },
   {
-   "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-   "severity": "error",
-   "scenes": [
-    "3184155462",
-    "3219908811",
-    "3243449890",
-    "3477054430"
-   ],
-   "scene_count": 4,
-   "occurrences": 6,
-   "kinds": {
-    "dropped": 2,
-    "effect_dropped": 4
-   },
-   "examples": [
-    {
-     "scene": "3184155462",
-     "object": 391,
-     "object_name": "Audio Visualizer"
-    },
-    {
-     "scene": "3219908811",
-     "object": 713,
-     "object_name": "纯色",
-     "effect_name": "音频光环"
-    },
-    {
-     "scene": "3243449890",
-     "object": 1043,
-     "object_name": "音频光环"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: 'M_PI' : undeclared identifier",
-   "severity": "error",
-   "scenes": [
-    "3243449890",
-    "3414858021",
-    "3516174947"
-   ],
-   "scene_count": 3,
-   "occurrences": 14,
-   "kinds": {
-    "effect_dropped": 14
-   },
-   "examples": [
-    {
-     "scene": "3243449890",
-     "object": 4879,
-     "object_name": "右飘带",
-     "effect_name": "Auto Sway"
-    },
-    {
-     "scene": "3414858021",
-     "object": 349,
-     "object_name": "左白巾",
-     "effect_name": "Auto Sway"
-    },
-    {
-     "scene": "3516174947",
-     "object": 173,
-     "object_name": "树",
-     "effect_name": "Auto Sway"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-   "severity": "error",
-   "scenes": [
-    "2469881470",
-    "2815800031",
-    "3243449890"
-   ],
-   "scene_count": 3,
-   "occurrences": 7,
-   "kinds": {
-    "effect_dropped": 7
-   },
-   "examples": [
-    {
-     "scene": "2469881470",
-     "object": 68,
-     "object_name": "emilia5",
-     "effect_name": "Chromatic Aberration"
-    },
-    {
-     "scene": "2815800031",
-     "object": 42,
-     "object_name": "astro sin",
-     "effect_name": "Chromatic Aberration"
-    },
-    {
-     "scene": "3243449890",
-     "object": 4149,
-     "object_name": "帧率三角",
-     "effect_name": "Clipping mask"
-    }
-   ]
-  },
-  {
    "cause": "script: TypeError: cannot read property 'copy' of undefined",
    "severity": "error",
    "scenes": [
@@ -227,33 +125,6 @@
      "object": 35,
      "object_name": "Simple Visualizer",
      "property": "visible"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON",
-   "severity": "error",
-   "scenes": [
-    "3354740764",
-    "3432999904"
-   ],
-   "scene_count": 2,
-   "occurrences": 3,
-   "kinds": {
-    "effect_dropped": 2,
-    "dropped": 1
-   },
-   "examples": [
-    {
-     "scene": "3354740764",
-     "object": 485,
-     "object_name": "breaked window",
-     "effect_name": "Tone mapping"
-    },
-    {
-     "scene": "3432999904",
-     "object": 62,
-     "object_name": "anh sang baotaobao"
     }
    ]
   },
@@ -366,26 +237,6 @@
    ]
   },
   {
-   "cause": "glslang: 'input' : Reserved word.",
-   "severity": "error",
-   "scenes": [
-    "3516106265"
-   ],
-   "scene_count": 1,
-   "occurrences": 24,
-   "kinds": {
-    "effect_dropped": 24
-   },
-   "examples": [
-    {
-     "scene": "3516106265",
-     "object": 236,
-     "object_name": "Launcher 1",
-     "effect_name": "Custom User Texture"
-    }
-   ]
-  },
-  {
    "cause": "missing usertexture: launcherN",
    "severity": "error",
    "scenes": [
@@ -421,106 +272,6 @@
     {
      "scene": "3319542538",
      "property": "pub"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: '' : boolean expression expected",
-   "severity": "error",
-   "scenes": [
-    "3516106265"
-   ],
-   "scene_count": 1,
-   "occurrences": 2,
-   "kinds": {
-    "effect_dropped": 2
-   },
-   "examples": [
-    {
-     "scene": "3516106265",
-     "object": 228,
-     "object_name": "Background | Logic",
-     "effect_name": "Frame Builder by Gariam"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: '#if' : unexpected tokens following directive",
-   "severity": "error",
-   "scenes": [
-    "3042492564"
-   ],
-   "scene_count": 1,
-   "occurrences": 1,
-   "kinds": {
-    "effect_dropped": 1
-   },
-   "examples": [
-    {
-     "scene": "3042492564",
-     "object": 339,
-     "object_name": "Music Cover",
-     "effect_name": "AA"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: '' : function does not return a value: ShadowMask",
-   "severity": "error",
-   "scenes": [
-    "3354740764"
-   ],
-   "scene_count": 1,
-   "occurrences": 1,
-   "kinds": {
-    "effect_dropped": 1
-   },
-   "examples": [
-    {
-     "scene": "3354740764",
-     "object": 519,
-     "object_name": "Reloj",
-     "effect_name": "CRT screen"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: 'assign' : l-value required \"a_TexCoord\" (can't modify shader input)",
-   "severity": "error",
-   "scenes": [
-    "3479521040"
-   ],
-   "scene_count": 1,
-   "occurrences": 1,
-   "kinds": {
-    "effect_dropped": 1
-   },
-   "examples": [
-    {
-     "scene": "3479521040",
-     "object": 264,
-     "object_name": "VHS Time and Date",
-     "effect_name": "Shadow"
-    }
-   ]
-  },
-  {
-   "cause": "glslang: 'non-constant initializer' : not supported for this version or the enabled extensions",
-   "severity": "error",
-   "scenes": [
-    "3354740764"
-   ],
-   "scene_count": 1,
-   "occurrences": 1,
-   "kinds": {
-    "effect_dropped": 1
-   },
-   "examples": [
-    {
-     "scene": "3354740764",
-     "object": 16,
-     "object_name": "Bliss",
-     "effect_name": "Color Grading"
     }
    ]
   },
@@ -1053,6 +804,104 @@
   }
  ],
  "compat": {
+  "WE: declarations hoisted above the includes": [
+   "1155728109",
+   "1160682576",
+   "1174926427",
+   "1195626192",
+   "1264170639",
+   "1556245028",
+   "1726902114",
+   "1797172968",
+   "1864677589",
+   "1884904087",
+   "1934084447",
+   "2047150134",
+   "2064316482",
+   "2134765860",
+   "2182433068",
+   "2189783622",
+   "2219762084",
+   "2288455459",
+   "2290002190",
+   "2325974975",
+   "2371103399",
+   "2375914945",
+   "2388299037",
+   "2469881470",
+   "2511663284",
+   "2542468435",
+   "2561227934",
+   "2638125030",
+   "2672425887",
+   "2679248947",
+   "2679885269",
+   "2683776412",
+   "2694785040",
+   "2783122117",
+   "2815800031",
+   "2828233985",
+   "2883756643",
+   "2886313155",
+   "2890767643",
+   "2905264428",
+   "2921510865",
+   "2932157836",
+   "2951169110",
+   "3013489778",
+   "3019192537",
+   "3022080536",
+   "3023509773",
+   "3028473503",
+   "3029971128",
+   "3042492564",
+   "3042865984",
+   "3046119914",
+   "3089687436",
+   "3104056709",
+   "3134525336",
+   "3163060610",
+   "3174556087",
+   "3184155462",
+   "3219908811",
+   "3233141951",
+   "3243449890",
+   "3276522107",
+   "3289734539",
+   "3291729669",
+   "3291745179",
+   "3309103316",
+   "3319542538",
+   "3326873240",
+   "3354740764",
+   "3363252053",
+   "3366535880",
+   "3387433141",
+   "3395587987",
+   "3413117423",
+   "3414858021",
+   "3419466417",
+   "3422085307",
+   "3422383300",
+   "3426575339",
+   "3432876246",
+   "3432999904",
+   "3445973124",
+   "3461192631",
+   "3463520581",
+   "3477054430",
+   "3478602089",
+   "3479521040",
+   "3480481965",
+   "3489263099",
+   "3490034653",
+   "3509243656",
+   "3516106265",
+   "3516174947",
+   "3556794116",
+   "3593587273",
+   "3749550751"
+  ],
   "shader: fragment writes to varyings (copied to globals)": [
    "2469881470",
    "2815800031",
@@ -1082,6 +931,15 @@
    "3516106265",
    "3516174947"
   ],
+  "WE: a fragment varying takes the vertex unit's type": [
+   "2883756643",
+   "3184155462",
+   "3219908811",
+   "3243449890",
+   "3354740764",
+   "3477054430",
+   "3490034653"
+  ],
   "shader replaced by its zcompat copy": [
    "2134765860",
    "2388299037",
@@ -1095,42 +953,69 @@
    "3243449890",
    "3414858021"
   ],
+  "WE: a GLSL-reserved name renamed": [
+   "2388299037",
+   "3414858021",
+   "3516106265"
+  ],
+  "WE: a user function overloads an HLSL intrinsic": [
+   "3354740764",
+   "3432999904"
+  ],
+  "WE: a declared gl_ built-in dropped": [
+   "3477054430",
+   "3509243656"
+  ],
   "shader: vertex-only varyings declared in the fragment": [
    "2189783622"
   ],
   "shader: fragment TexCoord vec2 compatibility": [
    "3013489778"
   ],
+  "WE: an unreadable #if is false": [
+   "3042492564"
+  ],
+  "HLSL: a static const global initialised in main": [
+   "3184155462"
+  ],
+  "HLSL: a function missing its return returns zero": [
+   "3354740764"
+  ],
+  "HLSL: a local const with a run-time initializer": [
+   "3354740764"
+  ],
   "file found ignoring case": [
    "3354740764"
   ],
   "glslang: backslash line continuation spliced": [
    "3414858021"
+  ],
+  "WE: vertex writes to attributes (copied to globals)": [
+   "3479521040"
+  ],
+  "HLSL: a scalar condition": [
+   "3516106265"
   ]
  },
  "fonts_substituted": [],
  "ranked": [
-  "3243449890",
-  "3354740764",
-  "3432999904",
-  "3219908811",
-  "3184155462",
-  "2815800031",
-  "3516174947",
   "3516106265",
-  "3414858021",
   "2890767643",
-  "2469881470",
-  "3477054430",
   "3319542538",
   "3326873240",
   "3042865984",
-  "3042492564",
+  "3243449890",
+  "3516174947",
+  "2469881470",
   "2828233985",
+  "3477054430",
   "3509243656",
   "2932157836",
+  "3042492564",
   "3163060610",
-  "3479521040"
+  "3219908811",
+  "3354740764",
+  "3432999904"
  ],
  "scenes": [
   {
@@ -1146,21 +1031,23 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.417927,
-   "build_ms": 179.942624,
-   "frame_ms_mean": 0.7302598777777779,
-   "frame_ms_p95": 1.932687,
+   "load_ms": 1.108796,
+   "build_ms": 246.619961,
+   "frame_ms_mean": 0.4493138,
+   "frame_ms_p95": 1.3735,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1155728109/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1155728109/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1155728109/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1155728109/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1176,21 +1063,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.208843,
-   "build_ms": 211.992243,
-   "frame_ms_mean": 0.9830978222222222,
-   "frame_ms_p95": 2.1390900000000004,
+   "load_ms": 1.083978,
+   "build_ms": 254.68798599999997,
+   "frame_ms_mean": 0.6168916555555556,
+   "frame_ms_p95": 1.155149,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1160682576/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1160682576/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1160682576/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1160682576/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1206,21 +1095,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.902623,
-   "build_ms": 124.826202,
-   "frame_ms_mean": 0.7851775111111108,
-   "frame_ms_p95": 2.0553559999999997,
+   "load_ms": 0.8515820000000001,
+   "build_ms": 139.69445,
+   "frame_ms_mean": 0.3971603666666666,
+   "frame_ms_p95": 0.899479,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1174926427/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1174926427/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1174926427/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1174926427/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1236,21 +1127,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 35.061815,
-   "build_ms": 394.316552,
-   "frame_ms_mean": 1.347242666666667,
-   "frame_ms_p95": 2.639389,
+   "load_ms": 1.079433,
+   "build_ms": 424.372921,
+   "frame_ms_mean": 1.188508,
+   "frame_ms_p95": 1.409408,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1195626192/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1195626192/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1195626192/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1195626192/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1266,21 +1159,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.240388,
-   "build_ms": 261.692841,
-   "frame_ms_mean": 0.9453629666666664,
-   "frame_ms_p95": 1.876523,
+   "load_ms": 1.260656,
+   "build_ms": 362.827762,
+   "frame_ms_mean": 0.6686552666666667,
+   "frame_ms_p95": 0.975196,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1264170639/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1264170639/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1264170639/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1264170639/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1296,14 +1191,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.8923680000000003,
-   "build_ms": 744.6308029999999,
-   "frame_ms_mean": 1.6726006666666668,
-   "frame_ms_p95": 2.441852,
+   "load_ms": 1.852822,
+   "build_ms": 908.175319,
+   "frame_ms_mean": 1.2765519,
+   "frame_ms_p95": 1.63195,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1556245028/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1556245028/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1556245028/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1556245028/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1353,7 +1248,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1369,21 +1266,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.496695,
-   "build_ms": 172.771837,
-   "frame_ms_mean": 0.7830874222222223,
-   "frame_ms_p95": 1.680257,
+   "load_ms": 1.011371,
+   "build_ms": 259.544599,
+   "frame_ms_mean": 0.4002669555555554,
+   "frame_ms_p95": 0.971631,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1726902114/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1726902114/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1726902114/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1726902114/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1399,21 +1298,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.710567,
-   "build_ms": 447.831777,
-   "frame_ms_mean": 1.5370382333333337,
-   "frame_ms_p95": 2.452297,
+   "load_ms": 2.078733,
+   "build_ms": 488.684415,
+   "frame_ms_mean": 1.1250702555555556,
+   "frame_ms_p95": 2.0547310000000003,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1797172968/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1797172968/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1797172968/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1797172968/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1429,14 +1330,14 @@
    "built": 39,
    "perspective": false,
    "hdr": false,
-   "load_ms": 16.0353,
-   "build_ms": 1209.464941,
-   "frame_ms_mean": 2.436664944444445,
-   "frame_ms_p95": 4.565342,
+   "load_ms": 7.79286,
+   "build_ms": 1550.740738,
+   "frame_ms_mean": 1.3484609333333342,
+   "frame_ms_p95": 2.066999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1864677589/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1864677589/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1864677589/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1864677589/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1566,7 +1467,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1582,21 +1485,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.325342,
-   "build_ms": 290.904496,
-   "frame_ms_mean": 1.101289122222222,
-   "frame_ms_p95": 2.224216,
+   "load_ms": 1.377861,
+   "build_ms": 379.370142,
+   "frame_ms_mean": 0.6120843,
+   "frame_ms_p95": 1.132303,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1884904087/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1884904087/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1884904087/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1884904087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1612,21 +1517,23 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.201336,
-   "build_ms": 233.53838,
-   "frame_ms_mean": 1.2063645222222223,
-   "frame_ms_p95": 2.075396,
+   "load_ms": 1.114147,
+   "build_ms": 271.609787,
+   "frame_ms_mean": 0.5056801444444444,
+   "frame_ms_p95": 1.1239869999999998,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/1934084447/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/1934084447/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1934084447/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/1934084447/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1642,21 +1549,23 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.608726,
-   "build_ms": 165.651117,
-   "frame_ms_mean": 0.6209550444444442,
-   "frame_ms_p95": 1.492338,
+   "load_ms": 0.930424,
+   "build_ms": 197.863353,
+   "frame_ms_mean": 0.3514161888888888,
+   "frame_ms_p95": 0.62149,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2047150134/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2047150134/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2047150134/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2047150134/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1672,21 +1581,23 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.776659,
-   "build_ms": 752.634463,
-   "frame_ms_mean": 2.8503783111111116,
-   "frame_ms_p95": 4.828894999999999,
+   "load_ms": 2.16233,
+   "build_ms": 933.199619,
+   "frame_ms_mean": 2.5142202555555553,
+   "frame_ms_p95": 4.061589,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2064316482/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2064316482/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2064316482/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2064316482/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1702,14 +1613,14 @@
    "built": 42,
    "perspective": false,
    "hdr": false,
-   "load_ms": 15.283473,
-   "build_ms": 1423.299067,
-   "frame_ms_mean": 1.9314652777777777,
-   "frame_ms_p95": 3.003023,
+   "load_ms": 12.098818,
+   "build_ms": 2146.709977,
+   "frame_ms_mean": 1.5464562222222222,
+   "frame_ms_p95": 2.287429,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2134765860/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2134765860/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2134765860/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2134765860/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1717,6 +1628,7 @@
    "warnings": 0,
    "problems": [],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "shader replaced by its zcompat copy"
    ],
    "fonts_substituted": []
@@ -1734,21 +1646,23 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.368965,
-   "build_ms": 164.13703099999998,
-   "frame_ms_mean": 0.9239688,
-   "frame_ms_p95": 1.770266,
+   "load_ms": 1.016025,
+   "build_ms": 229.969682,
+   "frame_ms_mean": 0.4864587,
+   "frame_ms_p95": 1.190303,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2182433068/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2182433068/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2182433068/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2182433068/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1764,14 +1678,14 @@
    "built": 1,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.381604,
-   "build_ms": 246.996695,
-   "frame_ms_mean": 1.389585511111111,
-   "frame_ms_p95": 2.367298,
+   "load_ms": 1.074027,
+   "build_ms": 276.045994,
+   "frame_ms_mean": 1.1753337444444445,
+   "frame_ms_p95": 1.85725,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2189783622/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2189783622/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2189783622/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2189783622/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1779,6 +1693,7 @@
    "warnings": 0,
    "problems": [],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "shader: vertex-only varyings declared in the fragment"
    ],
    "fonts_substituted": []
@@ -1796,21 +1711,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.380973,
-   "build_ms": 149.489418,
-   "frame_ms_mean": 0.8514974333333336,
-   "frame_ms_p95": 1.856049,
+   "load_ms": 0.900954,
+   "build_ms": 185.349512,
+   "frame_ms_mean": 0.5102050333333334,
+   "frame_ms_p95": 1.146754,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2219762084/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2219762084/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2219762084/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2219762084/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1826,14 +1743,14 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.178677,
-   "build_ms": 523.061556,
-   "frame_ms_mean": 4.323066455555555,
-   "frame_ms_p95": 5.389137,
+   "load_ms": 2.681987,
+   "build_ms": 724.0757570000001,
+   "frame_ms_mean": 4.010294066666666,
+   "frame_ms_p95": 4.98269,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2288455459/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2288455459/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2288455459/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2288455459/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1853,7 +1770,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1869,21 +1788,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.409551,
-   "build_ms": 281.905536,
-   "frame_ms_mean": 1.1288101444444445,
-   "frame_ms_p95": 2.281923,
+   "load_ms": 1.219256,
+   "build_ms": 326.095683,
+   "frame_ms_mean": 0.9517293999999996,
+   "frame_ms_p95": 2.2325079999999997,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2290002190/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2290002190/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2290002190/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2290002190/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1899,14 +1820,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.048157,
-   "build_ms": 953.636112,
-   "frame_ms_mean": 1.2348315555555558,
-   "frame_ms_p95": 1.830275,
+   "load_ms": 5.24421,
+   "build_ms": 1260.558384,
+   "frame_ms_mean": 0.9658504333333332,
+   "frame_ms_p95": 1.628942,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2325974975/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2325974975/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2325974975/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2325974975/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1966,7 +1887,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -1982,14 +1905,14 @@
    "built": 43,
    "perspective": false,
    "hdr": false,
-   "load_ms": 8.975906,
-   "build_ms": 1263.619576,
-   "frame_ms_mean": 1.961552355555555,
-   "frame_ms_p95": 2.961943,
+   "load_ms": 4.720225,
+   "build_ms": 1960.695144,
+   "frame_ms_mean": 1.5750129888888893,
+   "frame_ms_p95": 2.1870700000000003,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2371103399/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2371103399/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2371103399/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2371103399/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2089,7 +2012,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2105,21 +2030,23 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.12437,
-   "build_ms": 882.406338,
-   "frame_ms_mean": 4.655753344444444,
-   "frame_ms_p95": 8.078047,
+   "load_ms": 2.484405,
+   "build_ms": 896.040212,
+   "frame_ms_mean": 3.065189366666666,
+   "frame_ms_p95": 4.340814,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2375914945/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2375914945/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2375914945/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2375914945/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2135,14 +2062,14 @@
    "built": 35,
    "perspective": false,
    "hdr": false,
-   "load_ms": 22.264073,
-   "build_ms": 2046.885196,
-   "frame_ms_mean": 2.6744859999999986,
-   "frame_ms_p95": 4.71298,
+   "load_ms": 5.7173609999999995,
+   "build_ms": 1857.884745,
+   "frame_ms_mean": 2.537238288888889,
+   "frame_ms_p95": 3.632163,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2388299037/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2388299037/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2388299037/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2388299037/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2177,6 +2104,8 @@
     }
    ],
    "compat": [
+    "WE: a GLSL-reserved name renamed",
+    "WE: declarations hoisted above the includes",
     "shader replaced by its zcompat copy"
    ],
    "fonts_substituted": []
@@ -2185,7 +2114,7 @@
    "id": "2469881470",
    "class": "degraded",
    "failed": null,
-   "loss": 0.0547,
+   "loss": 0.02,
    "native": [
     1920,
     1080
@@ -2194,36 +2123,23 @@
    "built": 12,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.4902370000000005,
-   "build_ms": 637.544271,
-   "frame_ms_mean": 1.0877277666666665,
-   "frame_ms_p95": 1.97011,
+   "load_ms": 2.4044320000000003,
+   "build_ms": 806.682744,
+   "frame_ms_mean": 1.0404616222222225,
+   "frame_ms_p95": 1.839165,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2469881470/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2469881470/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2469881470/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2469881470/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 1,
     "script_error": 2,
     "offcanvas": 1
    },
-   "errors": 3,
+   "errors": 2,
    "warnings": 1,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 248 “Chromatic Aberration” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2423877731/effects/chromatic_aberration]",
-     "loss": 0.0347,
-     "object": 68,
-     "object_name": "emilia5",
-     "effect": 248,
-     "effect_name": "Chromatic Aberration",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -2260,6 +2176,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: wider vector truncated as HLSL does",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -2278,21 +2195,23 @@
    "built": 34,
    "perspective": false,
    "hdr": true,
-   "load_ms": 12.086195,
-   "build_ms": 1221.183077,
-   "frame_ms_mean": 5.081282788888888,
-   "frame_ms_p95": 7.676933,
+   "load_ms": 4.548247,
+   "build_ms": 1585.87517,
+   "frame_ms_mean": 4.456596488888889,
+   "frame_ms_p95": 5.300031000000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2511663284/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2511663284/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2511663284/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2511663284/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2308,21 +2227,23 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 1.884723,
-   "build_ms": 268.081834,
-   "frame_ms_mean": 2.9459842666666662,
-   "frame_ms_p95": 5.0178970000000005,
+   "load_ms": 1.153717,
+   "build_ms": 306.516138,
+   "frame_ms_mean": 2.368048233333333,
+   "frame_ms_p95": 3.665797,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2542468435/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2542468435/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2542468435/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2542468435/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2338,14 +2259,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.27028,
-   "build_ms": 599.89163,
-   "frame_ms_mean": 1.949506777777778,
-   "frame_ms_p95": 5.215253000000001,
+   "load_ms": 1.787041,
+   "build_ms": 641.929238,
+   "frame_ms_mean": 1.3378802333333333,
+   "frame_ms_p95": 3.00723,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2561227934/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2561227934/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2561227934/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2561227934/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2365,7 +2286,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2381,21 +2304,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.2412729999999996,
-   "build_ms": 493.649617,
-   "frame_ms_mean": 0.7435156222222223,
-   "frame_ms_p95": 1.5614940000000002,
+   "load_ms": 0.932235,
+   "build_ms": 198.722391,
+   "frame_ms_mean": 0.5166941333333332,
+   "frame_ms_p95": 1.185883,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2638125030/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2638125030/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2638125030/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2638125030/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2411,14 +2336,14 @@
    "built": 14,
    "perspective": false,
    "hdr": false,
-   "load_ms": 18.559404,
-   "build_ms": 1904.522708,
-   "frame_ms_mean": 3.6733542,
-   "frame_ms_p95": 5.839327,
+   "load_ms": 3.641903,
+   "build_ms": 1161.863568,
+   "frame_ms_mean": 2.418737122222222,
+   "frame_ms_p95": 3.387586,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2672425887/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2672425887/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2672425887/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2672425887/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2438,7 +2363,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2454,14 +2381,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.759877,
-   "build_ms": 1926.9348979999995,
-   "frame_ms_mean": 9.190728466666666,
-   "frame_ms_p95": 18.27084,
+   "load_ms": 4.185791,
+   "build_ms": 1328.02796,
+   "frame_ms_mean": 5.893770255555556,
+   "frame_ms_p95": 5.164056,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2679248947/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2679248947/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2679248947/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2679248947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2481,7 +2408,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2497,14 +2426,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.992481,
-   "build_ms": 894.1977899999999,
-   "frame_ms_mean": 0.8189426222222222,
-   "frame_ms_p95": 1.743817,
+   "load_ms": 1.962936,
+   "build_ms": 704.825517,
+   "frame_ms_mean": 0.7836379888888888,
+   "frame_ms_p95": 1.34771,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2679885269/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2679885269/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2679885269/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2679885269/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2524,7 +2453,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2540,21 +2471,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.988608,
-   "build_ms": 198.15033000000005,
-   "frame_ms_mean": 1.2239686777777776,
-   "frame_ms_p95": 2.215323,
+   "load_ms": 1.02992,
+   "build_ms": 233.030134,
+   "frame_ms_mean": 0.8985278222222222,
+   "frame_ms_p95": 1.686932,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2683776412/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2683776412/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2683776412/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2683776412/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2570,21 +2503,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.927852,
-   "build_ms": 295.31431299999997,
-   "frame_ms_mean": 1.4948299555555558,
-   "frame_ms_p95": 2.599956,
+   "load_ms": 2.689666,
+   "build_ms": 364.383646,
+   "frame_ms_mean": 1.2781575333333337,
+   "frame_ms_p95": 2.392332,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2694785040/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2694785040/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2694785040/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2694785040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2600,28 +2535,30 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.728467,
-   "build_ms": 157.97139900000002,
-   "frame_ms_mean": 0.7052690444444446,
-   "frame_ms_p95": 1.648566,
+   "load_ms": 1.3094370000000002,
+   "build_ms": 187.301698,
+   "frame_ms_mean": 0.3708357444444445,
+   "frame_ms_p95": 0.7148410000000001,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2783122117/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2783122117/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2783122117/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2783122117/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "2815800031",
-   "class": "degraded",
+   "class": "clean",
    "failed": null,
-   "loss": 0.2839,
+   "loss": 0,
    "native": [
     4096,
     2044
@@ -2630,48 +2567,22 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.366432,
-   "build_ms": 821.177748,
-   "frame_ms_mean": 4.360229755555556,
-   "frame_ms_p95": 6.2922400000000005,
+   "load_ms": 3.065663,
+   "build_ms": 1109.713826,
+   "frame_ms_mean": 4.396741955555555,
+   "frame_ms_p95": 4.857386,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2815800031/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2815800031/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2815800031/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2815800031/lwe-smoke-3s.png"
    ],
    "exit": 0,
-   "counts": {
-    "effect_dropped": 2
-   },
-   "errors": 2,
+   "counts": {},
+   "errors": 0,
    "warnings": 0,
-   "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 678 “Chromatic Aberration” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2423877731/effects/chromatic_aberration]",
-     "loss": 0.1197,
-     "object": 42,
-     "object_name": "astro sin",
-     "effect": 678,
-     "effect_name": "Chromatic Aberration",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 744 “Chromatic Aberration” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2423877731/effects/chromatic_aberration]",
-     "loss": 0.1642,
-     "object": 219,
-     "object_name": "chica buen",
-     "effect": 744,
-     "effect_name": "Chromatic Aberration",
-     "type": "image"
-    }
-   ],
+   "problems": [],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: wider vector truncated as HLSL does",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -2690,14 +2601,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.77082,
-   "build_ms": 346.965038,
-   "frame_ms_mean": 1.4027163888888885,
-   "frame_ms_p95": 2.411687,
+   "load_ms": 1.254927,
+   "build_ms": 440.72084500000005,
+   "frame_ms_mean": 1.0253499111111113,
+   "frame_ms_p95": 1.763153,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2828233985/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2828233985/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2828233985/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2828233985/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2742,7 +2653,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2758,21 +2671,24 @@
    "built": 95,
    "perspective": false,
    "hdr": false,
-   "load_ms": 33.641073,
-   "build_ms": 7941.069264000001,
-   "frame_ms_mean": 17.949538599999997,
-   "frame_ms_p95": 24.693508,
+   "load_ms": 23.750929,
+   "build_ms": 9669.356181,
+   "frame_ms_mean": 18.736866911111115,
+   "frame_ms_p95": 23.602861,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2883756643/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2883756643/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2883756643/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2883756643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2788,14 +2704,14 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.695271,
-   "build_ms": 722.833326,
-   "frame_ms_mean": 6.106711555555558,
-   "frame_ms_p95": 10.300509,
+   "load_ms": 1.4822220000000002,
+   "build_ms": 810.2255590000001,
+   "frame_ms_mean": 5.160884766666667,
+   "frame_ms_p95": 6.781035,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2886313155/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2886313155/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2886313155/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2886313155/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2815,7 +2731,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2831,14 +2749,14 @@
    "built": 17,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.127233,
-   "build_ms": 1601.436884,
-   "frame_ms_mean": 5.705106911111112,
-   "frame_ms_p95": 11.642759000000002,
+   "load_ms": 4.219011,
+   "build_ms": 1468.8767300000002,
+   "frame_ms_mean": 4.091980844444445,
+   "frame_ms_p95": 6.118576,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2890767643/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2890767643/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2890767643/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2890767643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2943,7 +2861,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -2959,14 +2879,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 8.475196,
-   "build_ms": 355.31739699999997,
-   "frame_ms_mean": 1.693546988888889,
-   "frame_ms_p95": 3.782016,
+   "load_ms": 1.506067,
+   "build_ms": 501.999612,
+   "frame_ms_mean": 1.0551300888888888,
+   "frame_ms_p95": 1.363223,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2905264428/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2905264428/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2905264428/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2905264428/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2986,7 +2906,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3002,21 +2924,23 @@
    "built": 72,
    "perspective": false,
    "hdr": false,
-   "load_ms": 45.890256,
-   "build_ms": 6073.608784,
-   "frame_ms_mean": 56.97167233333333,
-   "frame_ms_p95": 82.551232,
+   "load_ms": 22.401581,
+   "build_ms": 8071.046796999999,
+   "frame_ms_mean": 112.64913783333331,
+   "frame_ms_p95": 145.919238,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2921510865/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2921510865/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2921510865/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2921510865/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3032,14 +2956,14 @@
    "built": 22,
    "perspective": false,
    "hdr": false,
-   "load_ms": 36.024962,
-   "build_ms": 1635.442751,
-   "frame_ms_mean": 5.894809522222224,
-   "frame_ms_p95": 8.874590999999999,
+   "load_ms": 11.4247,
+   "build_ms": 2018.071612,
+   "frame_ms_mean": 3.9007497,
+   "frame_ms_p95": 5.074136,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2932157836/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2932157836/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2932157836/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2932157836/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3060,6 +2984,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "shader replaced by its zcompat copy"
    ],
    "fonts_substituted": []
@@ -3077,14 +3002,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.978275,
-   "build_ms": 394.577569,
-   "frame_ms_mean": 1.5964991999999998,
-   "frame_ms_p95": 1.92936,
+   "load_ms": 2.2152700000000003,
+   "build_ms": 482.730962,
+   "frame_ms_mean": 1.2921101333333336,
+   "frame_ms_p95": 1.559638,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/2951169110/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/2951169110/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2951169110/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/2951169110/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3104,7 +3029,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3120,14 +3047,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.478452,
-   "build_ms": 1218.909797,
-   "frame_ms_mean": 2.3322682444444447,
-   "frame_ms_p95": 4.093608000000001,
+   "load_ms": 4.6493519999999995,
+   "build_ms": 1807.684723,
+   "frame_ms_mean": 2.565744588888889,
+   "frame_ms_p95": 4.002153,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3013489778/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3013489778/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3013489778/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3013489778/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3158,6 +3085,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "shader: fragment TexCoord vec2 compatibility"
    ],
    "fonts_substituted": []
@@ -3175,21 +3103,23 @@
    "built": 1,
    "perspective": false,
    "hdr": true,
-   "load_ms": 2.191609,
-   "build_ms": 345.580673,
-   "frame_ms_mean": 3.172302833333333,
-   "frame_ms_p95": 4.346812,
+   "load_ms": 1.126321,
+   "build_ms": 387.052539,
+   "frame_ms_mean": 2.3801025888888883,
+   "frame_ms_p95": 3.30472,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3019192537/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3019192537/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3019192537/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3019192537/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3205,21 +3135,23 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.838612,
-   "build_ms": 756.17068,
-   "frame_ms_mean": 3.905568155555554,
-   "frame_ms_p95": 7.095365999999999,
+   "load_ms": 1.6486770000000002,
+   "build_ms": 781.2525489999999,
+   "frame_ms_mean": 2.1823779555555554,
+   "frame_ms_p95": 3.332168,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3022080536/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3022080536/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3022080536/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3022080536/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3235,14 +3167,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.930042,
-   "build_ms": 348.58337,
-   "frame_ms_mean": 0.7880415333333332,
-   "frame_ms_p95": 1.589089,
+   "load_ms": 1.151011,
+   "build_ms": 428.44405,
+   "frame_ms_mean": 0.7052338555555554,
+   "frame_ms_p95": 1.427407,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3023509773/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3023509773/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3023509773/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3023509773/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3262,7 +3194,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3278,14 +3212,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.652667999999999,
-   "build_ms": 954.839418,
-   "frame_ms_mean": 8.1718167,
-   "frame_ms_p95": 9.027038,
+   "load_ms": 2.0459620000000003,
+   "build_ms": 747.430941,
+   "frame_ms_mean": 3.314004177777778,
+   "frame_ms_p95": 4.781689,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3028473503/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3028473503/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3028473503/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3028473503/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3305,7 +3239,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3321,28 +3257,30 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.186184,
-   "build_ms": 480.900759,
-   "frame_ms_mean": 1.896499255555555,
-   "frame_ms_p95": 2.285801,
+   "load_ms": 1.818951,
+   "build_ms": 456.840864,
+   "frame_ms_mean": 2.0371989,
+   "frame_ms_p95": 2.264117,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3029971128/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3029971128/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3029971128/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3029971128/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3042492564",
    "class": "degraded",
    "failed": null,
-   "loss": 0.0248,
+   "loss": 0.01,
    "native": [
     3840,
     2160
@@ -3351,35 +3289,22 @@
    "built": 79,
    "perspective": false,
    "hdr": false,
-   "load_ms": 35.654385,
-   "build_ms": 4025.044421,
-   "frame_ms_mean": 4.876733755555555,
-   "frame_ms_p95": 5.858751,
+   "load_ms": 24.213608,
+   "build_ms": 5542.609683000001,
+   "frame_ms_mean": 4.208877066666668,
+   "frame_ms_p95": 5.422273,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3042492564/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3042492564/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3042492564/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3042492564/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 1,
     "script_error": 1
    },
-   "errors": 2,
+   "errors": 1,
    "warnings": 0,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '#if' : unexpected tokens following directive",
-     "message": "effect 718 “AA” left out: '#if' : unexpected tokens following directive [effects/aa_gaussian]",
-     "loss": 0.0148,
-     "object": 339,
-     "object_name": "Music Cover",
-     "effect": 718,
-     "effect_name": "AA",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -3393,7 +3318,10 @@
      "type": "text"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: an unreadable #if is false",
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3409,14 +3337,14 @@
    "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.123451,
-   "build_ms": 1484.523684,
-   "frame_ms_mean": 16.236903022222222,
-   "frame_ms_p95": 17.902538,
+   "load_ms": 5.146581,
+   "build_ms": 1745.915755,
+   "frame_ms_mean": 14.0626483,
+   "frame_ms_p95": 16.41396,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3042865984/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3042865984/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3042865984/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3042865984/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3440,7 +3368,9 @@
      "type": "compose"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3456,21 +3386,23 @@
    "built": 13,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.8474900000000005,
-   "build_ms": 1207.105214,
-   "frame_ms_mean": 9.814363888888892,
-   "frame_ms_p95": 13.156871,
+   "load_ms": 2.3877170000000003,
+   "build_ms": 1469.304927,
+   "frame_ms_mean": 9.539475711111107,
+   "frame_ms_p95": 12.845266,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3046119914/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3046119914/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3046119914/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3046119914/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3486,14 +3418,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.504326000000001,
-   "build_ms": 786.300163,
-   "frame_ms_mean": 9.815082033333338,
-   "frame_ms_p95": 16.845866,
+   "load_ms": 2.460219,
+   "build_ms": 1135.826672,
+   "frame_ms_mean": 5.6628681666666685,
+   "frame_ms_p95": 7.213214,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3089687436/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3089687436/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3089687436/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3089687436/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3513,7 +3445,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3529,21 +3463,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 131.52530000000002,
-   "build_ms": 682.1942600000001,
-   "frame_ms_mean": 2.4623072555555554,
-   "frame_ms_p95": 4.29273,
+   "load_ms": 3.507093,
+   "build_ms": 902.742793,
+   "frame_ms_mean": 2.061937888888889,
+   "frame_ms_p95": 2.909998,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3104056709/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3104056709/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3104056709/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3104056709/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3559,14 +3495,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1121.487295,
-   "build_ms": 1110.0829299999998,
-   "frame_ms_mean": 1.6645221222222215,
-   "frame_ms_p95": 2.553188,
+   "load_ms": 4.328206000000001,
+   "build_ms": 554.150628,
+   "frame_ms_mean": 1.494940722222222,
+   "frame_ms_p95": 2.5103880000000003,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3134525336/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3134525336/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3134525336/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3134525336/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3596,7 +3532,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3612,14 +3550,14 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9678.206654,
-   "build_ms": 10458.103128,
-   "frame_ms_mean": 4.1201369777777765,
-   "frame_ms_p95": 6.175924,
+   "load_ms": 31.957374,
+   "build_ms": 5944.931689,
+   "frame_ms_mean": 3.7386920888888895,
+   "frame_ms_p95": 5.112106,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3163060610/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3163060610/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3163060610/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3163060610/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3652,7 +3590,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3668,14 +3608,14 @@
    "built": 19,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3019.318669,
-   "build_ms": 8142.038239,
-   "frame_ms_mean": 10.660049999999998,
-   "frame_ms_p95": 10.24519,
+   "load_ms": 8.345216,
+   "build_ms": 1198.253826,
+   "frame_ms_mean": 8.592506655555558,
+   "frame_ms_p95": 6.708266,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3174556087/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3174556087/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3174556087/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3174556087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3696,65 +3636,42 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "shader replaced by its zcompat copy"
    ],
    "fonts_substituted": []
   },
   {
    "id": "3184155462",
-   "class": "degraded",
+   "class": "clean",
    "failed": null,
-   "loss": 0.3,
+   "loss": 0,
    "native": [
     3840,
     2160
    ],
    "objects": 15,
-   "built": 14,
+   "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5662.1977289999995,
-   "build_ms": 2561.973559,
-   "frame_ms_mean": 7.110087588888886,
-   "frame_ms_p95": 9.673406,
+   "load_ms": 5.6380930000000005,
+   "build_ms": 1150.3817729999998,
+   "frame_ms_mean": 5.701759211111112,
+   "frame_ms_p95": 7.968809,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3184155462/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3184155462/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3184155462/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3184155462/lwe-smoke-3s.png"
    ],
    "exit": 0,
-   "counts": {
-    "dropped": 1,
-    "effect_dropped": 1
-   },
-   "errors": 2,
+   "counts": {},
+   "errors": 0,
    "warnings": 0,
-   "problems": [
-    {
-     "kind": "dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "compose not built: error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2844906964/effects/test_shader]",
-     "loss": 0.3,
-     "object": 391,
-     "object_name": "Audio Visualizer",
-     "type": "compose",
-     "visible": true
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "effect 392 “Test Shader” left out (and with it the layer): error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2844906964/effects/test_shader]",
-     "loss": 0.0,
-     "object": 391,
-     "object_name": "Audio Visualizer",
-     "effect": 392,
-     "effect_name": "Test Shader",
-     "type": "compose"
-    }
-   ],
+   "problems": [],
    "compat": [
+    "HLSL: a static const global initialised in main",
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes",
     "shader: fragment writes to varyings (copied to globals)"
    ],
    "fonts_substituted": []
@@ -3763,7 +3680,7 @@
    "id": "3219908811",
    "class": "degraded",
    "failed": null,
-   "loss": 0.31,
+   "loss": 0.01,
    "native": [
     3840,
     2160
@@ -3772,37 +3689,24 @@
    "built": 41,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12320.033641,
-   "build_ms": 3504.685609,
-   "frame_ms_mean": 6.894151411111112,
-   "frame_ms_p95": 8.996302,
+   "load_ms": 17.07154,
+   "build_ms": 4566.816388,
+   "frame_ms_mean": 6.141321866666666,
+   "frame_ms_p95": 8.156887,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3219908811/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3219908811/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3219908811/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3219908811/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 1,
     "script_error": 1,
     "alpha0": 3,
     "offcanvas": 1
    },
-   "errors": 2,
+   "errors": 1,
    "warnings": 4,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "effect 772 “音频光环” left out: error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2846673187/effects/____________]",
-     "loss": 0.3,
-     "object": 713,
-     "object_name": "纯色",
-     "effect": 772,
-     "effect_name": "音频光环",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -3856,7 +3760,10 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -3872,14 +3779,14 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3602.997125,
-   "build_ms": 7362.14577,
-   "frame_ms_mean": 6.962258777777778,
-   "frame_ms_p95": 11.343095,
+   "load_ms": 25.87478,
+   "build_ms": 5064.61517,
+   "frame_ms_mean": 87.8927366,
+   "frame_ms_p95": 95.789017,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3233141951/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3233141951/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3233141951/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3233141951/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4082,6 +3989,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -4091,143 +3999,34 @@
    "id": "3243449890",
    "class": "degraded",
    "failed": null,
-   "loss": 0.4597,
+   "loss": 0.04,
    "native": [
     3840,
     2160
    ],
    "objects": 83,
-   "built": 82,
+   "built": 83,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11713.1449,
-   "build_ms": 13411.439566,
-   "frame_ms_mean": 12.48990561111111,
-   "frame_ms_p95": 15.684664,
+   "load_ms": 28.160298,
+   "build_ms": 7436.561175,
+   "frame_ms_mean": 9.020276355555556,
+   "frame_ms_p95": 10.646197,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3243449890/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3243449890/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3243449890/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3243449890/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "dropped": 1,
-    "effect_dropped": 8,
     "script_error": 4,
     "offcanvas": 5,
     "alpha0": 2,
     "shader_warning": 3
    },
-   "errors": 13,
+   "errors": 4,
    "warnings": 10,
    "problems": [
-    {
-     "kind": "dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "compose not built: error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2846673187/effects/____________]",
-     "loss": 0.3,
-     "object": 1043,
-     "object_name": "音频光环",
-     "type": "compose",
-     "visible": true
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "effect 1102 “音频光环” left out (and with it the layer): error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2846673187/effects/____________]",
-     "loss": 0.0,
-     "object": 1043,
-     "object_name": "音频光环",
-     "effect": 1102,
-     "effect_name": "音频光环",
-     "type": "compose"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 1317 “Clipping mask” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2800594362/effects/clipping_mask]",
-     "loss": 0.0057,
-     "object": 4149,
-     "object_name": "帧率三角",
-     "effect": 1317,
-     "effect_name": "Clipping mask",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 2586 “Clipping mask” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2800594362/effects/clipping_mask]",
-     "loss": 0.0057,
-     "object": 3285,
-     "object_name": "三角 倒",
-     "effect": 2586,
-     "effect_name": "Clipping mask",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 3038 “Clipping mask” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2800594362/effects/clipping_mask]",
-     "loss": 0.0089,
-     "object": 4551,
-     "object_name": "文字三角",
-     "effect": 3038,
-     "effect_name": "Clipping mask",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON",
-     "message": "effect 3320 “Clipping mask” left out: '' : syntax error, unexpected DOT, expecting COMMA or SEMICOLON [workshop/2800594362/effects/clipping_mask]",
-     "loss": 0.0158,
-     "object": 1126,
-     "object_name": "主三角",
-     "effect": 3320,
-     "effect_name": "Clipping mask",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 6551 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0321,
-     "object": 4879,
-     "object_name": "右飘带",
-     "effect": 6551,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 4012 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0157,
-     "object": 4417,
-     "object_name": "左飘带",
-     "effect": 4012,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 1635 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0358,
-     "object": 25983,
-     "object_name": "头发",
-     "effect": 1635,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -4384,6 +4183,8 @@
     }
    ],
    "compat": [
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "glslang: wider vector truncated as HLSL does",
     "shader: fragment writes to varyings (copied to globals)"
@@ -4403,14 +4204,14 @@
    "built": 25,
    "perspective": true,
    "hdr": false,
-   "load_ms": 6159.42034,
-   "build_ms": 4247.665174,
-   "frame_ms_mean": 7.633595388888889,
-   "frame_ms_p95": 13.306975,
+   "load_ms": 7.750282,
+   "build_ms": 1408.0074329999998,
+   "frame_ms_mean": 4.940477322222224,
+   "frame_ms_p95": 6.441756,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3276522107/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3276522107/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3276522107/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3276522107/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4451,7 +4252,9 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4467,14 +4270,14 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 8093.824415,
-   "build_ms": 2679.546589,
-   "frame_ms_mean": 1.913132355555555,
-   "frame_ms_p95": 2.930964,
+   "load_ms": 10.49331,
+   "build_ms": 3496.991189,
+   "frame_ms_mean": 2.044921744444445,
+   "frame_ms_p95": 2.70365,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3289734539/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3289734539/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3289734539/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3289734539/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4664,7 +4467,9 @@
      "type": "text"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4680,21 +4485,23 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 413.542874,
-   "build_ms": 700.2650209999999,
-   "frame_ms_mean": 1.2066863444444444,
-   "frame_ms_p95": 2.2080110000000004,
+   "load_ms": 3.465163,
+   "build_ms": 637.682635,
+   "frame_ms_mean": 0.8686006444444445,
+   "frame_ms_p95": 1.3082,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3291729669/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3291729669/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3291729669/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3291729669/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4710,14 +4517,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 684.614249,
-   "build_ms": 1119.36301,
-   "frame_ms_mean": 1.1204652888888886,
-   "frame_ms_p95": 2.272465,
+   "load_ms": 3.896282,
+   "build_ms": 459.788662,
+   "frame_ms_mean": 0.8065341333333331,
+   "frame_ms_p95": 2.002999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3291745179/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3291745179/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3291745179/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3291745179/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4737,7 +4544,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4753,21 +4562,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1027.996645,
-   "build_ms": 782.6279499999999,
-   "frame_ms_mean": 1.7777940888888888,
-   "frame_ms_p95": 2.667473,
+   "load_ms": 2.2580500000000003,
+   "build_ms": 434.457373,
+   "frame_ms_mean": 1.7288249555555553,
+   "frame_ms_p95": 2.744587,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3309103316/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3309103316/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3309103316/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3309103316/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4783,14 +4594,14 @@
    "built": 46,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4525.3955399999995,
-   "build_ms": 5422.727205,
-   "frame_ms_mean": 5.392307855555556,
-   "frame_ms_p95": 5.259769,
+   "load_ms": 13.156602,
+   "build_ms": 3235.491019,
+   "frame_ms_mean": 4.6393199888888885,
+   "frame_ms_p95": 5.1841040000000005,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3319542538/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3319542538/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3319542538/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3319542538/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4908,7 +4719,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -4924,14 +4737,14 @@
    "built": 62,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6231.600915999999,
-   "build_ms": 14658.787898,
-   "frame_ms_mean": 17.939433288888885,
-   "frame_ms_p95": 21.370182,
+   "load_ms": 14.651641,
+   "build_ms": 4738.805308,
+   "frame_ms_mean": 21.510519844444445,
+   "frame_ms_p95": 26.12584,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3326873240/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3326873240/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3326873240/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3326873240/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5013,6 +4826,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -5022,7 +4836,7 @@
    "id": "3354740764",
    "class": "degraded",
    "failed": null,
-   "loss": 0.4181,
+   "loss": 0.01,
    "native": [
     1920,
     1080
@@ -5031,61 +4845,24 @@
    "built": 47,
    "perspective": false,
    "hdr": false,
-   "load_ms": 10898.48308,
-   "build_ms": 4315.190205999999,
-   "frame_ms_mean": 3.127390799999999,
-   "frame_ms_p95": 4.403166,
+   "load_ms": 16.331882999999998,
+   "build_ms": 4180.10298,
+   "frame_ms_mean": 3.0762545777777777,
+   "frame_ms_p95": 4.574406,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3354740764/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3354740764/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3354740764/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3354740764/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 3,
     "unsupported": 1,
     "offcanvas": 1,
     "shader_warning": 2
    },
-   "errors": 4,
+   "errors": 1,
    "warnings": 3,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'non-constant initializer' : not supported for this version or the enabled extensions",
-     "message": "effect 168 “Color Grading” left out: 'non-constant initializer' : not supported for this version or the enabled extensions [workshop/2795521260/effects/color_grading]",
-     "loss": 0.3,
-     "object": 16,
-     "object_name": "Bliss",
-     "effect": 168,
-     "effect_name": "Color Grading",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : function does not return a value: ShadowMask",
-     "message": "effect 539 “CRT screen” left out: '' : function does not return a value: ShadowMask [workshop/2821337237/effects/shadow_map]",
-     "loss": 0.0235,
-     "object": 519,
-     "object_name": "Reloj",
-     "effect": 539,
-     "effect_name": "CRT screen",
-     "type": "text"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON",
-     "message": "effect 557 “Tone mapping” left out: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON [workshop/2812601803/effects/tone_mapping]",
-     "loss": 0.0846,
-     "object": 485,
-     "object_name": "breaked window",
-     "effect": 557,
-     "effect_name": "Tone mapping",
-     "type": "image"
-    },
     {
      "kind": "unsupported",
      "severity": "error",
@@ -5132,6 +4909,11 @@
     }
    ],
    "compat": [
+    "HLSL: a function missing its return returns zero",
+    "HLSL: a local const with a run-time initializer",
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: a user function overloads an HLSL intrinsic",
+    "WE: declarations hoisted above the includes",
     "file found ignoring case",
     "shader replaced by its zcompat copy"
    ],
@@ -5150,14 +4932,14 @@
    "built": 48,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7222.439346,
-   "build_ms": 16156.072938,
-   "frame_ms_mean": 4.442701422222223,
-   "frame_ms_p95": 7.248521,
+   "load_ms": 28.084251,
+   "build_ms": 3696.661277,
+   "frame_ms_mean": 3.160977888888888,
+   "frame_ms_p95": 4.789983,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3363252053/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3363252053/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3363252053/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3363252053/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5198,6 +4980,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -5216,21 +4999,23 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5684.769814,
-   "build_ms": 2908.187349,
-   "frame_ms_mean": 4.912350533333334,
-   "frame_ms_p95": 7.239247,
+   "load_ms": 5.939973,
+   "build_ms": 987.943732,
+   "frame_ms_mean": 4.431310455555556,
+   "frame_ms_p95": 6.366226,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3366535880/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3366535880/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3366535880/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3366535880/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5246,14 +5031,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 459.336259,
-   "build_ms": 529.304258,
-   "frame_ms_mean": 1.0218628,
-   "frame_ms_p95": 2.0316,
+   "load_ms": 3.700156,
+   "build_ms": 402.38909,
+   "frame_ms_mean": 0.5410446777777776,
+   "frame_ms_p95": 0.981998,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3387433141/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3387433141/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3387433141/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3387433141/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5273,7 +5058,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5289,21 +5076,23 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 101.591248,
-   "build_ms": 421.895148,
-   "frame_ms_mean": 1.7148944999999998,
-   "frame_ms_p95": 2.693835,
+   "load_ms": 1.270091,
+   "build_ms": 349.77022800000003,
+   "frame_ms_mean": 1.2509685444444447,
+   "frame_ms_p95": 1.887462,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3395587987/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3395587987/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3395587987/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3395587987/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5319,14 +5108,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 300.46514,
-   "build_ms": 1893.392359,
-   "frame_ms_mean": 8.168684944444445,
-   "frame_ms_p95": 10.126547,
+   "load_ms": 2.011926,
+   "build_ms": 709.286629,
+   "frame_ms_mean": 5.8060061777777765,
+   "frame_ms_p95": 5.637308,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3413117423/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3413117423/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3413117423/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3413117423/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5346,14 +5135,16 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3414858021",
-   "class": "degraded",
+   "class": "clean",
    "failed": null,
-   "loss": 0.1001,
+   "loss": 0.0,
    "native": [
     3840,
     2160
@@ -5362,71 +5153,22 @@
    "built": 139,
    "perspective": false,
    "hdr": false,
-   "load_ms": 833.529304,
-   "build_ms": 5790.587799,
-   "frame_ms_mean": 7.522594277777781,
-   "frame_ms_p95": 10.04758,
+   "load_ms": 17.860359,
+   "build_ms": 6607.17409,
+   "frame_ms_mean": 4.9518166,
+   "frame_ms_p95": 6.452597,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3414858021/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3414858021/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3414858021/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3414858021/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 4,
     "shader_warning": 4
    },
-   "errors": 4,
+   "errors": 0,
    "warnings": 4,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 354 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0299,
-     "object": 349,
-     "object_name": "左白巾",
-     "effect": 354,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 476 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0283,
-     "object": 475,
-     "object_name": "左白巾",
-     "effect": 476,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 366 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0266,
-     "object": 365,
-     "object_name": "左白巾",
-     "effect": 366,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 472 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0153,
-     "object": 470,
-     "object_name": "左白巾",
-     "effect": 472,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
     {
      "kind": "shader_warning",
      "severity": "warning",
@@ -5477,6 +5219,8 @@
     }
    ],
    "compat": [
+    "WE: a GLSL-reserved name renamed",
+    "WE: declarations hoisted above the includes",
     "glslang: backslash line continuation spliced",
     "glslang: unmatched #endif dropped",
     "glslang: wider vector truncated as HLSL does",
@@ -5497,21 +5241,23 @@
    "built": 23,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4481.052702,
-   "build_ms": 2920.017419,
-   "frame_ms_mean": 8.663895499999999,
-   "frame_ms_p95": 11.281138,
+   "load_ms": 6.299798,
+   "build_ms": 2272.851262,
+   "frame_ms_mean": 7.20595888888889,
+   "frame_ms_p95": 8.721738,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3419466417/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3419466417/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3419466417/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3419466417/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5527,21 +5273,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 786.715791,
-   "build_ms": 900.543427,
-   "frame_ms_mean": 1.387423544444445,
-   "frame_ms_p95": 2.2830060000000003,
+   "load_ms": 1.752747,
+   "build_ms": 369.145511,
+   "frame_ms_mean": 0.8715704333333333,
+   "frame_ms_p95": 1.468553,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3422085307/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3422085307/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3422085307/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3422085307/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5557,21 +5305,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1340.113228,
-   "build_ms": 815.764454,
-   "frame_ms_mean": 1.6582632333333334,
-   "frame_ms_p95": 2.364963,
+   "load_ms": 3.3710329999999997,
+   "build_ms": 499.849621,
+   "frame_ms_mean": 1.040048277777778,
+   "frame_ms_p95": 1.472959,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3422383300/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3422383300/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3422383300/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3422383300/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5587,21 +5337,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 758.029996,
-   "build_ms": 4048.981784999999,
-   "frame_ms_mean": 7.630166577777779,
-   "frame_ms_p95": 10.072084,
+   "load_ms": 1.221103,
+   "build_ms": 878.04795,
+   "frame_ms_mean": 6.866994144444445,
+   "frame_ms_p95": 5.841773,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3426575339/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3426575339/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3426575339/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3426575339/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5617,77 +5369,54 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1248.221563,
-   "build_ms": 3195.436051,
-   "frame_ms_mean": 8.4145132,
-   "frame_ms_p95": 11.304979,
+   "load_ms": 1.927718,
+   "build_ms": 848.2103119999999,
+   "frame_ms_mean": 7.39172011111111,
+   "frame_ms_p95": 7.263004,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3432876246/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3432876246/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3432876246/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3432876246/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3432999904",
    "class": "degraded",
    "failed": null,
-   "loss": 0.31,
+   "loss": 0.01,
    "native": [
     2340,
     1080
    ],
    "objects": 10,
-   "built": 9,
+   "built": 10,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1447.988955,
-   "build_ms": 1888.76323,
-   "frame_ms_mean": 3.0869016222222214,
-   "frame_ms_p95": 6.98643,
+   "load_ms": 2.5418350000000003,
+   "build_ms": 871.469634,
+   "frame_ms_mean": 2.115596,
+   "frame_ms_p95": 3.972082,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3432999904/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3432999904/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3432999904/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3432999904/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "dropped": 1,
-    "effect_dropped": 1,
     "script_error": 1
    },
-   "errors": 3,
+   "errors": 1,
    "warnings": 0,
    "problems": [
-    {
-     "kind": "dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON",
-     "message": "compose not built: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON [workshop/3360740962/effects/tone_mapping]",
-     "loss": 0.3,
-     "object": 62,
-     "object_name": "anh sang baotaobao",
-     "type": "compose",
-     "visible": true
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON",
-     "message": "effect 69 “Tone mapping” left out (and with it the layer): '' : syntax error, unexpected LEFT_PAREN, expecting COMMA or SEMICOLON [workshop/3360740962/effects/tone_mapping]",
-     "loss": 0.0,
-     "object": 62,
-     "object_name": "anh sang baotaobao",
-     "effect": 69,
-     "effect_name": "Tone mapping",
-     "type": "compose"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -5702,6 +5431,8 @@
     }
    ],
    "compat": [
+    "WE: a user function overloads an HLSL intrinsic",
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -5720,14 +5451,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5414.099716,
-   "build_ms": 4250.303537,
-   "frame_ms_mean": 5.741104477777777,
-   "frame_ms_p95": 7.337754,
+   "load_ms": 5.579021,
+   "build_ms": 2356.878373,
+   "frame_ms_mean": 4.98406381111111,
+   "frame_ms_p95": 5.775882,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3445973124/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3445973124/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3445973124/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3445973124/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5757,7 +5488,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5773,21 +5506,23 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 988.021533,
-   "build_ms": 1362.558659,
-   "frame_ms_mean": 0.7162772,
-   "frame_ms_p95": 1.579673,
+   "load_ms": 0.907285,
+   "build_ms": 211.004997,
+   "frame_ms_mean": 0.4175299444444442,
+   "frame_ms_p95": 0.885785,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3461192631/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3461192631/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3461192631/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3461192631/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5803,14 +5538,14 @@
    "built": 74,
    "perspective": false,
    "hdr": false,
-   "load_ms": 19521.356844,
-   "build_ms": 6918.1466629999995,
-   "frame_ms_mean": 4.15426402222222,
-   "frame_ms_p95": 6.305486,
+   "load_ms": 11.090015,
+   "build_ms": 5022.147207999999,
+   "frame_ms_mean": 2.7718819777777783,
+   "frame_ms_p95": 4.087753999999999,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3463520581/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3463520581/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3463520581/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3463520581/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5881,14 +5616,16 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3477054430",
    "class": "degraded",
    "failed": null,
-   "loss": 0.0543,
+   "loss": 0.02,
    "native": [
     1920,
     1080
@@ -5897,35 +5634,22 @@
    "built": 15,
    "perspective": true,
    "hdr": false,
-   "load_ms": 3832.999381,
-   "build_ms": 3400.473238,
-   "frame_ms_mean": 1.4218626999999997,
-   "frame_ms_p95": 2.746192,
+   "load_ms": 2.1046419999999997,
+   "build_ms": 868.252179,
+   "frame_ms_mean": 0.947625411111111,
+   "frame_ms_p95": 2.251128,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3477054430/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3477054430/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3477054430/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3477054430/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 1,
     "script_error": 2
    },
-   "errors": 3,
+   "errors": 2,
    "warnings": 0,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "GL: error C7011: implicit cast from \"vec4\" to \"vec2\"",
-     "message": "effect 103 “Test Shader” left out: error C7011: implicit cast from \"vec4\" to \"vec2\" [workshop/2342779250/effects/test_shader]",
-     "loss": 0.0343,
-     "object": 44,
-     "object_name": "luna-na-prozrachnom-fone-",
-     "effect": 103,
-     "effect_name": "Test Shader",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -5951,7 +5675,11 @@
      "type": "text"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: a declared gl_ built-in dropped",
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -5967,28 +5695,30 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1521.705576,
-   "build_ms": 1478.4123679999998,
-   "frame_ms_mean": 0.7834516333333332,
-   "frame_ms_p95": 1.926449,
+   "load_ms": 2.117229,
+   "build_ms": 272.820736,
+   "frame_ms_mean": 0.5184689888888889,
+   "frame_ms_p95": 1.229173,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3478602089/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3478602089/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3478602089/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3478602089/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3479521040",
-   "class": "degraded",
+   "class": "clean",
    "failed": null,
-   "loss": 0.0021,
+   "loss": 0.0,
    "native": [
     3840,
     2160
@@ -5997,35 +5727,22 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1611.169884,
-   "build_ms": 1520.743524,
-   "frame_ms_mean": 4.693510711111111,
-   "frame_ms_p95": 6.917026,
+   "load_ms": 6.861351,
+   "build_ms": 1954.46275,
+   "frame_ms_mean": 3.474522833333333,
+   "frame_ms_p95": 4.452264,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3479521040/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3479521040/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3479521040/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3479521040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 1,
     "offcanvas": 8
    },
-   "errors": 1,
+   "errors": 0,
    "warnings": 8,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'assign' : l-value required \"a_TexCoord\" (can't modify shader input)",
-     "message": "effect 257 “Shadow” left out: 'assign' : l-value required \"a_TexCoord\" (can't modify shader input) [workshop/3088030303/effects/shadow]",
-     "loss": 0.0021,
-     "object": 264,
-     "object_name": "VHS Time and Date",
-     "effect": 257,
-     "effect_name": "Shadow",
-     "type": "text"
-    },
     {
      "kind": "offcanvas",
      "severity": "warning",
@@ -6108,6 +5825,8 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
+    "WE: vertex writes to attributes (copied to globals)",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -6126,14 +5845,14 @@
    "built": 20,
    "perspective": false,
    "hdr": false,
-   "load_ms": 23.364016000000003,
-   "build_ms": 1060.791132,
-   "frame_ms_mean": 3.0132677333333335,
-   "frame_ms_p95": 4.590515,
+   "load_ms": 4.180994,
+   "build_ms": 1414.9315760000002,
+   "frame_ms_mean": 1.981773388888889,
+   "frame_ms_p95": 2.95094,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3480481965/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3480481965/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3480481965/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3480481965/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6174,6 +5893,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -6192,14 +5912,14 @@
    "built": 49,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11.227239,
-   "build_ms": 1596.07507,
-   "frame_ms_mean": 11.365599744444443,
-   "frame_ms_p95": 18.115078,
+   "load_ms": 7.314539,
+   "build_ms": 2436.517445,
+   "frame_ms_mean": 8.53269592222222,
+   "frame_ms_p95": 10.025324,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3489263099/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3489263099/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3489263099/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3489263099/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6250,7 +5970,9 @@
      "type": "particle"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -6266,14 +5988,14 @@
    "built": 51,
    "perspective": false,
    "hdr": false,
-   "load_ms": 40.305483,
-   "build_ms": 1653.317313,
-   "frame_ms_mean": 4.134087155555554,
-   "frame_ms_p95": 5.937812,
+   "load_ms": 8.170014,
+   "build_ms": 2142.4467090000003,
+   "frame_ms_mean": 2.4100046111111117,
+   "frame_ms_p95": 3.627151,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3490034653/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3490034653/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3490034653/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3490034653/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6364,6 +6086,8 @@
     }
    ],
    "compat": [
+    "WE: a fragment varying takes the vertex unit's type",
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -6382,14 +6106,14 @@
    "built": 142,
    "perspective": true,
    "hdr": true,
-   "load_ms": 206.197563,
-   "build_ms": 4700.202663,
-   "frame_ms_mean": 13.982053511111111,
-   "frame_ms_p95": 25.941792000000003,
+   "load_ms": 17.113495,
+   "build_ms": 6995.538774,
+   "frame_ms_mean": 7.444658700000001,
+   "frame_ms_p95": 12.278667,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3509243656/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3509243656/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3509243656/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3509243656/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7086,14 +6810,17 @@
      "type": "image"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: a declared gl_ built-in dropped",
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
    "id": "3516106265",
    "class": "degraded",
    "failed": null,
-   "loss": 0.1702,
+   "loss": 0.15,
    "native": [
     3840,
     2160
@@ -7102,337 +6829,24 @@
    "built": 69,
    "perspective": false,
    "hdr": false,
-   "load_ms": 24.219227,
-   "build_ms": 2444.893854,
-   "frame_ms_mean": 4.26551638888889,
-   "frame_ms_p95": 4.845654,
+   "load_ms": 17.740893,
+   "build_ms": 4103.088283,
+   "frame_ms_mean": 3.2355097,
+   "frame_ms_p95": 2.573147,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3516106265/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3516106265/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3516106265/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3516106265/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 26,
     "missing_asset": 24,
     "script_error": 3,
     "offcanvas": 3
    },
-   "errors": 53,
+   "errors": 27,
    "warnings": 3,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : boolean expression expected",
-     "message": "effect 229 “Frame Builder by Gariam” left out: '' : boolean expression expected [workshop/3573886911/effects/frame_builder_by_gariam]",
-     "loss": 0.005,
-     "object": 228,
-     "object_name": "Background | Logic",
-     "effect": 229,
-     "effect_name": "Frame Builder by Gariam",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: '' : boolean expression expected",
-     "message": "effect 233 “Frame Builder by Gariam” left out: '' : boolean expression expected [workshop/3573886911/effects/frame_builder_by_gariam]",
-     "loss": 0.0008,
-     "object": 232,
-     "object_name": "Drag and Drop",
-     "effect": 233,
-     "effect_name": "Frame Builder by Gariam",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 239 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 236,
-     "object_name": "Launcher 1",
-     "effect": 239,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 247 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 245,
-     "object_name": "Launcher 2",
-     "effect": 247,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 254 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 252,
-     "object_name": "Launcher 3",
-     "effect": 254,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 261 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 259,
-     "object_name": "Launcher 4",
-     "effect": 261,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 268 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 266,
-     "object_name": "Launcher 5",
-     "effect": 268,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 275 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 273,
-     "object_name": "Launcher 6",
-     "effect": 275,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 282 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 280,
-     "object_name": "Launcher 7",
-     "effect": 282,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 289 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 287,
-     "object_name": "Launcher 8",
-     "effect": 289,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 296 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 294,
-     "object_name": "Launcher 9",
-     "effect": 296,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 303 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 301,
-     "object_name": "Launcher 10",
-     "effect": 303,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 310 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 308,
-     "object_name": "Launcher 11",
-     "effect": 310,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 317 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 315,
-     "object_name": "Launcher 12",
-     "effect": 317,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 324 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 322,
-     "object_name": "Launcher 13",
-     "effect": 324,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 331 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 329,
-     "object_name": "Launcher 14",
-     "effect": 331,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 338 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 336,
-     "object_name": "Launcher 15",
-     "effect": 338,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 345 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 343,
-     "object_name": "Launcher 16",
-     "effect": 345,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 352 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 350,
-     "object_name": "Launcher 17",
-     "effect": 352,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 359 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 357,
-     "object_name": "Launcher 18",
-     "effect": 359,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 366 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 364,
-     "object_name": "Launcher 19",
-     "effect": 366,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 373 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 371,
-     "object_name": "Launcher 20",
-     "effect": 373,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 380 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 378,
-     "object_name": "Launcher 21",
-     "effect": 380,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 387 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 385,
-     "object_name": "Launcher 22",
-     "effect": 387,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 394 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 392,
-     "object_name": "Launcher 23",
-     "effect": 394,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'input' : Reserved word.",
-     "message": "effect 401 “Custom User Texture” left out: 'input' : Reserved word. [workshop/3573886911/effects/custom_user_texture]",
-     "loss": 0.0006,
-     "object": 399,
-     "object_name": "Launcher 24",
-     "effect": 401,
-     "effect_name": "Custom User Texture",
-     "type": "image"
-    },
     {
      "kind": "missing_asset",
      "severity": "error",
@@ -7789,6 +7203,9 @@
     }
    ],
    "compat": [
+    "HLSL: a scalar condition",
+    "WE: a GLSL-reserved name renamed",
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -7798,7 +7215,7 @@
    "id": "3516174947",
    "class": "degraded",
    "failed": null,
-   "loss": 0.2591,
+   "loss": 0.03,
    "native": [
     3440,
     1440
@@ -7807,110 +7224,25 @@
    "built": 132,
    "perspective": false,
    "hdr": false,
-   "load_ms": 30.952051,
-   "build_ms": 6380.665314,
-   "frame_ms_mean": 4.637942566666667,
-   "frame_ms_p95": 6.327710000000001,
+   "load_ms": 26.485446,
+   "build_ms": 9584.171154,
+   "frame_ms_mean": 6.442464044444444,
+   "frame_ms_p95": 8.353088,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3516174947/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3516174947/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3516174947/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3516174947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
-    "effect_dropped": 7,
     "script_error": 3,
     "offcanvas": 2,
     "alpha0": 1,
     "shader_warning": 7
    },
-   "errors": 10,
+   "errors": 3,
    "warnings": 10,
    "problems": [
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 213 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.1032,
-     "object": 173,
-     "object_name": "树",
-     "effect": 213,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 248 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.1032,
-     "object": 173,
-     "object_name": "树",
-     "effect": 248,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 419 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0035,
-     "object": 416,
-     "object_name": "右花",
-     "effect": 419,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 454 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0025,
-     "object": 452,
-     "object_name": "右花2",
-     "effect": 454,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 626 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.002,
-     "object": 625,
-     "object_name": "右花",
-     "effect": 626,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 640 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0014,
-     "object": 638,
-     "object_name": "右花2",
-     "effect": 640,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
-    {
-     "kind": "effect_dropped",
-     "severity": "error",
-     "cause": "glslang: 'M_PI' : undeclared identifier",
-     "message": "effect 344 “Auto Sway” left out: 'M_PI' : undeclared identifier [workshop/3235948233/effects/auto_sway]",
-     "loss": 0.0133,
-     "object": 342,
-     "object_name": "树2",
-     "effect": 344,
-     "effect_name": "Auto Sway",
-     "type": "image"
-    },
     {
      "kind": "script_error",
      "severity": "error",
@@ -8063,6 +7395,7 @@
     }
    ],
    "compat": [
+    "WE: declarations hoisted above the includes",
     "glslang: unmatched #endif dropped",
     "shader: fragment writes to varyings (copied to globals)"
    ],
@@ -8081,14 +7414,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.83954,
-   "build_ms": 1636.716999,
-   "frame_ms_mean": 5.294977799999999,
-   "frame_ms_p95": 9.452173,
+   "load_ms": 2.9243870000000003,
+   "build_ms": 1382.460635,
+   "frame_ms_mean": 3.5447177555555545,
+   "frame_ms_p95": 5.7232840000000005,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3556794116/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3556794116/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3556794116/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3556794116/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8108,7 +7441,9 @@
      "type": "text"
     }
    ],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -8124,21 +7459,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 45.052944999999994,
-   "build_ms": 131.63550199999997,
-   "frame_ms_mean": 0.5845962222222222,
-   "frame_ms_p95": 1.512364,
+   "load_ms": 1.175427,
+   "build_ms": 134.294829,
+   "frame_ms_mean": 0.32838512222222227,
+   "frame_ms_p95": 1.048103,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3593587273/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3593587273/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3593587273/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3593587273/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   },
   {
@@ -8154,21 +7491,23 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.494097,
-   "build_ms": 286.363489,
-   "frame_ms_mean": 0.8359424,
-   "frame_ms_p95": 1.5011180000000002,
+   "load_ms": 1.618545,
+   "build_ms": 353.52147,
+   "frame_ms_mean": 0.8810155555555553,
+   "frame_ms_p95": 2.0115380000000003,
    "static": false,
    "shots": [
-    "/tmp/liascape-scene-health-run3/scenes/3749550751/lwe-smoke-1s.png",
-    "/tmp/liascape-scene-health-run3/scenes/3749550751/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3749550751/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/f40515c5-cbd7-49eb-9150-fbd746d451fc/scratchpad/health-run1/scenes/3749550751/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
    "errors": 0,
    "warnings": 0,
    "problems": [],
-   "compat": [],
+   "compat": [
+    "WE: declarations hoisted above the includes"
+   ],
    "fonts_substituted": []
   }
  ]

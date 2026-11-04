@@ -1948,7 +1948,96 @@ Not ours / left: the date text "WEDNESDAY" still reaches the right edge (its gro
 `x8` = 0.967 of the canvas; not checked against WE). The `auto_sway` hair/cloth effect (3235948233) still fails: its
 helper functions use `M_PI` from `common.h` above the point LWE pastes includes (before main, after the last
 varying). Moving the include's `#define`s to the `#include` line builds it, but then the left white cloth (左白巾)
-vanished, so that change is not in; it needs the effect itself read (TODO).
+vanished, so that change is not in; it needs the effect itself read (TODO). **Done:** see "Shader preprocessing
+result" below — the vanish was 0059's writable-varying copy filled only in the first of the unit's three `main`s.
 
 Tests (host_api_test, all RED on 157c111): `particle_pointer_is_y_down`, `script_angles_are_degrees`,
 `shaders_compile_like_hlsl`. The smoke has `--pointer X0,Y0:X1,Y1` (a scripted pointer path) for direction checks.
+
+### Shader preprocessing result (fork patches 0063–0064, 2026-11-04)
+
+The scene health report (fork patch 0061) found 21 of 96 scenes degraded, most by shaders LWE's glslang path refused
+but WE builds. Instead of more one-off retries, WE's own shader path was read (in the sound spike's `all.c`; the
+addresses are its functions) and ported (`Render/Shaders/WEShaderRules.{h,cpp}`, `ShaderUnit`, `GLSLContext`).
+
+**WE's path (Observed in the decompile).**
+- **Includes (GH 0x140191050, GH 0x1401917f0).** A unit is read line by line; a line that *starts* with the eight
+  bytes `#include` (no indent — a `// #include` is a comment) is blanked and the quoted name recorded with the output
+  offset it was at. Each include (`shaders/<name>`, expanded the same way, recursively) is pasted at that offset: in
+  place. A missing file is skipped. LWE pasted every include before `main`, after the unit's last declaration, and
+  matched `#include` anywhere on a line.
+- **The translator (GH 0x140125e80).** Lines starting `attribute` / `varying` / `in` / `out` / `uniform` are taken
+  out of the text: uniforms become cbuffer members and `Texture2D` + `SamplerState` pairs (the 15-entry type table
+  `float…uvec4` → `float…uint4`, `sampler2D` → `sampler`, `sampler2DComparison` → `samplerComparison`), attributes the
+  `VS_INPUT` struct (the 26-name attribute table `a_Position…a_Color` → POSITION/NORMAL/TANGENT/BLENDINDICES/…/COLOR),
+  varyings `VS_OUTPUT`; every use is rewritten `IN.x` / `OUT.x` (a token pass over the text; `gl_FragColor` →
+  `OUT.gl_FragColor`, `gl_Position` added to the outputs). The fragment unit's input struct **is the vertex unit's
+  output list** (`param_6`: its own varying lines are dropped). A global line starting `const` gets `static `. The
+  header it prepends: `#define vec2 float2 … mix lerp, mod(x,y) …, CASTI/CASTU/CASTF/CAST2/3/4/CAST4U/CAST3X3,
+  DECLARE_SAMPLER2D_PARAMETER / MAKE_SAMPLER2D_ARGUMENT (+ _COMPARE_), texSample2D / Lod / Compare, texLoad2D,
+  texSample3D, MapTexCoordToFrameBuffer, MapNDCToFrameBuffer (y flipped), MapEffectSpaceToFrameBuffer`, and one of two
+  `texSample2DBackBuffer`s; plus `#define HLSL 1\n#define HLSL_SM40 1` (GH 0x140106780).
+- **The compile (GH 0x140106780).** `D3DCompile (src, len, name, NULL defines, NULL include handler, "main",
+  vs_5_0 / gs_5_0 / ps_5_0, 0x8800 = optimization level 3 | strictness, 0)`; a unit that fails is replaced by
+  `shaders/HLSL/dx11fallback.{vert,frag}` — solid `(0.5, 0, 0, 1)` red. So a shader a published scene uses compiles in
+  FXC with that scene's combos; its HLSL semantics are what authors relied on.
+- **Combos (GH 0x14019b330)** become `#define NAME value` for every entry of the pass's combo map, zeros included.
+  **WE's preprocessor (GH 0x140199cf0, its `#if` reader GH 0x140196ce0)** handles `define / undef / if / ifdef /
+  ifndef / elif / else / endif / require` with the regex `^\s*#\s*([a-z]+)\b\s*(.*)`; an `#endif` with no open `#if`
+  is passed over.
+
+**Ported** (each rewrite is a `compat` record in the health report):
+| rule | WE / HLSL | was in LWE | e.g. |
+|---|---|---|---|
+| include in place, line-start only | GH 0x140191050 / 0x1401917f0 | before main; anywhere on a line | 3235948233 auto_sway (`M_PI` above main) |
+| declarations hoisted above the includes (inside copies of their `#if` chain; kept in place when the chain or an array size reads a name the unit `#define`s below the hoist point) | GH 0x140125e80 (cbuffers / structs ahead of code) | implied by the before-main placement | common_blur.h samples `g_Texture0` declared below it |
+| fragment varyings take the vertex's types | GH 0x140125e80 (`VS_OUTPUT` is the PS input) | own types; glslang linked vec2-in to vec4-out, SPIRV-Cross wrote `vec2 = vec4`, NVIDIA C7011 | 2846673187 audio ring, 2844906964 / 2342779250 test_shader |
+| fragment varyings and vertex attributes writable, the copy filled in **every** `main` | IN struct members are locals | first `main` only (0059) | 3235948233 auto_sway has one `main` per `AA_VERSION` |
+| WE's header macros + HLSL type names (`half*`, `uint2…`, `float2x2…`) | GH 0x140125e80 header | CAST2/3/4 only | stock fur4 (`CASTF`), chroma4 / foliage4 (`DECLARE_SAMPLER2D_PARAMETER`), volumetricsfront (`sampler2DBackBuffer`) |
+| declared `gl_` built-ins dropped | system-value struct members (Inferred: SV_InstanceID / SV_ViewportArrayIndex) | redeclaration error | stock shadowcaster* |
+| unmatched `#endif` dropped | GH 0x140199cf0 | 0059 (kept) | 2973943998 iris_movement__ |
+| an `#if` a preprocessor can't read is false | GH 0x140196ce0 (Inferred: the guarded block has a missing `;`) | glslang error | 3042492564 aa_gaussian `#if g_Texture0Resolution.y <= 640` |
+| `formatcombo` samplers get `TEX<n>FORMAT` (0 = RGBA8888 for any decoded texture) | Inferred (the engine defines it per bound texture) | only TEX0FORMAT | stock fur4 `TEX8FORMAT` |
+
+HLSL's semantics, applied from glslang's error on the line it names (`GLSLContext.cpp`; HLSL's documented rules —
+Inferred as WE's only in that FXC is its compiler):
+| rule | e.g. |
+|---|---|
+| an assignment / initializer converts: truncates (`(x).xy`), promotes a scalar, changes base (`int(a < b)`), each assignment on the line | 2846673187 `vec2 fragPos = v_TexCoord`, 3021673417 Simple_Audio_Bars `barLeft *= isLeftChannel` |
+| an operand truncates — the variable of the error's storage (in / uniform / temp), never a name being declared (0059 swizzled `vec4 clip` itself) | 2800594362 clipping_mask, 3414858021 iris_movement__ |
+| a call's arguments convert to its (single) user definition's parameter types; int literals of a built-in call become floats | 3370055069 depthparallax `getDepthMapDataX (vec2, int)` |
+| a local `const` takes any initializer; a global one is a static const set at the top of every main | 2795521260 color_grading, 2799421411 oscilloscope |
+| a function with no return on the combo's path returns its type's zero | 2821337237 shadow_map (SHADOWMASK 0 "None"), 3082978660 Simple_Audio_Bars |
+| a scalar is a condition (ternary, if, while) | 3573886911 frame_builder |
+| GLSL-reserved names renamed `_wp_<name>` (input, output, filter, common, …; `texture` when the unit declares a variable of that name) | 3573886911 custom_user_texture, stock effects/blend |
+| a user function named like a header macro (log10, saturate, frac, fmod, lerp, atan2, ddx, ddy) gets the macro #undef'd and real overloads for the other types | 2812601803 / 3360740962 tone_mapping (`float log10 (float)`) |
+| `clip()` | stock volumetricsfront |
+
+Also Inferred: a uniform with neither a default nor a material constant starts at 0 (was an exception: the stock
+shadowcasterfoliage4); a vector default with too few components fills with 0 (the stock editorpaintbrush's vec4 `"0
+0"`); an include already pasted in the unit isn't pasted again. **Why 左白巾 vanished** when only the defines were
+moved (the earlier attempt): auto_sway's fragment unit writes `v_TexCoord` in `calNode (inout vec4 texCoord …)`, so 0059
+copies it into a global filled at the start of `main` — but the unit has three `main`s, one per `AA_VERSION`, and the
+fill went into the first (AA_VERSION 3, inactive). The active one read the copy as 0, so every pixel sampled the
+texture's corner (alpha 0). Measured with the extracted scene: a magenta output showed the geometry in place,
+`gl_FragColor = vec4 (v_TexCoord.xy, …)` read black.
+
+**The shader sweep** (fork patch 0063 `wp_project_shader_check`, `liascape-scene-worker --shader-sweep`,
+`src/player/tests/onmachine/shader_sweep.py`): every stock shader (`assets/shaders/**` and `assets/effects/*/shaders/**`,
+124) and every custom shader in the library's pkgs and folders (272 after de-duplicating identical copies), each with
+its defaults, every single combo at each declared value (texture-slot combos only as 1, with their texture), every
+combination the library's materials / effects / scene overrides use, and 4 seeded random combinations: **4085
+compiles** through the core's own preprocessing, glslang + SPIRV-Cross and the GL compile and link, nothing drawn.
+**Before: 313 failed, in 35 shaders. After: 47 failed, in 7 shaders, 0 newly failing** — each explained:
+- stock `shadowcaster`, `shadowcasterfoliage4`, `shadowcasterfur4` (41): the vertex unit writes `gl_ViewportIndex`
+  (layered cube/cascade shadow maps), which GLSL allows from 4.10 and LWE compiles at 3.30. LWE has no shadow-casting
+  pass, so no scene compiles them.
+- stock `puppettexturechannels` (2): `BLENDROWCOUNT` is set by WE's puppet-warp tool, not by any material.
+- 3235948233 `auto_sway` with `AA_VERSION 1` and DEBUG (2: a full-width `；` ends a line) and `AA_VERSION 3` +
+  `AUTO_TIMEOFFSET 0` (1: `thisOffset` undeclared) — options the shader labels beta / "in verification"; FXC refuses
+  the same text. No scene uses them.
+- 3370055069 `depthparallax` with `MODE 1` + `OVERLAY_LOCATOR` (1, a random combination): `g_Texture2` is declared
+  only for another MODE. No scene uses it.
+
+Tests (host_api_test, all four red on `42f301d`): `shaders_include_in_place`, `fragment_varying_takes_vertex_type`,
+`hlsl_conversions_compile`, `hlsl_names_and_leftovers_compile`; `shaders_compile_like_hlsl` (0059) still passes.

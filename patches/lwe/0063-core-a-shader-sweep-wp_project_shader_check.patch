@@ -1,0 +1,321 @@
+From 1cd09a6e8e3fd47cf470c7309897a658d9435d6d Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:02:56 +0530
+Subject: [PATCH 63/64] core: a shader sweep (wp_project_shader_check)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The scene health report sees a shader only when a scene that uses it is rendered, with that scene's combos. The
+sweep compiles any shader of a project — stock or the scene's own — with any combos, through the same
+preprocessing, glslang + SPIRV-Cross pass and GL compile and link a material pass uses, and returns what failed
+where (load, glslang, gl, link) and the HLSL-compatible rewrites it needed. Nothing is drawn. Health::Capture
+collects a call's records on its thread for it.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Shader preprocessing result" (the sweep over WE's stock shaders and the library's)
+Status: ours-only
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/project.h |  17 +++
+ src/core/WallpaperEngine/Health.cpp     |  10 +-
+ src/core/WallpaperEngine/Health.h       |  19 ++++
+ src/core/WallpaperEngine/Project.cpp    | 133 +++++++++++++++++++++++-
+ src/core/WallpaperEngine/Project.h      |   9 ++
+ src/core/frontends/project.cpp          |  18 ++++
+ 6 files changed, 204 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/project.h b/include/linux-wallpaperengine/project.h
+index ee407d0..30f384b 100644
+--- a/include/linux-wallpaperengine/project.h
++++ b/include/linux-wallpaperengine/project.h
+@@ -505,6 +505,23 @@ WPENGINE_API void wp_project_notify_media_status (wp_project* project, bool enab
+  */
+ WPENGINE_API bool wp_project_uses_media (wp_project* project);
+ 
++/**
++ * The shader sweep (a diagnostic; draws nothing): builds shader `shader` (relative to the project's shaders/, no
++ * extension — "genericimage2", "workshop/<id>/effects/<name>") through the same preprocessing, glslang pass and GL
++ * compile and link a material pass uses, on the GL context current on the calling thread.
++ *
++ * @param project
++ * @param shader
++ * @param request JSON or NULL: {"combos": {NAME: int…}, "textures": [slot…], "gl": bool (default true)}
++ * @param out Receives JSON {"shader", "ok", "stage" (load | glslang | gl | link), "message", "unit", "compat": [the
++ * HLSL-compatible rewrites applied], "combos": {the effective combos}}, NUL-terminated and cut to `out_size`
++ * @param out_size
++ * @return The length of the whole JSON (more than `out_size - 1` when it was cut), 0 on an error before it
++ */
++WPENGINE_API size_t wp_project_shader_check (
++    wp_project* project, const char* shader, const char* request, char* out, size_t out_size
++);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/core/WallpaperEngine/Health.cpp b/src/core/WallpaperEngine/Health.cpp
+index 68f1f8d..cd633b1 100644
+--- a/src/core/WallpaperEngine/Health.cpp
++++ b/src/core/WallpaperEngine/Health.cpp
+@@ -20,6 +20,7 @@ size_t g_lines = 0;
+ constexpr size_t kMaxLines = 50000;
+ 
+ thread_local std::vector<std::pair<std::string, nlohmann::json>> t_scopes;
++thread_local Capture* t_capture = nullptr;
+ } // namespace
+ 
+ void configure () noexcept {
+@@ -43,7 +44,11 @@ void configure () noexcept {
+     g_enabled.store (g_file != nullptr, std::memory_order_relaxed);
+ }
+ 
+-bool enabled () noexcept { return g_enabled.load (std::memory_order_relaxed); }
++bool enabled () noexcept { return g_enabled.load (std::memory_order_relaxed) || t_capture != nullptr; }
++
++Capture::Capture () noexcept : m_previous (t_capture) { t_capture = this; }
++
++Capture::~Capture () { t_capture = m_previous; }
+ 
+ void report (const char* event, nlohmann::json fields) noexcept {
+     if (!enabled ()) {
+@@ -62,6 +67,9 @@ void report (const char* event, nlohmann::json fields) noexcept {
+ 	}
+ 	// invalid UTF-8 in a message (a font name, a shader log) is replaced, not thrown
+ 	std::string line = record.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
++	if (t_capture != nullptr) {
++	    t_capture->m_records.push_back (nlohmann::json::parse (line));
++	}
+ 
+ 	std::lock_guard lock (g_mutex);
+ 	if (g_file == nullptr || g_lines >= kMaxLines || !g_written.insert (line).second) {
+diff --git a/src/core/WallpaperEngine/Health.h b/src/core/WallpaperEngine/Health.h
+index f260dbb..1191124 100644
+--- a/src/core/WallpaperEngine/Health.h
++++ b/src/core/WallpaperEngine/Health.h
+@@ -41,6 +41,25 @@ private:
+     bool m_pushed = false;
+ };
+ 
++/**
++ * Collects every record reported on this thread while it lives (as well as writing them to the file when one is
++ * open): the shader sweep (`wp_project_shader_check`) reads a compile's errors and rewrites from it. Nests: only the
++ * innermost capture collects
++ */
++class Capture {
++public:
++    Capture () noexcept;
++    ~Capture ();
++    Capture (const Capture&) = delete;
++    Capture& operator= (const Capture&) = delete;
++    [[nodiscard]] const nlohmann::json& records () const noexcept { return m_records; }
++
++private:
++    nlohmann::json m_records = nlohmann::json::array ();
++    Capture* m_previous = nullptr;
++    friend void report (const char* event, nlohmann::json fields) noexcept;
++};
++
+ /** The first `max` bytes of a log message, without a "Compiled source code:" dump */
+ [[nodiscard]] std::string brief (const std::string& message, size_t max = 600);
+ } // namespace WallpaperEngine::Health
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 16ea537..453cf14 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -5,6 +5,8 @@
+ #include "Data/Model/Property.h"
+ #include "Data/Parsers/ProjectParser.h"
+ #include "FileSystem/Adapters/MediaCover.h"
++#include "Render/Shaders/GLSLContext.h"
++#include "Render/Shaders/Shader.h"
+ #include "Render/Wallpapers/CScene.h"
+ #include "Render/Wallpapers/CWeb.h"
+ #include "Scripting/ScriptEngine.h"
+@@ -627,4 +629,133 @@ WallpaperEngine::Project::loadFolder (Context* context, wp_mouse_input* mouse_in
+ 	WPENGINE_HEALTH ("load_failed", { { "message", WallpaperEngine::Health::brief (e.what ()) } });
+ 	throw;
+     }
+-}
+\ No newline at end of file
++}
++namespace {
++/** Compiles one GL unit of the sweep; false + the driver's log when it doesn't compile */
++bool sweepCompile (GLuint type, const std::string& source, GLuint& id, std::string& log) {
++    id = glCreateShader (type);
++    const char* text = source.c_str ();
++    glShaderSource (id, 1, &text, nullptr);
++    glCompileShader (id);
++    GLint ok = GL_FALSE, length = 0;
++    glGetShaderiv (id, GL_COMPILE_STATUS, &ok);
++    glGetShaderiv (id, GL_INFO_LOG_LENGTH, &length);
++    if (ok == GL_FALSE && length > 0) {
++	std::string buffer (static_cast<size_t> (length), '\0');
++	glGetShaderInfoLog (id, length, nullptr, buffer.data ());
++	log = buffer.c_str ();
++    }
++    return ok != GL_FALSE;
++}
++} // namespace
++
++std::string WallpaperEngine::Project::shaderCheck (const std::string& name, const std::string& request) {
++    using namespace WallpaperEngine::Render::Shaders;
++    nlohmann::json out = { { "shader", name }, { "ok", false } };
++    nlohmann::json compat = nlohmann::json::array ();
++    const WallpaperEngine::Health::Capture capture;
++    std::string stage = "load", message;
++
++    try {
++	const auto req = request.empty () ? nlohmann::json::object () : nlohmann::json::parse (request);
++	ComboMap combos;
++	TextureMap textures;
++	const ComboMap noCombos;
++	const TextureMap noTextures;
++	const ShaderConstantMap noConstants;
++	if (req.contains ("combos")) {
++	    for (const auto& [key, value] : req["combos"].items ()) {
++		combos[key] = value.is_number () ? value.get<int> () : 0;
++	    }
++	}
++	if (req.contains ("textures")) {
++	    for (const auto& slot : req["textures"]) {
++		textures[slot.get<int> ()] = "sweep";
++	    }
++	}
++	const bool gl = req.value ("gl", true);
++
++	Shader shader (*this->ref->assetLocator, name, combos, noCombos, textures, noTextures, noConstants);
++	const std::string vertexIn = shader.vertex ();
++	const std::string fragmentIn = shader.fragment ();
++	nlohmann::json effective = nlohmann::json::object ();
++	for (const auto* unit : { &shader.getVertex (), &shader.getFragment () }) {
++	    for (const auto& [key, value] : unit->getCombos ()) {
++		effective[key] = value;
++	    }
++	    for (const auto& [key, value] : unit->getDiscoveredCombos ()) {
++		if (!effective.contains (key)) {
++		    effective[key] = value;
++		}
++	    }
++	}
++	out["combos"] = effective;
++	stage = "glslang";
++	const auto [vertex, fragment] = GLSLContext::get ().toGlsl (vertexIn, fragmentIn);
++	if (vertex.empty () || fragment.empty ()) {
++	    throw std::runtime_error ("");
++	}
++	if (gl) {
++	    if (active_context != &this->context) {
++		active_context = &this->context;
++		gladLoadGLLoader (wp_context_call_gl_proc_address);
++	    }
++	    GLuint vs = 0, fs = 0;
++	    stage = "gl";
++	    const bool vok = sweepCompile (GL_VERTEX_SHADER, vertex, vs, message);
++	    const bool fok = vok && sweepCompile (GL_FRAGMENT_SHADER, fragment, fs, message);
++	    if (vok && fok) {
++		stage = "link";
++		const GLuint program = glCreateProgram ();
++		glAttachShader (program, vs);
++		glAttachShader (program, fs);
++		glLinkProgram (program);
++		GLint ok = GL_FALSE, length = 0;
++		glGetProgramiv (program, GL_LINK_STATUS, &ok);
++		glGetProgramiv (program, GL_INFO_LOG_LENGTH, &length);
++		if (ok == GL_FALSE && length > 0) {
++		    std::string buffer (static_cast<size_t> (length), '\0');
++		    glGetProgramInfoLog (program, length, nullptr, buffer.data ());
++		    message = buffer.c_str ();
++		}
++		glDeleteProgram (program);
++		if (ok != GL_FALSE) {
++		    stage = "";
++		}
++	    } else {
++		out["unit"] = vok ? "fragment" : "vertex";
++	    }
++	    if (vs != 0) {
++		glDeleteShader (vs);
++	    }
++	    if (fs != 0) {
++		glDeleteShader (fs);
++	    }
++	} else {
++	    stage = "";
++	}
++    } catch (const std::exception& e) {
++	if (message.empty ()) {
++	    message = e.what ();
++	}
++    }
++
++    for (const auto& record : capture.records ()) {
++	const std::string ev = record.value ("ev", "");
++	if (ev == "compat") {
++	    compat.push_back (record.value ("what", ""));
++	} else if (ev == "shader_error" && message.empty ()) {
++	    message = record.value ("message", "");
++	    if (record.contains ("unit")) {
++		out["unit"] = record["unit"];
++	    }
++	}
++    }
++    out["ok"] = stage.empty ();
++    if (!stage.empty ()) {
++	out["stage"] = stage;
++	out["message"] = WallpaperEngine::Health::brief (message, 2000);
++    }
++    out["compat"] = compat;
++    return out.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
++}
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index 6d03575..ccb544c 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -64,6 +64,15 @@ public:
+     void mediaStatusChange (bool enabled);
+     [[nodiscard]] bool usesMedia () const;
+ 
++    /**
++     * The shader sweep: builds shader `name` (relative to shaders/, no extension) from this project's files the way a
++     * material pass does — the same preprocessing, glslang and SPIRV-Cross pass and the GL compile and link, on the
++     * GL context current on this thread — and draws nothing. `request` is JSON: `{"combos": {NAME: value…},
++     * "textures": [slot…], "gl": bool}` (gl defaults to true). Returns JSON `{"ok", "stage" (load | glslang | gl |
++     * link), "message", "compat": [what…], "combos": {the effective combos}}`
++     */
++    std::string shaderCheck (const std::string& name, const std::string& request);
++
+     static Project* loadId (Context* context, wp_mouse_input* mouse_input, const unsigned long int id);
+     static Project* loadId (Context* context, wp_mouse_input* mouse_input, const std::string& id);
+     static Project* loadFolder (Context* context, wp_mouse_input* mouse_input, const char* folder);
+diff --git a/src/core/frontends/project.cpp b/src/core/frontends/project.cpp
+index a8f06e4..b600b71 100644
+--- a/src/core/frontends/project.cpp
++++ b/src/core/frontends/project.cpp
+@@ -1,5 +1,8 @@
+ #include "linux-wallpaperengine/project.h"
+ 
++#include <algorithm>
++#include <cstring>
++
+ #include "WallpaperEngine/Project.h"
+ 
+ #define WPENGINE_PROJECT_API_BEGIN try {
+@@ -250,3 +253,18 @@ wp_project_notify_playback_position_and_duration_change (wp_project* project, do
+     static_cast<WallpaperEngine::Project*> (project)->playbackPositionAndDurationChange (position, duration);
+     WPENGINE_PROJECT_API_END ();
+ }
++
++WPENGINE_API size_t wp_project_shader_check (
++    wp_project* project, const char* shader, const char* request, char* out, size_t out_size
++) {
++    WPENGINE_PROJECT_API_BEGIN
++    const std::string json
++	= static_cast<WallpaperEngine::Project*> (project)->shaderCheck (shader, request != nullptr ? request : "");
++    if (out != nullptr && out_size > 0) {
++	const size_t n = std::min (json.size (), out_size - 1);
++	std::memcpy (out, json.data (), n);
++	out[n] = '\0';
++    }
++    return json.size ();
++    WPENGINE_PROJECT_API_END (0);
++}
