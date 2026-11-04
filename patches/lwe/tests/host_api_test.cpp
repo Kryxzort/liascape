@@ -3932,6 +3932,65 @@ static bool alphawriting_masks_alpha () {
     return true;
 }
 
+// F9/E26 + fbos.fit: an effect FBO's `fit` caps its longer side (aspect kept, GH 0x140216080: a 16×8 layer's fit 4
+// FBO is 4×2) and a `command: swap` pass exchanges two FBOs (the stock fluid simulation's ping-pong): a pass draws
+// green into B, the layer shows A, the swap makes A what B was, so from the second frame the layer is green.
+// Unpatched the FBO was the layer's 16×8 and the swap pass was dropped (A stayed empty)
+static bool effect_fbo_fit_and_swap () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto layer = [] (int id, int x, const char* effect) {
+        return "{\"id\":" + std::to_string (id) + ",\"name\":\"l" + std::to_string (id) + "\",\"image\":\"models/b9.json\","
+               "\"size\":\"16 8\",\"origin\":\"" + std::to_string (x) + " 16 0\",\"effects\":[{\"id\":" + std::to_string (id + 10)
+             + ",\"name\":\"" + effect + "\",\"file\":\"effects/" + effect + "/effect.json\"}]}";
+    };
+    const std::string dir = camera_scene ("\"zoom\":1", layer (1, 16, "fit") + "," + layer (2, 48, "swap"), "");
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const std::string vert = "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), "
+                             "g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n";
+    auto shader = [&] (const std::string& name, const std::string& frag) {
+        write_file (dir + "/shaders/" + name + ".vert", vert);
+        write_file (dir + "/shaders/" + name + ".frag", frag);
+        write_file (dir + "/materials/" + name + ".json", "{\"passes\":[{\"shader\":\"" + name + "\",\"cullmode\":\"nocull\","
+                    "\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    };
+    shader ("green", "void main() {\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n}\n");
+    shader ("size", "uniform sampler2D g_Texture1;\nuniform vec4 g_Texture1Resolution;\nvoid main() {\n"
+                    "\tgl_FragColor = vec4(g_Texture1Resolution.x / 16.0, g_Texture1Resolution.y / 16.0, 0.0, 1.0);\n}\n");
+    shader ("show", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                    "\tgl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);\n}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/fit").c_str (), 0755);
+    mkdir ((dir + "/effects/swap").c_str (), 0755);
+    write_file (dir + "/effects/fit/effect.json",
+                "{\"name\":\"fit\",\"fbos\":[{\"name\":\"_rt_small\",\"fit\":4,\"format\":\"rgba8888\"}],\"passes\":["
+                "{\"material\":\"materials/green.json\",\"target\":\"_rt_small\"},"
+                "{\"material\":\"materials/size.json\",\"bind\":[{\"name\":\"_rt_small\",\"index\":1}]}]}\n");
+    write_file (dir + "/effects/swap/effect.json",
+                "{\"name\":\"swap\",\"fbos\":[{\"name\":\"_rt_A\",\"unique\":true,\"format\":\"rgba8888\"},"
+                "{\"name\":\"_rt_B\",\"unique\":true,\"format\":\"rgba8888\"}],\"passes\":["
+                "{\"material\":\"materials/green.json\",\"target\":\"_rt_B\"},"
+                "{\"material\":\"materials/show.json\",\"bind\":[{\"name\":\"_rt_A\",\"index\":0}]},"
+                "{\"command\":\"swap\",\"source\":\"_rt_A\",\"target\":\"_rt_B\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/fit/effect.json", "effects/swap/effect.json", "shaders/green.vert", "shaders/green.frag",
+                  "shaders/size.vert", "shaders/size.frag", "shaders/show.vert", "shaders/show.frag", "materials/green.json",
+                  "materials/size.json", "materials/show.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    unsigned char sized[4] = {}, shown[4] = {};
+    read_pixel (rig.fbo, 16, 16, sized);
+    read_pixel (rig.fbo, 48, 16, shown);
+    printf ("    fit-4 FBO of a 16x8 layer: %.1f x %.1f; swapped A after two frames: %d %d %d\n", sized[0] * 16.0 / 255.0,
+            sized[1] * 16.0 / 255.0, shown[0], shown[1], shown[2]);
+    CHECK (sized[0] >= 60 && sized[0] <= 68 && sized[1] >= 28 && sized[1] <= 36, "the fit FBO isn't 4x2 (%d %d)", sized[0], sized[1]);
+    CHECK (shown[1] > 200 && shown[0] < 30, "A doesn't hold what was drawn into B (no swap: %d %d %d)", shown[0], shown[1], shown[2]);
+    return true;
+}
+
 // IScene: get/setCameraTransforms (the scene's camera, a CameraTransforms), getInitialLayerConfig (the object as the
 // scene file has it), getAnimation (a named keyframe timeline), getLayerByID; a camera object's ICamera zoom;
 // renderContext exists. Unpatched: none of these existed (getAnimation, the camera methods: not functions)
@@ -4935,6 +4994,7 @@ int main (int argc, char** argv) {
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("blending_sets_combos", blending_sets_combos);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
+    run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
     run ("scene_camera_and_config_api", scene_camera_and_config_api);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
