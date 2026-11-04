@@ -1,7 +1,7 @@
 From 564634243f6a218253fc6e8161ef4e46f5e4fd6a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 02:52:27 +0530
-Subject: [PATCH 099/100] render: a sampler's components combos follow the
+Subject: [PATCH 099/101] render: a sampler's components combos follow the
  bound texture's channel flags, as WE's
 
 WE's shader preamble (GH 0x14019b550) defines, for every sampler bound to a texture, its

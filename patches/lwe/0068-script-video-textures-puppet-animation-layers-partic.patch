@@ -1,7 +1,7 @@
 From 859c037e10c54da2a48e9c3891f243fe25c06e47 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 18:31:14 +0530
-Subject: [PATCH 068/100] script: video textures, puppet animation layers,
+Subject: [PATCH 068/101] script: video textures, puppet animation layers,
  particle systems, the other events
 
 The rest of SceneScript's documented interfaces (lib.sceneScript.d.ts 2.8), against what the

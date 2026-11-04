@@ -1,7 +1,7 @@
 From 3eaac6ed1188a47840b583ac79ced91290a13acb Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 19:26:33 +0530
-Subject: [PATCH 037/100] render: an effect's visible turns it on and off live
+Subject: [PATCH 037/101] render: an effect's visible turns it on and off live
 
 An image effect whose `visible` is bound to a user property (or driven
 by a script) is now built even when hidden at load, and every frame the
