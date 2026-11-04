@@ -125,7 +125,7 @@ Batches are ordered by library usage × impact, highest first.
 | **B4 Text renderer** | T1–T5, T8, T10, G04 (text part), G13, G30, E34, S28 | 45 | L | Render text into a texture: UTF-8, line breaking, `maxwidth`/`maxrows`/ellipsis, alignment/anchor/padding. Draw it as a CImage, so it gets effects, parent, rotation and parallax. fontconfig for `systemfont_*` with metric-compatible fallbacks. | Smoke 1884904087, 2134765860, 3028473503 (CJK), 2890767643 (system font on NixOS): text present, multi-line, aligned. WE captures of 2 clock scenes for size calibration (T10). |
 | **B5 Parallax and camera** — **done 2026-11-03** (patch 0029; see "B5 result" in § 5; E6, the camera-object pan and paths left) | G10, G11, G12, G14 (= E1), G15, E6, G18, G19, G17, then G16 once its algorithm is decoded | 25 + 8 + 6 | M | WE's smoothing `k = min(1,(1−delay/3)·10·dt)`. A centred target with `mouseinfluence`. Publish `g_ParallaxPosition`. Per-draw effect texture-projection matrix. `general.zoom`/fov/nearz/farz from `general`. Camera-object zoom/pan. | Headless player: `ctl headless.pointer` to 4 corners, `ctl capture` each, layer offsets ∝ depth and depth-0 static. WE capture of 2679248947 (depthparallax) at rest and with the cursor moved. |
 | **B6 Hierarchy** — **done 2026-11-03** (patch 0030; see "B6 result" in § 5; text parents stay in B4) | G03, G04 (particles), P36, G31 | 12 + 19 | S | Recursive "effectively visible". A parent transform for particle systems. The rotation pivot once confirmed. | Smoke 3163060610 / 3319542538 (hidden group). WE capture to confirm (G03). |
-| **B7 Blend modes and the framebuffer** | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
+| **B7 Blend modes and the framebuffer** — **done 2026-11-04** (patches 0046–0047; see "B7 result" in § 5) | E27, E28, E30 (= G33), E31, E33 | 28 | M | Copy the scene FBO before a pass samples `_rt_FullFrameBuffer`. Honour `clampuvs`. Settle `copybackground` and `_rt_imageLayerComposite` parity from WE captures. | WE capture of 2883756643 (blend modes 7/8/11/12/14/31) vs smoke. `glGetError`/KHR_debug feedback-loop warnings gone. |
 | **B8 Audio response** — **done 2026-11-03** on the fork side; liascape still feeds mono (patch 0045; see "B8 result" in § 5) | A1, A3, A4, A5, E8, S17, P20, P21 | 41 | M | C API: f32 stereo frames. Per-channel FFT, the observed pow band mapping, max-per-band, sqrt magnitude. Separate Left/Right. dt-based decay. `engine.registerAudioBuffers` (16/32/64 `left/right/average`) on the same buffers. Audio-driven emitter rate. Needs one more decompile pass for the weights and the 16/32 derivation (A3/A4 Unknowns). | Feed a log sine sweep through the input mix, dump the 64-band arrays per frame, and check that the band index follows the WE mapping and L≠R for a panned sweep. Smoke 2469881470 / 2134765860 with music. |
 | **B9 Small uniform, property and shader fixes** — **done 2026-11-03** except E9, E11, E20, E38 (patches 0031–0036; E41 in patch 0037; see "B9 result" and "E41 result" in § 5) | E4, E5, C1, C3, E9, E11, E17, E18, E19, E20, E36, E37, E38, E40 (+ the property side of scenetexture), E41, U1, U2, U4, S18 | ≤ 10 each | S each | One patch per theme: engine uniforms (E4, E5, C1, C3, E9, E11), annotation parsing (E17, E18, E45), the varying fix-up (E19), bloom live/tint (E36, E37), textinput quotes (U1, U2), timeOfDay (S18). | Smoke 3184155462 (cursorripple, needs pointer), 2189783622 (foliagesway back), 2890767643 (bar spacing). Corpus. |
 | **B10 SceneScript API surface** — **done 2026-11-03** except S16 (resize/animation events), S26 (video textures, puppet layers, …), S37 (createLayer) (patches 0038–0044; see "B10 result" in § 5) | S8, S10–S16, S19–S27, S29–S32, S36, S37 | 1–28 each | M–L | Cursor hit-test + events (`solid`). Media events from liascape's MPRIS (`wp_project_notify_*`). `applyUserProperties` + `engine.userProperties`. `getLayer` by index for all layer types. ISoundLayer `play/stop/pause` (unblocks `startsilent`, A7). Persistent `localStorage`. Layer writes. Missing engine/scene members. Needs B1. | Per feature, a fork test script. Smoke 2325974975 (sounds + menu), 2890767643 (media widget with a fake MPRIS). Headless pointer clicks for cursor events. |
@@ -145,7 +145,7 @@ U5–U7 and E10.
   unreachable in FUN_140103630 ([L6]); read the asm. This settles A3/A4.
 - ~~The camera-shake algorithm (G16), the per-layer parallax offset with `cameraparallaxamount` (G12)~~ (settled by
   B5), the semantics
-  of `camerafade` (G23) and of `copybackground` (E30).
+  of `camerafade` (G23) ~~and of `copybackground` (E30)~~ (settled by B7).
 
 ## Needs the owner
 
@@ -218,7 +218,7 @@ The scripts that produced the counts are in `audit/work-scenegraph/` (`gen.py`, 
 | G30 | Text rotation (`angles`) is ignored | Inferred: shared base `angles` | CText registers no angles. The quad is built from origin/scale only (`CText.cpp:340-413`). | 16 (literal z ≠ 0 or scripted). e.g. 2047150134, 3219908811 | Rotated text draws upright | S (handoff: lead/text) |
 | G31 | Rotation pivot for non-centre `alignment` | **Unknown**: WE pivot. **Inferred**: the origin (anchor point). | `CImage.cpp:1109-1111` rotates about the quad centre after the alignment shift | 3: 3243449890, 3326873240, 3414858021 | Rotated aligned layers are displaced | S (once confirmed) |
 | G32 | `anchor` (text/image screen anchoring) is ignored | **Unknown**: semantics. **Inferred**: it re-positions on aspect change. | Not parsed | 7 non-`none` (center 6, bottomleft 1). e.g. 2890767643 | Only when the output aspect ≠ the scene aspect | S |
-| G33 | `copybackground` image flag | **Observed**: an image-table bit (+0x304, GH 0x140219c60). **Unknown**: how it renders. | Not parsed | 49 true on images, 14 on text | Unknown (handoff: effects/compose) | ? |
+| G33 | `copybackground` image flag | **Observed**: an image-table bit (+0x304, GH 0x140219c60). **Unknown**: how it renders. | Not parsed | 49 true on images, 14 on text | Unknown (handoff: effects/compose) | ? **Done in B7**: flag 0x40, default true; see E30. |
 | G34 | `instance` (combos/version, `instanced` models) only half-applied | **Unknown** | `ObjectParser.cpp:187-204` merges `instance.textures/usertextures` into the first pass. `instance.combos` and `id` are dropped. | 13. e.g. 2932157836, 3013489778 | Likely none (combos only carry `version: 2`) | S |
 
 ### Notes
@@ -319,13 +319,13 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E24 | FBO `fit` / `width` / `height` / `uvs` ignored | **Observed** keys in stock effects (glitter: 256×256 r8 `uvs:repeat`; cursorripple `fit:512`) | parseFBOs reads name/format/scale/unique only (EffectParser.cpp:99-115); size = image size / scale; wrap taken from the image texture's flags | 2: 3445973124 (glitter), 3184155462 (cursorripple) | glitter tiles stretched (no repeat, wrong size); cursorripple simulates at layer resolution | S |
 | E25 | Effect pass `"compose": true` ignored | **Observed** parsed: sets pass flag 0x200000000 and increments a compose counter (GH 0x1402131b0); semantics **Unknown** (old-format two-pass effects without binds) | not parsed (EffectParser.cpp:48-75) | 5: 2511663284, 2672425887, 2890767643 (+1 blurprecise, 3042865984 refraction) | old blurprecise / refraction may sample the wrong input in pass 2 | M (needs RE) |
 | E26 | Pass `command:"swap"` | **Observed** `copy`=1, `swap`=2 (GH 0x1402131b0) | copy only (CImage.cpp:674) | 0 (copy in 3: motionblur) | none | S |
-| E27 | `_rt_FullFrameBuffer` is the live scene target | **Inferred**: D3D11 cannot sample a bound RT, so WE must copy before sampling | `_rt_FullFrameBuffer` *is* the scene FBO (CWallpaper.cpp:245-249). A last pass that samples it (genericimage3 `BLENDMODE` g_Texture4) while drawing into it is a GL feedback loop (UB) | 28 with `colorBlendMode` > 0: 1864677589, 2371103399, 2883756643; plus COPYBG (1) | blend-mode layers may sample garbage or partly updated texels, which shows as noise or wrong blend colour (driver-dependent) | M: copy the scene FBO into a separate texture before such passes |
-| E28 | `colorBlendMode` path | **Observed** an image property (table GH 0x140219c60); how it is applied is **Unknown** | appends an extra `effectpassthrough` (genericimage3) pass with `BLENDMODE=n`; the first pass's blending moves to the last pass (CImage.cpp:758-783) | 28 (values 1, 4, 6, 7, 8, 11, 12, 14, 20-25, 29-31) | blend result not verified; needs a WE capture | — |
+| E27 | `_rt_FullFrameBuffer` is the live scene target | **Inferred**: D3D11 cannot sample a bound RT, so WE must copy before sampling | `_rt_FullFrameBuffer` *is* the scene FBO (CWallpaper.cpp:245-249). A last pass that samples it (genericimage3 `BLENDMODE` g_Texture4) while drawing into it is a GL feedback loop (UB) | 28 with `colorBlendMode` > 0: 1864677589, 2371103399, 2883756643; plus COPYBG (1) | blend-mode layers may sample garbage or partly updated texels, which shows as noise or wrong blend colour (driver-dependent) | M: copy the scene FBO into a separate texture before such passes **Done in B7, now Observed**: WE copies `_rt_FullFrameBuffer` before the image or first pass that reads it (GH 0x140214b50; particles GH 0x14025bc30); a pass sampling its own target reads a copy. |
+| E28 | `colorBlendMode` path | **Observed** an image property (table GH 0x140219c60); how it is applied is **Unknown** | appends an extra `effectpassthrough` (genericimage3) pass with `BLENDMODE=n`; the first pass's blending moves to the last pass (CImage.cpp:758-783) | 28 (values 1, 4, 6, 7, 8, 11, 12, 14, 20-25, 29-31) | blend result not verified; needs a WE capture | — **Done in B7**: mode 31 = additive last draw, no BLENDMODE pass (GH 0x140211f90, 0x140214b50); other modes read the copy (E27). Still no WE capture. |
 | E29 | `_rt_MipMappedFrameBuffer` has no mips | **Observed** name + `g_TextureNMipMapInfo` ids | an alias of the full framebuffer, no mips, MipMapInfo not fed (CWallpaper.cpp:249) | 0 active (REFLECTION+NORMALMAP) | none | S |
-| E30 | `copybackground:false` ignored | **Observed** image property `copybackground` (GH 0x140219c60); semantics **Unknown** | ignored; a compose layer always samples `_rt_FullFrameBuffer` (materials/util/composelayer.json) | 2: 3414858021, 3432999904 | the layer may show the background where WE shows nothing | S once the semantics are known |
-| E31 | Image `clampuvs` ignored | **Observed** image property `clampuvs` (GH 0x140219c60) | wrap comes only from the .tex header flags (CTexture.cpp:177-183) | 9: 2388299037, 3354740764, 3463520581 | UV-shifting effects (waterripple, shake, scroll) bleed the opposite edge in at the borders | S: OR in the clamp flag |
+| E30 | `copybackground:false` ignored | **Observed** image property `copybackground` (GH 0x140219c60); semantics **Unknown** | ignored; a compose layer always samples `_rt_FullFrameBuffer` (materials/util/composelayer.json) | 2: 3414858021, 3432999904 | the layer may show the background where WE shows nothing | S once the semantics are known **Done in B7, Observed**: a passthrough layer draws its subtree into itself, after a background copy (true) or a clear (false), and with false its last draw is translucent (GH 0x1402321d0, 0x140218260). |
+| E31 | Image `clampuvs` ignored | **Observed** image property `clampuvs` (GH 0x140219c60) | wrap comes only from the .tex header flags (CTexture.cpp:177-183) | 9: 2388299037, 3354740764, 3463520581 | UV-shifting effects (waterripple, shake, scroll) bleed the opposite edge in at the borders | S: OR in the clamp flag **Done in B7, Observed**: flag 0x8000, **default true** (GH 0x140212c50), so every layer's composite clamps unless `clampuvs:false`; nointerpolation 0x4000 (GH 0x140214b50). |
 | E32 | Image `nointerpolation` | **Observed** property (GH 0x140219c60) | ignored | 0 | none | S |
-| E33 | Which of `_rt_imageLayerComposite_<id>_a/_b` holds the result | **Unknown** | ping-pong parity decides which buffer holds the final image; "TODO: determine when … is used" (CImage.cpp:254-257) | 9 reference it: 2189783622, 2469881470, 3243449890 | a layer that uses another layer as a mask/texture may get an intermediate pass | M |
+| E33 | Which of `_rt_imageLayerComposite_<id>_a/_b` holds the result | **Unknown** | ping-pong parity decides which buffer holds the final image; "TODO: determine when … is used" (CImage.cpp:254-257) | 9 reference it: 2189783622, 2469881470, 3243449890 | a layer that uses another layer as a mask/texture may get an intermediate pass | M **Done in B7, Observed**: the ping-pong starts by pass parity, so `_a` is what the last pass reads and `_b` the stage before (GH 0x140214b50). |
 | E34 | Effects on non-image objects | **Inferred** WE renders them (the editor attaches effects to text) | `parseText` keeps no effects (ObjectParser.cpp:142-160); a group object with effects becomes a placeholder `CObject` | 25 text: 2134765860, 2325974975, 2890767643; 1 group: 3319542538 (lightshafts) | text drawn without its blurprecise/pulse/shift_hue/reflection/shine/godrays | L (text → FBO + effect chain) |
 | E35 | `general.hdr` ignored | **Observed** HDR scenes load `hdr_downsample`, `hdr_downsample_bloom`, `hdr_upsample(_cubic)`, `combine_hdr_upsample`/`combine_srgb`; LDR scenes load `downsample_quarter_bloom`, `downsample_eighth_blur_v`, `blur_h_bloom`, `combine_ldr` (GH 0x1401afbf0); HDR params `bloomstrength`/`blend`/`bloomtint`/`scatter` from `bloomhdr*` (GH 0x1401b42b0, keys GH 0x1401c7880) | always the LDR chain with `bloomstrength`/`bloomthreshold` (CScene.cpp:117-165); RGBA8 everywhere; `hdr` and `bloomhdr*` never read (WallpaperParser.cpp:41-53) | 5 hdr=true: 2511663284, 2542468435, 3019192537, 3395587987 (+1); 4 of them bloom | HDR bloom (threshold 1.0, iterative scatter) replaced by LDR bloom with other params; values > 1 clip | L |
 | E36 | `bloomtint` ignored | **Observed** set on the LDR chain too (GH 0x1401b42b0); shader `g_BloomTint` default "1 1 1" | not passed to the bloom passes (CScene.cpp:139-153) | 1 non-white (3490034653), 1 user-bound | bloom tinted white instead of warm | S |
@@ -1239,3 +1239,99 @@ Left:
   (protocol: f32 frames instead of the u8 frame).
 - The 17 scenes that showed no change: check with music (a sweep, not one tone) before calling them done.
 
+
+### B7 result (fork patches 0046–0047, pin `c4eea29`, 2026-11-04)
+
+Done: E27, E28, E30 (= G33), E31, E33. Patch 0047 is the batch; 0046 fixes a B8 bug the fork suite caught
+(below). Every claim was decoded from the sound spike's `all.c` (the same wallpaper64.exe 2.8.485); the addresses
+are in the fork commit message.
+
+**Decoded (Observed):**
+
+- **The image flags at +0x304.** The constructor (GH 0x140212c50) sets 0x8040, so `copybackground` (0x40) and
+  `clampuvs` (0x8000) are both **true by default**. `nointerpolation` is 0x4000. The property setters are
+  GH 0x14021a8a0 / 0x1401c9b40 / 0x1401c9970. The model's flags are fullscreen 2, nopadding 4, autosize 8,
+  passthrough 0x20, solidlayer 0x200, projectlayer 0x400 and instanced 0x800 (the model parse, GH 0x140225660).
+- **E31.** A layer's composite FBOs clamp per `clampuvs` and sample nearest with `nointerpolation` or a
+  point-filtered texture (GH 0x140214b50: flags = noInterp | clamp << 1). They used to take the texture's flags, so
+  solid layers and most textures wrapped. **Every layer with effects now clamps** unless it says `clampuvs: false`,
+  which no scene in the library does. The audit's "9 scenes" was those that write the key.
+- **E27.** WE copies `_rt_FullFrameBuffer` (the registry at scene+0x18a0, vtable +8) before an image whose
+  material or blend mode reads it, or before the first pass whose material has the "reads the framebuffer" bit
+  (GH 0x140214b50). Particles copy once per frame (GH 0x14025bc30). Ours: a pass that **samples the FBO it draws
+  into** reads a copy taken just before its draw (`CWallpaper::copyForSampling`, one copy per size and flags). Only
+  a sampler the program uses counts. genericimage4 and genericparticle declare `g_Texture3 = _rt_MipMappedFrameBuffer`
+  for REFLECTION/REFRACT, but it's compiled out otherwise. A pass that samples the scene while drawing into the
+  layer's own FBO needs no copy, since the scene can't change before the layer's last pass.
+- **E28, mode 31.** Mode 31 (A + B·opacity) is **additive blending of the layer's last draw** with no BLENDMODE pass.
+  The combo is 0 for modes 0 and 31 (GH 0x140211f90), and the final draw's blend is 2 (GH 0x140214b50, 0x1402321d0;
+  text: GH 0x14027d4e0). The other modes keep genericimage3's BLENDMODE pass, which now reads the copy.
+- **E30 / G33, compose layers.** A passthrough layer **renders its subtree into itself** (GH 0x140218260 → 0x1402181b0,
+  recursing down to a nested compose layer, which renders its own). That happens after it copies the background
+  (`copybackground`) or clears to transparent (`false`; GH 0x1402321d0, renderer +0x108/+0x110). Its effects then
+  apply to the background and its children together. With `false` its last draw is translucent. The scene loop skips
+  those children.
+  - Ours: a scene-sized group target that the compose layer's base pass reads instead of `_rt_FullFrameBuffer`. The
+    subtree's last passes, text and particles draw into it.
+  - With `copybackground: false` the children write alpha (coverage). Into the scene or a copying compose layer,
+    alpha stays masked as before.
+  - With no effect running, the group target is blitted back. composelayer's base pass covers its whole destination,
+    and WE never draws it straight to the screen.
+- **E33.** WE starts the composite ping-pong at the parity of the passes that write it (GH 0x140214b50: start
+  index = (passes − 1 + extra) & 1). So **`_rt_imageLayerComposite_<id>_a` is always what the layer's last pass
+  reads**, and `_b` holds the stage before it. The final draw and the BLENDMODE pass read `_a` too. We started at
+  `_a` regardless, so with an even number of composite writes the names were swapped.
+- The scene clear now writes alpha. The previous frame's last pass left alpha masked, so the scene's alpha was
+  whatever the first frame cleared. Compose layers and blend passes read it.
+
+**Inferred / not checked against WE:** no WE capture yet (2883756643, 3414858021 and 3432999904 are still on the
+owner list). The blend shader maths is WE's own (`common_blending.h`). Two things here are our reading of the decoded
+code: the alpha that the children of a `copybackground: false` layer write, and cropping the subtree to the layer's
+quad (WE renders it in the layer's local ortho space; we render it in scene space and the base pass samples the
+layer's region).
+
+- **Fork tests** (`host_api_test`): 53/53, 4 new. On 592fdff the three that test behaviour fail. The fourth,
+  `color_blend_modes_read_the_scene`, also passes there, because NVIDIA happens to read the old texels through the
+  loop.
+  - `clampuvs_clamps_the_composite`: an effect sampling at u + 0.5 gets the edge (green); `clampuvs:false` wraps (red).
+    On 592fdff the default wrapped.
+  - `composite_a_is_what_the_last_pass_reads`: with two effects, `_a` = base + green and `_b` = base. On 592fdff
+    they were swapped.
+  - `compose_layer_draws_its_children`: the child goes through the layer's tint (yellow). `copybackground` tints the
+    background; `false` leaves it alone; with no effect the layer is just background + child. On 592fdff the child
+    stayed red.
+  - `color_blend_modes_read_the_scene`: mode 31 adds (255 127 0) and mode 2 multiplies the scene (127 0 0).
+- **Smoke:** all 96 scenes, `--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`. The same release worker ran on
+  592fdff (`we-b8/build/lwe-core-b8`) and on the new core. The metric is the % of pixels differing by more than 8 at
+  the 3 s frame.
+  - **88 scenes load on both. None was newly blank and none newly failed.** Total mean frame time over the 88 is
+    171.3 ms on the old core and 170.2 ms on the new one. A first build that copied for unused samplers cost
+    +2–3 ms per frame on 2371103399 and 3163060610; the sampler check fixed that.
+  - What changed: 2883756643 85 % (blend modes 7/8/11/12/14/31: the bokeh is now additive and brighter);
+    3184155462 80 % (mode 31: lit 90.5 → 97.7 %); 3490034653 50 % (see the next item); 3219908811 15.7 % (modes
+    1/4/6/31); 3419466417 4 % (clamping); 3243449890 1.6 % (also 5.5 → 2.5 ms a frame); 3042492564 0.4 %;
+    3479521040 0.3 %. The rest are ≤ 0.24 %.
+  - 3490034653 is compose layers 930 and 712 with light-shaft particle children and an `opacity` effect that has a
+    mask. The shafts are now drawn through the layer and masked as the author set them up: they cover 14 % of the
+    frame vs 57 % unmasked before. With their property (`newproperty24`) off, the two cores differ by 0.06 %.
+  - 3233141951 (compose layers 378/393 with text children and no effects) is unchanged (0.00 %). Its first build
+    drew composelayer's base pass straight to the screen, which hid the dragon; that is fixed and covered by the
+    "no effect" case of the compose test.
+  - The 8 compose-reference scenes are at 0.00–1.6 %. Their references are masks whose last stage differs little.
+- **Can't be checked here:** 8 scenes are blank or fail on both cores, including the pinned 592fdff from the store.
+  These are 3276522107, 3477054430 and 3509243656 (the known 3D failures); 3046119914 and 3432999904 (black, as in
+  E41); and 3426575339, 3432876246 and 3556794116. The last three are blank at 3 s and at 10 s on every core with no
+  error logged. That is new since the E41 smoke, so a pre-B7 fault, and it needs a look. 3414858021's compose layers
+  have effects bound to a property that is off by default, so they draw background + children, which is unchanged.
+- **0046 (B8 fix).** `engine.registerAudioBuffers` inside `update ()` didn't throw "can only be called from global
+  scope". callModule also sets the running module, so the check never fired. The fork's
+  `audio_reaches_shaders_scripts_and_emitters` failed on 592fdff, and B8's "49/49" was not reproducible. The engine
+  now tracks the module's evaluation.
+
+Left:
+- WE captures of 2883756643 (blend modes) and 3414858021 / 3432999904 (copybackground: false) to confirm the inferred
+  parts.
+- The 3 newly blank scenes (3426575339, 3432876246, 3556794116) and the 2 black ones (3046119914, 3432999904,
+  the second of which is a B7 target: compose + blend 12 + `copybackground: false` + text children).
+- The compose subtree is rendered in scene space at scene resolution rather than in the layer's ortho space. This
+  matters only for a rotated or scaled compose layer whose children's texel density differs.

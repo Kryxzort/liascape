@@ -1,0 +1,748 @@
+From c4eea29cfae8db6d0bb1a91e01ee57d9acc141f4 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 05:19:30 +0530
+Subject: [PATCH 47/47] render: blend modes, compose layers and composite FBOs
+ the way Wallpaper Engine does
+
+Decoded from wallpaper64.exe 2.8.485 (GH = the headless Ghidra decompile):
+- A pass that samples the FBO it draws into (genericimage3's BLENDMODE g_Texture4, a compose layer's
+  _rt_FullFrameBuffer on its last pass) reads a copy taken just before the draw. WE copies
+  _rt_FullFrameBuffer before the image or the first pass whose material reads it (GH 0x140214b50,
+  once per frame for particles, GH 0x14025bc30); in GL that read was a feedback loop (undefined).
+  Only for a sampler the program uses: genericimage4/genericparticle declare g_Texture3 =
+  _rt_MipMappedFrameBuffer for REFLECTION/REFRACT, compiled out otherwise. CWallpaper::copyForSampling
+  keeps one copy per size and flags.
+- colorBlendMode 31 (A + B*opacity) is additive blending of the layer's last draw, with no BLENDMODE
+  pass (the combo is 0 for modes 0 and 31, GH 0x140211f90; draw blend 2, GH 0x140214b50/0x1402321d0).
+- Image flags at +0x304 (constructor default 0x8040, GH 0x140212c50): copybackground 0x40,
+  nointerpolation 0x4000, clampuvs 0x8000, all parsed now. The composite FBOs clamp per clampuvs
+  (default true) and sample nearest per nointerpolation or the texture (GH 0x140214b50); they took the
+  texture's flags, so solid and most layers wrapped.
+- A passthrough (compose) layer renders its subtree into itself (GH 0x140218260 / 0x1402181b0, up to a
+  nested compose layer), after copying the background (copybackground) or clearing to transparent
+  (GH 0x1402321d0); its effects then apply to both, and with copybackground false its last draw is
+  translucent. Here: a scene-sized group target its base pass reads; the subtree's last passes, text
+  and particles draw into it and the scene loop skips them. With no effect running the target is
+  blitted back (composelayer's base pass covers its whole destination; WE never draws it to the screen).
+- The composite ping-pong starts by the parity of the passes that write it, so the last composite
+  written is _rt_imageLayerComposite_<id>_a (what the last pass reads) and _b the stage before
+  (GH 0x140214b50, start index = pass count parity); another layer binding them gets that stage.
+- The scene clear writes alpha (the last pass left it masked), so the scene's alpha is opaque.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B7 (E27, E28, E30/G33, E31, E33)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   9 ++
+ .../Data/Parsers/ObjectParser.cpp             |   3 +
+ .../WallpaperEngine/Render/CWallpaper.cpp     |  22 ++++
+ src/core/WallpaperEngine/Render/CWallpaper.h  |  14 ++
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 124 ++++++++++++++++--
+ .../WallpaperEngine/Render/Objects/CImage.h   |  12 ++
+ .../Render/Objects/CParticle.cpp              |   8 +-
+ .../Render/Objects/Effects/CPass.cpp          |  39 +++++-
+ .../Render/Objects/Effects/CPass.h            |   8 ++
+ .../Render/Wallpapers/CScene.cpp              | 121 +++++++++++++++++
+ .../Render/Wallpapers/CScene.h                |  28 ++++
+ 11 files changed, 372 insertions(+), 16 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 473a6a7..d003e63 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -125,6 +125,15 @@ struct ImageData {
+     UserSettingUniquePtr colorBlendMode;
+     /** The brightness of the image */
+     UserSettingUniquePtr brightness;
++    /**
++     * A passthrough (compose) layer starts from the background behind it (true, WE's default) or from transparent
++     * (image flag 0x40 at +0x304, default set by the constructor GH 0x140212c50; read in GH 0x1402321d0)
++     */
++    UserSettingUniquePtr copyBackground;
++    /** The layer's composite FBOs clamp (true, WE's default) or wrap (image flag 0x8000; GH 0x140214b50) */
++    UserSettingUniquePtr clampUVs;
++    /** The layer's composite FBOs sample nearest (image flag 0x4000, default false; GH 0x140214b50) */
++    UserSettingUniquePtr noInterpolation;
+     /** The material in use for this image */
+     ModelUniquePtr model;
+     /** The effects applied to this image after the material is rendered */
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 3995594..09f8e15 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -188,6 +188,9 @@ ObjectParser::parseImage (const JSON& it, const Project& project, ObjectData bas
+ 	    .parallaxDepth = it.user ("parallaxDepth", properties, glm::vec2 (1.0f)),
+ 	    .colorBlendMode = it.user ("colorBlendMode", properties, 0),
+ 	    .brightness = it.user ("brightness", properties, 1.0f),
++	    .copyBackground = it.user ("copybackground", properties, true),
++	    .clampUVs = it.user ("clampuvs", properties, true),
++	    .noInterpolation = it.user ("nointerpolation", properties, false),
+ 	    .model = ModelParser::load (project, image),
+ 	    .effects = effects.has_value () ? parseEffects (*effects, project) : std::vector<ImageEffectUniquePtr> {},
+ 	    .animationLayers = animationLayers.has_value () ? parseAnimationLayers (*animationLayers, project)
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.cpp b/src/core/WallpaperEngine/Render/CWallpaper.cpp
+index f27516c..e864189 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.cpp
++++ b/src/core/WallpaperEngine/Render/CWallpaper.cpp
+@@ -263,6 +263,28 @@ std::shared_ptr<const CFBO> CWallpaper::findFBO (const std::string& name) const
+ 
+ std::shared_ptr<const CFBO> CWallpaper::getFBO () const { return this->m_sceneFBO; }
+ 
++std::shared_ptr<const CFBO> CWallpaper::copyForSampling (const CFBO& source) const {
++    const uint32_t width = source.getTextureWidth (0);
++    const uint32_t height = source.getTextureHeight (0);
++    auto& copy = this->m_samplingCopies[{ width, height, source.getFlags () }];
++
++    if (copy == nullptr) {
++	copy = std::make_shared<CFBO> (
++	    "_rt_samplingCopy", source.getFormat (), source.getFlags (), source.getScale (), source.getRealWidth (),
++	    source.getRealHeight (), width, height
++	);
++    }
++
++    glBindFramebuffer (GL_READ_FRAMEBUFFER, source.getFramebuffer ());
++    glBindFramebuffer (GL_DRAW_FRAMEBUFFER, copy->getFramebuffer ());
++    glBlitFramebuffer (
++	0, 0, static_cast<GLint> (width), static_cast<GLint> (height), 0, 0, static_cast<GLint> (width),
++	static_cast<GLint> (height), GL_COLOR_BUFFER_BIT, GL_NEAREST
++    );
++
++    return copy;
++}
++
+ glm::dvec2 CWallpaper::getLiveMousePosition () const {
+     if (this->m_mouseInput == nullptr) {
+ 	return { 0, 0 };
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.h b/src/core/WallpaperEngine/Render/CWallpaper.h
+index 5bd5185..da87741 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.h
++++ b/src/core/WallpaperEngine/Render/CWallpaper.h
+@@ -2,6 +2,9 @@
+ 
+ #include <glad/glad.h>
+ 
++#include <map>
++#include <tuple>
++
+ #include "linux-wallpaperengine/project.h"
+ 
+ #include "WallpaperEngine/Audio/AudioContext.h"
+@@ -80,6 +83,14 @@ public:
+      */
+     [[nodiscard]] std::shared_ptr<const CFBO> getFBO () const;
+ 
++    /**
++     * A copy of `source` taken now, for a pass that samples the FBO it draws into. WE copies the framebuffer before
++     * a pass samples it (GH 0x140214b50: `_rt_FullFrameBuffer`'s copy runs before an image whose material or blend
++     * mode reads it); sampling the target being drawn is a GL feedback loop. One copy per size and flags, shared.
++     * Leaves the copy bound as the draw framebuffer.
++     */
++    [[nodiscard]] std::shared_ptr<const CFBO> copyForSampling (const CFBO& source) const;
++
+     /**
+      * Updates the mouse input handler for this wallpaper
+      *
+@@ -151,6 +162,9 @@ protected:
+     GLuint m_vaoBuffer = GL_NONE;
+ 
+ private:
++    /** copyForSampling's copies, by width, height and flags */
++    mutable std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::shared_ptr<CFBO>> m_samplingCopies = {};
++
+     /** The texture used for the scene output */
+     GLuint m_texCoordBuffer = GL_NONE;
+     GLuint m_positionBuffer = GL_NONE;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index b0170e5..6cde037 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -191,15 +191,24 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     // register both FBOs into the scene
+     std::ostringstream nameA, nameB;
+ 
+-    // TODO: determine when _rt_imageLayerComposite and _rt_imageLayerAlbedo is used
++    // which of the two holds what: updateActivePasses (WE's parity)
+     nameA << "_rt_imageLayerComposite_" << this->getImage ().id << "_a";
+     nameB << "_rt_imageLayerComposite_" << this->getImage ().id << "_b";
+ 
++    // the composite FBOs' sampling is the layer's, not its texture's (GH 0x140214b50): they clamp unless `clampuvs`
++    // is false (WE's default is true, GH 0x140212c50), and sample nearest with `nointerpolation` or a point-filtered
++    // texture. Wrapping let UV-shifting effects (waterripple, shake, scroll) pull the opposite edge in
++    const uint32_t compositeFlags = (this->m_image.clampUVs->value->getBool () ? TextureFlags_ClampUVs : 0)
++	| ((this->m_image.noInterpolation->value->getBool ()
++	    || (this->m_texture->getFlags () & TextureFlags_NoInterpolation) != 0)
++	       ? TextureFlags_NoInterpolation
++	       : 0);
++
+     this->m_currentMainFBO = this->m_mainFBO = scene.create (
+-	nameA.str (), TextureFormat_ARGB8888, this->m_texture->getFlags (), 1, { size.x, size.y }, { size.x, size.y }
++	nameA.str (), TextureFormat_ARGB8888, compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
+     );
+     this->m_currentSubFBO = this->m_subFBO = scene.create (
+-	nameB.str (), TextureFormat_ARGB8888, this->m_texture->getFlags (), 1, { size.x, size.y }, { size.x, size.y }
++	nameB.str (), TextureFormat_ARGB8888, compositeFlags, 1, { size.x, size.y }, { size.x, size.y }
+     );
+ 
+     // build a list of vertices, these might need some change later (or maybe invert the camera)
+@@ -493,7 +502,8 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass) const {
+ 	[this] () {
+ 	    GLint currentFramebuffer = 0;
+ 	    glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &currentFramebuffer);
+-	    if (currentFramebuffer != static_cast<GLint> (this->getScene ().getFBO ()->getFramebuffer ())) {
++	    if (currentFramebuffer
++		!= static_cast<GLint> (this->getScene ().getTargetFor (this->m_image)->getFramebuffer ())) {
+ 		GLfloat previousClearColor[4] = {};
+ 		glGetFloatv (GL_COLOR_CLEAR_VALUE, previousClearColor);
+ 		glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
+@@ -529,7 +539,12 @@ void CImage::setup () {
+     // TODO: CHECK ORDER OF THINGS, 2419444134'S ID 27 DEPENDS ON 104'S COMPOSITE_A WHEN OUR LAST RENDER IS ON
+     // COMPOSITE_B
+     // TODO: SUPPORT PASSTHROUGH (IT'S A SHADER)
+-    if (this->m_image.model->passthrough) {
++    // a passthrough layer that draws objects of its own, or starts transparent, renders through a group target
++    // (GH 0x1402321d0: the background copy or a clear, then its subtree, GH 0x140218260), effects or none
++    const bool composes = this->m_image.model->passthrough
++	&& (this->getScene ().composesChildren (this->m_image) || !this->m_image.copyBackground->value->getBool ());
++
++    if (this->m_image.model->passthrough && !composes) {
+ 	// passthrough images without effects are bad, do not draw them
+ 	if (this->m_image.effects.empty ()) {
+ 	    return;
+@@ -559,6 +574,11 @@ void CImage::setup () {
+ 	);
+     }
+ 
++    if (composes && !this->m_passes.empty ()) {
++	this->m_composeTarget = this->getScene ().getComposeTarget (this->getId ());
++	this->m_passes.front ()->setTexture (0, this->m_composeTarget);
++    }
++
+     // prepare the passes list
+     if (!debug.baseOnly && !this->getImage ().effects.empty ()) {
+ 	// generate the effects used by this material
+@@ -725,8 +745,11 @@ void CImage::setup () {
+ 	}
+     }
+ 
+-    // extra render pass if there's any blending to be done
+-    if (!debug.baseOnly && this->m_image.colorBlendMode->value->getInt () > 0) {
++    // extra render pass if there's any blending to be done. Mode 31 (A + B·opacity) is plain additive blending in WE:
++    // no BLENDMODE pass, and the layer's last draw blends additively (GH 0x140214b50, 0x1402321d0; the BLENDMODE combo
++    // is 0 for modes 0 and 31, GH 0x140211f90)
++    const int colorBlendMode = this->m_image.colorBlendMode->value->getInt ();
++    if (!debug.baseOnly && colorBlendMode > 0 && colorBlendMode != 31) {
+ 	this->m_materials.colorBlending.material
+ 	    = MaterialParser::load (this->getScene ().getScene ().project, "materials/util/effectpassthrough.json");
+ 	this->m_materials.colorBlending.override = std::make_unique<ImageEffectPassOverride> (ImageEffectPassOverride {
+@@ -814,10 +837,32 @@ void CImage::updateActivePasses () {
+ 	first->setBlendingMode (BlendingMode_Normal);
+     }
+ 
++    // the layer's last draw: additive for colour blend mode 31; translucent for a passthrough layer that doesn't copy
++    // the background (it starts transparent, GH 0x1402321d0)
++    if (!this->m_activePasses.empty ()) {
++	if (this->m_image.colorBlendMode->value->getInt () == 31) {
++	    this->m_activePasses.back ()->setBlendingMode (BlendingMode_Additive);
++	} else if (this->m_image.model->passthrough && !this->m_image.copyBackground->value->getBool ()) {
++	    this->m_activePasses.back ()->setBlendingMode (BlendingMode_Translucent);
++	}
++    }
++
+     // the chain starts again from the image's main FBO: which FBO each pass reads and writes, and which pass draws
+     // to the scene, follow the passes that run
+     this->m_currentMainFBO = this->m_mainFBO;
+     this->m_currentSubFBO = this->m_subFBO;
++
++    // WE starts the ping-pong so that the last composite written before the final draw is _a (GH 0x140214b50: the
++    // start index is the parity of the passes that write the composite), so `_rt_imageLayerComposite_<id>_a` is what
++    // the last pass reads and _b the stage before it. Another layer binding one of them gets that stage
++    size_t compositeWrites = 0;
++    for (size_t i = 0; i + 1 < this->m_activePasses.size (); i++) {
++	compositeWrites += this->m_activePasses[i]->getTarget ().has_value () ? 0 : 1;
++    }
++    if (compositeWrites % 2 == 0) {
++	std::swap (this->m_currentMainFBO, this->m_currentSubFBO);
++    }
++
+     this->setupPasses ();
+ }
+ 
+@@ -860,7 +905,7 @@ void CImage::setupPasses () {
+ 	// TODO: PROPERLY CHECK IF THIS IS ALL THAT'S NEEDED
+ 	if (!writesToTarget && this->shouldRenderFinalPass (std::next (cur) == end)) {
+ 	    spacePosition = this->getSceneSpacePosition ();
+-	    drawTo = this->getScene ().getFBO ();
++	    drawTo = this->getScene ().getTargetFor (this->m_image);
+ 	    projection = &this->m_modelViewProjectionScreen;
+ 	    inverseProjection = &this->m_modelViewProjectionScreenInverse;
+ 	}
+@@ -945,6 +990,36 @@ void CImage::pinpongFramebuffer (std::shared_ptr<const CFBO>* drawTo, std::share
+     this->m_currentSubFBO = currentMainFBO;
+ }
+ 
++bool CImage::drawsSubtree () const { return this->m_initialized && this->m_composeTarget != nullptr; }
++
++void CImage::renderComposeTarget (bool copyBackground) {
++    const auto& group = *this->m_composeTarget;
++    const auto background = this->getScene ().getTargetFor (this->m_image);
++
++    glColorMask (true, true, true, true);
++
++    // the background behind the layer, or transparent (`copybackground: false`)
++    if (copyBackground || this->m_image.copyBackground->value->getBool ()) {
++	glBindFramebuffer (GL_READ_FRAMEBUFFER, background->getFramebuffer ());
++	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, group.getFramebuffer ());
++	glBlitFramebuffer (
++	    0, 0, static_cast<GLint> (background->getRealWidth ()), static_cast<GLint> (background->getRealHeight ()), 0,
++	    0, static_cast<GLint> (group.getRealWidth ()), static_cast<GLint> (group.getRealHeight ()),
++	    GL_COLOR_BUFFER_BIT, GL_NEAREST
++	);
++    } else {
++	GLfloat previousClearColor[4] = {};
++	glGetFloatv (GL_COLOR_CLEAR_VALUE, previousClearColor);
++	glBindFramebuffer (GL_FRAMEBUFFER, group.getFramebuffer ());
++	glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
++	glClear (GL_COLOR_BUFFER_BIT);
++	glClearColor (previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
++    }
++
++    // then the objects it owns, in draw order
++    this->getScene ().renderComposed (this->getId (), group);
++}
++
+ void CImage::render () {
+     // do not try to render something that did not initialize successfully
+     if (!this->m_initialized) {
+@@ -961,11 +1036,35 @@ void CImage::render () {
+ 	this->updateActivePasses ();
+     }
+ 
+-    // a passthrough layer is only its effects: with none visible it draws nothing (as it isn't built when none can be)
+-    if (this->m_image.model->passthrough && this->m_visibleEffects == 0) {
++    // a passthrough layer is only its effects: with none visible it draws nothing (as it isn't built when none can be),
++    // unless it composes: its subtree and background are its picture
++    if (this->m_image.model->passthrough && this->m_visibleEffects == 0 && this->m_composeTarget == nullptr) {
+ 	return;
+     }
+ 
++    if (this->m_composeTarget != nullptr) {
++	// with no effect running, the layer's picture is its target: the background with its subtree drawn over it.
++	// (composelayer's base pass covers its whole destination: it only ever draws into the layer's own FBO)
++	const bool bare = this->m_visibleEffects == 0;
++
++	this->renderComposeTarget (bare);
++
++	if (bare) {
++	    const auto& group = *this->m_composeTarget;
++	    const auto target = this->getScene ().getTargetFor (this->m_image);
++
++	    glBindFramebuffer (GL_READ_FRAMEBUFFER, group.getFramebuffer ());
++	    glBindFramebuffer (GL_DRAW_FRAMEBUFFER, target->getFramebuffer ());
++	    glBlitFramebuffer (
++		0, 0, static_cast<GLint> (group.getRealWidth ()), static_cast<GLint> (group.getRealHeight ()), 0, 0,
++		static_cast<GLint> (target->getRealWidth ()), static_cast<GLint> (target->getRealHeight ()),
++		GL_COLOR_BUFFER_BIT, GL_NEAREST
++	    );
++	    glBindFramebuffer (GL_FRAMEBUFFER, target->getFramebuffer ());
++	    return;
++	}
++    }
++
+     glColorMask (true, true, true, true);
+ 
+     // g_Color4 is bound to m_color4: bring it up to this frame's colour and alpha
+@@ -989,9 +1088,12 @@ void CImage::render () {
+ 
+     auto cur = this->m_activePasses.begin ();
+ 
++    // the last draw keeps the scene's alpha (a compose layer that starts transparent takes this layer's as coverage)
++    const bool keepAlpha = this->getScene ().targetKeepsAlpha (this->m_image);
++
+     for (const auto end = this->m_activePasses.end (); cur != end; ++cur) {
+ 	if (std::next (cur) == end) {
+-	    glColorMask (true, true, true, false);
++	    glColorMask (true, true, true, !keepAlpha);
+ 	}
+ 
+ 	(*cur)->render ();
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 1b4445f..bb53f74 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -32,6 +32,8 @@ public:
+     void render () override;
+ 
+     [[nodiscard]] const Image& getImage () const;
++    /** A passthrough (compose) layer built with a group target: it draws its subtree into it (CScene::renderComposed) */
++    [[nodiscard]] bool drawsSubtree () const;
+     [[nodiscard]] glm::vec2 getSize () const;
+ 
+     /**
+@@ -63,6 +65,11 @@ public:
+     void pinpongFramebuffer (std::shared_ptr<const CFBO>* drawTo, std::shared_ptr<const TextureProvider>* asInput);
+ 
+ protected:
++    /**
++     * Fills the group target: the background (copybackground, or `copyBackground`; else transparent), then the
++     * objects this layer owns
++     */
++    void renderComposeTarget (bool copyBackground);
+     void setupPasses ();
+     /** The passes that run (the effects' while visible), their blending and targets set up for that chain */
+     void updateActivePasses ();
+@@ -112,6 +119,11 @@ private:
+     glm::mat4 m_modelMatrix = {};
+     glm::mat4 m_viewProjectionMatrix = {};
+ 
++    /**
++     * A passthrough layer's group target: the background behind it (copybackground, WE's default) or transparent, then
++     * the objects it owns; its base pass reads this instead of _rt_FullFrameBuffer. Null for every other layer
++     */
++    std::shared_ptr<const CFBO> m_composeTarget = nullptr;
+     std::shared_ptr<const CFBO> m_mainFBO = nullptr;
+     std::shared_ptr<const CFBO> m_subFBO = nullptr;
+     std::shared_ptr<const CFBO> m_currentMainFBO = nullptr;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 8600bd4..a401b93 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -1878,7 +1878,7 @@ void CParticle::setupPass () {
+     // black reads on NVIDIA. By placing a copy FBO with the same name in our FBOProvider,
+     // CPass resolves g_Texture3 to the copy instead. We blit the scene content before each render.
+     if (m_hasRefract) {
+-	auto sceneFBO = getScene ().getFBO ();
++	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
+ 	float w = static_cast<float> (sceneFBO->getRealWidth ());
+ 	float h = static_cast<float> (sceneFBO->getRealHeight ());
+ 	m_refractFBO = m_passFBOProvider->create (
+@@ -1890,7 +1890,7 @@ void CParticle::setupPass () {
+     m_pass = new Effects::CPass (*this, m_passFBOProvider, firstPass, *m_passOverride, m_passBinds, std::nullopt);
+ 
+     // Set destination to scene FBO and input to particle texture
+-    m_pass->setDestination (getScene ().getFBO ());
++    m_pass->setDestination (getScene ().getTargetFor (this->getObject ()));
+     m_pass->setInput (getTexture ());
+ 
+     // Set matrix pointers - CPass will dereference these each frame
+@@ -2289,7 +2289,7 @@ void CParticle::renderSprites () {
+     // This gives the shader a snapshot of what's behind the particles for refraction,
+     // without a feedback loop (rendering to scene FBO while reading from copy FBO).
+     if (m_hasRefract && m_refractFBO) {
+-	auto sceneFBO = getScene ().getFBO ();
++	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
+ 	GLint w = static_cast<GLint> (sceneFBO->getRealWidth ());
+ 	GLint h = static_cast<GLint> (sceneFBO->getRealHeight ());
+ 	glBindFramebuffer (GL_READ_FRAMEBUFFER, sceneFBO->getFramebuffer ());
+@@ -2525,7 +2525,7 @@ void CParticle::renderRope () {
+ 
+     // For REFRACT: blit current scene content into the copy FBO before rendering
+     if (m_hasRefract && m_refractFBO) {
+-	auto sceneFBO = getScene ().getFBO ();
++	auto sceneFBO = getScene ().getTargetFor (this->getObject ());
+ 	GLint w = static_cast<GLint> (sceneFBO->getRealWidth ());
+ 	GLint h = static_cast<GLint> (sceneFBO->getRealHeight ());
+ 	glBindFramebuffer (GL_READ_FRAMEBUFFER, sceneFBO->getFramebuffer ());
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 219dcc7..a46bfb5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -303,13 +303,42 @@ CPass::resolveTextureAnimationState (const std::shared_ptr<const TextureProvider
+     return state;
+ }
+ 
++bool CPass::samplerIsUsed (int index) const {
++    const auto it = this->m_samplerUsed.find (index);
++    if (it != this->m_samplerUsed.end ()) {
++	return it->second;
++    }
++
++    const std::string name = "g_Texture" + std::to_string (index);
++    const bool used = glGetUniformLocation (this->m_programID, name.c_str ()) != -1;
++    this->m_samplerUsed.emplace (index, used);
++    return used;
++}
++
+ void CPass::bindTextureUnit (int index, const std::shared_ptr<const TextureProvider>& texture, uint32_t frame) const {
+     if (texture == nullptr) {
+ 	return;
+     }
+ 
++    GLuint id = texture->getTextureID (frame);
++
++    // a unit sampling the FBO this pass draws into (a blend mode's g_Texture4, a compose layer's _rt_FullFrameBuffer
++    // on its last pass) reads a copy taken before the draw, as WE copies the framebuffer before such a pass: sampling
++    // the bound target is a GL feedback loop, undefined (noise or stale texels)
++    // (only a sampler the program uses: genericimage4/genericparticle declare g_Texture3 = _rt_MipMappedFrameBuffer
++    // for REFLECTION/REFRACT, compiled out otherwise; WE copies only for a material that reads it)
++    if (this->m_drawTo != nullptr && id != GL_NONE && id == this->m_drawTo->getTextureID (0)
++	&& this->samplerIsUsed (index)) {
++	if (this->m_drawToCopy == nullptr) {
++	    this->m_drawToCopy = this->m_renderable.getScene ().copyForSampling (*this->m_drawTo);
++	    glBindFramebuffer (GL_FRAMEBUFFER, this->m_drawTo->getFramebuffer ());
++	}
++
++	id = this->m_drawToCopy->getTextureID (0);
++    }
++
+     glActiveTexture (GL_TEXTURE0 + index);
+-    glBindTexture (GL_TEXTURE_2D, texture->getTextureID (frame));
++    glBindTexture (GL_TEXTURE_2D, id);
+ }
+ 
+ void CPass::bindTextureOverrides (uint32_t currentTexture, std::shared_ptr<const TextureProvider>& texture0) const {
+@@ -526,6 +555,7 @@ void CPass::render () {
+     }
+ 
+     this->setupRenderFramebuffer ();
++    this->m_drawToCopy = nullptr;
+     this->setupRenderTexture ();
+     this->setupRenderUniforms ();
+     this->setupRenderReferenceUniforms ();
+@@ -536,6 +566,13 @@ void CPass::render () {
+ 
+ std::shared_ptr<const FBOProvider> CPass::getFBOProvider () const { return this->m_fboProvider; }
+ 
++void CPass::setTexture (int index, std::shared_ptr<const TextureProvider> texture) {
++    this->m_textures[index] = std::make_shared<TextureChainEntry> (TextureChainEntry {
++	.texture = std::move (texture),
++	.next = nullptr,
++    });
++}
++
+ const CRenderable& CPass::getRenderable () const { return this->m_renderable; }
+ 
+ void CPass::setDestination (std::shared_ptr<const CFBO> drawTo) { this->m_drawTo = std::move (drawTo); }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 4f34cfa..dbb1f7a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -38,6 +38,8 @@ public:
+     void setDestination (std::shared_ptr<const CFBO> drawTo);
+     void setInput (std::shared_ptr<const TextureProvider> input);
+     void setPreviousInput (std::shared_ptr<const TextureProvider> input);
++    /** Replaces what texture unit `index` samples (a compose layer's base pass reads its group target) */
++    void setTexture (int index, std::shared_ptr<const TextureProvider> texture);
+     void setTexCoord (GLuint texcoord);
+     void setPosition (GLuint position);
+     void setModelViewProjectionMatrix (const glm::mat4* projection);
+@@ -165,6 +167,8 @@ private:
+     [[nodiscard]] TextureAnimationState
+     resolveTextureAnimationState (const std::shared_ptr<const TextureProvider>& texture) const;
+     void bindTextureUnit (int index, const std::shared_ptr<const TextureProvider>& texture, uint32_t frame) const;
++    /** The program samples g_Texture<index> (it's active: not compiled out by a combo) */
++    [[nodiscard]] bool samplerIsUsed (int index) const;
+     void bindTextureOverrides (uint32_t currentTexture, std::shared_ptr<const TextureProvider>& texture0) const;
+     void setupRenderUniforms ();
+     void setupRenderReferenceUniforms ();
+@@ -202,6 +206,10 @@ private:
+     Render::Shaders::Shader* m_shader = nullptr;
+ 
+     std::shared_ptr<const CFBO> m_drawTo = nullptr;
++    /** this render's copy of m_drawTo, for a texture unit that samples it (taken once per render) */
++    mutable std::shared_ptr<const CFBO> m_drawToCopy = nullptr;
++    /** samplerIsUsed, by unit */
++    mutable std::map<int, bool> m_samplerUsed = {};
+     std::shared_ptr<const TextureProvider> m_input = nullptr;
+     std::shared_ptr<const TextureProvider> m_previousInput = nullptr;
+     glm::vec4 m_texture0Resolution = {};
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 69d6b88..0a42fff 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -449,6 +449,9 @@ void CScene::renderFrame () {
+     // ensure we render over the whole framebuffer
+     glViewport (0, 0, this->m_sceneFBO->getRealWidth (), this->m_sceneFBO->getRealHeight ());
+ 
++    // the last frame's last pass left alpha masked: the clear sets the scene's alpha (opaque) every frame, as a compose
++    // layer's background copy and a blend mode's output alpha read it
++    glColorMask (true, true, true, true);
+     glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+     for (const auto& cur : this->m_objectsByRenderOrder) {
+@@ -462,6 +465,10 @@ void CScene::renderFrame () {
+ 	if (cur == this->m_bloomObject && !this->getScene ().camera.bloom.enabled->value->getBool ()) {
+ 	    continue;
+ 	}
++	// a compose layer draws its subtree into itself (renderComposed)
++	if (this->drawingOwnerOf (cur->getObject ()).has_value ()) {
++	    continue;
++	}
+ 
+ 	cur->render ();
+     }
+@@ -584,6 +591,120 @@ glm::vec2 parallaxDepthOf (const Object& object) {
+ }
+ } // namespace
+ 
++std::optional<int> CScene::composeOwnerOf (const Object& object) const {
++    if (!this->m_composeOwnersBuilt) {
++	this->m_composeOwnersBuilt = true;
++
++	// only an ancestor listed before the object (so built before it: its setup already knows the target)
++	std::map<int, std::pair<const Object*, size_t>> byId;
++	size_t index = 0;
++	for (const auto& cur : this->getScene ().objects) {
++	    byId.emplace (cur->id, std::make_pair (cur.get (), index++));
++	}
++	index = 0;
++
++	for (const auto& cur : this->getScene ().objects) {
++	    std::optional<int> owner = std::nullopt;
++	    const Object* at = cur.get ();
++
++	    for (int depth = 0; at->parent.has_value () && depth < 32; depth++) {
++		const auto parent = byId.find (at->parent.value ());
++		if (parent == byId.end () || parent->second.first == cur.get ()) {
++		    break;
++		}
++		at = parent->second.first;
++		if (at->is<Image> () && at->as<Image> ()->model->passthrough) {
++		    if (parent->second.second < index) {
++			owner = at->id;
++		    }
++		    break;
++		}
++	    }
++
++	    this->m_composeOwners.emplace (cur->id, owner);
++	    index++;
++	}
++    }
++
++    const auto it = this->m_composeOwners.find (object.id);
++    return it == this->m_composeOwners.end () ? std::nullopt : it->second;
++}
++
++bool CScene::composesChildren (const Object& image) const {
++    // builds the map
++    static_cast<void> (this->composeOwnerOf (image));
++
++    return std::ranges::any_of (this->m_composeOwners | std::views::values, [&image] (const auto& owner) {
++	return owner.has_value () && owner.value () == image.id;
++    });
++}
++
++std::optional<int> CScene::drawingOwnerOf (const Object& object) const {
++    const auto owner = this->composeOwnerOf (object);
++
++    if (!owner.has_value ()) {
++	return std::nullopt;
++    }
++
++    // a compose layer that couldn't be built leaves its subtree to the scene
++    const CObject* image = this->getObject (owner.value ());
++    if (image == nullptr || !image->is<Objects::CImage> () || !image->as<Objects::CImage> ()->drawsSubtree ()) {
++	return std::nullopt;
++    }
++
++    return owner;
++}
++
++std::shared_ptr<const CFBO> CScene::getTargetFor (const Object& object) const {
++    const auto owner = this->drawingOwnerOf (object);
++
++    if (!owner.has_value ()) {
++	return this->getFBO ();
++    }
++
++    return const_cast<CScene*> (this)->getComposeTarget (owner.value ());
++}
++
++bool CScene::targetKeepsAlpha (const Object& object) const {
++    const auto owner = this->drawingOwnerOf (object);
++
++    if (!owner.has_value ()) {
++	return true;
++    }
++
++    return this->getObject (owner.value ())->as<Objects::CImage> ()->getImage ().copyBackground->value->getBool ();
++}
++
++std::shared_ptr<const CFBO> CScene::getComposeTarget (int id) {
++    auto& target = this->m_composeTargets[id];
++
++    if (target == nullptr) {
++	const auto& scene = *this->getFBO ();
++	target = std::make_shared<CFBO> (
++	    "_rt_composeLayer_" + std::to_string (id), TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0f,
++	    scene.getRealWidth (), scene.getRealHeight (), scene.getTextureWidth (0), scene.getTextureHeight (0)
++	);
++    }
++
++    return target;
++}
++
++void CScene::renderComposed (int ownerId, const CFBO& target) {
++    for (const auto& cur : this->m_objectsByRenderOrder) {
++	const auto owner = this->drawingOwnerOf (cur->getObject ());
++	if (!owner.has_value () || owner.value () != ownerId) {
++	    continue;
++	}
++
++	// what draws to whatever is bound (text, particles' masks) draws into the layer
++	glBindFramebuffer (GL_FRAMEBUFFER, target.getFramebuffer ());
++	glViewport (0, 0, target.getRealWidth (), target.getRealHeight ());
++	glColorMask (true, true, true, !this->targetKeepsAlpha (cur->getObject ()));
++
++	cur->render ();
++    }
++}
++
+ bool CScene::isEffectivelyVisible (const Object& object) const {
+     const Object* cur = &object;
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 355f210..f860f28 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -5,6 +5,8 @@
+ #include "WallpaperEngine/Render/CWallpaper.h"
+ #include "linux-wallpaperengine/project.h"
+ 
++#include <map>
++#include <optional>
+ #include <random>
+ 
+ namespace WallpaperEngine::Scripting {
+@@ -65,6 +67,28 @@ public:
+      */
+     [[nodiscard]] bool isEffectivelyVisible (const Object& object) const;
+ 
++    /**
++     * The passthrough (compose) layer that draws this object: its nearest ancestor that is a passthrough image. WE
++     * renders a compose layer's subtree into the layer (GH 0x140218260, recursing through GH 0x1402181b0 up to a nested
++     * compose layer, which draws its own), after its background copy or clear, and before the layer's effects run
++     */
++    [[nodiscard]] std::optional<int> composeOwnerOf (const Object& object) const;
++    /** composeOwnerOf, when that layer was built and draws its subtree (else the object draws to the scene) */
++    [[nodiscard]] std::optional<int> drawingOwnerOf (const Object& object) const;
++    /** Whether a passthrough layer draws objects of its own (it has a descendant whose compose owner it is) */
++    [[nodiscard]] bool composesChildren (const Object& image) const;
++    /** The FBO an object draws its last pass into: its compose layer's group target, or the scene's */
++    [[nodiscard]] std::shared_ptr<const CFBO> getTargetFor (const Object& object) const;
++    /**
++     * Whether an object's last draw leaves its target's alpha alone: the scene's, and a compose layer's that starts
++     * from the background (opaque). A compose layer that starts transparent takes its subtree's alpha as coverage
++     */
++    [[nodiscard]] bool targetKeepsAlpha (const Object& object) const;
++    /** A compose layer's group target (scene-sized, made on first use): its background (or transparent) + subtree */
++    [[nodiscard]] std::shared_ptr<const CFBO> getComposeTarget (int id);
++    /** Draws the objects a compose layer owns, in draw order, into `target` */
++    void renderComposed (int ownerId, const CFBO& target);
++
+     [[nodiscard]] const std::vector<CObject*>& getObjectsByRenderOrder () const;
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
+     [[nodiscard]] std::mt19937& getParticleRng ();
+@@ -104,6 +128,10 @@ private:
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};
+     std::mt19937 m_particleRng;
++    /** composeOwnerOf, by object id (built on first use from the scene data) */
++    mutable std::map<int, std::optional<int>> m_composeOwners = {};
++    mutable bool m_composeOwnersBuilt = false;
++    std::map<int, std::shared_ptr<CFBO>> m_composeTargets = {};
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};
+     glm::vec4 m_pointerState = {};

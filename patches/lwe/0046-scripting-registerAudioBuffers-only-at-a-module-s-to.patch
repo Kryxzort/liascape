@@ -1,0 +1,72 @@
+From 49cb616297b94feb4dc5d43b29babd4321c58fb5 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 05:19:11 +0530
+Subject: [PATCH 46/47] scripting: registerAudioBuffers only at a module's top
+ level, not in update
+
+engine.registerAudioBuffers threw "can only be called from global scope" only while no module ran, but
+callModule sets the running module for update()/init() too, so a call inside update() went through and
+the WE error never came (host_api_test audio_reaches_shaders_scripts_and_emitters failed on 592fdff).
+The engine now tracks the module's evaluation itself.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md B8 (S17), a fix to patch 0045
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01288H8XbjUdhpEVfhFbe7bj
+---
+ src/core/WallpaperEngine/Scripting/EngineObject.cpp | 3 ++-
+ src/core/WallpaperEngine/Scripting/ScriptEngine.cpp | 2 ++
+ src/core/WallpaperEngine/Scripting/ScriptEngine.h   | 3 +++
+ 3 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index d2059b3..cf2f7b5 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -198,7 +198,8 @@ JSValue engine_register_audio_buffers (JSContext* ctx, JSValueConst this_val, in
+ 	return JS_EXCEPTION;
+     }
+ 
+-    if (it->second.getEngine ().getRunningModule () == nullptr) {
++    // the running module is also set while its update () runs: only its evaluation is the global scope
++    if (!it->second.getEngine ().isEvaluatingModule ()) {
+ 	return JS_ThrowSyntaxError (ctx, "registerAudioBuffers can only be called from global scope.");
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 6142f14..af661ac 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -912,8 +912,10 @@ void ScriptEngine::evaluateModule (LoadedModule& module) {
+     );
+     // createScriptProperties().finish() binds the stored script properties of the module being evaluated
+     this->m_runningModule = &module;
++    this->m_evaluatingModule = true;
+     JSValue promise = JS_EvalFunction (ctx, function);
+     this->runPendingJobs ();
++    this->m_evaluatingModule = false;
+     this->m_runningModule = nullptr;
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding", JS_UNDEFINED);
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__thisObjectBinding", JS_UNDEFINED);
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index d3283d0..243b6c6 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -79,6 +79,8 @@ public:
+     JSContext* getContext () const { return m_context; }
+     JSValue getGlobalThis () const { return m_globalThis; }
+     LoadedModule* getRunningModule () const { return m_runningModule; }
++    /** A module's top level is being evaluated (not one of its exported functions) */
++    bool isEvaluatingModule () const { return m_evaluatingModule; }
+     JSValue dynamicToJs (DynamicValue& value) const;
+     /**
+      * Writes a script value into `target` (numbers, booleans, strings, Vec2/3/4); undefined/null write nothing
+@@ -250,6 +252,7 @@ private:
+     JSValue m_vecCtors[3] = { JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED };
+ 
+     LoadedModule* m_runningModule = nullptr;
++    bool m_evaluatingModule = false;
+ 
+     ScriptLayerHandle m_nextLayerId = 1;
+     bool m_layerRegistryReady = false;

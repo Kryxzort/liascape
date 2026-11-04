@@ -2071,6 +2071,205 @@ static bool effect_visible_is_live () {
 
 
 // ---------------------------------------------------------------------------------------------
+// B7: blend modes and the framebuffer (docs/player/spikes/we-lwe-gap-audit.md E27, E28, E30, E31, E33)
+
+// a layer material `name` drawing `body` (v_TexCoord is the layer's 0..1), as models/<name>.json; `textures` is the
+// material's texture list (JSON), `solid` makes it a solid layer (no texture of its own). Returns the files it wrote
+static std::vector<std::string> b7_layer (const std::string& dir, const std::string& name, const std::string& body,
+                                          const std::string& textures = "", bool solid = true, const std::string& uniforms = "") {
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/shaders/" + name + ".vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/" + name + ".frag", "varying vec2 v_TexCoord;\n" + uniforms + "void main() {\n\t" + body + "\n}\n");
+    write_file (dir + "/materials/" + name + ".json",
+                "{\"passes\":[{\"shader\":\"" + name + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                "\"blending\":\"normal\"" + (textures.empty () ? std::string () : ",\"textures\":" + textures) + "}]}\n");
+    write_file (dir + "/models/" + name + ".json",
+                "{\"material\":\"materials/" + name + ".json\"" + (solid ? ",\"solidlayer\":true" : "") + "}\n");
+    return { "shaders/" + name + ".vert", "shaders/" + name + ".frag", "materials/" + name + ".json", "models/" + name + ".json" };
+}
+
+// an effect `name` of one pass drawing `body` over g_Texture0 (the layer so far) at v_TexCoord
+static std::vector<std::string> b7_effect (const std::string& dir, const std::string& name, const std::string& body) {
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/" + name).c_str (), 0755);
+    auto files = b7_layer (dir, name, body, "", true, "uniform sampler2D g_Texture0;\n");
+    unlink ((dir + "/models/" + name + ".json").c_str ());
+    files.pop_back ();
+    write_file (dir + "/effects/" + name + "/effect.json",
+                "{\"name\":\"" + name + "\",\"passes\":[{\"material\":\"materials/" + name + ".json\"}]}\n");
+    files.push_back ("effects/" + name + "/effect.json");
+    return files;
+}
+
+static std::string b7_object (int id, const std::string& model, int x, const std::string& size, const std::string& extra = "") {
+    return "{\"id\":" + std::to_string (id) + ",\"name\":\"o" + std::to_string (id) + "\",\"image\":\"models/" + model
+         + ".json\",\"size\":\"" + size + "\",\"origin\":\"" + std::to_string (x) + " 16 0\"" + extra + "}";
+}
+
+static std::array<unsigned char, 4> pixel_at (const ScriptRig& rig, int x) {
+    std::array<unsigned char, 4> px {};
+    read_pixel (rig.fbo, x, 16, px.data ());
+    return px;
+}
+
+static bool rgb_near (const std::array<unsigned char, 4>& px, int r, int g, int b) {
+    return near (px[0], r, 3) && near (px[1], g, 3) && near (px[2], b, 3);
+}
+
+// a layer's composite FBOs clamp unless `clampuvs` is false (WE's default is true): an effect sampling past the
+// layer's right edge gets the edge, not the left side (unpatched: the FBOs took the texture's flags, a solid layer's
+// none, and wrapped)
+static bool clampuvs_clamps_the_composite () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& flag, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene ("\"zoom\":1",
+            b7_object (1, "b7uv", 32, "32 8",
+                       flag + ",\"effects\":[{\"id\":2,\"name\":\"s\",\"file\":\"effects/b7shift/effect.json\",\"visible\":true}]"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "b7uv", "gl_FragColor = mix(vec4(0.0, 1.0, 0.0, 1.0), vec4(1.0, 0.0, 0.0, 1.0), step(v_TexCoord.x, 0.25));");
+        const auto fx = b7_effect (dir, "b7shift", "gl_FragColor = texSample2D(g_Texture0, v_TexCoord + vec2(0.5, 0.0));");
+        rig.extra.insert (rig.extra.end (), fx.begin (), fx.end ());
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 36);
+        return true;
+    };
+    std::array<unsigned char, 4> clamped {}, wrapped {};
+    CHECK (run ("", clamped), "load/build failed");
+    CHECK (run (",\"clampuvs\":false", wrapped), "load/build failed (clampuvs false)");
+    printf ("    u 0.63 + 0.5: default %d %d %d (want green: the edge), clampuvs false %d %d %d (want red: wrapped)\n", clamped[0],
+            clamped[1], clamped[2], wrapped[0], wrapped[1], wrapped[2]);
+    CHECK (rgb_near (clamped, 0, 255, 0), "default clampuvs didn't clamp (%d %d %d)", clamped[0], clamped[1], clamped[2]);
+    CHECK (rgb_near (wrapped, 255, 0, 0), "clampuvs false didn't wrap (%d %d %d)", wrapped[0], wrapped[1], wrapped[2]);
+    return true;
+}
+
+// `_rt_imageLayerComposite_<id>_a` holds what the layer's last pass reads, `_b` the stage before (WE starts the
+// ping-pong by the parity of the passes that write it; unpatched: the base always went to _a, so with two effects
+// _a held the bare base and _b what the last pass read)
+static bool composite_a_is_what_the_last_pass_reads () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string fx = ",\"effects\":[{\"id\":2,\"name\":\"g\",\"file\":\"effects/e41g/effect.json\",\"visible\":true},"
+                           "{\"id\":3,\"name\":\"b\",\"file\":\"effects/e41b/effect.json\",\"visible\":true}]";
+    const std::string dir = camera_scene ("\"zoom\":1",
+        b7_object (1, "b7red", 16, "8 8", fx) + "," + b7_object (4, "b7a", 32, "8 8") + "," + b7_object (5, "b7b", 48, "8 8"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b7red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const std::string sample = "gl_FragColor = texSample2D(g_Texture0, v_TexCoord);";
+    for (const auto& files : { b7_layer (dir, "b7a", sample, "[\"_rt_imageLayerComposite_1_a\"]", false, "uniform sampler2D g_Texture0;\n"),
+                               b7_layer (dir, "b7b", sample, "[\"_rt_imageLayerComposite_1_b\"]", false, "uniform sampler2D g_Texture0;\n") }) {
+        rig.extra.insert (rig.extra.end (), files.begin (), files.end ());
+    }
+    e41_effect (dir, "e41g", "g");
+    e41_effect (dir, "e41b", "b");
+    for (const char* f : { "effects/e41g/effect.json", "effects/e41b/effect.json", "shaders/e41g.vert", "shaders/e41g.frag",
+                           "shaders/e41b.vert", "shaders/e41b.frag", "materials/e41g.json", "materials/e41b.json" }) {
+        rig.extra.emplace_back (f);
+    }
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const auto layer = pixel_at (rig, 16), a = pixel_at (rig, 32), b = pixel_at (rig, 48);
+    printf ("    layer %d %d %d; _a %d %d %d (want yellow: base + green); _b %d %d %d (want red: the base)\n", layer[0], layer[1],
+            layer[2], a[0], a[1], a[2], b[0], b[1], b[2]);
+    CHECK (rgb_near (layer, 255, 255, 255), "the layer isn't white (%d %d %d)", layer[0], layer[1], layer[2]);
+    CHECK (rgb_near (a, 255, 255, 0), "_a isn't what the last pass reads (%d %d %d)", a[0], a[1], a[2]);
+    CHECK (rgb_near (b, 255, 0, 0), "_b isn't the stage before (%d %d %d)", b[0], b[1], b[2]);
+    return true;
+}
+
+// a compose (passthrough) layer draws its children (origin parent-local: x 16) into itself, from the background (copybackground, the default) or
+// from transparent, and its effects apply to them; an object outside it is drawn as before (unpatched: the children
+// were drawn after the layer, untouched, and `copybackground: false` still tinted the background)
+static bool compose_layer_draws_its_children () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& flag, std::array<std::array<unsigned char, 4>, 3>& out, bool effect = true) {
+        const std::string compose
+            = "{\"id\":1,\"name\":\"c\",\"image\":\"models/util/composelayer.json\",\"size\":\"64 32\",\"origin\":\"32 16 0\"" + flag
+            + (effect ? ",\"effects\":[{\"id\":2,\"name\":\"t\",\"file\":\"effects/b7tint/effect.json\",\"visible\":true}]}" : "}");
+        const std::string dir = camera_scene ("\"zoom\":1",
+            compose + ",{\"id\":3,\"name\":\"o3\",\"image\":\"models/b7red.json\",\"size\":\"8 8\",\"origin\":\"-16 0 0\",\"parent\":1},"
+                + b7_object (4, "b7red", 48, "8 8"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "b7red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+        // green = coverage: the transparent stays transparent
+        const auto fx = b7_effect (dir, "b7tint", "vec4 c = texSample2D(g_Texture0, v_TexCoord);\n\tgl_FragColor = vec4(c.r, c.a, c.b, c.a);");
+        rig.extra.insert (rig.extra.end (), fx.begin (), fx.end ());
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        out = { pixel_at (rig, 16), pixel_at (rig, 32), pixel_at (rig, 48) };
+        return true;
+    };
+    std::array<std::array<unsigned char, 4>, 3> copied {}, clear {}, bare {};
+    CHECK (run ("", copied), "load/build failed");
+    CHECK (run (",\"copybackground\":false", clear), "load/build failed (copybackground false)");
+    CHECK (run ("", bare, false), "load/build failed (no effect)");
+    printf ("    no effect: child %d %d %d, background %d %d %d, outside %d %d %d\n", bare[0][0], bare[0][1], bare[0][2], bare[1][0],
+            bare[1][1], bare[1][2], bare[2][0], bare[2][1], bare[2][2]);
+    CHECK (rgb_near (bare[0], 255, 0, 0) && rgb_near (bare[1], 0, 0, 128) && rgb_near (bare[2], 255, 0, 0),
+           "no effect: the layer isn't just its background and child");
+    printf ("    copybackground: child %d %d %d, background %d %d %d, outside %d %d %d\n", copied[0][0], copied[0][1], copied[0][2],
+            copied[1][0], copied[1][1], copied[1][2], copied[2][0], copied[2][1], copied[2][2]);
+    printf ("    copybackground false: child %d %d %d, background %d %d %d, outside %d %d %d\n", clear[0][0], clear[0][1],
+            clear[0][2], clear[1][0], clear[1][1], clear[1][2], clear[2][0], clear[2][1], clear[2][2]);
+    CHECK (rgb_near (copied[0], 255, 255, 0), "copybackground: the child wasn't drawn through the layer (%d %d %d)", copied[0][0],
+           copied[0][1], copied[0][2]);
+    CHECK (rgb_near (copied[1], 0, 255, 128), "copybackground: the background wasn't tinted (%d %d %d)", copied[1][0], copied[1][1],
+           copied[1][2]);
+    CHECK (rgb_near (copied[2], 255, 0, 0), "copybackground: the object outside changed (%d %d %d)", copied[2][0], copied[2][1],
+           copied[2][2]);
+    CHECK (rgb_near (clear[0], 255, 255, 0), "copybackground false: the child wasn't drawn through the layer (%d %d %d)", clear[0][0],
+           clear[0][1], clear[0][2]);
+    CHECK (rgb_near (clear[1], 0, 0, 128), "copybackground false: the background was touched (%d %d %d)", clear[1][0], clear[1][1],
+           clear[1][2]);
+    CHECK (rgb_near (clear[2], 255, 0, 0), "copybackground false: the object outside changed (%d %d %d)", clear[2][0], clear[2][1],
+           clear[2][2]);
+    return true;
+}
+
+// colour blend modes over the scene: 31 adds (WE: additive blending, no blend pass), 2 multiplies through
+// genericimage3's BLENDMODE pass, which reads a copy of the scene, not the target it draws into
+static bool color_blend_modes_read_the_scene () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1",
+        b7_object (1, "b7red", 32, "64 32") + "," + b7_object (2, "b7add", 16, "8 8", ",\"colorBlendMode\":31") + ","
+            + b7_object (3, "b7mul", 48, "8 8", ",\"colorBlendMode\":2"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b7red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    for (const auto& files : { b7_layer (dir, "b7add", "gl_FragColor = vec4(0.0, 0.5, 0.0, 1.0);"),
+                               b7_layer (dir, "b7mul", "gl_FragColor = vec4(0.5, 1.0, 1.0, 1.0);") }) {
+        rig.extra.insert (rig.extra.end (), files.begin (), files.end ());
+    }
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const auto add = pixel_at (rig, 16), mul = pixel_at (rig, 48), bg = pixel_at (rig, 32);
+    printf ("    red + (0 .5 0) mode 31 → %d %d %d (want 255 128 0); red × (.5 1 1) mode 2 → %d %d %d (want 128 0 0); red %d %d %d\n",
+            add[0], add[1], add[2], mul[0], mul[1], mul[2], bg[0], bg[1], bg[2]);
+    CHECK (rgb_near (add, 255, 128, 0), "mode 31 didn't add (%d %d %d)", add[0], add[1], add[2]);
+    CHECK (rgb_near (mul, 128, 0, 0), "mode 2 didn't multiply the scene (%d %d %d)", mul[0], mul[1], mul[2]);
+    CHECK (rgb_near (bg, 255, 0, 0), "the background isn't red (%d %d %d)", bg[0], bg[1], bg[2]);
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
 // B10: the SceneScript API surface (docs/player/spikes/we-lwe-gap-audit.md S10–S37)
 
 // a JS check list a script runs: every failed name is logged, the script returns whether all passed
@@ -2805,6 +3004,10 @@ int main (int argc, char** argv) {
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
     run ("effect_visible_is_live", effect_visible_is_live);
+    run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);
+    run ("composite_a_is_what_the_last_pass_reads", composite_a_is_what_the_last_pass_reads);
+    run ("compose_layer_draws_its_children", compose_layer_draws_its_children);
+    run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);

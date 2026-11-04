@@ -1029,8 +1029,15 @@ Two bug classes kept recurring; fix the class, not the instance:
           sound under a hidden parent, G05; WE captures of 3243449890 (its "simple" character variant, drawn before
           under a hidden group, is gone) and 3490034653 (parented light beams now show). Result: the audit's "B6
           result" (§ 5).
-    - [ ] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
+    - [x] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
           loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
+          **Done 2026-11-04** (patch 0047, pin `c4eea29`; 0046 fixes B8's registerAudioBuffers scope check). All
+          decoded from wallpaper64.exe: copy before a pass samples its own target, mode 31 = additive, clampuvs
+          (default true) on the composite FBOs, compose layers draw their subtree, `_a`/`_b` parity. See the
+          audit's "B7 result".
+          - [ ] WE captures of 2883756643 and 3414858021 / 3432999904 to confirm the inferred parts.
+          - [ ] 3426575339, 3432876246, 3556794116 smoke blank on every core incl. 592fdff (new since E41; not B7);
+                3046119914 / 3432999904 still black.
     - [x] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
           **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a

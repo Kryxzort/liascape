@@ -63,7 +63,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
   - **Pin**: `third_party/lwe/PIN` (JSON: `repo`, `branch`, `rev`, `base`, `version`, `nix_hash`,
     `submodules`) — the single source of truth: the flake reads it (`lwe-src`, `lwe-core`),
     `scripts/lwe.sh` reads it, `src/player/tests/lwe_build.rs` checks both stay in step.
-    Today: `rev` **`592fdff`** (fork, 2026-11-03: + 0045, batch B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
+    Today: `rev` **`c4eea29`** (fork, 2026-11-04: + 0046–0047, batch B7 and a B8 fix; 0045 = B8; 0038–0044 = B10; 0037 = E41; 0031–0036 = B9; 0030 = B6; 0029 = B5; 0024–0028 = B3; 0022–0023 = B2; 0019–0021 = B1) on `base` **`ddea3b4`** (upstream `next-v2` 2026-08-03,
     "chore: formatting"), CMake version `0.0.1`. `base` stays upstream `next-v2`: the fixes upstream
     merged on **`main`** only (which has diverged from `next-v2` — 13 commits since `ddea3b4`, `next-v2` 36
     ahead of `main`) are **cherry-picked onto the fork branch as ordinary patches** (0007–0014), after

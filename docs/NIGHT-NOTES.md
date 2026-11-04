@@ -230,3 +230,15 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   load visibly react (2542468435, 3029971128, 2890767643, 1556245028 the most). Left and right are still the same:
   the player feeds one mono mix; stereo is a TODO. The agent doing this hit the weekly usage limit mid-way; the
   rest was finished in the main session.
+
+- **Scenes, batch B7 (fork patches 0046–0047, pin `c4eea29`):** blend modes and compose layers now work the way
+  Wallpaper Engine does them (decoded from wallpaper64.exe):
+  - Layers that blend with the scene read a copy of it instead of the image they're drawing into.
+  - "Add" (mode 31) is plain additive blending: 2883756643's bokeh and 3184155462 are brighter.
+  - Effects no longer pull in the opposite edge of a layer (WE clamps by default).
+  - Compose layers draw their child layers through their own effects: 3490034653's light shafts are now masked the
+    way the author set them up.
+  - A B8 bug was fixed on the way.
+  - All 88 scenes that load still load, and frame time is unchanged. 3426575339, 3432876246 and 3556794116 render
+    blank on every core, including the previous one, so that is a separate fault to look at.
+

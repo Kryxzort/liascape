@@ -1,7 +1,7 @@
 From d7a9f34a453efad05eec9a30244ebd81446520a4 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 04:12:25 +0530
-Subject: [PATCH 29/45] render: parallax and camera the way Wallpaper Engine
+Subject: [PATCH 29/47] render: parallax and camera the way Wallpaper Engine
  does
 
 Decoded from wallpaper64.exe 2.8.485: the camera update (GH 0x1401b8af0),
