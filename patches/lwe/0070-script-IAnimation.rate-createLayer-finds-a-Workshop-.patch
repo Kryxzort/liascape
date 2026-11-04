@@ -1,0 +1,159 @@
+From deeb4dada1dcc182e27f3621f93d04bd190b1cd7 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 19:06:25 +0530
+Subject: [PATCH 70/70] script: IAnimation.rate; createLayer finds a Workshop
+ script's own files
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- IAnimation.rate reads and writes the speed a keyframe timeline runs at.
+- A script from a Workshop asset (`export let __workshopId = '…'`, as WE's editor writes it) names
+  its files as in its own item: createLayer ('models/bar.json') is models/workshop/<id>/bar.json
+  when that exists. 2469881470 and 2890767643's visualisers (Workshop 2115341179) create 63 bars
+  each from it; without this the bars weren't found.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (SceneScript coverage); docs/player/reports/scene-health.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Data/Model/PropertyAnimation.cpp          |  1 +
+ .../Data/Model/PropertyAnimation.h            |  4 +++
+ .../Adapters/ScriptableObjectAdapter.cpp      | 23 +++++++++++++
+ .../WallpaperEngine/Scripting/SceneObject.cpp | 33 +++++++++++++++++++
+ 4 files changed, 61 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+index e9b133c..09a3fe8 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+@@ -185,6 +185,7 @@ void PropertyAnimation::advance (float dt) {
+     if (this->m_duration <= 0.0f) {
+ 	return;
+     }
++    dt *= this->m_rate;
+     const float before = this->m_time;
+     const bool backwards = (this->m_flags & Reverse) != 0;
+     if (backwards) {
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+index 8e5565e..65d7ec0 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+@@ -79,6 +79,9 @@ public:
+     void setFrame (int frame);
+     [[nodiscard]] int getLength () const;
+     [[nodiscard]] float getFps () const;
++    /** SceneScript's IAnimation.rate: the speed the timeline runs at (1: its own) */
++    [[nodiscard]] float getRate () const { return this->m_rate; }
++    void setRate (float rate) { this->m_rate = rate; }
+ 
+     [[nodiscard]] const std::string& getName () const;
+     [[nodiscard]] size_t getComponentCount () const;
+@@ -95,6 +98,7 @@ public:
+ private:
+     std::string m_name;
+     float m_fps;
++    float m_rate = 1.0f;
+     float m_secondsPerFrame;
+     float m_duration;
+     int m_length;
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 5a912e6..4e6fcba 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -993,6 +993,9 @@ JSValue animation_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom ato
+     if (strcmp (name.str, "duration") == 0) {
+ 	return JS_NewFloat64 (ctx, animation.getLength () / animation.getFps ());
+     }
++    if (strcmp (name.str, "rate") == 0) {
++	return JS_NewFloat64 (ctx, animation.getRate ());
++    }
+ 
+     for (const auto& [method, id] : kAnimationMethods) {
+ 	if (strcmp (name.str, method) == 0) {
+@@ -1003,6 +1006,25 @@ JSValue animation_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom ato
+     return JS_UNDEFINED;
+ }
+ 
++// IAnimation.rate is the one writable member
++int animation_property_set (
++    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
++) {
++    JSClassID classId = 0;
++    auto* opaque = static_cast<OpaqueAnimation*> (JS_GetAnyOpaque (obj_val, &classId));
++    const AtomName name (ctx, atom);
++
++    if (opaque == nullptr || name.str == nullptr || opaque->value.getAnimation () == nullptr) {
++	return -1;
++    }
++    if (strcmp (name.str, "rate") == 0) {
++	double rate = 1.0;
++	JS_ToFloat64 (ctx, &rate, val);
++	opaque->value.getAnimation ()->setRate (static_cast<float> (rate));
++    }
++    return 1;
++}
++
+ void animation_finalizer (JSRuntime* rt, JSValueConst val) {
+     JSClassID classId = 0;
+     delete static_cast<OpaqueAnimation*> (JS_GetAnyOpaque (val, &classId));
+@@ -1200,6 +1222,7 @@ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::str
+     JS_NewClass (rt, this->m_videoClassId, &this->m_videoDefinition);
+ 
+     this->m_animationExoticMethods.get_property = animation_property_get;
++    this->m_animationExoticMethods.set_property = animation_property_set;
+     this->m_animationDefinition = {
+ 	.class_name = "IAnimation",
+ 	.finalizer = animation_finalizer,
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index 812f80d..fe79763 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -9,6 +9,7 @@
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ 
+ #include <algorithm>
++#include <tuple>
+ #include <nlohmann/json.hpp>
+ 
+ using namespace WallpaperEngine::Scripting;
+@@ -310,6 +311,38 @@ JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	return JS_UNDEFINED;
+     }
+ 
++    // a script from a Workshop asset (`export let __workshopId = '…'`, as the editor writes it) names its files as in
++    // its own item: `models/bar.json` is `models/workshop/<id>/bar.json` when that exists (2469881470's bars)
++    if (const auto* module = container->getEngine ().getRunningModule (); module != nullptr && JS_IsObject (module->ns)) {
++	JSValue id = JS_GetPropertyStr (ctx, module->ns, "__workshopId");
++	if (JS_IsString (id)) {
++	    const std::string workshop = jsString (ctx, id);
++	    try {
++		auto json = nlohmann::json::parse (config);
++		for (const char* key : { "image", "particle", "model", "sound" }) {
++		    if (!json.contains (key) || !json[key].is_string ()) {
++			continue;
++		    }
++		    const std::string file = json[key].get<std::string> ();
++		    const auto slash = file.find ('/');
++		    if (slash == std::string::npos || file.find ("/workshop/") != std::string::npos) {
++			continue;
++		    }
++		    const std::string own = file.substr (0, slash) + "/workshop/" + workshop + file.substr (slash);
++		    try {
++			std::ignore = container->getScene ().getAssetLocator ().readString (own);
++			json[key] = own;
++		    } catch (const std::exception&) {
++			// not in the item's folder: the path as written
++		    }
++		}
++		config = json.dump ();
++	    } catch (const std::exception&) {
++	    }
++	}
++	JS_FreeValue (ctx, id);
++    }
++
+     return layerValue (*container, container->getScene ().createLayer (config));
+ }
+ 

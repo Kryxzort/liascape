@@ -1,0 +1,68 @@
+From bf65684865ad682e8161331996a2f5a9ba1972f0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:31:14 +0530
+Subject: [PATCH 67/70] material: alphatocoverage and additive set their combos
+
+WE's material pass setup (GH 0x140183570) turns a pass's blending into combos: `alphatocoverage`
+(3) sets ALPHATOCOVERAGE 1 and `additive` (2) ADDITIVE 1. LWE logged alphatocoverage as unsupported
+and drew it as normal (3354740764's "Custom Image"), and set no combo for additive. With
+ALPHATOCOVERAGE the stock shaders (generic*, genericimage3/4, genericparticle, clippingmaskimage4,
+the shadow casters) sharpen alpha and, on GLSL, discard below 0.5: a cutout drawn without blending.
+ADDITIVE is read by generic4, foliage4, fur4 and chroma4.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (blend modes); docs/player/reports/scene-health.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Data/Parsers/MaterialParser.cpp           | 23 ++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+index 54e8ae1..6c738a3 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+@@ -43,9 +43,9 @@ MaterialPassUniquePtr MaterialParser::parsePass (const JSON& it, const Project&
+     const auto combos = it.optional ("combos");
+     const auto constants = it.optional ("constantshadervalues");
+ 
+-    return std::make_unique<MaterialPass> (MaterialPass {
+-	// TODO: REMOVE THIS UGLY STD::STRING CREATION
+-	.blending = parseBlendMode (it.optional ("blending", std::string ("normal"))),
++    const std::string blending = it.optional ("blending", std::string ("normal"));
++    auto pass = std::make_unique<MaterialPass> (MaterialPass {
++	.blending = parseBlendMode (blending),
+ 	.cullmode = parseCullMode (it.optional ("cullmode", std::string ("nocull"))),
+ 	.depthtest = parseDepthtestMode (it.optional ("depthtest", std::string ("disabled"))),
+ 	.depthwrite = parseDepthwriteMode (it.optional ("depthwrite", std::string ("disabled"))),
+@@ -55,6 +55,18 @@ MaterialPassUniquePtr MaterialParser::parsePass (const JSON& it, const Project&
+ 	.combos = combos.has_value () ? parseCombos (*combos) : ComboMap {},
+ 	.constants = constants.has_value () ? ShaderConstantParser::parse (*constants, project) : ShaderConstantMap {},
+     });
++
++    // WE's material pass setup (GH 0x140183570) turns the blending into combos: `alphatocoverage` (3) sets
++    // ALPHATOCOVERAGE 1, `additive` (2) ADDITIVE 1. With ALPHATOCOVERAGE the stock shaders sharpen alpha and, on
++    // GLSL, discard below 0.5 (generic*.frag, genericimage*.frag, genericparticle.frag): a cutout drawn without
++    // blending
++    if (blending == "alphatocoverage") {
++	pass->combos["ALPHATOCOVERAGE"] = 1;
++    } else if (blending == "additive") {
++	pass->combos["ADDITIVE"] = 1;
++    }
++
++    return pass;
+ }
+ 
+ std::map<std::string, int> MaterialParser::parseCombos (const JSON& it) {
+@@ -84,6 +96,11 @@ BlendingMode MaterialParser::parseBlendMode (const std::string& mode) {
+ 	return BlendingMode_Translucent;
+     }
+ 
++    // alpha to coverage: no blending, the pass's ALPHATOCOVERAGE combo cuts the alpha (parsePass)
++    if (mode == "alphatocoverage") {
++	return BlendingMode_Normal;
++    }
++
+     sLog.error ("Unknown blending mode: ", mode, " defaulting to normal");
+     WPENGINE_HEALTH ("unsupported", { { "what", "material blending mode " + std::string (mode) + " (as normal)" } });
+     return BlendingMode_Normal;

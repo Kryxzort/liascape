@@ -1,0 +1,252 @@
+From 35d54fb2c49907d275660de29634e4c82ceaf25e Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:35:19 +0530
+Subject: [PATCH 69/70] script: IScene's camera, initial configs and timelines;
+ ICamera
+
+- IScene.getCameraTransforms / setCameraTransforms (a CameraTransforms: camera.eye/center/up and
+  general.zoom; a 3D scene's view follows from the next frame), getInitialLayerConfig (the layer's
+  object as the scene file has it: the scene's file name is kept now, it was ""), getAnimation (a
+  keyframe timeline by name). createModelData / destroyModelData exist and build nothing (LWE makes no
+  meshes from script data; no library scene does). renderContext is defined (an empty interface).
+- A camera object's ICamera zoom / fov are layer properties (read, written, scripted).
+- IAnimation.fps is the timeline's fps (30, not 29.999998 from 1 / (1 / 30)).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (SceneScript coverage)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Data/Model/PropertyAnimation.cpp          |  4 +-
+ .../Data/Model/PropertyAnimation.h            |  1 +
+ .../Data/Parsers/WallpaperParser.cpp          |  2 +-
+ .../WallpaperEngine/Render/Objects/CGroup.h   |  7 +++
+ .../Adapters/ScriptableObjectAdapter.cpp      |  6 ++
+ .../Adapters/ScriptableObjectAdapter.h        |  3 +
+ .../WallpaperEngine/Scripting/SceneObject.cpp | 63 ++++++++++++++++++-
+ .../Scripting/resources/builtins.js           | 26 ++++++++
+ 8 files changed, 108 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+index 807f394..e9b133c 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+@@ -11,7 +11,7 @@ PropertyAnimation::PropertyAnimation (
+     std::string name, float fps, int length, const std::string& mode, bool startPaused, bool wrapLoop,
+     std::vector<Curve> curves
+ ) :
+-    m_name (std::move (name)), m_secondsPerFrame (1.0f / fps), m_duration (static_cast<float> (length) / fps),
++    m_name (std::move (name)), m_fps (fps), m_secondsPerFrame (1.0f / fps), m_duration (static_cast<float> (length) / fps),
+     m_length (length), m_curves (std::move (curves)) {
+     if (mode == "mirror") {
+ 	this->m_flags |= Mirror;
+@@ -157,7 +157,7 @@ void PropertyAnimation::setFrame (int frame) {
+ 
+ int PropertyAnimation::getLength () const { return this->m_length; }
+ 
+-float PropertyAnimation::getFps () const { return 1.0f / this->m_secondsPerFrame; }
++float PropertyAnimation::getFps () const { return this->m_fps; }
+ 
+ void PropertyAnimation::collectEvents (float from, float to) {
+     for (const auto& event : this->m_events) {
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+index 6bcb0c9..8e5565e 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+@@ -94,6 +94,7 @@ public:
+ 
+ private:
+     std::string m_name;
++    float m_fps;
+     float m_secondsPerFrame;
+     float m_duration;
+     int m_length;
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 33729a4..1a196ee 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -69,7 +69,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+ 
+     auto result = std::make_unique <Scene> (
+         WallpaperData {
+-            .filename = "",
++            .filename = file,
+             .project = project
+         }, SceneData {
+             .colors = {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CGroup.h b/src/core/WallpaperEngine/Render/Objects/CGroup.h
+index dc85bd8..6e9a5b1 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CGroup.h
++++ b/src/core/WallpaperEngine/Render/Objects/CGroup.h
+@@ -23,6 +23,13 @@ public:
+ 	if (object.groupParallaxDepth != nullptr) {
+ 	    this->registerProperty ("parallaxDepth", *object.groupParallaxDepth->value);
+ 	}
++	// a camera object's ICamera zoom / fov (scripts on them run; CScene::updateCamera reads them live)
++	if (object.cameraZoom != nullptr) {
++	    this->registerProperty ("zoom", *object.cameraZoom->value);
++	}
++	if (object.cameraFov != nullptr) {
++	    this->registerProperty ("fov", *object.cameraFov->value);
++	}
+     }
+ };
+ } // namespace WallpaperEngine::Render::Objects
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index eb6c86e..5a912e6 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -1273,6 +1273,12 @@ JSValue ScriptableObjectAdapter::instantiate (ScriptableObject& object) {
+     return result;
+ }
+ 
++JSValue ScriptableObjectAdapter::animation (DynamicValue& value) {
++    JSValue result = JS_NewObjectClass (this->m_engine.getContext (), static_cast<int> (this->m_animationClassId));
++    JS_SetOpaque (result, new OpaqueAnimation { .value = value });
++    return result;
++}
++
+ JSValue ScriptableObjectAdapter::effect (const ImageEffect& effect) {
+     return newEffect (this->m_engine.getContext (), *this, effect);
+ }
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+index 312cdc9..95401b0 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+@@ -28,6 +28,9 @@ public:
+     JSValue instantiate (ScriptableObject& object) override;
+     JSValue instantiate (Data::Model::DynamicValue& value) override;
+ 
++    /** An IAnimation for a value's keyframe animation (a new object) */
++    [[nodiscard]] JSValue animation (Data::Model::DynamicValue& value);
++
+     /** An IEffect for one effect of an image layer (a new object) */
+     [[nodiscard]] JSValue effect (const Data::Model::ImageEffect& effect);
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index bf88675..812f80d 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -3,6 +3,8 @@
+ #include "Adapters/ScriptableObjectAdapter.h"
+ #include "ScriptEngine.h"
+ #include "ScriptableObject.h"
++#include "WallpaperEngine/Data/Model/PropertyAnimation.h"
++#include "WallpaperEngine/Data/Model/Wallpaper.h"
+ #include "WallpaperEngine/Render/Wallpapers/CScene.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ 
+@@ -311,6 +313,63 @@ JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+     return layerValue (*container, container->getScene ().createLayer (config));
+ }
+ 
++// __cameraTransforms (): [eye, center, up, zoom] of the scene's camera (camera.eye/center/up, general.zoom)
++JSValue camera_transforms (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    const auto& camera = container->getScene ().getScene ().camera;
++    JSValue result = JS_NewArray (ctx);
++    JS_SetPropertyUint32 (ctx, result, 0, container->getEngine ().newVec (camera.configuration.eye));
++    JS_SetPropertyUint32 (ctx, result, 1, container->getEngine ().newVec (camera.configuration.center));
++    JS_SetPropertyUint32 (ctx, result, 2, container->getEngine ().newVec (camera.configuration.up));
++    JS_SetPropertyUint32 (ctx, result, 3, JS_NewFloat64 (ctx, camera.zoom == nullptr ? 1.0 : camera.zoom->value->getFloat ()));
++    return result;
++}
++
++// __setCameraTransforms (eye, center, up, zoom): the camera follows from the next frame (a 3D scene's view; the zoom
++// in any scene)
++JSValue set_camera_transforms (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    auto& camera = const_cast<WallpaperEngine::Data::Model::Scene&> (container->getScene ().getScene ()).camera;
++    glm::vec3* targets[] = { &camera.configuration.eye, &camera.configuration.center, &camera.configuration.up };
++    for (int i = 0; i < 3 && i < argc; i++) {
++	DynamicValue value (*targets[i]);
++	if (container->getEngine ().jsToDynamic (argv[i], value)) {
++	    *targets[i] = value.getVec3 ();
++	}
++    }
++    if (argc > 3 && camera.zoom != nullptr && JS_IsNumber (argv[3])) {
++	container->getEngine ().jsToDynamic (argv[3], *camera.zoom->value);
++    }
++    return JS_UNDEFINED;
++}
++
++// __sceneJson (): the scene file as written (IScene.getInitialLayerConfig, builtins.js)
++JSValue scene_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    try {
++	const auto& scene = container->getScene ();
++	return JS_NewString (ctx, scene.getAssetLocator ().readString (scene.getScene ().filename).c_str ());
++    } catch (const std::exception&) {
++	return JS_UNDEFINED;
++    }
++}
++
++// IScene.getAnimation (name): the scene's keyframe animation of that name (the first one without a name)
++JSValue scene_get_animation (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    const std::string name = argc > 0 && JS_IsString (argv[0]) ? jsString (ctx, argv[0]) : "";
++    for (const auto& animated : container->getScene ().getScene ().animatedValues) {
++	if (animated.alive && !*animated.alive) {
++	    continue;
++	}
++	const auto& animation = animated.value->getAnimation ();
++	if (animation != nullptr && (name.empty () || animation->getName () == name)) {
++	    return container->getEngine ().getAdapters ().object->animation (*animated.value);
++	}
++    }
++    return JS_UNDEFINED;
++}
++
+ // IScene.destroyLayer: true when the layer was in the scene
+ JSValue destroy_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     auto* container = get_opaque (this_val);
+@@ -380,7 +439,9 @@ SceneObject::SceneObject (ScriptEngine& engine, Render::Wallpapers::CScene& scen
+     const std::pair<const char*, JSCFunction*> methods[] = {
+ 	{ "getLayer", get_layer },	       { "getLayerCount", get_layer_count }, { "enumerateLayers", enumerate_layers },
+ 	{ "getLayerIndex", get_layer_index }, { "sortLayer", sort_layer },	      { "createLayer", create_layer },
+-	{ "destroyLayer", destroy_layer },
++	{ "destroyLayer", destroy_layer },     { "getAnimation", scene_get_animation },
++	{ "__cameraTransforms", camera_transforms }, { "__setCameraTransforms", set_camera_transforms },
++	{ "__sceneJson", scene_json },
+     };
+ 
+     for (const auto& [name, function] : methods) {
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index e6651e0..0c83097 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -416,8 +416,34 @@ globalThis.__layerMethods = (function () {
+   }
+   const define = (name, value) => Object.defineProperty(scene, name, { value, enumerable: true, configurable: true });
+   define('getLayerByID', (id) => scene.enumerateLayers().find((layer) => String(layer.id) === String(id)));
++  // CameraTransforms { eye, center, up, zoom }: the scene's camera (a 3D scene's view, any scene's zoom)
++  class CameraTransforms {
++    constructor(eye, center, up, zoom) { this.eye = eye; this.center = center; this.up = up; this.zoom = zoom; }
++  }
++  globalThis.CameraTransforms = CameraTransforms;
++  define('getCameraTransforms', () => new CameraTransforms(...scene.__cameraTransforms()));
++  define('setCameraTransforms', (t) => {
++    if (t !== null && typeof t === 'object') { scene.__setCameraTransforms(t.eye, t.center, t.up, t.zoom); }
++  });
++  // getInitialLayerConfig (layer): its object as the scene file has it (a copy)
++  let initial;
++  define('getInitialLayerConfig', (which) => {
++    const layer = typeof which === 'object' ? which : scene.getLayer(which);
++    if (layer === undefined || layer === null) { return undefined; }
++    if (initial === undefined) {
++      try { initial = JSON.parse(scene.__sceneJson() || '{}'); } catch (e) { initial = {}; }
++    }
++    const found = (initial.objects || []).find((o) => o && o.id === layer.id);
++    return found === undefined ? undefined : JSON.parse(JSON.stringify(found));
++  });
++  // createModelData / destroyModelData: LWE builds no meshes from script data (no library scene does)
++  define('createModelData', () => undefined);
++  define('destroyModelData', () => {});
+ })();
+ 
++// renderContext: an empty interface in WE's definitions
++globalThis.renderContext = globalThis.renderContext || {};
++
+ // V8's legacy RegExp statics (RegExp.$1…$9, lastMatch, …), which quickjs leaves out: scripts written for WE use them
+ // (2932157836's clock: `fmt.replace(RegExp.$1, …)` after a `test`). Every match (exec, test, match, replace, split go
+ // through `exec`) records the last one, as V8 does

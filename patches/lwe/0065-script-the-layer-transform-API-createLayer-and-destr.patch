@@ -1,0 +1,720 @@
+From 744de0e43aaea0b061735acaba50211e6594d437 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:10:25 +0530
+Subject: [PATCH 65/70] script: the layer transform API, createLayer and
+ destroyLayer
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SceneScript's ILayer.getTransformMatrix was missing: 5 of the library's scenes (3243449890, 3319542538,
+3326873240, 3516106265, 3516174947) call it in init to pick a side of the screen, and the shared values
+their other scripts read never got set (7 more errors of "cannot read property 'x' of undefined").
+thisScene.createLayer returned undefined: 2469881470, 2828233985 and 2890767643 build their visualiser
+bars with it (64 bars from one), and WE's own clock preset builds its text shadow with it.
+
+- ILayer: getTransformMatrix (the world matrix with the parents', scene units, y up, as `origin`),
+  rotateObjectSpace, lookAt / lookAtYaw (the layer's -z towards the target), setParent (with
+  adjustTransforms, a puppet attachment, a cycle refused), getAttachmentIndex / Matrix / Origin / Angles
+  (a puppet's attachments, posed), in JS over four natives with WE's own Mat4. getParent is undefined
+  when unparented, as WE's docs say (it was null).
+- IImageLayer.alignment reads and writes (the quad is placed from it next frame); ITextLayer font,
+  anchor, padding, limitrows, limitwidth, opaquebackground read.
+- IScene.createLayer: an asset path (models/ → image, particles/ → particle, a sound, an .mdl), an
+  IAssetHandle, or a layer's configuration as scene.json writes it (serialised with WE's
+  _Internal.stringifyConfig, so vectors are "x y z"), built now with a new id, last in the layer list
+  and drawn last before the bloom. destroyLayer takes a layer out of the lists (freed with the scene);
+  engine.isObjectValid is false for it. getLayerByID.
+- The draw loop walks a copy of the draw order: a text layer's script runs while it renders and may
+  create, destroy or sort layers.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (SceneScript coverage); docs/player/reports/scene-health.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  13 ++
+ .../WallpaperEngine/Render/Objects/CImage.h   |   4 +
+ .../Render/Wallpapers/CScene.cpp              | 107 ++++++++++++-
+ .../Render/Wallpapers/CScene.h                |  20 +++
+ .../Adapters/ScriptableObjectAdapter.cpp      | 142 +++++++++++++++++-
+ .../Adapters/ScriptableObjectAdapter.h        |   5 +
+ .../WallpaperEngine/Scripting/SceneObject.cpp |  89 ++++++++++-
+ .../Scripting/resources/builtins.js           | 103 ++++++++++++-
+ 8 files changed, 473 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index c368e96..04e37d6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -512,6 +512,19 @@ bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, fl
+     return false;
+ }
+ 
++std::vector<std::string> CImage::attachmentNames () const {
++    std::vector<std::string> names;
++    for (const auto& attachment : this->m_puppet.attachments) {
++	names.push_back (attachment.name);
++    }
++    return names;
++}
++
++void CImage::setAlignment (const std::string& alignment) {
++    // the scene's data is the layer's live state (as its DynamicValues are)
++    const_cast<Image&> (this->m_image).alignment = alignment;
++}
++
+ void CImage::updatePuppetPositionBuffer (const glm::vec2& size) {
+     if (this->m_puppetRawPositions.empty ()) {
+ 	return;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 9cd66b6..2a57ce3 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -84,6 +84,10 @@ public:
+      * name (G09; the attachment is the bone's posed world · the MDAT matrix)
+      */
+     [[nodiscard]] bool attachmentTransform (const std::string& name, glm::vec2& offset, float& angle);
++    /** The puppet's attachment names, in the model's order (none without a puppet) */
++    [[nodiscard]] std::vector<std::string> attachmentNames () const;
++    /** IImageLayer.alignment from a script: where the quad sits on the origin, from the next frame */
++    void setAlignment (const std::string& alignment);
+ 
+ protected:
+     /**
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index ac63913..00c9d10 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -712,7 +712,12 @@ void CScene::renderFrame () {
+ 	this->updateLights ();
+     }
+ 
+-    for (const auto& cur : this->drawOrder ()) {
++    // a copy: a text layer's script runs as it renders, and may create, destroy or sort layers
++    const std::vector<CObject*> order = this->drawOrder ();
++    for (const auto& cur : order) {
++	if (!this->m_destroyed.empty () && std::ranges::find (this->m_destroyed, cur) != this->m_destroyed.end ()) {
++	    continue;
++	}
+ 	const auto& debug = this->getContext ().getContext ().config;
+ 	if (debug.objectFilter.has_value () && cur->getId () != debug.objectFilter.value ()) {
+ 	    continue;
+@@ -1012,6 +1017,16 @@ glm::vec2 CScene::getParallaxOffset (const Object& object) const {
+     return (origin - this->m_parallaxPosition) * amount * parallaxDepthOf (*root);
+ }
+ 
++void CScene::setParentOf (CObject& object, CObject* parent, const std::optional<std::string>& attachment) {
++    // the scene's data is the layers' live state (as their DynamicValues are)
++    auto& data = const_cast<Object&> (object.getObject ());
++    data.parent = parent == nullptr ? std::nullopt : std::optional<int> (parent->getId ());
++    data.attachment = parent == nullptr ? std::nullopt : attachment;
++    // which compose layer draws what follows the parents
++    this->m_composeOwners.clear ();
++    this->m_composeOwnersBuilt = false;
++}
++
+ glm::mat4 CScene::localMatrixOf (const Object& object) {
+     glm::vec3 angles (0.0f);
+     glm::vec3 scale (1.0f);
+@@ -1286,6 +1301,96 @@ bool CScene::scriptsReachEffects () const { return this->getScene ().scriptsReac
+ 
+ const std::vector<CObject*>& CScene::getLayers () const { return this->m_layers; }
+ 
++CObject* CScene::createLayer (const std::string& config) {
++    using WallpaperEngine::Data::Parsers::ObjectParser;
++    WallpaperEngine::Data::JSON::JSON json;
++
++    try {
++	json = WallpaperEngine::Data::JSON::JSON::parse (config);
++    } catch (const std::exception& e) {
++	sLog.error ("createLayer: the configuration is not JSON: ", e.what ());
++	return nullptr;
++    }
++
++    if (!json.is_object ()) {
++	return nullptr;
++    }
++
++    if (this->m_nextCreatedId == 0) {
++	int top = 0;
++	for (const auto& object : this->getScene ().objects) {
++	    top = std::max (top, object->id);
++	}
++	this->m_nextCreatedId = top + 1;
++    }
++
++    const int id = this->m_nextCreatedId++;
++    json["id"] = id;
++    if (!json.contains ("name") || !json["name"].is_string ()) {
++	// the asset it was made from, as the editor names a new layer
++	std::string name = "layer";
++	for (const char* key : { "image", "particle", "sound", "model" }) {
++	    if (json.contains (key) && json[key].is_string ()) {
++		name = json[key].get<std::string> ();
++		break;
++	    }
++	}
++	if (json.contains ("text")) {
++	    name = "text";
++	}
++	json["name"] = name;
++    }
++    json.erase ("parent");
++    json.erase ("dependencies");
++
++    try {
++	this->m_createdObjects.push_back (ObjectParser::parse (json, this->getScene ().project));
++    } catch (const std::exception& e) {
++	sLog.error ("createLayer: ", e.what ());
++	WPENGINE_HEALTH ("dropped", { { "object", id }, { "object_name", json["name"] }, { "reason", WallpaperEngine::Health::brief (std::string ("createLayer: ") + e.what ()) } });
++	return nullptr;
++    }
++
++    CObject* object = this->dispatchObjectType (*this->m_createdObjects.back ());
++
++    if (object == nullptr) {
++	return nullptr;
++    }
++
++    this->m_objects.emplace (object->getId (), object);
++    this->m_layers.push_back (object);
++    // drawn last, before the bloom
++    auto at = this->m_bloomObject == nullptr ? this->m_objectsByRenderOrder.end ()
++					      : std::ranges::find (this->m_objectsByRenderOrder, this->m_bloomObject);
++    this->m_objectsByRenderOrder.insert (at, object);
++    this->m_composeOwners.clear ();
++    this->m_composeOwnersBuilt = false;
++    return object;
++}
++
++bool CScene::destroyLayer (CObject* layer) {
++    const auto it = std::ranges::find (this->m_layers, layer);
++
++    if (layer == nullptr || it == this->m_layers.end ()) {
++	return false;
++    }
++
++    this->m_layers.erase (it);
++    if (const auto drawn = std::ranges::find (this->m_objectsByRenderOrder, layer);
++	drawn != this->m_objectsByRenderOrder.end ()) {
++	this->m_objectsByRenderOrder.erase (drawn);
++    }
++    if (auto* sound = layer->asOrNull<Objects::CSound> ()) {
++	sound->stop ();
++    }
++    this->m_destroyed.push_back (layer);
++    return true;
++}
++
++bool CScene::isLayerAlive (const CObject* layer) const {
++    return std::ranges::find (this->m_destroyed, layer) == this->m_destroyed.end ();
++}
++
+ bool CScene::sortLayer (CObject* layer, int index) {
+     const auto from = std::ranges::find (this->m_layers, layer);
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index c260eba..071eb18 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -114,6 +114,20 @@ public:
+     [[nodiscard]] const CObject* getObject (int id) const;
+     /** The layers scripts index (thisScene.getLayer (n), enumerateLayers): the scene's objects in their order */
+     [[nodiscard]] const std::vector<CObject*>& getLayers () const;
++    /**
++     * ILayer.setParent: `object`'s parent becomes `parent` (none: a root layer), at its puppet `attachment` if one is
++     * named; its local transform stays as it is (the script adjusts it to keep the world one)
++     */
++    void setParentOf (CObject& object, CObject* parent, const std::optional<std::string>& attachment);
++    /**
++     * IScene.createLayer: builds a layer from a scene object's JSON (`config`, as scene.json writes one; its `id` is
++     * given here), last in the layer list and drawn last (before the bloom). nullptr when it can't be built
++     */
++    CObject* createLayer (const std::string& config);
++    /** IScene.destroyLayer: the layer leaves the layer list and the draw order (it is freed with the scene) */
++    bool destroyLayer (CObject* layer);
++    /** Whether a layer is still in the scene (not destroyed: engine.isObjectValid) */
++    [[nodiscard]] bool isLayerAlive (const CObject* layer) const;
+     /** IScene.sortLayer: moves a layer to `index` in the layer list, and in the draw order with it */
+     bool sortLayer (CObject* layer, int index);
+     /** The scene's scripts call `getEffect`: every effect is built, a script may show it (SceneScript IEffect.visible) */
+@@ -163,6 +177,12 @@ private:
+     std::map<int, CObject*> m_objects = {};
+     std::vector<CObject*> m_objectsByRenderOrder = {};
+     std::vector<CObject*> m_layers = {};
++    /** the data of the layers scripts created (createLayer), owned here as the scene owns its own */
++    std::vector<ObjectUniquePtr> m_createdObjects = {};
++    /** the next id a created layer gets (above every id in the scene) */
++    int m_nextCreatedId = 0;
++    /** layers a script destroyed: out of the lists, freed with the scene */
++    std::vector<CObject*> m_destroyed = {};
+     /** drawOrder's sorted copy of the render order */
+     std::vector<CObject*> m_sortedOrder = {};
+     SceneLights m_lights = {};
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 56b113d..eacabd1 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -1,6 +1,7 @@
+ #include "ScriptableObjectAdapter.h"
+ 
+ #include <cstring>
++#include <glm/gtc/matrix_transform.hpp>
+ #include <ranges>
+ #include <utility>
+ 
+@@ -89,6 +90,11 @@ enum LayerMethod {
+     Method_Pause,
+     Method_IsPlaying,
+     Method_GetAnimation,
++    Method_World,
++    Method_ParentWorld,
++    Method_SetParent,
++    Method_Attachments,
++    Method_Valid,
+ };
+ 
+ constexpr std::pair<const char*, LayerMethod> kMethods[] = {
+@@ -98,8 +104,22 @@ constexpr std::pair<const char*, LayerMethod> kMethods[] = {
+     { "play", Method_Play },		 { "stop", Method_Stop },
+     { "pause", Method_Pause },		 { "isPlaying", Method_IsPlaying },
+     { "getAnimation", Method_GetAnimation },
++    // the natives under the JS ILayer methods (builtins.js: getTransformMatrix, setParent, getAttachment*, …)
++    { "__world", Method_World },	 { "__parentWorld", Method_ParentWorld },
++    { "__setParent", Method_SetParent }, { "__attachments", Method_Attachments },
++    { "__valid", Method_Valid },
+ };
+ 
++/** a glm matrix as the 16 numbers of SceneScript's Mat4.m (column-major, as glm keeps it) */
++JSValue matrixArray (JSContext* ctx, const glm::mat4& m) {
++    JSValue result = JS_NewArray (ctx);
++    const float* f = &m[0][0];
++    for (uint32_t i = 0; i < 16; i++) {
++	JS_SetPropertyUint32 (ctx, result, i, JS_NewFloat64 (ctx, f[i]));
++    }
++    return result;
++}
++
+ JSValue newEffect (JSContext* ctx, ScriptableObjectAdapter& adapter, const ImageEffect& effect) {
+     JSValue result = JS_NewObjectClass (ctx, static_cast<int> (adapter.getEffectClassId ()));
+     JS_SetOpaque (result, new OpaqueEffect { .adapter = adapter, .effect = effect });
+@@ -171,7 +191,8 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 		? nullptr
+ 		: const_cast<WallpaperEngine::Render::CObject*> (parentObject)->asOrNull<ScriptableObject> ();
+ 
+-	    return scriptable == nullptr ? JS_NULL : adapter.instantiate (*scriptable);
++	    // "the current parent layer or undefined if the layer is not parented" (WE's docs)
++	    return scriptable == nullptr ? JS_UNDEFINED : adapter.instantiate (*scriptable);
+ 	}
+ 	case Method_GetChildren: {
+ 	    JSValue result = JS_NewArray (ctx);
+@@ -248,6 +269,64 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	    JS_SetOpaque (result, new OpaqueAnimation { .value = *found });
+ 	    return result;
+ 	}
++	case Method_World:
++	    // ILayer.getTransformMatrix: the layer's world matrix, T (origin) · Rz · Ry · Rx · S with its parents'
++	    // (scene units, y up, as `origin`; no parallax, no camera)
++	    return matrixArray (ctx, object.getScene ().worldMatrixOf (object.getObject ()));
++	case Method_ParentWorld: {
++	    const auto& parent = object.getObject ().parent;
++	    const auto* parentObject = parent.has_value () ? object.getScene ().getObject (*parent) : nullptr;
++	    return matrixArray (
++		ctx, parentObject == nullptr ? glm::mat4 (1.0f) : object.getScene ().worldMatrixOf (parentObject->getObject ())
++	    );
++	}
++	case Method_SetParent: {
++	    // __setParent (layer | null, attachment name | undefined): false when the parent would be the layer itself
++	    // or one of its children (a cycle)
++	    ScriptableObject* parent = argc > 0 ? adapter.fromValue (argv[0]) : nullptr;
++	    if (parent != nullptr) {
++		for (const auto* cur = &parent->getObject (); cur != nullptr;) {
++		    if (cur == &object.getObject ()) {
++			return JS_FALSE;
++		    }
++		    const auto* up = cur->parent.has_value () ? object.getScene ().getObject (*cur->parent) : nullptr;
++		    cur = up == nullptr ? nullptr : &up->getObject ();
++		}
++	    }
++	    std::optional<std::string> attachment = std::nullopt;
++	    if (argc > 1 && JS_IsString (argv[1])) {
++		const char* str = JS_ToCString (ctx, argv[1]);
++		attachment = std::string (str == nullptr ? "" : str);
++		JS_FreeCString (ctx, str);
++	    }
++	    object.getScene ().setParentOf (object, parent, attachment);
++	    return JS_TRUE;
++	}
++	case Method_Valid:
++	    return JS_NewBool (ctx, object.getScene ().isLayerAlive (&object));
++	case Method_Attachments: {
++	    // [{ name, m }]: a puppet's attachments, `m` their matrix in the layer's own space (posed now)
++	    JSValue result = JS_NewArray (ctx);
++	    if (image == nullptr) {
++		return result;
++	    }
++	    uint32_t count = 0;
++	    for (const auto& name : image->attachmentNames ()) {
++		glm::vec2 offset (0.0f);
++		float angle = 0.0f;
++		if (!image->attachmentTransform (name, offset, angle)) {
++		    continue;
++		}
++		const glm::mat4 local = glm::rotate (
++		    glm::translate (glm::mat4 (1.0f), glm::vec3 (offset, 0.0f)), angle, glm::vec3 (0.0f, 0.0f, 1.0f)
++		);
++		JSValue entry = JS_NewObject (ctx);
++		JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, name.c_str ()));
++		JS_SetPropertyStr (ctx, entry, "m", matrixArray (ctx, local));
++		JS_SetPropertyUint32 (ctx, result, count++, entry);
++	    }
++	    return result;
++	}
+     }
+ 
+     return JS_UNDEFINED;
+@@ -298,14 +377,39 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 	}
+     }
+ 
+-    // ITextLayer alignment (live: a script can switch it)
++    // ITextLayer alignment (live: a script can switch it) and its other fields as the scene set them
+     if (const auto* text = object.asOrNull<CText> ()) {
++	const auto& data = text->getText ();
+ 	if (strcmp (name, "horizontalalign") == 0) {
+ 	    return JS_NewString (ctx, text->getHorizontalAlign ().c_str ());
+ 	}
+ 	if (strcmp (name, "verticalalign") == 0) {
+ 	    return JS_NewString (ctx, text->getVerticalAlign ().c_str ());
+ 	}
++	if (strcmp (name, "font") == 0) {
++	    return JS_NewString (ctx, data.font.c_str ());
++	}
++	if (strcmp (name, "anchor") == 0) {
++	    return JS_NewString (ctx, data.anchor.c_str ());
++	}
++	if (strcmp (name, "padding") == 0) {
++	    return JS_NewFloat64 (ctx, data.padding.x);
++	}
++	if (strcmp (name, "limitrows") == 0) {
++	    return JS_NewBool (ctx, data.limitRows);
++	}
++	if (strcmp (name, "limitwidth") == 0) {
++	    return JS_NewBool (ctx, data.limitWidth);
++	}
++	// LWE draws no text background box (no library scene turns one on)
++	if (strcmp (name, "opaquebackground") == 0) {
++	    return JS_FALSE;
++	}
++    } else if (const auto* image = object.asOrNull<CImage> ()) {
++	// IImageLayer.alignment (live: a script can switch it)
++	if (strcmp (name, "alignment") == 0) {
++	    return JS_NewString (ctx, image->getImage ().alignment.c_str ());
++	}
+     }
+ 
+     // what the script stored on the layer wins over a method of the same name
+@@ -319,7 +423,8 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 	return JS_DupValue (ctx, method);
+     }
+ 
+-    return JS_UNDEFINED;
++    // ILayer methods written in JS on top of the natives (builtins.js `__layerMethods`)
++    return container->adapter.jsMethod (atomName.str);
+ }
+ 
+ int scriptableobject_property_set (
+@@ -345,6 +450,16 @@ int scriptableobject_property_set (
+ 	return 1;
+     }
+ 
++    // IImageLayer.alignment: the quad is placed from it on the next frame
++    if (auto* image = object.asOrNull<CImage> ();
++	image != nullptr && !object.is<CText> () && strcmp (name, "alignment") == 0) {
++	if (const char* value = JS_ToCString (ctx, val)) {
++	    image->setAlignment (value);
++	    JS_FreeCString (ctx, value);
++	}
++	return 1;
++    }
++
+     // ITextLayer alignment: the layout follows on the next frame
+     if (auto* text = object.asOrNull<CText> ();
+ 	text != nullptr && (strcmp (name, "horizontalalign") == 0 || strcmp (name, "verticalalign") == 0)) {
+@@ -689,6 +804,27 @@ ScriptableObjectAdapter::~ScriptableObjectAdapter () {
+     for (auto& method : this->m_methods | std::views::values) {
+ 	JS_FreeValue (ctx, method);
+     }
++    JS_FreeValue (ctx, this->m_jsMethods);
++}
++
++JSValue ScriptableObjectAdapter::jsMethod (const char* name) {
++    JSContext* ctx = this->m_engine.getContext ();
++
++    if (JS_IsUndefined (this->m_jsMethods)) {
++	JSValue methods = JS_GetPropertyStr (ctx, this->m_engine.getGlobalThis (), "__layerMethods");
++	if (!JS_IsObject (methods)) {
++	    JS_FreeValue (ctx, methods);
++	    return JS_UNDEFINED;
++	}
++	this->m_jsMethods = methods;
++    }
++
++    JSValue method = JS_GetPropertyStr (ctx, this->m_jsMethods, name);
++    if (!JS_IsFunction (ctx, method)) {
++	JS_FreeValue (ctx, method);
++	return JS_UNDEFINED;
++    }
++    return method;
+ }
+ 
+ JSValueConst ScriptableObjectAdapter::method (const char* name) const {
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+index 4ee58ef..4591278 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+@@ -32,6 +32,9 @@ public:
+     /** A method of ILayer by name, or JS_UNDEFINED (a borrowed reference) */
+     [[nodiscard]] JSValueConst method (const char* name) const;
+ 
++    /** An ILayer method written in JS (builtins.js `__layerMethods`) by name, or JS_UNDEFINED (a new reference) */
++    [[nodiscard]] JSValue jsMethod (const char* name);
++
+     [[nodiscard]] JSClassID getEffectClassId () const { return m_effectClassId; }
+     [[nodiscard]] JSClassID getTextureAnimationClassId () const { return m_textureAnimationClassId; }
+     [[nodiscard]] JSClassID getAnimationClassId () const { return m_animationClassId; }
+@@ -50,5 +53,7 @@ private:
+     std::string m_name;
+     std::unordered_map<ScriptableObject*, JSValue> m_instances;
+     std::map<std::string, JSValue> m_methods;
++    /** builtins.js `__layerMethods`, once installed */
++    JSValue m_jsMethods = JS_UNDEFINED;
+ };
+ } // namespace WallpaperEngine::Scripting::Adapters
+diff --git a/src/core/WallpaperEngine/Scripting/SceneObject.cpp b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+index 4cbcc1f..bf88675 100644
+--- a/src/core/WallpaperEngine/Scripting/SceneObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/SceneObject.cpp
+@@ -7,6 +7,7 @@
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+ 
+ #include <algorithm>
++#include <nlohmann/json.hpp>
+ 
+ using namespace WallpaperEngine::Scripting;
+ using WallpaperEngine::Data::Model::DynamicValue;
+@@ -233,10 +234,90 @@ JSValue sort_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
+     return JS_NewBool (ctx, container->getScene ().sortLayer (object, index));
+ }
+ 
+-// createLayer/destroyLayer: not supported (a layer built at run time needs the loader at run time); createLayer
+-// returns undefined (as a missing layer), destroyLayer false
+-JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_UNDEFINED; }
+-JSValue destroy_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) { return JS_FALSE; }
++namespace {
++/** createLayer ('models/x.json'): the object that asset makes (an image model, a particle system, a sound) */
++std::string configForAsset (const std::string& file) {
++    nlohmann::json config = nlohmann::json::object ();
++    const auto ends = [&file] (const char* suffix) {
++	const std::string s = suffix;
++	return file.size () >= s.size () && file.compare (file.size () - s.size (), s.size (), s) == 0;
++    };
++
++    if (file.rfind ("particles/", 0) == 0) {
++	config["particle"] = file;
++    } else if (ends (".mp3") || ends (".wav") || ends (".ogg") || file.rfind ("sounds/", 0) == 0) {
++	config["sound"] = file;
++    } else if (ends (".mdl")) {
++	config["model"] = file;
++    } else {
++	config["image"] = file;
++    }
++
++    return config.dump ();
++}
++
++std::string jsString (JSContext* ctx, JSValueConst value) {
++    const char* str = JS_ToCString (ctx, value);
++    std::string result = str == nullptr ? "" : str;
++    JS_FreeCString (ctx, str);
++    return result;
++}
++} // namespace
++
++// IScene.createLayer (an asset path, an IAssetHandle from engine.registerAsset, or a layer's configuration as
++// scene.json writes one): the layer, built now and drawn from this frame; undefined when it can't be built
++JSValue create_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++
++    if (argc < 1) {
++	return JS_UNDEFINED;
++    }
++
++    std::string config;
++
++    if (JS_IsString (argv[0])) {
++	config = configForAsset (jsString (ctx, argv[0]));
++    } else if (JS_IsObject (argv[0])) {
++	JSValue file = JS_GetPropertyStr (ctx, argv[0], "file");
++	JSValue image = JS_GetPropertyStr (ctx, argv[0], "image");
++	const bool handle = JS_IsString (file) && JS_IsUndefined (image);
++
++	if (handle) {
++	    config = configForAsset (jsString (ctx, file));
++	} else {
++	    // Wallpaper Engine's own serialiser (vectors as "x y z", baseclasses.js _Internal.stringifyConfig)
++	    JSValue internal = JS_GetPropertyStr (ctx, container->getEngine ().getGlobalThis (), "_Internal");
++	    JSValue stringify = JS_IsObject (internal) ? JS_GetPropertyStr (ctx, internal, "stringifyConfig") : JS_UNDEFINED;
++	    JSValue text = JS_IsFunction (ctx, stringify) ? JS_Call (ctx, stringify, internal, 1, argv)
++							   : JS_JSONStringify (ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
++	    if (JS_IsException (text)) {
++		JS_FreeValue (ctx, file);
++		JS_FreeValue (ctx, image);
++		JS_FreeValue (ctx, stringify);
++		JS_FreeValue (ctx, internal);
++		return JS_EXCEPTION;
++	    }
++	    config = jsString (ctx, text);
++	    JS_FreeValue (ctx, text);
++	    JS_FreeValue (ctx, stringify);
++	    JS_FreeValue (ctx, internal);
++	}
++	JS_FreeValue (ctx, file);
++	JS_FreeValue (ctx, image);
++    } else {
++	return JS_UNDEFINED;
++    }
++
++    return layerValue (*container, container->getScene ().createLayer (config));
++}
++
++// IScene.destroyLayer: true when the layer was in the scene
++JSValue destroy_layer (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    auto* container = get_opaque (this_val);
++    auto* object = argc < 1 ? nullptr : resolveLayer (ctx, *container, argv[0]);
++
++    return JS_NewBool (ctx, object != nullptr && container->getScene ().destroyLayer (object));
++}
+ 
+ /** IScene's properties are writable ("all properties are writable"): a script's value replaces the scene's */
+ JSValue scene_set_value (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index 26f8215..4f13acb 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -149,9 +149,11 @@ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+   define('isRunningInEditor', () => false);
+   define('isPortrait', () => { const r = engine.screenResolution; return r.y > r.x; });
+   define('isLandscape', () => { const r = engine.screenResolution; return r.x >= r.y; });
+-  // an IAssetHandle: what createLayer would take (createLayer isn't supported, so a plain record of the file)
++  // an IAssetHandle: what createLayer takes (a record of the file)
+   define('registerAsset', (file) => ({ file: String(file) }));
+-  define('isObjectValid', (object) => object !== undefined && object !== null);
++  // a layer is valid until a script destroys it (thisScene.destroyLayer)
++  define('isObjectValid', (object) => object !== undefined && object !== null
++    && (typeof object.__valid !== 'function' || object.__valid()));
+ })();
+ 
+ // console.warn/info/debug as V8 has them (log/error are native); scripts may also replace them (console.log = …)
+@@ -164,3 +166,100 @@ globalThis.MediaPlaybackEvent = globalThis.MediaPlaybackEvent || {
+   c.info = c.info || c.log;
+   c.debug = c.debug || c.log;
+ })();
++
++// ILayer methods built on the natives (__world, __parentWorld, __setParent, __attachments) with Wallpaper Engine's own
++// Mat4 (baseclasses.js; angles in degrees as SceneScript has them). `this` is the layer
++globalThis.__layerMethods = (function () {
++  const mat = (numbers) => {
++    const m = new Mat4();
++    for (let i = 0; i < 16; i++) {
++      m.m[i] = numbers[i];
++    }
++    return m;
++  };
++  const attachment = (layer, which) => {
++    const list = layer.__attachments();
++    return typeof which === 'number' ? list[which] : list.find((a) => a.name === String(which));
++  };
++  // keep the layer where it is in the world while its parent changes: local = parent⁻¹ · world
++  const adopt = (layer, world) => {
++    const local = mat(layer.__parentWorld()).inverse().multiply(world).decompose();
++    layer.origin = local.translation;
++    layer.angles = local.rotation;
++    layer.scale = local.scale;
++  };
++  // the rotation (degrees) whose −z axis points from `from` to `to`, `up` up (Mat4.lookAt is a view matrix: its
++  // transpose turns the layer)
++  const facing = (from, to, up) => mat(Mat4.lookAt(from, to, up || new Vec3(0, 1, 0)).m).transpose().extractEuler();
++  return {
++    // "the current world transform matrix"
++    getTransformMatrix() {
++      return mat(this.__world());
++    },
++    // "rotates the object around the axes defined by its current transformation"
++    rotateObjectSpace(angles) {
++      this.angles = Mat4.fromEuler(this.angles).multiply(Mat4.fromEuler(angles)).extractEuler();
++    },
++    lookAt(center, up) {
++      const world = this.getTransformMatrix();
++      this.angles = facing(world.translation(), center, up);
++    },
++    // as lookAt, turning about `up` only (heading): the target is moved level with the layer first
++    lookAtYaw(center, up) {
++      const u = (up || new Vec3(0, 1, 0)).normalize();
++      const eye = this.getTransformMatrix().translation();
++      const d = center.subtract(eye);
++      const level = eye.add(d.subtract(u.multiply(d.dot(u))));
++      this.angles = facing(eye, level, u);
++    },
++    // setParent (parent, adjustTransforms?) or setParent (parent, attachment, adjustTransforms?); an undefined parent
++    // makes it a root layer
++    setParent(parent, second, third) {
++      const named = typeof second === 'string' || typeof second === 'number';
++      const adjust = named ? third === true : second === true;
++      let target = parent;
++      if (typeof parent === 'string' || typeof parent === 'number') {
++        target = typeof parent === 'number' ? thisScene.getLayer(parent) : thisScene.getLayer(String(parent));
++      }
++      let point;
++      if (named && target !== undefined && target !== null) {
++        const a = attachment(target, second);
++        point = a === undefined ? undefined : a.name;
++      }
++      const world = adjust ? this.getTransformMatrix() : undefined;
++      if (!this.__setParent(target === undefined ? null : target, point)) {
++        return;
++      }
++      if (adjust) {
++        adopt(this, world);
++      }
++    },
++    getAttachmentIndex(name) {
++      return this.__attachments().findIndex((a) => a.name === String(name));
++    },
++    // "world transform matrix of an attachment"
++    getAttachmentMatrix(which) {
++      const a = attachment(this, which);
++      return a === undefined ? undefined : this.getTransformMatrix().multiply(mat(a.m));
++    },
++    getAttachmentOrigin(which) {
++      const m = this.getAttachmentMatrix(which);
++      return m === undefined ? undefined : m.translation();
++    },
++    getAttachmentAngles(which) {
++      const m = this.getAttachmentMatrix(which);
++      return m === undefined ? undefined : m.decompose().rotation;
++    }
++  };
++})();
++
++// IScene members over the natives
++(function () {
++  const scene = globalThis.thisScene;
++  if (scene === undefined || scene === null) {
++    return;
++  }
++  const define = (name, value) => Object.defineProperty(scene, name, { value, enumerable: true, configurable: true });
++  define('getLayerByID', (id) => scene.enumerateLayers().find((layer) => String(layer.id) === String(id)));
++})();
++

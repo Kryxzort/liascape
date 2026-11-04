@@ -1,0 +1,1822 @@
+From affeebad3648bb01eff0081f1f8d43fcdecc14c3 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:29:13 +0530
+Subject: [PATCH 64/70] render: preprocess shaders by WE's rules, and compile
+ them with HLSL's
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE turns its GLSL-dialect shaders into HLSL and hands them to D3DCompile (wallpaper64.exe 2.8.485: the include
+pass GH 0x140191050 / 0x1401917f0, the translator GH 0x140125e80, the compile GH 0x140106780 with flags 0x8800);
+LWE handed them to glslang as GLSL 3.30 with its own include placement and a few ad-hoc retries, and 21 of the
+library's 96 scenes lost layers or effects to shaders WE builds. Now (WEShaderRules, ShaderUnit, GLSLContext):
+
+- WE's rules: an include is pasted where its line is, and only a line starting `#include` is one (was: all
+  before main, commented ones too — 3235948233's auto_sway, M_PI above main); declarations are hoisted ahead of
+  the code as WE's cbuffers/structs are (an include sees the unit's uniforms); the fragment's varyings take the
+  vertex unit's types (WE's PS input is the VS_OUTPUT; a vec2-in/vec4-out pair got NVIDIA C7011); a fragment's
+  varyings and a vertex's attributes are writable, the copy filled in every main (only the first was: auto_sway's
+  active main read v_TexCoord 0, so 3414858021's 左白巾 vanished when it compiled); declared gl_ built-ins dropped;
+  WE's header macros (CASTF/I/U, CAST4U, the sampler parameter macros, texLoad2D, texSample2DCompare, the frame
+  buffer mappings) and the HLSL type names; an #if a preprocessor can't read is false; formatcombo samplers get
+  TEX<n>FORMAT.
+- HLSL's semantics, from glslang's errors: assignments and call arguments convert (truncate, promote, change
+  base), operands truncate (the identifier picked by the error's storage, never a declared name), a scalar is a
+  condition, a local const takes any initializer and a global one is a static const set in main, a function with
+  no return on the combo's path returns zero, GLSL-reserved names (`input`) are renamed, a user function overloading
+  an intrinsic the header has as a macro (log10) gets real overloads, clip() exists.
+- Inferred (not read in WE's code): a missing uniform default / short vector default is zero; include-once.
+
+The shader sweep: 4085 compiles of WE's 124 stock shaders and the library's 272 custom ones, 313 failed in 35
+shaders before, see docs/player/spikes/we-lwe-gap-audit.md "Shader preprocessing result".
+
+Origin: ours
+Why: docs/player/reports/scene-health.md (shader errors WE accepts) and the sweep
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/CMakeLists.txt                       |   1 +
+ src/core/WallpaperEngine/Project.cpp          |   8 +
+ src/core/WallpaperEngine/Project.h            |   2 +-
+ .../Render/Shaders/GLSLContext.cpp            | 569 +++++++++++++++---
+ .../Render/Shaders/ShaderUnit.cpp             | 356 +++++------
+ .../Render/Shaders/ShaderUnit.h               |   8 +-
+ .../Render/Shaders/WEShaderRules.cpp          | 443 ++++++++++++++
+ .../Render/Shaders/WEShaderRules.h            |  85 +++
+ 8 files changed, 1171 insertions(+), 301 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
+
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 7d4dd4d..b963b95 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -36,6 +36,7 @@ set(TARGET_SOURCE_FILES
+ 
+     WallpaperEngine/Render/Shaders/Shader.cpp
+     WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++    WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+     WallpaperEngine/Render/Shaders/GLSLContext.cpp
+ 
+     WallpaperEngine/Render/Helpers/ContextAware.cpp
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 453cf14..759af95 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -690,11 +690,19 @@ std::string WallpaperEngine::Project::shaderCheck (const std::string& name, cons
+ 	    }
+ 	}
+ 	out["combos"] = effective;
++	if (req.value ("source", false)) {
++	    out["vertex_source"] = vertexIn;
++	    out["fragment_source"] = fragmentIn;
++	}
+ 	stage = "glslang";
+ 	const auto [vertex, fragment] = GLSLContext::get ().toGlsl (vertexIn, fragmentIn);
+ 	if (vertex.empty () || fragment.empty ()) {
+ 	    throw std::runtime_error ("");
+ 	}
++	if (req.value ("source", false)) {
++	    out["vertex_glsl"] = vertex;
++	    out["fragment_glsl"] = fragment;
++	}
+ 	if (gl) {
+ 	    if (active_context != &this->context) {
+ 		active_context = &this->context;
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index ccb544c..c9adb4b 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -68,7 +68,7 @@ public:
+      * The shader sweep: builds shader `name` (relative to shaders/, no extension) from this project's files the way a
+      * material pass does — the same preprocessing, glslang and SPIRV-Cross pass and the GL compile and link, on the
+      * GL context current on this thread — and draws nothing. `request` is JSON: `{"combos": {NAME: value…},
+-     * "textures": [slot…], "gl": bool}` (gl defaults to true). Returns JSON `{"ok", "stage" (load | glslang | gl |
++     * "textures": [slot…], "gl": bool, "source": bool}` (gl defaults to true; source adds the units as handed to glslang). Returns JSON `{"ok", "stage" (load | glslang | gl |
+      * link), "message", "compat": [what…], "combos": {the effective combos}}`
+      */
+     std::string shaderCheck (const std::string& name, const std::string& request);
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+index 85b1475..6dfd198 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+@@ -1,10 +1,13 @@
+ #include "GLSLContext.h"
++#include "WEShaderRules.h"
+ #include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include <cassert>
+ #include <memory>
+ #include <regex>
++#include <sstream>
++#include <algorithm>
+ 
+ #include "SPIRV/GlslangToSpv.h"
+ #include "glslang/Include/ResourceLimits.h"
+@@ -134,141 +137,510 @@ GLSLContext& GLSLContext::get () {
+ }
+ 
+ namespace {
+-/**
+- * The preprocessor's line splicing: a backslash at the end of a line joins it to the next. WE's shaders are
+- * HLSL-era sources whose compiler splices (3414858021's depthparallax.frag continues an expression over lines);
+- * glslang only does so from GLSL 4.20, so a 3.30 unit failed to parse and its whole layer wasn't built. The lines
+- * taken out are put back after the joined one, so the line numbers in errors still match the source.
++using WallpaperEngine::Render::Shaders::WERules::dropUnmatchedEndifs;
++using WallpaperEngine::Render::Shaders::WERules::spliceLines;
++
++/*
++ * D3DCompile's HLSL rules, emulated from glslang's errors. WE hands its translated units to FXC (GH 0x140106780:
++ * vs_5_0 / ps_5_0, flags 0x8800), which accepts what GLSL refuses; the shaders were written against that. Each fixer
++ * reads one glslang error, rewrites the line it names the way HLSL reads it and returns true; parseUnit retries.
++ * The rules are HLSL's (inferred from its documented conversions and the library's shaders, which WE builds — a
++ * unit FXC refuses renders as WE's red fallback, dx11fallback.frag).
+  */
+-std::string spliceLines (const std::string& source) {
+-    std::string out;
+-    out.reserve (source.size ());
+-    int pending = 0;
+-
+-    for (size_t i = 0; i < source.size (); i++) {
+-	if (source[i] == '\\') {
+-	    size_t next = i + 1;
+-	    if (next < source.size () && source[next] == '\r') {
+-		next++;
++struct Line {
++    size_t begin = 0, end = 0;
++    std::string text;
++};
++
++bool lineAt (const std::string& source, int number, Line& line) {
++    if (number <= 0) {
++	return false;
++    }
++    size_t begin = 0;
++    for (int i = 1; i < number && begin != std::string::npos; i++) {
++	begin = source.find ('\n', begin);
++	begin = begin == std::string::npos ? begin : begin + 1;
++    }
++    if (begin == std::string::npos || begin > source.size ()) {
++	return false;
++    }
++    line.begin = begin;
++    line.end = std::min (source.find ('\n', begin), source.size ());
++    line.text = source.substr (begin, line.end - begin);
++    return true;
++}
++
++void replaceLine (std::string& source, const Line& line, const std::string& text) {
++    source.replace (line.begin, line.end - line.begin, text);
++}
++
++/** glslang's type text (' temp 4-component vector of float', ' const int') → base and width; false for others */
++bool readType (const std::string& text, std::string& base, int& width) {
++    static const std::regex vector (R"((\d)-component vector of (float|int|uint|bool)\s*$)");
++    static const std::regex scalar (R"(\b(float|int|uint|bool)\s*$)");
++    std::smatch m;
++    if (std::regex_search (text, m, vector)) {
++	base = m[2].str ();
++	width = std::stoi (m[1].str ());
++	return true;
++    }
++    if (text.find ("matrix") == std::string::npos && text.find ("structure") == std::string::npos
++	&& std::regex_search (text, m, scalar)) {
++	base = m[1].str ();
++	width = 1;
++	return true;
++    }
++    return false;
++}
++
++std::string typeName (const std::string& base, int width) {
++    if (width == 1) {
++	return base;
++    }
++    const std::string prefix = base == "float" ? "" : base == "int" ? "i" : base == "uint" ? "u" : "b";
++    return prefix + "vec" + std::to_string (width);
++}
++
++/** The first `[lhs] = rhs;` on the line from `from` (not ==, <=, >=, !=): the rhs's bounds; false when there's none */
++bool assignment (const std::string& text, size_t& rhsBegin, size_t& rhsEnd, size_t from = 0) {
++    for (size_t i = from; i < text.size (); i++) {
++	if (text[i] != '=') {
++	    continue;
++	}
++	const char before = i > 0 ? text[i - 1] : ' ';
++	const char after = i + 1 < text.size () ? text[i + 1] : ' ';
++	if (after == '=' || before == '=' || before == '<' || before == '>' || before == '!') {
++	    if (after == '=') {
++		i++;
+ 	    }
+-	    if (next < source.size () && source[next] == '\n') {
+-		pending++;
+-		i = next;
+-		continue;
++	    continue;
++	}
++	int depth = 0;
++	size_t j = i + 1;
++	for (; j < text.size (); j++) {
++	    if (text[j] == '(' || text[j] == '[') {
++		depth++;
++	    } else if (text[j] == ')' || text[j] == ']') {
++		depth--;
++	    } else if ((text[j] == ';' || text[j] == ',') && depth <= 0) {
++		break;
+ 	    }
+ 	}
+-	out += source[i];
+-	if (source[i] == '\n' && pending > 0) {
+-	    out.append (static_cast<size_t> (pending), '\n');
+-	    pending = 0;
++	if (j >= text.size ()) {
++	    return false;
+ 	}
++	rhsBegin = i + 1;
++	rhsEnd = j;
++	return true;
+     }
+-
+-    return out;
++    return false;
+ }
++
+ /**
+- * An `#endif` with no open `#if` (2973943998's iris_movement__.vert has a stray one after its FOLLOWCURSOR block)
+- * is dropped, as WE's shader compiler builds such effects; glslang stops at it. The line stays (empty) so the
+- * line numbers hold.
++ * HLSL's implicit conversions on an assignment or initializer: a wider vector truncated (`vec2 p = v_TexCoord;`
++ * with a vec4 v_TexCoord), a scalar promoted (`vec3 c = 0.5;`), bool / int / uint / float converted
++ * (`int hit = a < b;`). From glslang's "cannot convert from 'A' to 'B'", the right-hand side becomes a B.
+  */
+-std::string dropUnmatchedEndifs (const std::string& source) {
+-    static const std::regex opens (R"(^\s*#\s*if(?:n?def)?\b)");
+-    static const std::regex closes (R"(^\s*#\s*endif\b)");
+-    std::string out;
+-    out.reserve (source.size ());
+-    int depth = 0;
+-    size_t begin = 0;
++bool convertAssignment (std::string& source, const std::string& log) {
++    static const std::regex conversion (R"(ERROR: 0:(\d+): '[^']*' :\s+cannot convert from '([^']*)' to '([^']*)')");
++    std::smatch m;
++    if (!std::regex_search (log, m, conversion)) {
++	return false;
++    }
++    std::string fromBase, toBase;
++    int fromWidth = 0, toWidth = 0;
++    Line line;
++    if (!readType (m[2].str (), fromBase, fromWidth) || !readType (m[3].str (), toBase, toWidth)
++	|| !lineAt (source, std::stoi (m[1].str ()), line)) {
++	return false;
++    }
++    static const char* swizzles[] = { "", ".x", ".xy", ".xyz" };
++    const std::string ctor = typeName (toBase, toWidth) + "(";
++    // the first assignment on the line not converted yet (a line may hold several: `a *= x; b *= y;`)
++    size_t rb = 0, re = 0, from = 0;
++    while (assignment (line.text, rb, re, from)) {
++	std::string rhs = line.text.substr (rb, re - rb);
++	const size_t lead = rhs.find_first_not_of (" \t");
++	if (lead != std::string::npos && (rhs.compare (lead, ctor.size (), ctor) == 0 || rhs.compare (lead, 1, "(") == 0)) {
++	    from = re;
++	    continue;
++	}
++	std::string wrapped;
++	if (fromWidth > toWidth) {
++	    // truncation keeps the first components; then the base, if it differs too
++	    wrapped = "(" + rhs + ")" + swizzles[toWidth];
++	    if (fromBase != toBase) {
++		wrapped = ctor + wrapped + ")";
++	    }
++	} else if (fromWidth == 1 || fromWidth == toWidth) {
++	    // a scalar fills every component; a same-width vector converts its base
++	    wrapped = ctor + rhs + ")";
++	} else {
++	    return false;
++	}
++	sLog.out ("HLSL conversion on line ", m[1].str (), ": ", rhs, " -> ", wrapped);
++	WPENGINE_HEALTH ("compat", { { "what", "HLSL: an assignment converts implicitly" } });
++	replaceLine (source, line, line.text.substr (0, rb) + " " + wrapped + line.text.substr (re));
++	return true;
++    }
++    return false;
++}
+ 
+-    while (begin < source.size ()) {
+-	size_t end = source.find ('\n', begin);
+-	end = end == std::string::npos ? source.size () : end + 1;
+-	const std::string line = source.substr (begin, end - begin);
+-	if (std::regex_search (line, opens)) {
++/** The arguments of the call whose `(` is at `open`: their bounds; false when the parentheses don't close */
++bool callArguments (const std::string& text, size_t open, std::vector<std::pair<size_t, size_t>>& args, size_t& close) {
++    int depth = 0;
++    size_t start = open + 1;
++    for (size_t i = open; i < text.size (); i++) {
++	const char c = text[i];
++	if (c == '(' || c == '[') {
+ 	    depth++;
+-	} else if (std::regex_search (line, closes)) {
++	} else if (c == ')' || c == ']') {
++	    depth--;
+ 	    if (depth == 0) {
+-		sLog.out ("Dropping an #endif with no #if: ", line);
+-		WPENGINE_HEALTH ("compat", { { "what", "glslang: unmatched #endif dropped" } });
+-		out += line.back () == '\n' ? "\n" : "";
+-		begin = end;
+-		continue;
++		if (text.find_first_not_of (" \t", start) < i) {
++		    args.emplace_back (start, i);
++		}
++		close = i;
++		return true;
+ 	    }
+-	    depth--;
++	} else if (c == ',' && depth == 1) {
++	    args.emplace_back (start, i);
++	    start = i + 1;
+ 	}
+-	out += line;
+-	begin = end;
+     }
++    return false;
++}
+ 
+-    return out;
++/**
++ * HLSL converts a call's arguments to its parameters' types (3370055069's depthparallax passes a float to
++ * `getDepthMapDataX (vec2, int)`; `smoothstep (0, …)` with an int edge). From glslang's "no matching overloaded
++ * function", the call on that line: each argument for a parameter of a user function's single definition with that
++ * many parameters is made that type (`int (x)`, `vec2 (v)` — a GLSL constructor truncates and fills like HLSL),
++ * out and inout ones left; for a built-in, integer literals become float ones
++ */
++bool convertArguments (std::string& source, const std::string& log) {
++    static const std::regex error (R"(ERROR: 0:(\d+): '([A-Za-z_][A-Za-z0-9_]*)' : no matching overloaded function found)");
++    static const std::regex scalarType (R"(^(?:float|int|uint|bool|[biu]?vec[234]|mat[234])$)");
++    std::smatch m;
++    Line line;
++    if (!std::regex_search (log, m, error) || !lineAt (source, std::stoi (m[1].str ()), line)) {
++	return false;
++    }
++    const std::string name = m[2].str ();
++    const std::regex callAt ("\\b" + name + "\\s*\\(");
++    std::smatch c;
++    if (!std::regex_search (line.text, c, callAt)) {
++	return false;
++    }
++    const size_t open = static_cast<size_t> (c.position () + c.length () - 1);
++    std::vector<std::pair<size_t, size_t>> args;
++    size_t close = 0;
++    if (!callArguments (line.text, open, args, close)) {
++	return false;
++    }
++    // the user's definitions with as many parameters
++    const std::regex definition ("\\b(?:void|float|int|uint|bool|[biu]?vec[234]|mat[234])\\s+" + name + "\\s*\\(([^)]*)\\)\\s*\\{");
++    std::vector<std::vector<std::string>> candidates;
++    for (auto it = std::sregex_iterator (source.begin (), source.end (), definition); it != std::sregex_iterator (); ++it) {
++	std::vector<std::string> params;
++	std::stringstream list ((*it)[1].str ());
++	for (std::string p; std::getline (list, p, ',');) {
++	    params.push_back (p);
++	}
++	if (params.size () == 1 && params[0].find_first_not_of (" \tvoid") == std::string::npos) {
++	    params.clear ();
++	}
++	if (params.size () == args.size ()) {
++	    candidates.push_back (params);
++	}
++    }
++    std::string rebuilt;
++    size_t last = 0;
++    bool changed = false;
++    static const std::regex intLiteral (R"((^|[^A-Za-z0-9_.])(\d+)(?![\d.eEuU]))");
++    for (size_t i = 0; i < args.size (); i++) {
++	const auto [b, e] = args[i];
++	const std::string arg = line.text.substr (b, e - b);
++	std::string converted = arg;
++	if (candidates.size () == 1) {
++	    std::stringstream words (candidates[0][i]);
++	    std::vector<std::string> w;
++	    for (std::string x; words >> x;) {
++		w.push_back (x);
++	    }
++	    const bool output = std::find (w.begin (), w.end (), "out") != w.end () || std::find (w.begin (), w.end (), "inout") != w.end ();
++	    std::string type;
++	    for (const auto& x : w) {
++		if (std::regex_match (x, scalarType)) {
++		    type = x;
++		    break;
++		}
++	    }
++	    const size_t lead = arg.find_first_not_of (" \t");
++	    if (!output && !type.empty () && lead != std::string::npos && arg.compare (lead, type.size () + 1, type + "(") != 0) {
++		converted = " " + type + "(" + arg + ")";
++	    }
++	} else if (candidates.empty ()) {
++	    converted = std::regex_replace (arg, intLiteral, "$1$2.0");
++	}
++	if (converted != arg) {
++	    changed = true;
++	}
++	rebuilt += line.text.substr (last, b - last) + converted;
++	last = e;
++    }
++    if (!changed) {
++	return false;
++    }
++    rebuilt += line.text.substr (last);
++    sLog.out ("HLSL argument conversion on line ", m[1].str (), ": ", rebuilt);
++    WPENGINE_HEALTH ("compat", { { "what", "HLSL: a call converts its arguments" } });
++    replaceLine (source, line, rebuilt);
++    return true;
+ }
+ 
+ /**
+- * HLSL's implicit truncation: an operation between a wider and a narrower float vector (or a narrower variable
+- * taking a wider value) uses the wider one's first components, with a warning. GLSL refuses it; WE's effects rely
+- * on it (3414858021's iris_movement__: `vec2 da = transformedCursorPosition * g_CursorScale`, a vec4 times a vec2,
+- * failed the compose layer holding the girl's head). From glslang's error, the line's variables declared with the
+- * wider type get the narrower swizzle; false when the error isn't one of these or nothing changed.
++ * HLSL's implicit truncation in an operation between a wider and a narrower float vector: the wider one's first
++ * components, with a warning (3414858021's iris_movement__: `vec2 da = transformedCursorPosition * g_CursorScale`, a
++ * vec4 times a vec2). From glslang's error, the line's variables declared with the wider type get the narrower
++ * swizzle — not one being declared on the line, and when glslang names the wider operand's storage (in, uniform,
++ * temp), one of that storage first (2800594362's clipping_mask: `vec4 clip = texSample2D(…, v_TexCoord + …)` had
++ * `clip` itself swizzled)
+  */
+ bool truncateWiderOperands (std::string& source, const std::string& log) {
+     static const std::regex operands (
+-	R"(ERROR: 0:(\d+): '[^']*' :\s+wrong operand types: no operation '[^']*' exists that takes a left-hand operand of type ' (?:[a-z]+ )*(\d)-component vector of float' and a right operand of type ' (?:[a-z]+ )*(\d)-component vector of float')"
+-    );
+-    static const std::regex conversion (
+-	R"(ERROR: 0:(\d+): '[^']*' :\s+cannot convert from ' (?:[a-z]+ )*(\d)-component vector of float' to ' (?:[a-z]+ )*(\d)-component vector of float')"
++	R"(ERROR: 0:(\d+): '[^']*' :\s+wrong operand types: no operation '[^']*' exists that takes a left-hand operand of type ' ((?:[a-z]+ )*)(\d)-component vector of float' and a right operand of type ' ((?:[a-z]+ )*)(\d)-component vector of float')"
+     );
+     std::smatch match;
+-    int line = 0, wider = 0, narrower = 0;
+-
+-    if (std::regex_search (log, match, operands) || std::regex_search (log, match, conversion)) {
+-	line = std::stoi (match[1].str ());
+-	const int a = std::stoi (match[2].str ()), b = std::stoi (match[3].str ());
+-	wider = std::max (a, b);
+-	narrower = std::min (a, b);
+-    }
+-    if (line <= 0 || wider == narrower) {
++    if (!std::regex_search (log, match, operands)) {
+ 	return false;
+     }
+-
+-    size_t begin = 0;
+-    for (int i = 1; i < line && begin != std::string::npos; i++) {
+-	begin = source.find ('\n', begin);
+-	begin = begin == std::string::npos ? begin : begin + 1;
++    const int line = std::stoi (match[1].str ());
++    const int a = std::stoi (match[3].str ()), b = std::stoi (match[5].str ());
++    const int wider = std::max (a, b), narrower = std::min (a, b);
++    const std::string storage = a > b ? match[2].str () : match[4].str ();
++    if (wider == narrower) {
++	return false;
+     }
+-    if (begin == std::string::npos) {
++    Line at;
++    if (!lineAt (source, line, at)) {
+ 	return false;
+     }
+-    const size_t end = std::min (source.find ('\n', begin), source.size ());
+-    const std::string text = source.substr (begin, end - begin);
++    const std::string& text = at.text;
+     static const char* swizzles[] = { "", ".x", ".xy", ".xyz" };
+-    // a bare identifier (not a call, not already swizzled or indexed)
+     static const std::regex identifier (R"(\b([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*[.(\[])(?![A-Za-z0-9_]))");
+-    std::string rebuilt;
+-    size_t at = 0;
+-
+-    for (auto it = std::sregex_iterator (text.begin (), text.end (), identifier); it != std::sregex_iterator (); ++it) {
+-	const std::string name = (*it)[1].str ();
+-	const std::regex declared ("\\bvec" + std::to_string (wider) + "\\s+" + name + "\\b");
+-	// a preceding '.' makes it a member or swizzle, not a variable
+-	const size_t pos = static_cast<size_t> (it->position ());
+-	const bool member = pos > 0 && text[pos - 1] == '.';
+-	if (member || !std::regex_search (source, declared)) {
++    static const std::regex typeBefore (R"((?:\b(?:vec[234]|float[234]|float|int|bool|mat[234]|const)\s+)$)");
++    // the wider operand's storage: varyings are `in` (fragment), uniforms `uniform`, the rest temporaries
++    const bool wantsInput = storage.find ("in ") != std::string::npos || storage.find ("smooth") != std::string::npos;
++    const bool wantsUniform = storage.find ("uniform") != std::string::npos;
++
++    for (int pass = 0; pass < 2; pass++) {
++	std::string rebuilt;
++	size_t last = 0;
++	bool any = false;
++	for (auto it = std::sregex_iterator (text.begin (), text.end (), identifier); it != std::sregex_iterator (); ++it) {
++	    const std::string name = (*it)[1].str ();
++	    const size_t pos = static_cast<size_t> (it->position ());
++	    if ((pos > 0 && text[pos - 1] == '.') || std::regex_search (text.substr (0, pos), typeBefore)) {
++		continue;
++	    }
++	    const std::string wide = "\\bvec" + std::to_string (wider) + "\\s+" + name + "\\b";
++	    if (!std::regex_search (source, std::regex (wide))) {
++		continue;
++	    }
++	    if (pass == 0 && (wantsInput || wantsUniform)) {
++		const std::string q = wantsInput ? "(?:varying|in)" : "uniform";
++		if (!std::regex_search (source, std::regex ("\\b" + q + "\\s+(?:[A-Za-z_]+\\s+)*vec" + std::to_string (wider) + "\\s+" + name + "\\b"))) {
++		    continue;
++		}
++	    }
++	    rebuilt += text.substr (last, pos + name.size () - last) + swizzles[narrower];
++	    last = pos + name.size ();
++	    any = true;
++	}
++	if (!any) {
+ 	    continue;
+ 	}
+-	rebuilt += text.substr (at, pos + name.size () - at) + swizzles[narrower];
+-	at = pos + name.size ();
++	rebuilt += text.substr (last);
++	sLog.out ("Truncating to vec", narrower, " as HLSL does, line ", line, ": ", rebuilt);
++	WPENGINE_HEALTH ("compat", { { "what", "glslang: wider vector truncated as HLSL does" } });
++	replaceLine (source, at, rebuilt);
++	return true;
+     }
+-    if (at == 0) {
+-	return false;
++    return false;
++}
++
++/** Brace depth at the start of `offset` (comments skipped) */
++int depthAt (const std::string& source, size_t offset) {
++    int depth = 0;
++    for (size_t i = 0; i < offset && i < source.size (); i++) {
++	if (source.compare (i, 2, "//") == 0) {
++	    i = std::min (source.find ('\n', i), offset);
++	    continue;
++	}
++	if (source.compare (i, 2, "/*") == 0) {
++	    const size_t end = source.find ("*/", i + 2);
++	    i = end == std::string::npos ? offset : end + 1;
++	    continue;
++	}
++	depth += source[i] == '{' ? 1 : source[i] == '}' ? -1 : 0;
+     }
++    return depth;
++}
+ 
+-    rebuilt += text.substr (at);
+-    sLog.out ("Truncating to vec", narrower, " as HLSL does, line ", line, ": ", rebuilt);
+-    WPENGINE_HEALTH ("compat", { { "what", "glslang: wider vector truncated as HLSL does" } });
+-    source.replace (begin, end - begin, rebuilt);
++/**
++ * HLSL's `const`: a local one is a read-only variable with any initializer (2795521260's color_grading: `const float
++ * cosAngle = cos(radians(u_hueShift));`) — the `const` goes. A global one is WE's `static const` (GH 0x140125e80
++ * adds `static `), which FXC initialises before main from any expression, uniforms included (`const mat3
++ * colorMatrix = mat3(c_red, c_green, c_blue);`) — it becomes a global set at the top of main.
++ */
++bool constInitializer (std::string& source, const std::string& log) {
++    static const std::regex error (
++	R"(ERROR: 0:(\d+): '(?:non-constant initializer' :|[^']*' :\s+global const initializers must be constant))"
++    );
++    static const std::regex constDecl (R"(^(\s*)const\s+(?:(?:lowp|mediump|highp)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?\s*=\s*(.*);\s*(//.*)?$)");
++    std::smatch m;
++    Line line;
++    if (!std::regex_search (log, m, error) || !lineAt (source, std::stoi (m[1].str ()), line)) {
++	return false;
++    }
++    // inside a function: by brace depth, or by indentation (a unit's #if branches may open a function twice)
++    if (depthAt (source, line.begin) > 0 || (!line.text.empty () && (line.text[0] == ' ' || line.text[0] == '\t'))) {
++	const size_t at = line.text.find ("const ");
++	if (at == std::string::npos) {
++	    return false;
++	}
++	WPENGINE_HEALTH ("compat", { { "what", "HLSL: a local const with a run-time initializer" } });
++	replaceLine (source, line, line.text.substr (0, at) + line.text.substr (at + 6));
++	return true;
++    }
++    std::smatch d;
++    if (!std::regex_match (line.text, d, constDecl) || d[4].matched) {
++	return false;
++    }
++    static const std::regex mainOpen (R"(\bvoid\s+main\s*\(\s*(?:void)?\s*\)\s*\{)");
++    std::smatch open;
++    const std::string marker = "/* _wp_static_inits */";
++    const std::string init = "\t" + d[3].str () + " = " + d[5].str () + ";\n";
++    replaceLine (source, line, d[1].str () + d[2].str () + " " + d[3].str () + "; // static const, set in main");
++    // every main (a unit may have one per #if branch): after the inits already there, in declaration order
++    if (source.find (marker) != std::string::npos) {
++	for (size_t at = source.find (marker); at != std::string::npos; at = source.find (marker, at + init.size () + marker.size ())) {
++	    source.insert (at, init);
++	}
++    } else if (std::regex_search (source, open, mainOpen)) {
++	source = std::regex_replace (source, mainOpen, "$&\n" + init + marker);
++    } else {
++	return false;
++    }
++    WPENGINE_HEALTH ("compat", { { "what", "HLSL: a static const global initialised in main" } });
+     return true;
+ }
+ 
+-/** Parses a unit, retrying after each HLSL-style truncation it needed (`source` must outlive the shader) */
++/**
++ * A function that doesn't return on the path the combos leave (2821337237's shadow_map: ShadowMask returns only
++ * under `#if SHADOWMASK == N`, and SHADOWMASK 0 — "None" — leaves it empty) compiles in FXC when nothing calls it;
++ * glslang refuses it. It returns its type's zero at its end
++ */
++bool missingReturn (std::string& source, const std::string& log) {
++    static const std::regex error (R"(ERROR: 0:\d+: '[^']*' : function does not return a value: ([A-Za-z_][A-Za-z0-9_]*))");
++    std::smatch m;
++    if (!std::regex_search (log, m, error)) {
++	return false;
++    }
++    const std::string name = m[1].str ();
++    const std::regex definition ("\\b((?:float|int|uint|bool|[biu]?vec[234]|mat[234]))\\s+" + name + "\\s*\\([^;{]*\\)\\s*\\{");
++    std::smatch d;
++    std::string::const_iterator from = source.cbegin ();
++    while (std::regex_search (from, source.cend (), d, definition)) {
++	const size_t open = static_cast<size_t> (d.position () + d.length ()) + static_cast<size_t> (from - source.cbegin ());
++	int depth = 1;
++	size_t i = open;
++	for (; i < source.size () && depth > 0; i++) {
++	    depth += source[i] == '{' ? 1 : source[i] == '}' ? -1 : 0;
++	}
++	if (depth != 0) {
++	    return false;
++	}
++	const std::string ret = "\treturn " + d[1].str () + "(0);\n";
++	if (source.compare (i - 1 - ret.size (), ret.size (), ret) != 0) {
++	    source.insert (i - 1, ret);
++	    WPENGINE_HEALTH ("compat", { { "what", "HLSL: a function missing its return returns zero" } });
++	    return true;
++	}
++	from = source.cbegin () + static_cast<long> (i);
++    }
++    return false;
++}
++
++/**
++ * HLSL takes any scalar as a condition (`vec4 final = outside ? inSmooth : outSmooth;` with a float `outside`,
++ * 3573886911's frame_builder; `if (mask)`): it is compared with zero
++ */
++bool booleanCondition (std::string& source, const std::string& log) {
++    static const std::regex error (R"(ERROR: 0:(\d+): '[^']*' : boolean expression expected)");
++    std::smatch m;
++    Line line;
++    if (!std::regex_search (log, m, error) || !lineAt (source, std::stoi (m[1].str ()), line)) {
++	return false;
++    }
++    const std::string& text = line.text;
++    // a ternary: the operand before `?` (back to `=`, `(`, `,`, `return` or the line's start)
++    const size_t q = text.find ('?');
++    if (q != std::string::npos) {
++	size_t b = q;
++	int depth = 0;
++	while (b > 0) {
++	    const char c = text[b - 1];
++	    if (c == ')') {
++		depth++;
++	    } else if (c == '(') {
++		if (depth == 0) {
++		    break;
++		}
++		depth--;
++	    } else if (depth == 0 && (c == '=' || c == ',' || c == ':' || c == '?')) {
++		break;
++	    }
++	    b--;
++	}
++	std::string cond = text.substr (b, q - b);
++	if (cond.find ("return ") != std::string::npos) {
++	    b += cond.find ("return ") + 7;
++	    cond = text.substr (b, q - b);
++	}
++	if (cond.find_first_not_of (" \t") == std::string::npos || cond.find ("bool(") != std::string::npos) {
++	    return false;
++	}
++	replaceLine (source, line, text.substr (0, b) + " bool(" + cond + ") " + text.substr (q));
++	WPENGINE_HEALTH ("compat", { { "what", "HLSL: a scalar condition" } });
++	return true;
++    }
++    // if / while: the parenthesised condition
++    static const std::regex statement (R"(\b(if|while)\s*\()");
++    std::smatch s;
++    if (std::regex_search (text, s, statement)) {
++	const size_t open = static_cast<size_t> (s.position () + s.length ());
++	int depth = 1;
++	size_t i = open;
++	for (; i < text.size () && depth > 0; i++) {
++	    depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
++	}
++	if (depth != 0) {
++	    return false;
++	}
++	const std::string cond = text.substr (open, i - 1 - open);
++	if (cond.starts_with ("bool(")) {
++	    return false;
++	}
++	replaceLine (source, line, text.substr (0, open) + "bool(" + cond + ")" + text.substr (i - 1));
++	WPENGINE_HEALTH ("compat", { { "what", "HLSL: a scalar condition" } });
++	return true;
++    }
++    return false;
++}
++
++/** Parses a unit, retrying after each HLSL rule it needed (`source` must outlive the shader) */
+ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& source, const char* what) {
+     for (int attempt = 0;; attempt++) {
+ 	auto shader = std::make_unique<glslang::TShader> (stage);
+@@ -287,7 +659,10 @@ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& sou
+ 
+ 	const std::string log = shader->getInfoLog ();
+ 	shader.reset ();
+-	if (attempt >= 16 || !truncateWiderOperands (source, log)) {
++	const bool fixed = attempt < 64
++	    && (truncateWiderOperands (source, log) || convertAssignment (source, log) || constInitializer (source, log)
++		|| missingReturn (source, log) || booleanCondition (source, log) || convertArguments (source, log));
++	if (!fixed) {
+ 	    sLog.error ("GLSL ", what, " unit parsing Failed: ", log);
+ 	    WPENGINE_HEALTH ("shader_error", { { "stage", "glslang" }, { "unit", what }, { "message", WallpaperEngine::Health::brief (log) } });
+ 	    return nullptr;
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 66e91dd..01ae36e 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -2,13 +2,16 @@
+ 
+ #include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
++#include <algorithm>
+ #include <cstdlib>
+ #include <regex>
++#include <sstream>
+ #include <stack>
+ #include <string>
+ #include <utility>
+ 
+ #include "GLSLContext.h"
++#include "WEShaderRules.h"
+ #include "WallpaperEngine/Assets/AssetLoadException.h"
+ #include "WallpaperEngine/Render/Shaders/Variables/ShaderVariable.h"
+ #include "WallpaperEngine/Render/Shaders/Variables/ShaderVariableFloat.h"
+@@ -36,6 +39,7 @@
+ 	  "#define CAST3(x) (vec3(x))\n"                                                                               \
+ 	  "#define CAST4(x) (vec4(x))\n"                                                                               \
+ 	  "#define CAST3X3(x) (mat3(x))\n"                                                                             \
++	  WE_HEADER_DEFINES                                                                                            \
+ 	  "#define float2 vec2\n"                                                                                      \
+ 	  "#define float3 vec3\n"                                                                                      \
+ 	  "#define float4 vec4\n"                                                                                      \
+@@ -51,6 +55,43 @@
+ 	  "#define ddx dFdx\n"                                                                                         \
+ 	  "#define ddy(x) dFdy(-(x))\n"                                                                                \
+ 	  "#define GLSL 1\n\n";
++// the rest of WE's translator header (GH 0x140125e80's #define block) — CASTF/CASTI/CASTU/CAST4U, the sampler
++// parameter macros, texLoad2D / texSample2DCompare / texSample3D, the frame buffer mappings — and the HLSL type names
++// WE's GLSL dialect lets a shader use. MapNDCToFrameBuffer has WE's y flip undone (D3D's texture rows go down;
++// inferred), sampler2DComparison is a shadow sampler, sampler2DBackBuffer a plain one (GH 0x140125e80 picks
++// texSample2DBackBuffer per backbuffer kind)
++#define WE_HEADER_DEFINES                                                                                              \
++    "#define CASTF(x) (float(x))\n"                                                                                    \
++    "#define CASTI(x) (int(x))\n"                                                                                      \
++    "#define CASTU(x) (uint(x))\n"                                                                                     \
++    "#define CAST4U(x) (uvec4(x))\n"                                                                                   \
++    "#define DECLARE_SAMPLER2D_PARAMETER(t) sampler2D t\n"                                                             \
++    "#define MAKE_SAMPLER2D_ARGUMENT(t) t\n"                                                                           \
++    "#define DECLARE_SAMPLER2D_COMPARE_PARAMETER(t) sampler2DShadow t\n"                                               \
++    "#define MAKE_SAMPLER2D_COMPARE_ARGUMENT(t) t\n"                                                                   \
++    "#define texSample2DCompare(s, u, d) texture(s, vec3((u), (d)))\n"                                                 \
++    "#define texLoad2D(s, u, r) texelFetch(s, ivec2((u) * (r)), 0)\n"                                                  \
++    "#define texSample3D texture\n"                                                                                    \
++    "#define texSample2DBackBuffer(s, u, r) texture(s, (u))\n"                                                         \
++    "#define MapTexCoordToFrameBuffer(u) (u)\n"                                                                        \
++    "#define MapNDCToFrameBuffer(n) ((n) * 0.5 + 0.5)\n"                                                               \
++    "#define MapEffectSpaceToFrameBuffer MapNDCToFrameBuffer\n"                                                        \
++    "#define sampler2DComparison sampler2DShadow\n"                                                                    \
++    "#define sampler2DBackBuffer sampler2D\n"                                                                          \
++    "#define half float\n"                                                                                             \
++    "#define half2 vec2\n"                                                                                             \
++    "#define half3 vec3\n"                                                                                             \
++    "#define half4 vec4\n"                                                                                             \
++    "#define uint2 uvec2\n"                                                                                            \
++    "#define uint3 uvec3\n"                                                                                            \
++    "#define uint4 uvec4\n"                                                                                            \
++    "#define bool2 bvec2\n"                                                                                            \
++    "#define bool3 bvec3\n"                                                                                            \
++    "#define bool4 bvec4\n"                                                                                            \
++    "#define float2x2 mat2\n"                                                                                          \
++    "#define float3x3 mat3\n"                                                                                          \
++    "#define float4x4 mat4\n"                                                                                          \
++    "#define float4x3 mat4x3\n"
+ #define FRAGMENT_SHADER_DEFINES                                                                                        \
+     "out vec4 out_FragColor;\n"                                                                                        \
+     "#define varying in\n"
+@@ -77,10 +118,11 @@ ShaderUnit::ShaderUnit (
+ 
+ void ShaderUnit::preprocess () {
+     this->m_preprocessed = this->m_content;
+-    this->m_includes = "";
+ 
+     this->preprocessIncludes ();
+     this->preprocessRequires ();
++    // GH 0x140125e80: declarations are WE's cbuffers / structs, ahead of all code (the includes pasted in place too)
++    this->m_preprocessed = WERules::hoistDeclarations (this->m_preprocessed);
+     this->preprocessVariables ();
+ 
+     // replace gl_FragColor with the equivalent
+@@ -135,181 +177,21 @@ void ShaderUnit::preprocessVariables () {
+ }
+ 
+ void ShaderUnit::preprocessIncludes () {
+-    size_t start = 0, end = 0;
+-    // prepare the include content
+-    while ((start = this->m_preprocessed.find ("#include", end)) != std::string::npos) {
+-	// TODO: CHECK FOR ERRORS HERE, MALFORMED INCLUDES WILL NOT BE PROPERLY HANDLED
+-	const size_t quoteStart = this->m_preprocessed.find_first_of ('"', start) + 1;
+-	const size_t quoteEnd = this->m_preprocessed.find_first_of ('"', quoteStart);
+-	const std::string filename = this->m_preprocessed.substr (quoteStart, quoteEnd - quoteStart);
+-
+-	// some includes might not be present
+-	// and that should not be treated as an error mainly because these could come from
+-	// commented out content
+-	std::string content;
+-
+-	try {
+-	    content += "// begin of include from file ";
+-	    content += filename;
+-	    content += "\n";
+-	    content += this->m_assetLocator.includeShader (filename);
+-	    content += "\n// end of included from file ";
+-	    content += filename;
+-	    content += "\n";
+-	} catch (AssetLoadException&) {
+-	    content += "// tried including file ";
+-	    content += filename;
+-	    content += " but was not found\n";
+-	}
+-
+-	// replace the first two letters with a comment so the filelength doesn't change
+-	this->m_preprocessed = this->m_preprocessed.replace (start, 2, "//");
+-
+-
+-	this->m_includes += content;
+-
+-	// go to the end of the line
+-	end = start;
+-    }
+-
+-    // ensure the included files do not include other files
+-    end = 0;
+-
+-    // then apply includes in-place
+-    while ((start = this->m_includes.find ("#include", end)) != std::string::npos) {
+-	const size_t lineEnd = this->m_includes.find_first_of ('\n', start);
+-	// TODO: CHECK FOR ERRORS HERE, MALFORMED INCLUDES WILL NOT BE PROPERLY HANDLED
+-	const size_t quoteStart = this->m_includes.find_first_of ('"', start) + 1;
+-	const size_t quoteEnd = this->m_includes.find_first_of ('"', quoteStart);
+-	const std::string filename = this->m_includes.substr (quoteStart, quoteEnd - quoteStart);
+-
+-	// some includes might not be present
+-	// and that should not be treated as an error mainly because these could come from
+-	// commented out content
+-	std::string content;
+-
++    // WE's rule (GH 0x140191050 / 0x1401917f0): each include in place, where its line was — LWE pasted them all
++    // before main, after the unit's last declaration, so a function above main using an include's #define
++    // (3235948233's auto_sway: M_PI from common.h) didn't compile. hoistDeclarations keeps what that order gave: an
++    // include's code seeing the unit's uniforms (common_blur.h samples g_Texture0, declared below its #include)
++    std::set<std::string> seen;
++    const auto load = [this] (const std::string& name) -> std::optional<std::string> {
+ 	try {
+-	    content = "// begin of include from file ";
+-	    content += filename;
+-	    content += "\n";
+-	    content += this->m_assetLocator.includeShader (filename);
+-	    content += "\n// end of included from file ";
+-	    content += filename;
+-	    content += "\n";
++	    return std::filesystem::path (name).extension () == ".h"
++		? this->m_assetLocator.includeShader (name)
++		: this->m_assetLocator.readString (std::filesystem::path ("shaders") / name);
+ 	} catch (AssetLoadException&) {
+-	    content = "// tried including file ";
+-	    content += filename;
+-	    content += " but was not found\n";
+-	}
+-
+-	// file contents ready, replace things
+-	this->m_includes = this->m_includes.replace (start, lineEnd - start, content);
+-
+-	// go back to the beginning of the line to properly continue detecting things
+-	end = start;
+-    }
+-
+-    // search for the main function and add the includes before that for now
+-    end = 0;
+-    bool includesAdded = false;
+-
+-    // finally, try to place the include contents before the main function
+-    while ((start = this->m_preprocessed.find (" main", end)) != std::string::npos) {
+-	char value = this->m_preprocessed.at (start + 5);
+-
+-	end = start + 5;
+-
+-	if (value != ' ' && value != '(') {
+-	    continue;
+-	}
+-
+-	// main located, search for uniforms and find the latest one available
+-	size_t lastAttribute = this->m_preprocessed.rfind ("attribute", start);
+-	size_t lastVarying = this->m_preprocessed.rfind ("varying", start);
+-	size_t lastUniform = this->m_preprocessed.rfind ("uniform", start);
+-	size_t latest = lastAttribute;
+-
+-	if (latest == std::string::npos) {
+-	    latest = lastVarying;
+-	} else if (latest < lastVarying && lastVarying != std::string::npos) {
+-	    latest = lastVarying;
+-	}
+-
+-	if (latest == std::string::npos) {
+-	    latest = lastUniform;
+-	} else if (latest < lastUniform && lastUniform != std::string::npos) {
+-	    latest = lastUniform;
+-	}
+-
+-	if (latest < start) {
+-	    // find the end of the current line
+-	    latest = this->m_preprocessed.find ('\n', latest);
+-	} else {
+-	    // find the end of the previous line
+-	    latest = this->m_preprocessed.rfind ('\n', start);
++	    return std::nullopt;
+ 	}
+-
+-	// update the function start to point to the end of the previous line
+-	// as this will be used to determine the position of the includes
+-	start = this->m_preprocessed.rfind ('\n', start);
+-
+-	// keeps track of the start and end of ifdefs to look for the right
+-	// place to put the includes in
+-	std::stack<size_t> ifdefStack;
+-
+-	// start looking for #if and #endif results and add to the stack so we find the start of the current chain of
+-	// ifdefs and use that as point
+-
+-	// for this we'll use regex
+-	const std::regex ifdef (R"((#if|#endif))");
+-	std::smatch match;
+-	size_t current = 0;
+-
+-	while (
+-	    std::regex_search (this->m_preprocessed.cbegin () + current, this->m_preprocessed.cend (), match, ifdef)) {
+-	    current += match.position ();
+-
+-	    // if it's opening an #ifdef keep track of the start of the block
+-	    // and that's it
+-	    if (this->m_preprocessed.substr (current, 3) == "#if") {
+-		// go to the next character so the regex doesn't match with the same thing again
+-		ifdefStack.push (current++);
+-		continue;
+-	    }
+-
+-	    // go to the next character so the regex doesn't match with the same thing again
+-	    current++;
+-
+-	    // most likely a syntax error, but we'll ignore it for now...
+-	    if (ifdefStack.empty ()) {
+-		continue;
+-	    }
+-
+-	    size_t stackStart = ifdefStack.top ();
+-	    ifdefStack.pop ();
+-
+-	    if (latest > stackStart && latest <= current) {
+-		// The insertion point is inside a conditional block.
+-		// Move to BEFORE the #if so includes are available to all branches
+-		// (e.g. genericropeparticle.vert has #if GS_ENABLED wrapping two main() functions).
+-		size_t beforeIfdef = this->m_preprocessed.rfind ('\n', stackStart);
+-		latest = (beforeIfdef != std::string::npos) ? beforeIfdef : 0;
+-	    }
+-	}
+-
+-	// no more matches, get the one that happens the earliest
+-	// TODO: IS THIS GOOD ENOUGH? MAYBE WE SHOULD BE GETTING THE FIRST #IF BLOCK INSTEAD?
+-	latest = std::min (latest, start);
+-
+-	// finally insert it there
+-	this->m_preprocessed.insert (latest + 1, this->m_includes + '\n');
+-	includesAdded = true;
+-	break;
+-    }
+-
+-    if (!includesAdded) {
+-	sLog.exception ("Could not find where to place includes for shader unit ", this->m_file);
+-    }
++    };
++    this->m_preprocessed = WERules::expandIncludes (this->m_preprocessed, load, seen);
+ }
+ 
+ void ShaderUnit::preprocessRequires () {
+@@ -347,7 +229,6 @@ void ShaderUnit::preprocessRequires () {
+ 
+ 	if (!moduleCode.empty ()) {
+ 	    // insert the generated code directly into m_preprocessed at the #require location
+-	    // (m_includes was already consumed by preprocessIncludes, so appending there would be lost)
+ 	    this->m_preprocessed.insert (start, moduleCode);
+ 	    end = start + moduleCode.length ();
+ 	} else {
+@@ -444,27 +325,46 @@ std::string ShaderUnit::applyFragmentVaryingDeclarations (std::string source) co
+ 	return source;
+     }
+ 
++    // GH 0x140125e80: the fragment unit's inputs are the vertex unit's VS_OUTPUT list, so a varying the fragment
++    // doesn't declare is still there, and one it declares narrower (`varying vec2 v_TexCoord` against the vertex's
++    // vec4) is the vertex's type, its uses truncated as HLSL does. LWE linked them with their own types: glslang let
++    // the vec2 input read a vec4 output and SPIRV-Cross's GLSL then had `vec2 = vec4` (NVIDIA C7011; 2846673187's
++    // audio ring and 2844906964 / 2342779250's test shaders dropped their layers)
+     static const std::regex vertexVarying (
+ 	R"(\bvarying\s+(?:(?:lowp|mediump|highp|flat|smooth|noperspective)\s+)*([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)"
+     );
++    static const std::map<std::string, int> width = { { "float", 1 }, { "vec2", 2 }, { "vec3", 3 }, { "vec4", 4 } };
+     const std::string& vertex = this->m_link->m_preprocessed;
+     std::string missing;
++    bool retyped = false;
+ 
+     for (auto it = std::sregex_iterator (vertex.begin (), vertex.end (), vertexVarying); it != std::sregex_iterator ();
+ 	 ++it) {
+ 	const std::string type = (*it)[1].str ();
+ 	const std::string name = (*it)[2].str ();
+-	const std::regex declared ("\\bvarying\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + name + "\\s*;");
++	const std::regex declared ("\\bvarying\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\s+)*?)([A-Za-z_][A-Za-z0-9_]*)\\s+" + name + "\\s*;");
+ 	const std::regex used ("\\b" + name + "\\b");
+-
+-	if (std::regex_search (source, declared) || !std::regex_search (source, used)
+-	    || missing.find (" " + name + ";") != std::string::npos) {
++	std::smatch own;
++
++	if (std::regex_search (source, own, declared)) {
++	    const std::string ownType = own[2].str ();
++	    const auto v = width.find (type), f = width.find (ownType);
++	    if (v != width.end () && f != width.end () && v->second > f->second) {
++		source = std::regex_replace (source, declared, "varying $1" + type + " " + name + ";");
++		retyped = true;
++	    }
++	    continue;
++	}
++	if (!std::regex_search (source, used) || missing.find (" " + name + ";") != std::string::npos) {
+ 	    continue;
+ 	}
+ 
+ 	missing += "varying " + type + " " + name + ";\n";
+     }
+ 
++    if (retyped) {
++	WPENGINE_HEALTH ("compat", { { "what", "WE: a fragment varying takes the vertex unit's type" } });
++    }
+     if (missing.empty ()) {
+ 	return source;
+     }
+@@ -501,13 +401,16 @@ std::string ShaderUnit::applyFragmentTexCoordCompatibility (std::string source)
+ }
+ 
+ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const {
+-    if (this->m_type != GLSLContext::UnitType_Fragment) {
+-	return source;
+-    }
+-
+-    static const std::regex declaration (
++    // the fragment's varyings and the vertex's attributes are WE's IN struct (GH 0x140125e80), which HLSL lets
++    // main write to (3088030303's shadow does `a_TexCoord = …` in its vertex unit)
++    const bool fragment = this->m_type == GLSLContext::UnitType_Fragment;
++    static const std::regex fragmentDeclaration (
+ 	R"(\bvarying\s+((?:(?:lowp|mediump|highp|flat|smooth|noperspective)\s+)*[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)"
+     );
++    static const std::regex vertexDeclaration (
++	R"(\battribute\s+((?:(?:lowp|mediump|highp)\s+)*[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)"
++    );
++    const std::regex& declaration = fragment ? fragmentDeclaration : vertexDeclaration;
+     static const std::regex mainOpen (R"(\bvoid\s+main\s*\(\s*(?:void)?\s*\)\s*\{)");
+     std::vector<std::pair<std::string, std::string>> written; // (type, name)
+ 
+@@ -516,7 +419,8 @@ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const
+ 	const std::string name = (*it)[2].str ();
+ 	// `name = …`, `name += …`, `name.xy *= …` (not `==`), or `name++` / `++name`
+ 	const std::regex assigned ("\\b" + name + "\\b(?:\\s*\\.\\s*[xyzwrgba]+)?\\s*(?:[-+*/]?=(?!=)|\\+\\+|--)|(?:\\+\\+|--)\\s*" + name + "\\b");
+-	if (std::regex_search (source, assigned)) {
++	const bool listed = std::any_of (written.begin (), written.end (), [&] (const auto& w) { return w.second == name; });
++	if (!listed && std::regex_search (source, assigned)) {
+ 	    // the type without its qualifiers
+ 	    std::string type = (*it)[1].str ();
+ 	    type = type.substr (type.find_last_of (" \t") == std::string::npos ? 0 : type.find_last_of (" \t") + 1);
+@@ -529,7 +433,9 @@ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const
+ 	return source;
+     }
+ 
+-    // every use after the declarations reads the copy; main starts by filling it
++    // every use after the declarations reads the copy; each main starts by filling it (a unit may have several
++    // under #if — 3235948233's auto_sway has one per AA_VERSION — and only filling the first left the copy of the
++    // active one zero: its v_TexCoord read 0 and 3414858021's 左白巾 drew nothing)
+     const size_t bodyAt = static_cast<size_t> (open.position () + open.length ());
+     std::string head = source.substr (0, bodyAt);
+     std::string body = source.substr (bodyAt);
+@@ -537,27 +443,49 @@ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const
+ 
+     for (const auto& [type, name] : written) {
+ 	const std::regex use ("\\b" + name + "\\b");
+-	const std::regex decl ("\\bvarying\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + name + "\\s*;");
++	const std::regex decl (std::string (fragment ? "\\bvarying" : "\\battribute") + "\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + name + "\\s*;");
+ 	const std::string copy = "_wp_writable_" + name;
+ 	// keep the declaration (the vertex unit's output links by its name), the other uses go to the copy
+ 	std::string rebuilt;
+ 	size_t at = 0;
+ 	for (auto it = std::sregex_iterator (head.begin (), head.end (), decl); it != std::sregex_iterator (); ++it) {
+ 	    const size_t end = static_cast<size_t> (it->position () + it->length ());
++	    // the copy (and a mark that it exists) where the input is declared: inside the same #if, when it's in one
+ 	    rebuilt += std::regex_replace (head.substr (at, it->position () - at), use, copy) + it->str ()
+-		+ "\n" + type + " " + copy + ";";
++		+ "\n" + type + " " + copy + ";\n#define _WP_HAS" + copy;
+ 	    at = end;
+ 	}
+ 	head = rebuilt + std::regex_replace (head.substr (at), use, copy);
+ 	body = std::regex_replace (body, use, copy);
+-	fill += "\n\t" + copy + " = " + name + ";";
++	fill += "\n#ifdef _WP_HAS" + copy + "\n\t" + copy + " = " + name + ";\n#endif";
+     }
+ 
+-    sLog.out ("Copying the varyings the fragment unit of ", this->m_file, " writes to:", fill);
+-    WPENGINE_HEALTH ("compat", { { "what", "shader: fragment writes to varyings (copied to globals)" } });
++    body = std::regex_replace (body, mainOpen, "$&" + fill);
++    sLog.out ("Copying the inputs the ", fragment ? "fragment" : "vertex", " unit of ", this->m_file, " writes to:", fill);
++    WPENGINE_HEALTH ("compat", { { "what", fragment ? "shader: fragment writes to varyings (copied to globals)" : "WE: vertex writes to attributes (copied to globals)" } });
+     return head + fill + body;
+ }
+ 
++std::string ShaderUnit::applyBuiltinDeclarations (std::string source) {
++    // WE's translator turns a declared `gl_…` input or output into a member of its IN / OUT struct with that system
++    // value's semantic (gl_Position SV_POSITION: GH 0x140125e80 adds it; the stock shadow casters declare
++    // `in uint gl_InstanceID;` and `varying uint gl_ViewportIndex;` — inferred to be SV_InstanceID and
++    // SV_ViewportArrayIndex). GLSL has them built in and refuses a declaration: it's dropped, and a vertex unit
++    // that writes gl_ViewportIndex asks for the extension that allows it there
++    static const std::regex declaration (
++	R"((^|\n)[ \t]*(?:in|out|varying|attribute)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)+(gl_[A-Za-z0-9_]+)\s*;[^\n]*)"
++    );
++    if (!std::regex_search (source, declaration)) {
++	return source;
++    }
++    source = std::regex_replace (source, declaration, "$1// built in: $2");
++    if (this->m_type == GLSLContext::UnitType_Vertex && source.find ("gl_ViewportIndex") != std::string::npos) {
++	this->m_extensions += "#extension GL_ARB_shader_viewport_layer_array : enable\n";
++    }
++    WPENGINE_HEALTH ("compat", { { "what", "WE: a declared gl_ built-in dropped" } });
++    return source;
++}
++
+ void ShaderUnit::parseComboConfiguration (const std::string& content, const int defaultValue) {
+     // TODO: SUPPORT REQUIRES SO WE PROPERLY FOLLOW THE REQUIRED CHAIN
+     JSON data;
+@@ -609,7 +537,18 @@ template <typename V> V vectorDefault (const JSON& value) {
+ 	return V (value.get<float> ());
+     }
+     if (value.is_string ()) {
+-	return VectorBuilder::parse<V> (value.get<std::string> ());
++	// as many components as are written, the rest 0, extras ignored (the stock editorpaintbrush gives a vec4
++	// "0 0"; VectorBuilder threw and the shader didn't build). Inferred: WE's own reader isn't located
++	std::istringstream in (value.get<std::string> ());
++	V out (0.0f);
++	for (int i = 0; i < V::length (); i++) {
++	    float f = 0.0f;
++	    if (!(in >> f)) {
++		break;
++	    }
++	    out[i] = f;
++	}
++	return out;
+     }
+     return V (0.0f);
+ }
+@@ -660,10 +599,10 @@ void ShaderUnit::parseParameterConfiguration (
+ 	constant = this->m_constants.find (*material);
+     }
+ 
+-    if (constant == this->m_constants.end () && !defvalue.has_value ()) {
+-	if (type != "sampler2D") {
+-	    sLog.exception ("Cannot parse parameter data for ", name, " in shader ", this->m_file);
+-	}
++    // a parameter with neither a material constant nor a default (the stock shadowcasterfoliage4's g_SpeedLeaves,
++    // set by the material it's used with) starts at zero: it threw, and the shader didn't build. Inferred
++    if (constant == this->m_constants.end () && !defvalue.has_value () && type != "sampler2D") {
++	sLog.out ("No default for parameter ", name, " in shader ", this->m_file, ", using zero");
+     }
+ 
+     Variables::ShaderVariable* parameter = nullptr;
+@@ -771,6 +710,17 @@ void ShaderUnit::parseParameterConfiguration (
+ 	    }
+ 	}
+ 
++	// "formatcombo": WE defines TEX<n>FORMAT to the bound texture's format (common_fragment.h's FORMAT_*, read by
++	// ConvertTextureFormat; the stock fur4 uses TEX8FORMAT in code). LWE sets only TEX0FORMAT (CPass): the others
++	// are FORMAT_RGBA8888 (0), what LWE hands the shader for any texture it decoded. Inferred
++	const auto formatCombo = data.find ("formatcombo");
++	if (formatCombo != data.end () && formatCombo->is_boolean () && formatCombo->get<bool> ()) {
++	    const std::string name = "TEX" + std::to_string (index) + "FORMAT";
++	    if (!this->m_combos.contains (name) && !this->m_overrideCombos.contains (name)) {
++		this->m_discoveredCombos.emplace (name, 0);
++	    }
++	}
++
+ 	if (textureName != data.end ()) {
+ 	    this->m_defaultTextures.emplace (index, *textureName);
+ 	}
+@@ -868,10 +818,18 @@ const std::string& ShaderUnit::compile () {
+     }
+ 
+     // this should be the rest of the shader
+-    this->m_final
+-	+= this->applyWritableFragmentVaryings (this->applyFragmentTexCoordCompatibility (
+-	    this->applyFragmentVaryingDeclarations (this->applyLinkedVaryingCompatibility (this->m_preprocessed))
+-	));
++    std::string body = this->applyWritableFragmentVaryings (this->applyFragmentTexCoordCompatibility (
++	this->applyFragmentVaryingDeclarations (this->applyLinkedVaryingCompatibility (this->m_preprocessed))
++    ));
++    body = WERules::renameReservedWords (WERules::falsifyUnreadableIfs (this->applyBuiltinDeclarations (body)));
++    this->m_final += WERules::intrinsicOverloads (body);
++    if (this->m_type == GLSLContext::UnitType_Fragment) {
++	this->m_final += WERules::clipFunctions (body);
++    }
++    this->m_final += body;
++    if (!this->m_extensions.empty ()) {
++	this->m_final.insert (this->m_final.find ('\n') + 1, this->m_extensions);
++    }
+ 
+     // the pass itself handles shader compilation, the unit doesn't have enough information for this step
+     return this->m_final;
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index 7ffcc9a..e8e7181 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -114,6 +114,8 @@ private:
+      * shaders: the packaged foliagesway reads `v_Bounds`, declared in its vertex unit only)
+      */
+     [[nodiscard]] std::string applyFragmentVaryingDeclarations (std::string source) const;
++    /** Declarations of gl_ built-ins (WE's system-value struct members) dropped */
++    [[nodiscard]] std::string applyBuiltinDeclarations (std::string source);
+ 
+     /**
+      * Parses a COMBO value to add the proper define to the code
+@@ -142,10 +144,6 @@ private:
+      * Shader's original contents
+      */
+     std::string m_content;
+-    /**
+-     * Includes content to be added on compilation
+-     */
+-    std::string m_includes;
+     /**
+      * Shader's content after the preprocessing step
+      */
+@@ -154,6 +152,8 @@ private:
+      * Shader's code after the compilation of glslang and spirv
+      */
+     std::string m_final;
++    /** `#extension` lines the unit needs (after `#version`) */
++    std::string m_extensions;
+     /**
+      * The parameters the shader needs
+      */
+diff --git a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+new file mode 100644
+index 0000000..b08184d
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+@@ -0,0 +1,443 @@
++#include "WEShaderRules.h"
++
++#include "WallpaperEngine/Health.h"
++#include "WallpaperEngine/Logging/Log.h"
++
++#include <map>
++#include <regex>
++#include <sstream>
++#include <vector>
++
++namespace WallpaperEngine::Render::Shaders::WERules {
++namespace {
++std::vector<std::string> splitLines (const std::string& source) {
++    std::vector<std::string> lines;
++    size_t begin = 0;
++    while (begin <= source.size ()) {
++	const size_t end = source.find ('\n', begin);
++	if (end == std::string::npos) {
++	    lines.push_back (source.substr (begin));
++	    break;
++	}
++	lines.push_back (source.substr (begin, end - begin));
++	begin = end + 1;
++    }
++    return lines;
++}
++
++std::string joinLines (const std::vector<std::string>& lines) {
++    std::string out;
++    for (size_t i = 0; i < lines.size (); i++) {
++	out += lines[i];
++	if (i + 1 < lines.size ()) {
++	    out += '\n';
++	}
++    }
++    return out;
++}
++
++/** The line without its `//` comment (block comments are left: the callers only look at directive lines) */
++std::string withoutLineComment (const std::string& line) {
++    const size_t at = line.find ("//");
++    return at == std::string::npos ? line : line.substr (0, at);
++}
++
++const std::regex& directive () {
++    static const std::regex re (R"(^\s*#\s*([a-z]+)\b\s*([^\n]*)$)");
++    return re;
++}
++} // namespace
++
++std::string expandIncludes (const std::string& source, const IncludeLoader& load, std::set<std::string>& seen) {
++    std::string out;
++    out.reserve (source.size ());
++    for (const auto& line : splitLines (source)) {
++	// GH 0x140191050: only a line that begins with the 8 bytes "#include"
++	if (line.compare (0, 8, "#include") != 0) {
++	    out += line;
++	    out += '\n';
++	    continue;
++	}
++	const size_t open = line.find ('"');
++	const size_t close = open == std::string::npos ? std::string::npos : line.find ('"', open + 1);
++	if (close == std::string::npos) {
++	    out += "\n";
++	    continue;
++	}
++	const std::string name = line.substr (open + 1, close - open - 1);
++	if (seen.contains (name)) {
++	    out += "// already included from file " + name + "\n";
++	    continue;
++	}
++	const auto content = load (name);
++	if (!content.has_value ()) {
++	    out += "// tried including file " + name + " but was not found\n";
++	    continue;
++	}
++	seen.insert (name);
++	out += "// begin of include from file " + name + "\n";
++	out += expandIncludes (*content, load, seen);
++	out += "// end of included from file " + name + "\n";
++    }
++    if (!out.empty () && (source.empty () || source.back () != '\n')) {
++	out.pop_back ();
++    }
++    return out;
++}
++
++std::string hoistDeclarations (const std::string& source) {
++    auto lines = splitLines (source);
++    static const std::regex declaration (
++	R"(^\s*(?:uniform|attribute|varying|in|out)\s+(?:(?:lowp|mediump|highp|flat|smooth|noperspective|centroid)\s+)*)"
++	R"((?:float|int|uint|bool|[biu]?vec[234]|mat[234](?:x[234])?|sampler[A-Za-z0-9]*|float[234](?:x[234])?|int[234])\s+)"
++	R"([A-Za-z_][A-Za-z0-9_]*\s*(?:\[[^\]]*\])?\s*;\s*(?://[^\n]*)?$)"
++    );
++    static const std::regex identifier (R"([A-Za-z_][A-Za-z0-9_]*)");
++
++    std::vector<std::vector<std::string>> chains; // the open #if chains, outermost first
++    std::vector<size_t> chainStart;               // the line each chain's #if is on
++    int braces = 0, parens = 0;
++    bool block = false;
++    long hoistAt = -1;
++    std::set<std::string> definedSince;
++    std::string hoisted;
++    size_t moved = 0;
++
++    for (size_t i = 0; i < lines.size (); i++) {
++	const std::string& line = lines[i];
++	const bool topLevel = braces == 0 && parens == 0 && !block;
++	std::smatch m;
++	if (!block && std::regex_match (line, m, directive ())) {
++	    const std::string kind = m[1].str ();
++	    if (kind == "if" || kind == "ifdef" || kind == "ifndef") {
++		chains.push_back ({ line });
++		chainStart.push_back (i);
++	    } else if ((kind == "elif" || kind == "else") && !chains.empty ()) {
++		chains.back ().push_back (line);
++	    } else if (kind == "endif" && !chains.empty ()) {
++		chains.pop_back ();
++		chainStart.pop_back ();
++	    } else if ((kind == "define" || kind == "undef") && hoistAt >= 0) {
++		std::smatch name;
++		const std::string rest = m[2].str ();
++		if (std::regex_search (rest, name, identifier)) {
++		    definedSince.insert (name.str ());
++		}
++	    }
++	    continue;
++	}
++	if (hoistAt < 0 && topLevel && line.find ("// begin of include from file ") != std::string::npos) {
++	    // the first include: before the outermost #if it is in, so the whole chain stays below
++	    hoistAt = chainStart.empty () ? static_cast<long> (i) : static_cast<long> (chainStart.front ());
++	    // the chains open at that point are above the hoisted block: a declaration in them keeps only the inner ones
++	} else if (hoistAt >= 0 && topLevel && std::regex_match (line, declaration)) {
++	    // the chains the hoisted copy needs: those opened after the hoist point
++	    std::string open, close;
++	    bool readsLocalDefine = false;
++	    for (size_t c = 0; c < chains.size (); c++) {
++		if (static_cast<long> (chainStart[c]) < hoistAt) {
++		    continue;
++		}
++		for (const auto& d : chains[c]) {
++		    open += d + "\n";
++		    const std::string text = withoutLineComment (d);
++		    for (auto it = std::sregex_iterator (text.begin (), text.end (), identifier); it != std::sregex_iterator ();
++			 ++it) {
++			readsLocalDefine = readsLocalDefine || definedSince.contains (it->str ());
++		    }
++		}
++		close += "#endif\n";
++	    }
++	    for (auto it = std::sregex_iterator (line.begin (), line.end (), identifier); it != std::sregex_iterator (); ++it) {
++		readsLocalDefine = readsLocalDefine || definedSince.contains (it->str ());
++	    }
++	    if (!readsLocalDefine) {
++		hoisted += open + line + "\n" + close;
++		lines[i] = "";
++		moved++;
++	    }
++	}
++	// track the scope for the next line
++	for (size_t c = 0; c < line.size (); c++) {
++	    if (block) {
++		if (line.compare (c, 2, "*/") == 0) {
++		    block = false;
++		    c++;
++		}
++		continue;
++	    }
++	    if (line.compare (c, 2, "//") == 0) {
++		break;
++	    }
++	    if (line.compare (c, 2, "/*") == 0) {
++		block = true;
++		c++;
++		continue;
++	    }
++	    switch (line[c]) {
++		case '{': braces++; break;
++		case '}': braces = std::max (0, braces - 1); break;
++		case '(': parens++; break;
++		case ')': parens = std::max (0, parens - 1); break;
++		default: break;
++	    }
++	}
++    }
++
++    if (moved == 0 || hoistAt < 0) {
++	return source;
++    }
++    lines[static_cast<size_t> (hoistAt)] = "// declarations hoisted as WE's cbuffers and structs are\n" + hoisted
++	+ "// end of hoisted declarations\n" + lines[static_cast<size_t> (hoistAt)];
++    WPENGINE_HEALTH ("compat", { { "what", "WE: declarations hoisted above the includes" } });
++    return joinLines (lines);
++}
++
++namespace {
++/** Applies `fn (identifier, position, text)` → replacement to every identifier outside comments */
++template <typename F> std::string mapIdentifiers (const std::string& source, F fn) {
++    std::string out;
++    out.reserve (source.size ());
++    size_t i = 0;
++    const size_t n = source.size ();
++    while (i < n) {
++	const char c = source[i];
++	if (c == '/' && i + 1 < n && source[i + 1] == '/') {
++	    const size_t end = source.find ('\n', i);
++	    const size_t stop = end == std::string::npos ? n : end;
++	    out.append (source, i, stop - i);
++	    i = stop;
++	    continue;
++	}
++	if (c == '/' && i + 1 < n && source[i + 1] == '*') {
++	    const size_t end = source.find ("*/", i + 2);
++	    const size_t stop = end == std::string::npos ? n : end + 2;
++	    out.append (source, i, stop - i);
++	    i = stop;
++	    continue;
++	}
++	if (std::isalpha (static_cast<unsigned char> (c)) || c == '_') {
++	    size_t j = i;
++	    while (j < n && (std::isalnum (static_cast<unsigned char> (source[j])) || source[j] == '_')) {
++		j++;
++	    }
++	    const bool member = i > 0 && source[i - 1] == '.';
++	    const std::string word = source.substr (i, j - i);
++	    out += member ? word : fn (word, j);
++	    i = j;
++	    continue;
++	}
++	if (std::isdigit (static_cast<unsigned char> (c))) {
++	    // a number with its suffix (1.0f, 2u, 1e-3) is not an identifier
++	    size_t j = i;
++	    while (j < n && (std::isalnum (static_cast<unsigned char> (source[j])) || source[j] == '.' || source[j] == '_'
++			     || ((source[j] == '-' || source[j] == '+') && (source[j - 1] == 'e' || source[j - 1] == 'E')))) {
++		j++;
++	    }
++	    out.append (source, i, j - i);
++	    i = j;
++	    continue;
++	}
++	out += c;
++	i++;
++    }
++    return out;
++}
++} // namespace
++
++std::string renameReservedWords (const std::string& source) {
++    // GLSL 3.30's keywords and reserved words that HLSL leaves free for a name (HLSL's own keywords — static,
++    // inline, extern, volatile, shared, sample, … — would not compile in WE either, so they are not here)
++    static const std::set<std::string> reserved = {
++	"input",	 "output",    "filter",	    "common",	 "partition", "active",   "asm",       "class",
++	"union",	 "enum",      "typedef",    "template",	 "this",      "packed",	  "goto",      "noinline",
++	"public",	 "external",  "interface",  "superp",	 "sizeof",    "cast",	  "namespace", "using",
++	"resource",	 "patch",     "subroutine", "fvec2",	 "fvec3",     "fvec4",	  "hvec2",     "hvec3",
++	"hvec4",	 "smooth",    "flat",	    "invariant", "layout",    "lowp",	  "mediump",   "highp",
++	"precision",	 "coherent",  "restrict",   "readonly",	 "writeonly", "buffer",	  "atomic_uint",
++	"noperspective", "centroid", "sampler3DRect", "image1D", "image2D",  "image3D", "iimage2D",  "uimage2D",
++    };
++    // a qualifier the source itself writes as GLSL (`flat in`, `precision highp float`, `layout(…)`) stays
++    static const std::set<std::string> qualifiers = { "smooth",	   "flat",     "invariant", "layout",
++						      "lowp",	   "mediump",  "highp",	    "precision",
++						      "noperspective", "centroid" };
++    static const std::regex textureVariable (
++	R"(\b(?:float|int|uint|bool|[biu]?vec[234]|mat[234]|sampler2D|float[234])\s+texture\s*[;=,\[)])"
++    );
++    const bool textureIsAVariable = std::regex_search (source, textureVariable);
++    bool renamed = false;
++
++    std::string out = mapIdentifiers (source, [&] (const std::string& word, size_t after) -> std::string {
++	if (reserved.contains (word)) {
++	    if (qualifiers.contains (word)) {
++		// a qualifier is followed by another word (a type or a qualifier) or `(` for layout; a name isn't
++		size_t k = after;
++		while (k < source.size () && (source[k] == ' ' || source[k] == '\t')) {
++		    k++;
++		}
++		const bool qualifies
++		    = k < source.size () && (std::isalpha (static_cast<unsigned char> (source[k])) || source[k] == '(');
++		if (qualifies) {
++		    return word;
++		}
++	    }
++	    renamed = true;
++	    return "_wp_" + word;
++	}
++	if (textureIsAVariable && word == "texture") {
++	    size_t k = after;
++	    while (k < source.size () && std::isspace (static_cast<unsigned char> (source[k]))) {
++		k++;
++	    }
++	    if (k >= source.size () || source[k] != '(') {
++		renamed = true;
++		return "_wp_texture";
++	    }
++	}
++	return word;
++    });
++    if (renamed) {
++	WPENGINE_HEALTH ("compat", { { "what", "WE: a GLSL-reserved name renamed" } });
++    }
++    return renamed ? out : source;
++}
++
++std::string falsifyUnreadableIfs (const std::string& source) {
++    auto lines = splitLines (source);
++    static const std::regex member (R"([A-Za-z_][A-Za-z0-9_]*\s*(?:\.|\[))");
++    bool changed = false;
++    for (auto& line : lines) {
++	std::smatch m;
++	if (!std::regex_match (line, m, directive ()) || (m[1].str () != "if" && m[1].str () != "elif")) {
++	    continue;
++	}
++	const std::string expression = withoutLineComment (m[2].str ());
++	if (std::regex_search (expression, member)) {
++	    sLog.out ("An #if WE's preprocessor can't read is false: ", line);
++	    line = "#" + m[1].str () + " 0 // was: " + expression;
++	    changed = true;
++	}
++    }
++    if (changed) {
++	WPENGINE_HEALTH ("compat", { { "what", "WE: an unreadable #if is false" } });
++    }
++    return changed ? joinLines (lines) : source;
++}
++
++std::string intrinsicOverloads (const std::string& source) {
++    struct Intrinsic {
++	const char* name;
++	const char* body; // T is the type
++    };
++    static const Intrinsic intrinsics[] = {
++	{ "log10", "T log10 (T x) { return log2 (x) * 0.301029995663981; }" },
++	{ "saturate", "T saturate (T x) { return clamp (x, 0.0, 1.0); }" },
++	{ "frac", "T frac (T x) { return fract (x); }" },
++	{ "fmod", "T fmod (T x, T y) { return x - y * trunc (x / y); }" },
++	{ "lerp", "T lerp (T a, T b, T t) { return mix (a, b, t); }" },
++	{ "atan2", "T atan2 (T y, T x) { return atan (y, x); }" },
++	{ "ddx", "T ddx (T x) { return dFdx (x); }" },
++	{ "ddy", "T ddy (T x) { return dFdy (-x); }" },
++    };
++    static const char* types[] = { "float", "vec2", "vec3", "vec4" };
++    std::string out;
++    for (const auto& intrinsic : intrinsics) {
++	const std::regex definition (
++	    std::string (R"(\b(?:float|vec[234]|float[234]|int|void)\s+)") + intrinsic.name
++	    + R"(\s*\(\s*(?:(?:in|const)\s+)*([A-Za-z_][A-Za-z0-9_]*))"
++	);
++	std::set<std::string> own;
++	for (auto it = std::sregex_iterator (source.begin (), source.end (), definition); it != std::sregex_iterator (); ++it) {
++	    std::string type = (*it)[1].str ();
++	    if (type.starts_with ("float") && type.size () == 6) {
++		type = std::string ("vec") + type.back ();
++	    }
++	    own.insert (type);
++	}
++	if (own.empty ()) {
++	    continue;
++	}
++	out += std::string ("#undef ") + intrinsic.name + "\n";
++	for (const char* type : types) {
++	    if (own.contains (type)) {
++		continue;
++	    }
++	    out += std::regex_replace (intrinsic.body, std::regex ("\\bT\\b"), type) + "\n";
++	}
++    }
++    if (!out.empty ()) {
++	WPENGINE_HEALTH ("compat", { { "what", "WE: a user function overloads an HLSL intrinsic" } });
++    }
++    return out;
++}
++
++std::string clipFunctions (const std::string& source) {
++    static const std::regex call (R"(\bclip\s*\()");
++    static const std::regex variable (R"(\b(?:float|vec[234]|float[234]|int|bool)\s+clip\b)");
++    if (!std::regex_search (source, call) || std::regex_search (source, variable)) {
++	return "";
++    }
++    return "void clip (float x) { if (x < 0.0) discard; }\n"
++	   "void clip (vec2 x) { if (any (lessThan (x, vec2 (0.0)))) discard; }\n"
++	   "void clip (vec3 x) { if (any (lessThan (x, vec3 (0.0)))) discard; }\n"
++	   "void clip (vec4 x) { if (any (lessThan (x, vec4 (0.0)))) discard; }\n";
++}
++
++std::string dropUnmatchedEndifs (const std::string& source) {
++    static const std::regex opens (R"(^\s*#\s*if(?:n?def)?\b)");
++    static const std::regex closes (R"(^\s*#\s*endif\b)");
++    std::string out;
++    out.reserve (source.size ());
++    int depth = 0;
++    size_t begin = 0;
++
++    while (begin < source.size ()) {
++	size_t end = source.find ('\n', begin);
++	end = end == std::string::npos ? source.size () : end + 1;
++	const std::string line = source.substr (begin, end - begin);
++	if (std::regex_search (line, opens)) {
++	    depth++;
++	} else if (std::regex_search (line, closes)) {
++	    if (depth == 0) {
++		sLog.out ("Dropping an #endif with no #if: ", line);
++		WPENGINE_HEALTH ("compat", { { "what", "glslang: unmatched #endif dropped" } });
++		out += line.back () == '\n' ? "\n" : "";
++		begin = end;
++		continue;
++	    }
++	    depth--;
++	}
++	out += line;
++	begin = end;
++    }
++
++    return out;
++}
++
++std::string spliceLines (const std::string& source) {
++    std::string out;
++    out.reserve (source.size ());
++    int pending = 0;
++
++    for (size_t i = 0; i < source.size (); i++) {
++	if (source[i] == '\\') {
++	    size_t next = i + 1;
++	    if (next < source.size () && source[next] == '\r') {
++		next++;
++	    }
++	    if (next < source.size () && source[next] == '\n') {
++		pending++;
++		i = next;
++		continue;
++	    }
++	}
++	out += source[i];
++	if (source[i] == '\n' && pending > 0) {
++	    out.append (static_cast<size_t> (pending), '\n');
++	    pending = 0;
++	}
++    }
++
++    return out;
++}
++} // namespace WallpaperEngine::Render::Shaders::WERules
+diff --git a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
+new file mode 100644
+index 0000000..3e674c6
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
+@@ -0,0 +1,85 @@
++#pragma once
++
++#include <functional>
++#include <optional>
++#include <set>
++#include <string>
++
++/**
++ * Wallpaper Engine's own shader preprocessing, ported. WE's shaders are a GLSL dialect that WE turns into HLSL and
++ * hands to D3DCompile (wallpaper64.exe 2.8.485; addresses are its Ghidra functions, as in the WE/LWE gap audit):
++ *
++ * - GH 0x140191050 reads a unit line by line; a line that *starts* with `#include` (no indent; a commented-out one
++ *   is just a comment) is blanked and the file named between its quotes is recorded with the offset it was at, and
++ *   GH 0x1401917f0 pastes each include (`shaders/<name>`, itself expanded the same way) at that offset — in place,
++ *   not before main. A missing include is skipped silently.
++ * - GH 0x140125e80 (the translator) takes every `attribute`, `varying`, `in`, `out` and `uniform` declaration line out
++ *   of the text: uniforms go to cbuffers / Texture2D + SamplerState declarations ahead of all code, attributes and
++ *   varyings to the VS_INPUT / VS_OUTPUT structs, and every use becomes `IN.x` / `OUT.x`. So code anywhere — an
++ *   include pasted at the top included — sees every declaration of the unit. The fragment unit's inputs are the
++ *   vertex unit's outputs (its VS_OUTPUT list, types and all); `gl_FragColor` is `OUT.gl_FragColor`; a global line
++ *   starting `const` gets `static ` in front. Then the text goes to D3DCompile (vs_5_0 / ps_5_0, flags 0x8800 =
++ *   optimization level 3 | strictness), whose HLSL semantics are what the shaders were written against: implicit
++ *   vector truncation, scalar promotion, bool/int/float conversions in conditions and assignments, non-constant
++ *   initializers for `static const` globals and for `const` locals, uncalled functions not type-checked to the end.
++ *   A unit that still fails is replaced by shaders/HLSL/dx11fallback (solid 0.5 0 0 red) — so a shader a published
++ *   scene uses compiles there.
++ * - GH 0x140199cf0 is WE's own preprocessor pass over the result (#define, #undef, #if/#ifdef/#ifndef/#elif/#else/
++ *   #endif, #require); an `#endif` with no open `#if` is ignored there.
++ *
++ * LWE hands GLSL 3.30 to glslang, so these functions rewrite a unit's text so that glslang and the GL driver accept
++ * what WE's path accepts, with the same meaning. Each names its rule; "inferred" marks the parts read from HLSL's
++ * rules and the library's shaders rather than from WE's code.
++ */
++namespace WallpaperEngine::Render::Shaders::WERules {
++/** Reads `shaders/<name>`; nullopt when it doesn't exist */
++using IncludeLoader = std::function<std::optional<std::string> (const std::string& name)>;
++
++/**
++ * GH 0x140191050 / 0x1401917f0: every line starting `#include "name"` replaced by that file, expanded the same way,
++ * between `// begin of include from file name` / `// end of included from file name` markers. A file already pasted
++ * in this unit is not pasted again (inferred: HLSL would reject the second copy's functions)
++ */
++std::string expandIncludes (const std::string& source, const IncludeLoader& load, std::set<std::string>& seen);
++
++/**
++ * GH 0x140125e80: the unit's `uniform` / `attribute` / `varying` / `in` / `out` declaration lines (at file scope,
++ * after the first include) moved up to where the first include starts, each inside copies of the `#if` chain it was
++ * in, so every include and function sees them as in WE's cbuffers and structs. A declaration whose `#if` reads a
++ * name the unit `#define`s between there and here stays where it is
++ */
++std::string hoistDeclarations (const std::string& source);
++
++/**
++ * Identifiers HLSL leaves free but GLSL reserves (`input`, `output`, `filter`, `common`, …) renamed `_wp_<name>`; a
++ * variable named `texture` too (it hides GLSL's texture(), which texSample2D is). Inferred (HLSL's keyword list)
++ */
++std::string renameReservedWords (const std::string& source);
++
++/**
++ * An `#if` / `#elif` whose expression isn't one a preprocessor can read (`#if g_Texture0Resolution.y <= 640`, 3042492564's
++ * aa_gaussian) is false, as WE's preprocessor (GH 0x140199cf0, its expression reader GH 0x140196ce0) treats it: the
++ * block it guards there is never compiled (it has a missing semicolon). Inferred from that shader
++ */
++std::string falsifyUnreadableIfs (const std::string& source);
++
++/**
++ * The header's HLSL names that are macros (log10, saturate, frac, fmod, lerp, atan2, ddx, ddy) clash with a unit that
++ * defines a function of that name itself (2812601803's tone_mapping defines `float log10 (float)`; HLSL lets a
++ * user function overload an intrinsic): the macro is #undef'd and replaced by real overloads for the other types.
++ * Returns the text to put before the unit's code (empty when nothing clashes)
++ */
++std::string intrinsicOverloads (const std::string& source);
++
++/**
++ * HLSL's clip(x) (discard when any component is below zero; the stock volumetricsfront): overloads for a fragment
++ * unit that calls it and has no variable of that name (2800594362's clipping_mask has `vec4 clip`). Empty otherwise
++ */
++std::string clipFunctions (const std::string& source);
++
++/** An `#endif` with no open `#if` dropped (GH 0x140199cf0 ignores it); the line stays, empty */
++std::string dropUnmatchedEndifs (const std::string& source);
++
++/** A backslash at the end of a line joins it to the next (D3DCompile's preprocessor); the line count is kept */
++std::string spliceLines (const std::string& source);
++} // namespace WallpaperEngine::Render::Shaders::WERules

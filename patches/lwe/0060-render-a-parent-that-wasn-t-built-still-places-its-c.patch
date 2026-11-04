@@ -1,7 +1,7 @@
 From b6e2878e81bd521ef2b4847f5a84f272ff23060b Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 14:18:54 +0530
-Subject: [PATCH 60/62] render: a parent that wasn't built still places its
+Subject: [PATCH 60/70] render: a parent that wasn't built still places its
  children
 
 resolveTransform walked the parent chain through the built render objects and stopped at the first one

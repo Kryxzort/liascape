@@ -1,0 +1,106 @@
+From de0e225852efe3e69d4f53a5516fb54e54de84d0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:10:25 +0530
+Subject: [PATCH 66/70] script: stored script-property strings stay strings;
+ V8's RegExp.$1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- A script property the scene stores as a string is that string: WE hands scripts the JSON value and
+  turns one into a vector only for a vector default (baseclasses.js _Internal.updateScriptProperties).
+  LWE parsed "0.5, 1, 1" into a Vec3, so 3477054430 and 3509243656's `string.split` threw. A stored
+  "x y z" for a vector default still becomes that vector (property and text scripts).
+- RegExp.$1…$9, lastMatch, lastParen, leftContext, rightContext, input, as V8 has them (quickjs leaves
+  them out): every match records the last one. 2932157836's clock formats its time with
+  `fmt.replace(RegExp.$1, …)` after a `test`.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (SceneScript coverage); docs/player/reports/scene-health.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Data/Parsers/DynamicValueParser.cpp       |  5 ++-
+ .../Scripting/ScriptEngine.cpp                |  7 +++-
+ .../Scripting/resources/builtins.js           | 37 +++++++++++++++++++
+ 3 files changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+index d764ef8..41ab60a 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+@@ -211,7 +211,10 @@ DynamicValueParser::parse (const JSON& data, const Properties& properties, bool
+ 
+ 	if (scriptPropsJson.has_value () && scriptPropsJson->is_object ()) {
+ 	    for (const auto& [key, propData] : scriptPropsJson->items ()) {
+-		scriptProps[key] = UserSettingParser::parse (propData, properties);
++		// a stored string stays a string (an addText's "0.5, 1, 1"): WE hands scripts the JSON value as it is
++		// and only turns one into a Vec3 for a Vec3 default (baseclasses.js _Internal.updateScriptProperties,
++		// which builtins.js follows for Vec2/3/4)
++		scriptProps[key] = UserSettingParser::parse (propData, properties, false, true);
+ 	    }
+ 	}
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index e8cfc0d..ce9ecf3 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -640,7 +640,12 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	<< "    get: function(t, k) {\n"
+ 	<< "      if (typeof k !== 'string') { return t[k]; }\n"
+ 	<< "      var v = globalThis.__layerProp(__id, k);\n"
+-	<< "      return v === undefined ? t[k] : v;\n"
++	<< "      if (v === undefined) { return t[k]; }\n"
++	// a stored string for a vector default is that vector (as for property scripts, builtins.js)
++	<< "      var d = t[k];\n"
++	<< "      if (typeof v === 'string' && d !== null && typeof d === 'object' && typeof d.constructor === 'function'\n"
++	<< "          && /^Vec[234]$/.test(d.constructor.name)) { return new d.constructor(v); }\n"
++	<< "      return v;\n"
+ 	<< "    },\n"
+ 	<< "    has: function(t, k) { return (k in t) || globalThis.__layerProp(__id, k) !== undefined; }\n"
+ 	<< "  });\n"
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index 4f13acb..da5a2b8 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -263,3 +263,40 @@ globalThis.__layerMethods = (function () {
+   define('getLayerByID', (id) => scene.enumerateLayers().find((layer) => String(layer.id) === String(id)));
+ })();
+ 
++// V8's legacy RegExp statics (RegExp.$1…$9, lastMatch, …), which quickjs leaves out: scripts written for WE use them
++// (2932157836's clock: `fmt.replace(RegExp.$1, …)` after a `test`). Every match (exec, test, match, replace, split go
++// through `exec`) records the last one, as V8 does
++(function () {
++  if (Object.getOwnPropertyDescriptor(RegExp, '$1') !== undefined) {
++    return;
++  }
++  const exec = RegExp.prototype.exec;
++  let last = null;
++  let input = '';
++  Object.defineProperty(RegExp.prototype, 'exec', {
++    value: function (s) {
++      const result = exec.call(this, s);
++      if (result !== null) {
++        last = result;
++        input = String(s);
++      }
++      return result;
++    },
++    writable: true,
++    configurable: true
++  });
++  const getter = (name, get) => Object.defineProperty(RegExp, name, { get, configurable: true });
++  for (let i = 1; i <= 9; i++) {
++    getter('$' + i, () => (last !== null && last[i] !== undefined ? last[i] : ''));
++  }
++  const lastMatch = () => (last !== null ? last[0] : '');
++  const lastParen = () => (last !== null && last.length > 1 && last[last.length - 1] !== undefined ? last[last.length - 1] : '');
++  const left = () => (last !== null ? input.slice(0, last.index) : '');
++  const right = () => (last !== null ? input.slice(last.index + last[0].length) : '');
++  for (const [names, get] of [[['lastMatch', '$&'], lastMatch], [['lastParen', '$+'], lastParen],
++    [['leftContext', '$`'], left], [['rightContext', "$'"], right], [['input', '$_'], () => input]]) {
++    for (const name of names) {
++      getter(name, get);
++    }
++  }
++})();

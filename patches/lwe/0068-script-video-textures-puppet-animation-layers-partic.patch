@@ -1,0 +1,1872 @@
+From 859c037e10c54da2a48e9c3891f243fe25c06e47 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:31:14 +0530
+Subject: [PATCH 68/70] script: video textures, puppet animation layers,
+ particle systems, the other events
+
+The rest of SceneScript's documented interfaces (lib.sceneScript.d.ts 2.8), against what the
+library's scripts call:
+- IImageLayer.getVideoTexture / IVideoTexture (3243449890, 3326873240): play, pause, stop (to the
+  start), isPlaying, get/setCurrentTime (a seek waits until mpv has the video), duration, rate, loop,
+  addEndedCallback (mpv keeps the last frame of a video that doesn't loop). undefined for a layer
+  whose texture isn't a video.
+- IAnimationLayer on puppet layers (3363252053, 3414858021's sway layers, 3326873240):
+  getAnimationLayerCount, getAnimationLayer (name or index, one object per layer), fps, frameCount,
+  duration, name, rate, blend, visible, play / pause / stop, isPlaying, get/setFrame,
+  addEndedCallback (each loop wrap, mirror turn, single finish), createAnimationLayer,
+  playSingleAnimation (plays once, then removed), destroyAnimationLayer. Scripts on an animation
+  layer's rate / visible / blend run, with thisObject that IAnimationLayer.
+- Bones: getBoneCount, getBoneIndex, getBoneParentIndex, get/setBoneTransform (world),
+  get/setLocalBoneTransform / Angles / Origin (a script's local pose over the animations'). Bone
+  physics and blend shapes are no-ops (LWE has neither; no library scene uses them).
+- IParticleSystem: play, pause (no new particles), stop (all gone), isPlaying, emitParticles,
+  instance (IParticleSystemInstance: the instanceoverride values, live, controlpoint0..7 too).
+- IEffect.setMaterialProperty (the effect's shader constant of that name, live), getMaterial.
+- Events: applyGeneralSettings ({ language } from the locale, once on load), animationEvent
+  ({ name, frame }, value) as a keyframe timeline passes its `options.events` (also those passed
+  before the script started), destroy () before the scene goes and for a destroyed layer.
+- The scene's clear colour is set every frame: a video texture's player (mpv) left its own (black)
+  behind, so every scene with a video texture cleared black; a script's IScene.clearcolor now shows.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (SceneScript coverage); docs/player/reports/scene-health.md
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |   2 +
+ .../Data/Model/PropertyAnimation.cpp          |  41 +-
+ .../Data/Model/PropertyAnimation.h            |  14 +
+ .../Data/Parsers/DynamicValueParser.cpp       |  15 +-
+ .../Data/Parsers/ObjectParser.cpp             |   1 +
+ src/core/WallpaperEngine/Render/CTexture.h    |   1 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 131 +++++-
+ .../WallpaperEngine/Render/Objects/CImage.h   |  49 +-
+ .../Render/Objects/CParticle.cpp              |  52 +++
+ .../Render/Objects/CParticle.h                |  20 +
+ .../WallpaperEngine/Render/Objects/Puppet.cpp |   9 +-
+ .../WallpaperEngine/Render/Objects/Puppet.h   |   4 +
+ .../WallpaperEngine/Render/TextureProvider.h  |   6 +
+ .../Render/Wallpapers/CScene.cpp              |  17 +
+ .../Adapters/ScriptableObjectAdapter.cpp      | 425 +++++++++++++++++-
+ .../Adapters/ScriptableObjectAdapter.h        |  20 +
+ .../Scripting/ScriptEngine.cpp                | 112 ++++-
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  11 +-
+ .../Scripting/resources/builtins.js           | 177 ++++++++
+ .../VideoPlayback/MPV/GLPlayer.cpp            |  74 ++-
+ .../VideoPlayback/MPV/GLPlayer.h              |  21 +
+ 21 files changed, 1171 insertions(+), 31 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 6998ebc..41cb075 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -105,6 +105,8 @@ struct ImageEffect {
+  */
+ struct ImageAnimationLayer {
+     int id;
++    /** the layer's custom name (SceneScript IAnimationLayer.name, getAnimationLayer (name)) */
++    std::string name;
+     UserSettingUniquePtr rate;
+     UserSettingUniquePtr visible;
+     UserSettingUniquePtr blend;
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+index 4a144f2..807f394 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.cpp
+@@ -159,6 +159,22 @@ int PropertyAnimation::getLength () const { return this->m_length; }
+ 
+ float PropertyAnimation::getFps () const { return 1.0f / this->m_secondsPerFrame; }
+ 
++void PropertyAnimation::collectEvents (float from, float to) {
++    for (const auto& event : this->m_events) {
++	const float at = static_cast<float> (event.frame) * this->m_secondsPerFrame;
++	// a frame is passed once: from its time (the start of a span) up to, not including, the next span's start
++	if (at >= from && (at < to || (to >= this->m_duration && at <= to))) {
++	    this->m_fired.emplace_back (event.name, event.frame);
++	}
++    }
++}
++
++std::vector<std::pair<std::string, int>> PropertyAnimation::takeFiredEvents () {
++    std::vector<std::pair<std::string, int>> fired;
++    fired.swap (this->m_fired);
++    return fired;
++}
++
+ void PropertyAnimation::advance (float dt) {
+     if ((this->m_flags & (StartPaused | Finished)) != 0) {
+ 	return;
+@@ -169,13 +185,36 @@ void PropertyAnimation::advance (float dt) {
+     if (this->m_duration <= 0.0f) {
+ 	return;
+     }
+-    if ((this->m_flags & Reverse) != 0) {
++    const float before = this->m_time;
++    const bool backwards = (this->m_flags & Reverse) != 0;
++    if (backwards) {
+ 	dt = -dt;
+     }
+ 
+     const float t = this->m_time + dt;
+     this->m_time = t;
+ 
++    // the events the timeline passes (animationEvent): forwards [before, t), a loop's wrap in two spans, a mirror's
++    // way back (t, before]
++    if (!this->m_events.empty () && dt != 0.0f) {
++	const float d = this->m_duration;
++	if (!backwards) {
++	    if (t < d || (this->m_flags & (Single | Mirror)) != 0) {
++		this->collectEvents (before, std::min (t, d));
++	    } else {
++		this->collectEvents (before, d);
++		this->collectEvents (0.0f, std::fmod (t, d));
++	    }
++	} else {
++	    for (const auto& event : this->m_events) {
++		const float at = static_cast<float> (event.frame) * this->m_secondsPerFrame;
++		if (at <= before && at > std::max (t, 0.0f)) {
++		    this->m_fired.emplace_back (event.name, event.frame);
++		}
++	    }
++	}
++    }
++
+     if ((this->m_flags & Single) != 0) {
+ 	if (t >= this->m_duration) {
+ 	    this->m_flags |= Finished;
+diff --git a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+index 212b698..6bcb0c9 100644
+--- a/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
++++ b/src/core/WallpaperEngine/Data/Model/PropertyAnimation.h
+@@ -38,6 +38,12 @@ public:
+ 
+     using Curve = std::vector<Keyframe>;
+ 
++    /** `options.events`: a named frame; SceneScript's animationEvent fires as the timeline passes it */
++    struct Event {
++	int frame = 0;
++	std::string name;
++    };
++
+     enum Flags : unsigned int {
+ 	Mirror = 0x1,
+ 	Single = 0x2,
+@@ -79,6 +85,10 @@ public:
+     [[nodiscard]] float getTime () const;
+     [[nodiscard]] unsigned int getFlags () const;
+ 
++    void setEvents (std::vector<Event> events) { this->m_events = std::move (events); }
++    /** The events the timeline passed since the last call (name, frame), in order */
++    [[nodiscard]] std::vector<std::pair<std::string, int>> takeFiredEvents ();
++
+     /** The value of a curve at a whole frame (exposed for tests) */
+     [[nodiscard]] static float evaluate (const Curve& curve, int frame);
+ 
+@@ -90,6 +100,10 @@ private:
+     unsigned int m_flags = 0;
+     float m_time = 0.0f;
+     std::vector<Curve> m_curves;
++    std::vector<Event> m_events = {};
++    std::vector<std::pair<std::string, int>> m_fired = {};
++    /** the time span advance covered last: [from, to] in timeline seconds, forwards (wrapped spans split) */
++    void collectEvents (float from, float to);
+ };
+ 
+ using PropertyAnimationSharedPtr = std::shared_ptr<PropertyAnimation>;
+diff --git a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+index 41ab60a..95385e3 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/DynamicValueParser.cpp
+@@ -139,10 +139,23 @@ PropertyAnimationSharedPtr DynamicValueParser::parseAnimation (const JSON& anima
+ 	curves.push_back (parseCurve (*it, curves.size () < 3 ? offsets [curves.size ()] : 0.0f));
+     }
+ 
+-    return std::make_shared<PropertyAnimation> (
++    auto result = std::make_shared<PropertyAnimation> (
+ 	text (*options, "name"), fps, length, text (*options, "mode"), flag ("startpaused"), flag ("wraploop"),
+ 	std::move (curves)
+     );
++
++    // `options.events`: [{ frame, name }], SceneScript's animationEvent
++    if (const auto events = options->find ("events"); events != options->end () && events->is_array ()) {
++	std::vector<PropertyAnimation::Event> parsed;
++	for (const auto& event : *events) {
++	    if (event.is_object () && event.contains ("frame") && event["frame"].is_number ()) {
++		parsed.push_back ({ .frame = static_cast<int> (event["frame"].get<double> ()), .name = text (event, "name") });
++	    }
++	}
++	result->setEvents (std::move (parsed));
++    }
++
++    return result;
+ }
+ 
+ DynamicValueUniquePtr
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index e3d8617..96d2172 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -414,6 +414,7 @@ ImageAnimationLayerUniquePtr ObjectParser::parseAnimationLayer (const JSON& it,
+ 
+     return std::make_unique<ImageAnimationLayer> (ImageAnimationLayer {
+ 	.id = it.require<int> ("id", "Animation layer must have an id"),
++	.name = it.optional ("name", std::string ()),
+ 	.rate = it.user ("rate", properties, 1.0f),
+ 	// WE's layer starts visible (flags 1, GH 0x140291d20)
+ 	.visible = it.user ("visible", properties, true),
+diff --git a/src/core/WallpaperEngine/Render/CTexture.h b/src/core/WallpaperEngine/Render/CTexture.h
+index 86eecfd..39652b5 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.h
++++ b/src/core/WallpaperEngine/Render/CTexture.h
+@@ -59,6 +59,7 @@ public:
+      */
+     void update () const override;
+     bool isReady () const override;
++    [[nodiscard]] GLPlayer* getVideoPlayer () const override { return this->m_player.get (); }
+ 
+ private:
+     /**
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 04e37d6..4ba460c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1,5 +1,9 @@
+ #include "CImage.h"
+ 
++#define GLM_ENABLE_EXPERIMENTAL
++#include <glm/gtx/matrix_decompose.hpp>
++#undef GLM_ENABLE_EXPERIMENTAL
++
+ #include <algorithm>
+ #include <cmath>
+ 
+@@ -12,6 +16,7 @@
+ 
+ #include "WallpaperEngine/Data/Model/Material.h"
+ #include "WallpaperEngine/Data/Model/Object.h"
++#include "WallpaperEngine/Data/Model/UserSetting.h"
+ #include "WallpaperEngine/Data/Parsers/MaterialParser.h"
+ #include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+@@ -124,6 +129,22 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     }
+     // the puppet first: with autosize its canvas grows to hold the posed mesh, which sizes the quad and the FBOs
+     this->m_hasPuppetMesh = this->loadPuppetMesh (size);
++
++    // scripts on an animation layer's rate / visible / blend run like a layer property's; thisObject is that
++    // IAnimationLayer (3363252053 starts its sway layers at an offset from them)
++    for (const auto& state : this->m_puppetLayers) {
++	const std::pair<const char*, const UserSettingUniquePtr*> values[] = {
++	    { "rate", &state.layer->rate }, { "visible", &state.layer->visible }, { "blend", &state.layer->blend }
++	};
++	for (const auto& [name, setting] : values) {
++	    if (*setting != nullptr && (*setting)->value->getScriptSource ().has_value ()) {
++		this->getScene ().getScriptEngine ().queueScript (
++		    "animationlayer_" + std::to_string (state.layer->id) + "_" + name + "_" + std::to_string (this->getId ()),
++		    *(*setting)->value, *this, nullptr, state.key
++		);
++	    }
++	}
++    }
+     if (this->m_hasPuppetMesh) {
+ 	size = this->m_puppetSize;
+     }
+@@ -381,9 +402,10 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	for (auto& m : this->m_puppetBindWorldInverse) {
+ 	    m = glm::inverse (m);
+ 	}
+-	this->m_puppetLayers.assign (this->getImage ().animationLayers.size (), {});
+-	for (size_t i = 0; i < this->m_puppetLayers.size (); i++) {
+-	    this->m_puppetLayers[i].blendIn = this->getImage ().animationLayers[i]->blendIn;
++	this->m_puppetLayers.clear ();
++	for (const auto& layer : this->getImage ().animationLayers) {
++	    this->m_puppetLayers.push_back ({ .blendIn = layer->blendIn, .layer = layer.get (),
++					      .key = this->m_nextAnimationLayerKey++, .name = layer->name });
+ 	}
+ 	this->m_puppetSkinned = !this->m_puppet.bones.empty () && !this->m_puppet.animations.empty ();
+ 
+@@ -448,32 +470,45 @@ void CImage::updatePuppetPose () {
+ 	return;
+     }
+     const float now = static_cast<float> (this->getScene ().getTime ());
+-    if (now == this->m_puppetPoseTime) {
++    if (now == this->m_puppetPoseTime && !this->m_puppetPoseDirty) {
+ 	return;
+     }
+     const float dt = this->m_puppetPoseTime < 0.0f ? 0.0f : std::max (now - this->m_puppetPoseTime, 0.0f);
+     this->m_puppetPoseTime = now;
++    this->m_puppetPoseDirty = false;
+ 
+     // GH 0x140228470: from the bind pose, every visible layer in order; its clock runs at dt · rate
+     std::vector<Puppet::Key> pose = this->m_puppetBind;
+-    const auto& layers = this->getImage ().animationLayers;
+-    for (size_t i = 0; i < layers.size () && i < this->m_puppetLayers.size (); i++) {
+-	const auto& layer = *layers[i];
+-	const auto id = static_cast<uint32_t> (layer.animation->value->getInt ());
+-	const auto match = std::find_if (this->m_puppet.animations.begin (), this->m_puppet.animations.end (),
+-					 [id] (const Puppet::Animation& a) { return a.id == id; });
+-	if (match == this->m_puppet.animations.end ()) {
++    for (auto& state : this->m_puppetLayers) {
++	const auto& layer = *state.layer;
++	const auto* match = this->puppetAnimationOf (state);
++	if (match == nullptr) {
+ 	    continue;
+ 	}
+-	auto& state = this->m_puppetLayers[i];
+ 	if (!layer.visible->value->getBool ()) {
+ 	    continue;
+ 	}
+-	Puppet::advance (*match, state.clock, dt * layer.rate->value->getFloat ());
++	if (state.playing) {
++	    Puppet::advance (*match, state.clock, dt * layer.rate->value->getFloat (),
++			     state.single ? Puppet::Mode::Single : match->mode);
++	}
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+ 	Puppet::mix (pose, this->m_puppetBind, *match, state.clock.time, weight, layer.additive);
+     }
++    // a single animation that played is removed (playSingleAnimation)
++    std::erase_if (this->m_puppetLayers, [] (const PuppetLayerState& state) { return state.single && state.clock.finished; });
++
++    this->m_puppetPose = pose;
++    // a script's bone poses (setLocalBoneTransform …) over the animations'
++    for (const auto& [bone, local] : this->m_boneOverrides) {
++	if (bone < 0 || static_cast<size_t> (bone) >= pose.size ()) {
++	    continue;
++	}
++	glm::vec3 skew;
++	glm::vec4 perspective;
++	glm::decompose (local, pose[bone].scale, pose[bone].rotation, pose[bone].position, skew, perspective);
++    }
+ 
+     Puppet::worldMatrices (this->m_puppet, pose, this->m_puppetWorld);
+     std::vector<glm::mat4> skinning (this->m_puppetWorld.size ());
+@@ -512,6 +547,76 @@ bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, fl
+     return false;
+ }
+ 
++CImage::PuppetLayerState* CImage::findPuppetLayer (int key) {
++    const auto it = std::ranges::find_if (this->m_puppetLayers, [key] (const PuppetLayerState& s) { return s.key == key; });
++    return it == this->m_puppetLayers.end () ? nullptr : &*it;
++}
++
++const Puppet::Animation* CImage::puppetAnimationOf (const PuppetLayerState& state) const {
++    const auto id = static_cast<uint32_t> (state.layer->animation->value->getInt ());
++    const auto match = std::ranges::find_if (this->m_puppet.animations, [id] (const Puppet::Animation& a) { return a.id == id; });
++    return match == this->m_puppet.animations.end () ? nullptr : &*match;
++}
++
++int CImage::createPuppetLayer (const std::string& name, int id, bool single) {
++    const auto match = std::ranges::find_if (this->m_puppet.animations, [&] (const Puppet::Animation& a) {
++	return name.empty () ? static_cast<int> (a.id) == id : a.name == name;
++    });
++    if (!this->m_puppetSkinned || match == this->m_puppet.animations.end ()) {
++	return -1;
++    }
++    // its settings as a scene's layer would have them: rate 1, visible, blend 1
++    auto layer = std::make_unique<ImageAnimationLayer> (ImageAnimationLayer {
++	.id = -1,
++	.name = match->name,
++	.rate = std::make_unique<UserSetting> (UserSetting { .value = std::make_unique<DynamicValue> (1.0f) }),
++	.visible = std::make_unique<UserSetting> (UserSetting { .value = std::make_unique<DynamicValue> (true) }),
++	.blend = std::make_unique<UserSetting> (UserSetting { .value = std::make_unique<DynamicValue> (1.0f) }),
++	.animation = std::make_unique<UserSetting> (
++	    UserSetting { .value = std::make_unique<DynamicValue> (static_cast<int> (match->id)) }
++	),
++    });
++    const int key = this->m_nextAnimationLayerKey++;
++    this->m_puppetLayers.push_back ({ .layer = layer.get (), .key = key, .name = match->name, .single = single });
++    this->m_createdAnimationLayers.push_back (std::move (layer));
++    return key;
++}
++
++bool CImage::destroyPuppetLayer (int key) {
++    return std::erase_if (this->m_puppetLayers, [key] (const PuppetLayerState& s) { return s.key == key; }) > 0;
++}
++
++void CImage::puppetBonePose (std::vector<glm::mat4>& local, std::vector<glm::mat4>& world) {
++    this->updatePuppetPose ();
++    const auto& bones = this->m_puppet.bones;
++    local.assign (bones.size (), glm::mat4 (1.0f));
++    for (size_t b = 0; b < bones.size (); b++) {
++	if (const auto it = this->m_boneOverrides.find (static_cast<int> (b)); it != this->m_boneOverrides.end ()) {
++	    local[b] = it->second;
++	} else if (b < this->m_puppetPose.size ()) {
++	    const auto& key = this->m_puppetPose[b];
++	    local[b] = glm::translate (glm::mat4 (1.0f), key.position) * glm::mat4_cast (key.rotation)
++		* glm::scale (glm::mat4 (1.0f), key.scale);
++	} else {
++	    local[b] = bones[b].local;
++	}
++    }
++    world.assign (bones.size (), glm::mat4 (1.0f));
++    for (size_t b = 0; b < bones.size (); b++) {
++	const int parent = bones[b].parent;
++	world[b] = parent >= 0 && static_cast<size_t> (parent) < b ? world[parent] * local[b] : local[b];
++    }
++}
++
++void CImage::setBoneOverride (int bone, const std::optional<glm::mat4>& local) {
++    if (local.has_value ()) {
++	this->m_boneOverrides[bone] = *local;
++    } else {
++	this->m_boneOverrides.erase (bone);
++    }
++    this->m_puppetPoseDirty = true;
++}
++
+ std::vector<std::string> CImage::attachmentNames () const {
+     std::vector<std::string> names;
+     for (const auto& attachment : this->m_puppet.attachments) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 2a57ce3..f60812e 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -1,4 +1,6 @@
+ #pragma once
++#include <map>
++#include <optional>
+ 
+ #include <optional>
+ 
+@@ -89,6 +91,40 @@ public:
+     /** IImageLayer.alignment from a script: where the quad sits on the origin, from the next frame */
+     void setAlignment (const std::string& alignment);
+ 
++    /** One puppet animation layer as it plays (SceneScript's IAnimationLayer) */
++    struct PuppetLayerState {
++	Puppet::Clock clock;
++	bool blendIn = false;
++	/** its settings: rate, visible, blend, the animation (the scene's, or one a script created) */
++	const ImageAnimationLayer* layer = nullptr;
++	/** the scripts' handle on it (stays while layers before it go) */
++	int key = 0;
++	std::string name;
++	/** pause () / stop () hold the clock */
++	bool playing = true;
++	/** playSingleAnimation: plays once, then the layer is removed */
++	bool single = false;
++    };
++    /** the puppet's animation layers in order (none without a skinned puppet) */
++    [[nodiscard]] std::vector<PuppetLayerState>& getPuppetLayers () { return this->m_puppetLayers; }
++    [[nodiscard]] PuppetLayerState* findPuppetLayer (int key);
++    /** the animation a layer plays, nullptr if the puppet has none of that id */
++    [[nodiscard]] const Puppet::Animation* puppetAnimationOf (const PuppetLayerState& state) const;
++    /**
++     * createAnimationLayer / playSingleAnimation: a new layer, last, playing the puppet animation named `name` (or of
++     * that id), rate/blend 1, visible. Its key, or -1 when the puppet has no such animation
++     */
++    int createPuppetLayer (const std::string& name, int id, bool single);
++    bool destroyPuppetLayer (int key);
++    /** The puppet's bones (none without a puppet) */
++    [[nodiscard]] const std::vector<Puppet::Bone>& getPuppetBones () const { return this->m_puppet.bones; }
++    /** The posed bones now: local (the pose with the overrides) and world (in the mesh's space: centred, y up) */
++    void puppetBonePose (std::vector<glm::mat4>& local, std::vector<glm::mat4>& world);
++    /** A script's local matrix for a bone, over what the animations pose (nullopt: back to the animations) */
++    void setBoneOverride (int bone, const std::optional<glm::mat4>& local);
++    /** a script changed an animation layer (its frame, its blend): the pose follows now */
++    void puppetPoseChanged () { this->m_puppetPoseDirty = true; }
++
+ protected:
+     /**
+      * Gives the layer a new size: its composite FBOs and its effects' FBOs (at their scale) are resized in place, so the
+@@ -162,12 +198,17 @@ private:
+     std::vector<Puppet::Key> m_puppetBind = {};
+     std::vector<glm::mat4> m_puppetBindWorldInverse = {};
+     std::vector<glm::mat4> m_puppetWorld = {};
+-    struct PuppetLayerState {
+-	Puppet::Clock clock;
+-	bool blendIn = false;
+-    };
+     std::vector<PuppetLayerState> m_puppetLayers = {};
++    /** animation layers scripts created (createAnimationLayer, playSingleAnimation) */
++    std::vector<std::unique_ptr<ImageAnimationLayer>> m_createdAnimationLayers = {};
++    int m_nextAnimationLayerKey = 0;
++    /** the pose mixed last (local, per bone), before the bone overrides */
++    std::vector<Puppet::Key> m_puppetPose = {};
++    /** bone poses a script set (setLocalBoneTransform …): the bone's local matrix, over the animations */
++    std::map<int, glm::mat4> m_boneOverrides = {};
+     float m_puppetPoseTime = -1.0f;
++    /** a script changed a layer or a bone: pose again this frame (with no time passing) */
++    bool m_puppetPoseDirty = false;
+     bool m_puppetSkinned = false;
+     glm::vec2 m_puppetSize = glm::vec2 (0.0f);
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index e8ae53c..5d641d3 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -1,4 +1,5 @@
+ #include "CParticle.h"
++#include "WallpaperEngine/Data/Model/UserSetting.h"
+ #include "WallpaperEngine/Health.h"
+ 
+ #include "WallpaperEngine/Audio/AudioContext.h"
+@@ -883,7 +884,58 @@ void CParticle::resetEmitter (const ParticleEmitter& emitter, EmitterState& stat
+     state.stopped = false;
+ }
+ 
++void CParticle::scriptPlay () { m_scriptHalted = false; }
++
++void CParticle::scriptPause () { m_scriptHalted = true; }
++
++void CParticle::scriptStop () {
++    m_scriptHalted = true;
++    m_particleCount = 0;
++    for (auto& p : m_particles) {
++	p.alive = false;
++    }
++}
++
++bool CParticle::scriptIsPlaying () const { return !m_scriptHalted || m_particleCount > 0; }
++
++void CParticle::scriptEmit (uint32_t count) { m_scriptEmit += count; }
++
++DynamicValue* CParticle::instanceValue (const std::string& name) {
++    auto& override = const_cast<ParticleInstanceOverride&> (m_particle.instanceOverride);
++    const std::pair<const char*, UserSettingUniquePtr*> values[] = {
++	{ "alpha", &override.alpha }, { "size", &override.size },	  { "count", &override.count },
++	{ "speed", &override.speed }, { "lifetime", &override.lifetime }, { "rate", &override.rate },
++	{ "colorn", &override.colorn },
++    };
++    for (const auto& [key, setting] : values) {
++	if (name == key) {
++	    return *setting == nullptr ? nullptr : (*setting)->value.get ();
++	}
++    }
++    // controlpointN: the override of that control point's offset, made from its offset when the scene sets none
++    if (name.rfind ("controlpoint", 0) == 0 && name.size () == 13 && name[12] >= '0' && name[12] <= '7') {
++	const int index = name[12] - '0';
++	auto& setting = override.controlPoint[index];
++	if (setting == nullptr) {
++	    const glm::vec3 offset = index < static_cast<int> (m_controlPoints.size ()) ? m_controlPoints[index].offset : glm::vec3 (0.0f);
++	    setting = std::make_unique<UserSetting> (UserSetting { .value = std::make_unique<DynamicValue> (offset) });
++	}
++	return setting->value.get ();
++    }
++    return nullptr;
++}
++
+ uint32_t CParticle::emitCount (const ParticleEmitter& emitter, EmitterState& state, float dt) {
++    // emitParticles: a script's particles come first, paused, stopped or not
++    const uint32_t asked = m_scriptEmit;
++    m_scriptEmit = 0;
++    if (m_scriptHalted) {
++	return asked;
++    }
++    return asked + emitterCount (emitter, state, dt);
++}
++
++uint32_t CParticle::emitterCount (const ParticleEmitter& emitter, EmitterState& state, float dt) {
+     // WE's emitter step (GH 0x14025cfe0), shared by every emitter type; a stopped emitter (bit 31) emits nothing
+     if (state.stopped) {
+ 	return 0;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index 1ce4194..9f8a13c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -110,6 +110,20 @@ public:
+     void render () override;
+     void update (float dt);
+ 
++    // SceneScript's IParticleSystem
++    /** play (): emitting again (after pause or stop) */
++    void scriptPlay ();
++    /** pause (): no new particles; the living ones go on */
++    void scriptPause ();
++    /** stop (): every particle gone now, and no new ones */
++    void scriptStop ();
++    /** isPlaying (): emitting, or particles still alive */
++    [[nodiscard]] bool scriptIsPlaying () const;
++    /** emitParticles (count): `count` more on the next step, paused or not */
++    void scriptEmit (uint32_t count);
++    /** IParticleSystemInstance: an instanceoverride value by its script name (alpha … controlpoint7), nullptr if none */
++    [[nodiscard]] DynamicValue* instanceValue (const std::string& name);
++
+     [[nodiscard]] const Particle& getParticle () const;
+ 
+     [[nodiscard]] const float& getBrightness () const override;
+@@ -144,6 +158,8 @@ protected:
+     /** an audio-responsive emitter's rate factor this frame, 0..1 */
+     [[nodiscard]] float audioLevel (const ParticleEmitter& emitter) const;
+     uint32_t emitCount (const ParticleEmitter& emitter, EmitterState& state, float dt);
++    /** the emitter's own count this step (emitCount adds a script's and holds it while halted) */
++    uint32_t emitterCount (const ParticleEmitter& emitter, EmitterState& state, float dt);
+     /** WE's hidden-system reset (GH 0x140255d00): every particle gone, every emitter reloaded */
+     void resetSystem ();
+     /** re-evaluates the `colorn` tint for this step (WE's override patcher GH 0x1401ff240) */
+@@ -235,6 +251,10 @@ private:
+ 
+     std::vector<ParticleInstance> m_particles;
+     uint32_t m_particleCount { 0 };
++    /** a script paused or stopped the system (IParticleSystem): its emitters emit nothing */
++    bool m_scriptHalted { false };
++    /** particles a script asked for (emitParticles), emitted by the next emitter step */
++    uint32_t m_scriptEmit { 0 };
+     uint32_t m_maxParticles { DEFAULT_MAX_PARTICLES };
+ 
+     std::vector<EmitterFunc> m_emitters;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index ad0b1ca..a40877a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -432,17 +432,20 @@ float length (const Animation& animation) {
+     return animation.fps > 0.0f ? static_cast<float> (animation.frames) / animation.fps : 0.0f;
+ }
+ 
+-void advance (const Animation& animation, Clock& clock, float dt) {
++void advance (const Animation& animation, Clock& clock, float dt) { advance (animation, clock, dt, animation.mode); }
++
++void advance (const Animation& animation, Clock& clock, float dt, Mode mode) {
+     const float len = length (animation);
+     if (len <= 0.0f || clock.finished) {
+ 	return;
+     }
+-    switch (animation.mode) {
++    switch (mode) {
+ 	case Mode::Single:
+ 	    clock.time += dt;
+ 	    if (clock.time >= len) {
+ 		clock.time = len;
+ 		clock.finished = true;
++		clock.ends++;
+ 	    }
+ 	    break;
+ 	case Mode::Mirror:
+@@ -450,6 +453,7 @@ void advance (const Animation& animation, Clock& clock, float dt) {
+ 	    if (!clock.reversed && clock.time >= len) {
+ 		clock.time = len - std::fmod (clock.time, len);
+ 		clock.reversed = true;
++		clock.ends++;
+ 	    } else if (clock.reversed && clock.time <= 0.0f) {
+ 		clock.time = std::fabs (std::fmod (clock.time, len));
+ 		clock.reversed = false;
+@@ -462,6 +466,7 @@ void advance (const Animation& animation, Clock& clock, float dt) {
+ 	    }
+ 	    if (clock.time >= len) {
+ 		clock.time = std::fmod (clock.time, len);
++		clock.ends++;
+ 	    }
+ 	    break;
+     }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index 1f5e776..d5441cb 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -96,6 +96,8 @@ struct Clock {
+     float time = 0.0f;
+     bool reversed = false;
+     bool finished = false;
++    /** how often the animation reached its end (a loop's wrap, a mirror's turn at the end, a single's finish) */
++    uint32_t ends = 0;
+ };
+ 
+ /** The animation's length in seconds: frames / fps */
+@@ -103,6 +105,8 @@ float length (const Animation& animation);
+ 
+ /** Advances the clock by dt (already × the layer's rate): loop wraps, mirror bounces, single stops (GH 0x1401d6a00) */
+ void advance (const Animation& animation, Clock& clock, float dt);
++/** advance, in `mode` instead of the animation's own (SceneScript's playSingleAnimation plays one once) */
++void advance (const Animation& animation, Clock& clock, float dt, Mode mode);
+ 
+ /**
+  * The layer's weight (GH 0x140291f60): blend, × the blend-in ramp t / min (length / 2, blendtime) while `blendIn`
+diff --git a/src/core/WallpaperEngine/Render/TextureProvider.h b/src/core/WallpaperEngine/Render/TextureProvider.h
+index d2a36a3..395d430 100644
+--- a/src/core/WallpaperEngine/Render/TextureProvider.h
++++ b/src/core/WallpaperEngine/Render/TextureProvider.h
+@@ -9,6 +9,10 @@
+ #include "WallpaperEngine/Data/Assets/Texture.h"
+ #include "WallpaperEngine/Data/Model/Types.h"
+ 
++namespace WallpaperEngine::VideoPlayback::MPV {
++class GLPlayer;
++}
++
+ namespace WallpaperEngine::Render {
+ using namespace WallpaperEngine::Data::Assets;
+ /**
+@@ -101,5 +105,7 @@ public:
+      * Allows the texture contents to be updated (for example, for video textures)
+      */
+     virtual void update () const = 0;
++    /** A video texture's player (SceneScript's IVideoTexture), nullptr for every other texture */
++    [[nodiscard]] virtual VideoPlayback::MPV::GLPlayer* getVideoPlayer () const { return nullptr; }
+ };
+ } // namespace WallpaperEngine::Render
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 00c9d10..695caf1 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -471,6 +471,11 @@ void CScene::updateHDRBloom () {
+ bool CScene::rendersHDR () const { return this->m_hdr; }
+ 
+ CScene::~CScene () {
++    // destroy () before the objects go ("called just before the object it belongs to gets destroyed")
++    if (this->m_scriptEngine != nullptr) {
++	this->m_scriptEngine->dispatchEvent ("destroy", JS_UNDEFINED);
++    }
++
+     // bloom object is in the objects list, so no need to explicitly delete it
+     this->m_bloomObject = nullptr;
+ 
+@@ -637,6 +642,11 @@ void CScene::advanceAnimations () {
+ 
+ 	animation->advance (dt);
+ 	animation->apply (*value);
++
++	// the events it passed reach the property's script (animationEvent)
++	if (auto fired = animation->takeFiredEvents (); !fired.empty ()) {
++	    this->m_scriptEngine->animationEvents (*value, fired);
++	}
+     }
+ }
+ Camera& CScene::getCamera () const { return *this->m_camera; }
+@@ -705,6 +715,10 @@ void CScene::renderFrame () {
+     glColorMask (true, true, true, true);
+     // (a pass leaves depth writes off: the clear needs them)
+     glDepthMask (GL_TRUE);
++    // the clear colour every frame: a video texture's player (mpv) leaves its own behind, and a script may change it
++    // (IScene.clearcolor)
++    const glm::vec3 clearColor = this->getScene ().colors.clear->value->getVec3 ();
++    glClearColor (clearColor.r, clearColor.g, clearColor.b, 1.0f);
+     glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+     // a 3D scene's lights for this frame (the models' shading reads them)
+@@ -1383,6 +1397,9 @@ bool CScene::destroyLayer (CObject* layer) {
+     if (auto* sound = layer->asOrNull<Objects::CSound> ()) {
+ 	sound->stop ();
+     }
++    if (const auto* scriptable = layer->asOrNull<Scripting::ScriptableObject> ()) {
++	this->m_scriptEngine->dispatchEvent ("destroy", JS_UNDEFINED, scriptable);
++    }
+     this->m_destroyed.push_back (layer);
+     return true;
+ }
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index eacabd1..eb6c86e 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -7,8 +7,12 @@
+ 
+ #include "WallpaperEngine/Data/Model/PropertyAnimation.h"
+ #include "WallpaperEngine/Render/Objects/CImage.h"
++#include "WallpaperEngine/Render/Objects/Puppet.h"
++#include "WallpaperEngine/Render/Objects/CParticle.h"
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+ #include "WallpaperEngine/Render/Objects/CText.h"
++#include "WallpaperEngine/Logging/Log.h"
++#include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+ #include "WallpaperEngine/Scripting/ScriptableObject.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+@@ -18,8 +22,10 @@ using namespace WallpaperEngine::Data::Utils;
+ using namespace WallpaperEngine::Scripting::Adapters;
+ using WallpaperEngine::Render::Objects::CImage;
+ using WallpaperEngine::Render::Objects::CRenderable;
++using WallpaperEngine::Render::Objects::CParticle;
+ using WallpaperEngine::Render::Objects::CSound;
+ using WallpaperEngine::Render::Objects::CText;
++namespace Puppet = WallpaperEngine::Render::Objects::Puppet;
+ using WallpaperEngine::Scripting::ScriptableObject;
+ 
+ #define SCRIPTABLE_OPAQUE_MAGIC 0xdeadbeef
+@@ -43,6 +49,12 @@ struct OpaqueAnimation {
+     DynamicValue& value;
+ };
+ 
++/** an IVideoTexture: the video an image layer shows */
++struct OpaqueVideoTexture {
++    ScriptableObjectAdapter& adapter;
++    CImage& image;
++};
++
+ /** an ITextureAnimation: the texture animation of an image layer */
+ struct OpaqueTextureAnimation {
+     ScriptableObjectAdapter& adapter;
+@@ -70,6 +82,13 @@ struct AtomName {
+     ~AtomName () { JS_FreeCString (ctx, str); }
+ };
+ 
++std::string jsString (JSContext* ctx, JSValueConst value) {
++    const char* str = JS_ToCString (ctx, value);
++    std::string result = str == nullptr ? "" : str;
++    JS_FreeCString (ctx, str);
++    return result;
++}
++
+ /** names scripts use that differ from the registered property's */
+ const char* propertyAlias (const char* name) {
+     if (strcmp (name, "pointsize") == 0) {
+@@ -95,6 +114,16 @@ enum LayerMethod {
+     Method_SetParent,
+     Method_Attachments,
+     Method_Valid,
++    Method_GetVideoTexture,
++    Method_AnimLayers,
++    Method_AnimLayerSet,
++    Method_AnimLayerCreate,
++    Method_AnimLayerDestroy,
++    Method_Bones,
++    Method_BoneOverride,
++    Method_EmitParticles,
++    Method_ParticleGet,
++    Method_ParticleSet,
+ };
+ 
+ constexpr std::pair<const char*, LayerMethod> kMethods[] = {
+@@ -108,8 +137,33 @@ constexpr std::pair<const char*, LayerMethod> kMethods[] = {
+     { "__world", Method_World },	 { "__parentWorld", Method_ParentWorld },
+     { "__setParent", Method_SetParent }, { "__attachments", Method_Attachments },
+     { "__valid", Method_Valid },
++    { "getVideoTexture", Method_GetVideoTexture },
++    // the natives under the JS IAnimationLayer and the bone methods (builtins.js)
++    { "__animLayers", Method_AnimLayers },	   { "__animLayerSet", Method_AnimLayerSet },
++    { "__animLayerCreate", Method_AnimLayerCreate }, { "__animLayerDestroy", Method_AnimLayerDestroy },
++    { "__bones", Method_Bones },		   { "__boneOverride", Method_BoneOverride },
++    { "emitParticles", Method_EmitParticles },
++    { "__particleGet", Method_ParticleGet },	   { "__particleSet", Method_ParticleSet },
+ };
+ 
++bool matrixFrom (JSContext* ctx, JSValueConst array, glm::mat4& out) {
++    if (!JS_IsObject (array)) {
++	return false;
++    }
++    float* f = &out[0][0];
++    for (uint32_t i = 0; i < 16; i++) {
++	JSValue v = JS_GetPropertyUint32 (ctx, array, i);
++	double d = 0.0;
++	if (JS_ToFloat64 (ctx, &d, v) < 0) {
++	    JS_FreeValue (ctx, v);
++	    return false;
++	}
++	JS_FreeValue (ctx, v);
++	f[i] = static_cast<float> (d);
++    }
++    return true;
++}
++
+ /** a glm matrix as the 16 numbers of SceneScript's Mat4.m (column-major, as glm keeps it) */
+ JSValue matrixArray (JSContext* ctx, const glm::mat4& m) {
+     JSValue result = JS_NewArray (ctx);
+@@ -137,6 +191,7 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+     auto& adapter = layer->adapter;
+     auto* image = object.asOrNull<CImage> ();
+     auto* sound = object.asOrNull<CSound> ();
++    auto* particle = object.asOrNull<CParticle> ();
+ 
+     switch (static_cast<LayerMethod> (magic)) {
+ 	case Method_GetEffect: {
+@@ -213,20 +268,48 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	case Method_Play:
+ 	    if (sound != nullptr) {
+ 		sound->play ();
++	    } else if (particle != nullptr) {
++		particle->scriptPlay ();
+ 	    }
+ 	    return JS_UNDEFINED;
+ 	case Method_Stop:
+ 	    if (sound != nullptr) {
+ 		sound->stop ();
++	    } else if (particle != nullptr) {
++		particle->scriptStop ();
+ 	    }
+ 	    return JS_UNDEFINED;
+ 	case Method_Pause:
+ 	    if (sound != nullptr) {
+ 		sound->pause ();
++	    } else if (particle != nullptr) {
++		particle->scriptPause ();
+ 	    }
+ 	    return JS_UNDEFINED;
+ 	case Method_IsPlaying:
++	    if (particle != nullptr) {
++		return JS_NewBool (ctx, particle->scriptIsPlaying ());
++	    }
+ 	    return JS_NewBool (ctx, sound != nullptr && sound->isPlaying ());
++	case Method_EmitParticles: {
++	    // "emit x number of particles instantly" (no count: one)
++	    int count = 1;
++	    if (argc > 0 && !JS_IsUndefined (argv[0])) {
++		JS_ToInt32 (ctx, &count, argv[0]);
++	    }
++	    if (particle != nullptr && count > 0) {
++		particle->scriptEmit (static_cast<uint32_t> (count));
++	    }
++	    return JS_UNDEFINED;
++	}
++	case Method_ParticleGet: {
++	    DynamicValue* value = particle == nullptr || argc < 1 ? nullptr : particle->instanceValue (jsString (ctx, argv[0]));
++	    return value == nullptr ? JS_UNDEFINED : adapter.getEngine ().dynamicToJs (*value);
++	}
++	case Method_ParticleSet: {
++	    DynamicValue* value = particle == nullptr || argc < 2 ? nullptr : particle->instanceValue (jsString (ctx, argv[0]));
++	    return JS_NewBool (ctx, value != nullptr && adapter.getEngine ().jsToDynamic (argv[1], *value));
++	}
+ 	case Method_GetAnimation: {
+ 	    // getAnimation (name?): the keyframe animation of the property whose script runs now (a script's own:
+ 	    // `thisObject.getAnimation ()`), else of a property of this layer, by name when one is given
+@@ -302,6 +385,142 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	    object.getScene ().setParentOf (object, parent, attachment);
+ 	    return JS_TRUE;
+ 	}
++	case Method_GetVideoTexture: {
++	    // an image layer whose texture is a video; undefined for any other layer
++	    if (image == nullptr || image->getTexture () == nullptr || image->getTexture ()->getVideoPlayer () == nullptr) {
++		return JS_UNDEFINED;
++	    }
++	    JSValue result = JS_NewObjectClass (ctx, static_cast<int> (adapter.getVideoTextureClassId ()));
++	    JS_SetOpaque (result, new OpaqueVideoTexture { .adapter = adapter, .image = *image });
++	    return result;
++	}
++	case Method_AnimLayers: {
++	    // [{ key, name, fps, frames, playing, visible, rate, blend, time, ends }]: the puppet's layers now
++	    JSValue result = JS_NewArray (ctx);
++	    if (image == nullptr) {
++		return result;
++	    }
++	    uint32_t count = 0;
++	    for (const auto& state : image->getPuppetLayers ()) {
++		const auto* animation = image->puppetAnimationOf (state);
++		JSValue entry = JS_NewObject (ctx);
++		JS_SetPropertyStr (ctx, entry, "key", JS_NewInt32 (ctx, state.key));
++		JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, state.name.c_str ()));
++		JS_SetPropertyStr (ctx, entry, "fps", JS_NewFloat64 (ctx, animation ? animation->fps : 0.0));
++		JS_SetPropertyStr (ctx, entry, "frames", JS_NewInt32 (ctx, animation ? static_cast<int> (animation->frames) : 0));
++		JS_SetPropertyStr (ctx, entry, "playing", JS_NewBool (ctx, state.playing && !state.clock.finished));
++		JS_SetPropertyStr (ctx, entry, "visible", JS_NewBool (ctx, state.layer->visible->value->getBool ()));
++		JS_SetPropertyStr (ctx, entry, "rate", JS_NewFloat64 (ctx, state.layer->rate->value->getFloat ()));
++		JS_SetPropertyStr (ctx, entry, "blend", JS_NewFloat64 (ctx, state.layer->blend->value->getFloat ()));
++		JS_SetPropertyStr (ctx, entry, "time", JS_NewFloat64 (ctx, state.clock.time));
++		JS_SetPropertyStr (ctx, entry, "ends", JS_NewInt64 (ctx, state.clock.ends));
++		JS_SetPropertyUint32 (ctx, result, count++, entry);
++	    }
++	    return result;
++	}
++	case Method_AnimLayerSet: {
++	    // __animLayerSet (key, field, value): playing, time (seconds), stop, rate, blend, visible, name
++	    int key = -1;
++	    if (image == nullptr || argc < 2 || JS_ToInt32 (ctx, &key, argv[0]) < 0) {
++		return JS_FALSE;
++	    }
++	    auto* state = image->findPuppetLayer (key);
++	    if (state == nullptr) {
++		return JS_FALSE;
++	    }
++	    const std::string field = jsString (ctx, argv[1]);
++	    double number = 0.0;
++	    if (argc > 2 && !JS_IsString (argv[2])) {
++		JS_ToFloat64 (ctx, &number, argv[2]);
++	    }
++	    if (field == "playing") {
++		const bool play = argc > 2 && JS_ToBool (ctx, argv[2]) != 0;
++		// a finished single animation plays again from its start
++		if (play && state->clock.finished) {
++		    state->clock.time = 0.0f;
++		    state->clock.finished = false;
++		    state->clock.reversed = false;
++		}
++		state->playing = play;
++	    } else if (field == "stop") {
++		state->playing = false;
++		state->clock.time = 0.0f;
++		state->clock.finished = false;
++		state->clock.reversed = false;
++	    } else if (field == "time") {
++		const auto* animation = image->puppetAnimationOf (*state);
++		const float len = animation == nullptr ? 0.0f : Puppet::length (*animation);
++		state->clock.time = std::clamp (static_cast<float> (number), 0.0f, len);
++		state->clock.finished = false;
++	    } else if (field == "rate") {
++		state->layer->rate->value->update (static_cast<float> (number), DynamicValue::UpdateSource::Script);
++	    } else if (field == "blend") {
++		state->layer->blend->value->update (static_cast<float> (number), DynamicValue::UpdateSource::Script);
++	    } else if (field == "visible") {
++		state->layer->visible->value->update (argc > 2 && JS_ToBool (ctx, argv[2]) != 0, DynamicValue::UpdateSource::Script);
++	    } else if (field == "name") {
++		state->name = argc > 2 ? jsString (ctx, argv[2]) : "";
++	    } else {
++		return JS_FALSE;
++	    }
++	    image->puppetPoseChanged ();
++	    return JS_TRUE;
++	}
++	case Method_AnimLayerCreate: {
++	    // __animLayerCreate (animation name | id, single): the new layer's key, -1 without such an animation
++	    if (image == nullptr || argc < 1) {
++		return JS_NewInt32 (ctx, -1);
++	    }
++	    int id = -1;
++	    std::string animationName;
++	    if (JS_IsString (argv[0])) {
++		animationName = jsString (ctx, argv[0]);
++	    } else {
++		JS_ToInt32 (ctx, &id, argv[0]);
++	    }
++	    const bool single = argc > 1 && JS_ToBool (ctx, argv[1]) != 0;
++	    return JS_NewInt32 (ctx, image->createPuppetLayer (animationName, id, single));
++	}
++	case Method_AnimLayerDestroy: {
++	    int key = -1;
++	    if (image == nullptr || argc < 1 || JS_ToInt32 (ctx, &key, argv[0]) < 0) {
++		return JS_FALSE;
++	    }
++	    return JS_NewBool (ctx, image->destroyPuppetLayer (key));
++	}
++	case Method_Bones: {
++	    // [{ name, parent, local, world }]: the posed bones (matrices as Mat4.m, the mesh's space)
++	    JSValue result = JS_NewArray (ctx);
++	    if (image == nullptr) {
++		return result;
++	    }
++	    std::vector<glm::mat4> local, world;
++	    image->puppetBonePose (local, world);
++	    const auto& bones = image->getPuppetBones ();
++	    for (uint32_t b = 0; b < bones.size (); b++) {
++		JSValue entry = JS_NewObject (ctx);
++		JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, bones[b].name.c_str ()));
++		JS_SetPropertyStr (ctx, entry, "parent", JS_NewInt32 (ctx, bones[b].parent));
++		JS_SetPropertyStr (ctx, entry, "local", matrixArray (ctx, local[b]));
++		JS_SetPropertyStr (ctx, entry, "world", matrixArray (ctx, world[b]));
++		JS_SetPropertyUint32 (ctx, result, b, entry);
++	    }
++	    return result;
++	}
++	case Method_BoneOverride: {
++	    // __boneOverride (bone index, Mat4.m | null): a local matrix over the animations', or back to them
++	    int bone = -1;
++	    if (image == nullptr || argc < 1 || JS_ToInt32 (ctx, &bone, argv[0]) < 0) {
++		return JS_FALSE;
++	    }
++	    glm::mat4 local (1.0f);
++	    if (argc > 1 && matrixFrom (ctx, argv[1], local)) {
++		image->setBoneOverride (bone, local);
++	    } else {
++		image->setBoneOverride (bone, std::nullopt);
++	    }
++	    return JS_TRUE;
++	}
+ 	case Method_Valid:
+ 	    return JS_NewBool (ctx, object.getScene ().isLayerAlive (&object));
+ 	case Method_Attachments: {
+@@ -412,6 +631,18 @@ JSValue scriptableobject_property_get (JSContext* ctx, JSValueConst obj_val, JSA
+ 	}
+     }
+ 
++    // IParticleSystem.instance (builtins.js IParticleSystemInstance over __particleGet / __particleSet)
++    if (object.is<CParticle> () && strcmp (name, "instance") == 0) {
++	JSValue of = JS_GetPropertyStr (ctx, engine.getGlobalThis (), "__particleInstanceOf");
++	JSValue result = JS_UNDEFINED;
++	if (JS_IsFunction (ctx, of)) {
++	    JSValueConst args[] = { obj_val };
++	    result = JS_Call (ctx, of, JS_UNDEFINED, 1, args);
++	}
++	JS_FreeValue (ctx, of);
++	return result;
++    }
++
+     // what the script stored on the layer wins over a method of the same name
+     JSValue extra = JS_GetPropertyStr (ctx, container->extras, atomName.str);
+ 
+@@ -490,6 +721,38 @@ int scriptableobject_property_set (
+ static JSValue effect_material_count (JSContext* ctx, JSValueConst, int, JSValueConst*) { return JS_NewInt32 (ctx, 1); }
+ static JSValue effect_material_noop (JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
+ 
++// IEffect.setMaterialProperty (name, value): the effect's shader constant of that name (its constantshadervalues
++// key) takes the value, live, in every pass that sets it. A name the scene doesn't set is not added
++static JSValue effect_set_material_property (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    JSClassID classId = 0;
++    auto* effect = static_cast<OpaqueEffect*> (JS_GetAnyOpaque (this_val, &classId));
++    if (effect == nullptr || argc < 2) {
++	return JS_UNDEFINED;
++    }
++    const std::string name = jsString (ctx, argv[0]);
++    for (const auto& pass : effect->effect.passOverrides) {
++	const auto it = pass->constants.find (name);
++	if (it != pass->constants.end () && it->second != nullptr && it->second->value != nullptr) {
++	    effect->adapter.getEngine ().jsToDynamic (argv[1], *it->second->value);
++	}
++    }
++    return JS_UNDEFINED;
++}
++
++// IEffect.getMaterial (index): an IMaterial (an IObject; WE's has getAnimation only)
++static JSValue effect_get_material (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
++    int index = 0;
++    if (argc > 0) {
++	JS_ToInt32 (ctx, &index, argv[0]);
++    }
++    if (index != 0) {
++	return JS_UNDEFINED;
++    }
++    JSValue material = JS_NewObject (ctx);
++    JS_SetPropertyStr (ctx, material, "getAnimation", JS_NewCFunction (ctx, effect_material_noop, "getAnimation", 1));
++    return material;
++}
++
+ // IEffect: name (read-only), visible (read/write: an effect's visibility is live since E41), and the material
+ // calls as no-ops (WE: every effect has at least one material)
+ JSValue effect_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
+@@ -510,7 +773,14 @@ JSValue effect_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom,
+     if (strcmp (name.str, "getMaterialCount") == 0) {
+ 	return JS_NewCFunction (ctx, effect_material_count, "getMaterialCount", 0);
+     }
+-    if (strcmp (name.str, "setMaterialProperty") == 0 || strcmp (name.str, "executeMaterialFunction") == 0) {
++    if (strcmp (name.str, "setMaterialProperty") == 0) {
++	return JS_NewCFunction (ctx, effect_set_material_property, name.str, 2);
++    }
++    if (strcmp (name.str, "getMaterial") == 0) {
++	return JS_NewCFunction (ctx, effect_get_material, name.str, 1);
++    }
++    // what a "material function" is isn't documented (no library scene calls one)
++    if (strcmp (name.str, "executeMaterialFunction") == 0 || strcmp (name.str, "getAnimation") == 0) {
+ 	return JS_NewCFunction (ctx, effect_material_noop, name.str, 1);
+     }
+ 
+@@ -743,6 +1013,146 @@ void texture_animation_finalizer (JSRuntime* rt, JSValueConst val) {
+     delete static_cast<OpaqueTextureAnimation*> (JS_GetAnyOpaque (val, &classId));
+ }
+ 
++namespace {
++using WallpaperEngine::VideoPlayback::MPV::GLPlayer;
++
++GLPlayer* playerOf (JSValueConst value) {
++    JSClassID classId = 0;
++    auto* video = static_cast<OpaqueVideoTexture*> (JS_GetAnyOpaque (value, &classId));
++    if (video == nullptr || video->image.getTexture () == nullptr) {
++	return nullptr;
++    }
++    return video->image.getTexture ()->getVideoPlayer ();
++}
++
++enum VideoMethod { Video_Play, Video_Pause, Video_Stop, Video_IsPlaying, Video_GetTime, Video_SetTime, Video_Ended };
++
++constexpr std::pair<const char*, VideoMethod> kVideoMethods[] = {
++    { "play", Video_Play },	      { "pause", Video_Pause },		  { "stop", Video_Stop },
++    { "isPlaying", Video_IsPlaying }, { "getCurrentTime", Video_GetTime }, { "setCurrentTime", Video_SetTime },
++    { "addEndedCallback", Video_Ended },
++};
++
++JSValue video_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
++    GLPlayer* player = playerOf (this_val);
++    if (player == nullptr) {
++	return JS_ThrowTypeError (ctx, "not a video texture");
++    }
++
++    switch (static_cast<VideoMethod> (magic)) {
++	case Video_Play:
++	    // a video that ended starts over
++	    if (player->reachedEnd ()) {
++		player->seek (0.0);
++	    }
++	    player->clearPaused ();
++	    break;
++	case Video_Pause:
++	    player->setPaused ();
++	    break;
++	case Video_Stop:
++	    // "stops the video and reverts to the beginning"
++	    player->setPaused ();
++	    player->seek (0.0);
++	    break;
++	case Video_IsPlaying:
++	    return JS_NewBool (ctx, !player->isPaused () && !player->reachedEnd ());
++	case Video_GetTime:
++	    return JS_NewFloat64 (ctx, player->getTime ());
++	case Video_SetTime: {
++	    double time = 0.0;
++	    if (argc > 0) {
++		JS_ToFloat64 (ctx, &time, argv[0]);
++	    }
++	    player->seek (time);
++	    break;
++	}
++	case Video_Ended: {
++	    JSClassID classId = 0;
++	    auto* video = static_cast<OpaqueVideoTexture*> (JS_GetAnyOpaque (this_val, &classId));
++	    if (argc > 0 && JS_IsFunction (ctx, argv[0])) {
++		video->adapter.addVideoEndedCallback (video->image, argv[0]);
++	    }
++	    break;
++	}
++    }
++    return JS_UNDEFINED;
++}
++} // namespace
++
++JSValue video_texture_property_get (JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst receiver) {
++    const AtomName name (ctx, atom);
++    GLPlayer* player = playerOf (obj_val);
++
++    if (player == nullptr || name.str == nullptr) {
++	return JS_EXCEPTION;
++    }
++    if (strcmp (name.str, "duration") == 0) {
++	return JS_NewFloat64 (ctx, player->getDuration ());
++    }
++    if (strcmp (name.str, "rate") == 0) {
++	return JS_NewFloat64 (ctx, player->getRate ());
++    }
++    if (strcmp (name.str, "loop") == 0) {
++	return JS_NewBool (ctx, player->getLoop ());
++    }
++    for (const auto& [method, id] : kVideoMethods) {
++	if (strcmp (name.str, method) == 0) {
++	    return JS_NewCFunctionMagic (ctx, video_method, method, 1, JS_CFUNC_generic_magic, id);
++	}
++    }
++    return JS_UNDEFINED;
++}
++
++int video_texture_property_set (
++    JSContext* ctx, JSValueConst obj_val, JSAtom atom, JSValueConst val, JSValueConst receiver, int flags
++) {
++    const AtomName name (ctx, atom);
++    GLPlayer* player = playerOf (obj_val);
++
++    if (player == nullptr || name.str == nullptr) {
++	return -1;
++    }
++    if (strcmp (name.str, "rate") == 0) {
++	double rate = 1.0;
++	JS_ToFloat64 (ctx, &rate, val);
++	player->setRate (rate);
++    } else if (strcmp (name.str, "loop") == 0) {
++	player->setLoop (JS_ToBool (ctx, val) != 0);
++    }
++    return 1;
++}
++
++void video_texture_finalizer (JSRuntime* rt, JSValueConst val) {
++    JSClassID classId = 0;
++    delete static_cast<OpaqueVideoTexture*> (JS_GetAnyOpaque (val, &classId));
++}
++
++void ScriptableObjectAdapter::addVideoEndedCallback (CImage& image, JSValueConst callback) {
++    this->m_videoEnded.push_back ({ .image = &image, .callback = JS_DupValue (this->m_engine.getContext (), callback), .ended = false });
++}
++
++void ScriptableObjectAdapter::pollVideoEnded () {
++    JSContext* ctx = this->m_engine.getContext ();
++
++    for (auto& entry : this->m_videoEnded) {
++	const auto* player = entry.image->getTexture () == nullptr ? nullptr : entry.image->getTexture ()->getVideoPlayer ();
++	const bool ended = player != nullptr && player->reachedEnd ();
++	if (ended && !entry.ended) {
++	    JSValue result = JS_Call (ctx, entry.callback, JS_UNDEFINED, 0, nullptr);
++	    if (JS_IsException (result)) {
++		JSValue exception = JS_GetException (ctx);
++		const char* message = JS_ToCString (ctx, exception);
++		sLog.error ("ScriptEngine [video ended]: ", message ? message : "<exception>");
++		JS_FreeCString (ctx, message);
++		JS_FreeValue (ctx, exception);
++	    }
++	    JS_FreeValue (ctx, result);
++	}
++	entry.ended = ended;
++    }
++}
++
+ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::string name) :
+     ObjectAdapter (engine), m_exoticMethods (), m_effectExoticMethods (), m_textureAnimationExoticMethods (),
+     m_effectDefinition (), m_textureAnimationDefinition (), m_name (std::move (name)) {
+@@ -779,6 +1189,16 @@ ScriptableObjectAdapter::ScriptableObjectAdapter (ScriptEngine& engine, std::str
+     JS_NewClassID (rt, &this->m_textureAnimationClassId);
+     JS_NewClass (rt, this->m_textureAnimationClassId, &this->m_textureAnimationDefinition);
+ 
++    this->m_videoExoticMethods.get_property = video_texture_property_get;
++    this->m_videoExoticMethods.set_property = video_texture_property_set;
++    this->m_videoDefinition = {
++	.class_name = "IVideoTexture",
++	.finalizer = video_texture_finalizer,
++	.exotic = &m_videoExoticMethods,
++    };
++    JS_NewClassID (rt, &this->m_videoClassId);
++    JS_NewClass (rt, this->m_videoClassId, &this->m_videoDefinition);
++
+     this->m_animationExoticMethods.get_property = animation_property_get;
+     this->m_animationDefinition = {
+ 	.class_name = "IAnimation",
+@@ -805,6 +1225,9 @@ ScriptableObjectAdapter::~ScriptableObjectAdapter () {
+ 	JS_FreeValue (ctx, method);
+     }
+     JS_FreeValue (ctx, this->m_jsMethods);
++    for (auto& entry : this->m_videoEnded) {
++	JS_FreeValue (ctx, entry.callback);
++    }
+ }
+ 
+ JSValue ScriptableObjectAdapter::jsMethod (const char* name) {
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+index 4591278..312cdc9 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.h
+@@ -6,6 +6,11 @@
+ #include <map>
+ #include <string>
+ #include <unordered_map>
++#include <vector>
++
++namespace WallpaperEngine::Render::Objects {
++class CImage;
++}
+ 
+ namespace WallpaperEngine::Scripting::Adapters {
+ /**
+@@ -38,6 +43,12 @@ public:
+     [[nodiscard]] JSClassID getEffectClassId () const { return m_effectClassId; }
+     [[nodiscard]] JSClassID getTextureAnimationClassId () const { return m_textureAnimationClassId; }
+     [[nodiscard]] JSClassID getAnimationClassId () const { return m_animationClassId; }
++    [[nodiscard]] JSClassID getVideoTextureClassId () const { return m_videoClassId; }
++
++    /** IVideoTexture.addEndedCallback: `callback` runs when the layer's video reaches its end */
++    void addVideoEndedCallback (Render::Objects::CImage& image, JSValueConst callback);
++    /** Runs the ended callbacks of the videos that reached their end since the last call (once per frame) */
++    void pollVideoEnded ();
+ 
+ private:
+     JSClassExoticMethods m_exoticMethods;
+@@ -53,6 +64,15 @@ private:
+     std::string m_name;
+     std::unordered_map<ScriptableObject*, JSValue> m_instances;
+     std::map<std::string, JSValue> m_methods;
++    JSClassExoticMethods m_videoExoticMethods {};
++    JSClassDef m_videoDefinition {};
++    JSClassID m_videoClassId = 0;
++    struct VideoEnded {
++	Render::Objects::CImage* image;
++	JSValue callback;
++	bool ended;
++    };
++    std::vector<VideoEnded> m_videoEnded = {};
+     /** builtins.js `__layerMethods`, once installed */
+     JSValue m_jsMethods = JS_UNDEFINED;
+ };
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index ce9ecf3..e49f9f2 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -568,7 +568,7 @@ constexpr const char* kLayerEvents[] = {
+     "applyUserProperties",   "resizeScreen",	      "cursorEnter",	      "cursorLeave",
+     "cursorMove",	     "cursorDown",	      "cursorUp",	      "cursorClick",
+     "mediaPlaybackChanged",  "mediaPropertiesChanged", "mediaThumbnailChanged", "mediaTimelineChanged",
+-    "mediaStatusChanged",
++    "mediaStatusChanged",    "applyGeneralSettings",
+ };
+ 
+ // __layerProp (id, name): a text-layer script property's live value (bound to a user property: follows it)
+@@ -869,7 +869,8 @@ void ScriptEngine::destroyLayer (ScriptLayerHandle handle) {
+ }
+ 
+ void ScriptEngine::queueScript (
+-    const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect
++    const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect,
++    int animationLayer
+ ) {
+     const auto source = currentValue.getScriptSource ();
+ 
+@@ -885,6 +886,7 @@ void ScriptEngine::queueScript (
+ 			   .value = currentValue,
+ 			   .object = object,
+ 			   .effect = effect,
++			   .animationLayer = animationLayer,
+ 			   .scriptScale = scriptScaleOf (key.substr (0, key.rfind ('_'))) }
+     );
+     this->m_pendingModules = true;
+@@ -988,11 +990,24 @@ void ScriptEngine::evaluateModule (LoadedModule& module) {
+     auto* definition = static_cast<JSModuleDef*> (JS_VALUE_GET_PTR (function));
+ 
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding", this->m_adapters.object->instantiate (module.object));
+-    JS_SetPropertyStr (
+-	ctx, this->m_globalThis, "__thisObjectBinding",
+-	module.effect != nullptr ? this->m_adapters.object->effect (*module.effect)
+-				 : this->m_adapters.object->instantiate (module.object)
+-    );
++    JSValue thisObject = module.effect != nullptr ? this->m_adapters.object->effect (*module.effect)
++						  : this->m_adapters.object->instantiate (module.object);
++    // a script on an animation layer's value: thisObject is that IAnimationLayer (builtins.js)
++    if (module.animationLayer >= 0) {
++	JSValue of = JS_GetPropertyStr (ctx, this->m_globalThis, "__animationLayerOf");
++	if (JS_IsFunction (ctx, of)) {
++	    JSValue args[] = { thisObject, JS_NewInt32 (ctx, module.animationLayer) };
++	    JSValue anim = JS_Call (ctx, of, JS_UNDEFINED, 2, args);
++	    if (!JS_IsException (anim) && !JS_IsUndefined (anim)) {
++		JS_FreeValue (ctx, thisObject);
++		thisObject = anim;
++	    } else {
++		JS_FreeValue (ctx, anim);
++	    }
++	}
++	JS_FreeValue (ctx, of);
++    }
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__thisObjectBinding", thisObject);
+     // createScriptProperties().finish() binds the stored script properties of the module being evaluated
+     this->m_runningModule = &module;
+     this->m_evaluatingModule = true;
+@@ -1122,6 +1137,75 @@ void ScriptEngine::startPendingScripts () {
+ 	}
+ 
+ 	JS_FreeValue (this->m_context, properties);
++
++	// applyGeneralSettings, once on load too: WE's general settings are "currently only language"
++	JSValue settings = this->generalSettings ();
++	for (auto* module : started) {
++	    this->callModule (*module, "applyGeneralSettings", 1, &settings, false);
++	}
++	for (const auto handle : startedLayers) {
++	    this->callLayerHook (handle, "applyGeneralSettings", 1, &settings, true);
++	}
++	JS_FreeValue (this->m_context, settings);
++
++	for (auto* module : started) {
++	    if (!module->pendingAnimationEvents.empty ()) {
++		const auto events = std::move (module->pendingAnimationEvents);
++		module->pendingAnimationEvents.clear ();
++		this->animationEvents (module->value, events);
++	    }
++	}
++    }
++}
++
++JSValue ScriptEngine::generalSettings () const {
++    // the user's language as WE names them (en-us, de-de, zh-chs …): the locale's language and country, from LC_ALL /
++    // LC_MESSAGES / LANG; English without one. WE's Chinese is zh-chs / zh-cht
++    std::string language = "en-us";
++    for (const char* name : { "LC_ALL", "LC_MESSAGES", "LANG" }) {
++	const char* value = std::getenv (name);
++	if (value == nullptr || *value == '\0' || std::string_view (value) == "C" || std::string_view (value) == "POSIX") {
++	    continue;
++	}
++	std::string locale = value;
++	locale = locale.substr (0, locale.find_first_of (".@"));
++	std::ranges::transform (locale, locale.begin (), [] (unsigned char c) { return c == '_' ? '-' : std::tolower (c); });
++	if (locale == "zh-cn" || locale == "zh-sg") {
++	    locale = "zh-chs";
++	} else if (locale == "zh-tw" || locale == "zh-hk") {
++	    locale = "zh-cht";
++	}
++	if (!locale.empty ()) {
++	    language = locale;
++	}
++	break;
++    }
++    JSValue settings = JS_NewObject (this->m_context);
++    JS_SetPropertyStr (this->m_context, settings, "language", JS_NewString (this->m_context, language.c_str ()));
++    return settings;
++}
++
++void ScriptEngine::animationEvents (DynamicValue& value, const std::vector<std::pair<std::string, int>>& events) {
++    // animationEvent (event, value) to the script of the animated property
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	auto& module = *this->m_scriptModules[i];
++	if (&module.value != &value) {
++	    continue;
++	}
++	// the timeline runs from the scene's first frame, the script starts on its first tick: it gets them after init
++	if (!module.initialized) {
++	    module.pendingAnimationEvents.insert (module.pendingAnimationEvents.end (), events.begin (), events.end ());
++	    continue;
++	}
++	for (const auto& [name, frame] : events) {
++	    JSValue event = JS_NewObject (this->m_context);
++	    JS_SetPropertyStr (this->m_context, event, "name", JS_NewString (this->m_context, name.c_str ()));
++	    JS_SetPropertyStr (this->m_context, event, "frame", JS_NewInt32 (this->m_context, frame));
++	    JSValue args[] = { event, this->dynamicToJs (module.value, module.scriptScale) };
++	    this->callModule (module, "animationEvent", 2, args, false);
++	    JS_FreeValue (this->m_context, args[0]);
++	    JS_FreeValue (this->m_context, args[1]);
++	}
+     }
+ }
+ 
+@@ -1309,6 +1393,20 @@ void ScriptEngine::cursorFrame (const std::vector<CursorHit>& hits, const glm::v
+ void ScriptEngine::tick () {
+     this->startPendingScripts ();
+ 
++    // IVideoTexture.addEndedCallback: the videos that reached their end
++    this->m_adapters.object->pollVideoEnded ();
++    // builtins.js's per-frame work (IAnimationLayer's ended callbacks)
++    if (JSValue hooks = JS_GetPropertyStr (this->m_context, this->m_globalThis, "__tickHooks"); JS_IsFunction (this->m_context, hooks)) {
++	JSValue result = JS_Call (this->m_context, hooks, JS_UNDEFINED, 0, nullptr);
++	if (JS_IsException (result)) {
++	    logJSException (this->m_context, "tick hooks");
++	}
++	JS_FreeValue (this->m_context, result);
++	JS_FreeValue (this->m_context, hooks);
++    } else {
++	JS_FreeValue (this->m_context, hooks);
++    }
++
+     // user properties changed since the last tick: applyUserProperties gets only those
+     if (!this->m_changedProperties.empty ()) {
+ 	JSValue changed = JS_NewObject (this->m_context);
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 92fb054..e279e17 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -60,6 +60,10 @@ public:
+ 	ScriptableObject& object;
+ 	/** a script on an effect's `visible`: thisObject is that effect (IEffect), not the layer */
+ 	const ImageEffect* effect = nullptr;
++	/** a script on a puppet animation layer's value: thisObject is that IAnimationLayer (its key), else -1 */
++	int animationLayer = -1;
++	/** animation events its value's timeline passed before the script started (sent after its init) */
++	std::vector<std::pair<std::string, int>> pendingAnimationEvents = {};
+ 	/** the script's unit per stored unit: a script sees `angles` in degrees, the layer keeps radians */
+ 	float scriptScale = 1.0f;
+ 	/** the module namespace once evaluated (JS_UNDEFINED before, or when it failed to load) */
+@@ -112,7 +116,8 @@ public:
+      * returns written to `currentValue`
+      */
+     void queueScript (
+-	const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect = nullptr
++	const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect = nullptr,
++	int animationLayer = -1
+     );
+ 
+     /**
+@@ -185,6 +190,10 @@ public:
+     /** localStorage's file for this project (wp_config_set_storage_dir), or none */
+     [[nodiscard]] std::optional<std::filesystem::path> storagePath () const;
+ 
++    /** applyGeneralSettings' argument: { language } (a new object) */
++    [[nodiscard]] JSValue generalSettings () const;
++    /** Sends animationEvent ({ name, frame }, value) to the script of `value` for each event its animation passed */
++    void animationEvents (DynamicValue& value, const std::vector<std::pair<std::string, int>>& events);
+     /** engine.userProperties: every user property, colours as Vec3 (a new object) */
+     [[nodiscard]] JSValue userProperties ();
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index da5a2b8..e6651e0 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -191,7 +191,162 @@ globalThis.__layerMethods = (function () {
+   // the rotation (degrees) whose −z axis points from `from` to `to`, `up` up (Mat4.lookAt is a view matrix: its
+   // transpose turns the layer)
+   const facing = (from, to, up) => mat(Mat4.lookAt(from, to, up || new Vec3(0, 1, 0)).m).transpose().extractEuler();
++  // IAnimationLayer: one puppet animation layer of an image layer (natives __animLayers / __animLayerSet)
++  const ended = [];
++  class IAnimationLayer {
++    constructor(layer, key) {
++      Object.defineProperty(this, '__layer', { value: layer });
++      Object.defineProperty(this, '__key', { value: key });
++    }
++    get __info() { return this.__layer.__animLayers().find((a) => a.key === this.__key); }
++    get fps() { const i = this.__info; return i ? i.fps : 0; }
++    get frameCount() { const i = this.__info; return i ? i.frames : 0; }
++    get duration() { const i = this.__info; return i && i.fps > 0 ? i.frames / i.fps : 0; }
++    get name() { const i = this.__info; return i ? i.name : ''; }
++    set name(v) { this.__layer.__animLayerSet(this.__key, 'name', String(v)); }
++    get rate() { const i = this.__info; return i ? i.rate : 0; }
++    set rate(v) { this.__layer.__animLayerSet(this.__key, 'rate', +v); }
++    get blend() { const i = this.__info; return i ? i.blend : 0; }
++    set blend(v) { this.__layer.__animLayerSet(this.__key, 'blend', +v); }
++    get visible() { const i = this.__info; return i ? i.visible : false; }
++    set visible(v) { this.__layer.__animLayerSet(this.__key, 'visible', !!v); }
++    play() { this.__layer.__animLayerSet(this.__key, 'playing', true); }
++    pause() { this.__layer.__animLayerSet(this.__key, 'playing', false); }
++    // "stop the animation and reset the current time to zero"
++    stop() { this.__layer.__animLayerSet(this.__key, 'stop'); }
++    isPlaying() { const i = this.__info; return i ? i.playing : false; }
++    getFrame() { const i = this.__info; return i ? Math.floor(i.time * i.fps + 1e-4) : 0; }
++    setFrame(frame) { const i = this.__info; if (i && i.fps > 0) { this.__layer.__animLayerSet(this.__key, 'time', frame / i.fps); } }
++    // "fired every time the animation layer reaches the end"
++    addEndedCallback(callback) {
++      if (typeof callback !== 'function') { return; }
++      const i = this.__info;
++      ended.push({ layer: this, callback, seen: i ? i.ends : 0 });
++    }
++  }
++  globalThis.IAnimationLayer = IAnimationLayer;
++  // thisObject of a script on an animation layer's value (ScriptEngine::evaluateModule)
++  globalThis.__animationLayerOf = (layer, key) => animationLayer(layer, key);
++  const animationLayer = (layer, key) => {
++    let cache = layer.__animationLayers;
++    if (cache === undefined) {
++      cache = new Map();
++      layer.__animationLayers = cache;
++    }
++    if (!cache.has(key)) { cache.set(key, new IAnimationLayer(layer, key)); }
++    return cache.get(key);
++  };
++  // createAnimationLayer's config: rate, blend, visible, name (WE: "see IAnimationLayer for config options")
++  const configure = (anim, config) => {
++    if (config === null || typeof config !== 'object') { return; }
++    for (const key of ['rate', 'blend', 'visible', 'name']) {
++      if (config[key] !== undefined) { anim[key] = config[key]; }
++    }
++    if (config.frame !== undefined) { anim.setFrame(config.frame); }
++    if (config.paused === true || config.startpaused === true) { anim.pause(); }
++  };
++  const create = (layer, animation, config, single) => {
++    let which = animation;
++    if (animation !== null && typeof animation === 'object') {
++      config = config || animation;
++      which = animation.animation !== undefined ? animation.animation : animation.name;
++    }
++    const key = layer.__animLayerCreate(typeof which === 'number' ? which : String(which), single);
++    if (key < 0) { return undefined; }
++    const anim = animationLayer(layer, key);
++    configure(anim, config);
++    return anim;
++  };
++  const bone = (layer, which) => {
++    const bones = layer.__bones();
++    const index = typeof which === 'number' ? which : bones.findIndex((b) => b.name === String(which));
++    return index >= 0 && index < bones.length ? { index, bones, bone: bones[index] } : undefined;
++  };
++  // runs once a frame (ScriptEngine::tick): ended callbacks of the layers that reached their end since
++  globalThis.__tickHooks = function () {
++    for (const entry of ended) {
++      const i = entry.layer.__info;
++      if (i === undefined || i.ends === entry.seen) { continue; }
++      entry.seen = i.ends;
++      try { entry.callback(); } catch (e) { console.error('addEndedCallback: ' + e); }
++    }
++  };
+   return {
++    getAnimationLayerCount() {
++      return this.__animLayers().length;
++    },
++    // "an existing animation layer object by name or index"
++    getAnimationLayer(which) {
++      const list = this.__animLayers();
++      const info = typeof which === 'number' ? list[which] : list.find((a) => a.name === String(which));
++      return info === undefined ? undefined : animationLayer(this, info.key);
++    },
++    createAnimationLayer(animation, config) {
++      return create(this, animation, config, false);
++    },
++    // "only play the animation once, then remove it automatically"
++    playSingleAnimation(animation, config) {
++      return create(this, animation, config, true);
++    },
++    destroyAnimationLayer(which) {
++      const anim = which instanceof IAnimationLayer ? which : this.getAnimationLayer(which);
++      return anim !== undefined && this.__animLayerDestroy(anim.__key);
++    },
++    getBoneCount() {
++      return this.__bones().length;
++    },
++    getBoneIndex(name) {
++      return this.__bones().findIndex((b) => b.name === String(name));
++    },
++    getBoneParentIndex(child) {
++      const b = bone(this, child);
++      return b === undefined ? -1 : b.bone.parent;
++    },
++    // a bone in the world: the layer's world · the bone's (the mesh's space is the layer's own)
++    getBoneTransform(which) {
++      const b = bone(this, which);
++      return b === undefined ? undefined : this.getTransformMatrix().multiply(mat(b.bone.world));
++    },
++    setBoneTransform(which, transform) {
++      const b = bone(this, which);
++      if (b === undefined) { return; }
++      const parent = b.bone.parent >= 0 ? mat(b.bones[b.bone.parent].world) : new Mat4();
++      this.__boneOverride(b.index, this.getTransformMatrix().multiply(parent).inverse().multiply(transform).m);
++    },
++    getLocalBoneTransform(which) {
++      const b = bone(this, which);
++      return b === undefined ? undefined : mat(b.bone.local);
++    },
++    setLocalBoneTransform(which, transform) {
++      const b = bone(this, which);
++      if (b !== undefined) { this.__boneOverride(b.index, transform.m); }
++    },
++    getLocalBoneAngles(which) {
++      const m = this.getLocalBoneTransform(which);
++      return m === undefined ? undefined : m.decompose().rotation;
++    },
++    setLocalBoneAngles(which, angles) {
++      const m = this.getLocalBoneTransform(which);
++      if (m === undefined) { return; }
++      const d = m.decompose();
++      this.setLocalBoneTransform(which, Mat4.compose(d.translation, angles, d.scale));
++    },
++    getLocalBoneOrigin(which) {
++      const m = this.getLocalBoneTransform(which);
++      return m === undefined ? undefined : m.translation();
++    },
++    setLocalBoneOrigin(which, origin) {
++      const m = this.getLocalBoneTransform(which);
++      if (m === undefined) { return; }
++      const d = m.decompose();
++      this.setLocalBoneTransform(which, Mat4.compose(origin, d.rotation, d.scale));
++    },
++    // LWE simulates no bone physics and has no blend shapes (no library scene has either)
++    applyBonePhysicsImpulse() {},
++    resetBonePhysicsSimulation() {},
++    getBlendShapeIndex() { return -1; },
++    getBlendShapeWeight() { return 0; },
++    setBlendShapeWeight() {},
+     // "the current world transform matrix"
+     getTransformMatrix() {
+       return mat(this.__world());
+@@ -300,3 +455,25 @@ globalThis.__layerMethods = (function () {
+     }
+   }
+ })();
++
++// IParticleSystemInstance: a particle layer's instance overrides, live (natives __particleGet / __particleSet)
++(function () {
++  class IParticleSystemInstance {
++    constructor(layer) { Object.defineProperty(this, '__layer', { value: layer }); }
++  }
++  const names = ['alpha', 'size', 'count', 'speed', 'lifetime', 'rate', 'colorn'];
++  for (let i = 0; i < 8; i++) { names.push('controlpoint' + i); }
++  for (const name of names) {
++    Object.defineProperty(IParticleSystemInstance.prototype, name, {
++      get() { return this.__layer.__particleGet(name); },
++      set(v) { this.__layer.__particleSet(name, v); },
++      enumerable: true
++    });
++  }
++  globalThis.IParticleSystemInstance = IParticleSystemInstance;
++  const instances = new WeakMap();
++  globalThis.__particleInstanceOf = (layer) => {
++    if (!instances.has(layer)) { instances.set(layer, new IParticleSystemInstance(layer)); }
++    return instances.get(layer);
++  };
++})();
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+index ec2ed48..3cc41bd 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+@@ -1,3 +1,5 @@
++#include <algorithm>
++#include <string>
+ #include "GLPlayer.h"
+ 
+ #include "WallpaperEngine/Context.h"
+@@ -123,11 +125,78 @@ void GLPlayer::clearPaused () {
+     }
+ }
+ 
++double GLPlayer::getDuration () const {
++    double value = 0.0;
++    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "duration", MPV_FORMAT_DOUBLE, &value) < 0) {
++	return 0.0;
++    }
++    return value;
++}
++
++double GLPlayer::getTime () const {
++    // a seek not done yet (mpv hasn't loaded the video, or is still seeking this frame): where it will be
++    if (this->m_pendingSeek.has_value ()) {
++	return *this->m_pendingSeek;
++    }
++    if (this->m_seekTarget.has_value ()) {
++	return *this->m_seekTarget;
++    }
++    double value = 0.0;
++    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "time-pos", MPV_FORMAT_DOUBLE, &value) < 0) {
++	return 0.0;
++    }
++    return value;
++}
++
++void GLPlayer::seek (double seconds) {
++    seconds = std::max (seconds, 0.0);
++    double position = 0.0;
++    // mpv seeks only a loaded video: until then the seek waits (render () does it)
++    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "time-pos", MPV_FORMAT_DOUBLE, &position) < 0) {
++	this->m_pendingSeek = seconds;
++	return;
++    }
++    this->m_pendingSeek = std::nullopt;
++    this->m_seekTarget = seconds;
++    const std::string at = std::to_string (seconds);
++    const char* command[] = { "seek", at.c_str (), "absolute+exact", nullptr };
++    mpv_command (this->m_handle, command);
++}
++
++void GLPlayer::setRate (double rate) {
++    // mpv's speed range
++    this->m_rate = std::clamp (rate, 0.01, 100.0);
++    if (this->m_handle) {
++	mpv_set_property (this->m_handle, "speed", MPV_FORMAT_DOUBLE, &this->m_rate);
++    }
++}
++
++void GLPlayer::setLoop (bool loop) {
++    this->m_loop = loop;
++    if (this->m_handle) {
++	mpv_set_property_string (this->m_handle, "loop", loop ? "inf" : "no");
++    }
++}
++
++bool GLPlayer::reachedEnd () const {
++    int flag = 0;
++    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "eof-reached", MPV_FORMAT_FLAG, &flag) < 0) {
++	return false;
++    }
++    return flag != 0;
++}
++
+ void GLPlayer::render () const {
+     // rendering should only happen if the texture is in use
+     if (this->m_handle == nullptr) {
+ 	return;
+     }
++    // a seek issued last frame is mpv's to report now
++    const_cast<GLPlayer*> (this)->m_seekTarget = std::nullopt;
++    // a script's seek from before mpv had the video loaded
++    if (this->m_pendingSeek.has_value ()) {
++	const_cast<GLPlayer*> (this)->seek (*this->m_pendingSeek);
++    }
+ 
+     // read all the events available
+     while (true) {
+@@ -238,7 +307,10 @@ void GLPlayer::init () {
+ 
+     // ensure video is muted and plays in a loop
+     mpv_set_property_string (this->m_handle, "hwdec", "auto");
+-    mpv_set_property_string (this->m_handle, "loop", "inf");
++    mpv_set_property_string (this->m_handle, "loop", this->m_loop ? "inf" : "no");
++    // at the end of a video that doesn't loop, stay on its last frame (IVideoTexture's ended callback)
++    mpv_set_property_string (this->m_handle, "keep-open", "yes");
++    mpv_set_property (this->m_handle, "speed", MPV_FORMAT_DOUBLE, &this->m_rate);
+     mpv_set_property (this->m_handle, "volume", MPV_FORMAT_DOUBLE, &this->m_volume);
+ 
+     // initialize gl context for mpv
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+index c7576a4..addcc26 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+@@ -50,6 +50,21 @@ public:
+ 
+     void render () const;
+ 
++    // SceneScript's IVideoTexture (a layer's video): the player's state and controls. Before mpv runs (nothing
++    // draws the video yet) they keep the state it starts with
++    [[nodiscard]] bool isPaused () const { return this->m_paused; }
++    /** the video's length in seconds (0 until mpv knows it) */
++    [[nodiscard]] double getDuration () const;
++    /** where the video is, in seconds */
++    [[nodiscard]] double getTime () const;
++    void seek (double seconds);
++    [[nodiscard]] double getRate () const { return this->m_rate; }
++    void setRate (double rate);
++    [[nodiscard]] bool getLoop () const { return this->m_loop; }
++    void setLoop (bool loop);
++    /** mpv reached the end of a video that doesn't loop (cleared by a seek) */
++    [[nodiscard]] bool reachedEnd () const;
++
+     int getWidth () const;
+     int getHeight () const;
+ 
+@@ -73,6 +88,12 @@ protected:
+     bool m_muted = false;
+     bool m_untimed = false;
+     bool m_paused = false;
++    double m_rate = 1.0;
++    bool m_loop = true;
++    /** a seek asked for before mpv ran */
++    std::optional<double> m_pendingSeek = std::nullopt;
++    /** a seek issued this frame: getTime reports it until mpv does (the next render) */
++    std::optional<double> m_seekTarget = std::nullopt;
+     std::optional<std::filesystem::path> m_file;
+     std::optional<MemoryStreamProtocolUniquePtr> m_stream;
+     uint32_t m_usageCount = 0;
