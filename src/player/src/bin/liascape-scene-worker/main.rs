@@ -38,7 +38,8 @@
 //! `--lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S]`
 //! (feature `lwe`): a diagnostic outside the protocol — renders a real scene through LWE's core
 //! offscreen, writes two PNGs, prints one JSON line (`lwe.rs`); `--audio-dump` also writes its
-//! sound and the time stretch's 0.5×/1.5× output as raw F32.
+//! sound and the time stretch's 0.5×/1.5× output as raw F32. Frames are paced to the wall clock
+//! (video textures decode in real time) unless `--unpaced`.
 
 mod audio;
 mod gputimer;

@@ -3920,7 +3920,9 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   [--prop name=value]… [--prop-at T name=value]…`** (`--prop`: a user property before the build, like
   `scene_props`; `--prop-at`: set T s into the dump, live; the dump renders at 30 fps of scene time meanwhile,
   so 0018's playlists advance) renders a
-  real scene offscreen (frames at 30 fps of scene time), writes `lwe-smoke-1s.png`/`-3s.png`
+  real scene offscreen (frames at 30 fps of scene time, paced to the wall clock: libmpv decodes video
+  textures in real time, so an unpaced run showed 3426575339 / 3432876246 / 3556794116 black; `--unpaced`
+  for the old as-fast-as-possible run), writes `lwe-smoke-1s.png`/`-3s.png`
   (upright, opaque) and prints one JSON line (`native`, `load_ms`, `build_ms`, `frame_ms_*` with a
   `glFinish` per frame, `lit_pixels`, `changed_pixels_1s_to_end`, `gl_error`, `audio_driver`,
   `audio_streams`, `audio_peak` of 0.5 s pulled); exit 0 = rendered and animating. Measured

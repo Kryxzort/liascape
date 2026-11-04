@@ -531,6 +531,9 @@ impl Drop for Scene {
 /// `T` s into the frames, after writing the frame before it as `<out>/lwe-smoke-before-<T>s.png`.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` every frame (synthetic: nothing is
 /// played), for audio-responsive scenes — compare with a run without it.
+/// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
+/// decoded by libmpv in real time, so an unpaced run (all of `S` s in a few ms) shows them black
+/// (3426575339, 3432876246, 3556794116). `--unpaced` renders as fast as it can, as before.
 pub fn smoke(args: &[String]) -> ! {
     let mut scene_dir = None;
     let mut assets = None;
@@ -538,6 +541,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut seconds = 3.0f32;
     let mut audio_dump = 0.0f32;
     let mut tone = 0.0f32;
+    let mut paced = true;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
     let mut props_at: Vec<(f32, String, serde_json::Value)> = Vec::new();
     let prop = |kv: Option<&String>| -> Option<(String, serde_json::Value)> {
@@ -554,6 +558,7 @@ pub fn smoke(args: &[String]) -> ! {
             "--seconds" => seconds = it.next().and_then(|v| v.parse().ok()).unwrap_or(3.0),
             "--audio-dump" => audio_dump = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             "--tone" => tone = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0),
+            "--unpaced" => paced = false,
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
                 let at = it.next().and_then(|v| v.parse().ok());
@@ -566,7 +571,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]..."
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ] [--prop name=value]... [--prop-at T name=value]... [--unpaced]"
         );
         std::process::exit(2)
     };
@@ -578,6 +583,7 @@ pub fn smoke(args: &[String]) -> ! {
         seconds,
         audio_dump,
         tone,
+        paced,
         &props,
         &props_at,
     ) {
@@ -599,6 +605,7 @@ fn run_smoke(
     seconds: f32,
     audio_dump: f32,
     tone: f32,
+    paced: bool,
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
 ) -> Result<String, String> {
@@ -665,8 +672,16 @@ fn run_smoke(
     let mut shots = Vec::new();
     let mut live = props_at.iter().filter(|_| audio_dump <= 0.0).peekable();
     let mut live_errors = Vec::new();
+    let start = std::time::Instant::now();
     for f in 1..=frames {
         let t = f as f32 / 30.0;
+        if paced {
+            // video textures play on the wall clock (libmpv), so scene time may not run ahead of it
+            let due = std::time::Duration::from_secs_f32((f - 1) as f32 / 30.0);
+            if let Some(wait) = due.checked_sub(start.elapsed()) {
+                std::thread::sleep(wait);
+            }
+        }
         if live.peek().is_some_and(|(at, _, _)| *at <= t) {
             opaque(&gfx);
             let path = out.join(format!("lwe-smoke-before-{}s.png", (t * 10.0).round() / 10.0));
