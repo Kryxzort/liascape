@@ -462,3 +462,5 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   wasn't found in its code; ours is a standard two-bone solver (marked inferred).
 - **Not done: bone physics** (springy hair etc., `applyBonePhysicsImpulse`, gravity/wind): none of your puppets
   enables it, and WE's simulation code is a large unread rigid-body layer.
+- Health report 86 clean / 10 degraded / 0 failed (3319542538 lost its VolumeLight error, nothing else moved);
+  shader sweep 6 failing, none new; player tests 740 passed.

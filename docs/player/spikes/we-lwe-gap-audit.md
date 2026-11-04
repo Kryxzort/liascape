@@ -2577,3 +2577,8 @@ LD_LIBRARY_PATH; VRAM at 4 s; scratchpad `f2/pairs/`):
 fixes, absent from that run's core), 0 newly failing; the 6 are as in F1.
 
 Player tests (DEBUG, pin `f4aa7c5`): 740 passed, 0 failed, 3 ignored.
+
+**Health** (`scene-health.md`, 96 scenes, pin `f4aa7c5`): 86 clean / 10 degraded / 0 failed, as on `78128d1`. The one
+change: 3319542538 loses its "unsupported: VolumeLight (shape) object" error (6 → 5 errors, loss 2 → 1 %: the `Text`
+user property is what's left); no other scene's class, loss, errors or warnings moved. VolumeLight is gone from the
+report.
