@@ -1,7 +1,7 @@
 From d9933e821973850382498d77c97cb8abc9cf4023 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:32:46 +0530
-Subject: [PATCH 35/70] data: textinput and combo values as written; list
+Subject: [PATCH 35/71] data: textinput and combo values as written; list
  textinput properties
 
 A textinput property's default was built from the JSON value's dump (),

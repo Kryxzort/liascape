@@ -1,0 +1,1124 @@
+From 4b85ae769c2201935fdafe50bed64fddf41a1edd Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:37:34 +0530
+Subject: [PATCH 71/71] render: shadows, light cookies, tube and directional
+ lights
+
+WE's shadow pass and the rest of its generated lighting (decoded from wallpaper64.exe 2.8.485):
+- Lights: castshadow (flags bit 0), usecookie (bit 1) and `cookie` (default cookie/flashlight1,
+  GH 0x140282140), `controlpoint` (a tube's far end), lightsourcesize; ltube and ldirectional
+  (GH 0x140283df0's table). Models: castshadow.
+- The shadow atlas is a depth texture sampled by comparison, 2 x 2 until a light casts a shadow,
+  then a 256 px tile per projection (medium quality, GH 0x140282540); it was a scene-sized RGBA8
+  target nothing drew. A spot's projection is its outer cone along its x axis; a point light's six
+  cube faces share a tile in 2 x 3, as common_pbr_2.h's CalculateProjectedCoordsPoint reads them
+  (near 0.05, far the radius, FUN_140282580).
+- The casters (materials/util/shadowcaster.json; shadowcasterfoliage4 / fur4 for foliage4 / fur4,
+  the mesh's combos) are drawn into each viewport before the scene; WE draws up to six instances,
+  one per viewport (gl_ViewportIndex from the vertex unit). LWE draws a viewport at a time and
+  drops that write, so the stock casters build on any GL. A polygon offset against acne (inferred).
+- PerformLighting_V1 (GH 0x140197e20): the spot cookie and shadow lookups, the point light's cube
+  lookup, the tube loop (PointSegmentDelta) and the directional lights; the calls follow the
+  common_pbr_2.h the assets ship (2.8.42's or 2.8.485's signatures). Models get
+  LIGHTS_SHADOW_MAPPING / _QUALITY 2, LIGHTS_COOKIE and LIGHTS_DIRECTIONAL from the scene's lights,
+  and the cookie where they sample _alias_lightCookie.
+- texSample2DCompare returns a vec4 (the header reads .r).
+
+Not done: WE's light clusters, the directional cascades, the 2.8.485 PCSS terms, the
+lightconfig key.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md (F1 shadows and light cookies)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Object.h  |  19 +-
+ .../Data/Parsers/ObjectParser.cpp             |  18 +-
+ src/core/WallpaperEngine/Render/CFBO.cpp      |  60 ++++
+ src/core/WallpaperEngine/Render/CFBO.h        |   8 +
+ .../WallpaperEngine/Render/Objects/CModel.cpp | 184 +++++++++++-
+ .../WallpaperEngine/Render/Objects/CModel.h   |  11 +
+ .../Render/Shaders/ShaderUnit.cpp             | 155 +++++++---
+ .../Render/Wallpapers/CScene.cpp              | 270 ++++++++++++++++--
+ .../Render/Wallpapers/CScene.h                |  49 +++-
+ 9 files changed, 701 insertions(+), 73 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Object.h b/src/core/WallpaperEngine/Data/Model/Object.h
+index 41cb075..a9b7cfa 100644
+--- a/src/core/WallpaperEngine/Data/Model/Object.h
++++ b/src/core/WallpaperEngine/Data/Model/Object.h
+@@ -195,6 +195,9 @@ public:
+ struct MeshObjectData {
+     /** the .mdl file */
+     std::string file;
++    /** `castshadow` (default false): the model is drawn into the shadow atlas of the lights that cast shadows
++     *  (WE's object property, GH 0x140283df0's table; the shadow pass GH 0x1401c4f30 draws the casters) */
++    UserSettingUniquePtr castShadow = nullptr;
+ };
+ 
+ class MeshObject : public Object, public MeshObjectData {
+@@ -205,12 +208,15 @@ public:
+ };
+ 
+ /**
+- * A light object (`"light": "lpoint" | "lspot" | …`). WE's light property table (GH 0x140283df0): color +0x2cc,
+- * intensity +0x2e4, radius +0x2e8, exponent +0x2ec, innercone +0x2f0, outercone +0x2f4 (degrees). Its transform is
+- * the base object's; a spot shines along its world x axis (GH 0x1401bf270)
++ * A light object (`"light": "lpoint" | "lspot" | "ltube" | "ldirectional"`, WE's type table 0 … 3 at the light's
++ * +0x2c0). WE's light property table (GH 0x140283df0): color +0x2cc, intensity +0x2e4, radius +0x2e8, exponent
++ * +0x2ec, innercone +0x2f0, outercone +0x2f4 (degrees), controlpoint +0x2d8 (a vec3: a tube's far end, in the
++ * light's own space), lightsourcesize +0x314, and the flags at +0x2c4: castshadow bit 0, usecookie bit 1 (GH
++ * 0x1401c9430), castvolumetrics bit 2. A spot with usecookie projects its `cookie` texture (GH 0x140282140; default
++ * cookie/flashlight1). Its transform is the base object's; a spot shines along its world x axis (GH 0x1401bf270)
+  */
+ struct LightData {
+-    enum class Kind { Point, Spot, Other };
++    enum class Kind { Point, Spot, Tube, Directional, Other };
+     Kind kind = Kind::Point;
+     std::string type;
+     UserSettingUniquePtr color;
+@@ -219,6 +225,11 @@ struct LightData {
+     float exponent = 1.0f;
+     float innerCone = 0.0f;
+     float outerCone = 45.0f;
++    UserSettingUniquePtr castShadow = nullptr;
++    UserSettingUniquePtr useCookie = nullptr;
++    std::string cookie = "cookie/flashlight1";
++    glm::vec3 controlPoint = glm::vec3 (0.0f);
++    float lightSourceSize = 0.0f;
+ };
+ 
+ class Light : public Object, public LightData {
+diff --git a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+index 96d2172..1be3cfd 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp
+@@ -96,7 +96,10 @@ ObjectUniquePtr ObjectParser::parse (const JSON& it, const Project& project) {
+     // a model object: static MDL meshes (an image object has a string `image`, a model one `image: null`)
+     if (const auto modelIt = it.find ("model");
+ 	modelIt != it.end () && modelIt->is_string () && (imageIt == it.end () || !imageIt->is_string ())) {
+-	return std::make_unique<MeshObject> (std::move (basedata), MeshObjectData { .file = *modelIt });
++	return std::make_unique<MeshObject> (
++	    std::move (basedata),
++	    MeshObjectData { .file = *modelIt, .castShadow = it.user ("castshadow", project.properties, false) }
++	);
+     }
+ 
+     if (imageIt != it.end () && imageIt->is_string ()) {
+@@ -139,9 +142,11 @@ LightUniquePtr ObjectParser::parseLight (const JSON& it, const Project& project,
+     return std::make_unique<Light> (
+ 	std::move (base),
+ 	LightData {
+-	    .kind = type == "lpoint"	 ? LightData::Kind::Point
+-		: type == "lspot" ? LightData::Kind::Spot
+-				  : LightData::Kind::Other,
++	    .kind = type == "lpoint"	       ? LightData::Kind::Point
++		: type == "lspot"	       ? LightData::Kind::Spot
++		: type == "ltube"	       ? LightData::Kind::Tube
++		: type == "ldirectional" ? LightData::Kind::Directional
++					 : LightData::Kind::Other,
+ 	    .type = type,
+ 	    .color = it.color ("color", project.properties, Builders::ColorBuilder::White),
+ 	    .intensity = it.user ("intensity", project.properties, 1.0f),
+@@ -149,6 +154,11 @@ LightUniquePtr ObjectParser::parseLight (const JSON& it, const Project& project,
+ 	    .exponent = it.optional ("exponent", 1.0f),
+ 	    .innerCone = it.optional ("innercone", 0.0f),
+ 	    .outerCone = it.optional ("outercone", 45.0f),
++	    .castShadow = it.user ("castshadow", project.properties, false),
++	    .useCookie = it.user ("usecookie", project.properties, false),
++	    .cookie = it.optional ("cookie", std::string ("cookie/flashlight1")),
++	    .controlPoint = it.optional ("controlpoint", glm::vec3 (0.0f)),
++	    .lightSourceSize = it.optional ("lightsourcesize", 0.0f),
+ 	}
+     );
+ }
+diff --git a/src/core/WallpaperEngine/Render/CFBO.cpp b/src/core/WallpaperEngine/Render/CFBO.cpp
+index 22d16fb..5e1f730 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.cpp
++++ b/src/core/WallpaperEngine/Render/CFBO.cpp
+@@ -134,6 +134,25 @@ void CFBO::resize (uint32_t realWidth, uint32_t realHeight, uint32_t textureWidt
+     glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+ 
+     glBindTexture (GL_TEXTURE_2D, this->m_texture);
++    if (this->m_shadowAtlas) {
++	glTexImage2D (
++	    GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, textureWidth, textureHeight, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT,
++	    nullptr
++	);
++	glBindFramebuffer (GL_FRAMEBUFFER, this->m_framebuffer);
++	glDepthMask (GL_TRUE);
++	glClearDepth (1.0);
++	glClear (GL_DEPTH_BUFFER_BIT);
++	glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
++	this->m_resolution = { textureWidth, textureHeight, realWidth, realHeight };
++	for (const auto& frame : this->m_frames) {
++	    frame->width1 = textureWidth;
++	    frame->height1 = textureHeight;
++	    frame->width2 = realWidth;
++	    frame->height2 = realHeight;
++	}
++	return;
++    }
+     const GLStorage storage = storageFor (this->m_format);
+     glTexImage2D (
+ 	GL_TEXTURE_2D, 0, storage.internalFormat, textureWidth, textureHeight, 0, storage.format, storage.type, nullptr
+@@ -196,6 +215,47 @@ void CFBO::attachDepthBuffer () const {
+     glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
+ }
+ 
++void CFBO::makeShadowAtlas () {
++    if (this->m_shadowAtlas) {
++	return;
++    }
++
++    GLint previousFramebuffer = 0;
++    glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
++
++    glBindTexture (GL_TEXTURE_2D, this->m_texture);
++    glTexImage2D (
++	GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, static_cast<GLsizei> (this->m_resolution.x),
++	static_cast<GLsizei> (this->m_resolution.y), 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr
++    );
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameterf (GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 1.0f);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
++    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
++
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_framebuffer);
++    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
++    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, this->m_texture, 0);
++    glDrawBuffer (GL_NONE);
++    glReadBuffer (GL_NONE);
++
++    if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++	sLog.error ("The shadow atlas ", this->m_name, " is an incomplete framebuffer");
++	WPENGINE_HEALTH ("pass_error", { { "message", "shadow atlas " + this->m_name + " is an incomplete framebuffer" } });
++    }
++
++    glDepthMask (GL_TRUE);
++    glClearDepth (1.0);
++    glClear (GL_DEPTH_BUFFER_BIT);
++    glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
++    this->m_shadowAtlas = true;
++}
++
++bool CFBO::isShadowAtlas () const { return this->m_shadowAtlas; }
++
+ CFBO::~CFBO () {
+     if (this->m_depthbuffer != GL_NONE) {
+ 	glDeleteRenderbuffers (1, &this->m_depthbuffer);
+diff --git a/src/core/WallpaperEngine/Render/CFBO.h b/src/core/WallpaperEngine/Render/CFBO.h
+index b116c74..3328498 100644
+--- a/src/core/WallpaperEngine/Render/CFBO.h
++++ b/src/core/WallpaperEngine/Render/CFBO.h
+@@ -44,6 +44,13 @@ public:
+      * against. Cleared to the far plane
+      */
+     void attachDepthBuffer () const;
++    /**
++     * Turns this FBO into a shadow atlas: its texture becomes a 24-bit depth texture (the framebuffer's depth
++     * attachment, no colour) that samples as a comparison (sampler2DShadow, GL_LEQUAL, filtered: WE's
++     * SamplerComparisonState, inferred), cleared to 1. A resize keeps it one
++     */
++    void makeShadowAtlas ();
++    [[nodiscard]] bool isShadowAtlas () const;
+ 
+     void incrementUsageCount () const override;
+     void decrementUsageCount () const override;
+@@ -54,6 +61,7 @@ private:
+     GLuint m_framebuffer = GL_NONE;
+     mutable GLuint m_depthbuffer = GL_NONE;
+     GLuint m_texture = GL_NONE;
++    bool m_shadowAtlas = false;
+     glm::vec4 m_resolution = {};
+     float m_scale = 0;
+     std::string m_name = "";
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+index 3d5f32f..55c50c5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -34,6 +34,7 @@ CModelMesh::~CModelMesh () {
+ 	delete pass;
+     }
+     this->m_passes.clear ();
++    delete this->m_shadowPass;
+ 
+     if (this->m_vbo != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_vbo);
+@@ -100,6 +101,16 @@ void CModelMesh::setup () {
+ 	cpass->addUniform ("g_EyePosition", &this->m_eye);
+ 	cpass->setInput (this->m_texture);
+ 
++	// the scene's light cookie where the material samples _alias_lightCookie (generic4's g_Texture7 under
++	// LIGHTS_COOKIE; WE points the alias at the cookie, GH 0x1401bf270 → scene+0x1310)
++	if (const auto cookie = this->getScene ().getLightCookie (); cookie != nullptr) {
++	    for (const auto& [index, name] : cpass->getShader ()->getFragment ().getTextures ()) {
++		if (name == "_alias_lightCookie") {
++		    cpass->setTexture (index, cookie);
++		}
++	    }
++	}
++
+ 	const GLint position = glGetAttribLocation (program, "a_Position");
+ 	const GLint normal = glGetAttribLocation (program, "a_Normal");
+ 	const GLint tangent = glGetAttribLocation (program, "a_Tangent4");
+@@ -152,20 +163,37 @@ void CModelMesh::uploadSceneUniforms (GLuint program) const {
+     }
+ 
+     const auto& lights = scene.getLights ();
++    using SceneLights = Wallpapers::CScene::SceneLights;
+     if (const GLint at = glGetUniformLocation (program, "g_LCluster_Counts"); at >= 0) {
+-	glUniform4f (at, static_cast<float> (lights.count), 0.0f, 0.0f, 0.0f);
++	glUniform4f (
++	    at, static_cast<float> (lights.count), static_cast<float> (lights.tubes),
++	    static_cast<float> (lights.projections), 0.0f
++	);
+     }
+-    const std::pair<const char*, const glm::vec4*> arrays[] = {
+-	{ "g_LCluster_Origin", lights.origin },
+-	{ "g_LCluster_Color", lights.color },
+-	{ "g_LCluster_Direction", lights.direction },
+-	{ "g_LCluster_Extra", lights.extra },
++    const std::tuple<const char*, const glm::vec4*, int> arrays[] = {
++	{ "g_LCluster_Origin", lights.origin, SceneLights::Max },
++	{ "g_LCluster_Color", lights.color, SceneLights::Max },
++	{ "g_LCluster_Direction", lights.direction, SceneLights::Max },
++	{ "g_LCluster_Extra", lights.extra, SceneLights::Max },
++	{ "g_LCluster_ProjectionTransform", lights.projectionTransform, SceneLights::MaxProjections },
++	{ "g_LCluster_PointProjection", lights.pointProjection, SceneLights::MaxProjections },
++	{ "g_LDirectional_Color", lights.directionalColor, scene.directionalLightCount () },
++	{ "g_LDirectional_Direction", lights.directionalDirection, scene.directionalLightCount () },
++	// the atlas's texel size: generic4's SHADOW_ATLAS_TEXEL (2.8.485's generator names it g_TextureShadowAtlasTexel)
++	{ "g_Texture6Texel", &lights.atlasTexel, 1 },
++	{ "g_TextureShadowAtlasTexel", &lights.atlasTexel, 1 },
+     };
+-    for (const auto& [name, values] : arrays) {
++    for (const auto& [name, values, count] : arrays) {
++	if (count <= 0) {
++	    continue;
++	}
+ 	if (const GLint at = glGetUniformLocation (program, name); at >= 0) {
+-	    glUniform4fv (at, Wallpapers::CScene::SceneLights::Max, glm::value_ptr (values[0]));
++	    glUniform4fv (at, count, glm::value_ptr (values[0]));
+ 	}
+     }
++    if (const GLint at = glGetUniformLocation (program, "g_LCluster_Projection"); at >= 0) {
++	glUniformMatrix4fv (at, SceneLights::MaxProjections, GL_FALSE, glm::value_ptr (lights.projection[0]));
++    }
+ 
+     const auto& fog = scene.getScene ().fog;
+     const std::pair<const char*, glm::vec4> fog4[] = {
+@@ -209,6 +237,88 @@ void CModelMesh::draw (const std::shared_ptr<const CFBO>& target, const glm::mat
+     glDepthMask (GL_FALSE);
+ }
+ 
++void CModelMesh::setupShadowCaster (const Material& caster) {
++    if (caster.passes.empty () || this->m_shadowPass != nullptr) {
++	return;
++    }
++
++    auto* cpass = new CPass (*this, std::make_shared<FBOProvider> (this), *caster.passes[0], std::nullopt, std::nullopt, std::nullopt);
++    const GLuint program = cpass->getProgramID ();
++    cpass->setModelMatrix (&this->m_modelMatrix);
++    cpass->setInput (this->m_texture);
++
++    const GLint position = glGetAttribLocation (program, "a_Position");
++    const GLint texcoord = glGetAttribLocation (program, "a_TexCoord");
++    const GLint normal = glGetAttribLocation (program, "a_Normal");
++    const GLint viewports = glGetUniformLocation (program, "g_ViewportViewProjectionMatrices");
++
++    cpass->setGeometryCallback (
++	[this, position, texcoord, normal] () {
++	    glBindBuffer (GL_ARRAY_BUFFER, this->m_vbo);
++	    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_ibo);
++	    const GLsizei stride = kFloatsPerVertex * sizeof (GLfloat);
++	    const std::pair<GLint, std::pair<GLint, size_t>> attributes[] = {
++		{ position, { 3, 0 } }, { normal, { 3, 3 } }, { texcoord, { 2, 10 } }
++	    };
++	    for (const auto& [location, layout] : attributes) {
++		if (location < 0) {
++		    continue;
++		}
++		glEnableVertexAttribArray (location);
++		glVertexAttribPointer (
++		    location, layout.first, GL_FLOAT, GL_FALSE, stride,
++		    reinterpret_cast<const void*> (layout.second * sizeof (GLfloat))
++		);
++	    }
++	},
++	[this, viewports] () {
++	    // one draw per viewport: its rect bound and its matrix as g_ViewportViewProjectionMatrices[0] (the caster
++	    // reads [gl_InstanceID], 0 for a single instance); WE draws up to six instances, one per viewport
++	    if (this->m_shadowViews == nullptr) {
++		return;
++	    }
++	    for (const auto& view : *this->m_shadowViews) {
++		if (GLAD_GL_VERSION_4_1) {
++		    glViewportIndexedf (0, view.rect.x, view.rect.y, view.rect.z, view.rect.w);
++		} else {
++		    glViewport (
++			static_cast<GLint> (view.rect.x), static_cast<GLint> (view.rect.y), static_cast<GLsizei> (view.rect.z),
++			static_cast<GLsizei> (view.rect.w)
++		    );
++		}
++		if (viewports >= 0) {
++		    glUniformMatrix4fv (viewports, 1, GL_FALSE, glm::value_ptr (view.clip));
++		}
++		glDrawElements (GL_TRIANGLES, this->m_indexCount, GL_UNSIGNED_INT, nullptr);
++	    }
++	},
++	[position, texcoord, normal] () {
++	    for (const GLint location : { position, texcoord, normal }) {
++		if (location >= 0) {
++		    glDisableVertexAttribArray (location);
++		}
++	    }
++	    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
++	}
++    );
++
++    this->m_shadowPass = cpass;
++}
++
++void CModelMesh::drawShadow (
++    const std::shared_ptr<const CFBO>& atlas, const glm::mat4& world, const std::vector<Wallpapers::CScene::ShadowView>& views
++) {
++    if (this->m_shadowPass == nullptr) {
++	return;
++    }
++
++    this->m_modelMatrix = world;
++    this->m_shadowViews = &views;
++    this->m_shadowPass->setDestination (atlas);
++    this->m_shadowPass->render ();
++    this->m_shadowViews = nullptr;
++}
++
+ bool CModelMesh::isReady () const { return this->m_ready; }
+ 
+ const float& CModelMesh::getBrightness () const { return this->m_one; }
+@@ -259,6 +369,9 @@ WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "me
+     }
+ 
+     const auto& fog = this->getScene ().getScene ().fog;
++    const auto& scene = this->getScene ();
++    const bool casts = scene.castsShadows () && this->m_object.castShadow != nullptr
++	&& this->m_object.castShadow->value->getBool ();
+ 
+     for (const auto& mesh : this->m_model.meshes) {
+ 	try {
+@@ -280,6 +393,19 @@ WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "me
+ 		}
+ 		pass.cullmode = CullingMode_Disable;
+ 
++		// the lights' combos (WE sets them on every model pass it builds, GH 0x1401c56e0 and the scene's light
++		// config): the shadow atlas and its quality when a light casts a shadow, the cookie, the directional count
++		if (scene.castsShadows ()) {
++		    pass.combos.insert_or_assign ("LIGHTS_SHADOW_MAPPING", 1);
++		    pass.combos.insert_or_assign ("LIGHTS_SHADOW_MAPPING_QUALITY", Wallpapers::CScene::ShadowQuality);
++		}
++		if (scene.getLightCookie () != nullptr) {
++		    pass.combos.insert_or_assign ("LIGHTS_COOKIE", 1);
++		}
++		if (scene.directionalLightCount () > 0) {
++		    pass.combos.insert_or_assign ("LIGHTS_DIRECTIONAL", scene.directionalLightCount ());
++		}
++
+ 		// the scene's fog for a material that keeps generic4's FOG combo (default 1)
+ 		const auto fogCombo = pass.combos.find ("FOG");
+ 		if (fogCombo == pass.combos.end () || fogCombo->second != 0) {
+@@ -293,9 +419,37 @@ WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "me
+ 	    }
+ 
+ 	    auto renderable = std::make_unique<CModelMesh> (this->getScene (), this->m_object, *material, mesh);
+-	    this->m_materials.push_back (std::move (material));
+ 	    renderable->setup ();
+ 
++	    if (renderable->isReady () && casts) {
++		// its caster: materials/util/shadowcaster.json with the shader for the mesh's (WE maps the material's
++		// shader through a table, GH 0x140185230; foliage4 → shadowcasterfoliage4, fur4 → shadowcasterfur4 by
++		// their names, inferred) and the mesh material's combos (ALPHATOCOVERAGE, …)
++		try {
++		    auto caster = MaterialParser::load (project, "materials/util/shadowcaster.json");
++		    const auto& first = *material->passes.front ();
++		    for (auto& pass : caster->passes) {
++			if (first.shader == "foliage4" || first.shader == "fur4") {
++			    pass->shader = "shadowcaster" + first.shader;
++			}
++			for (const auto& [name, value] : first.combos) {
++			    pass->combos.insert_or_assign (name, value);
++			}
++			pass->depthtest = DepthtestMode_Enabled;
++			pass->depthwrite = DepthwriteMode_Enabled;
++			pass->cullmode = CullingMode_Disable;
++			pass->blending = BlendingMode_Normal;
++		    }
++		    renderable->setupShadowCaster (*caster);
++		    this->m_materials.push_back (std::move (caster));
++		} catch (const std::exception& ex) {
++		    sLog.error ("No shadow caster for mesh ", mesh.material, " of model ", file, ": ", ex.what ());
++		    WPENGINE_HEALTH ("asset_error", { { "kind", "material" }, { "path", "materials/util/shadowcaster.json" }, { "message", "no shadow caster: " + WallpaperEngine::Health::brief (ex.what ()) } });
++		}
++	    }
++
++	    this->m_materials.push_back (std::move (material));
++
+ 	    if (renderable->isReady ()) {
+ 		this->m_meshes.push_back (std::move (renderable));
+ 	    }
+@@ -325,6 +479,18 @@ void CModel::render () {
+     }
+ }
+ 
++void CModel::renderShadow (const std::shared_ptr<const CFBO>& atlas, const std::vector<Wallpapers::CScene::ShadowView>& views) {
++    if (this->m_meshes.empty () || this->m_object.castShadow == nullptr || !this->m_object.castShadow->value->getBool ()
++	|| !this->getScene ().isEffectivelyVisible (this->m_object)) {
++	return;
++    }
++
++    const glm::mat4 world = this->getScene ().worldMatrixOf (this->m_object);
++    for (const auto& mesh : this->m_meshes) {
++	mesh->drawShadow (atlas, world, views);
++    }
++}
++
+ const MeshObject& CModel::getMeshObject () const { return this->m_object; }
+ 
+ size_t CModel::getMeshCount () const { return this->m_meshes.size (); }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.h b/src/core/WallpaperEngine/Render/Objects/CModel.h
+index d4159de..a0d2d45 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.h
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.h
+@@ -23,6 +23,13 @@ public:
+     void setup () override;
+     /** Draws the mesh into `target` with this frame's matrices */
+     void draw (const std::shared_ptr<const CFBO>& target, const glm::mat4& world, bool keepAlpha);
++    /** Builds the mesh's shadow caster pass from `caster` (materials/util/shadowcaster.json with its shader picked) */
++    void setupShadowCaster (const Material& caster);
++    /** Draws the mesh's caster into every shadow viewport of `atlas` (the scene's shadow pass) */
++    void drawShadow (
++	const std::shared_ptr<const CFBO>& atlas, const glm::mat4& world,
++	const std::vector<Wallpapers::CScene::ShadowView>& views
++    );
+     [[nodiscard]] bool isReady () const;
+ 
+     [[nodiscard]] const float& getBrightness () const override;
+@@ -39,6 +46,8 @@ private:
+     const Material& m_meshMaterial;
+     const Puppet::Mesh& m_mesh;
+     std::vector<Effects::CPass*> m_passes = {};
++    Effects::CPass* m_shadowPass = nullptr;
++    const std::vector<Wallpapers::CScene::ShadowView>* m_shadowViews = nullptr;
+     GLuint m_vbo = GL_NONE;
+     GLuint m_ibo = GL_NONE;
+     GLsizei m_indexCount = 0;
+@@ -68,6 +77,8 @@ public:
+ 
+     void setup () override;
+     void render () override;
++    /** The scene's shadow pass: a model with castshadow draws its meshes' casters into the atlas's viewports */
++    void renderShadow (const std::shared_ptr<const CFBO>& atlas, const std::vector<Wallpapers::CScene::ShadowView>& views);
+ 
+     [[nodiscard]] const MeshObject& getMeshObject () const;
+     /** The meshes that could be built (tests) */
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 01ae36e..9e850a2 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -69,7 +69,7 @@
+     "#define MAKE_SAMPLER2D_ARGUMENT(t) t\n"                                                                           \
+     "#define DECLARE_SAMPLER2D_COMPARE_PARAMETER(t) sampler2DShadow t\n"                                               \
+     "#define MAKE_SAMPLER2D_COMPARE_ARGUMENT(t) t\n"                                                                   \
+-    "#define texSample2DCompare(s, u, d) texture(s, vec3((u), (d)))\n"                                                 \
++    "#define texSample2DCompare(s, u, d) vec4(texture(s, vec3((u), (d))))\n"                                           \
+     "#define texLoad2D(s, u, r) texelFetch(s, ivec2((u) * (r)), 0)\n"                                                  \
+     "#define texSample3D texture\n"                                                                                    \
+     "#define texSample2DBackBuffer(s, u, r) texture(s, (u))\n"                                                         \
+@@ -248,38 +248,116 @@ std::string ShaderUnit::resolveRequireModule (const std::string& moduleName) con
+ }
+ 
+ std::string ShaderUnit::generateLightingV1 () const {
+-    // WE generates PerformLighting_V1 for the scene's lights (GH 0x140197e20 builds it: the point/spot loop over
+-    // g_LCluster_Origin/Color/Direction/Extra, ComputePBRLightShadow per light). This is that loop without the
+-    // clusters, the shadows, the cookies and the tube and directional lights: the first
+-    // g_LCluster_Counts.x lights of the scene (CScene::updateLights feeds them; none outside a 3D scene)
+-    return "// begin of generated module LightingV1\n"
+-	   "uniform vec4 g_LCluster_Counts;\n"
+-	   "uniform vec4 g_LCluster_Origin[8];\n"
+-	   "uniform vec4 g_LCluster_Color[8];\n"
+-	   "uniform vec4 g_LCluster_Direction[8];\n"
+-	   "uniform vec4 g_LCluster_Extra[8];\n"
+-	   "vec3 PerformLighting_V1(vec3 worldPos, vec3 color, vec3 normal, vec3 viewVector,\n"
+-	   "    vec3 specularTint, vec3 ambient, float roughness, float metallic)\n"
+-	   "{\n"
+-	   "    vec3 light = CAST3(0.0);\n"
+-	   "    int pointSpotCount = int(g_LCluster_Counts.x);\n"
+-	   "    for (int lightIndex = 0; lightIndex < 8; ++lightIndex)\n"
+-	   "    {\n"
+-	   "        if (lightIndex >= pointSpotCount) break;\n"
+-	   "        vec4 lightOrigin = g_LCluster_Origin[lightIndex];\n"
+-	   "        vec4 lightColor = g_LCluster_Color[lightIndex];\n"
+-	   "        vec4 lightDirection = g_LCluster_Direction[lightIndex];\n"
+-	   "        vec4 lightExtra = g_LCluster_Extra[lightIndex];\n"
+-	   "        vec3 lightDelta = lightOrigin.xyz - worldPos;\n"
+-	   "        float spotCookie = -dot(normalize(lightDelta), lightDirection.xyz);\n"
+-	   "        spotCookie = smoothstep(0.0, 1.0, spotCookie * lightDirection.w + lightExtra.x);\n"
+-	   "        vec3 clusterColor = lightColor.rgb * spotCookie;\n"
+-	   "        light += ComputePBRLightShadow(normal, lightDelta, viewVector, color, clusterColor, lightOrigin.w,\n"
+-	   "            lightColor.w, specularTint, ambient, roughness, metallic, 1.0);\n"
+-	   "    }\n"
+-	   "    return light;\n"
+-	   "}\n"
+-	   "// end of generated module LightingV1\n";
++    // WE generates PerformLighting_V1 for the scene's lights (GH 0x140197e20): the point/spot loop over
++    // g_LCluster_Origin/Color/Direction/Extra, the tube loop after it (PointSegmentDelta to the segment origin →
++    // g_LCluster_Direction), then the directional lights (g_LDirectional_*, ComputePBRLightShadowInfinite). A point or
++    // spot light's flags (g_LCluster_Extra.y: 1 shadow, 2 cookie, 4 projected — a spot) pick its projection
++    // (g_LCluster_Extra.z): a spot's g_LCluster_Projection for the cookie and its atlas tile, a point light's six cube
++    // faces (CalculateProjectedCoordsPoint). WE emits the shadow code when LIGHTS_SHADOW_MAPPING_QUALITY is set; here
++    // it's there when the material declares the atlas sampler (generic4: SHADOW_ATLAS_SAMPLER under
++    // LIGHTS_SHADOW_MAPPING) and the cookie code when it declares COOKIE_SAMPLER (LIGHTS_COOKIE). Not done: WE's
++    // light clusters (the first lights are taken, CScene::updateLights) and the directional cascades.
++    // The calls follow the common_pbr_2.h the assets ship: 2.8.42's PerformShadowMapping (coords, transform) and
++    // CalculateProjectedCoordsPoint (pos, origin, info, transform); 2.8.485's take the projection scale, the penumbra
++    // and the PCSS terms (the generator's own text, GH 0x140197e20)
++    const bool v485 = this->m_preprocessed.find ("vec2 projectionScale") != std::string::npos;
++    std::string out =
++	"// begin of generated module LightingV1\n"
++	"uniform vec4 g_LCluster_Counts;\n"
++	"uniform vec4 g_LCluster_Origin[16];\n"
++	"uniform vec4 g_LCluster_Color[16];\n"
++	"uniform vec4 g_LCluster_Direction[16];\n"
++	"uniform vec4 g_LCluster_Extra[16];\n"
++	"#if defined(SHADOW_ATLAS_SAMPLER) || defined(COOKIE_SAMPLER)\n"
++	"uniform mat4 g_LCluster_Projection[16];\n"
++	"uniform vec4 g_LCluster_ProjectionTransform[16];\n"
++	"uniform vec4 g_LCluster_PointProjection[16];\n"
++	"#endif\n"
++	"#if defined(LIGHTS_DIRECTIONAL) && LIGHTS_DIRECTIONAL > 0\n"
++	"uniform vec4 g_LDirectional_Color[LIGHTS_DIRECTIONAL];\n"
++	"uniform vec4 g_LDirectional_Direction[LIGHTS_DIRECTIONAL];\n"
++	"#endif\n"
++	"vec3 PerformLighting_V1(vec3 worldPos, vec3 color, vec3 normal, vec3 viewVector, vec3 specularTint, vec3 ambient, float roughness, float metallic)\n"
++	"{\n"
++	"\tvec3 light = CAST3(0.0);\n"
++	"\tvec2 shadowNoisePosition = gl_FragCoord.xy;\n"
++	"\tuint pointSpotCount = uint(g_LCluster_Counts.x);\n"
++	"\tuint tubeCount = uint(g_LCluster_Counts.y);\n"
++	"\tfor (uint pointSpotIndex = 0u; pointSpotIndex < pointSpotCount; ++pointSpotIndex)\n"
++	"\t{\n"
++	"\t\tuint lightIndex = pointSpotIndex;\n"
++	"\t\tvec4 lightOrigin = g_LCluster_Origin[lightIndex];\n"
++	"\t\tvec4 lightColor = g_LCluster_Color[lightIndex];\n"
++	"\t\tvec4 lightDirection = g_LCluster_Direction[lightIndex];\n"
++	"\t\tvec4 lightExtra = g_LCluster_Extra[lightIndex];\n"
++	"\n"
++	"\t\tvec3 lightDelta = lightOrigin.xyz - worldPos;\n"
++	"\t\tfloat spotCookie = -dot(normalize(lightDelta), lightDirection.xyz);\n"
++	"\t\tspotCookie = smoothstep(0.0, 1.0, spotCookie * lightDirection.w + lightExtra.x);\n"
++	"\t\tvec3 clusterColor = lightColor.rgb * spotCookie;\n"
++	"\t\tfloat shadowFactor = 1.0;\n"
++	"#if defined(SHADOW_ATLAS_SAMPLER) || defined(COOKIE_SAMPLER)\n"
++	"\t\tuint lightFlags = uint(lightExtra.y);\n"
++	"\t\tif ((lightFlags & 3u) != 0u)\n"
++	"\t\t{\n"
++	"\t\t\tuint projectionIndex = uint(lightExtra.z);\n"
++	"\t\t\tif ((lightFlags & 4u) != 0u)\n"
++	"\t\t\t{\n"
++	"\t\t\t\tvec3 projectedCoords = CalculateProjectedCoords(worldPos, g_LCluster_Projection[projectionIndex]);\n"
++	"#ifdef COOKIE_SAMPLER\n"
++	"\t\t\t\tif ((lightFlags & 2u) != 0u)\n"
++	"\t\t\t\t{\n"
++	"\t\t\t\t\tvec2 cookieInside = step(abs(projectedCoords.xy - CAST2(0.5)), CAST2(0.5));\n"
++	"\t\t\t\t\tclusterColor *= texSample2DLod(COOKIE_SAMPLER, projectedCoords.xy, 0.0).rgb * (cookieInside.x * cookieInside.y);\n"
++	"\t\t\t\t}\n"
++	"#endif\n"
++	"#ifdef SHADOW_ATLAS_SAMPLER\n"
++	"\t\t\t\tif ((lightFlags & 1u) != 0u)\n"
++	"\t\t\t\t{\n";
++    out += v485
++	? "\t\t\t\t\tshadowFactor = PerformShadowMapping(projectedCoords, g_LCluster_ProjectionTransform[projectionIndex], g_LCluster_PointProjection[projectionIndex], lightExtra.w, shadowNoisePosition, CAST3(0.0), CAST3(0.0));\n"
++	: "\t\t\t\t\tshadowFactor = PerformShadowMapping(projectedCoords, g_LCluster_ProjectionTransform[projectionIndex]);\n";
++    out +=
++	"\t\t\t\t}\n"
++	"#endif\n"
++	"\t\t\t}\n"
++	"#ifdef SHADOW_ATLAS_SAMPLER\n"
++	"\t\t\telse\n"
++	"\t\t\t{\n";
++    out += v485
++	? "\t\t\t\tvec4 projectedCoords = CalculateProjectedCoordsPoint(worldPos, lightOrigin.xyz, lightDirection.xy, g_LCluster_PointProjection[projectionIndex], g_LCluster_ProjectionTransform[projectionIndex]);\n"
++	  "\t\t\t\tshadowFactor = PerformPointShadowMapping(projectedCoords, g_LCluster_ProjectionTransform[projectionIndex], g_LCluster_PointProjection[projectionIndex], lightExtra.w, shadowNoisePosition, CAST3(0.0), CAST3(0.0));\n"
++	: "\t\t\t\tvec4 projectedCoords = CalculateProjectedCoordsPoint(worldPos, lightOrigin.xyz, g_LCluster_PointProjection[projectionIndex], g_LCluster_ProjectionTransform[projectionIndex]);\n"
++	  "\t\t\t\tshadowFactor = PerformPointShadowMapping(projectedCoords);\n";
++    out +=
++	"\t\t\t}\n"
++	"#endif\n"
++	"\t\t}\n"
++	"#endif\n"
++	"\n"
++	"\t\tlight += ComputePBRLightShadow(normal, lightDelta, viewVector, color, clusterColor, lightOrigin.w, lightColor.w, specularTint, ambient, roughness, metallic, shadowFactor);\n"
++	"\t}\n"
++	"\n"
++	"\tfor (uint tubeIndex = 0u; tubeIndex < tubeCount; ++tubeIndex)\n"
++	"\t{\n"
++	"\t\tuint lightIndex = pointSpotCount + tubeIndex;\n"
++	"\t\tvec4 lightOrigin = g_LCluster_Origin[lightIndex];\n"
++	"\t\tvec4 lightColor = g_LCluster_Color[lightIndex];\n"
++	"\t\tvec4 lightDirection = g_LCluster_Direction[lightIndex];\n"
++	"\n"
++	"\t\tvec3 lightDelta = PointSegmentDelta(worldPos, lightOrigin.xyz, lightDirection.xyz);\n"
++	"\t\tlight += ComputePBRLightShadow(normal, lightDelta, viewVector, color, lightColor.rgb, lightOrigin.w, lightColor.w, specularTint, ambient, roughness, metallic, 1.0);\n"
++	"\t}\n"
++	"#if defined(LIGHTS_DIRECTIONAL) && LIGHTS_DIRECTIONAL > 0\n"
++	"\tfor (int i = 0; i < LIGHTS_DIRECTIONAL; ++i)\n"
++	"\t{\n"
++	"\t\tlight += ComputePBRLightShadowInfinite(normal, g_LDirectional_Direction[i].xyz, viewVector, color, g_LDirectional_Color[i].rgb, specularTint, ambient, roughness, metallic, 1.0);\n"
++	"\t}\n"
++	"#endif\n"
++	"\treturn light;\n"
++	"}\n"
++	"// end of generated module LightingV1\n";
++    return out;
+ }
+ 
+ std::string ShaderUnit::applyLinkedVaryingCompatibility (std::string source) const {
+@@ -470,8 +548,9 @@ std::string ShaderUnit::applyBuiltinDeclarations (std::string source) {
+     // WE's translator turns a declared `gl_…` input or output into a member of its IN / OUT struct with that system
+     // value's semantic (gl_Position SV_POSITION: GH 0x140125e80 adds it; the stock shadow casters declare
+     // `in uint gl_InstanceID;` and `varying uint gl_ViewportIndex;` — inferred to be SV_InstanceID and
+-    // SV_ViewportArrayIndex). GLSL has them built in and refuses a declaration: it's dropped, and a vertex unit
+-    // that writes gl_ViewportIndex asks for the extension that allows it there
++    // SV_ViewportArrayIndex). GLSL has them built in and refuses a declaration: it's dropped. A vertex unit's
++    // gl_ViewportIndex write (GLSL 4.10 or GL_ARB_shader_viewport_layer_array) is dropped too: LWE draws the
++    // casters one viewport at a time (CScene::renderShadows), so every instance goes to the viewport bound
+     static const std::regex declaration (
+ 	R"((^|\n)[ \t]*(?:in|out|varying|attribute)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)+(gl_[A-Za-z0-9_]+)\s*;[^\n]*)"
+     );
+@@ -479,8 +558,10 @@ std::string ShaderUnit::applyBuiltinDeclarations (std::string source) {
+ 	return source;
+     }
+     source = std::regex_replace (source, declaration, "$1// built in: $2");
+-    if (this->m_type == GLSLContext::UnitType_Vertex && source.find ("gl_ViewportIndex") != std::string::npos) {
+-	this->m_extensions += "#extension GL_ARB_shader_viewport_layer_array : enable\n";
++    static const std::regex viewportWrite (R"(\bgl_ViewportIndex\s*=[^;]*;)");
++    if (this->m_type == GLSLContext::UnitType_Vertex && std::regex_search (source, viewportWrite)) {
++	source = std::regex_replace (source, viewportWrite, "/* one draw per viewport: gl_ViewportIndex */");
++	WPENGINE_HEALTH ("compat", { { "what", "WE: a vertex gl_ViewportIndex write dropped (one draw per viewport)" } });
+     }
+     WPENGINE_HEALTH ("compat", { { "what", "WE: a declared gl_ built-in dropped" } });
+     return source;
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 695caf1..7cc670e 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -112,11 +112,39 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     const uint32_t sceneWidth = this->m_camera->getWidth ();
+     const uint32_t sceneHeight = this->m_camera->getHeight ();
+ 
+-    this->_rt_shadowAtlas = this->create (
+-	"_rt_shadowAtlas", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { sceneWidth, sceneHeight },
+-	{ sceneWidth, sceneHeight }
+-    );
+-    this->alias ("_alias_lightCookie", "_rt_shadowAtlas");
++    // WE's shadow atlas starts at 2 x 2 (GH 0x1401bf270 creates it so, and recreates it bigger when the shadow
++    // lights' tiles don't fit) and is a depth texture the lit materials sample by comparison. It was a scene-sized
++    // RGBA8 target nothing drew. The light cookie a material reads (_alias_lightCookie, generic4's g_Texture7) is the
++    // scene's cookie (getLightCookie, bound per pass), else this 1 x 1 placeholder
++    this->m_shadowAtlas = this->create ("_rt_shadowAtlas", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { 2, 2 }, { 2, 2 });
++    this->m_shadowAtlas->makeShadowAtlas ();
++    this->_rt_shadowAtlas = this->m_shadowAtlas;
++    this->create ("_alias_lightCookie", TextureFormat_ARGB8888, TextureFlags_ClampUVs, 1.0, { 1, 1 }, { 1, 1 });
++
++    // what the lights ask of the models' materials (decided before they're built): the shadow atlas when one casts a
++    // shadow (castshadow on a point or spot light; a directional light's cascades aren't done), the cookie of the
++    // spots with usecookie (WE keeps the last one's, GH 0x1401bf270 → scene+0x1310), the directional count
++    for (const auto& object : scene->objects) {
++	if (!object->is<Light> ()) {
++	    continue;
++	}
++	const auto& light = *object->as<Light> ();
++	const bool pointOrSpot = light.kind == LightData::Kind::Point || light.kind == LightData::Kind::Spot;
++	if (pointOrSpot && light.castShadow != nullptr && light.castShadow->value->getBool ()) {
++	    this->m_castsShadows = true;
++	}
++	if (light.kind == LightData::Kind::Directional) {
++	    this->m_directionalCount = std::min (this->m_directionalCount + 1, SceneLights::MaxDirectional);
++	}
++	if (light.kind == LightData::Kind::Spot && light.useCookie != nullptr && light.useCookie->value->getBool ()) {
++	    try {
++		this->m_lightCookie = this->getContext ().resolveTexture (light.cookie);
++	    } catch (const std::exception& ex) {
++		sLog.error ("Cannot load light cookie ", light.cookie, ": ", ex.what ());
++		WPENGINE_HEALTH ("missing_asset", { { "kind", "texture" }, { "path", light.cookie }, { "message", WallpaperEngine::Health::brief (ex.what ()) } });
++	    }
++	}
++    }
+ 
+     // set clear color
+     const glm::vec3 clearColor = scene->colors.clear->value->getVec3 ();
+@@ -705,6 +733,13 @@ void CScene::renderFrame () {
+ 
+     // bind the vertex array
+     glBindVertexArray (this->m_vaoBuffer);
++
++    // a 3D scene's lights for this frame (the models' shading reads them), and the shadow pass into the atlas
++    if (this->m_camera->isPerspective ()) {
++	this->updateLights ();
++	this->renderShadows ();
++    }
++
+     // use the scene's framebuffer by default
+     glBindFramebuffer (GL_FRAMEBUFFER, this->getWallpaperFramebuffer ());
+     // ensure we render over the whole framebuffer
+@@ -721,11 +756,6 @@ void CScene::renderFrame () {
+     glClearColor (clearColor.r, clearColor.g, clearColor.b, 1.0f);
+     glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
+-    // a 3D scene's lights for this frame (the models' shading reads them)
+-    if (this->m_camera->isPerspective ()) {
+-	this->updateLights ();
+-    }
+-
+     // a copy: a text layer's script runs as it renders, and may create, destroy or sort layers
+     const std::vector<CObject*> order = this->drawOrder ();
+     for (const auto& cur : order) {
+@@ -1133,16 +1163,84 @@ const std::vector<CObject*>& CScene::drawOrder () {
+     return this->m_sortedOrder;
+ }
+ 
++namespace {
++/** A light's tile at CScene::ShadowQuality (WE's "shadows" setting: disabled 0, low 1, medium 2 — the default, high 3,
++ *  ultra 4, GH 0x14013f3f0): 256 px below high (GH 0x140282540: 512 high, 1024 ultra) */
++constexpr float kShadowTile = 256.0f;
++/** common_pbr_2.h's viewportPointCompensation for qualities 1 and 2 (0.48 high, 0.49 ultra): a cube face covers
++ *  ±0.47 of its sub-tile, so WE renders it a little wider than 90° (94° at medium, FUN_140282580's DAT_1404d4488) */
++constexpr float kPointCompensation = 0.47f;
++constexpr int kAtlasColumns = 4;
++
++/**
++ * The clip matrix that draws into a tile what the lit material's header samples there: `view` then a right-handed
++ * D3D perspective (depth 0 … 1) with x and y scaled by `sx` / `sy`, y negated (the header's v grows down the texture,
++ * whose first row is the tile's first row: window y 0) and depth remapped to GL's −1 … 1 so the depth buffer holds
++ * the D3D depth the header compares against
++ */
++glm::mat4 shadowClip (const glm::mat4& view, float sx, float sy, float nearZ, float farZ) {
++    const float m22 = farZ / (nearZ - farZ);
++    const float m32 = nearZ * farZ / (nearZ - farZ);
++    glm::mat4 clip (0.0f);
++    clip[0][0] = sx;
++    clip[1][1] = -sy;
++    clip[2][2] = 2.0f * m22 + 1.0f;
++    clip[3][2] = 2.0f * m32;
++    clip[2][3] = -1.0f;
++    return clip * view;
++}
++
++/** The D3D projection (depth 0 … 1) the header's CalculateProjectedCoords applies to a spot's view */
++glm::mat4 d3dPerspective (float sx, float sy, float nearZ, float farZ) {
++    glm::mat4 projection (0.0f);
++    projection[0][0] = sx;
++    projection[1][1] = sy;
++    projection[2][2] = farZ / (nearZ - farZ);
++    projection[3][2] = nearZ * farZ / (nearZ - farZ);
++    projection[2][3] = -1.0f;
++    return projection;
++}
++
++/** common_pbr_2.h's CalculateProjectedCoordsPoint face views (+x, −x, +y, −y, +z, −z), for a light at `o` */
++glm::mat4 pointFaceView (int face, const glm::vec3& o) {
++    switch (face) {
++	case 0: return glm::mat4 (0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -o.z, -o.y, o.x, 1);
++	case 1: return glm::mat4 (0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, o.z, -o.y, -o.x, 1);
++	case 2: return glm::mat4 (1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, -o.x, -o.z, o.y, 1);
++	case 3: return glm::mat4 (1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, -o.x, o.z, -o.y, 1);
++	case 4: return glm::mat4 (-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, o.x, -o.y, o.z, 1);
++	default: return glm::mat4 (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -o.x, -o.y, -o.z, 1);
++    }
++}
++} // namespace
++
+ void CScene::updateLights () {
+-    // the point and spot lights the models' generated PerformLighting_V1 loops over (GH 0x1401bf270 fills
+-    // g_LCluster_Origin/Color/Direction/Extra the same way; WE culls them into clusters, LWE takes the first ones):
++    // the lights the models' generated PerformLighting_V1 reads (GH 0x1401bf270 fills g_LCluster_* the same way; WE
++    // culls them into clusters, LWE takes the first ones):
+     //  origin (world position, radius), color (rgb · intensity, exponent), direction (a spot's world x axis,
+-    //  1 / (cos inner − cos outer)), extra.x (−cos outer / (cos inner − cos outer)); a point light: 0 and 1
++    //  1 / (cos inner − cos outer)), extra.x (−cos outer / (cos inner − cos outer)); a point light: 0 and 1.
++    //  extra.y: the flags (1 shadow, 2 cookie, 4 projected: a spot with either), extra.z: its projection (at most 16).
++    //  Then the tubes: origin (the light's position, radius), direction (its far end: the world position of its
++    //  `controlpoint`), extra.x 1. The directional lights: g_LDirectional_Color (rgb · intensity), _Direction (the
++    //  light's −x axis: it shines along x like a spot; the zero minus the axis is inferred from the packer)
+     auto& lights = this->m_lights;
+     lights.count = 0;
++    lights.tubes = 0;
++    lights.projections = 0;
++    lights.directional = 0;
++    this->m_shadowViews.clear ();
++
++    struct Projected {
++	const Light* light;
++	glm::mat4 world;
++	int index;
++	int slot;
++    };
++    std::vector<Projected> projected;
++    std::vector<std::pair<const Light*, glm::mat4>> tubes;
+ 
+     for (const auto& object : this->getScene ().objects) {
+-	if (!object->is<Light> () || lights.count >= SceneLights::Max) {
++	if (!object->is<Light> ()) {
+ 	    continue;
+ 	}
+ 
+@@ -1152,11 +1250,32 @@ void CScene::updateLights () {
+ 	}
+ 
+ 	const glm::mat4 world = this->worldMatrixOf (light);
+-	const int i = lights.count++;
+ 	const float intensity = light.intensity->value->getFloat ();
++	const glm::vec3 color = light.color->value->getVec3 () * intensity;
+ 
++	if (light.kind == LightData::Kind::Directional) {
++	    if (lights.directional < SceneLights::MaxDirectional && lights.directional < this->m_directionalCount) {
++		const int d = lights.directional++;
++		lights.directionalColor[d] = glm::vec4 (color, 0.0f);
++		lights.directionalDirection[d] = glm::vec4 (-glm::vec3 (world[0]), 0.0f);
++	    }
++	    continue;
++	}
++	if (light.kind == LightData::Kind::Tube) {
++	    tubes.emplace_back (&light, world);
++	    continue;
++	}
++	if (lights.count >= SceneLights::Max) {
++	    continue;
++	}
++
++	const int i = lights.count++;
+ 	lights.origin[i] = glm::vec4 (glm::vec3 (world[3]), light.radius);
+-	lights.color[i] = glm::vec4 (light.color->value->getVec3 () * intensity, light.exponent);
++	lights.color[i] = glm::vec4 (color, light.exponent);
++
++	const bool shadow = this->m_castsShadows && light.castShadow != nullptr && light.castShadow->value->getBool ();
++	const bool cookie = light.kind == LightData::Kind::Spot && this->m_lightCookie != nullptr && light.useCookie != nullptr
++	    && light.useCookie->value->getBool ();
+ 
+ 	if (light.kind == LightData::Kind::Spot) {
+ 	    const glm::vec3 axis = glm::vec3 (world[0]);
+@@ -1171,9 +1290,128 @@ void CScene::updateLights () {
+ 	    lights.direction[i] = glm::vec4 (0.0f, 0.0f, -1.0f, 0.0f);
+ 	    lights.extra[i] = glm::vec4 (1.0f, 0.0f, 0.0f, 0.0f);
+ 	}
++
++	if ((shadow || cookie) && lights.projections < SceneLights::MaxProjections) {
++	    const int p = lights.projections++;
++	    const int flags = light.kind == LightData::Kind::Spot ? 4 | (cookie ? 2 : 0) | (shadow ? 1 : 0) : 1;
++	    lights.extra[i].y = static_cast<float> (flags);
++	    lights.extra[i].z = static_cast<float> (p);
++	    projected.push_back ({ &light, world, shadow ? p : -1, i });
++	}
++    }
++
++    for (const auto& [light, world] : tubes) {
++	if (lights.count + lights.tubes >= SceneLights::Max) {
++	    break;
++	}
++	const int i = lights.count + lights.tubes++;
++	const glm::vec3 a = glm::vec3 (world[3]);
++	const glm::vec3 b = glm::vec3 (world * glm::vec4 (light->controlPoint, 1.0f));
++	lights.origin[i] = glm::vec4 (a, light->radius);
++	lights.color[i] = glm::vec4 (light->color->value->getVec3 () * light->intensity->value->getFloat (), light->exponent);
++	lights.direction[i] = glm::vec4 (b, 0.0f);
++	lights.extra[i] = glm::vec4 (1.0f, 0.0f, 0.0f, 0.0f);
++    }
++
++    if (projected.empty ()) {
++	return;
++    }
++
++    // the atlas: a 256 px tile per projection, four to a row (WE packs them skyline-wise, GH 0x1401bf270; the place
++    // doesn't show). It grows to fit and never shrinks, as WE's
++    const int tiles = lights.projections;
++    const float atlasW = static_cast<float> (std::min (tiles, kAtlasColumns)) * kShadowTile;
++    const float atlasH = static_cast<float> ((tiles + kAtlasColumns - 1) / kAtlasColumns) * kShadowTile;
++    if (this->m_shadowAtlas->getRealWidth () < atlasW || this->m_shadowAtlas->getRealHeight () < atlasH) {
++	const uint32_t w = std::max (this->m_shadowAtlas->getRealWidth (), static_cast<uint32_t> (atlasW));
++	const uint32_t h = std::max (this->m_shadowAtlas->getRealHeight (), static_cast<uint32_t> (atlasH));
++	this->m_shadowAtlas->resize (w, h, w, h);
++    }
++    const float W = static_cast<float> (this->m_shadowAtlas->getRealWidth ());
++    const float H = static_cast<float> (this->m_shadowAtlas->getRealHeight ());
++    lights.atlasTexel = glm::vec4 (1.0f / W, 1.0f / H, W, H);
++
++    int p = 0;
++    for (const auto& item : projected) {
++	const Light& light = *item.light;
++	const float tx = static_cast<float> (p % kAtlasColumns) * kShadowTile;
++	const float ty = static_cast<float> (p / kAtlasColumns) * kShadowTile;
++	lights.projectionTransform[p] = glm::vec4 (tx / W, ty / H, kShadowTile / W, kShadowTile / H);
++	const glm::vec3 origin = glm::vec3 (item.world[3]);
++	// near: 0.05 (or the light's source size, for a point light), far: the radius (FUN_140282580)
++	const float nearZ = light.kind == LightData::Kind::Point ? std::max (0.05f, light.lightSourceSize) : 0.05f;
++	const float farZ = std::max (light.radius, nearZ + 0.01f);
++	lights.pointProjection[p] = glm::vec4 (farZ / (nearZ - farZ), nearZ * farZ / (nearZ - farZ), -1.0f, 0.0f);
++
++	if (light.kind == LightData::Kind::Spot) {
++	    // its view looks along its x axis with its y axis up; the frustum is the outer cone (fov 2 · outercone)
++	    const glm::vec3 x = glm::normalize (glm::vec3 (item.world[0]));
++	    const glm::vec3 y = glm::length (glm::vec3 (item.world[1])) > 0.0f ? glm::normalize (glm::vec3 (item.world[1]))
++									     : glm::vec3 (0.0f, 1.0f, 0.0f);
++	    const glm::mat4 view = glm::lookAt (origin, origin + x, y);
++	    const float scale = 1.0f / std::tan (glm::radians (std::clamp (light.outerCone, 0.5f, 89.5f)));
++	    lights.projection[p] = d3dPerspective (scale, scale, nearZ, farZ) * view;
++	    if (item.index >= 0) {
++		this->m_shadowViews.push_back ({ glm::vec4 (tx, ty, kShadowTile, kShadowTile), shadowClip (view, scale, scale, nearZ, farZ) });
++	    }
++	} else {
++	    // the six cube faces in a 2 x 3 grid of the tile (the header's viewportScale 0.5 x 0.3333 and its offsets)
++	    const glm::vec2 face (kShadowTile * 0.5f, kShadowTile * 0.3333f);
++	    // (2.8.485's header reads the faces' projection scale from direction.xy; w stays 0, so no spot falloff)
++	    lights.direction[item.slot] = glm::vec4 (2.0f * kPointCompensation, 2.0f * kPointCompensation, 0.0f, 0.0f);
++	    for (int f = 0; f < 6; f++) {
++		const glm::vec4 rect (tx + (f % 2) * face.x, ty + (f / 2) * face.y, face.x, face.y);
++		this->m_shadowViews.push_back (
++		    { rect, shadowClip (pointFaceView (f, origin), 2.0f * kPointCompensation, 2.0f * kPointCompensation, nearZ, farZ) }
++		);
++	    }
++	}
++	p++;
++    }
++}
++
++void CScene::renderShadows () {
++    if (this->m_shadowViews.empty ()) {
++	return;
++    }
++
++    // WE's pass (GH 0x1401c4f30): the atlas bound, its depth cleared, then every caster in up to six viewports at
++    // once (its shaders pick g_ViewportViewProjectionMatrices[gl_InstanceID] and write gl_ViewportIndex). LWE draws a
++    // viewport at a time (CModel::renderShadow), with a depth bias against acne (inferred: WE's rasterizer state for
++    // the pass wasn't read)
++    GLint previousFramebuffer = 0;
++    glGetIntegerv (GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_shadowAtlas->getFramebuffer ());
++    glViewport (0, 0, this->m_shadowAtlas->getRealWidth (), this->m_shadowAtlas->getRealHeight ());
++    glDepthMask (GL_TRUE);
++    glClearDepth (1.0);
++    glClear (GL_DEPTH_BUFFER_BIT);
++    glEnable (GL_POLYGON_OFFSET_FILL);
++    // (the 9-tap filter at medium quality reaches about two texels: the slope term covers that)
++    glPolygonOffset (4.0f, 16.0f);
++
++    for (const auto& cur : this->m_objectsByRenderOrder) {
++	if (cur->is<Objects::CModel> ()) {
++	    cur->as<Objects::CModel> ()->renderShadow (this->m_shadowAtlas, this->m_shadowViews);
++	}
+     }
++
++    glDisable (GL_POLYGON_OFFSET_FILL);
++    glDisable (GL_DEPTH_TEST);
++    glDepthMask (GL_FALSE);
++    glBindFramebuffer (GL_FRAMEBUFFER, previousFramebuffer);
+ }
+ 
++const std::vector<CScene::ShadowView>& CScene::getShadowViews () const { return this->m_shadowViews; }
++
++bool CScene::castsShadows () const { return this->m_castsShadows; }
++
++std::shared_ptr<const TextureProvider> CScene::getLightCookie () const { return this->m_lightCookie; }
++
++int CScene::directionalLightCount () const { return this->m_directionalCount; }
++
++std::shared_ptr<const CFBO> CScene::getShadowAtlas () const { return this->m_shadowAtlas; }
++
+ const CScene::SceneLights& CScene::getLights () const { return this->m_lights; }
+ 
+ void CScene::updateCamera () {
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 071eb18..cdaeed0 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -99,16 +99,52 @@ public:
+     /** Placed in a 3D scene's world (a model, a particle system, an image that isn't full-screen) */
+     [[nodiscard]] bool drawsInWorld (const CObject& object) const;
+ 
+-    /** A 3D scene's point and spot lights this frame, packed as the generated PerformLighting_V1 reads them */
++    /**
++     * A 3D scene's lights this frame, packed as the generated PerformLighting_V1 reads them (GH 0x1401bf270): the
++     * point and spot lights (`count`), then the tubes (`tubes`) in origin … extra; the projections of the lights that
++     * cast shadows or project a cookie; the directional lights
++     */
++    /** The shadow quality (LIGHTS_SHADOW_MAPPING_QUALITY): WE's "shadows" setting's default, medium (GH 0x14013f3f0) */
++    static constexpr int ShadowQuality = 2;
+     struct SceneLights {
+-	static constexpr int Max = 8;
++	static constexpr int Max = 16;
++	static constexpr int MaxProjections = 16;
++	static constexpr int MaxDirectional = 3;
+ 	int count = 0;
++	int tubes = 0;
+ 	glm::vec4 origin[Max] = {};
+ 	glm::vec4 color[Max] = {};
+ 	glm::vec4 direction[Max] = {};
+ 	glm::vec4 extra[Max] = {};
++	int projections = 0;
++	glm::mat4 projection[MaxProjections] = {};
++	glm::vec4 projectionTransform[MaxProjections] = {};
++	glm::vec4 pointProjection[MaxProjections] = {};
++	int directional = 0;
++	glm::vec4 directionalColor[MaxDirectional] = {};
++	glm::vec4 directionalDirection[MaxDirectional] = {};
++	/** the shadow atlas's 1 / size and size (g_Texture6Texel: SHADOW_ATLAS_TEXEL) */
++	glm::vec4 atlasTexel = glm::vec4 (0.5f, 0.5f, 2.0f, 2.0f);
+     };
+     [[nodiscard]] const SceneLights& getLights () const;
++    /**
++     * One viewport of the shadow pass: its rect in the atlas (pixels, x y w h) and the clip matrix that draws a
++     * caster there, so that the lit materials' header (CalculateProjectedCoords / …Point, common_pbr_2.h) finds it
++     */
++    struct ShadowView {
++	glm::vec4 rect;
++	glm::mat4 clip;
++    };
++    /** This frame's shadow viewports (empty when no light casts a shadow) */
++    [[nodiscard]] const std::vector<ShadowView>& getShadowViews () const;
++    /** A light in the scene has castshadow: its models build their shadow casters and sample the atlas */
++    [[nodiscard]] bool castsShadows () const;
++    /** The cookie of the scene's spot lights with usecookie (the last one's: WE binds one, scene+0x1310), or null */
++    [[nodiscard]] std::shared_ptr<const TextureProvider> getLightCookie () const;
++    /** How many directional lights the scene has (LIGHTS_DIRECTIONAL, at most 3) */
++    [[nodiscard]] int directionalLightCount () const;
++    /** The shadow atlas (a depth texture, grown as the shadow lights need) */
++    [[nodiscard]] std::shared_ptr<const CFBO> getShadowAtlas () const;
+     /** The scene's one random source for particles (WE: scene+0x1f08, GH 0x140223090), shared by every system */
+     [[nodiscard]] std::mt19937& getParticleRng ();
+     [[nodiscard]] const CObject* getObject (int id) const;
+@@ -148,8 +184,10 @@ protected:
+     void advanceAnimations ();
+     /** The camera update (WE GH 0x1401b8af0): shake, the active camera object's zoom, general.zoom, the parallax */
+     void updateCamera ();
+-    /** Packs the 3D scene's lights for this frame (getLights) */
++    /** Packs the 3D scene's lights for this frame (getLights), and lays out the shadow atlas (getShadowViews) */
+     void updateLights ();
++    /** WE's shadow pass (GH 0x1401c4f30): the casters into each shadow viewport of the atlas */
++    void renderShadows ();
+     /** The order objects draw in this frame: the render order, a 3D scene's world objects sorted by `transparentsorting` */
+     const std::vector<CObject*>& drawOrder ();
+ 
+@@ -186,6 +224,11 @@ private:
+     /** drawOrder's sorted copy of the render order */
+     std::vector<CObject*> m_sortedOrder = {};
+     SceneLights m_lights = {};
++    std::vector<ShadowView> m_shadowViews = {};
++    bool m_castsShadows = false;
++    int m_directionalCount = 0;
++    std::shared_ptr<const TextureProvider> m_lightCookie = nullptr;
++    std::shared_ptr<CFBO> m_shadowAtlas = nullptr;
+     /** the sound objects, ticked on the host's clock every frame (they don't render) */
+     std::vector<Objects::CSound*> m_sounds = {};
+     std::vector<DynamicValue*> m_scriptedValues = {};

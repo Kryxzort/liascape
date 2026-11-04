@@ -1,7 +1,7 @@
 From bca5629f389d54d1e553e0bf6cee50f2dd006f52 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 15:56:20 +0530
-Subject: [PATCH 61/70] core: a scene health report (WPENGINE_HEALTH)
+Subject: [PATCH 61/71] core: a scene health report (WPENGINE_HEALTH)
 
 A scene that loads and draws something can still have lost a layer, an effect or a script on the way (3414858021
 lost its head's compose layer to four glslang errors for months, and nothing outside the log said so). With

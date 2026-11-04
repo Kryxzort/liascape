@@ -102,3 +102,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0068-script-video-textures-puppet-animation-layers-partic.patch` | script: video textures, puppet animation layers, particle systems, the other events | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0069-script-IScene-s-camera-initial-configs-and-timelines.patch` | script: IScene's camera, initial configs and timelines; ICamera | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0070-script-IAnimation.rate-createLayer-finds-a-Workshop-.patch` | script: IAnimation.rate; createLayer finds a Workshop script's own files | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0071-render-shadows-light-cookies-tube-and-directional-li.patch` | render: shadows, light cookies, tube and directional lights | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
