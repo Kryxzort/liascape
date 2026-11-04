@@ -1,0 +1,234 @@
+From bb85adbcccc38e9b952588b900a7126e1de42855 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 22:14:45 +0530
+Subject: [PATCH 78/81] shader: the stock casters' SKINNING and MORPHING combos
+ compile
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three fixes, from the shader sweep's 10 caster failures (stock shadowcaster, shadowcasterfoliage4,
+shadowcasterfur4 with SKINNING or MORPHING):
+
+- SKINNING with BONECOUNT 0 declared g_Bones[0]. WE sets BONECOUNT to the skeleton's bone count
+  whenever it sets SKINNING (GH 0x140230ec0, vtable +0xd8), so a SKINNING unit without a count
+  gets 1.
+- shadowcasterfoliage4 reads g_Texture1Texel under MORPHING and declares only
+  g_Texture1Resolution. g_Texture0Texel … g_Texture9Texel are engine uniforms in WE's name table
+  (GH 0x140002a20, ids 0x49–0x52). On glslang's "undeclared identifier" the unit now declares
+  it, and CPass feeds g_Texture<n>Texel = (1 / width, 1 / height, width, height) for every bound
+  texture. Inferred: that value, from model_vertex_v1.h's morph lookups (x = i % texel.z).
+- shadowcasterfur4 passes gl_VertexID (an int) to ApplyMorphPosition (in uint vertexID). The
+  call-argument rule now finds definitions whose parameter list holds a macro call
+  (DECLARE_SAMPLER2D_PARAMETER (morphTexture)), and leaves array parameters alone.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F4 (the shadow-caster SKINNING / MORPHING sweep failures)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/Effects/CPass.cpp          |  9 ++++
+ .../Render/Objects/Effects/CPass.h            |  3 ++
+ .../Render/Shaders/GLSLContext.cpp            | 51 ++++++++++++++++---
+ .../Render/Shaders/ShaderUnit.cpp             | 27 ++++++++--
+ 4 files changed, 78 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 102b875..a345c1b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -1018,6 +1018,15 @@ void CPass::setupTextureUniforms () {
+ 
+ 	texture = this->resolveTexture (expectedTexture->texture, textureIndex, texture);
+ 	this->addUniform (namestream.str (), texture->getResolution ());
++
++	// WE's g_Texture<n>Texel (ids 0x49–0x52, GH 0x140002a20): (1 / width, 1 / height, width, height) of the
++	// texture's storage (Inferred from model_vertex_v1.h's morph lookups)
++	if (const glm::vec4* resolution = texture->getResolution (); resolution != nullptr && resolution->x > 0.0f
++	    && resolution->y > 0.0f) {
++	    auto& texel = this->m_textureTexels[textureIndex];
++	    texel = glm::vec4 (1.0f / resolution->x, 1.0f / resolution->y, resolution->x, resolution->y);
++	    this->addUniform ("g_Texture" + std::to_string (textureIndex) + "Texel", &texel);
++	}
+     }
+ 
+     this->addUniform ("g_Texture0Resolution", &this->m_texture0Resolution);
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index b365099..88b3fdc 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <map>
+ #include <optional>
+ 
+ #include <functional>
+@@ -221,6 +222,8 @@ private:
+     std::shared_ptr<const TextureProvider> m_input = nullptr;
+     std::shared_ptr<const TextureProvider> m_previousInput = nullptr;
+     glm::vec4 m_texture0Resolution = {};
++    /** g_Texture<n>Texel per bound texture (std::map: the uniforms point at its nodes) */
++    std::map<int, glm::vec4> m_textureTexels = {};
+ 
+     GLuint m_programID;
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+index 6dfd198..5dc728b 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+@@ -338,14 +338,24 @@ bool convertArguments (std::string& source, const std::string& log) {
+     if (!callArguments (line.text, open, args, close)) {
+ 	return false;
+     }
+-    // the user's definitions with as many parameters
+-    const std::regex definition ("\\b(?:void|float|int|uint|bool|[biu]?vec[234]|mat[234])\\s+" + name + "\\s*\\(([^)]*)\\)\\s*\\{");
++    // the user's definitions with as many parameters (a parameter list may hold macro calls:
++    // DECLARE_SAMPLER2D_PARAMETER (morphTexture) in model_vertex_v1.h's ApplyMorphPosition)
++    const std::regex definition ("\\b(?:void|float|int|uint|bool|[biu]?vec[234]|mat[234])\\s+" + name + "\\s*\\(");
+     std::vector<std::vector<std::string>> candidates;
+     for (auto it = std::sregex_iterator (source.begin (), source.end (), definition); it != std::sregex_iterator (); ++it) {
++	const size_t paren = static_cast<size_t> (it->position () + it->length () - 1);
++	std::vector<std::pair<size_t, size_t>> bounds;
++	size_t end = 0;
++	if (!callArguments (source, paren, bounds, end)) {
++	    continue;
++	}
++	const size_t body = source.find_first_not_of (" \t\r\n", end + 1);
++	if (body == std::string::npos || source[body] != '{') {
++	    continue; // a call or a prototype, not the definition
++	}
+ 	std::vector<std::string> params;
+-	std::stringstream list ((*it)[1].str ());
+-	for (std::string p; std::getline (list, p, ',');) {
+-	    params.push_back (p);
++	for (const auto& [b, e] : bounds) {
++	    params.push_back (source.substr (b, e - b));
+ 	}
+ 	if (params.size () == 1 && params[0].find_first_not_of (" \tvoid") == std::string::npos) {
+ 	    params.clear ();
+@@ -368,7 +378,9 @@ bool convertArguments (std::string& source, const std::string& log) {
+ 	    for (std::string x; words >> x;) {
+ 		w.push_back (x);
+ 	    }
+-	    const bool output = std::find (w.begin (), w.end (), "out") != w.end () || std::find (w.begin (), w.end (), "inout") != w.end ();
++	    // out, inout and array parameters (`in uint morphOffsets[12]`) are left as they are
++	    const bool output = std::find (w.begin (), w.end (), "out") != w.end () || std::find (w.begin (), w.end (), "inout") != w.end ()
++		|| candidates[0][i].find ('[') != std::string::npos;
+ 	    std::string type;
+ 	    for (const auto& x : w) {
+ 		if (std::regex_match (x, scalarType)) {
+@@ -640,6 +652,30 @@ bool booleanCondition (std::string& source, const std::string& log) {
+     return false;
+ }
+ 
++/**
++ * WE's engine uniforms g_Texture0Texel … g_Texture9Texel (the name table GH 0x140002a20, ids 0x49–0x52) exist
++ * whether a shader declares them or not: the stock shadowcasterfoliage4 reads g_Texture1Texel under MORPHING and
++ * declares only g_Texture1Resolution. From glslang's "undeclared identifier", the uniform is declared at the top of
++ * the unit; CPass gives it (1 / width, 1 / height, width, height), the form model_vertex_v1.h's morph lookups read
++ * (Inferred: the setter wasn't read)
++ */
++bool declareTexelUniform (std::string& source, const std::string& log) {
++    static const std::regex error (R"(ERROR: 0:\d+: '(g_Texture\d+Texel)' : undeclared identifier)");
++    std::smatch m;
++    if (!std::regex_search (log, m, error)) {
++	return false;
++    }
++    const std::string declaration = "uniform vec4 " + m[1].str () + ";\n";
++    size_t at = 0;
++    if (source.rfind ("#version", 0) == 0) {
++	at = source.find ('\n');
++	at = at == std::string::npos ? source.size () : at + 1;
++    }
++    source.insert (at, declaration);
++    WPENGINE_HEALTH ("compat", { { "what", "WE: an engine texel uniform declared" } });
++    return true;
++}
++
+ /** Parses a unit, retrying after each HLSL rule it needed (`source` must outlive the shader) */
+ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& source, const char* what) {
+     for (int attempt = 0;; attempt++) {
+@@ -661,7 +697,8 @@ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& sou
+ 	shader.reset ();
+ 	const bool fixed = attempt < 64
+ 	    && (truncateWiderOperands (source, log) || convertAssignment (source, log) || constInitializer (source, log)
+-		|| missingReturn (source, log) || booleanCondition (source, log) || convertArguments (source, log));
++		|| missingReturn (source, log) || booleanCondition (source, log) || convertArguments (source, log)
++		|| declareTexelUniform (source, log));
+ 	if (!fixed) {
+ 	    sLog.error ("GLSL ", what, " unit parsing Failed: ", log);
+ 	    WPENGINE_HEALTH ("shader_error", { { "stage", "glslang" }, { "unit", what }, { "message", WallpaperEngine::Health::brief (log) } });
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 69d0e99..b77f770 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -848,6 +848,23 @@ const std::string& ShaderUnit::compile () {
+ 	this->m_final += VERTEX_SHADER_DEFINES;
+     }
+ 
++    // SKINNING sizes g_Bones[BONECOUNT]: WE sets BONECOUNT to the skeleton's bone count with it (vtable +0xd8, GH
++    // 0x140230ec0), never 0. A SKINNING pass without a count (a caster's defaults) gets 1 rather than a zero-size array
++    const auto skinningSet = [this] () {
++	for (const ComboMap* map : std::initializer_list<const ComboMap*> { &this->m_overrideCombos, &this->m_combos, &this->m_discoveredCombos }) {
++	    for (const auto& [name, value] : *map) {
++		std::string upper;
++		std::ranges::transform (name, std::back_inserter (upper), ::toupper);
++		if (upper == "SKINNING") {
++		    return value != 0;
++		}
++	    }
++	}
++	return false;
++    } ();
++    const auto comboValue = [skinningSet] (const std::string& name, int value) {
++	return name == "BONECOUNT" && skinningSet && value < 1 ? 1 : value;
++    };
+     std::map<std::string, bool> addedCombos;
+ 
+     for (const auto& [name, value] : this->m_overrideCombos) {
+@@ -855,7 +872,7 @@ const std::string& ShaderUnit::compile () {
+ 	std::ranges::transform (name, std::back_inserter (uppercase), ::toupper);
+ 
+ 	if (!addedCombos.contains (uppercase)) {
+-	    this->m_final += DEFINE_COMBO (uppercase, value);
++	    this->m_final += DEFINE_COMBO (uppercase, comboValue (uppercase, value));
+ 	    addedCombos.emplace (uppercase, true);
+ 	}
+     }
+@@ -866,7 +883,7 @@ const std::string& ShaderUnit::compile () {
+ 	std::ranges::transform (name, std::back_inserter (uppercase), ::toupper);
+ 
+ 	if (!addedCombos.contains (uppercase)) {
+-	    this->m_final += DEFINE_COMBO (uppercase, value);
++	    this->m_final += DEFINE_COMBO (uppercase, comboValue (uppercase, value));
+ 	    addedCombos.emplace (uppercase, true);
+ 	}
+     }
+@@ -876,7 +893,7 @@ const std::string& ShaderUnit::compile () {
+ 	std::ranges::transform (name, std::back_inserter (uppercase), ::toupper);
+ 
+ 	if (!addedCombos.contains (uppercase)) {
+-	    this->m_final += DEFINE_COMBO (uppercase, value);
++	    this->m_final += DEFINE_COMBO (uppercase, comboValue (uppercase, value));
+ 	    addedCombos.emplace (uppercase, true);
+ 	}
+     }
+@@ -887,7 +904,7 @@ const std::string& ShaderUnit::compile () {
+ 	    std::ranges::transform (name, std::back_inserter (uppercase), ::toupper);
+ 
+ 	    if (!addedCombos.contains (uppercase)) {
+-		this->m_final += DEFINE_COMBO (uppercase, value);
++		this->m_final += DEFINE_COMBO (uppercase, comboValue (uppercase, value));
+ 		addedCombos.emplace (uppercase, true);
+ 	    }
+ 	}
+@@ -897,7 +914,7 @@ const std::string& ShaderUnit::compile () {
+ 	    std::ranges::transform (name, std::back_inserter (uppercase), ::toupper);
+ 
+ 	    if (!addedCombos.contains (uppercase)) {
+-		this->m_final += DEFINE_COMBO (uppercase, value);
++		this->m_final += DEFINE_COMBO (uppercase, comboValue (uppercase, value));
+ 		addedCombos.emplace (uppercase, true);
+ 	    }
+ 	}

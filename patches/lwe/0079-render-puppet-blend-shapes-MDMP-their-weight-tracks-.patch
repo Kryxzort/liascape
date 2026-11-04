@@ -1,0 +1,730 @@
+From bf688e664424f3b229b8a2e3b2b2b3a548b3ac7c Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 22:19:33 +0530
+Subject: [PATCH 79/81] render: puppet blend shapes (MDMP), their weight tracks
+ and bone alpha
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decoded from wallpaper64.exe 2.8.485's MDL loader (GH 0x1402873f0) and the stock genericimage4
+(MORPHING, SKINNING_ALPHA) and 2.8.485's base/morph_vertex_v1.h:
+
+- MDMP0001: per mesh a u16 target count; with targets the f32 position scale and the u32 point
+  count N; per target a u64 id, a name, N · 6 bytes of snorm16 xyz (value / 32767, at least −1,
+  × the scale), then by the mesh's flags N · 6 normal bytes (0x400), N · 2 alpha bytes (0x1000)
+  and a bone rule (0x2000: u32, u32, f32, f32; parsed, not applied). A vertex's point is its vec4
+  position's w − 1 (format 0x10000; 0 = none).
+- MDLA v4 blend-shape weights: per mesh flags (bit 0), a float (the scale again), a u16 count,
+  then per track the target's index and frames + 1 floats. MDLA v3's bone alpha tracks (a flag
+  byte, then per bone a u32 and frames + 1 floats) are read too. MDLE0002 is a byte count and a
+  copy of the bones' local matrices (not used).
+- Applied as genericimage4 does: the morph before the skin (position + Σ weight · delta), the
+  vertex alpha Π (alpha · w + 1 − w) × saturate (Σ weight · bone alpha).
+- IImageLayer getBlendShapeIndex / getBlendShapeWeight / setBlendShapeWeight (by name or index,
+  every mesh's targets in order). A set weight holds over the animations'.
+
+Inferred: how the layers mix these (as the position: normal lerps from 0, additive adds; bone
+alpha from 1). Ours: LWE poses puppets on the CPU, so the vertex alpha reaches genericimage4's
+fragment through its VERTEXCOLOR (a_Color = 1 1 1 alpha, multiplied right after WE's
+v_VertexAlpha); genericimage2 has neither, in WE too. 3490034653's 人物1 blinks with its one
+target ("眨眼", 25 eyelid points); its alphas are all 1.
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F3 (blend shapes, bone alpha)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 123 +++++++++++-
+ .../WallpaperEngine/Render/Objects/CImage.h   |  21 ++
+ .../WallpaperEngine/Render/Objects/Puppet.cpp | 182 +++++++++++++++++-
+ .../WallpaperEngine/Render/Objects/Puppet.h   |  64 ++++++
+ .../Adapters/ScriptableObjectAdapter.cpp      |  32 +++
+ .../Scripting/resources/builtins.js           |  19 +-
+ 6 files changed, 428 insertions(+), 13 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index cb2bf76..cc3a2e4 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -350,6 +350,9 @@ CImage::~CImage () {
+     if (this->m_puppetTexCoord != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetTexCoord);
+     }
++    if (this->m_puppetColor != GL_NONE) {
++	glDeleteBuffers (1, &this->m_puppetColor);
++    }
+     if (this->m_puppetIndices != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetIndices);
+     }
+@@ -380,10 +383,19 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	std::vector<GLfloat> texcoords;
+ 	std::vector<GLuint> indices;
+ 	this->m_puppetVertices.clear ();
+-	for (const auto& mesh : this->m_puppet.meshes) {
++	this->m_puppetVertexMesh.clear ();
++	this->m_puppetShapes.clear ();
++	this->m_puppetShapeWeights.clear ();
++	for (size_t m = 0; m < this->m_puppet.meshes.size (); m++) {
++	    const auto& mesh = this->m_puppet.meshes[m];
+ 	    const auto base = static_cast<GLuint> (this->m_puppetVertices.size ());
++	    for (size_t t = 0; t < mesh.morphs.size (); t++) {
++		this->m_puppetShapes.emplace_back (m, t);
++	    }
++	    this->m_puppetShapeWeights.emplace_back (mesh.morphs.size (), 0.0f);
+ 	    for (const auto& vertex : mesh.vertices) {
+ 		this->m_puppetVertices.push_back (vertex);
++		this->m_puppetVertexMesh.push_back (static_cast<uint16_t> (m));
+ 		texcoords.push_back (vertex.uv.x);
+ 		texcoords.push_back (vertex.uv.y);
+ 	    }
+@@ -408,6 +420,27 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 					      .key = this->m_nextAnimationLayerKey++, .name = layer->name });
+ 	}
+ 	this->m_puppetSkinned = !this->m_puppet.bones.empty () && !this->m_puppet.animations.empty ();
++	this->m_puppetMorphed = !this->m_puppetShapes.empty ();
++	// a vertex alpha (genericimage4's SKINNING_ALPHA and MORPHING both multiply v_VertexAlpha in): bone alpha tracks
++	// or target alphas below 1
++	this->m_puppetVertexAlpha = false;
++	for (const auto& animation : this->m_puppet.animations) {
++	    this->m_puppetVertexAlpha = this->m_puppetVertexAlpha || !animation.boneAlpha.empty ();
++	}
++	for (const auto& mesh : this->m_puppet.meshes) {
++	    for (const auto& target : mesh.morphs) {
++		for (const float a : target.alpha) {
++		    this->m_puppetVertexAlpha = this->m_puppetVertexAlpha || a < 0.999f;
++		}
++	    }
++	}
++	if (this->m_puppetVertexAlpha) {
++	    this->m_puppetColors.assign (this->m_puppetVertices.size () * 4, 1.0f);
++	    glGenBuffers (1, &this->m_puppetColor);
++	    glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetColor);
++	    glBufferData (GL_ARRAY_BUFFER, this->m_puppetColors.size () * sizeof (GLfloat), this->m_puppetColors.data (),
++			  GL_DYNAMIC_DRAW);
++	}
+ 
+ 	this->m_puppetRawPositions.clear ();
+ 	this->m_puppetRawPositions.reserve (this->m_puppetVertices.size () * 3);
+@@ -466,7 +499,7 @@ glm::vec2 CImage::puppetCanvasSize (const glm::vec2& size) const {
+ }
+ 
+ void CImage::updatePuppetPose () {
+-    if (!this->m_puppetSkinned) {
++    if (!this->m_puppetSkinned && !this->m_puppetMorphed) {
+ 	return;
+     }
+     const float now = static_cast<float> (this->getScene ().getTime ());
+@@ -479,6 +512,11 @@ void CImage::updatePuppetPose () {
+ 
+     // GH 0x140228470: from the bind pose, every visible layer in order; its clock runs at dt · rate
+     std::vector<Puppet::Key> pose = this->m_puppetBind;
++    std::vector<float> boneAlpha (this->m_puppet.bones.size (), 1.0f);
++    std::vector<std::vector<float>> shapeWeights = this->m_puppetShapeWeights;
++    for (auto& weights : shapeWeights) {
++	std::fill (weights.begin (), weights.end (), 0.0f);
++    }
+     for (auto& state : this->m_puppetLayers) {
+ 	const auto& layer = *state.layer;
+ 	const auto* match = this->puppetAnimationOf (state);
+@@ -507,7 +545,15 @@ void CImage::updatePuppetPose () {
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+ 	Puppet::mix (pose, this->m_puppetBind, *match, state.clock.time, weight, layer.additive);
++	Puppet::mixExtras (boneAlpha, shapeWeights, *match, state.clock.time, weight, layer.additive);
+     }
++    for (const auto& [index, weight] : this->m_shapeOverrides) {
++	if (index >= 0 && static_cast<size_t> (index) < this->m_puppetShapes.size ()) {
++	    const auto [mesh, target] = this->m_puppetShapes[index];
++	    shapeWeights[mesh][target] = weight;
++	}
++    }
++    this->m_puppetShapeWeights = shapeWeights;
+     // a single animation that played is removed (playSingleAnimation)
+     std::erase_if (this->m_puppetLayers, [] (const PuppetLayerState& state) { return state.single && state.clock.finished; });
+ 
+@@ -528,13 +574,63 @@ void CImage::updatePuppetPose () {
+ 	skinning[b] = this->m_puppetWorld[b] * this->m_puppetBindWorldInverse[b];
+     }
+     for (size_t v = 0; v < this->m_puppetVertices.size (); v++) {
+-	const glm::vec3 p = Puppet::skin (this->m_puppetVertices[v], skinning);
++	const auto& vertex = this->m_puppetVertices[v];
++	const auto& mesh = this->m_puppet.meshes[this->m_puppetVertexMesh[v]];
++	// MORPHING before SKINNING (genericimage4): the blend shapes move the bind-space position
++	float alpha = 1.0f;
++	const glm::vec3 morphed = this->m_puppetMorphed ? Puppet::morph (mesh, vertex, shapeWeights[this->m_puppetVertexMesh[v]], alpha)
++						     : vertex.position;
++	const glm::vec3 p = this->m_puppetSkinned ? Puppet::skin (morphed, vertex, skinning) : morphed;
++	if (this->m_puppetVertexAlpha) {
++	    // SKINNING_ALPHA: saturate (Σ weight · alpha[bone])
++	    float bones = 0.0f, total = 0.0f;
++	    for (int c = 0; c < 4; c++) {
++		if (vertex.weights[c] != 0.0f && vertex.bones[c] < boneAlpha.size ()) {
++		    bones += vertex.weights[c] * boneAlpha[vertex.bones[c]];
++		    total += vertex.weights[c];
++		}
++	    }
++	    this->m_puppetColors[v * 4 + 3] = alpha * (total == 0.0f ? 1.0f : std::clamp (bones, 0.0f, 1.0f));
++	}
+ 	this->m_puppetRawPositions[v * 3] = p.x;
+ 	this->m_puppetRawPositions[v * 3 + 1] = p.y;
+ 	// (inferred, as PR #625) flat: x/y bone turns would push vertices out of the FBO's depth range
+ 	this->m_puppetRawPositions[v * 3 + 2] = 0.0f;
+     }
+     this->updatePuppetPositionBuffer (this->getSize ());
++    if (this->m_puppetVertexAlpha && this->m_puppetColor != GL_NONE) {
++	glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetColor);
++	glBufferSubData (GL_ARRAY_BUFFER, 0, this->m_puppetColors.size () * sizeof (GLfloat), this->m_puppetColors.data ());
++    }
++}
++
++std::vector<std::string> CImage::blendShapeNames () const {
++    std::vector<std::string> names;
++    for (const auto& [mesh, target] : this->m_puppetShapes) {
++	names.push_back (this->m_puppet.meshes[mesh].morphs[target].name);
++    }
++    return names;
++}
++
++float CImage::blendShapeWeight (int index) {
++    if (index < 0 || static_cast<size_t> (index) >= this->m_puppetShapes.size ()) {
++	return 0.0f;
++    }
++    this->updatePuppetPose ();
++    const auto [mesh, target] = this->m_puppetShapes[index];
++    return this->m_puppetShapeWeights[mesh][target];
++}
++
++void CImage::setBlendShapeWeight (int index, const std::optional<float>& weight) {
++    if (index < 0 || static_cast<size_t> (index) >= this->m_puppetShapes.size ()) {
++	return;
++    }
++    if (weight.has_value ()) {
++	this->m_shapeOverrides[index] = *weight;
++    } else {
++	this->m_shapeOverrides.erase (index);
++    }
++    this->m_puppetPoseDirty = true;
+ }
+ 
+ bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, float& angle) {
+@@ -702,6 +798,14 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) co
+ 		glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetTexCoord);
+ 		glVertexAttribPointer (texCoord, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+ 	    }
++
++	    // the vertex alphas (bone alpha, morph alpha) through genericimage4's VERTEXCOLOR
++	    if (const GLint color = glGetAttribLocation (pass->getProgramID (), "a_Color");
++		color >= 0 && this->m_puppetColor != GL_NONE) {
++		glEnableVertexAttribArray (color);
++		glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetColor);
++		glVertexAttribPointer (color, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
++	    }
+ 	},
+ 	[this] () {
+ 	    GLint currentFramebuffer = 0;
+@@ -730,6 +834,9 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) co
+ 	    if (texCoord >= 0) {
+ 		glDisableVertexAttribArray (texCoord);
+ 	    }
++	    if (const GLint color = glGetAttribLocation (pass->getProgramID (), "a_Color"); color >= 0) {
++		glDisableVertexAttribArray (color);
++	    }
+ 	}
+     );
+ }
+@@ -771,6 +878,16 @@ void CImage::setup () {
+ 
+     const auto& debug = this->getScene ().getContext ().getContext ().config;
+ 
++    // a puppet's vertex alpha (bone alpha tracks, blend-shape alphas) reaches genericimage4's fragment through its
++    // VERTEXCOLOR (a_Color = 1 1 1 alpha; color *= v_Color right after WE's color.a *= v_VertexAlpha). Ours: WE skins
++    // and morphs on the GPU (SKINNING_ALPHA, MORPHING), LWE's puppets on the CPU. genericimage2 has neither, in WE too
++    if (this->m_hasPuppetMesh && this->m_puppetVertexAlpha && !this->getImage ().model->material->passes.empty ()) {
++	auto& first = const_cast<MaterialPass&> (*this->getImage ().model->material->passes.front ());
++	if (first.shader == "genericimage4") {
++	    first.combos.insert_or_assign ("VERTEXCOLOR", 1);
++	}
++    }
++
+     // copy pass to the composite layer
+     for (const auto& cur : this->getImage ().model->material->passes) {
+ 	this->m_passes.push_back (
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index f9c6c41..8bb99d1 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -124,6 +124,12 @@ public:
+     void puppetBonePose (std::vector<glm::mat4>& local, std::vector<glm::mat4>& world);
+     /** A script's local matrix for a bone, over what the animations pose (nullopt: back to the animations) */
+     void setBoneOverride (int bone, const std::optional<glm::mat4>& local);
++    /** The puppet's blend shapes (MDMP targets, every mesh's in order): their names */
++    [[nodiscard]] std::vector<std::string> blendShapeNames () const;
++    /** A blend shape's weight now (the animations' mix, or the script's), 0 when there's no such shape */
++    [[nodiscard]] float blendShapeWeight (int index);
++    /** A script's weight for a blend shape, over the animations' (nullopt: back to them) */
++    void setBlendShapeWeight (int index, const std::optional<float>& weight);
+     /** a script changed an animation layer (its frame, its blend): the pose follows now */
+     void puppetPoseChanged () { this->m_puppetPoseDirty = true; }
+ 
+@@ -212,6 +218,21 @@ private:
+     /** a script changed a layer or a bone: pose again this frame (with no time passing) */
+     bool m_puppetPoseDirty = false;
+     bool m_puppetSkinned = false;
++    /** a mesh has blend shapes (MDMP): posed even without animations */
++    bool m_puppetMorphed = false;
++    /** the animations carry bone alphas or the targets alphas: the first pass gets VERTEXCOLOR and a_Color */
++    bool m_puppetVertexAlpha = false;
++    /** per vertex of m_puppetVertices, its mesh */
++    std::vector<uint16_t> m_puppetVertexMesh = {};
++    /** the blend shapes' (mesh, target), in blendShapeNames' order */
++    std::vector<std::pair<size_t, size_t>> m_puppetShapes = {};
++    /** per mesh, per target: the weights mixed last (with the script's) */
++    std::vector<std::vector<float>> m_puppetShapeWeights = {};
++    /** blend-shape weights a script set, by blendShapeNames' index */
++    std::map<int, float> m_shapeOverrides = {};
++    /** per vertex: (1, 1, 1, bone alpha · morph alpha) when m_puppetVertexAlpha */
++    std::vector<GLfloat> m_puppetColors = {};
++    GLuint m_puppetColor = GL_NONE;
+     glm::vec2 m_puppetSize = glm::vec2 (0.0f);
+ 
+     glm::mat4 m_modelViewProjectionScreen = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index af1a78a..25f8ee0 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -96,6 +96,7 @@ void parseMeshes (Reader& r, int version, Model& out) {
+ 	    }
+ 	}
+ 	const uint32_t flags = version >= 4 ? r.u32 () : 0;
++	mesh.flags = flags;
+ 	if (flags & 2) {
+ 	    r.u32 (); // influences per vertex (≤ 4)
+ 	}
+@@ -145,6 +146,11 @@ void parseMeshes (Reader& r, int version, Model& out) {
+ 	    const char* base = r.data + vertices + v * stride;
+ 	    Vertex& vertex = mesh.vertices[v];
+ 	    std::memcpy (&vertex.position, base + positionAt, sizeof (glm::vec3));
++	    if (format & 0x10000) {
++		float w = 0.0f;
++		std::memcpy (&w, base + positionAt + 12, sizeof (float));
++		vertex.morph = w > 0.0f ? static_cast<uint32_t> (w) : 0;
++	    }
+ 	    vertex.uv = glm::vec2 (0.0f);
+ 	    if (hasUv) {
+ 		std::memcpy (&vertex.uv, base + uvAt, sizeof (glm::vec2));
+@@ -258,6 +264,87 @@ void parseSkeleton (Reader& r, int version, Model& out, SkeletonCounts& counts)
+     }
+ }
+ 
++/** `count` float tracks (a u32 of flags, a blob of frames + 1 floats each) */
++std::vector<std::vector<float>> floatTracks (Reader& r, uint32_t count, size_t samples) {
++    std::vector<std::vector<float>> out (count);
++    for (uint32_t i = 0; i < count; i++) {
++	r.u32 ();
++	uint32_t length;
++	const size_t at = r.blob (length);
++	if (length != samples * 4) {
++	    throw std::runtime_error ("float track length isn't (frames + 1) · 4");
++	}
++	out[i].resize (samples);
++	std::memcpy (out[i].data (), r.data + at, length);
++    }
++    return out;
++}
++
++/** MDMP0001 (GH 0x1402873f0): per mesh a u16 target count (≤ 0x100); with targets, the f32 scale and the u32 point
++ *  count N; per target a u64 id, its name and N · 6 bytes of snorm16 xyz, then by the mesh's flags N · 6 normal bytes
++ *  (0x400), N · 2 alpha bytes (0x1000) and a bone rule (0x2000: u32 bone, u32, f32, f32) */
++void parseMorphs (Reader& r, Model& out) {
++    const auto snorm = [] (int16_t v) { return std::max (static_cast<float> (v) / 32767.0f, -1.0f); };
++    for (auto& mesh : out.meshes) {
++	const uint16_t count = r.u16 ();
++	if (count > 0x100) {
++	    throw std::runtime_error ("too many morph targets");
++	}
++	if (count == 0) {
++	    continue;
++	}
++	mesh.morphScale = r.f32 ();
++	mesh.morphPoints = r.u32 ();
++	for (uint16_t t = 0; t < count; t++) {
++	    MorphTarget target;
++	    target.id = r.get<uint64_t> ();
++	    target.name = r.str ();
++	    uint32_t length;
++	    size_t at = r.blob (length);
++	    if (length % 6 != 0) {
++		throw std::runtime_error ("morph positions not 6 bytes a point");
++	    }
++	    // WE takes the smaller of the header's count and the blob's (and requires them equal)
++	    mesh.morphPoints = std::min<uint32_t> (mesh.morphPoints, length / 6);
++	    const auto read3 = [&] (size_t from, std::vector<glm::vec3>& into, float scale) {
++		into.resize (mesh.morphPoints);
++		for (uint32_t i = 0; i < mesh.morphPoints; i++) {
++		    int16_t v[3];
++		    std::memcpy (v, r.data + from + i * 6, sizeof (v));
++		    into[i] = glm::vec3 (snorm (v[0]), snorm (v[1]), snorm (v[2])) * scale;
++		}
++	    };
++	    read3 (at, target.positions, mesh.morphScale);
++	    if (mesh.flags & 0x400) {
++		at = r.blob (length);
++		if (length != mesh.morphPoints * 6) {
++		    throw std::runtime_error ("morph normals don't match the points");
++		}
++		read3 (at, target.normals, 1.0f);
++	    }
++	    if (mesh.flags & 0x1000) {
++		at = r.blob (length);
++		if (length != mesh.morphPoints * 2) {
++		    throw std::runtime_error ("morph alphas don't match the points");
++		}
++		target.alpha.resize (mesh.morphPoints);
++		for (uint32_t i = 0; i < mesh.morphPoints; i++) {
++		    int16_t v;
++		    std::memcpy (&v, r.data + at + i * 2, sizeof (v));
++		    target.alpha[i] = snorm (v);
++		}
++	    }
++	    if (mesh.flags & 0x2000) {
++		target.modifierBone = static_cast<int> (r.u32 ());
++		target.modifierMode = r.u32 ();
++		target.modifierRange.x = r.f32 ();
++		target.modifierRange.y = r.f32 ();
++	    }
++	    mesh.morphs.push_back (std::move (target));
++	}
++    }
++}
++
+ void skipFloatTracks (Reader& r, uint32_t count) {
+     for (uint32_t i = 0; i < count; i++) {
+ 	r.u32 ();
+@@ -311,18 +398,27 @@ void parseAnimations (Reader& r, int version, const SkeletonCounts& counts, Mode
+ 	    }
+ 	    skipFloatTracks (r, curves);
+ 	    if (r.u8 ()) {
+-		skipFloatTracks (r, tracks); // per-bone alpha
++		animation.boneAlpha = floatTracks (r, tracks, samples);
+ 	    }
+ 	}
+ 	if (version > 3 && r.u8 ()) {
+-	    // blend-shape weights per mesh
++	    // blend-shape weights per mesh: flags (bit 0), a float (the mesh's morph scale again), a u16 count, then per
++	    // track the target's index and frames + 1 floats
++	    animation.shapeWeights.resize (out.meshes.size ());
+ 	    for (size_t m = 0; m < out.meshes.size (); m++) {
+ 		if (r.u32 () & 1) {
+ 		    r.u32 ();
+ 		    const uint16_t shapes = r.u16 ();
+ 		    for (uint16_t s = 0; s < shapes; s++) {
+-			r.u16 ();
+-			r.skipBlob ();
++			const uint16_t index = r.u16 ();
++			uint32_t length;
++			const size_t at = r.blob (length);
++			if (length != samples * 4) {
++			    throw std::runtime_error ("blend-shape track length isn't (frames + 1) · 4");
++			}
++			std::vector<float> weights (samples);
++			std::memcpy (weights.data (), r.data + at, length);
++			animation.shapeWeights[m].emplace_back (index, std::move (weights));
+ 		    }
+ 		}
+ 	    }
+@@ -336,6 +432,7 @@ void parseAnimations (Reader& r, int version, const SkeletonCounts& counts, Mode
+ 	    skipFloatTracks (r, tracks);
+ 	}
+ 	if (flags & 1) {
++	    animation.rootMotion = true;
+ 	    r.need (18);
+ 	    r.at += 18; // root motion
+ 	}
+@@ -412,6 +509,8 @@ bool parse (const char* data, size_t size, Model& out, std::string& error) {
+ 		parseAnimations (r, v, counts, out);
+ 	    } else if (versionOf (marker, "MDAT") >= 1) {
+ 		parseAttachments (r, out);
++	    } else if (versionOf (marker, "MDMP") >= 1) {
++		parseMorphs (r, out);
+ 	    }
+ 	    r.at = end;
+ 	}
+@@ -419,6 +518,14 @@ bool parse (const char* data, size_t size, Model& out, std::string& error) {
+ 	error = ex.what ();
+ 	return !out.meshes.empty ();
+     }
++    // a vertex's morph point must be one of its mesh's (else no target moves it)
++    for (auto& mesh : out.meshes) {
++	for (auto& vertex : mesh.vertices) {
++	    if (vertex.morph > mesh.morphPoints) {
++		vertex.morph = 0;
++	    }
++	}
++    }
+     // tracks and attachments must match the skeleton
+     const auto bones = out.bones.size ();
+     out.animations.erase (std::remove_if (out.animations.begin (), out.animations.end (),
+@@ -612,8 +719,71 @@ void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world) {
+     }
+ }
+ 
++float sampleFloat (const Animation& animation, const std::vector<float>& track, float time) {
++    if (track.empty () || animation.fps <= 0.0f) {
++	return 0.0f;
++    }
++    const float frame = 1.0f / animation.fps;
++    const int frames = static_cast<int> (animation.frames);
++    const int a = std::clamp (static_cast<int> (time / frame), 0, std::max (frames - 1, 0));
++    const int b = std::min (a + 1, frames);
++    const float f = std::fmod (time, frame) / frame;
++    if (static_cast<size_t> (b) >= track.size ()) {
++	return track.back ();
++    }
++    return track[a] * (1.0f - f) + track[b] * f;
++}
++
++void mixExtras (std::vector<float>& alpha, std::vector<std::vector<float>>& weights, const Animation& animation,
++		float time, float weight, bool additive) {
++    for (size_t b = 0; b < alpha.size () && b < animation.boneAlpha.size (); b++) {
++	if (b < animation.tracks.size () && (animation.tracks[b].flags & 1)) {
++	    continue;
++	}
++	const float sample = sampleFloat (animation, animation.boneAlpha[b], time);
++	alpha[b] = additive ? alpha[b] + (sample - 1.0f) * weight : alpha[b] * (1.0f - weight) + sample * weight;
++    }
++    for (size_t m = 0; m < weights.size () && m < animation.shapeWeights.size (); m++) {
++	for (const auto& [index, track] : animation.shapeWeights[m]) {
++	    if (index >= weights[m].size ()) {
++		continue;
++	    }
++	    const float sample = sampleFloat (animation, track, time);
++	    float& w = weights[m][index];
++	    w = additive ? w + sample * weight : w * (1.0f - weight) + sample * weight;
++	}
++    }
++}
++
++glm::vec3 morph (const Mesh& mesh, const Vertex& vertex, const std::vector<float>& weights, float& alpha) {
++    alpha = 1.0f;
++    if (vertex.morph == 0 || mesh.morphs.empty ()) {
++	return vertex.position;
++    }
++    const uint32_t point = vertex.morph - 1;
++    glm::vec3 delta (0.0f);
++    for (size_t t = 0; t < mesh.morphs.size () && t < weights.size (); t++) {
++	const float w = weights[t];
++	if (w == 0.0f) {
++	    continue;
++	}
++	const auto& target = mesh.morphs[t];
++	if (point < target.positions.size ()) {
++	    delta += target.positions[point] * w;
++	}
++	if (point < target.alpha.size ()) {
++	    alpha *= target.alpha[point] * w + (1.0f - w);
++	}
++    }
++    return vertex.position + delta;
++}
++
+ glm::vec3 skin (const Vertex& vertex, const std::vector<glm::mat4>& skinning) {
+-    const glm::vec4 p (vertex.position, 1.0f);
++    return skin (vertex.position, vertex, skinning);
++}
++
++glm::vec3 skin (const glm::vec3& position, const Vertex& vertex, const std::vector<glm::mat4>& skinning) {
++    const glm::vec4 p (position, 1.0f);
+     glm::vec3 result (0.0f);
+     float total = 0.0f;
+     for (int c = 0; c < 4; c++) {
+@@ -625,6 +795,6 @@ glm::vec3 skin (const Vertex& vertex, const std::vector<glm::mat4>& skinning) {
+ 	result += w * glm::vec3 (skinning[bone] * p);
+ 	total += w;
+     }
+-    return total == 0.0f ? vertex.position : result;
++    return total == 0.0f ? position : result;
+ }
+ } // namespace WallpaperEngine::Render::Objects::Puppet
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index ca8addd..07f80a6 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -29,10 +29,41 @@ struct Vertex {
+     glm::vec3 normal = glm::vec3 (0.0f, 0.0f, 1.0f);
+     /** format bit 0x4: xyz and the bitangent's sign in w (1 0 0 1 when absent) */
+     glm::vec4 tangent = glm::vec4 (1.0f, 0.0f, 0.0f, 1.0f);
++    /**
++     * the vec4 position's w (format 0x10000): 1 + the vertex's point in its mesh's morph targets, 0 for a vertex no
++     * target moves (genericimage4's MORPHING reads a_PositionVec4.w)
++     */
++    uint32_t morph = 0;
++};
++
++/**
++ * A blend shape (MDMP0001, GH 0x1402873f0): per point (a vertex's `morph` − 1) a position delta, read as snorm16
++ * × the mesh's morph scale (2.8.485's morph_vertex_v1.h: DecodeMorphSnorm16, × g_MorphPositionScale), and, with the
++ * mesh's flag 0x1000, an alpha (snorm16, the morph map's w: v_VertexAlpha mixes it in by the weight)
++ */
++struct MorphTarget {
++    uint64_t id = 0;
++    std::string name;
++    std::vector<glm::vec3> positions;
++    /** with mesh flag 0x400 */
++    std::vector<glm::vec3> normals;
++    /** with mesh flag 0x1000, else empty (1) */
++    std::vector<float> alpha;
++    /** with mesh flag 0x2000 (MORPHING_MODIFIERS): a bone and its rule (u32, f32, f32): parsed, not applied */
++    int modifierBone = -1;
++    uint32_t modifierMode = 0;
++    glm::vec2 modifierRange = glm::vec2 (0.0f);
+ };
+ 
+ struct Mesh {
+     std::string material;
++    /** the mesh's flags (v4+): 1 32-bit indices, 2 an influence count, 0x400 / 0x1000 / 0x2000 morph normals / alpha /
++     *  modifiers */
++    uint32_t flags = 0;
++    /** MDMP: the snorm16 deltas' scale and the targets (points: their delta count) */
++    float morphScale = 0.0f;
++    uint32_t morphPoints = 0;
++    std::vector<MorphTarget> morphs;
+     std::vector<Vertex> vertices;
+     std::vector<uint32_t> indices;
+ };
+@@ -68,6 +99,18 @@ struct Animation {
+     float fps = 30.0f;
+     uint32_t frames = 0;
+     std::vector<Track> tracks;
++    /**
++     * MDLA v3+: the bones' alpha tracks (a flag byte, then per bone its flags and frames + 1 floats; empty when the
++     * flag is 0). genericimage4's SKINNING_ALPHA: v_VertexAlpha = saturate (Σ weight · alpha[bone])
++     */
++    std::vector<std::vector<float>> boneAlpha;
++    /**
++     * MDLA v4+: blend-shape weight tracks, per mesh (flags bit 0, a float, a u16 count), per track the target's index
++     * and frames + 1 weights
++     */
++    std::vector<std::vector<std::pair<uint16_t, std::vector<float>>>> shapeWeights;
++    /** flags bit 0: the root-motion record (18 bytes, not decoded) */
++    bool rootMotion = false;
+     /** the animation's events (MDLA's last list: a frame, a name): SceneScript's animationEvent on the layer */
+     std::vector<std::pair<uint32_t, std::string>> events;
+ };
+@@ -146,6 +189,27 @@ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vecto
+ /** The bind world matrices (GH 0x1402261c0) */
+ void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world);
+ 
++/** A float track's value at `time` (frames a, b and the fraction as `mix`) */
++float sampleFloat (const Animation& animation, const std::vector<float>& track, float time);
++
++/**
++ * Mixes one layer's bone alphas and blend-shape weights into `alpha` (per bone, from 1) and `weights` (per mesh,
++ * per target, from 0): normal lerps toward the sample by the layer's weight, additive adds (sample − rest) × weight.
++ * **Inferred**: WE's blend for these (the mixer GH 0x140228470 wasn't read that far); the bones' rule is
++ * the position's
++ */
++void mixExtras (std::vector<float>& alpha, std::vector<std::vector<float>>& weights, const Animation& animation,
++		float time, float weight, bool additive);
++
++/**
++ * A morphed position: position + scale · Σ weightₜ · deltaₜ[point] over the mesh's targets (genericimage4's
++ * MORPHING before SKINNING), and its alpha Π (alphaₜ · weightₜ + 1 − weightₜ)
++ */
++glm::vec3 morph (const Mesh& mesh, const Vertex& vertex, const std::vector<float>& weights, float& alpha);
++
++/** Skins `position` (the vertex's, morphed) by the vertex's bones and weights, as skin () */
++glm::vec3 skin (const glm::vec3& position, const Vertex& vertex, const std::vector<glm::mat4>& skinning);
++
+ /** Skins a vertex: Σ weightᵢ · world[boneᵢ] · bindWorld⁻¹[boneᵢ] · position; weights summing to 0 keep it */
+ glm::vec3 skin (const Vertex& vertex, const std::vector<glm::mat4>& skinning);
+ } // namespace WallpaperEngine::Render::Objects::Puppet
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 4e6fcba..3b88b09 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -121,6 +121,8 @@ enum LayerMethod {
+     Method_AnimLayerDestroy,
+     Method_Bones,
+     Method_BoneOverride,
++    Method_Shapes,
++    Method_ShapeOverride,
+     Method_EmitParticles,
+     Method_ParticleGet,
+     Method_ParticleSet,
+@@ -142,6 +144,7 @@ constexpr std::pair<const char*, LayerMethod> kMethods[] = {
+     { "__animLayers", Method_AnimLayers },	   { "__animLayerSet", Method_AnimLayerSet },
+     { "__animLayerCreate", Method_AnimLayerCreate }, { "__animLayerDestroy", Method_AnimLayerDestroy },
+     { "__bones", Method_Bones },		   { "__boneOverride", Method_BoneOverride },
++    { "__shapes", Method_Shapes },		   { "__shapeOverride", Method_ShapeOverride },
+     { "emitParticles", Method_EmitParticles },
+     { "__particleGet", Method_ParticleGet },	   { "__particleSet", Method_ParticleSet },
+ };
+@@ -521,6 +524,35 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	    }
+ 	    return JS_TRUE;
+ 	}
++	case Method_Shapes: {
++	    // [{ name, weight }]: the puppet's blend shapes (MDMP targets, every mesh's in order), weighted now
++	    JSValue result = JS_NewArray (ctx);
++	    if (image == nullptr) {
++		return result;
++	    }
++	    const auto names = image->blendShapeNames ();
++	    for (uint32_t i = 0; i < names.size (); i++) {
++		JSValue entry = JS_NewObject (ctx);
++		JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, names[i].c_str ()));
++		JS_SetPropertyStr (ctx, entry, "weight", JS_NewFloat64 (ctx, image->blendShapeWeight (static_cast<int> (i))));
++		JS_SetPropertyUint32 (ctx, result, i, entry);
++	    }
++	    return result;
++	}
++	case Method_ShapeOverride: {
++	    // __shapeOverride (index, weight | null): a script's weight over the animations', or back to them
++	    int index = -1;
++	    if (image == nullptr || argc < 1 || JS_ToInt32 (ctx, &index, argv[0]) < 0) {
++		return JS_FALSE;
++	    }
++	    double weight = 0.0;
++	    if (argc > 1 && JS_IsNumber (argv[1]) && JS_ToFloat64 (ctx, &weight, argv[1]) == 0) {
++		image->setBlendShapeWeight (index, static_cast<float> (weight));
++	    } else {
++		image->setBlendShapeWeight (index, std::nullopt);
++	    }
++	    return JS_TRUE;
++	}
+ 	case Method_Valid:
+ 	    return JS_NewBool (ctx, object.getScene ().isLayerAlive (&object));
+ 	case Method_Attachments: {
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index 0c83097..cf05939 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -341,12 +341,23 @@ globalThis.__layerMethods = (function () {
+       const d = m.decompose();
+       this.setLocalBoneTransform(which, Mat4.compose(origin, d.rotation, d.scale));
+     },
+-    // LWE simulates no bone physics and has no blend shapes (no library scene has either)
++    // LWE simulates no bone physics (no library scene enables it: every bone's "se"/"re"/"ge" is false)
+     applyBonePhysicsImpulse() {},
+     resetBonePhysicsSimulation() {},
+-    getBlendShapeIndex() { return -1; },
+-    getBlendShapeWeight() { return 0; },
+-    setBlendShapeWeight() {},
++    // the puppet's blend shapes (MDMP targets), by name or index: "get the index of a blend shape by name",
++    // "get / set blend shape weight by name or index" (d.ts 2.8). A set weight holds over the animations'
++    getBlendShapeIndex(name) {
++      return this.__shapes().findIndex((s) => s.name === String(name));
++    },
++    getBlendShapeWeight(shape) {
++      const shapes = this.__shapes();
++      const i = typeof shape === 'number' ? shape : shapes.findIndex((s) => s.name === String(shape));
++      return i >= 0 && i < shapes.length ? shapes[i].weight : 0;
++    },
++    setBlendShapeWeight(shape, weight) {
++      const i = typeof shape === 'number' ? shape : this.getBlendShapeIndex(shape);
++      if (i >= 0) { this.__shapeOverride(i, Number(weight)); }
++    },
+     // "the current world transform matrix"
+     getTransformMatrix() {
+       return mat(this.__world());
