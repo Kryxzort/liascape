@@ -2918,7 +2918,7 @@ static bool layer_api_reaches_layers () {
         "thisScene.getLayer('sq2').mark = 7;\n"
         "check('kept', thisScene.getLayer('sq2').mark === 7);\n"
         "check('effects', thisLayer.getEffectCount() == 0 && thisLayer.getEffect('x') === undefined);\n"
-        "check('parent', thisLayer.getParent() === null && thisScene.getLayer('grp').getChildren().length == 0);\n"
+        "check('parent', thisLayer.getParent() === undefined && thisScene.getLayer('grp').getChildren().length == 0);\n"
         "check('scene', typeof thisScene.bloomstrength === 'number' && thisScene.clearenabled === true);\n");
     const std::string dir = script_scene (
         square (1, scripted ("visible", "true", "export function update(value) {\n" + checks
@@ -3272,6 +3272,138 @@ static bool local_storage_persists () {
     CHECK (stored.find ("\"n\":41") != std::string::npos, "not stored as a number");
     return true;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The SceneScript coverage batch (docs/player/spikes/we-coverage.md § 1)
+
+// a property script that runs `checks` once (its first update) and then shows its layer only if they all passed
+static std::string checked_once (const std::string& checks) {
+    return "let result;\nexport function update(value) {\n  if (result === undefined) {\n" + js_checks (checks)
+         + "    result = fails.length == 0;\n  }\n  return result;\n}";
+}
+
+// ILayer's transform API: getTransformMatrix (world, with the parent's), rotateObjectSpace (degrees), setParent with
+// and without adjustTransforms (and a refused cycle), getParent undefined when unparented, getLayerByID,
+// getAttachmentIndex on a layer without a puppet, lookAt, IImageLayer.alignment read and written (the quad moves
+// right of its origin). Unpatched: getTransformMatrix and the rest were not functions, alignment undefined
+static bool layer_transform_api () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks =
+        "const m = thisLayer.getTransformMatrix();\n"
+        "check('world', m instanceof Mat4 && Math.abs(m.m[12] - 24) < 1e-4 && Math.abs(m.m[13] - 16) < 1e-4);\n"
+        "check('parent', thisLayer.getParent().name == 'grp' && thisScene.getLayerByID(10).name == 'grp');\n"
+        "const sq2 = thisScene.getLayer('sq2'), sq3 = thisScene.getLayer('sq3'), grp = thisScene.getLayer('grp');\n"
+        "check('unparented', sq2.getParent() === undefined);\n"
+        "check('align0', sq2.alignment == 'center');\n"
+        "sq2.alignment = 'left';\n"
+        "check('align1', sq2.alignment == 'left');\n"
+        "sq3.angles = new Vec3(0, 0, 0);\n"
+        "sq3.rotateObjectSpace(new Vec3(0, 0, 30));\n"
+        "sq3.rotateObjectSpace(new Vec3(0, 0, 30));\n"
+        "check('rotate', Math.abs(sq3.angles.z - 60) < 1e-3 && Math.abs(sq3.angles.x) < 1e-3);\n"
+        "sq3.angles = new Vec3(0, 0, 0);\n"
+        "sq3.origin = new Vec3(30, 10, 0);\n"
+        "sq3.setParent('grp', true);\n"
+        "check('adopt', sq3.getParent().name == 'grp' && Math.abs(sq3.origin.x - 14) < 1e-3"
+        " && Math.abs(sq3.getTransformMatrix().m[12] - 30) < 1e-3);\n"
+        "sq3.setParent(undefined, true);\n"
+        "check('release', sq3.getParent() === undefined && Math.abs(sq3.origin.x - 30) < 1e-3);\n"
+        "sq3.setParent(grp);\n"
+        "check('keep', Math.abs(sq3.origin.x - 30) < 1e-3 && Math.abs(sq3.getTransformMatrix().m[12] - 46) < 1e-3);\n"
+        "grp.setParent(sq3);\n"
+        "check('cycle', grp.getParent() === undefined);\n"
+        "check('attach', thisLayer.getAttachmentIndex('x') == -1 && thisLayer.getAttachmentMatrix('x') === undefined);\n"
+        "sq3.lookAt(new Vec3(30, 10, -100));\n"
+        "check('look', sq3.angles.isFinite());\n";
+    const std::string dir = script_scene (
+        "{\"id\":10,\"name\":\"grp\",\"origin\":\"16 0 0\",\"visible\":true}," + square (1, scripted ("visible", "true", checked_once (checks))
+                       + ",\"origin\":\"8 16 0\",\"parent\":10")
+        + "," + square (2, "\"origin\":\"48 16 0\"") + "," + square (3, "\"origin\":\"30 10 0\",\"visible\":false"));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    std::string want = covered (20, 27);
+    for (int x = 48; x <= 55; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == want, "want %s (no square at 20..27: a failed check, see FAILS above; sq2 at 44..51: alignment)",
+           want.c_str ());
+    return true;
+}
+
+// thisScene.createLayer from a configuration (vectors as WE serialises them) and from an asset path, drawn from that
+// frame; sortLayer of a created layer; destroyLayer takes a layer out (no longer drawn, not valid, not found by name,
+// a second destroy false). Unpatched: createLayer returned undefined, destroyLayer false
+static bool create_layer_builds_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script =
+        "let made, bar, ok;\n"
+        "export function init(value) {\n" + js_checks (
+        "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(1, 1, 1),"
+        " origin: new Vec3(40, 16, 0) });\n"
+        "bar = thisScene.createLayer('models/util/solidlayer.json');\n"
+        "check('made', made !== undefined && bar !== undefined && made !== bar);\n"
+        "check('count', thisScene.getLayerCount() == 4 && thisScene.getLayerIndex(made) == 2);\n"
+        "check('origin', Math.abs(made.origin.x - 40) < 1e-4 && made.size.x == 8);\n"
+        "check('sort', thisScene.sortLayer(made, 0) && thisScene.getLayerIndex(made) == 0);\n"
+        "bar.visible = false;\n"
+        "const gone = thisScene.getLayer('sq2');\n"
+        "check('destroy', thisScene.destroyLayer(gone) && !engine.isObjectValid(gone) && engine.isObjectValid(made));\n"
+        "check('after', thisScene.getLayerCount() == 3 && thisScene.getLayer('sq2') === undefined && !thisScene.destroyLayer(gone));\n")
+        + "  ok = fails.length == 0;\n  return ok;\n}\n"
+        "export function update(value) { return ok; }";
+    const std::string dir = script_scene (square (1, scripted ("visible", "true", script) + ",\"origin\":\"8 16 0\"") + ","
+                                          + square (2, "\"origin\":\"24 16 0\""));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    std::string want = covered (4, 11);
+    for (int x = 36; x <= 43; x++) {
+        want[x] = '#';
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == want, "want %s (sq1 missing: a failed check, see FAILS above; 36..43: the created layer; 20..27: sq2 "
+                        "not destroyed)", want.c_str ());
+    return true;
+}
+
+// a text script property the scene stores as "0.5, 1, 1" is that string (2 library scenes split it; unpatched it
+// was parsed into a Vec3); V8's RegExp.$1 / lastMatch after a match (2932157836's clock; unpatched undefined)
+static bool script_strings_and_regexp () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks =
+        "check('text', typeof scriptProperties.textMin === 'string' && scriptProperties.textMin.split(/\\s*,\\s*/).length == 3);\n"
+        "check('vec', scriptProperties.tint instanceof Vec3 && scriptProperties.tint.y == 0.5);\n"
+        "check('re1', /(y+)/.test('yyyy-MM') && RegExp.$1 == 'yyyy');\n"
+        "'ab12cd'.replace(/(\\d+)/, 'x');\n"
+        "check('re2', RegExp.$1 == '12' && RegExp.lastMatch == '12' && RegExp.leftContext == 'ab' && RegExp.rightContext == 'cd');\n";
+    std::string prop = scripted ("visible", "true",
+                                 "export var scriptProperties = createScriptProperties().addText({ name: 'textMin', value: '1, 1, 1' })"
+                                 ".addColor({ name: 'tint', value: new Vec3(1, 1, 1) }).finish();\n"
+                                     + checked_once (checks));
+    prop.insert (prop.size () - 1, ",\"scriptproperties\":{\"textMin\":\"0.5, 1, 1\",\"tint\":\"1 0.5 0\"}");
+    const std::string dir = script_scene (square (1, prop + ",\"origin\":\"8 16 0\""));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    CHECK (got == covered (4, 11), "the square is hidden: a failed check, see FAILS above");
+    return true;
+}
+
 
 // ISoundLayer from a script: play () starts a startsilent sound, pause () silences it and play () resumes it,
 // volume is live (0.5 → 0.25 gain), stop () silences it for good (unpatched: getLayer could not return a sound)
@@ -4223,6 +4355,9 @@ int main (int argc, char** argv) {
     run ("cursor_events_reach_layers", cursor_events_reach_layers);
     run ("local_storage_persists", local_storage_persists);
     run ("script_controls_a_sound", script_controls_a_sound);
+    run ("layer_transform_api", layer_transform_api);
+    run ("create_layer_builds_layers", create_layer_builds_layers);
+    run ("script_strings_and_regexp", script_strings_and_regexp);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
     run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
