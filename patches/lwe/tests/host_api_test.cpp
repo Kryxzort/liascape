@@ -1899,6 +1899,111 @@ static bool puppet_warp_as_we () {
     return true;
 }
 
+// F3 IK (the audit's "F2 result"): a bone whose simulation JSON has "ik": true is the end of a chain `ikd` bones long
+// that reaches for its type 0 IK target (MDLS v2's target list), which the animation moves (MDLA v2's target tracks).
+// A three-bone arm along x (root at -8, elbow at 0, hand at +8; a 4 px square on the hand), its hand's target animated
+// to (0, 8) and a pole above: the square sits at (0, 8) — x 30..33, 8 px up. Unpatched (no IK): the square stays at
+// the bind (x 38..41, the centre row)
+static std::string ik_puppet (bool ik) {
+    MdlWriter w;
+    w.str ("MDLV0016").u32 (0x1800009).u32 (1).u32 (1).str ("materials/puppet.json");
+    w.u32 (0).u32 (0x1800009);
+    MdlWriter verts;
+    const float corners[4][2] = { { 6, -2 }, { 10, -2 }, { 10, 2 }, { 6, 2 } };
+    for (const auto& c : corners) {
+        verts.f32 (c[0]).f32 (c[1]).f32 (0.0f);
+        verts.u32 (2).u32 (0).u32 (0).u32 (0).f32 (1).f32 (0).f32 (0).f32 (0);
+        verts.f32 (0.5f).f32 (0.5f);
+    }
+    w.u32 (static_cast<uint32_t> (verts.out.size ()));
+    w.out += verts.out;
+    w.u32 (12);
+    for (unsigned t : { 0u, 1u, 2u, 0u, 2u, 3u }) {
+        w.u16 (t);
+    }
+    const auto translate = [] (MdlWriter& m, float x, float y) {
+        for (int i = 0; i < 12; i++) {
+            m.f32 (i % 5 == 0 ? 1.0f : 0.0f);
+        }
+        m.f32 (x).f32 (y).f32 (0.0f).f32 (1.0f);
+    };
+    MdlWriter bones;
+    bones.u32 (3);
+    bones.str ("root").u32 (1).u32 (0xffffffff).u32 (64);
+    translate (bones, -8.0f, 0.0f);
+    bones.str ("");
+    bones.str ("elbow").u32 (1).u32 (0).u32 (64);
+    translate (bones, 8.0f, 0.0f);
+    bones.str ("");
+    bones.str ("hand").u32 (1).u32 (1).u32 (64);
+    translate (bones, 8.0f, 0.0f);
+    bones.str (ik ? "{\"ik\":true,\"ikd\":2,\"ikr\":false}" : "{}");
+    // the targets: the hand's goal at its bind, the pole above the elbow
+    bones.u16 (2);
+    bones.str ("").u32 (2).u32 (0);
+    translate (bones, 8.0f, 0.0f);
+    bones.str ("").u32 (2).u32 (1);
+    translate (bones, 0.0f, 10.0f);
+    bones.u8 (0).u32 (0);
+    // one animation: the bones still, the goal at (0, 8), the pole where it was
+    MdlWriter anim;
+    anim.u32 (1).u32 (1).u32 (0).str ("reach").str ("loop").f32 (1.0f).u32 (1).u32 (0).u32 (3);
+    const float binds[3] = { -8.0f, 8.0f, 8.0f };
+    for (float x : binds) {
+        anim.u32 (0).u32 (72);
+        for (int k = 0; k < 2; k++) {
+            anim.f32 (x).f32 (0).f32 (0).f32 (0).f32 (0).f32 (0).f32 (1).f32 (1).f32 (1);
+        }
+    }
+    const float goals[2][2] = { { 0.0f, 8.0f }, { 0.0f, 10.0f } };
+    for (const auto& g : goals) {
+        anim.u32 (0).u32 (72);
+        for (int k = 0; k < 2; k++) {
+            anim.f32 (g[0]).f32 (g[1]).f32 (0).f32 (0).f32 (0).f32 (0).f32 (1).f32 (1).f32 (1);
+        }
+    }
+    anim.u32 (0); // events
+    w.section ("MDLS0002", bones.out).section ("MDLA0002", anim.out);
+    return w.out;
+}
+
+static bool puppet_ik_reaches_its_target () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    const std::string objects
+        = "{\"id\":1,\"name\":\"arm\",\"image\":\"models/ik.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":1,\"rate\":1,\"blend\":1,\"visible\":true}]}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/ik.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/ik.mdl\"}\n");
+    write_file (dir + "/models/ik.mdl", ik_puppet (true));
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/ik.json", "models/ik.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    int x0 = 99, x1 = -1, y0 = 99, y1 = -1;
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 64; x++) {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (rig.fbo, x, y, px);
+            if (px[0] > 128) {
+                x0 = std::min (x0, x), x1 = std::max (x1, x), y0 = std::min (y0, y), y1 = std::max (y1, y);
+            }
+        }
+    }
+    printf ("    the hand's square: x %d..%d, rows %d..%d (bind: x 38..41, rows 14..17)\n", x0, x1, y0, y1);
+    CHECK (x0 >= 29 && x1 <= 34 && x1 >= x0, "the hand isn't at its target's x (30..33)");
+    CHECK (std::abs ((y0 + y1) / 2.0 - 16.0) >= 6.0 && std::abs ((y0 + y1) / 2.0 - 16.0) <= 10.0, "the hand isn't 8 px off the centre row");
+    return true;
+}
+
 // B5: parallax and camera (docs/player/spikes/we-lwe-gap-audit.md G10-G12, G14/E1, G15-G19), decoded from
 // wallpaper64.exe 2.8.485: the camera update GH 0x1401b8af0, the per-object offset in the render loop GH 0x1401b9b50,
 // the shake GH 0x1401c7680, the zoom in the scene tick GH 0x1401afbf0. The pointer is native scene px, y down
@@ -6123,6 +6228,7 @@ int main (int argc, char** argv) {
     run ("animation_layer_api", animation_layer_api);
     run ("puppet_animation_events", puppet_animation_events);
     run ("puppet_blend_shapes_and_alpha", puppet_blend_shapes_and_alpha);
+    run ("puppet_ik_reaches_its_target", puppet_ik_reaches_its_target);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
