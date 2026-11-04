@@ -5400,6 +5400,260 @@ static bool transparent_sort_takes_sortorder () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// F6: the operators and initializers only WE's stock presets use (the audit's "F5/F6 result"). Unpatched the parser
+// dropped each one ("unsupported particle operator/initializer"), so these systems ran without them. 64 x 32, one
+// system per scene at the centre, white 4 px particles that live 100 s on black (opaque material)
+
+struct StockRig {
+    ScriptRig rig;
+    bool open (const std::string& system, const std::vector<std::pair<std::string, std::string>>& more = {}, int steps = 15) {
+        std::vector<std::string> files;
+        std::vector<std::pair<std::string, std::string>> systems = { { "s.json", system } };
+        systems.insert (systems.end (), more.begin (), more.end ());
+        const std::string dir = particle_scene (particle_object (1, "s.json", 32, 16), "0 0 0", systems, files);
+        if (!particle_rig_open (rig, dir, files)) {
+            return false;
+        }
+        for (int i = 0; i < steps; i++) {
+            rig.step ();
+        }
+        return true;
+    }
+    std::array<unsigned char, 4> at (int x, int y) {
+        std::array<unsigned char, 4> px {};
+        read_pixel (rig.fbo, x, y, px.data ());
+        return px;
+    }
+    bool lit (int x, int y) {
+        const auto px = at (x, y);
+        return px[0] > 64 || px[1] > 64 || px[2] > 64;
+    }
+    // lit columns of row y as '#'/'.'
+    std::string row (int y) {
+        std::string out;
+        for (int x = 0; x < 64; x++) {
+            out += lit (x, y) ? '#' : '.';
+        }
+        return out;
+    }
+    int litCount () {
+        int n = 0;
+        for (int y = 0; y < 32; y++) {
+            for (int x = 0; x < 64; x++) {
+                n += lit (x, y);
+            }
+        }
+        return n;
+    }
+};
+
+static const char* kStockWhite = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+static const char* kStockLife = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+
+// a system: `emitter` (a whole emitter object), size 4 + white + 100 s life + `inits`, then `ops`; `top` more members
+static std::string stock_system (const std::string& emitter, const std::string& inits, const std::string& ops,
+                                 const std::string& top = "") {
+    return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":20") + top + ",\"emitter\":[" + emitter + "],"
+         + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4}," + kStockWhite + "," + kStockLife
+         + (inits.empty () ? "" : "," + inits) + "],\"operator\":[" + ops + "]}\n";
+}
+
+// one particle at the origin (or `count` of them), `speed` "x y z" (WE's y up)
+static std::string stock_point (int count = 1) {
+    return "{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,\"distancemax\":0,"
+           "\"rate\":0,\"instantaneous\":" + std::to_string (count) + "}";
+}
+static std::string stock_velocity (const char* v) {
+    return std::string ("{\"name\":\"velocityrandom\",\"min\":\"") + v + "\",\"max\":\"" + v + "\"}";
+}
+
+// capvelocity (case 0x12: v ×= min (1, maxspeed / |v|)), reducemovementnearcontrolpoint (case 0xd), boids (case
+// 0x11: cohesion pulls two particles 20 px apart together), maintaindistancetocontrolpoint (case 0xb: a particle 10 px
+// from control point 1 put at `distance` 4), remapvalue (lifetimefraction → opacity 0.5)
+static bool particle_stock_motion_operators () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string move = "{\"name\":\"movement\"}";
+    const std::string fast = stock_velocity ("60 0 0");
+    StockRig free, capped, reduced, flock, kept, remapped;
+    CHECK (free.open (stock_system (stock_point (), fast, move)), "load failed (free)");
+    CHECK (capped.open (stock_system (stock_point (), fast, move + ",{\"name\":\"capvelocity\",\"maxspeed\":10}")), "load failed (cap)");
+    CHECK (reduced.open (stock_system (stock_point (), fast,
+               move + ",{\"name\":\"reducemovementnearcontrolpoint\",\"distanceinner\":100,\"distanceouter\":200,\"reductioninner\":1000}")),
+           "load failed (reduce)");
+    const std::string pair = "{\"name\":\"boxrandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 1\",\"distancemin\":\"10 0 0\","
+                             "\"distancemax\":\"10 0 0\",\"rate\":0,\"instantaneous\":2}";
+    CHECK (flock.open (stock_system (pair, "", "{\"name\":\"movement\",\"drag\":1},{\"name\":\"boids\",\"cohesionfactor\":30,"
+                                               "\"alignmentfactor\":0,\"neighborthreshold\":50,\"maxspeed\":500}"), {}, 20),
+           "load failed (boids)");
+    CHECK (kept.open (stock_system (stock_point (), "",
+               "{\"name\":\"maintaindistancetocontrolpoint\",\"controlpoint\":1,\"distance\":4}",
+               ",\"controlpoint\":[{\"id\":1,\"offset\":\"10 0 0\"}]")),
+           "load failed (maintain)");
+    CHECK (remapped.open (stock_system (stock_point (), "",
+               "{\"name\":\"remapvalue\",\"input\":\"lifetimefraction\",\"output\":\"opacity\",\"outputrangemin\":0.5,\"outputrangemax\":0.5}")),
+           "load failed (remap)");
+    const std::string f = free.row (16), c = capped.row (16), r = reduced.row (16), b = flock.row (16), k = kept.row (16);
+    const int alpha = remapped.at (32, 16)[0];
+    printf ("    free 60 px/s, 0.5 s: %s\n    capvelocity 10:      %s\n    reduced near cp 0:   %s\n"
+            "    boids cohesion:      %s\n    maintain 4 from cp:  %s\n    remap opacity 0.5: red %d\n",
+            f.c_str (), c.c_str (), r.c_str (), b.c_str (), k.c_str (), alpha);
+    CHECK (left_edge (f) >= 50, "the free particle didn't move (%s)", f.c_str ());
+    CHECK (left_edge (c) >= 32 && left_edge (c) <= 40, "capvelocity 10 didn't slow it (left edge %d)", left_edge (c));
+    CHECK (left_edge (r) >= 28 && left_edge (r) <= 36, "the reduction near the control point didn't stop it (left edge %d)", left_edge (r));
+    const int flockLeft = left_edge (b), flockRight = static_cast<int> (b.rfind ('#'));
+    CHECK (flockLeft > 23 && flockRight < 41 && flockRight - flockLeft <= 8, "boids' cohesion didn't pull the pair together (%s)", b.c_str ());
+    const int keptAt = left_edge (k);
+    CHECK (keptAt >= 34 && keptAt <= 38, "the particle isn't 4 px from the control point 10 px right (left edge %d)", keptAt);
+    CHECK (alpha >= 110 && alpha <= 145, "remapvalue opacity 0.5: red %d", alpha);
+    return true;
+}
+
+// the collisions: a plane (case 0x15) a falling particle slides on, a sphere (0x16) that deletes what's in it, a
+// quad (0x19) a particle beside it falls past, the scene's bounds (0x18) a fast particle stops at
+static bool particle_stock_collisions () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string fall = stock_velocity ("0 -60 0");
+    const std::string move = "{\"name\":\"movement\"}";
+    StockRig plane, sphere, quad, bounds;
+    CHECK (plane.open (stock_system (stock_point (), fall,
+               move + ",{\"name\":\"collisionplane\",\"plane\":\"0 1 0\",\"distance\":-6,\"collisionbehavior\":\"slide\"}")),
+           "load failed (plane)");
+    CHECK (sphere.open (stock_system (stock_point (), "",
+               "{\"name\":\"collisionsphere\",\"origin\":\"0 0 0\",\"radius\":20,\"collisionbehavior\":\"delete\"}")),
+           "load failed (sphere)");
+    const std::string beside = "{\"name\":\"sphererandom\",\"origin\":\"20 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+                               "\"distancemax\":0,\"rate\":0,\"instantaneous\":1}";
+    CHECK (quad.open (stock_system (beside, fall,
+               move + ",{\"name\":\"collisionquad\",\"origin\":\"0 -6 0\",\"plane\":\"0 1 0\",\"forward\":\"0 0 1\","
+                      "\"size\":\"20 20\",\"collisionbehavior\":\"slide\"}")),
+           "load failed (quad)");
+    CHECK (bounds.open (stock_system (stock_point (), stock_velocity ("400 0 0"),
+               move + ",{\"name\":\"collisionbounds\",\"collisionbehavior\":\"slide\"}")),
+           "load failed (bounds)");
+    auto lowest = [] (StockRig& s, int x) {
+        int y = -1;
+        for (int row = 0; row < 32; row++) {
+            if (s.lit (x, row)) {
+                y = row;
+            }
+        }
+        return y;
+    };
+    const int planeLow = lowest (plane, 32), quadLow = lowest (quad, 52);
+    const int sphereLit = sphere.litCount ();
+    const std::string edge = bounds.row (16);
+    printf ("    plane at y -6: lowest lit row %d (want ~22); sphere delete: %d px lit; beside the quad: lowest row %d "
+            "(fell past); bounds: %s\n", planeLow, sphereLit, quadLow, edge.c_str ());
+    CHECK (planeLow >= 20 && planeLow <= 24, "the plane didn't stop the particle (lowest row %d)", planeLow);
+    CHECK (sphereLit == 0, "the sphere didn't delete the particle (%d px lit)", sphereLit);
+    CHECK (quadLow == -1 || quadLow > 26, "the particle beside the quad was stopped (row %d)", quadLow);
+    CHECK (edge.back () == '#', "the bounds didn't keep the particle on screen (%s)", edge.c_str ());
+    return true;
+}
+
+// the initializers: hsvcolorrandom (hue 1/3 → green), colorlist (one blue), positionoffsetrandom (10 particles
+// spread along x), remapinitialvalue (size × 2 at spawn), mapsequencebetweencontrolpoints (3 particles from control
+// point 0 to 1) with maintaindistancebetweencontrolpoints carrying them as control point 1 follows the pointer,
+// inheritcontrolpointvelocity (a particle born on the moving pointer drifts with it), and an eventspawn child that
+// takes its (invisible) parent particle's colour (inheritinitialvaluefromevent setcolor; inheritvaluefromevent
+// multiplycolor keeps it red)
+static bool particle_stock_initializers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    StockRig hsv, list, offset, sized, plain;
+    CHECK (hsv.open (stock_system (stock_point (), "{\"name\":\"hsvcolorrandom\",\"huemin\":0.3333,\"huemax\":0.3333,"
+                                                   "\"saturationmin\":1,\"saturationmax\":1,\"valuemin\":1,\"valuemax\":1}", "")),
+           "load failed (hsv)");
+    CHECK (list.open (stock_system (stock_point (), "{\"name\":\"colorlist\",\"colors\":[\"0 0 1\"]}", "")), "load failed (colorlist)");
+    CHECK (offset.open (stock_system (stock_point (10), "{\"name\":\"positionoffsetrandom\",\"distance\":12,\"scale\":0,"
+                                                         "\"directions\":\"1 0 0\"}", "")),
+           "load failed (offset)");
+    CHECK (sized.open (stock_system (stock_point (), "{\"name\":\"remapinitialvalue\",\"input\":\"lifetimefraction\",\"output\":\"size\","
+                                                     "\"operation\":\"multiply\",\"outputrangemin\":2,\"outputrangemax\":2}", "")),
+           "load failed (remapinitialvalue)");
+    CHECK (plain.open (stock_system (stock_point (), "", "")), "load failed (plain)");
+    const auto green = hsv.at (32, 16), blue = list.at (32, 16);
+    const std::string spread = offset.row (16), big = sized.row (16), small = plain.row (16);
+    auto width = [] (const std::string& r) { return static_cast<int> (std::count (r.begin (), r.end (), '#')); };
+    printf ("    hsv hue 1/3: %d %d %d; colorlist blue: %d %d %d\n    offset ±12 x: %s\n    remapinitialvalue size × 2: %s (plain %s)\n",
+            green[0], green[1], green[2], blue[0], blue[1], blue[2], spread.c_str (), big.c_str (), small.c_str ());
+    CHECK (green[1] > 200 && green[0] < 60 && green[2] < 60, "hsvcolorrandom hue 1/3 isn't green");
+    CHECK (blue[2] > 200 && blue[0] < 60 && blue[1] < 60, "colorlist's only colour isn't blue");
+    CHECK (std::abs (left_edge (spread) - static_cast<int> (spread.rfind ('#'))) >= 10, "positionoffsetrandom didn't spread them");
+    CHECK (width (big) == 2 * width (small), "remapinitialvalue didn't double the size (%d vs %d)", width (big), width (small));
+
+    // control point 0 at x −20, control point 1 on the pointer (scene x 52, then 52 + 8 · k): three particles at 0,
+    // ½ and 1 along it; the segment's end moves 8 px right per step for 2 steps, so the middle moves 8, the end 16
+    const std::string cps = ",\"controlpoint\":[{\"id\":0,\"offset\":\"-20 0 0\"},{\"id\":1,\"flags\":1,\"offset\":\"0 0 0\"}]";
+    const std::string seq = "{\"name\":\"mapsequencebetweencontrolpoints\",\"controlpointstart\":0,\"controlpointend\":1,\"count\":3}";
+    StockRig between, fixedEnds;
+    between.rig.mouse = &g_mouse;
+    fixedEnds.rig.mouse = &g_mouse;
+    g_mouseX = 52.0;
+    g_mouseY = 16.0;
+    CHECK (fixedEnds.open (stock_system (stock_point (3), seq, "", cps), {}, 2), "load failed (sequence)");
+    const std::string placed = fixedEnds.row (16);
+    g_mouseX = 52.0;
+    CHECK (between.open (stock_system (stock_point (3), seq,
+               "{\"name\":\"maintaindistancebetweencontrolpoints\",\"controlpointstart\":0,\"controlpointend\":1}", cps), {}, 2),
+           "load failed (between)");
+    for (int i = 0; i < 2; i++) {
+        g_mouseX += 8.0;
+        between.rig.step ();
+    }
+    const std::string carried = between.row (16);
+
+    // a particle born on the pointer, which moves 2 px per step (60 px/s): inheritcontrolpointvelocity min = max = 1
+    StockRig inherit;
+    inherit.rig.mouse = &g_mouse;
+    g_mouseX = 10.0;
+    const std::string onPointer = "{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+                                  "\"distancemax\":0,\"rate\":0,\"instantaneous\":0}";
+    std::string carriedSys = stock_system (onPointer, "{\"name\":\"inheritcontrolpointvelocity\",\"controlpoint\":0,\"min\":1,\"max\":1}",
+                                           "{\"name\":\"movement\"}", ",\"controlpoint\":[{\"id\":0,\"flags\":1,\"offset\":\"0 0 0\"}]");
+    // one particle at the control point once the pointer moves (rate 30/s from the first step, maxcount 1)
+    carriedSys.replace (carriedSys.find ("\"maxcount\":20"), 13, "\"maxcount\":1");
+    carriedSys.replace (carriedSys.find ("\"rate\":0"), 8, "\"rate\":30");
+    carriedSys.replace (carriedSys.find ("\"directions\":\"1 1 0\","), 21, "\"directions\":\"1 1 0\",\"controlpoint\":0,\"delay\":0.1,");
+    CHECK (inherit.open (carriedSys, {}, 1), "load failed (inherit velocity)");
+    for (int i = 0; i < 6; i++) {
+        g_mouseX += 2.0;
+        inherit.rig.step ();
+    }
+    const double stop = g_mouseX;
+    for (int i = 0; i < 15; i++) {
+        inherit.rig.step ();
+    }
+    const std::string drift = inherit.row (16);
+
+    // an eventspawn child (white) of a red parent of alpha 0: setcolor → red; inheritvaluefromevent multiplycolor keeps it
+    const std::string red = "{\"name\":\"colorrandom\",\"min\":\"255 0 0\",\"max\":\"255 0 0\"}";
+    std::string parent = stock_system (stock_point (), red + ",{\"name\":\"alpharandom\",\"min\":0,\"max\":0}", "", ",\"children\":[{\"name\":\"particles/c.json\",\"type\":\"eventspawn\"}]");
+    std::string child = stock_system ("{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+                                      "\"distancemax\":0,\"rate\":0,\"instantaneous\":1}",
+                                      "{\"name\":\"inheritinitialvaluefromevent\",\"input\":\"setcolor\"}",
+                                      "{\"name\":\"inheritvaluefromevent\",\"input\":\"multiplycolor\"}");
+    child.replace (child.find ("\"min\":4,\"max\":4"), 15, "\"min\":8,\"max\":8");
+    StockRig event;
+    CHECK (event.open (parent, { { "c.json", child } }, 5), "load failed (event child)");
+    const auto childPx = event.at (32, 16);
+    printf ("    sequence 0, ½, 1 (cp 0 at 12, cp 1 at 52): %s\n    the end moved 16 px:   %s\n"
+            "    pointer stopped at %.0f, the particle drifted on: %s\n    event child of a red particle: %d %d %d\n",
+            placed.c_str (), carried.c_str (), stop, drift.c_str (), childPx[0], childPx[1], childPx[2]);
+    CHECK (fixedEnds.lit (12, 16) && fixedEnds.lit (32, 16) && fixedEnds.lit (52, 16), "the sequence isn't at 12, 32, 52 (%s)", placed.c_str ());
+    CHECK (between.lit (12, 16) && between.lit (40, 16) && between.lit (68 - 1, 16) == between.lit (63, 16) && !between.lit (32, 16),
+           "the segment didn't carry its particles (%s)", carried.c_str ());
+    CHECK (left_edge (drift) > static_cast<int> (stop) + 4, "the particle didn't take the pointer's velocity (%s)", drift.c_str ());
+    CHECK (childPx[0] > 200 && childPx[1] < 60 && childPx[2] < 60, "the event child didn't take its particle's colour");
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -5511,6 +5765,9 @@ int main (int argc, char** argv) {
     run ("perspective_layers_in_2d", perspective_layers_in_2d);
     run ("camera_paths_and_fade", camera_paths_and_fade);
     run ("transparent_sort_takes_sortorder", transparent_sort_takes_sortorder);
+    run ("particle_stock_motion_operators", particle_stock_motion_operators);
+    run ("particle_stock_collisions", particle_stock_collisions);
+    run ("particle_stock_initializers", particle_stock_initializers);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
