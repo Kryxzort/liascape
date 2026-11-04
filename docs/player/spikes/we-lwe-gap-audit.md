@@ -2464,6 +2464,10 @@ need a model / an image layer emitter LWE doesn't run).
 **Shader sweep** (4085 checks, against the merged F1 + F7–F9 core's results): 16 failing before and after, 0 newly
 failing.
 
+**Health** (`scene-health.md`, 96 scenes, pin `78128d1`): 86 clean / 10 degraded / 0 failed; every scene's class,
+loss, errors, warnings and built objects the same as on F3/F4's `1072720`. In the full run 2883756643 timed out once
+(exit 124); alone it took 15 s and is clean, as before (the report carries the rerun).
+
 **Patch 0085** (after the preview smokes): remap output ranges as vectors, and the operators' blendinstart /
 blendinend as a clamped life ramp (inferred).
 

@@ -445,6 +445,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   constraints, inheriting from a parent particle. None of your scenes uses them; WE's own element preview scenes
   now do what their names say (old core: plain white particles ignoring the operator). Some behaviour is read from
   WE's code exactly, some is inferred (marked in the audit).
-- Smoke of all 96 scenes: none newly blank or failed. Health and shader sweep: below in the health report commit.
+- Smoke of all 96 scenes: none newly blank or failed. Health report 86 clean / 10 degraded / 0 failed, every scene
+  as before; shader sweep 16 failing, none new.
 - Left: the `layerimage` emitter, `collisionmodel`, the inferred parts of F6, text `depthtest` (no effect in 2D),
   `customsortorder`, the 3D camera's zoom and parallax.
