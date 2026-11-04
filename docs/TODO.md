@@ -1118,10 +1118,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           on both cores, none newly blank; player tests 737/0/3.
           - [ ] WE captures of 3174556087 (rain splash children), 2288455459 (firefly trails) and an oscillating
                 scene to confirm the decoded forms against WE itself.
-          - [ ] P29 sprite `orientation` (3174556087's splashes lie flat in WE) and P30 rope/trail combos
-                (TRAILSUBDIVISION, ORIENTATION, TRAILFADE*).
-          - [ ] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`mirror`/`axis` (3 scenes; decode the
-                spawn interpreter's case).
+          - [x] P29 sprite `orientation` — done 2026-11-04 (fork patch 0072: WE's g_Orientation* from
+                GH 0x14024fd30; 3174556087's splashes follow WE's axes).
+          - [ ] P30 rope/trail combos (TRAILSUBDIVISION, ORIENTATION, TRAILFADE*).
+          - [x] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`axis` — the 3 scenes use WE's defaults
+                (GH 0x1401e8c90), which is what LWE does; other values are reported to the health report (0072).
+          - [ ] P27 non-default bounds / limitbehavior / axis semantics (decode the spawn interpreter's case; 0
+                scenes).
           - [ ] `controlpointangle0-7`, system flags bit 0 (world-space simulation, 16 scenes), WE's simplex
                 gradient hash (GH 0x14012c280), vortex_v2 (case 0x10, 0 scenes), P24 cone, P25/P26 (0 scenes).
           - [ ] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0);
@@ -1189,7 +1192,8 @@ Two bug classes kept recurring; fix the class, not the instance:
                 Shader sweep (`src/player/tests/onmachine/shader_sweep.py`, 4085 compiles of 124 stock + 272 library
                 shaders): 313 → 47 failures, each explained in the audit's "Shader preprocessing result".
                 Left: the stock shadow casters write `gl_ViewportIndex` from the vertex unit (GLSL 4.10; LWE has no
-                shadow pass); WE's own `TEX<n>FORMAT` per bound texture (LWE: 0 for all but texture 0).
+                shadow pass). ~~WE's own `TEX<n>FORMAT` per bound texture~~ — done 2026-11-04 (fork patch 0075,
+                GH 0x1401d2a20).
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
@@ -1202,6 +1206,14 @@ Two bug classes kept recurring; fix the class, not the instance:
                 F4 skinned / animated 3D models + createModelData (L), F5 perspective layers (M), F6 the 20 stock-only
                 particle operators (M), F7 puppet hit boxes + MDLA events (S–M), F8 `resizeScreen` (S), F9 small keys
                 (`alphawriting`, `fbos.fit`, sprite `orientation`, mapsequence bounds, `command: swap`; S each).
+          - [x] F8 `resizeScreen` + `engine.screenResolution` + `cursorScreenPosition` in screen pixels (0076; the
+                worker hints `max_size`), F9 (0072–0075: `alphawriting`, `fbos.fit/width/height/uvs`, `command: swap`,
+                sprite `orientation`, mapsequence defaults, `TEX<n>FORMAT`), F7's MDLA animation events (0077) —
+                done 2026-11-04, `we-coverage.md` "Implemented (0072–0077)".
+          - [ ] F7 CursorEvent.hitBox: decode where WE keeps a puppet's hit boxes (not MDLE/MDMP; likely the rest
+                of MDLS, which LWE skips) — 0 library readers.
+          - [ ] ITextLayer writes (font, padding, anchor, limitrows, limitwidth, backgroundcolor) re-laying the text
+                (0 library writers); IEffectLayer.transformAttachmentToTexture; .tex flags 64 / 2²¹ / 2²³.
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy
