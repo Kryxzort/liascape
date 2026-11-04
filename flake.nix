@@ -116,6 +116,8 @@
           pkgs.freetype
           # text objects: `systemfont_*` and glyphs the scene's font lacks are looked up through fontconfig
           pkgs.fontconfig
+          # text shaping (GPOS kerning, ligatures), as WE shapes with HarfBuzz
+          pkgs.harfbuzz
           pkgs.glm
           pkgs.lz4
           pkgs.zlib

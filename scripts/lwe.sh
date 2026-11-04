@@ -72,7 +72,7 @@ cmd_deps() {
     command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || missing="$missing c++"
     command -v git >/dev/null 2>&1 || missing="$missing git"
     if command -v pkg-config >/dev/null 2>&1; then
-        for p in sdl2 freetype2 liblz4 zlib libavformat libavcodec libswresample libswscale libavutil mpv gl; do
+        for p in sdl2 freetype2 harfbuzz liblz4 zlib libavformat libavcodec libswresample libswscale libavutil mpv gl; do
             pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
         done
         # glm is header-only; it ships a CMake config (and on some distros a .pc)

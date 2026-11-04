@@ -1713,6 +1713,97 @@ static bool particle_control_points () {
     return true;
 }
 
+// system flags bit 0 is the editor's "Worldspace" (Leftovers): a particle stays where it was emitted in the scene when
+// its system moves on. Two systems emit one particle each at the start and then move right by 3 px a frame to x 50
+// (a script on the origin); the local one's particle goes with it, the world-space one's stays near x 20 (unpatched:
+// both at x 50)
+static bool particle_world_space_stays () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto sys = [] (int flags) {
+        return "{\"material\":\"materials/opaque.json\",\"maxcount\":1,\"flags\":" + std::to_string (flags)
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,"
+               "\"instantaneous\":1}],\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4},"
+               "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+               "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    };
+    auto moving = [] (int id, const std::string& file, int y) {
+        std::string o = particle_object (id, file, 20, y);
+        const std::string from = "\"origin\":\"20 " + std::to_string (y) + " 0\"";
+        o.replace (o.find (from), from.size (),
+                   scripted ("origin", "\"20 " + std::to_string (y) + " 0\"",
+                             "let n = 0;\nexport function update(value) {\n  n++;\n  value.x = 20 + Math.min(n, 10) * 3;\n  return value;\n}\n"));
+        return o;
+    };
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (moving (1, "local.json", 6) + "," + moving (2, "world.json", 14), "0 0 0",
+                                            { { "local.json", sys (0) }, { "world.json", sys (1) } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 14; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    // the mean lit column around a row (either way up: rows 6 and 14 don't overlap 31 - each other)
+    auto columnOf = [&] (int y) {
+        int sum = 0, count = 0;
+        for (const int row : { y - 2, y - 1, y, y + 1, y + 2, 29 - y, 30 - y, 31 - y, 32 - y, 33 - y }) {
+            for (int x = 0; x < 64; x++) {
+                read_pixel (rig.fbo, x, row, px);
+                if (px[0] > 128) {
+                    sum += x;
+                    count++;
+                }
+            }
+        }
+        return count ? sum / count : -1;
+    };
+    const int local = columnOf (6), world = columnOf (14);
+    printf ("    after the systems moved 20 -> 50: the local particle at x %d, the world-space one at x %d\n", local, world);
+    CHECK (local >= 46 && local <= 54, "the local particle (x %d) didn't move with its system to x 50", local);
+    CHECK (world >= 14 && world <= 34, "the world-space particle (x %d) moved with its system (expected near x 20)", world);
+    return true;
+}
+
+// an instanceoverride value takes a script like any property (Leftovers: 11 library scenes script rate / size / count
+// / speed / controlpoint1 / colorn / alpha; 2290002190's rate follows the audio): a size override scripted to 3
+// draws the size-4 particle (2 px across in this 64 x 32 scene) 3 times as wide (unpatched: the script never ran, 2 px)
+static bool particle_override_scripts_run () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string sys = "{\"material\":\"materials/opaque.json\",\"maxcount\":1,\"emitter\":[{\"name\":\"sphererandom\","
+                            "\"origin\":\"0 0 0\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1}],"
+                            "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4},"
+                            "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+                            "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "one.json", 32, 16, scripted ("size", "1", "export function update(value) {\n  return 3;\n}\n")), "0 0 0",
+        { { "one.json", sys } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 6; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    int x0 = 64, x1 = -1;
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 64; x++) {
+            read_pixel (rig.fbo, x, y, px);
+            if (px[0] > 128) {
+                x0 = std::min (x0, x);
+                x1 = std::max (x1, x);
+            }
+        }
+    }
+    const int width = x1 >= x0 ? x1 - x0 + 1 : 0;
+    printf ("    the particle with a size override scripted to 3: %d px wide (2 px without)\n", width);
+    CHECK (width >= 5 && width <= 7, "the scripted size override didn't apply (%d px, expected 6)", width);
+    return true;
+}
+
 // B12: puppet warp (docs/player/spikes/we-lwe-gap-audit.md G06-G09), decoded from wallpaper64.exe 2.8.485: the MDL
 // loader GH 0x1402873f0, the layer clock GH 0x1401d6a00, the mixing GH 0x140228470 (normal GH 0x140223b90, additive
 // GH 0x140224390), the attachment transform GH 0x1401b5170
@@ -2891,6 +2982,40 @@ static bool usertexture_reads_its_property () {
     return true;
 }
 
+// a slot WE leaves to the pass is no missing asset (Leftovers; the health report's 25 in 3516106265 and 3042865984):
+// a sampler annotated "default":"" names no file, and a usertexture naming a `usershortcut` property (an app
+// shortcut's icon, GH 0x140184980) with none picked keeps the slot's texture. Unpatched: "materials/.tex" and
+// "materials/shortcut.tex" were looked up and reported missing. A "Text" label property (3319542538) is a label like
+// "text" (unpatched: "unsupported user property type Text")
+static bool unset_slots_are_not_missing () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1", b9_object (1, 16),
+        "\"shortcut\":{\"type\":\"usershortcut\",\"value\":\"\",\"text\":\"s\"},\"label\":{\"type\":\"Text\",\"text\":\"a label\"}");
+    b9_layer (dir, "uniform sampler2D g_Texture1; // {\"default\":\"\",\"label\":\"t\"}\n",
+              "gl_FragColor = vec4(texSample2D(g_Texture1, vec2(0.5, 0.5)).rgb, 1.0);");
+    write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/black\",\"util/white\"],"
+                                            "\"usertextures\":[null,\"shortcut\"]}]}\n");
+    const std::string path = dir + "/health.jsonl";
+    setenv ("WPENGINE_HEALTH", path.c_str (), 1);
+    ScriptRig rig;
+    const bool opened = rig.open (dir);
+    unsetenv ("WPENGINE_HEALTH");
+    CHECK (opened, "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto lines = health_lines (path);
+    const auto px = b9_pixel (rig);
+    const std::string* missing = health_find (lines, { "\"ev\":\"missing_asset\"" });
+    printf ("    g_Texture1 %d %d %d; missing assets: %s\n", px[0], px[1], px[2], missing ? missing->c_str () : "none");
+    CHECK (px[0] > 250 && px[1] > 250 && px[2] > 250, "the slot lost its texture (%d %d %d)", px[0], px[1], px[2]);
+    CHECK (missing == nullptr, "reported missing: %s", missing->c_str ());
+    const std::string* unsupported = health_find (lines, { "\"ev\":\"unsupported\"" });
+    CHECK (unsupported == nullptr, "a \"Text\" label property is reported: %s", unsupported->c_str ());
+    return true;
+}
+
 // an effect pass of the E41 test: the previous output with channel `ch` raised to 1
 static void e41_effect (const std::string& dir, const std::string& name, const char* ch) {
     mkdir ((dir + "/effects").c_str (), 0755);
@@ -3431,6 +3556,35 @@ static bool script_plays_a_keyframe_animation () {
     printf ("    after %d ticks: played %d, paused %d\n", rig.frames, played, paused);
     CHECK (near (played, 0), "the played fade didn't reach 0: r=%d", played);
     CHECK (near (paused, 0.75 * 255), "the paused fade moved: r=%d", paused);
+    return true;
+}
+
+
+// a timeline with `options.parent.key` runs on its sibling's clock (Leftovers, B2's left list: 5 library scenes —
+// 3163060610's scripted Radius drives Size and opacity): square 1's alpha fade follows its paused origin timeline
+// and stays at its first key, square 2's follows a playing one and ends (unpatched: both faded out on their own)
+static bool animation_follows_its_parent () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string fade = "\"c0\":[" + key (0, 0.75) + "," + key (10, 0) + "]";
+    auto origin = [] (int x, bool paused) {
+        const std::string still = "\"c0\":[" + key (0, x) + "," + key (10, x) + "]";
+        return animated ("origin", "\"" + std::to_string (x) + " 16 0\"", still,
+                         std::string ("\"fps\":30,\"length\":10,\"mode\":\"single\"") + (paused ? ",\"startpaused\":true" : "")
+                             + ",\"children\":[{\"key\":\"alpha\"}]");
+    };
+    const std::string child = animated ("alpha", "1.0", fade, "\"fps\":30,\"length\":10,\"mode\":\"single\",\"parent\":{\"key\":\"origin\"}");
+    const std::string dir = script_scene (white_square (1, origin (4, true) + "," + child) + "," + white_square (2, origin (14, false) + "," + child));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 20) {
+        rig.step ();
+    }
+    const int paused = red_at (rig, 4), played = red_at (rig, 14);
+    printf ("    after %d ticks: fade under a paused parent %d, under a playing one %d\n", rig.frames, paused, played);
+    CHECK (near (paused, 0.75 * 255), "the child of a paused timeline moved: r=%d", paused);
+    CHECK (near (played, 0), "the child of a playing timeline didn't end: r=%d", played);
     return true;
 }
 
@@ -4890,6 +5044,23 @@ static bool text_lays_out_like_we () {
     return true;
 }
 
+// text is shaped as WE shapes it, with HarfBuzz (Leftovers): NotoSans kerns A-V by -40/1000 em in GPOS only (no kern
+// table), so "AVAVAVAV" (7 kerned pairs) is narrower than "AAAAVVVV" (1) by ~6 x 40/1000 x 83 px at 20 pt; unpatched
+// (FreeType's kern table) both are as wide
+static bool text_shapes_with_harfbuzz () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    InkBox kerned, apart;
+    CHECK (one_text (text_object (1, "AVAVAVAV", "\"pointsize\":20,\"origin\":\"256 64 0\""), kerned, 512, 128), "load failed");
+    CHECK (one_text (text_object (1, "AAAAVVVV", "\"pointsize\":20,\"origin\":\"256 64 0\""), apart, 512, 128), "load failed");
+    printf ("    20 pt \"AVAVAVAV\" %d px wide, \"AAAAVVVV\" %d (GPOS: ~20 px apart)\n", kerned.width (), apart.width ());
+    CHECK (kerned.count > 0 && apart.count > 0, "nothing drawn");
+    CHECK (apart.width () - kerned.width () >= 14 && apart.width () - kerned.width () <= 26,
+           "GPOS kerning: AVAVAVAV %d px vs AAAAVVVV %d (expected ~20 px narrower)", kerned.width (), apart.width ());
+    return true;
+}
+
 // a text layer takes effects (here one turning it red, keeping its alpha) and its colour (E34/T1; unpatched: drawn
 // flat by its own shader, white)
 static bool text_takes_effects_and_colour () {
@@ -6254,6 +6425,7 @@ int main (int argc, char** argv) {
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
+    run ("unset_slots_are_not_missing", unset_slots_are_not_missing);
     run ("effect_visible_is_live", effect_visible_is_live);
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);
     run ("composite_a_is_what_the_last_pass_reads", composite_a_is_what_the_last_pass_reads);
@@ -6266,6 +6438,7 @@ int main (int argc, char** argv) {
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
     run ("text_follows_its_parent_and_turns", text_follows_its_parent_and_turns);
     run ("text_lays_out_like_we", text_lays_out_like_we);
+    run ("text_shapes_with_harfbuzz", text_shapes_with_harfbuzz);
     run ("text_takes_effects_and_colour", text_takes_effects_and_colour);
     run ("colour_property_whole_numbers", colour_property_whole_numbers);
     run ("text_wraps_and_limits", text_wraps_and_limits);
@@ -6284,6 +6457,7 @@ int main (int argc, char** argv) {
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
+    run ("animation_follows_its_parent", animation_follows_its_parent);
     run ("cursor_events_reach_layers", cursor_events_reach_layers);
     run ("local_storage_persists", local_storage_persists);
     run ("script_controls_a_sound", script_controls_a_sound);
@@ -6312,6 +6486,8 @@ int main (int argc, char** argv) {
     run ("camera_paths_and_fade", camera_paths_and_fade);
     run ("transparent_sort_takes_sortorder", transparent_sort_takes_sortorder);
     run ("particle_stock_motion_operators", particle_stock_motion_operators);
+    run ("particle_world_space_stays", particle_world_space_stays);
+    run ("particle_override_scripts_run", particle_override_scripts_run);
     run ("particle_stock_collisions", particle_stock_collisions);
     run ("particle_stock_initializers", particle_stock_initializers);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
