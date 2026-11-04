@@ -1,0 +1,36 @@
+From f4aa7c570dccb3a4bc42b249f20e3509b4a57a08 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 00:20:33 +0530
+Subject: [PATCH 90/90] render: a shape's placeholder picture is 1 x 1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A shape has no picture (its passes compile with DIRECTDRAW and read none), but the placeholder
+an image without a texture gets was made at the layer's size: a square of the scene's height,
+18 MB at 3840 x 2160 (3319542538: 548 → 530 MiB, as before shapes drew).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "F2 result" (cost)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 4ca6768..41e1230 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -110,8 +110,10 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+ 	// https://docs.wallpaperengine.io/en/scene/scenescript/reference/event/cursor.html same applies to effects
+ 	// TODO: create a dummy texture of correct size, fbo constructors should be enough, but this should be properly
+ 	// handled
++	// (a shape's picture is never sampled: DIRECTDRAW. 1 x 1, not its square of the scene's height)
++	const glm::vec2 dummy = isShape ? glm::vec2 (1.0f) : size;
+ 	this->m_texture = std::make_shared<CFBO> (
+-	    "", TextureFormat_ARGB8888, TextureFlags_NoFlags, 1, size.x, size.y, size.x, size.y
++	    "", TextureFormat_ARGB8888, TextureFlags_NoFlags, 1, dummy.x, dummy.y, dummy.x, dummy.y
+ 	);
+     }
+ 

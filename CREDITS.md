@@ -121,3 +121,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0087-render-puppet-IK-chains-reach-for-their-animated-tar.patch` | render: puppet IK chains reach for their animated targets | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0088-render-volumetric-point-and-spot-lights-castvolumetr.patch` | render: volumetric point and spot lights (castvolumetrics) | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0089-render-name-the-object-factory-s-address-right-in-th.patch` | render: name the object factory's address right in the shape and light notes | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0090-render-a-shape-s-placeholder-picture-is-1-x-1.patch` | render: a shape's placeholder picture is 1 x 1 | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
