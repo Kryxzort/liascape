@@ -125,6 +125,13 @@ unsafe extern "C" {
         duration: f64,
     );
     fn wp_render_frame(project: *mut c_void);
+    fn wp_project_shader_check(
+        project: *mut c_void,
+        shader: *const c_char,
+        request: *const c_char,
+        out: *mut c_char,
+        out_size: usize,
+    ) -> usize;
 }
 
 // libEGL is linked by khronos-egl's `static` feature.
@@ -518,6 +525,96 @@ impl Drop for Scene {
             wp_config_destroy(self.config);
         }
     }
+}
+
+/// `liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>`: compiles shaders
+/// through the core's own pipeline (its preprocessing, glslang + SPIRV-Cross, the GL compile and link on an
+/// offscreen context) without rendering — `wp_project_shader_check`, fork patch "core: a shader sweep". The request is
+/// `{"jobs": [{"scene": <dir whose files the shaders come from>, "checks": [{"shader", "combos", "textures", …}]}]}`;
+/// each check's result (its own keys kept, the core's `ok` / `stage` / `message` / `compat` added) is one line of
+/// `<out>`. A job whose scene doesn't load writes one `{"scene", "ok": false, "stage": "project"}` line.
+/// `tests/onmachine/shader_sweep.py` writes the request and reports the results.
+pub fn shader_sweep(args: &[String]) -> ! {
+    let (mut request, mut assets, mut out) = (None, None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--shader-sweep" => request = it.next().cloned(),
+            "--assets" => assets = it.next().cloned(),
+            "--out" => out = it.next().cloned(),
+            _ => {}
+        }
+    }
+    let (Some(request), Some(assets), Some(out)) = (request, assets, out) else {
+        eprintln!("usage: liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>");
+        std::process::exit(2)
+    };
+    match run_sweep(Path::new(&request), Path::new(&assets), Path::new(&out)) {
+        Ok(n) => {
+            println!("{}", serde_json::json!({ "ok": true, "checks": n }));
+            std::process::exit(0)
+        }
+        Err(e) => {
+            println!("{}", serde_json::json!({ "ok": false, "error": e }));
+            std::process::exit(1)
+        }
+    }
+}
+
+fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String> {
+    use std::io::Write as _;
+    let text = std::fs::read_to_string(request).map_err(|e| e.to_string())?;
+    let req: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let _gfx = liascape_player::gfx::Gfx::new_offscreen()?;
+    let mut file = std::io::BufWriter::new(std::fs::File::create(out).map_err(|e| e.to_string())?);
+    let mut buf = vec![0u8; 1 << 16];
+    let mut n = 0;
+    for job in req["jobs"].as_array().into_iter().flatten() {
+        let dir = job["scene"].as_str().unwrap_or_default();
+        let scene = match Scene::load(Path::new(dir), assets) {
+            Ok(s) => s,
+            Err(e) => {
+                let line = serde_json::json!({ "scene": dir, "ok": false, "stage": "project", "message": e });
+                writeln!(file, "{line}").map_err(|e| e.to_string())?;
+                continue;
+            }
+        };
+        for check in job["checks"].as_array().into_iter().flatten() {
+            let shader = CString::new(check["shader"].as_str().unwrap_or_default()).map_err(|e| e.to_string())?;
+            let body = serde_json::json!({
+                "combos": check.get("combos").cloned().unwrap_or(serde_json::json!({})),
+                "textures": check.get("textures").cloned().unwrap_or(serde_json::json!([])),
+                "gl": check.get("gl").cloned().unwrap_or(serde_json::json!(true)),
+                "source": check.get("source").cloned().unwrap_or(serde_json::json!(false)),
+            });
+            let body = CString::new(body.to_string()).map_err(|e| e.to_string())?;
+            let mut len = unsafe {
+                wp_project_shader_check(scene.project, shader.as_ptr(), body.as_ptr(), buf.as_mut_ptr().cast(), buf.len())
+            };
+            if len >= buf.len() {
+                buf.resize(len + 1, 0);
+                len = unsafe {
+                    wp_project_shader_check(scene.project, shader.as_ptr(), body.as_ptr(), buf.as_mut_ptr().cast(), buf.len())
+                };
+            }
+            let got = &buf[..len.min(buf.len() - 1)];
+            let mut result: serde_json::Value = serde_json::from_slice(got)
+                .unwrap_or_else(|_| serde_json::json!({ "ok": false, "stage": "core", "message": "no result" }));
+            if let (Some(r), Some(c)) = (result.as_object_mut(), check.as_object()) {
+                for (k, v) in c {
+                    r.entry(k.clone()).or_insert(v.clone());
+                }
+                r.insert("scene".into(), dir.into());
+            }
+            writeln!(file, "{result}").map_err(|e| e.to_string())?;
+            // a check that crashes the driver leaves the ones before it on disk
+            file.flush().map_err(|e| e.to_string())?;
+            n += 1;
+        }
+        drop(scene);
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    Ok(n)
 }
 
 /// `liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S]`: renders a
