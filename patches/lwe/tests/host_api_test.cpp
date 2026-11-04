@@ -3720,6 +3720,43 @@ static bool blending_sets_combos () {
 }
 
 
+// IScene: get/setCameraTransforms (the scene's camera, a CameraTransforms), getInitialLayerConfig (the object as the
+// scene file has it), getAnimation (a named keyframe timeline), getLayerByID; a camera object's ICamera zoom;
+// renderContext exists. Unpatched: none of these existed (getAnimation, the camera methods: not functions)
+static bool scene_camera_and_config_api () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string checks =
+        "const t = thisScene.getCameraTransforms();\n"
+        "check('camera', t instanceof CameraTransforms && t.eye instanceof Vec3 && t.center.z == -1 && t.up.y == 1 && t.zoom == 1);\n"
+        "t.zoom = 1;\n"
+        "thisScene.setCameraTransforms(t);\n"
+        "check('config', thisScene.getInitialLayerConfig('sq2').origin == '24 16 0' && thisScene.getInitialLayerConfig(thisLayer).id == 1);\n"
+        "const a = thisScene.getAnimation('fade');\n"
+        "check('animation', a !== undefined && a.name == 'fade' && a.fps == 30);\n"
+        "check('cam', thisScene.getLayer('cam').zoom == 1);\n"
+        "check('render', typeof renderContext === 'object');\n";
+    const std::string dir = script_scene (
+        square (1, scripted ("visible", "false", checked_once (checks)) + ",\"origin\":\"8 16 0\"") + ","
+        + square (2, animated ("alpha", "1", "\"c0\":[" + key (0, 1) + "," + key (10, 1) + "]", "\"fps\":30,\"length\":10,\"name\":\"fade\"")
+                         + ",\"origin\":\"24 16 0\"")
+        + ",{\"id\":5,\"name\":\"cam\",\"camera\":\"default\",\"zoom\":1,\"origin\":\"0 0 0\"}");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    std::string want = covered (4, 11);
+    for (int x = 20; x <= 27; x++) {
+        want[x] = '#';
+    }
+    CHECK (got == want, "want %s (4..11 missing: a failed check, see FAILS above)", want.c_str ());
+    return true;
+}
+
+
 // ISoundLayer from a script: play () starts a startsilent sound, pause () silences it and play () resumes it,
 // volume is live (0.5 → 0.25 gain), stop () silences it for good (unpatched: getLayer could not return a sound)
 static bool script_controls_a_sound () {
@@ -4678,6 +4715,7 @@ int main (int argc, char** argv) {
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
     run ("blending_sets_combos", blending_sets_combos);
+    run ("scene_camera_and_config_api", scene_camera_and_config_api);
     run ("audio_tones_land_in_we_bands", audio_tones_land_in_we_bands);
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
     run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
