@@ -4912,6 +4912,99 @@ static bool tube_and_directional_lights () {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// F5 (docs/player/spikes/we-coverage.md, the audit's "F5/F6 result"): an orthographic scene's perspective layers and
+// particles. WE's image draw (GH 0x140214b50) and particle render (GH 0x14025bc30) swap in the perspective camera of
+// GH 0x1401b4fd0 for a layer with `perspective` (flag 0x80) and a system with flags bit 2: fov =
+// perspectiveoverridefov, the eye at d = (h / 2) / tan (fov / 2) so z 0 lands where the orthographic camera puts it,
+// near 5, far max (15000, d + 1000). 64 x 32 at fov 90: d = 16, so z 8 draws twice as large
+
+// the covered columns of the centre row of a 2D layer scene with `general` and one 8 x 8 square at (32, 16, z)
+static std::string persp_row (const std::string& general, const std::string& props) {
+    const std::string dir = camera_scene (general, square (1, "\"origin\":\"32 16 0\"," + props));
+    ScriptRig rig;
+    if (!rig.open (dir)) {
+        return "load failed";
+    }
+    rig.step ();
+    return rig.row ();
+}
+
+// the first and last covered columns of a row
+static std::pair<int, int> persp_span (const std::string& row) {
+    const auto a = row.find ('#'), b = row.rfind ('#');
+    return a == std::string::npos ? std::pair<int, int> { -1, -1 } : std::pair<int, int> { (int) a, (int) b };
+}
+
+// unpatched: `perspective` and `perspectiveoverridefov` weren't read, every layer was flat (z and x/y angles ignored)
+static bool perspective_layers_in_2d () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string fov90 = "\"perspectiveoverridefov\":90";
+    const std::string flat = persp_row (fov90, "\"perspective\":true");
+    const std::string flatDefault = persp_row ("\"zoom\":1", "\"perspective\":true");
+    const std::string nearer = persp_row (fov90, "\"perspective\":true,\"origin\":\"32 16 8\"");
+    const std::string nearerFlat = persp_row (fov90, "\"perspective\":false,\"origin\":\"32 16 8\"");
+    const std::string turned = persp_row (fov90, "\"perspective\":true,\"angles\":\"0 1.0471976 0\"");
+    const std::string turnedFlat = persp_row (fov90, "\"angles\":\"0 1.0471976 0\"");
+    const std::string zoomed = persp_row ("\"perspectiveoverridefov\":90,\"zoom\":2", "\"perspective\":true,\"origin\":\"32 16 8\"");
+    printf ("    perspective z 0:      %s\n    default fov 95 z 0:   %s\n    perspective z 8:      %s\n"
+            "    flat z 8:             %s\n    perspective 60° y:    %s\n    flat 60° y:           %s\n"
+            "    z 8, zoom 2:          %s\n",
+            flat.c_str (), flatDefault.c_str (), nearer.c_str (), nearerFlat.c_str (), turned.c_str (), turnedFlat.c_str (),
+            zoomed.c_str ());
+    CHECK (flat == covered (28, 35), "a perspective layer at z 0 isn't where a flat one is");
+    CHECK (flatDefault == covered (28, 35), "at the default fov (95) z 0 moved");
+    CHECK (nearer == covered (24, 39), "z 8 at fov 90 (d 16) isn't twice the size");
+    CHECK (nearerFlat == covered (28, 35), "a flat layer took its z");
+    const auto t = persp_span (turned);
+    const int w = t.second - t.first + 1;
+    CHECK (w >= 3 && w <= 6 && t.first >= 28 && t.second <= 35, "turned 60° about y isn't about half as wide (%d px)", w);
+    CHECK (turnedFlat == covered (28, 35), "a flat layer took its y angle");
+    CHECK (zoomed == covered (16, 47), "the zoom doesn't scale the perspective view");
+
+    // a particle system with flags 4: one 8 px particle at the origin, z 0 and z 8 (unpatched: general.fov 50 from an
+    // eye at z 1000, so z 0 drew 1.16 x and z 8 almost the same; LWE's sprite of size 8 covers 4 px)
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    std::string sys = particle_system ("opaque", ",\"maxcount\":1,\"flags\":4",
+                                       ",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1", white + "," + life);
+    sys.replace (sys.find ("\"min\":12,\"max\":12"), 17, "\"min\":8,\"max\":8");
+    auto particleWidth = [&] (int z, bool persp = true) {
+        std::vector<std::string> files;
+        std::string sys2 = sys;
+        if (!persp) {
+            sys2.replace (sys2.find (",\"flags\":4"), 10, "");
+        }
+        std::string obj = particle_object (1, "p.json", 32, 16);
+        obj.replace (obj.find ("32 16 0"), 7, "32 16 " + std::to_string (z));
+        const std::string dir = particle_scene (obj, "0 0 0", { { "p.json", sys2 } }, files);
+        std::string scene = read_file (dir + "/scene.json");
+        scene.replace (scene.find ("\"orthogonalprojection\""), 0, fov90 + ",");
+        write_file (dir + "/scene.json", scene);
+        ScriptRig rig;
+        if (!particle_rig_open (rig, dir, files)) {
+            return -1;
+        }
+        rig.step ();
+        rig.step ();
+        int lit = 0;
+        for (int x = 0; x < 64; x++) {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (rig.fbo, x, 16, px);
+            lit += px[0] > 64;
+        }
+        return lit;
+    };
+    const int p0 = particleWidth (0), p8 = particleWidth (8), flat0 = particleWidth (0, false);
+    printf ("    perspective particle 8 px: z 0 %d px, z 8 %d px (want the flat size, twice it); flat %d px\n", p0, p8,
+            flat0);
+    CHECK (flat0 > 0 && p0 == flat0, "a perspective particle at z 0 is %d px, a flat one %d", p0, flat0);
+    CHECK (std::abs (p8 - 2 * flat0) <= 1, "a perspective particle at z 8 is %d px, not twice %d", p8, flat0);
+    return true;
+}
+
 int main (int argc, char** argv) {
     if (argc < 3) {
         fprintf (stderr, "usage: %s <fixtures dir> <empty dir> [<WE assets dir>]\n", argv[0]);
@@ -5014,6 +5107,7 @@ int main (int argc, char** argv) {
     run ("audio_left_right_and_resolutions", audio_left_right_and_resolutions);
     run ("audio_smoothing_is_dt_based", audio_smoothing_is_dt_based);
     run ("audio_reaches_shaders_scripts_and_emitters", audio_reaches_shaders_scripts_and_emitters);
+    run ("perspective_layers_in_2d", perspective_layers_in_2d);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
