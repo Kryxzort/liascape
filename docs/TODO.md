@@ -1099,7 +1099,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
           tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
           2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
-          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, loading a user-picked picture, 3414858021's vertex units that
+          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
           don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
           **E41 done 2026-11-03** (fork patch 0037, pin `3eaac6e`): an effect's `visible` (user property or script)
           turns it on/off live — built when it can be visible, the pass chain re-picked and retargeted on a change.
@@ -1133,7 +1133,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 GH 0x14024fd30; 3174556087's splashes follow WE's axes).
           - [x] P30 rope/trail combos — done 2026-11-05 as far as the library goes (0097): a segment is subdivision + 1
                 pieces (WE's TRAILSUBDIVISION in genericropeparticle.geom); every library rope is ORIENTATION 0 and
-                sets no TRAILSCROLL/FADE key. Left: WE's per-segment bezier (its CPU spline buffer isn't read).
+                sets no TRAILSCROLL/FADE key. Left: WE's per-segment bezier (its CPU spline buffer isn't read; the shader
+                side is decoded: controls start + 0.15 · (end − CP0), end + 0.15 · (start − CP1), within 10 % of
+                LWE's Catmull-Rom if CP0 / CP1 are the neighbours — 2026-11-05).
           - [x] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`axis` — the 3 scenes use WE's defaults
                 (GH 0x1401e8c90), which is what LWE does; other values are reported to the health report (0072).
           - [ ] P27 non-default bounds / limitbehavior / axis semantics (decode the spawn interpreter's case; 0
@@ -1143,8 +1145,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 tables equal LWE's: nothing to port (0096 notes it).
           - [ ] `controlpointangle0-7`, vortex_v2 (case 0x10), P24 cone, P25/P26: 0 library users and unread —
                 listed in the audit's "Leftovers result".
-          - [ ] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0);
-                both are inferred now.
+          - [x] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0) —
+                done 2026-11-05, both confirm LWE's inference: the host is the render context, +0x14c its
+                g_Frametime; alive = particles, live emitters or a live child (audit "Decode leftovers result").
     - [x] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
           unmerged). 14 scenes. L. **Done 2026-11-04** (fork patch 0054, pin `36ad6a0`): WE's MDL loader (GH
           0x1402873f0: the vertex layout from the mesh's format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT by section),
@@ -1161,7 +1164,10 @@ Two bug classes kept recurring; fix the class, not the instance:
                 reached from the mixer GH 0x140228470); root motion (MDLA flags bit 0, 18 bytes, undecoded);
                 `autosort`/`index` layer order (0 users, not in the exe's strings).
           - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
-          - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
+          - [x] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale — done
+                2026-11-05: the additive scale is the position's rule (confirmed); the attachment is (bone matrix ·
+                MDAT) · local (GH 0x14024b530). Left: whether WE's bone array there is the posed world or the skin
+                matrix (its writer), and WE applies the whole matrix where LWE keeps translation + z turn.
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
     - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
@@ -1171,8 +1177,9 @@ Two bug classes kept recurring; fix the class, not the instance:
           rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 64/64 (2 new); corpus 93/96
           on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
           - [ ] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
-          - [ ] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 (set from the "postprocessing" setting
-                `ultra`, GH 0x14013f860). Today: HDR whenever `general.hdr`, unless WPENGINE_HDR=0.
+          - [x] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 — done 2026-11-05 (0098): `bloom` and
+                `hdr` both literal JSON true in scene.json, then "postprocessing" `ultra` (GH 0x14013f860).
+                2511663284 (hdr, no bloom) is LDR now, as in WE.
           - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
     - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
           E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
@@ -1199,8 +1206,10 @@ Two bug classes kept recurring; fix the class, not the instance:
                 pastes includes; hoisting the include's `#define`s builds it but the left cloth then vanishes — read
                 the effect before enabling it.
           - [ ] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — check in WE.
-          - [ ] Locate WE's SceneScript angles binding (xrefs of 0x1404928d0 / 0x140492628) to make the degrees
-                Observed in the binary, not only in scene scripts.
+          - [x] Locate WE's SceneScript angles binding — done 2026-11-05 as far as it goes: `angles` is the one
+                script property with descriptor flag 4 (GH 0x14020dcc0), getAttachmentAngles returns degrees
+                (GH 0x14020db20; constants at 0x1404d4460 / 0x1404d411c), WE's baseclasses.js is degrees throughout.
+                The bridge's use of flag 4 itself wasn't located.
     - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
@@ -1272,7 +1281,9 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] F7 CursorEvent.hitBox: decode where WE keeps a puppet's hit boxes (not MDLE/MDMP; likely the rest
                 of MDLS, which LWE skips) — 0 library readers.
           - [ ] ITextLayer writes (font, padding, anchor, limitrows, limitwidth, backgroundcolor) re-laying the text
-                (0 library writers); IEffectLayer.transformAttachmentToTexture; .tex flags 64 / 2²¹ / 2²³.
+                (0 library writers); IEffectLayer.transformAttachmentToTexture; .tex flag 64 (a slice count, 0 users).
+                .tex flags 2²⁰–2²³ done 2026-11-05 (0099): channel-built-from-a-component bits that define a
+                sampler's `components` combos (PBRMASKS: 3477054430, 3509243656).
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy

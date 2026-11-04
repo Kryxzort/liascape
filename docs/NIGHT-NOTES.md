@@ -484,3 +484,19 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   bugs in the scenes themselves — I checked each throws in WE too.
 - Smoke of all 96 scenes: none newly blank. Shader sweep: the same 6 failing, none new. Player tests 743 passed.
 - Left / for you: a WE capture of 3414858021's "WEDNESDAY" (reaches the screen edge here) and of 3445973124 with music.
+
+## 2026-11-05 — the decode leftovers (fork 0098–0100, pin `f50bc82`)
+- **HDR scenes follow WE's real switch.** WE renders a scene HDR only when its file turns on both `hdr` and
+  `bloom` (and WE's post-processing is Ultra); found in its project loader. 2511663284 (HDR on, bloom off) is
+  drawn the ordinary way now, as WE draws it. The other four HDR scenes are unchanged.
+- **PBR masks work.** Masks painted in WE's editor mark which channels they carry (metallic / roughness /
+  reflection / emissive); WE switches the matching shader options on from those marks, LWE ignored them.
+  3477054430's mask now gives roughness + glow, 3509243656's models their glow.
+- **3516106265's frame builder** gets the layer's transform it reads its scale from (was all zeros, so the frame
+  collapsed).
+- Checked against WE's code and left as they were (LWE's guesses were right): the particle force step's frame
+  time, when a particle sub-system counts as finished, the additive puppet layer's scale, SceneScript angles in
+  degrees. Read but not changed: the puppet attachment (WE applies the whole bone matrix; LWE its offset + turn)
+  and the rope curve (WE's control points sit within 10 % of LWE's). Not found: what WE's g_TexelSize divides by.
+- Health report 89 clean / 7 degraded / 0 failed (no scene worse, none newly blank); shader sweep the same 6
+  failing, none new; player tests 743 passed.

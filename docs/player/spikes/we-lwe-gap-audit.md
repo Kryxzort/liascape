@@ -301,9 +301,9 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E6 | `g_EffectTextureProjectionMatrix(Inverse)` is identity | **Observed** cases 0x17/0x18: a per-draw matrix at ctx+0x9f0. **Documented** "transform an effect vertex position into texture projection space" | constant `mat4(1)` (CPass.cpp:883-884) | 12: 2679248947, 3184155462, 3414858021 (depthparallax, cursorripple, iris_movement, dithering, halftone) | screen-space cursor → layer-UV mapping (`mul(pointer*2-1, inv)`) is right only for an unrotated layer that fills the screen. On other layers the cursor effect lands in the wrong place | M: build from the layer's screen MVP |
 | E7 | `g_EffectModelViewProjectionMatrix` = the pass MVP | **Observed** case 0x15: its own matrix (ctx+0x9b0), separate from MVP (case 0xc, ctx+0x8f0). **Documented** "effect vertex position into world view projection space" | aliased to the pass MVP: ortho/identity in FBO passes, screen only on the last pass (CPass.cpp:876) | 4: 3042865984, 3354740764, 3419466417 | screen-coordinate lookups (COPYBG, dithering, halftone, dot_matrix) are misaligned in intermediate passes | M |
 | E8 | Audio spectrum `Right` = `Left` | **Observed** cases 0x69-0x6e: Left = first half and Right = second half of separate 16/32/64 buffers (e.g. 0x6a reads +0x40..0x80) | both Left and Right get `recorder.audio16/32/64`, the same array (CPass.cpp:887-892) | 34 reference Right: 1556245028, 2134765860, 2388299037 | stereo visualizers become mirror-symmetric; nothing else changes (audio area owns the FFT) | M: stereo FFT |
-| E9 | `g_TexelSize`/`Half` scale | **Observed** cases 6/7: `const / ctx+0x74` (vec2). The same field is `g_Screen.xy` (case 8). **Documented** "size of a screen pixel … (1/1920, 1/1080)" | `1/scene projection size`, frozen (CPass.cpp:885-886) | 11: 2134765860, 2883756643, 3013489778 (bokeh/gaussian/sharpen/dithering) | when the scene resolution ≠ the output resolution (e.g. 4K scene on 1080p), blur and sharpen kernels differ by that ratio | S (whether ctx+0x74 is the output or the current RT size: **Unknown**) |
+| E9 | `g_TexelSize`/`Half` scale | **Observed** cases 6/7: `const / ctx+0x74` (vec2). The same field is `g_Screen.xy` (case 8). **Documented** "size of a screen pixel … (1/1920, 1/1080)" | `1/scene projection size`, frozen (CPass.cpp:885-886) | 11: 2134765860, 2883756643, 3013489778 (bokeh/gaussian/sharpen/dithering) | when the scene resolution ≠ the output resolution (e.g. 4K scene on 1080p), blur and sharpen kernels differ by that ratio | S (whether ctx+0x74 is the output or the current RT size: **Unknown**; its writer still not found, "Decode leftovers result") |
 | E10 | `g_Screen` not fed | **Observed** case 8: `(w, h, w/h)` | not registered | 0 active (REFLECTION+NORMALMAP only) | none | S |
-| E11 | `g_LayerModelMatrix` not fed | **Observed** id 0x19 (table). **Documented** "transform between layer local space and world space" | not registered: zero matrix | 1: 3516106265 (frame_builder_by_gariam) | `right`/`up` vectors = 0: frame geometry degenerate (Inferred) | S |
+| E11 | `g_LayerModelMatrix` not fed | **Observed** id 0x19 (table). **Documented** "transform between layer local space and world space" | not registered: zero matrix | 1: 3516106265 (frame_builder_by_gariam) | `right`/`up` vectors = 0: frame geometry degenerate (Inferred) | S **Done (0100)**: the layer's world matrix (GH 0x1402176a0 copies image +0x384, the draw's model matrix) |
 | E12 | `g_ModelViewProjectionMatrixInverse` in effect passes | **Observed** case 0xd: inverse of the ctx MVP. Its value inside effect passes: **Unknown** | identity in FBO passes, screen inverse on the last pass (CImage.cpp:815-847) | 5: 2469881470, 2815800031, 3479521040 (chromatic_aberration, lens_flare_sun) | the cursor-anchored centre may be off (unverified) | — |
 | E13 | Lights / `LightingV1` | **Observed** ids 0x64-0x68 and 0x86-0x95 (g_LightsPosition, g_LightsColorPremultiplied, g_LCluster_*, g_LDirectional_*); `LIGHTING` and `LIGHTS_*` defines in the binary strings | `#require LightingV1` → a stub returning 0 (ShaderUnit.cpp:336-379); light uniforms are not fed; ambient/skylight are frozen copies (CPass.cpp:859-860) | 0 of the loadable scenes (LIGHTING=1 only in 3D 3276522107, 3509243656) | none today; blocks the 3D work | L |
 | E14 | Fog | **Observed** `FOG_DIST`, `FOG_HEIGHT`, `FOG_COMPUTED` defines and g_Fog* ids 0x81-0x84 | not parsed or fed | 0 loadable (general.fogdistance only in 3D 3276522107, 3477054430) | none today | M |
@@ -312,7 +312,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E17 | Float uniform default given as a string | **Inferred** parsed as float (WE's editor shows 0.1) | `std::stoi("0.1")` = 0 (ShaderUnit.cpp:520) | 25 reference it; the default actually applies (no scene override) in ~5: 2890767643, 3028473503, 3432876246, 3013489778, 3042865984 | Simple_Audio_Bars spacing 0 (bars merge), cutout_vignette hard edge, dot_matrix size/smoothing 0 | S: `stof` |
 | E18 | Malformed `[COMBO]` JSON | **Unknown** (WE's annotation parser may be lenient) | JSON parse error is logged and the combo is skipped, so its default is never defined (= 0) (ShaderUnit.cpp:444-449) | 5: 3243449890, 3414858021, 3516174947 (auto_sway `VERTICAL_RELATIVE_WIDTH` def 1), 2388299037, 3354740764 (procedural_noise `AD_PERSPECTIVE` def 1) | the combo branch flips unless the scene sets the combo | S: lenient parse / regex for `"default"` |
 | E19 | Fragment uses a varying declared only in the vertex unit | **Unknown**/**Inferred**: WE compiles it (the scene works in WE), probably by building the PS input from the VS varyings | GLSL error, so the effect is left out (patch 0017) | 1: 2189783622: the effect lost is the packaged **foliagesway** (`v_Bounds`, frag line 51), not godrays as the TODO note says | foliage sway missing | S: copy VS-only `varying` decls into the frag unit |
-| E20 | `TEXnFORMAT` for samplers ≠ 0 (`formatcombo`) | **Observed** `TEX0FORMAT` built in GH 0x1401fffb0; the other slots are **Inferred** from `"formatcombo":true` and `TEX1/2/4FORMAT` in shaders | only `TEX0FORMAT` for the renderable's texture (CPass.cpp:606-612) | 1: 3319542538 (lightshafts gradient r8, `TEX2FORMAT`) | an r8 gradient is read as RGBA (red tint), only when `RENDERING=1` | S |
+| E20 | `TEXnFORMAT` for samplers ≠ 0 (`formatcombo`) | **Observed** `TEX0FORMAT` built in GH 0x1401fffb0; the other slots are **Inferred** from `"formatcombo":true` and `TEX1/2/4FORMAT` in shaders | only `TEX0FORMAT` for the renderable's texture (CPass.cpp:606-612) | 1: 3319542538 (lightshafts gradient r8, `TEX2FORMAT`) | an r8 gradient is read as RGBA (red tint), only when `RENDERING=1` | S **Done (0075)**: per bound texture (GH 0x1401d2a20) |
 | E21 | Engine-set defines | **Observed** strings and uses: `SKINNING`/`BONECOUNT`/`MORPHING`/`PRELIGHTING`/`REFLECTION` (GH 0x140230ec0), `SHADERVERSION` (GH 0x14019cb90), `WRITEALPHA`/`OPACITYMASK` (GH 0x140201470), `HDR`, `REVERSEDEPTH`, `SPRITESHEETBLEND`, `CLIPPINGUVS`/`CLIPPINGTARGET` | only `GLSL 1` plus combos (ShaderUnit.cpp:21-51) | puppet objects in ≥ 4 scenes (77 puppet-model objects); the rest 0 active | puppet warp isn't skinned (puppet area owns it); `HDR` blocks affect EMISSIVE only (0) | M-L |
 | E22 | `[COMBO]` / sampler `require` | **Observed** WE writes `require` in its own stock shaders (an editor and compile rule) | ignored for combos (ShaderUnit.cpp:442); the sampler-require logic looks inverted (ShaderUnit.cpp:553-590) | 0 (no used annotation has combo+require+default) | none today | S |
 | E23 | FBO `format` ignored | **Observed** formats in effect.json: `rgba_backbuffer` (Inferred 16F when HDR), `rgba8888`, `rg88`, `r8` | always GL_RGBA8 (FBOProvider.cpp:9-16, CFBO.cpp:20) | rgba_backbuffer 38, rg88 5, r8 1 | precision loss in HDR scenes only (see E35) | S. **Done (B13)**: CFBO allocates the named format (rg88 RG8, r8 R8, the f formats half float); `rgba_backbuffer`/`rgb_backbuffer` are half float in an HDR scene (GH 0x140216080, names GH 0x1402116c0) |
@@ -327,7 +327,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E32 | Image `nointerpolation` | **Observed** property (GH 0x140219c60) | ignored | 0 | none | S |
 | E33 | Which of `_rt_imageLayerComposite_<id>_a/_b` holds the result | **Unknown** | ping-pong parity decides which buffer holds the final image; "TODO: determine when … is used" (CImage.cpp:254-257) | 9 reference it: 2189783622, 2469881470, 3243449890 | a layer that uses another layer as a mask/texture may get an intermediate pass | M **Done in B7, Observed**: the ping-pong starts by pass parity, so `_a` is what the last pass reads and `_b` the stage before (GH 0x140214b50). |
 | E34 | Effects on non-image objects | **Inferred** WE renders them (the editor attaches effects to text) | `parseText` keeps no effects (ObjectParser.cpp:142-160); a group object with effects becomes a placeholder `CObject` | 25 text: 2134765860, 2325974975, 2890767643; 1 group: 3319542538 (lightshafts) | text drawn without its blurprecise/pulse/shift_hue/reflection/shine/godrays | L (text → FBO + effect chain) |
-| E35 | `general.hdr` ignored | **Observed** HDR scenes load `hdr_downsample`, `hdr_downsample_bloom`, `hdr_upsample(_cubic)`, `combine_hdr_upsample`/`combine_srgb`; LDR scenes load `downsample_quarter_bloom`, `downsample_eighth_blur_v`, `blur_h_bloom`, `combine_ldr` (GH 0x1401afbf0); HDR params `bloomstrength`/`blend`/`bloomtint`/`scatter` from `bloomhdr*` (GH 0x1401b42b0, keys GH 0x1401c7880) | always the LDR chain with `bloomstrength`/`bloomthreshold` (CScene.cpp:117-165); RGBA8 everywhere; `hdr` and `bloomhdr*` never read (WallpaperParser.cpp:41-53) | 5 hdr=true: 2511663284, 2542468435, 3019192537, 3395587987 (+1); 4 of them bloom | HDR bloom (threshold 1.0, iterative scatter) replaced by LDR bloom with other params; values > 1 clip | L. **Done (B13)**: WE's HDR chain and half float targets when `general.hdr` (inferred gate: WE only at Ultra post-processing; here unless WPENGINE_HDR=0) |
+| E35 | `general.hdr` ignored | **Observed** HDR scenes load `hdr_downsample`, `hdr_downsample_bloom`, `hdr_upsample(_cubic)`, `combine_hdr_upsample`/`combine_srgb`; LDR scenes load `downsample_quarter_bloom`, `downsample_eighth_blur_v`, `blur_h_bloom`, `combine_ldr` (GH 0x1401afbf0); HDR params `bloomstrength`/`blend`/`bloomtint`/`scatter` from `bloomhdr*` (GH 0x1401b42b0, keys GH 0x1401c7880) | always the LDR chain with `bloomstrength`/`bloomthreshold` (CScene.cpp:117-165); RGBA8 everywhere; `hdr` and `bloomhdr*` never read (WallpaperParser.cpp:41-53) | 5 hdr=true: 2511663284, 2542468435, 3019192537, 3395587987 (+1); 4 of them bloom | HDR bloom (threshold 1.0, iterative scatter) replaced by LDR bloom with other params; values > 1 clip | L. **Done (B13)**: WE's HDR chain and half float targets when `general.hdr` (gate decoded in 0098: `bloom` and `hdr` both literal true, then Ultra post-processing; here unless WPENGINE_HDR=0) |
 | E36 | `bloomtint` ignored | **Observed** set on the LDR chain too (GH 0x1401b42b0); shader `g_BloomTint` default "1 1 1" | not passed to the bloom passes (CScene.cpp:139-153) | 1 non-white (3490034653), 1 user-bound | bloom tinted white instead of warm | S |
 | E37 | Bloom params frozen at load | **Observed** GH 0x1401b42b0 re-applies them to the materials | strength and threshold are written as JSON literals into the virtual effect at construction; the bloom object exists only if `bloom` was true at load (CScene.cpp:117-162) | `bloom`/`bloomstrength`/`bloomthreshold` user- or script-bound in 4-5 (e.g. 2 `bloom.script`) | changing the user property or script doesn't change bloom | S |
 | E38 | Material `alphatocoverage` | **Observed** blending enum normal 0 / translucent 1 / additive 2 / alphatocoverage 3 (GH 0x140182410, parse GH 0x140182450) | logged and treated as `normal` (MaterialParser.cpp:73-87) | 1: 3354740764 | cutout edges opaque instead of A2C | **Done (0067).** Unblended + the ALPHATOCOVERAGE combo WE sets (GH 0x140183570): the stock shaders discard below 0.5 on GLSL; `additive` sets ADDITIVE likewise. |
@@ -2752,3 +2752,107 @@ their reader wasn't looked for in this run; `general.hdr`'s gate on the post-pro
 "alive" test (GH 0x1402524c0); the puppet attachment builder and the additive scale; WE's rope bezier; the SceneScript
 angles binding's address. WE captures (owner): 3414858021's "WEDNESDAY" (centred at the scripted x8 = 0.967 × canvas,
 it reaches the edge here; whether WE's layout does the same needs WE), 3445973124 with music, the B-batch captures.
+
+### Decode leftovers result: the HDR gate, .tex component flags, g_LayerModelMatrix, and what the rest decode to (fork patches 0098–0100, pin `f50bc82`, 2026-11-05)
+
+The "Still open" items above that have library users or readable code. Decoded from the same wallpaper64.exe 2.8.485
+(`all.c` / `all.asm`), resourcecompiler64.exe 2.8.485 (objdump) and WE's own `assets/`. **Observed** = read in the
+binary; **Inferred** = ours, marked. Where the decode confirms what LWE already inferred, that is said.
+
+**The HDR gate (B13; 0098; 5 HDR scenes, 1 changes).** **Observed** (GH 0x14013f860, the project classifier): it reads
+the scene file's `general` (raw JSON) and finds `bloom` and `hdr` (string 0x1404c9650) with GH 0x14013f170; each
+counts only with rapidjson's bool flag (`value +0xe & 8`) and true (GH 0x1401476c0). With both, the "postprocessing"
+setting `ultra` sets the renderer flag 0x2000 (`displayhdr`: 0x6000). So **an `hdr` scene without bloom renders LDR
+in WE**, and a `bloom` bound to a user property (a JSON object) or written as a number never turns HDR on. LWE now
+gates on the literal pair; WPENGINE_HDR=0 still stands for a setting below Ultra (LWE has no quality setting:
+Inferred that the owner's WE runs at Ultra). The library: 2511663284 (`hdr` true, `bloom` false) gets RGBA8 targets
+again; the other four have `bloom: true` and are unchanged. The renderer is rebuilt when the flags differ from the
+running ones (GH 0x140144b40), so the gate is per load.
+
+**The `.tex` flags 2²⁰–2²³ (0099; 2 scenes, 5 textures).** **Observed**: resourcecompiler64.exe builds a texture's
+channels from separate "component" images and sets `0x100000 << channel` for each one it fills (the copy loop at
+0x140060ee0, then `or [flags], 0x100000 << esi` at 0x140060f1c); the TEXI reader (GH 0x14018b1f0) accepts any flags
+below 0x2000000. WE's shader preamble (GH 0x14019b550) walks every sampler bound to a texture: its `combo` gets
+`#define … 1`, and each entry `i` of the sampler's `components` list gets its `combo` defined when the bound texture's
+flags (texture +0x1c) have `0x100000 << i`. The stock PBRMASKS sampler (generic3/4, genericimage2/3/4, foliage4,
+fur4, chroma4) lists METALLIC_MAP, ROUGHNESS_MAP, REFLECTION_MAP, EMISSIVE_MAP — the shaders read
+`componentMaps.x/y/z/a` only under those combos, else g_Metallic / g_Roughness and no emission. Library: 3477054430's
+`masks/Image_3_mask` is 0xa00002 (roughness + emissive), 3509243656's four `Material__50` / `DefaultMaterial` masks are
+0x800002 (emissive). LWE ignored the bits; the format resolver now also returns the bound texture's flags and
+ShaderUnit defines the component combos (unless the material sets them). Flag 64 (GH 0x14018b1f0: one more u32 in the
+header, 1..128, a slice count: `slice3d`) has 0 library users.
+
+**E11 `g_LayerModelMatrix` (0100; 3516106265).** **Observed**: uniform 0x19 (GH 0x14010a0e0) reads the render context
++0xa30; GH 0x1402176a0 copies image +0x384 there for the layer's effect passes, and the layer's draw (GH 0x140214b50)
+stores at +0x384 the matrix it pushes as its model matrix, the object's vtable +0x80 (GH 0x1401b5170: T · Rz · Ry · Rx ·
+S with the parents' and the attachment). LWE never registered it (zero): frame_builder's FIXSCALE (default on) takes
+the layer's scale from the matrix's first two columns and collapsed. It is now `CScene::worldMatrixOf` of the layer,
+updated each frame. WE fills it only for passes with flag bit 0 (`piVar12[… + 5] & 1`); LWE feeds every pass of the
+layer (a shader that doesn't declare it doesn't see it).
+
+**E9 `g_TexelSize` (not decoded).** Uniform cases 6/7 divide (1, 1) / (0.5, 0.5) by the render context's +0x74 (8
+bytes), the same pair as g_Screen (case 8: w, h, w/h). Its writer wasn't found: no float, 8-byte or 16-byte store to a
+render context's +0x74 in `all.asm` (the stores at +0x74 that exist are other classes: a CRT stream, a matrix
+transpose, the regex lexer). LWE keeps 1 / the scene size. **E20** (`TEX<n>FORMAT` for `formatcombo` samplers) was
+done in F9 (0075, GH 0x1401d2a20) and **E38** (`alphatocoverage`) in 0067; the rows are updated.
+
+**The fdt frame time (B11; confirms the inference).** **Observed**: the interpreter call (GH 0x14025c2e0, 0x14025ce6a)
+takes `rbx = *system` and divides 0.025 by `rbx +0x14c`, with `rbx +0x148` the frame-rate setting (`fps − 1 ≤ 19`:
+two half steps). That host is the render context: the instance update that calls the alive test (GH 0x140255e50) sets
+`*instance +0x1ca` (the matrix stack's dirty byte) and pops `+0x30` by 0x40 (the model matrix stack), the fields the
+uniform setter reads from its context (cases 9 / 0xb). Its +0x14c is uniform case 4, `g_Frametime`. So fdt =
+dt · min (0.025 / frametime, 1)^0.7 with the frame's own frame time, what LWE does.
+
+**The child "alive" test (GH 0x1402524c0; confirms, one nuance).** **Observed**: alive = any static child (+0x468,
+16-byte entries) alive, or any event instance (+0x480, 0x38-byte entries, vectors of instances) alive (recursively),
+or the system's particle count (+0x344) ≠ 0, or its live-emitter count (+0x3f4) ≠ 0. The count is the emitters of
+types 1–3 at reset (GH 0x140254e40 / 0x140254ed0) and drops when one stops (GH 0x14025cfe0 at 0x140260715): its delay run out and its
+duration run out, or — without a duration — a rate ≤ 0 and not (instantaneous ≠ 0 with the periodic flag 4). LWE's
+`childAlive` is this, except a periodic emitter with instantaneous 0 and rate 0 stays alive in LWE (WE stops it);
+no library child has one. Not changed.
+
+**B12: the additive scale and the attachment builder.** **Observed** (GH 0x140224390, the additive mix, SoA blocks of
+10 floats per bone): components 7–9 (scale) get exactly the position's rule, pose + (lerp (a, b, f) − bind) · w —
+LWE's inference holds. The attachment (vtable +0x78 of the puppet image, 0x1404d2cb0: GH 0x14024b480 finds it by name
+in 0x68-byte entries, name +0, matrix +0x20, bone u32 +0x60; GH 0x14024b530 applies it): local ← (bone matrix · the
+MDAT matrix) · local, then world = parent world · local (GH 0x1401b5170). The bone matrix comes from the puppet's
+animator (image +0x2d8, its +0x30 array of 64-byte matrices); whether that array holds the posed world (LWE's
+reading) or the skinning matrix wasn't traced to its writer. WE applies the whole product; LWE keeps its translation
+and z turn (2D: the library's attachments). Not changed.
+
+**P30 rope bezier (the shader side decoded, the CPU side not).** genericropeparticle.vert/.geom: per segment the CPU
+gives start (a_PositionVec4), end (a_TexCoordVec4.xyz) and two spline points CP0 (a_TexCoordVec4C1.xyz) and CP1
+(a_TexCoordVec3C2 / C2.xyz); the bezier's inner control points are start + 0.15 · (end − CP0) and end + 0.15 · (start −
+CP1). With CP0 / CP1 the neighbouring particles (i − 1, i + 2: **Inferred**, the buffer's builder wasn't found) this is
+a Catmull-Rom-shaped curve with tangent factor 0.15 where Catmull-Rom's is 1/6: LWE's ribbon is within 10 % of it.
+Not changed.
+
+**SceneScript angles in degrees (confirms 0057).** The constants 57.29578 / 0.017453292 are at 0x1404d4460 /
+0x1404d411c in this exe (the addresses 0x1404928d0 / 0x140492628 noted under the 3414858021 result hold other bytes).
+**Observed**: the script object table (GH 0x14020dcc0) registers `angles` as a vec3 at object +0x140 with the same
+script getter as `origin` / `scale` (LAB_1401d0ef0) plus descriptor flag bit 2 (`+0x60 |= 4`), which no other
+property sets; `getAttachmentAngles` (GH 0x14020db20) returns Euler angles × 57.29578; WE's own
+`scripts/jsclasses/baseclasses.js` (Vec2 angle, Mat4 rotation and decomposition, Vec3 spherical) works in degrees
+throughout. The bridge's use of flag 4 (where `thisLayer.angles` is scaled) wasn't located; scenescript64.dll's own
+copies (0x1812ed0a0 / 0x1812ed080) are read only by four V8 builtins.
+
+**Fork tests** (`host_api_test`, 113 → 116 passed): the 3 new ones fail on `262d97b`.
+
+| Test | What it checks | On `262d97b` |
+|---|---|---|
+| `hdr_needs_literal_bloom` | an rgba_backbuffer FBO of 2.0 read × 0.25: `hdr` + `bloom` false 64, `hdr` + user-bound bloom 64, `hdr` + `bloom` true 127 | 127 / 127 / 127 |
+| `texture_components_define_combos` | a 4-component sampler bound to a 1 × 1 .tex: flags 3 defines none, 0x800002 the 4th, 0xa00002 the 2nd and 4th | none defined |
+| `layer_model_matrix_is_fed` | an effect on a layer scaled 2 × 3 and turned 0.5 reads its matrix columns' lengths 2 and 3 | 0 0 |
+
+`fbo_formats_as_written` now runs its HDR half with `bloom` on (strength 0), as the gate needs.
+
+**Gates.**
+
+- Health (`scene-health.md`, 96 scenes): **89 clean / 7 degraded / 0 failed**, as before; no scene worse in class or
+  errors, none newly blank (lit pixels within 50 % on all).
+- 3 s frames vs the `262d97b` run: 2511663284 25 % of pixels differ (RGBA8 targets, no HDR; its video frame also
+  varies run to run), 3477054430 7 % (the mask's roughness + emission under its lights), 3516106265 2.5 % (the frame
+  builder's frame), 3509243656 0 % (generic4 reads EMISSIVE_MAP only under LIGHTING / REFLECTION; why its frame is unchanged wasn't checked further); every
+  other scene as before.
+- Shader sweep (4085 checks vs the leftovers'): 6 failing before, 6 still failing, 0 fixed, 0 newly failing.
+- Player tests (DEBUG, on this core): 743 passed, 0 failed, 3 ignored.
