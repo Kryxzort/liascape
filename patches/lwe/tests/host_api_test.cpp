@@ -2249,6 +2249,60 @@ static bool particle_follows_its_parent () {
     return true;
 }
 
+// F9/P29: a sprite's `orientation` (WE GH 0x1401efc50 parses it, GH 0x14024fd30 turns it into g_Orientation*): a
+// screen sprite faces the camera however its system is tilted, a `fixed` one lies in the plane `axis` is the normal
+// of (edge-on when that is world y), a child system uses its own renderer's. Unpatched every sprite took the
+// system's own axes (a tilted system's sprites foreshortened, a fixed one faced the camera, a child copied its
+// parent's)
+static bool sprite_orientation_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const std::string& top, const char* instantaneous) {
+        return std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":10") + top
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":" + instantaneous + "}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":24,\"max\":24}," + white + "," + life + "]}\n";
+    };
+    const std::string flat = ",\"renderer\":[{\"name\":\"sprite\",\"orientation\":\"fixed\",\"axis\":\"0 1 0\",\"flags\":1}]";
+    const std::string facing = ",\"renderer\":[{\"name\":\"sprite\",\"orientation\":\"fixed\",\"axis\":\"0 0 1\",\"flags\":1}]";
+    std::string tilted = particle_object (1, "screen.json", 8, 16);
+    const std::string level = "\"angles\":\"0 0 0\"";
+    tilted.replace (tilted.find (level), level.size (), "\"angles\":\"1 0 0\"");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        tilted + "," + particle_object (2, "flat.json", 24, 16) + "," + particle_object (3, "parent.json", 40, 16) + ","
+            + particle_object (4, "facing.json", 56, 16),
+        "0 0 0",
+        { { "screen.json", sys ("", "1") }, { "flat.json", sys (flat, "1") }, { "facing.json", sys (facing, "1") },
+          { "parent.json", sys (",\"children\":[{\"name\":\"particles/flat.json\"}]", "0") } },
+        files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 5; i++) {
+        rig.step ();
+    }
+    auto height = [&] (int x) {
+        int n = 0;
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        for (int y = 0; y < 32; y++) {
+            read_pixel (rig.fbo, x, y, px);
+            n += px[0] > 128 ? 1 : 0;
+        }
+        return n;
+    };
+    const int tiltedH = height (8), flatH = height (24), childH = height (40), facingH = height (56);
+    printf ("    sprite heights: screen in a system tilted 1 rad about x %d, fixed on world y %d, its child copy %d, "
+            "fixed facing the camera %d\n", tiltedH, flatH, childH, facingH);
+    CHECK (facingH >= 10 && facingH <= 14, "the camera-facing fixed sprite isn't 12 tall (%d)", facingH);
+    CHECK (tiltedH >= 10 && tiltedH <= 14, "the tilted system's screen sprite doesn't face the camera (%d tall)", tiltedH);
+    CHECK (flatH <= 1, "the fixed sprite on world y isn't edge-on (%d tall)", flatH);
+    CHECK (childH <= 1, "the child system didn't use its own (fixed) renderer (%d tall)", childH);
+    return true;
+}
+
 // an aligned image turns about its origin, its anchor point, not the centre of its quad (unpatched: the quad's
 // centre, so a left-aligned layer turned half round stayed where it was)
 static bool aligned_layer_turns_about_its_origin () {
@@ -4796,6 +4850,7 @@ int main (int argc, char** argv) {
     run ("camera_zoom_and_shake", camera_zoom_and_shake);
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);
+    run ("sprite_orientation_as_we", sprite_orientation_as_we);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
     run ("bloom_is_live_and_tinted", bloom_is_live_and_tinted);
