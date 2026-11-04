@@ -5600,6 +5600,72 @@ static bool tube_and_directional_lights () {
     return true;
 }
 
+// F2: volumetric lights (castvolumetrics, light flag bit 2). WE's volumetrics pass (GH 0x1401c56e0) marches each
+// such light's volume (a point light's sphere, a spot's cone) with its density, scattering and volumetricsexponent
+// into a light buffer an eighth of the scene, blurs it and adds it to the scene. A point light at the origin (radius 3)
+// glows in the air at the centre and not at the corner; the same without castvolumetrics leaves the clear colour; a
+// spot at x −4 shining along +x (outercone 20) lights the air along its axis and not 2.5 units above it; from inside
+// the point light's sphere the full-screen march lights the view; a black wall in the sphere (it writes depth) cuts the
+// march short. Unpatched: nothing is drawn but the clear colour
+static bool volumetric_lights_glow () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    struct Shot {
+        std::array<unsigned char, 4> centre {}, corner {}, axis {}, above {};
+    };
+    const auto shoot = [] (const std::string& light, const std::string& eye, Shot& shot, bool wall = false) {
+        const std::string wallObject = ",{\"id\":9,\"name\":\"wall\",\"model\":\"models/f2wall.mdl\",\"origin\":\"0 0 1\"}";
+        const std::string dir = world_scene (kF1Black, light + (wall ? wallObject : ""), eye);
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        if (wall) {
+            // a black quad that writes depth: the march stops at it
+            mkdir ((dir + "/models").c_str (), 0755);
+            mkdir ((dir + "/materials").c_str (), 0755);
+            write_file (dir + "/models/f2wall.mdl", b14_mdl ("materials/f2wall.json"));
+            write_file (dir + "/materials/f2wall.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"depthtest\":\"enabled\","
+                                                     "\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"],\"combos\":{\"LIGHTING\":0,\"FOG\":0},"
+                                                     "\"constantshadervalues\":{\"color\":\"0.0 0.0 0.0\"}}]}\n");
+            rig.extra = { "models/f2wall.mdl", "materials/f2wall.json" };
+        }
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        const int px = static_cast<int> (kF1PxPerUnit);
+        shot.centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        shot.corner = pixel_xy (rig, 4, 4);
+        shot.axis = pixel_xy (rig, kW3 / 2 + px, kH3 / 2);
+        shot.above = pixel_xy (rig, kW3 / 2 + px, kH3 / 2 + static_cast<int> (2.5 * px));
+        return true;
+    };
+    const std::string point = "{\"id\":2,\"name\":\"p\",\"light\":\"lpoint\",\"origin\":\"0 0 0\",\"color\":\"1.0 1.0 1.0\",\"intensity\":8,"
+                              "\"radius\":3,\"exponent\":1,\"density\":2,\"volumetricsexponent\":1,\"castvolumetrics\":";
+    const std::string spot = "{\"id\":3,\"name\":\"s\",\"light\":\"lspot\",\"origin\":\"-4 0 0\",\"angles\":\"0 0 0\",\"color\":\"1.0 1.0 1.0\","
+                             "\"intensity\":8,\"radius\":10,\"exponent\":1,\"innercone\":10,\"outercone\":20,\"castvolumetrics\":true}";
+    Shot on, off, cone, inside, walled;
+    CHECK (shoot (point + "true}", "0 0 10", on), "load failed (point)");
+    CHECK (shoot (point + "false}", "0 0 10", off), "load failed (point, no volumetrics)");
+    CHECK (shoot (spot, "0 0 10", cone), "load failed (spot)");
+    CHECK (shoot (point + "true}", "0 0 1", inside), "load failed (inside)");
+    CHECK (shoot (point + "true}", "0 0 10", walled, true), "load failed (wall)");
+    printf ("    point: centre %d %d %d, corner %d %d %d; without: centre %d %d %d; spot: axis %d %d %d, above %d %d %d; "
+            "inside: centre %d %d %d; a wall at z 1: centre %d %d %d\n", on.centre[0], on.centre[1], on.centre[2], on.corner[0], on.corner[1], on.corner[2],
+            off.centre[0], off.centre[1], off.centre[2], cone.axis[0], cone.axis[1], cone.axis[2], cone.above[0], cone.above[1],
+            cone.above[2], inside.centre[0], inside.centre[1], inside.centre[2], walled.centre[0],
+            walled.centre[1], walled.centre[2]);
+    CHECK (on.centre[0] > 20 && near (on.centre[0], on.centre[1], 2), "the point light's volume doesn't glow (white) at the centre");
+    CHECK (on.corner[0] < 4, "the glow reaches the corner, outside the light's radius");
+    CHECK (off.centre[0] < 4, "without castvolumetrics the air glows");
+    CHECK (cone.axis[0] > 20, "the spot's cone doesn't glow along its axis");
+    CHECK (cone.above[0] < cone.axis[0] / 3, "the spot's glow reaches outside its cone");
+    CHECK (inside.centre[0] > 20, "from inside the sphere the view doesn't glow (the full-screen march)");
+    CHECK (walled.centre[0] > 4 && walled.centre[0] < on.centre[0] * 0.7, "the march doesn't stop at the scene's depth (a wall in the sphere)");
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // F2 (the audit's "F2 result"): a `shape` object. WE builds a square of the scene's height (GH 0x140285b40) whose
 // corners are its first effect's point0..point3 (uv = the point, GH 0x1402861b0) and draws its LAST effect's passes
@@ -6214,6 +6280,7 @@ int main (int argc, char** argv) {
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
+    run ("volumetric_lights_glow", volumetric_lights_glow);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
