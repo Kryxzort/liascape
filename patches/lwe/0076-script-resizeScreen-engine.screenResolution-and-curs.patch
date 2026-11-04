@@ -1,0 +1,231 @@
+From fad72a793c0afdf1557dd8ce42daeaf7d5e3f706 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:49:45 +0530
+Subject: [PATCH 76/77] script: resizeScreen, engine.screenResolution and
+ cursorScreenPosition from the host's screen
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+wp_project_hint_size (the host's output size) now reaches a scene: it is the screen the scene
+shows on. engine.screenResolution reads it ("Screen resolution in pixels"; it was the scene's
+own size, which it stays until a host hints one), and a change after the scene is up sends
+resizeScreen (size) to every script at the next tick — WE: "called every time the wallpaper
+resizes because of a change to the current screen resolution", and "NOT called automatically
+when the wallpaper is first created" (lib.sceneScript.d.ts 2.8), so a size hinted before the
+first frame is the screen from the start, with no event. 3042492564 recomputes its scale there.
+
+IInput.cursorScreenPosition is "the cursor on the screen in pixels" (d.ts); it was 0..1. It is
+now the pointer in screenResolution's pixels, the scene covering the screen (scaled to cover,
+centred): 3509243656 centres the cursor with screenResolution / 2. Inferred: the cover mapping
+(the host's) and y down (Windows' screen coordinates).
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F8; IInput.cursorScreenPosition
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Project.cpp          |  8 +++++
+ src/core/WallpaperEngine/Project.h            |  4 +--
+ .../Render/Wallpapers/CScene.cpp              | 29 +++++++++++++++++++
+ .../Render/Wallpapers/CScene.h                | 17 +++++++++++
+ .../Scripting/EngineObject.cpp                |  7 ++---
+ .../WallpaperEngine/Scripting/InputObject.cpp |  5 ++--
+ .../Scripting/ScriptEngine.cpp                | 17 +++++++++++
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  4 +++
+ 8 files changed, 83 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 759af95..f77d180 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -265,6 +265,9 @@ void WallpaperEngine::Project::hintSize (int width, int height) {
+ 
+     if (this->wallpaper != nullptr && this->wallpaper->is<Wallpapers::CWeb> ()) {
+ 	this->wallpaper->as<Wallpapers::CWeb> ()->setSize (width, height);
++    } else if (this->wallpaper != nullptr && this->wallpaper->is<Wallpapers::CScene> ()) {
++	// the screen a scene shows on: engine.screenResolution, and resizeScreen when it changes
++	this->wallpaper->as<Wallpapers::CScene> ()->setScreenSize (width, height);
+     }
+ }
+ 
+@@ -290,6 +293,11 @@ void WallpaperEngine::Project::render () {
+ 	// give hint about size to the wallpaper only if web
+ 	if (this->wallpaper->is<Wallpapers::CWeb> ()) {
+ 	    this->wallpaper->as<Wallpapers::CWeb> ()->setSize (this->hintedWidth, this->hintedHeight);
++	} else if (this->wallpaper->is<Wallpapers::CScene> () && this->hintedWidth > 0 && this->hintedHeight > 0) {
++	    // a size hinted before the scene existed is its screen from the start (no resizeScreen: WE sends none on
++	    // creation)
++	    this->wallpaper->as<Wallpapers::CScene> ()->setScreenSize (this->hintedWidth, this->hintedHeight);
++	    this->wallpaper->as<Wallpapers::CScene> ()->getScriptEngine ().dropQueuedEvent ("resizeScreen");
+ 	}
+ 	// notify current media metadata status
+ 	this->renderContext->albumArtUrlChange (this->mediaInfo.url);
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index c9adb4b..bea5b5c 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -86,8 +86,8 @@ protected:
+     Properties::const_iterator property_it;
+     wp_project_property* current_property;
+     GLuint framebuffer;
+-    int hintedWidth;
+-    int hintedHeight;
++    int hintedWidth = 0;
++    int hintedHeight = 0;
+     MediaInfo mediaInfo;
+ 
+     Project (Context* context, wp_mouse_input* mouse_input, const std::filesystem::path& project);
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 7cc670e..3b949e6 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -653,6 +653,35 @@ void CScene::addObjectToRenderOrder (const Object& object) {
+ 
+ Scripting::ScriptEngine& CScene::getScriptEngine () const { return *this->m_scriptEngine; }
+ 
++glm::vec2 CScene::getScreenSize () const {
++    if (this->m_screenSize.x > 0 && this->m_screenSize.y > 0) {
++	return this->m_screenSize;
++    }
++    return { this->getWidth (), this->getHeight () };
++}
++
++void CScene::setScreenSize (int width, int height) {
++    if (width <= 0 || height <= 0) {
++	return;
++    }
++    const glm::vec2 before = this->getScreenSize ();
++    this->m_screenSize = { width, height };
++    if (before != this->getScreenSize ()) {
++	this->getScriptEngine ().notifyResizeScreen (this->getScreenSize ());
++    }
++}
++
++glm::vec2 CScene::getCursorScreenPosition () const {
++    const glm::vec2 scene (this->getWidth (), this->getHeight ());
++    const glm::vec2 screen = this->getScreenSize ();
++    const glm::vec2 pointer = *this->getMousePositionNormalized () * scene;
++    if (scene.x <= 0.0f || scene.y <= 0.0f) {
++	return pointer;
++    }
++    const float cover = std::max (screen.x / scene.x, screen.y / scene.y);
++    return (pointer - scene * 0.5f) * cover + screen * 0.5f;
++}
++
+ void CScene::advanceAnimations () {
+     auto& animated = const_cast<Data::Model::Scene&> (this->getScene ()).animatedValues;
+     const float dt = std::max (
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index cdaeed0..4eb3fac 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -46,6 +46,21 @@ public:
+     [[nodiscard]] float getDeltaTime () const;
+     [[nodiscard]] float getFps () const;
+ 
++    /**
++     * The size of the screen the scene is shown on, in pixels (the host's wp_project_hint_size; the scene's own size
++     * until a host gives one): engine.screenResolution. A change after the scene is up sends the scripts
++     * resizeScreen (size) (WE: "every time the wallpaper resizes because of a change to the current screen
++     * resolution", never on creation)
++     */
++    [[nodiscard]] glm::vec2 getScreenSize () const;
++    void setScreenSize (int width, int height);
++    /**
++     * The pointer in screen pixels (IInput.cursorScreenPosition, "the cursor on the screen in pixels"), x right, y
++     * down: the host shows the scene covering the screen (scaled to cover, centred, the overflow cut). Inferred: the
++     * cover mapping is liascape's, the y direction Windows' screen coordinates
++     */
++    [[nodiscard]] glm::vec2 getCursorScreenPosition () const;
++
+     const glm::vec2* getMousePosition () const;
+     const glm::vec2* getMousePositionLast () const;
+     const glm::vec2* getMousePositionNormalized () const;
+@@ -194,6 +209,8 @@ protected:
+     friend class CWallpaper;
+ 
+ private:
++    /** the host's screen size (0: none given) */
++    glm::ivec2 m_screenSize = { 0, 0 };
+     Render::CObject* createObject (const Object& object);
+     Render::CObject* dispatchObjectType (const Object& object);
+     void addObjectToRenderOrder (const Object& object);
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index 21f6c6d..943c769 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -75,10 +75,9 @@ JSValue engine_get_screen_resolution (JSContext* ctx, JSValueConst this_val, int
+ 	return JS_EXCEPTION;
+     }
+ 
+-    // "the size of the screen the wallpaper is displayed on": the core renders at the scene's size and the host
+-    // scales that to its output, which the core doesn't know, so the scene's size
+-    const auto& scene = it->second.getScene ();
+-    return it->second.getEngine ().newVec (glm::vec2 (scene.getWidth (), scene.getHeight ()));
++    // "Screen resolution in pixels": the screen the host shows the scene on (wp_project_hint_size), the scene's own
++    // size until a host gives one
++    return it->second.getEngine ().newVec (it->second.getScene ().getScreenSize ());
+ }
+ 
+ JSValue engine_get_user_properties (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+diff --git a/src/core/WallpaperEngine/Scripting/InputObject.cpp b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+index b4e9533..0986963 100644
+--- a/src/core/WallpaperEngine/Scripting/InputObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+@@ -22,9 +22,10 @@ JSValue get_cursor_world_position (JSContext* ctx, JSValueConst this_val, int ar
+ JSValue get_cursor_screen_position (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     JSClassID classId;
+     auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
+-    auto position = input->getScene ().getMousePositionNormalized ();
+ 
+-    return input->getScene ().getScriptEngine ().newVec (*position);
++    // "the cursor on the screen in pixels" (d.ts): in engine.screenResolution's pixels (3509243656 centres it with
++    // screenResolution / 2); it was 0..1
++    return input->getScene ().getScriptEngine ().newVec (input->getScene ().getCursorScreenPosition ());
+ }
+ 
+ JSValue get_cursor_left_down (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index e49f9f2..d2b42fc 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1523,6 +1523,23 @@ void ScriptEngine::notifyTrackMetadataChange (const MediaProperties& properties)
+     this->m_queuedEvents.insert_or_assign ("mediaPropertiesChanged", event);
+ }
+ 
++void ScriptEngine::notifyResizeScreen (const glm::vec2& size) {
++    if (!this->m_context) {
++	return;
++    }
++    if (const auto it = this->m_queuedEvents.find ("resizeScreen"); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (this->m_context, it->second);
++    }
++    this->m_queuedEvents.insert_or_assign ("resizeScreen", this->newVec (size));
++}
++
++void ScriptEngine::dropQueuedEvent (const std::string& name) {
++    if (const auto it = this->m_queuedEvents.find (name); it != this->m_queuedEvents.end ()) {
++	JS_FreeValue (this->m_context, it->second);
++	this->m_queuedEvents.erase (it);
++    }
++}
++
+ void ScriptEngine::notifyMediaStatusChange (bool enabled) {
+     JSContext* ctx = this->m_context;
+     JSValue event = JS_NewObject (ctx);
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index e279e17..9cecd87 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -232,6 +232,10 @@ public:
+     };
+     void notifyTrackMetadataChange (const MediaProperties& properties);
+     void notifyMediaStatusChange (bool enabled);
++    /** resizeScreen (size): the screen the scene shows on changed size (CScene::setScreenSize), at the next tick */
++    void notifyResizeScreen (const glm::vec2& size);
++    /** forgets a queued event (a screen size the scene was created with is no resize) */
++    void dropQueuedEvent (const std::string& name);
+     void notifyAlbumArtUrlChange (const std::optional<std::string>& url);
+     void notifyPlaybackStateChange (std::optional<wp_media_playback_state> state);
+     void notifyPlaybackPositionAndDurationChange (std::optional<double> position, std::optional<double> duration);

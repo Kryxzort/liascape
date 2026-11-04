@@ -1,7 +1,7 @@
 From bddf451d65eae2b06568e0ec90e627c94dd79bf5 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 07:16:09 +0530
-Subject: [PATCH 49/70] data: a text stays a string, and a colour property's "1
+Subject: [PATCH 49/77] data: a text stays a string, and a colour property's "1
  1 1" is white
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,0 +1,210 @@
+From 24adeff3d8cfd296853ace47a78ef885721c0572 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 20:52:53 +0530
+Subject: [PATCH 77/77] script: a puppet animation's own events (MDLA) reach
+ the layer's scripts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An MDLA animation ends with its event list (a u32 and a string each; read as the frame and the
+name — Inferred from the layout), which LWE skipped. Now each animation layer's clock fires
+animationEvent (event, value) — event {name, frame} — to every script on the image layer when
+it passes an event's frame (f / fps): forward, across a loop's wrap (its end, then its start),
+back along a mirror; the first step includes frame 0. Before the scripts' init they wait, as
+the keyframe timelines' events do. Inferred: WE's runtime for these events wasn't traced; the
+d.ts calls AnimationEvent "an animation event fired by puppet or property animations".
+
+Origin: ours
+Why: docs/player/spikes/we-coverage.md F7 (puppet animationEvent)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 12 +++++
+ .../WallpaperEngine/Render/Objects/CImage.h   |  2 +
+ .../WallpaperEngine/Render/Objects/Puppet.cpp | 44 ++++++++++++++++++-
+ .../WallpaperEngine/Render/Objects/Puppet.h   | 11 +++++
+ .../Scripting/ScriptEngine.cpp                | 24 ++++++++++
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  2 +
+ 6 files changed, 93 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 0147f11..cb2bf76 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -489,8 +489,20 @@ void CImage::updatePuppetPose () {
+ 	    continue;
+ 	}
+ 	if (state.playing) {
++	    const float before = state.started ? state.clock.time : -1.0f;
++	    const uint32_t endsBefore = state.clock.ends;
++	    const bool reversedBefore = state.clock.reversed;
+ 	    Puppet::advance (*match, state.clock, dt * layer.rate->value->getFloat (),
+ 			     state.single ? Puppet::Mode::Single : match->mode);
++	    state.started = true;
++	    // the animation's own events (MDLA) the clock passed: animationEvent (event, value) to the layer's scripts.
++	    // Inferred: WE's runtime for them wasn't traced (the keyframe timelines' events go the same way)
++	    if (!match->events.empty ()) {
++		const auto passed = Puppet::passedEvents (*match, before, state.clock, endsBefore, reversedBefore);
++		if (!passed.empty ()) {
++		    this->getScene ().getScriptEngine ().layerAnimationEvents (*this, passed);
++		}
++	    }
+ 	}
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 617786f..f9c6c41 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -104,6 +104,8 @@ public:
+ 	bool playing = true;
+ 	/** playSingleAnimation: plays once, then the layer is removed */
+ 	bool single = false;
++	/** its clock went once (the next step's events start after it, not at frame 0) */
++	bool started = false;
+     };
+     /** the puppet's animation layers in order (none without a skinned puppet) */
+     [[nodiscard]] std::vector<PuppetLayerState>& getPuppetLayers () { return this->m_puppetLayers; }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index a40877a..af1a78a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -340,9 +340,13 @@ void parseAnimations (Reader& r, int version, const SkeletonCounts& counts, Mode
+ 	    r.at += 18; // root motion
+ 	}
+ 	const uint32_t events = r.u32 ();
++	if (events > 0x10000) {
++	    throw std::runtime_error ("too many animation events");
++	}
+ 	for (uint32_t e = 0; e < events; e++) {
+-	    r.u32 ();
+-	    r.str ();
++	    // a frame, then a name (Inferred from the layout: the reader takes a u32 and a string per event)
++	    const uint32_t frame = r.u32 ();
++	    animation.events.emplace_back (frame, r.str ());
+ 	}
+ 	if (animation.fps > 0.0f && animation.frames > 0) {
+ 	    out.animations.push_back (std::move (animation));
+@@ -472,6 +476,42 @@ void advance (const Animation& animation, Clock& clock, float dt, Mode mode) {
+     }
+ }
+ 
++std::vector<std::pair<std::string, int>> passedEvents (const Animation& animation, float before, const Clock& after,
++						       uint32_t endsBefore, bool reversedBefore) {
++    std::vector<std::pair<std::string, int>> out;
++    if (animation.events.empty () || animation.fps <= 0.0f) {
++	return out;
++    }
++    // frame positions in frames (time · fps); an event at f is passed when the clock crosses f
++    const double from = before < 0.0f ? -1e-6 : static_cast<double> (before) * animation.fps;
++    const double to = static_cast<double> (after.time) * animation.fps;
++    const double last = static_cast<double> (animation.frames);
++    const auto add = [&] (double lo, double hi, bool includeLo) {
++	for (const auto& [frame, name] : animation.events) {
++	    const double f = frame;
++	    if ((includeLo ? f >= lo : f > lo) && f <= hi) {
++		out.emplace_back (name, static_cast<int> (frame));
++	    }
++	}
++    };
++    const bool wrapped = after.ends != endsBefore;
++    if (reversedBefore || after.reversed) {
++	// a mirror going back (or turning at the end): the frames between, either way
++	if (wrapped && !reversedBefore) {
++	    add (from, last, false);
++	    add (to, last, true);
++	} else {
++	    add (std::min (from, to), std::max (from, to), true);
++	}
++    } else if (wrapped && after.time < before) {
++	add (from, last, false); // a loop: up to the end, then from the start
++	add (-1.0, to, false);
++    } else {
++	add (from, to, false);
++    }
++    return out;
++}
++
+ float layerWeight (const Animation& animation, const Clock& clock, float blend, bool& blendIn, bool blendOut,
+ 		   float blendTime) {
+     constexpr float kEpsilon = 1.1920928955078125e-07f;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index d5441cb..ca8addd 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -68,8 +68,11 @@ struct Animation {
+     float fps = 30.0f;
+     uint32_t frames = 0;
+     std::vector<Track> tracks;
++    /** the animation's events (MDLA's last list: a frame, a name): SceneScript's animationEvent on the layer */
++    std::vector<std::pair<uint32_t, std::string>> events;
+ };
+ 
++
+ struct Attachment {
+     int bone = -1;
+     std::string name;
+@@ -108,6 +111,14 @@ void advance (const Animation& animation, Clock& clock, float dt);
+ /** advance, in `mode` instead of the animation's own (SceneScript's playSingleAnimation plays one once) */
+ void advance (const Animation& animation, Clock& clock, float dt, Mode mode);
+ 
++/**
++ * The events of `animation` the clock passed going from `before` to `after` (`ends` the clock's ends counter before
++ * the step: a loop that wrapped passed its end and its start). Frame f is at f / fps; the first step (`before` < 0)
++ * includes frame 0
++ */
++std::vector<std::pair<std::string, int>> passedEvents (const Animation& animation, float before, const Clock& after,
++						       uint32_t endsBefore, bool reversedBefore);
++
+ /**
+  * The layer's weight (GH 0x140291f60): blend, × the blend-in ramp t / min (length / 2, blendtime) while `blendIn`
+  * (cleared once it reaches 1, except in a single animation) and × the blend-out ramp (length − t) / that
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index d2b42fc..843141a 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -1209,6 +1209,30 @@ void ScriptEngine::animationEvents (DynamicValue& value, const std::vector<std::
+     }
+ }
+ 
++void ScriptEngine::layerAnimationEvents (
++    const ScriptableObject& layer, const std::vector<std::pair<std::string, int>>& events
++) {
++    for (size_t i = 0; i < this->m_scriptModules.size (); i++) {
++	auto& module = *this->m_scriptModules[i];
++	if (&module.object != &layer) {
++	    continue;
++	}
++	if (!module.initialized) {
++	    module.pendingAnimationEvents.insert (module.pendingAnimationEvents.end (), events.begin (), events.end ());
++	    continue;
++	}
++	for (const auto& [name, frame] : events) {
++	    JSValue event = JS_NewObject (this->m_context);
++	    JS_SetPropertyStr (this->m_context, event, "name", JS_NewString (this->m_context, name.c_str ()));
++	    JS_SetPropertyStr (this->m_context, event, "frame", JS_NewInt32 (this->m_context, frame));
++	    JSValue args[] = { event, this->dynamicToJs (module.value, module.scriptScale) };
++	    this->callModule (module, "animationEvent", 2, args, false);
++	    JS_FreeValue (this->m_context, args[0]);
++	    JS_FreeValue (this->m_context, args[1]);
++	}
++    }
++}
++
+ void ScriptEngine::dispatchEvent (const char* name, JSValueConst arg, const ScriptableObject* only) {
+     JSValueConst args[] = { arg };
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 9cecd87..638c86f 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -194,6 +194,8 @@ public:
+     [[nodiscard]] JSValue generalSettings () const;
+     /** Sends animationEvent ({ name, frame }, value) to the script of `value` for each event its animation passed */
+     void animationEvents (DynamicValue& value, const std::vector<std::pair<std::string, int>>& events);
++    /** a puppet animation's events (MDLA): animationEvent (event, value) to every script on `layer` */
++    void layerAnimationEvents (const ScriptableObject& layer, const std::vector<std::pair<std::string, int>>& events);
+     /** engine.userProperties: every user property, colours as Vec3 (a new object) */
+     [[nodiscard]] JSValue userProperties ();
+ 
