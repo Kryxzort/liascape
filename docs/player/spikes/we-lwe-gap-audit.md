@@ -2205,3 +2205,128 @@ smoke, old core vs new):
 
 Pin `4b85ae7`. Player tests (DEBUG): 740 passed, 0 failed, 3 ignored. In the full run, the timing test
 `four_workers_latch_independently` failed once and passed alone.
+
+### F5/F6 result: perspective layers, camera paths, the transparent sort, the stock particle operators (fork patches 0082–0085, 2026-11-04)
+
+Decoded from wallpaper64.exe 2.8.485 (`all.c`, the asm `all.asm`, the B11 decompile of the operator interpreter
+`op265800.c`; the particle parser GH 0x1401f3120 doesn't decompile — "response buffer exceeded" in REA too — so its
+stores were read from the asm with a script, `pk.py`/`pall.py` in the session scratchpad `persp/`). **Observed**
+unless marked inferred.
+
+**F5 — decoded:**
+
+- **`perspectiveoverridefov`** (scene +0x144, default 95, GH 0x1401b6c60). The camera update GH 0x1401b8af0 takes
+  +0x144 as the effective fov (+0x148) when the scene is orthographic (+0x140, general.fov, otherwise); a camera
+  object's fov applies only in 3D. In an orthographic scene the effective fov reaches only the perspective camera
+  below (the orthographic projection GH 0x1401b3f70 doesn't read it).
+- **The orthographic scene's perspective camera** (GH 0x1401b4fd0). From the current orthographic view and
+  projection: view.z = −1 / (tan (fov / 2) · proj[1][1]) — the eye at d = (h / 2) / tan (fov / 2), so z 0 maps as the
+  orthographic camera maps it —, view.xy −= scene size · the visible area's crop fraction (renderer +0x108/+0x10c: the
+  axis on the visible area's centre), then the renderer's perspective (vtable +0x10) with fov, aspect w / h, near 5
+  (DAT_1404d43e0), far max (15000, d + 1000). The y flip of the render target (renderer flag 0x800) is applied after.
+- **Who draws through it.** The image draw GH 0x140214b50 swaps it onto the matrix stacks when the layer's object
+  flag 0x80 (+0x120, `perspective`, its setter FUN_1401ca270; registered in two object tables, GH 0x140219c60 and GH
+  0x14024da50) is set; the particle render GH 0x14025bc30 when the system's flags have bit 2. Hit-testing
+  (GH 0x140219260) unprojects through it for such a layer (renderer flag 0x400 = orthographic).
+- **Camera paths.** The loader reads `camera.paths` — a list of file names; each string entry is parsed into the same
+  list (cleared first), so the last wins — with GH 0x1401c6ef0: `{"paths": [{"duration", "disabled", "transforms":
+  [{"eye", "center", "up", "zoom" (default 1), "timestamp" (else i / (n − 1) · duration), "disabled"}]}]}`; a path
+  without transforms ends the list. Records: path 0x20 bytes (keys, duration +0x18), key 0x2c (time, eye, centre, up,
+  zoom). GH 0x1401b8af0 plays them only while no camera object is active (the last effectively visible one wins
+  first): state path +0xe4, key +0xe8, time +0xec; before a key's time the key holds; between keys a cubic Hermite
+  (h00 = 2s³ − 3s² + 1 …) with both tangents (b − a) · 0.5; the boundaries and the wrap as in the asm (ported
+  literally, including the hold boundaries' odd sums). The eye/centre/up feed the view; the key's zoom replaces
+  general.zoom (+0x114 ← key zoom, else +0x13c).
+- **camerafade** (general flag 4, FUN_1401c9d10). GH 0x1401b1ef0 loads `materials/util/fade.json` when it is set
+  and paths exist; GH 0x1401afbf0 draws it when alpha > 0: rem = duration − t; alpha = 1 − 2 · rem over the last
+  0.5 s, 1 − 2 · t over the first. fade.frag is `vec4 (color · 0.7, g_Alpha)`, `color` the material's tint (default
+  0.315 0.135 0.1125) bound to the user property `schemecolor` (usershadervalues).
+- **The transparent sort** (GH 0x1401b6660, called by the scene render GH 0x1401b9b50 when (flags & 0x1008) ==
+  0x1000, i.e. transparentsorting in a 3D scene). Per object: key = dot (origin, the renderer's view vector +0x160),
+  −∞ for an object with flag 0x400; then a stable merge/insertion sort (GH 0x1401cc640 / 0x1401cc550) by `sortorder`
+  (base object int +0x124, table GH 0x14020dcc0) ascending, then key descending.
+- **Not read:** where `customsortorder` (general flag 0x2000) is consumed — no test of it on the scene struct in
+  `all.asm`; the 3D zoom — GH 0x1401b3f70's perspective branch doesn't read +0x114, its other reader wasn't found;
+  WE's 3D parallax block (GH 0x1401b8af0 bit 0x100 — 0 3D library scenes use parallax).
+
+**F5 — ported** (0082, 0083):
+
+| Item | LWE now | Was |
+|---|---|---|
+| `perspectiveoverridefov` | parsed (user-bindable), Camera::getPerspective2DViewProjection | ignored |
+| image / text `perspective` | a perspective layer of a 2D scene: its own x/y angles and z about its pivot, drawn through that camera with the frame's zoom/shake adjustment; an IEffectLayer property | ignored: flat |
+| perspective particles (flags 4) in 2D | that camera, eye (0, 0, d) | general.fov from an eye at z 1000 (z 0 drawn 1.16 x at fov 50) |
+| `camera.paths` + camerafade | parsed, played while no camera object is active (3D: eye/centre/up; 2D: zoom and the eye's offset); the fade overlay | ignored |
+| `sortorder` | the transparent sort's first key; then dot (origin − eye, forward) descending | the distance from the eye |
+
+Inferred / ours: the parents' x/y angles of a perspective layer (the 2D transform resolves z turns only);
+full-screen and compose layers stay flat (no library scene turns one); the fade colour's binding; LWE keeps its
+world-placed runs for the sort (WE sorts its transparent list after drawing the opaque objects, flag 0x202 — not
+ported).
+
+**F5 — what it changes in the library.** No scene has camera paths (all 11 camera objects' `path` files are
+`{"paths": []}`, and no scene has `camera.paths`), so camerafade (true in 92 scenes) never draws, as in WE. The
+transparent sort's key applies to 3477054430 and 3509243656 (`transparentsorting` true). Four 2D scenes have
+`perspective` image layers (2469881470 milk1, 3354740764 three `Shadow` layers and a compose layer, 3422085307, 3479521040
+人物, a puppet); all at z 0 with no x/y turn, so they draw where they did. **35 2D scenes have perspective particle
+systems**: their particles at z 0 are now the size WE draws them (LWE drew them 1.16 x at fov 50, or as general.fov
+gave), and particles off z 0 grow or shrink with depth. In the 96-scene smoke (3 s, `WPENGINE_PARTICLE_SEED=7`, the
+pinned core's parent 24adeff vs this one) no scene is newly blank or failed and no scene's lit share moved by more
+than 0.4 %. The largest pixel differences are videos, clocks and rain (3028473503 22 %, 3046119914 21 %, 3243449890
+6 %: its clock moved 22:22 → 22:30 between the runs); the three 3D scenes match (3477054430 and 3509243656 0.00 %,
+3276522107 2.6 %: its passing buildings).
+
+**F6 — decoded** (opcodes from B11's jump table; record keys from the parser's stores; defaults from the default
+functions, which take a second, pixel-unit value when the parser's flag [rbp+0x2238] is set — inferred: a 2D system):
+
+| Type | WE | Ported |
+|---|---|---|
+| capvelocity (0x12) | v ×= min (1, maxspeed / |v|); maxspeed (1 / 100) bound to the speed override | as WE |
+| maintaindistancetocontrolpoint (0xb) | p += cp − cp_last; p = cp + (p − cp)(1 + k (distance / |M (p − cp)| − 1)), k = 1 or clamp (variablestrength · dt, 0, 1) (GH 0x140206c00); distance 1 / 200 | as WE, M (a control point matrix, GH 0x14024e870) taken as identity (inferred) |
+| maintaindistancebetweencontrolpoints (0xc) | the last step's segment S₀E₀ → this step's: p += (S − S₀) + clamp (t) (E − S) − t (E₀ − S₀), t = dot (p − S₀, E₀ − S₀) / |E₀ − S₀|²; nothing below 1.42e-14 | as WE |
+| reducemovementnearcontrolpoint (0xd) | v ×= 1 − clamp ((rin + clamp ((d − din) / (dout − din)) (rout − rin)) · dt); 0.5/1 or 100/350, 100/0 | as WE |
+| collisionbox (0x17) | its jump-table entry 0x140265eb9 is the next-operator label: nothing runs | a no-op |
+| boids (0x11) | every s-th particle per step from the system's frame counter (s = n / 200 + 1), factors × s; separation 0.02/20, neighbor 0.2/50, maxspeed 1/500, factors 0 / 1 / 2 | the stagger as WE; the forces Reynolds' rules (inferred: 1.5 KB of SIMD not read through) |
+| remapvalue (0x13), remapinitialvalue | operation remap/multiply/add/subtract; 20 values (lifetimefraction … layerorigin); components all/x/y/z/sum/average/max/min; functions none/sine/square/saw/triangle/simplexnoise/fbmnoise (GH 0x140286d90…0x140286f60); defaults output size, ranges 0..1, cps 0/1, inputscale 2, octaves 3 | WE's enums and defaults; the function shapes and the clamp inferred (case 0x13 is 21 KB) |
+| collisionplane / sphere / bounds / quad (0x15/16/18/19) | collisionbehavior bounce / slide / delete, bouncefactor kept as −1 − b (GH 0x1401edab0); plane "0 1 0" distance −150; sphere "0 −200 0" r 50; quad "0 −150 0", size 200 200 | bounce v −= (1 + b)(v·n)n; the geometry from the keys (inferred: the default bounce 0.5, bounds = the scene rectangle, the sphere keeps particles out) |
+| collisionmodel (0x1a) | a model's triangles | parsed, reported unsupported |
+| inheritvaluefromevent (0x14), inheritinitialvaluefromevent | the event particle's value by GH 0x140287030's 15 names (setcolor … all) | from the event particle (now kept by an event child; a follow child's every step); set/multiply/add from the names (inferred) |
+| hsvcolorrandom | hue 0..1, saturation / value 0.5..1, huesteps | uniform draws (inferred) |
+| colorlist | colors, hue/saturation/valuenoise | one at random, jittered (inferred) |
+| positionoffsetrandom | scale 1 / 0.001, distance 0.1 / 100, timescale 1, directions "1 1 1" / "1 1 0", sign, octaves | a simplex offset (random at scale 0) (inferred) |
+| inheritcontrolpointvelocity | controlpoint, min 0.1, max 0.2 | the control point's velocity this step × U (min, max) (inferred) |
+| mapsequencebetweencontrolpoints | count 32, cps 0/1, arcamount 0.3, sizereductionamount 0.9, bounds, limitbehavior, mirror | evenly along the segment in turn (inferred; no arc, no size reduction) |
+| emitter layerimage | — | not done (it needs the layer's pixels on the CPU) |
+
+**F6 — what it changes in the library:** nothing: no library scene uses these types (the 20 were stock-only). The
+check is synthetic (host tests) plus WE's own element previews (`assets/scenes/particleelementpreviews/*`).
+WE's element previews, old core vs new (3 s smokes): boids flock
+into clumps; capvelocity's particles slow once half their life is gone (its blendinstart 0.5 … blendinend 0.6);
+collisionbounds piles them on the floor; collisionplane stacks them on the plane; collisionsphere slides them round
+the sphere (before: through it); colorlist and hsvcolorrandom colour them (before: white); the inherit pair's
+children take their parents' colours; maintaindistancetocontrolpoint holds a ring; maintaindistancebetween and
+mapsequencebetween lay a line between the control points; positionoffsetrandom scatters the bolt; remapvalue /
+remapinitialvalue colour by the distance to control point 1 (red near, blue far — the first port drew them black,
+its output range being "x y z": fixed in 0085). collisionmodel and layerimage exit 1 on both cores (their scenes
+need a model / an image layer emitter LWE doesn't run).
+
+**Fork tests** (`host_api_test`, each RED on `24adeff`):
+
+| Test | What it checks |
+|---|---|
+| `perspective_layers_in_2d` | at fov 90 on 64 x 32 (d 16): a perspective layer at z 0 is where a flat one is (also at the default 95); at z 8 twice the size, a flat one unchanged; 60° about y about half as wide (a flat one ignores it); zoom 2 doubles it again; a perspective particle at z 0 is the flat size, at z 8 twice |
+| `camera_paths_and_fade` | a path's zoom 2 doubles a square; a camera object takes precedence; the eye from 0 to 16 over 2 s is at 8 after 1 s (the Hermite midpoint); camerafade darkens the start (blue 34 vs 127 mid-path) |
+| `transparent_sort_takes_sortorder` | two world layers: back to front by depth; the far one with sortorder 1 draws last |
+| `particle_stock_motion_operators` | capvelocity 10, the reduction near a control point, boids' cohesion, maintaindistancetocontrolpoint 4, remapvalue → opacity 0.5 |
+| `particle_stock_collisions` | a plane stops a falling particle, a sphere deletes, a particle beside a quad falls past, the bounds keep a fast one on screen |
+| `particle_stock_initializers` | hsv green, colorlist blue, a position offset spread, remapinitialvalue size × 2, a sequence 12 / 32 / 52 between control points that maintaindistancebetween carries as the end moves, inheritcontrolpointvelocity from the moving pointer, an event child taking its particle's colour |
+
+**Shader sweep** (4085 checks, against the merged F1 + F7–F9 core's results): 16 failing before and after, 0 newly
+failing.
+
+**Patch 0085** (after the preview smokes): remap output ranges as vectors, and the operators' blendinstart /
+blendinend as a clamped life ramp (inferred).
+
+Pin `78128d1` (which also carries the rig agent's F3/F4 0078–0081). host_api_test 101/101 on it (105/105 with the
+rig agent's tests merged in). Player tests (DEBUG): 738 passed, 2 failed, 3 ignored; the 2
+(`no_trim_once_shutdown_started`, `align_end_hands_off_as_a_last_frame_ends`) are timing tests and passed alone.

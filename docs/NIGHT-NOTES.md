@@ -417,3 +417,21 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   library yet).
 - Left: puppet **hit boxes** (where WE stores them isn't decoded; no library script reads them), text-layer writes
   re-laying text, `transformAttachmentToTexture`, three unknown .tex flags.
+
+## 2026-11-04 night — perspective layers and camera paths (F5), the stock particle operators (F6), fork patches 0082–0085
+- **Perspective particles are now the size and depth WE draws them** (0082): 35 of your 2D scenes have particle
+  systems marked "perspective" (snow, rain, dust). WE draws those through a perspective camera set by the scene's
+  `perspectiveoverridefov`, placed so depth 0 lands exactly where the flat view puts it. LWE used the wrong camera
+  (16 % too big at depth 0, and depth barely changed the size). Layers marked `perspective` (4 scenes) now tilt and
+  move in depth as in WE; yours sit flat at depth 0, so they look the same.
+- **Camera paths and camerafade** (0083): scenes can fly the camera along keyframed paths and fade between them.
+  None of your scenes has a path (the 11 path files are all empty), so nothing changes. 3D scenes with
+  transparent sorting now use WE's order (an object's `sortorder`, then depth).
+- **The 20 particle operators only WE's own presets use** (0084–0085): flocking (boids), collisions with planes,
+  spheres, quads and the screen edges, speed caps, value remapping, colour lists, HSV colours, control-point
+  constraints, inheriting from a parent particle. None of your scenes uses them; WE's own element preview scenes
+  now do what their names say (old core: plain white particles ignoring the operator). Some behaviour is read from
+  WE's code exactly, some is inferred (marked in the audit).
+- Smoke of all 96 scenes: none newly blank or failed. Health and shader sweep: below in the health report commit.
+- Left: the `layerimage` emitter, `collisionmodel`, the inferred parts of F6, text `depthtest` (no effect in 2D),
+  `customsortorder`, the 3D camera's zoom and parallax.

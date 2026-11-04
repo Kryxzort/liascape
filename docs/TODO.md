@@ -1159,10 +1159,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           failing on 36ad6a0); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
           - [x] Shadows (`_rt_shadowAtlas`), light cookies, tube and directional lights — done in F1 (fork patch
                 0071, below).
+          - [x] G20 perspectiveoverridefov, G21 `perspective` layers, G23 camerafade, camera paths, sortorder and WE's
+                transparent sort key — done in F5 (fork patches 0082–0083, below).
           - [ ] Left: directional shadow cascades, light clusters, volumetrics; shape objects (G27, 3319542538); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
-                particle shaders; the 3D camera's parallax, zoom and paths; G20 perspectiveoverridefov, G21/E43
-                `perspective` and `depthtest` layers, G23 camerafade, sortorder/customsortorder; hit-testing
-                world-placed layers; WE's sort key and an output-sized 3D target; WE captures of the three scenes.
+                particle shaders; the 3D camera's parallax and zoom (WE's 3D projection doesn't read the zoom; its
+                other reader and the 3D parallax block weren't read — 0 3D scenes use either); E43 text `depthtest`
+                (no-op in 2D, not ported); customsortorder's reader; hit-testing world-placed layers; an
+                output-sized 3D target; WE captures of the three scenes.
     - [x] **3414858021 (owner report): head gone, cursor trail y-inverted.** **Done 2026-11-04** (fork patches
           0057–0060, pin `b6e2878`): SceneScript `angles` are degrees (scripts turned the body 55°, the head and arm
           left the screen); a pointer-linked particle control point was y up in a y-down space (trail mirrored);
@@ -1208,10 +1211,19 @@ Two bug classes kept recurring; fix the class, not the instance:
                 result". No library scene uses them (synthetic check). host_api_test +4 (RED on `deeb4da`).
                 - [ ] Left: directional cascades (`g_LFeature_Shadow*`), WE's light clusters, 2.8.485's PCSS (quality
                       4), the `shadows` quality as a setting (medium now), `lightconfig`; skinned/morphed casters (F4).
+          - [x] **F5 perspective layers + F6 the stock-only particle operators — done 2026-11-04** (fork patches
+                0082–0085): an orthographic scene's perspective camera (`perspectiveoverridefov`, GH 0x1401b4fd0) for
+                `perspective` layers and perspective particles (35 scenes' systems now WE's size and depth), camera
+                paths + camerafade, `sortorder` in WE's transparent sort; 20 stock-only operators/initializers (WE's
+                form where decoded, else inferred and marked). Result in the audit's "F5/F6 result". host_api_test +6
+                (RED on `24adeff`).
+                - [ ] Left: the `layerimage` emitter (CPU pixels of the layer), collisionmodel, the inferred F6 parts
+                      (boids' forces, remap's function shapes, the initializers' runtime: an asm read of case 0x11 /
+                      0x13 and the spawn interpreter GH 0x140260d80), vortex_v2, a camera object's own `path`/`queuemode`
+                      (all empty in the library), text `depthtest`, customsortorder, the 3D zoom/parallax, WE captures
+                      of the element previews (`assets/scenes/particleelementpreviews`).
           - [ ] F2 volumetric lights (L), F3 bone physics + blend shapes (L),
-                F4 skinned / animated 3D models + createModelData (L), F5 perspective layers (M), F6 the 20 stock-only
-                particle operators (M), F7 puppet hit boxes + MDLA events (S–M), F8 `resizeScreen` (S), F9 small keys
-                (`alphawriting`, `fbos.fit`, sprite `orientation`, mapsequence bounds, `command: swap`; S each).
+                F4 skinned / animated 3D models + createModelData (L), F7 puppet hit boxes (S–M).
           - [x] F8 `resizeScreen` + `engine.screenResolution` + `cursorScreenPosition` in screen pixels (0076; the
                 worker hints `max_size`), F9 (0072–0075: `alphawriting`, `fbos.fit/width/height/uvs`, `command: swap`,
                 sprite `orientation`, mapsequence defaults, `TEX<n>FORMAT`), F7's MDLA animation events (0077) —

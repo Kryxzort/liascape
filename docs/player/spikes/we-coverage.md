@@ -29,21 +29,21 @@
 
 ## Summary
 
-| Area | Items | Before (42f301d): impl / partial / missing / n/a | 0065–0070 (deeb4da) | Now (0071 F1, 0072–0077) |
-|---|---|---|---|---|
-| SceneScript: every member, event, module export and global of the d.ts | 453 | 329 / 3 / 120 / 1 | 421 / 14 / 17 / 1 | **424 / 12 / 16 / 1** |
-| Scene and object keys the library uses | 162 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 | **138 / 3 / 15 / 6** (F1: castshadow) |
-| Effect keys the library uses | 41 | 25 / 0 / 2 / 14 | 25 / 0 / 2 / 14 | **27 / 0 / 0 / 14** |
-| Material keys the library uses | 13 | 12 / 0 / 1 / 0 | 12 / 0 / 1 / 0 | **13 / 0 / 0 / 0** |
-| Model keys the library uses | 19 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 |
-| Particle keys the library uses | 100 | 97 / 0 / 3 / 0 | 97 / 0 / 3 / 0 | **98 / 2 / 0 / 0** |
-| Particle emitter / initializer / operator / renderer types (library + stock) | 48 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 (all 28 the library uses are impl) |
-| Material blend modes | 4 | 3 / 0 / 1 / 0 | 4 / 0 / 0 / 0 | 4 / 0 / 0 / 0 |
-| .tex formats | 14 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) |
-| .tex flags (known + seen) | 9 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 |
-| FBO formats | 13 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 |
-| Object types | 12 | 9 / 2 / 1 / 0 | 9 / 2 / 1 / 0 | **10 / 1 / 1 / 0** (F1: lights) |
-| Effect pass options | 7 | 6 / 0 / 1 / 0 | 6 / 0 / 1 / 0 | **7 / 0 / 0 / 0** |
+| Area | Items | Before (42f301d): impl / partial / missing / n/a | 0065–0070 (deeb4da) | 0071 F1, 0072–0077 | Now (0082–0085: F5, F6) |
+|---|---|---|---|---|---|
+| SceneScript: every member, event, module export and global of the d.ts | 453 | 329 / 3 / 120 / 1 | 421 / 14 / 17 / 1 | **424 / 12 / 16 / 1** | **425 / 11 / 16 / 1** (IEffectLayer.perspective) |
+| Scene and object keys the library uses | 162 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 | **138 / 3 / 15 / 6** (F1: castshadow) | **140 / 4 / 12 / 6** (perspectiveoverridefov, perspective; camera `path`/`queuemode` partial: their files are empty) |
+| Effect keys the library uses | 41 | 25 / 0 / 2 / 14 | 25 / 0 / 2 / 14 | **27 / 0 / 0 / 14** | 27 / 0 / 0 / 14 |
+| Material keys the library uses | 13 | 12 / 0 / 1 / 0 | 12 / 0 / 1 / 0 | **13 / 0 / 0 / 0** | 13 / 0 / 0 / 0 |
+| Model keys the library uses | 19 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 |
+| Particle keys the library uses | 100 | 97 / 0 / 3 / 0 | 97 / 0 / 3 / 0 | **98 / 2 / 0 / 0** | 98 / 2 / 0 / 0 (system flags bit 2, perspective, now drawn as WE) |
+| Particle emitter / initializer / operator / renderer types (library + stock) | 48 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 (all 28 the library uses are impl) | **32 / 16 / 1 / 0** of 49: the stock-only list below is 21 types, not 20 (F6: capvelocity, maintaindistancebetweencontrolpoints, reducemovementnearcontrolpoint as WE and collisionbox a no-op as in WE; 15 with inferred parts, vortex_v2 still LWE's own model; layerimage missing) |
+| Material blend modes | 4 | 3 / 0 / 1 / 0 | 4 / 0 / 0 / 0 | 4 / 0 / 0 / 0 | 4 / 0 / 0 / 0 |
+| .tex formats | 14 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) |
+| .tex flags (known + seen) | 9 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 | 6 / 0 / 3 / 0 |
+| FBO formats | 13 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 | 12 / 1 / 0 / 0 |
+| Object types | 12 | 9 / 2 / 1 / 0 | 9 / 2 / 1 / 0 | **10 / 1 / 1 / 0** (F1: lights) | 10 / 1 / 1 / 0 (F1: lights) |
+| Effect pass options | 7 | 6 / 0 / 1 / 0 | 6 / 0 / 1 / 0 | **7 / 0 / 0 / 0** | 7 / 0 / 0 / 0 |
 
 The SceneScript count is every member of every class/interface in the d.ts, the 17 events, the 3 modules' exports
 and the globals (`tools/sstatus.py` holds the per-item status). Vec2/3/4/Mat3/Mat4 (175 members) are WE's own JS, so
@@ -54,8 +54,9 @@ Keys didn't change in this batch: it was the SceneScript surface and one blend m
 
 **What still costs the library something** (scenes): SceneScript — `IModelLayer` animation (0), CursorEvent
 `hitBox` (0 readers; the hit boxes' MDL layout isn't decoded); keys — sound `queuemode` is not a sound key (WE
-ignores it too, sound spike), text background box (`opaquebackground` true in 0 scenes), `perspectiveoverridefov`
-(42 scenes, unknown use, G20), camera-object `path` (11, G17); render features listed under "Future batches".
+ignores it too, sound spike), text background box (`opaquebackground` true in 0 scenes); render features listed
+under "Future batches". `perspectiveoverridefov` and `perspective` were done in F5 (0082: the perspective camera of
+an orthographic scene, which 35 scenes' perspective particle systems also draw with), camera paths in 0083.
 `resizeScreen`, MDLA `animationEvent`s, sprite `orientation` and the F9 keys were done in 0072–0077 (below).
 
 ## 1. SceneScript (d.ts 2.8)
@@ -147,14 +148,14 @@ worth a row. Row ids in brackets are the gap audit's.
 | objects.`locktransforms`, `muteineditor` | 61, 55 | 18, 0 | n/a | editor-only |
 | objects.`castshadow` | 44 | 19 | impl (F1) | always false in the library; models and point/spot lights cast into the shadow atlas (fork patch 0071) |
 | objects.`backgroundcolor` / `opaquebackground` / `backgroundbrightness` (text box) | 43 / 43 / 40 | 3 | missing | `opaquebackground` is false in all 278 uses; S when one is true |
-| general.`perspectiveoverridefov` | 42 | 77 | missing | [G20] use unknown (default 95); with `perspective` layers |
+| general.`perspectiveoverridefov` | 42 | 77 | impl (F5, 0082) | [G20] an orthographic scene's effective fov (+0x144, default 95, GH 0x1401b8af0): the perspective camera of GH 0x1401b4fd0 that `perspective` layers and perspective particles draw with |
 | objects.`ledsource` | 34 | 11 | n/a | RGB-device lighting (iCUE/Chroma) |
 | general.`gravity*` / `wind*` | 27 | 69 | missing | [P40] no particle reader in WE; likely puppet/cloth physics (future) |
-| objects.`perspective` (images) | 37 (true in 4) | 14 | missing | [E43/G21] M |
-| objects.`depthtest` (images) | 29 | 0 | missing | [E43] 2D layers draw in order anyway; matters with `perspective` |
+| objects.`perspective` (images, text) | 37 (true in 4) | 14 | impl (F5, 0082) | [E43/G21] flag 0x80 at +0x120: the layer's x/y angles and z through that camera; the 4 library layers are at z 0, unturned (drawn as before). Parents' x/y angles not followed (inferred) |
+| objects.`depthtest` (text) | 29 | 0 | missing | [E43] only on text objects (248, all "enabled", all in 2D scenes); WE registers it at +0x5a0 of the text table (GH 0x14027e130). Nothing in a 2D scene writes depth, so it can't change a library scene; not ported |
 | objects.`disablepropagation` | 12 | 0 | missing | always false in the library |
-| objects.`queuemode` (camera objects) | 11 | 0 | missing | [G17] camera path order; `path` lists are empty in the library |
-| objects.`path` (camera objects) | 11 | 0 | missing | [G17] all `[]` |
+| objects.`queuemode` (camera objects) | 11 | 0 | partial | [G17] the camera object's path order (random 9, sequential 2); its `path` files are all `{"paths": []}`. The scene's `camera.paths` play in order (0083); a camera object's own path isn't read (empty everywhere) |
+| objects.`path` (camera objects) | 11 | 0 | partial | [G17] a camera paths file each, all `{"paths": []}` (the format: GH 0x1401c6ef0, done for `camera.paths` in 0083) |
 | objects.`instanceoverride.controlpoint1..7` | 6 | 34 | impl | (literal built from the index: the classifier misses it) |
 | objects.`particlesrc` | 3 | 21 | n/a | editor source reference |
 | objects.`effects.username` | 1 | 2 | n/a | editor label |
@@ -176,8 +177,10 @@ worth a row. Row ids in brackets are the gap audit's.
 
 ### Particles
 
-All 28 emitter/initializer/operator/renderer types the library uses are implemented (B3/B11). Stock-only types
-missing (`ptypes_class.tsv`; stock files in brackets): emitter `layerimage` (1); initializers `mapsequencebetweencontrolpoints`
+All 28 emitter/initializer/operator/renderer types the library uses are implemented (B3/B11). **F6 (0084–0085) ported the
+stock-only ones** below except the `layerimage` emitter (the audit's "F5/F6 result": per type, WE's form or inferred;
+collisionbox is a no-op in WE 2.8.485 too). Stock-only types (`ptypes_class.tsv`; stock files in brackets): emitter
+`layerimage` (1); initializers `mapsequencebetweencontrolpoints`
 (12), `hsvcolorrandom` (5), `positionoffsetrandom` (5), `remapinitialvalue` (3), `colorlist`,
 `inheritcontrolpointvelocity`, `inheritinitialvaluefromevent` (1 each); operators `remapvalue` (9), `boids`,
 `maintaindistancebetweencontrolpoints`, `reducemovementnearcontrolpoint`, `vortex_v2` (5 each),
@@ -302,6 +305,24 @@ built objects the same as on `deeb4da` and on F1's `4b85ae7`. Shader sweep: 4085
 failing (47 → 47 on these patches alone). host_api_test 95/95; player tests 739 passed, 1 timing failure
 (`mpv_source_teardown_never_skips_bus_cycles`, passed alone).
 
+## Implemented: F5 perspective layers and F6 the stock particle operators (fork patches 0082–0085, 2026-11-04)
+
+Decoded addresses and what's inferred: the audit's "F5/F6 result".
+- **0082 render: perspective layers and particles in orthographic scenes.** `perspectiveoverridefov` is an ortho
+  scene's effective fov; GH 0x1401b4fd0's perspective camera (eye at d = (h / 2) / tan (fov / 2), near 5, far max
+  (15000, d + 1000)) draws `perspective` image/text layers (with their x/y angles and z) and perspective particle
+  systems (flags bit 2: 35 library scenes; LWE drew them from general.fov at an eye at z 1000).
+- **0083 render: camera paths, camerafade, the transparent sort's sortorder.** `camera.paths` files (GH 0x1401c6ef0)
+  played while no camera object is active (Hermite keys); fade.json's overlay; transparentsorting by `sortorder`,
+  then depth along the view (GH 0x1401b6660).
+- **0084–0085 particle: the stock presets' operators and initializers** (all but `layerimage`; collisionmodel parsed
+  and reported), with remap's vector ranges and the operators' blend-in.
+
+No library scene changes except the perspective particles' size/depth (the four `perspective` layers are at z 0,
+unturned; no scene has camera paths). Tests (host_api_test, each RED on `24adeff`): `perspective_layers_in_2d`,
+`camera_paths_and_fade`, `transparent_sort_takes_sortorder`, `particle_stock_motion_operators`,
+`particle_stock_collisions`, `particle_stock_initializers`.
+
 ## Future batches (render features, not done here)
 
 | Batch | What | Library | Size |
@@ -310,8 +331,8 @@ failing (47 → 47 on these patches alone). host_api_test 95/95; player tests 73
 | F2 Volumetric lights | `shape` objects (VolumeLight), `density`, `volumetricsexponent` | 1 (3319542538) | L |
 | F3 Bone physics + blend shapes | `applyBonePhysicsImpulse`, gravity/wind (`general.gravity*`/`wind*`, 27 scenes set them), blend-shape weights | 0 scripted; physics data unknown | L |
 | F4 Skinned / animated 3D models | IModelLayer animation layers, `rootmotion`, `createModelData` (script meshes) | 0–2 | L |
-| F5 World-space perspective layers | image `perspective`/`depthtest`, `perspectiveoverridefov` (G20/G21/E43) | 4 (+42 with the fov key) | M |
-| F6 Stock-only particle operators | the 20 types above (boids, collisions, remap, mapsequencebetweencontrolpoints …) | 0 (stock presets) | M (after the operator asm read) |
+| ~~F5 World-space perspective layers~~ **done (0082–0083)** | `perspectiveoverridefov`, image/text `perspective`, perspective particles in 2D, camera paths + camerafade, `sortorder`; left: text `depthtest`, `customsortorder`'s reader, the 3D zoom / parallax, a camera object's own path | 4 layers + 35 particle scenes | M |
+| ~~F6 Stock-only particle operators~~ **done (0084–0085)** | the stock-only types above; left: `layerimage`, collisionmodel, the inferred parts (boids' forces, remap's shapes, the initializers' runtime) | 0 (stock presets) | M |
 | F7 Puppet hit boxes + MDLA events | CursorEvent.hitBox (left: layout not decoded); puppet animationEvent **done (0077)** | 0 known | S–M |
 | F8 Resize events | `resizeScreen` when the output size changes — **done (0076)** | 1 | S |
 | F9 Small parser keys | **done (0072–0075)**: `alphawriting`, `fbos.fit/uvs`, sprite `orientation`, mapsequence bounds (defaults), `command: swap`; left: texture flags 64/2²¹/2²³ (meaning not decoded) | 31 / 1 / 5 / 3 / 0 / 3 | S each |
