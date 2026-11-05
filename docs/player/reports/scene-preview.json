@@ -1,0 +1,3691 @@
+{
+ "run": {
+  "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
+  "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
+  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/src/player/target/release/liascape-scene-worker",
+  "shots": "0.5,2,5",
+  "shot_width": 640,
+  "core": "",
+  "started": "2026-11-05T08:54:13+05:30",
+  "commit": "1cb88ba",
+  "lwe": "9b2b2443acfac241c48eea2e37f18cfab717eac1",
+  "pin": "9b2b2443acfa",
+  "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
+ },
+ "generated": "2026-11-05T09:13:09+0530",
+ "weights": {
+  "ssim": 0.3,
+  "hist": 0.2,
+  "edges": 0.2,
+  "local": 0.3
+ },
+ "contact_sheet": "/tmp/liascape-scene-preview-run3/contact-worst20.png",
+ "scenes": [
+  {
+   "id": "2890767643",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.731,
+   "measures": {
+    "ssim": 0.6402,
+    "hist": 0.5053,
+    "edges": 0.6891,
+    "local": 1.0
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.7314,
+    "1.0": 0.7438,
+    "2.0": 0.731,
+    "5.0": 0.7413
+   },
+   "fit": "squeeze",
+   "box": [
+    0,
+    0,
+    0
+   ],
+   "ncc": null,
+   "preview_frames": 50,
+   "preview_frame": 9,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2890767643/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2890767643/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2890767643.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "time",
+   "note": "its face is a 665 MB video texture (materials/outfinal.tex, an MP4); the preview's dark silhouette with yellow eyes is a later moment of that video. The tint mask (a bottom vignette) is applied.",
+   "rank": 1
+  },
+  {
+   "id": "3509243656",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.7149,
+   "measures": {
+    "ssim": 0.5331,
+    "hist": 0.8019,
+    "edges": 0.6754,
+    "local": 0.8652
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.7204,
+    "1.0": 0.7191,
+    "2.0": 0.7449,
+    "5.0": 0.7149
+   },
+   "fit": "crop",
+   "box": [
+    311,
+    0,
+    142
+   ],
+   "ncc": 0.236,
+   "preview_frames": 50,
+   "preview_frame": 31,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3509243656/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3509243656/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3509243656.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "known",
+   "note": "a 3D (perspective) scene: TODO \"LWE: 3D / perspective scenes\"; ours shows its script UI, the preview its clock.",
+   "rank": 2
+  },
+  {
+   "id": "2694785040",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.6626,
+   "measures": {
+    "ssim": 0.6095,
+    "hist": 0.3413,
+    "edges": 0.6795,
+    "local": 0.9188
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.6627,
+    "1.0": 0.6626,
+    "2.0": 0.6627,
+    "5.0": 0.6627
+   },
+   "fit": "crop",
+   "box": [
+    311,
+    236,
+    191
+   ],
+   "ncc": 0.439,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2694785040/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2694785040/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2694785040.png",
+   "native": [
+    599,
+    482
+   ],
+   "class": "by-design",
+   "note": "the preview is other art (her full figure); copy.tex (4193 x 3380) is the whole picture we draw.",
+   "rank": 3
+  },
+  {
+   "id": "3516174947",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.632,
+   "measures": {
+    "ssim": 0.5461,
+    "hist": 0.2953,
+    "edges": 0.5724,
+    "local": 0.9821
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.632,
+    "1.0": 0.6368,
+    "2.0": 0.642,
+    "5.0": 0.6744
+   },
+   "fit": "crop",
+   "box": [
+    302,
+    48,
+    145
+   ],
+   "ncc": 0.873,
+   "preview_frames": 44,
+   "preview_frame": 12,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3516174947/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3516174947/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3516174947.png",
+   "native": [
+    573,
+    240
+   ],
+   "class": "bug?",
+   "note": "letterboxed black at its default camera zoom (\"Lens size\" 0.75): zoom < 1 shows more, as decoded in B5 (GH 0x1401afbf0 scales the projection by general.zoom x camera zoom). Its preview shows no border and the tree larger than at zoom 1; 3042492564's preview matches our zoom-1 view. Contested: 3490034653's 0.65 camera is labelled \"Panorama\" (shows more). Needs an owner's WE capture at the default. Like 3042492564's, its preview may be an editor capture at zoom 1 (no border, the tree larger).",
+   "rank": 4
+  },
+  {
+   "id": "2783122117",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.5759,
+   "measures": {
+    "ssim": 0.6583,
+    "hist": 0.2687,
+    "edges": 0.1721,
+    "local": 0.9676
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.5905,
+    "1.0": 0.5759,
+    "2.0": 0.6043,
+    "5.0": 0.6052
+   },
+   "fit": "squeeze",
+   "box": [
+    0,
+    0,
+    0
+   ],
+   "ncc": null,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2783122117/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2783122117/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2783122117.png",
+   "native": [
+    640,
+    180
+   ],
+   "class": "by-design",
+   "note": "a still scene (two images); the preview is another crop / frame of the source animation.",
+   "rank": 5
+  },
+  {
+   "id": "3243449890",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.561,
+   "measures": {
+    "ssim": 0.5606,
+    "hist": 0.4881,
+    "edges": 0.1251,
+    "local": 0.9006
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.5687,
+    "1.0": 0.5685,
+    "2.0": 0.561,
+    "5.0": 0.6277
+   },
+   "fit": "crop",
+   "box": [
+    311,
+    8,
+    289
+   ],
+   "ncc": 0.881,
+   "preview_frames": 29,
+   "preview_frame": 5,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3243449890/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3243449890/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3243449890.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview carries a 4K badge.",
+   "rank": 6
+  },
+  {
+   "id": "3354740764",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.54,
+   "measures": {
+    "ssim": 0.4728,
+    "hist": 0.4578,
+    "edges": 0.339,
+    "local": 0.7961
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.9978,
+    "1.0": 0.7669,
+    "2.0": 0.54,
+    "5.0": 0.6042
+   },
+   "fit": "crop",
+   "box": [
+    401,
+    135,
+    161
+   ],
+   "ncc": 0.906,
+   "preview_frames": 47,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3354740764/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3354740764/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3354740764.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "a clock (other time) and its placeholder windows.",
+   "rank": 7
+  },
+  {
+   "id": "3477054430",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4981,
+   "measures": {
+    "ssim": 0.2679,
+    "hist": 0.6186,
+    "edges": 0.0663,
+    "local": 0.9358
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.4997,
+    "1.0": 0.4981,
+    "2.0": 0.5007,
+    "5.0": 0.5047
+   },
+   "fit": "crop",
+   "box": [
+    349,
+    26,
+    270
+   ],
+   "ncc": 0.975,
+   "preview_frames": 50,
+   "preview_frame": 18,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3477054430/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3477054430/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3477054430.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "known",
+   "note": "a 3D (perspective) scene; the moon's tint differs.",
+   "rank": 8
+  },
+  {
+   "id": "3046119914",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4698,
+   "measures": {
+    "ssim": 0.3525,
+    "hist": 0.5284,
+    "edges": 0.0905,
+    "local": 0.8007
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.5727,
+    "1.0": 0.5247,
+    "2.0": 0.5271,
+    "5.0": 0.4698
+   },
+   "fit": "crop",
+   "box": [
+    158,
+    26,
+    289
+   ],
+   "ncc": 0.934,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3046119914/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3046119914/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3046119914.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "property",
+   "note": "the preview has its rain and VHS (chromatic) layers on; every rain / VHS / film-grain layer is behind a user property that defaults off (rainkey, stormkey, rtime, timekey\u2026).",
+   "rank": 9
+  },
+  {
+   "id": "3233141951",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4651,
+   "measures": {
+    "ssim": 0.4823,
+    "hist": 0.2772,
+    "edges": 0.1532,
+    "local": 0.7812
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.4651,
+    "1.0": 0.4806,
+    "2.0": 0.4957,
+    "5.0": 0.4993
+   },
+   "fit": "crop",
+   "box": [
+    137,
+    31,
+    280
+   ],
+   "ncc": 0.898,
+   "preview_frames": 61,
+   "preview_frame": 44,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3233141951/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3233141951/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3233141951.png",
+   "native": [
+    585,
+    328
+   ],
+   "class": "time",
+   "note": "matches; the dragon and smoke carry waterwaves / pulse and the gif is a sharper capture (our crop is ~45 % of a 640 px frame).",
+   "rank": 10
+  },
+  {
+   "id": "3219908811",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4408,
+   "measures": {
+    "ssim": 0.43,
+    "hist": 0.2894,
+    "edges": 0.1283,
+    "local": 0.7608
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.4408,
+    "1.0": 0.4732,
+    "2.0": 0.5106,
+    "5.0": 0.582
+   },
+   "fit": "crop",
+   "box": [
+    221,
+    19,
+    251
+   ],
+   "ncc": 0.939,
+   "preview_frames": 30,
+   "preview_frame": 3,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3219908811/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3219908811/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3219908811.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview carries a 4K badge.",
+   "rank": 11
+  },
+  {
+   "id": "3490034653",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4384,
+   "measures": {
+    "ssim": 0.4254,
+    "hist": 0.2279,
+    "edges": 0.0605,
+    "local": 0.8437
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.4384,
+    "1.0": 0.4581,
+    "2.0": 0.5204,
+    "5.0": 0.5289
+   },
+   "fit": "crop",
+   "box": [
+    178,
+    2,
+    215
+   ],
+   "ncc": 0.916,
+   "preview_frames": 50,
+   "preview_frame": 18,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3490034653/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3490034653/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3490034653.png",
+   "native": [
+    573,
+    240
+   ],
+   "class": "fixed",
+   "note": "the character (\u4eba\u72691, a puppet whose material culls, cullmode normal) was culled whole: LWE's y-down puppet positions reached GL clockwise. Fixed in fork 0103 (pin 9b2b244): 0.629 before, 0.438 after; the rest is her puppet animation (the preview caught her arm raised) and the falling petals.",
+   "rank": 12
+  },
+  {
+   "id": "3363252053",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.4311,
+   "measures": {
+    "ssim": 0.3393,
+    "hist": 0.3374,
+    "edges": 0.2989,
+    "local": 0.6735
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.573,
+    "1.0": 0.4698,
+    "2.0": 0.4311,
+    "5.0": 0.5487
+   },
+   "fit": "crop",
+   "box": [
+    52,
+    41,
+    232
+   ],
+   "ncc": 0.943,
+   "preview_frames": 30,
+   "preview_frame": 8,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3363252053/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3363252053/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3363252053.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "fixed",
+   "note": "the white-clad girl (\u8eab\u4f53\u90e8\u4ef6, a culling puppet) was culled whole; fixed with 3490034653 (fork 0103): 0.515 before, 0.431 after; the rest is its sparkle particles and glow at another moment.",
+   "rank": 13
+  },
+  {
+   "id": "3042492564",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3984,
+   "measures": {
+    "ssim": 0.2797,
+    "hist": 0.1859,
+    "edges": 0.2481,
+    "local": 0.7589
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.3984,
+    "1.0": 0.4348,
+    "2.0": 0.4347,
+    "5.0": 0.4277
+   },
+   "fit": "crop",
+   "box": [
+    219,
+    51,
+    264
+   ],
+   "ncc": 0.729,
+   "preview_frames": 20,
+   "preview_frame": 19,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3042492564/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3042492564/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3042492564.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "property",
+   "note": "the preview is our view at camera zoom 1 (crop side 0.733 of our frame = its default g_zoom 0.73): the editor's capture at another zoom. The runtime formula (zoom < 1 shows more, B5) agrees with its \"Zoom (lossless)\" 0.73-1 slider: its 6000 x 2805 background is 1/0.73 of the canvas, all of it visible at 0.73. The clock and cover appear after 1 s (scripts).",
+   "rank": 14
+  },
+  {
+   "id": "3480481965",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.392,
+   "measures": {
+    "ssim": 0.1993,
+    "hist": 0.1721,
+    "edges": 0.6326,
+    "local": 0.571
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.3976,
+    "1.0": 0.392,
+    "2.0": 0.3996,
+    "5.0": 0.3975
+   },
+   "fit": "crop",
+   "box": [
+    93,
+    155,
+    107
+   ],
+   "ncc": 0.994,
+   "preview_frames": 50,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3480481965/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3480481965/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3480481965.png",
+   "native": [
+    640,
+    270
+   ],
+   "class": "by-design",
+   "note": "the preview is a poster with a frame and signature.",
+   "rank": 15
+  },
+  {
+   "id": "2883756643",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3906,
+   "measures": {
+    "ssim": 0.3335,
+    "hist": 0.3873,
+    "edges": 0.1174,
+    "local": 0.6321
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.411,
+    "1.0": 0.4123,
+    "2.0": 0.3906,
+    "5.0": 0.3984
+   },
+   "fit": "crop",
+   "box": [
+    150,
+    15,
+    341
+   ],
+   "ncc": 0.962,
+   "preview_frames": 30,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2883756643/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2883756643/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2883756643.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the same picture; the preview's grain is GIF dithering (the dust overlay, colour blend 31 additive, draws its specks: checked alone), and its background is sharper and darker than the scene's blurprecise / godrays layers make it: an earlier edit. Bloom (threshold 1.0) changes nothing (rendered without).",
+   "rank": 16
+  },
+  {
+   "id": "2886313155",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3851,
+   "measures": {
+    "ssim": 0.3317,
+    "hist": 0.298,
+    "edges": 0.1174,
+    "local": 0.675
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.3903,
+    "1.0": 0.4671,
+    "2.0": 0.4118,
+    "5.0": 0.3851
+   },
+   "fit": "crop",
+   "box": [
+    172,
+    11,
+    341
+   ],
+   "ncc": 0.833,
+   "preview_frames": 38,
+   "preview_frame": 3,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2886313155/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2886313155/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2886313155.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches; a gif capture at other detail.",
+   "rank": 17
+  },
+  {
+   "id": "3042865984",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3638,
+   "measures": {
+    "ssim": 0.2128,
+    "hist": 0.5422,
+    "edges": 0.0266,
+    "local": 0.6205
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.3638,
+    "1.0": 0.3642,
+    "2.0": 0.3642,
+    "5.0": 0.3656
+   },
+   "fit": "crop",
+   "box": [
+    61,
+    0,
+    258
+   ],
+   "ncc": 0.99,
+   "preview_frames": 50,
+   "preview_frame": 9,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3042865984/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3042865984/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3042865984.png",
+   "native": [
+    625,
+    261
+   ],
+   "class": "property",
+   "note": "colour only (hist): ours a little greyer than the teal preview; every layer carries an audio-driven pulse (AUDIOPROCESSING, silent in the smoke) and the rain impulse; the layout matches.",
+   "rank": 18
+  },
+  {
+   "id": "2388299037",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3399,
+   "measures": {
+    "ssim": 0.3065,
+    "hist": 0.3051,
+    "edges": 0.0696,
+    "local": 0.5769
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.3399,
+    "1.0": 0.3536,
+    "2.0": 0.4233,
+    "5.0": 0.3423
+   },
+   "fit": "crop",
+   "box": [
+    308,
+    49,
+    142
+   ],
+   "ncc": 0.98,
+   "preview_frames": 49,
+   "preview_frame": 44,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2388299037/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2388299037/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2388299037.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "time",
+   "note": "colour-cycling lights: the score swings 0.34-0.42 across our times.",
+   "rank": 19
+  },
+  {
+   "id": "3013489778",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3322,
+   "measures": {
+    "ssim": 0.1392,
+    "hist": 0.2402,
+    "edges": 0.3773,
+    "local": 0.5565
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.3384,
+    "1.0": 0.3393,
+    "2.0": 0.3322,
+    "5.0": 0.3804
+   },
+   "fit": "crop",
+   "box": [
+    169,
+    15,
+    322
+   ],
+   "ncc": 0.882,
+   "preview_frames": 48,
+   "preview_frame": 26,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3013489778/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3013489778/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3013489778.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview has a frame-corner overlay and a signature; the picture matches.",
+   "rank": 20
+  },
+  {
+   "id": "3326873240",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.319,
+   "measures": {
+    "ssim": 0.201,
+    "hist": 0.2893,
+    "edges": 0.1297,
+    "local": 0.5829
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.319,
+    "1.0": 0.4266,
+    "2.0": 0.5222,
+    "5.0": 0.6135
+   },
+   "fit": "crop",
+   "box": [
+    262,
+    11,
+    232
+   ],
+   "ncc": 0.965,
+   "preview_frames": 21,
+   "preview_frame": 20,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3326873240/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3326873240/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3326873240.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview carries a 4K badge and other crop.",
+   "rank": 21
+  },
+  {
+   "id": "3289734539",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.3148,
+   "measures": {
+    "ssim": 0.4056,
+    "hist": 0.1252,
+    "edges": 0.0322,
+    "local": 0.5389
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.315,
+    "1.0": 0.317,
+    "2.0": 0.3148,
+    "5.0": 0.3163
+   },
+   "fit": "crop",
+   "box": [
+    142,
+    0,
+    360
+   ],
+   "ncc": 0.96,
+   "preview_frames": 50,
+   "preview_frame": 31,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3289734539/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3289734539/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3289734539.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches.",
+   "rank": 22
+  },
+  {
+   "id": "3414858021",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2996,
+   "measures": {
+    "ssim": 0.2512,
+    "hist": 0.3169,
+    "edges": 0.1062,
+    "local": 0.4655
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.3319,
+    "1.0": 0.3023,
+    "2.0": 0.3615,
+    "5.0": 0.2996
+   },
+   "fit": "crop",
+   "box": [
+    259,
+    30,
+    308
+   ],
+   "ncc": 0.954,
+   "preview_frames": 36,
+   "preview_frame": 6,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3414858021/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3414858021/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3414858021.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "fixed",
+   "note": "calibration: 0.665 before the head fix (pin 157c111), 0.32 after; the rest is its sway and rain.",
+   "rank": 23
+  },
+  {
+   "id": "2828233985",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2824,
+   "measures": {
+    "ssim": 0.1459,
+    "hist": 0.3236,
+    "edges": 0.3027,
+    "local": 0.3778
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.2842,
+    "1.0": 0.29,
+    "2.0": 0.2824,
+    "5.0": 0.2905
+   },
+   "fit": "crop",
+   "box": [
+    128,
+    8,
+    341
+   ],
+   "ncc": 0.986,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2828233985/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2828233985/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2828233985.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview has an audio visualiser (no audio in the smoke) and another clock time.",
+   "rank": 24
+  },
+  {
+   "id": "3028473503",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2773,
+   "measures": {
+    "ssim": 0.2696,
+    "hist": 0.1915,
+    "edges": 0.1048,
+    "local": 0.4572
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.2773,
+    "1.0": 0.2802,
+    "2.0": 0.332,
+    "5.0": 0.5051
+   },
+   "fit": "crop",
+   "box": [
+    128,
+    38,
+    270
+   ],
+   "ncc": 0.989,
+   "preview_frames": 20,
+   "preview_frame": 16,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3028473503/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3028473503/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3028473503.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "time",
+   "note": "the gif blinks and zooms in (frame 0: eyes closed); our closest crop matches. Its audio-bar compose layer (colour blend 4) changes nothing without audio (rendered without).",
+   "rank": 25
+  },
+  {
+   "id": "2561227934",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2678,
+   "measures": {
+    "ssim": 0.097,
+    "hist": 0.2709,
+    "edges": 0.0282,
+    "local": 0.5963
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.2905,
+    "1.0": 0.3293,
+    "2.0": 0.2678,
+    "5.0": 0.3575
+   },
+   "fit": "crop",
+   "box": [
+    70,
+    14,
+    226
+   ],
+   "ncc": 0.883,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2561227934/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2561227934/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2561227934.png",
+   "native": [
+    577,
+    344
+   ],
+   "class": "time",
+   "note": "random light-shaft particles (sphererandom, starttime 15); the preview caught other shafts.",
+   "rank": 26
+  },
+  {
+   "id": "3463520581",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2559,
+   "measures": {
+    "ssim": 0.2501,
+    "hist": 0.1938,
+    "edges": 0.0883,
+    "local": 0.4148
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.2727,
+    "1.0": 0.2729,
+    "2.0": 0.282,
+    "5.0": 0.2559
+   },
+   "fit": "crop",
+   "box": [
+    184,
+    0,
+    360
+   ],
+   "ncc": 0.968,
+   "preview_frames": 50,
+   "preview_frame": 49,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3463520581/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3463520581/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3463520581.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview has a camera-frame overlay and a signature.",
+   "rank": 27
+  },
+  {
+   "id": "3163060610",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2554,
+   "measures": {
+    "ssim": 0.1709,
+    "hist": 0.1559,
+    "edges": 0.2883,
+    "local": 0.3843
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.2557,
+    "1.0": 0.2554,
+    "2.0": 0.256,
+    "5.0": 0.2656
+   },
+   "fit": "crop",
+   "box": [
+    56,
+    17,
+    223
+   ],
+   "ncc": 0.944,
+   "preview_frames": 30,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3163060610/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3163060610/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3163060610.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the clocks stayed \"Loading...\" until fork 0104 (a shared class keeping thisObject wrote into the framework object). The preview's brown clock text is Media Integration's auto colour picking from a playing track's cover (mediaThumbnailChanged returns early without a thumbnail); without media the script sets m_text_color, the light blue we draw.",
+   "rank": 28
+  },
+  {
+   "id": "2905264428",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2374,
+   "measures": {
+    "ssim": 0.1638,
+    "hist": 0.3276,
+    "edges": 0.0456,
+    "local": 0.3786
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.2612,
+    "1.0": 0.2635,
+    "2.0": 0.2608,
+    "5.0": 0.2374
+   },
+   "fit": "crop",
+   "box": [
+    274,
+    0,
+    356
+   ],
+   "ncc": 0.972,
+   "preview_frames": 50,
+   "preview_frame": 49,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2905264428/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2905264428/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2905264428.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches.",
+   "rank": 29
+  },
+  {
+   "id": "2932157836",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2292,
+   "measures": {
+    "ssim": 0.1471,
+    "hist": 0.1371,
+    "edges": 0.1802,
+    "local": 0.4054
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.243,
+    "1.0": 0.2433,
+    "2.0": 0.2474,
+    "5.0": 0.2292
+   },
+   "fit": "crop",
+   "box": [
+    128,
+    41,
+    308
+   ],
+   "ncc": 0.978,
+   "preview_frames": 18,
+   "preview_frame": 6,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2932157836/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2932157836/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2932157836.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview shows a media cover and another clock time.",
+   "rank": 30
+  },
+  {
+   "id": "3489263099",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2036,
+   "measures": {
+    "ssim": 0.1253,
+    "hist": 0.2847,
+    "edges": 0.1637,
+    "local": 0.2543
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.2036,
+    "1.0": 0.2193,
+    "2.0": 0.217,
+    "5.0": 0.24
+   },
+   "fit": "crop",
+   "box": [
+    94,
+    0,
+    360
+   ],
+   "ncc": 0.818,
+   "preview_frames": 48,
+   "preview_frame": 30,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3489263099/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3489263099/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3489263099.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches; a clock outside the crop.",
+   "rank": 31
+  },
+  {
+   "id": "2921510865",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.2001,
+   "measures": {
+    "ssim": 0.1911,
+    "hist": 0.1372,
+    "edges": 0.0263,
+    "local": 0.3669
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.2001,
+    "1.0": 0.2255,
+    "2.0": 0.2663,
+    "5.0": 0.2478
+   },
+   "fit": "crop",
+   "box": [
+    135,
+    0,
+    360
+   ],
+   "ncc": 0.981,
+   "preview_frames": 23,
+   "preview_frame": 20,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2921510865/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2921510865/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2921510865.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches.",
+   "rank": 32
+  },
+  {
+   "id": "1726902114",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1996,
+   "measures": {
+    "ssim": 0.1225,
+    "hist": 0.162,
+    "edges": 0.042,
+    "local": 0.4067
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.2076,
+    "1.0": 0.1996,
+    "2.0": 0.2035,
+    "5.0": 0.2103
+   },
+   "fit": "crop",
+   "box": [
+    129,
+    37,
+    285
+   ],
+   "ncc": 0.931,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1726902114/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1726902114/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1726902114.png",
+   "native": [
+    512,
+    355
+   ],
+   "class": "time",
+   "note": "the characters sway; matches otherwise.",
+   "rank": 33
+  },
+  {
+   "id": "3432999904",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1992,
+   "measures": {
+    "ssim": 0.0513,
+    "hist": 0.1025,
+    "edges": 0.4955,
+    "local": 0.2141
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.2377,
+    "1.0": 0.2498,
+    "2.0": 0.2546,
+    "5.0": 0.1992
+   },
+   "fit": "crop",
+   "box": [
+    158,
+    0,
+    270
+   ],
+   "ncc": 0.984,
+   "preview_frames": 25,
+   "preview_frame": 9,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3432999904/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3432999904/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3432999904.png",
+   "native": [
+    585,
+    270
+   ],
+   "class": "by-design",
+   "note": "the preview shows a dock of app icons and another day.",
+   "rank": 34
+  },
+  {
+   "id": "3419466417",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1931,
+   "measures": {
+    "ssim": 0.162,
+    "hist": 0.0785,
+    "edges": 0.0507,
+    "local": 0.3955
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.2269,
+    "1.0": 0.208,
+    "2.0": 0.2205,
+    "5.0": 0.1931
+   },
+   "fit": "crop",
+   "box": [
+    259,
+    3,
+    256
+   ],
+   "ncc": 0.956,
+   "preview_frames": 31,
+   "preview_frame": 19,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3419466417/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3419466417/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3419466417.png",
+   "native": [
+    640,
+    270
+   ],
+   "class": "ok",
+   "note": "matches.",
+   "rank": 35
+  },
+  {
+   "id": "2134765860",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1923,
+   "measures": {
+    "ssim": 0.1096,
+    "hist": 0.1989,
+    "edges": 0.1223,
+    "local": 0.3173
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1931,
+    "1.0": 0.1931,
+    "2.0": 0.1927,
+    "5.0": 0.1923
+   },
+   "fit": "crop",
+   "box": [
+    315,
+    107,
+    180
+   ],
+   "ncc": 0.971,
+   "preview_frames": 21,
+   "preview_frame": 9,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2134765860/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2134765860/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2134765860.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview has an audio visualiser (no audio in the smoke) and another clock time.",
+   "rank": 36
+  },
+  {
+   "id": "3291745179",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1886,
+   "measures": {
+    "ssim": 0.0357,
+    "hist": 0.4323,
+    "edges": 0.2488,
+    "local": 0.139
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.2067,
+    "1.0": 0.1954,
+    "2.0": 0.1886,
+    "5.0": 0.1889
+   },
+   "fit": "crop",
+   "box": [
+    139,
+    0,
+    360
+   ],
+   "ncc": 0.97,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3291745179/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291745179/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3291745179.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches; a clock (other time).",
+   "rank": 37
+  },
+  {
+   "id": "3516106265",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1773,
+   "measures": {
+    "ssim": 0.0952,
+    "hist": 0.2594,
+    "edges": 0.1424,
+    "local": 0.2281
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.1849,
+    "1.0": 0.1773,
+    "2.0": 0.1783,
+    "5.0": 0.1779
+   },
+   "fit": "crop",
+   "box": [
+    128,
+    0,
+    360
+   ],
+   "ncc": 0.971,
+   "preview_frames": 72,
+   "preview_frame": 26,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3516106265/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3516106265/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3516106265.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "by-design",
+   "note": "the preview carries a signature and no clock; the picture matches.",
+   "rank": 38
+  },
+  {
+   "id": "2064316482",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1746,
+   "measures": {
+    "ssim": 0.0756,
+    "hist": 0.3613,
+    "edges": 0.0053,
+    "local": 0.262
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.1771,
+    "1.0": 0.1746,
+    "2.0": 0.1761,
+    "5.0": 0.1777
+   },
+   "fit": "crop",
+   "box": [
+    154,
+    0,
+    356
+   ],
+   "ncc": 0.996,
+   "preview_frames": 70,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2064316482/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2064316482/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2064316482.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches.",
+   "rank": 39
+  },
+  {
+   "id": "3593587273",
+   "preview": "preview.gif",
+   "exit": 1,
+   "status": "scored",
+   "score": 0.1632,
+   "measures": {
+    "ssim": 0.0791,
+    "hist": 0.3865,
+    "edges": 0.0246,
+    "local": 0.1907
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1632,
+    "1.0": 0.1723,
+    "2.0": 0.1723,
+    "5.0": 0.1723
+   },
+   "fit": "crop",
+   "box": [
+    95,
+    79,
+    134
+   ],
+   "ncc": 0.996,
+   "preview_frames": 50,
+   "preview_frame": 22,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3593587273/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3593587273/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3593587273.png",
+   "native": [
+    320,
+    293
+   ],
+   "class": "ok",
+   "note": "matches; a puppet animation at another moment.",
+   "rank": 40
+  },
+  {
+   "id": "1864677589",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1593,
+   "measures": {
+    "ssim": 0.1238,
+    "hist": 0.0637,
+    "edges": 0.0714,
+    "local": 0.3171
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1613,
+    "1.0": 0.1608,
+    "2.0": 0.1593,
+    "5.0": 0.2076
+   },
+   "fit": "crop",
+   "box": [
+    150,
+    4,
+    341
+   ],
+   "ncc": 0.979,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1864677589/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1864677589/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1864677589.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "time",
+   "note": "matches; the preview caught a passing train.",
+   "rank": 41
+  },
+  {
+   "id": "2542468435",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1577,
+   "measures": {
+    "ssim": 0.0894,
+    "hist": 0.2243,
+    "edges": 0.0653,
+    "local": 0.2433
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.3485,
+    "1.0": 0.4383,
+    "2.0": 0.4141,
+    "5.0": 0.1577
+   },
+   "fit": "crop",
+   "box": [
+    334,
+    52,
+    262
+   ],
+   "ncc": 0.99,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2542468435/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2542468435/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2542468435.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 42
+  },
+  {
+   "id": "2469881470",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1566,
+   "measures": {
+    "ssim": 0.1482,
+    "hist": 0.0942,
+    "edges": 0.0459,
+    "local": 0.2806
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.2101,
+    "1.0": 0.1566,
+    "2.0": 0.2213,
+    "5.0": 0.1719
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    34,
+    289
+   ],
+   "ncc": 0.969,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2469881470/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2469881470/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2469881470.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 43
+  },
+  {
+   "id": "3426575339",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1566,
+   "measures": {
+    "ssim": 0.1091,
+    "hist": 0.1901,
+    "edges": 0.124,
+    "local": 0.2036
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1566,
+    "1.0": 0.1595,
+    "2.0": 0.1683,
+    "5.0": 0.1639
+   },
+   "fit": "crop",
+   "box": [
+    232,
+    2,
+    171
+   ],
+   "ncc": 0.998,
+   "preview_frames": 60,
+   "preview_frame": 5,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3426575339/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3426575339/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3426575339.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 44
+  },
+  {
+   "id": "3319542538",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1548,
+   "measures": {
+    "ssim": 0.1182,
+    "hist": 0.2124,
+    "edges": 0.0612,
+    "local": 0.2155
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1742,
+    "1.0": 0.1629,
+    "2.0": 0.1548,
+    "5.0": 0.165
+   },
+   "fit": "crop",
+   "box": [
+    142,
+    0,
+    341
+   ],
+   "ncc": 0.992,
+   "preview_frames": 61,
+   "preview_frame": 44,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3319542538/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3319542538/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3319542538.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 45
+  },
+  {
+   "id": "3184155462",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1544,
+   "measures": {
+    "ssim": 0.0548,
+    "hist": 0.345,
+    "edges": 0.0341,
+    "local": 0.2073
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.159,
+    "1.0": 0.1544,
+    "2.0": 0.1691,
+    "5.0": 0.1789
+   },
+   "fit": "crop",
+   "box": [
+    197,
+    13,
+    345
+   ],
+   "ncc": 0.992,
+   "preview_frames": 50,
+   "preview_frame": 22,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3184155462/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3184155462/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3184155462.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 46
+  },
+  {
+   "id": "3479521040",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1535,
+   "measures": {
+    "ssim": 0.1037,
+    "hist": 0.2393,
+    "edges": 0.0172,
+    "local": 0.2368
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1535,
+    "1.0": 0.1905,
+    "2.0": 0.1862,
+    "5.0": 0.4801
+   },
+   "fit": "crop",
+   "box": [
+    334,
+    101,
+    180
+   ],
+   "ncc": 0.978,
+   "preview_frames": 50,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3479521040/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3479521040/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3479521040.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 47
+  },
+  {
+   "id": "3395587987",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1528,
+   "measures": {
+    "ssim": 0.0089,
+    "hist": 0.343,
+    "edges": 0.2155,
+    "local": 0.1281
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1528,
+    "1.0": 0.1536,
+    "2.0": 0.1641,
+    "5.0": 0.1799
+   },
+   "fit": "crop",
+   "box": [
+    142,
+    0,
+    360
+   ],
+   "ncc": 0.989,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3395587987/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3395587987/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3395587987.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 48
+  },
+  {
+   "id": "3019192537",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1488,
+   "measures": {
+    "ssim": 0.0783,
+    "hist": 0.3264,
+    "edges": 0.0495,
+    "local": 0.1671
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1488,
+    "1.0": 0.1571,
+    "2.0": 0.15,
+    "5.0": 0.1561
+   },
+   "fit": "crop",
+   "box": [
+    45,
+    7,
+    349
+   ],
+   "ncc": 0.995,
+   "preview_frames": 50,
+   "preview_frame": 18,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3019192537/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3019192537/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3019192537.png",
+   "native": [
+    637,
+    358
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 49
+  },
+  {
+   "id": "2511663284",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1449,
+   "measures": {
+    "ssim": 0.0791,
+    "hist": 0.2629,
+    "edges": 0.0465,
+    "local": 0.1976
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1482,
+    "1.0": 0.1487,
+    "2.0": 0.1449,
+    "5.0": 0.1539
+   },
+   "fit": "crop",
+   "box": [
+    285,
+    21,
+    332
+   ],
+   "ncc": 0.986,
+   "preview_frames": 32,
+   "preview_frame": 8,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2511663284/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2511663284/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2511663284.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 50
+  },
+  {
+   "id": "2288455459",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1413,
+   "measures": {
+    "ssim": 0.1136,
+    "hist": 0.072,
+    "edges": 0.0649,
+    "local": 0.2662
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1695,
+    "1.0": 0.1564,
+    "2.0": 0.1413,
+    "5.0": 0.1546
+   },
+   "fit": "crop",
+   "box": [
+    184,
+    107,
+    253
+   ],
+   "ncc": 0.981,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2288455459/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2288455459/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2288455459.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 51
+  },
+  {
+   "id": "2290002190",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1349,
+   "measures": {
+    "ssim": 0.0941,
+    "hist": 0.1548,
+    "edges": 0.0256,
+    "local": 0.2353
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.136,
+    "1.0": 0.1355,
+    "2.0": 0.1349,
+    "5.0": 0.1364
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    36,
+    289
+   ],
+   "ncc": 0.969,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2290002190/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2290002190/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2290002190.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 52
+  },
+  {
+   "id": "3461192631",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1316,
+   "measures": {
+    "ssim": 0.0653,
+    "hist": 0.3291,
+    "edges": 0.0123,
+    "local": 0.1456
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1345,
+    "1.0": 0.1316,
+    "2.0": 0.1316,
+    "5.0": 0.1316
+   },
+   "fit": "crop",
+   "box": [
+    242,
+    13,
+    153
+   ],
+   "ncc": 0.997,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3461192631/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3461192631/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3461192631.png",
+   "native": [
+    446,
+    251
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 53
+  },
+  {
+   "id": "1160682576",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1236,
+   "measures": {
+    "ssim": 0.1051,
+    "hist": 0.1065,
+    "edges": 0.0598,
+    "local": 0.1961
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.2258,
+    "1.0": 0.2301,
+    "2.0": 0.143,
+    "5.0": 0.1236
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    34,
+    289
+   ],
+   "ncc": 0.991,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1160682576/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1160682576/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1160682576.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 54
+  },
+  {
+   "id": "2375914945",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1174,
+   "measures": {
+    "ssim": 0.0673,
+    "hist": 0.2328,
+    "edges": 0.0227,
+    "local": 0.1537
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1508,
+    "1.0": 0.1417,
+    "2.0": 0.1174,
+    "5.0": 0.3004
+   },
+   "fit": "crop",
+   "box": [
+    79,
+    6,
+    352
+   ],
+   "ncc": 0.988,
+   "preview_frames": 22,
+   "preview_frame": 4,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2375914945/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2375914945/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2375914945.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 55
+  },
+  {
+   "id": "2951169110",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1171,
+   "measures": {
+    "ssim": 0.0555,
+    "hist": 0.221,
+    "edges": 0.0194,
+    "local": 0.1746
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1175,
+    "1.0": 0.1173,
+    "2.0": 0.1175,
+    "5.0": 0.1171
+   },
+   "fit": "crop",
+   "box": [
+    68,
+    86,
+    232
+   ],
+   "ncc": 0.998,
+   "preview_frames": 49,
+   "preview_frame": 22,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2951169110/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2951169110/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2951169110.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 56
+  },
+  {
+   "id": "3174556087",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1142,
+   "measures": {
+    "ssim": 0.0776,
+    "hist": 0.1833,
+    "edges": 0.0337,
+    "local": 0.1583
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1142,
+    "1.0": 0.1272,
+    "2.0": 0.1167,
+    "5.0": 0.1229
+   },
+   "fit": "crop",
+   "box": [
+    45,
+    0,
+    360
+   ],
+   "ncc": 0.993,
+   "preview_frames": 50,
+   "preview_frame": 18,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3174556087/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3174556087/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3174556087.png",
+   "native": [
+    640,
+    360
+   ],
+   "class": "ok",
+   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "rank": 57
+  },
+  {
+   "id": "3445973124",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1117,
+   "measures": {
+    "ssim": 0.0575,
+    "hist": 0.1264,
+    "edges": 0.0811,
+    "local": 0.1765
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.1127,
+    "1.0": 0.1117,
+    "2.0": 0.1146,
+    "5.0": 0.1163
+   },
+   "fit": "crop",
+   "box": [
+    98,
+    0,
+    360
+   ],
+   "ncc": 0.981,
+   "preview_frames": 50,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3445973124/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3445973124/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3445973124.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 58
+  },
+  {
+   "id": "3276522107",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1037,
+   "measures": {
+    "ssim": 0.0308,
+    "hist": 0.1823,
+    "edges": 0.0941,
+    "local": 0.1306
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.1037,
+    "1.0": 0.1416,
+    "2.0": 0.108,
+    "5.0": 0.1467
+   },
+   "fit": "crop",
+   "box": [
+    139,
+    0,
+    360
+   ],
+   "ncc": 0.962,
+   "preview_frames": 48,
+   "preview_frame": 47,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3276522107/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3276522107/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3276522107.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 59
+  },
+  {
+   "id": "3556794116",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.1001,
+   "measures": {
+    "ssim": 0.0459,
+    "hist": 0.1467,
+    "edges": 0.0612,
+    "local": 0.1493
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.1955,
+    "1.0": 0.1001,
+    "2.0": 0.18,
+    "5.0": 0.3278
+   },
+   "fit": "crop",
+   "box": [
+    0,
+    4,
+    356
+   ],
+   "ncc": 0.982,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3556794116/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3556794116/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3556794116.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 60
+  },
+  {
+   "id": "1934084447",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0982,
+   "measures": {
+    "ssim": 0.0114,
+    "hist": 0.4213,
+    "edges": 0.0125,
+    "local": 0.0268
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1,
+    "1.0": 0.1003,
+    "2.0": 0.0982,
+    "5.0": 0.0997
+   },
+   "fit": "crop",
+   "box": [
+    214,
+    0,
+    313
+   ],
+   "ncc": 0.999,
+   "preview_frames": 41,
+   "preview_frame": 22,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1934084447/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1934084447/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1934084447.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 61
+  },
+  {
+   "id": "2325974975",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0977,
+   "measures": {
+    "ssim": 0.0945,
+    "hist": 0.0376,
+    "edges": 0.0104,
+    "local": 0.1993
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0977,
+    "1.0": 0.0977,
+    "2.0": 0.0977,
+    "5.0": 0.0977
+   },
+   "fit": "crop",
+   "box": [
+    238,
+    13,
+    161
+   ],
+   "ncc": 0.997,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2325974975/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2325974975/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2325974975.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 62
+  },
+  {
+   "id": "2182433068",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0974,
+   "measures": {
+    "ssim": 0.0608,
+    "hist": 0.0611,
+    "edges": 0.0671,
+    "local": 0.1785
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0979,
+    "1.0": 0.098,
+    "2.0": 0.0978,
+    "5.0": 0.0974
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    101,
+    282
+   ],
+   "ncc": 0.991,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2182433068/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2182433068/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2182433068.png",
+   "native": [
+    497,
+    483
+   ],
+   "rank": 63
+  },
+  {
+   "id": "3478602089",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0954,
+   "measures": {
+    "ssim": 0.0098,
+    "hist": 0.1512,
+    "edges": 0.0457,
+    "local": 0.1768
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0954,
+    "1.0": 0.1041,
+    "2.0": 0.1108,
+    "5.0": 0.1476
+   },
+   "fit": "crop",
+   "box": [
+    161,
+    0,
+    360
+   ],
+   "ncc": 0.93,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3478602089/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3478602089/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3478602089.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 64
+  },
+  {
+   "id": "3309103316",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0953,
+   "measures": {
+    "ssim": 0.0291,
+    "hist": 0.3255,
+    "edges": 0.0198,
+    "local": 0.0582
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0967,
+    "1.0": 0.0953,
+    "2.0": 0.0956,
+    "5.0": 0.0967
+   },
+   "fit": "crop",
+   "box": [
+    0,
+    4,
+    341
+   ],
+   "ncc": 0.999,
+   "preview_frames": 50,
+   "preview_frame": 27,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3309103316/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3309103316/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3309103316.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 65
+  },
+  {
+   "id": "3387433141",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0938,
+   "measures": {
+    "ssim": 0.0979,
+    "hist": 0.0494,
+    "edges": 0.015,
+    "local": 0.1719
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1581,
+    "1.0": 0.1024,
+    "2.0": 0.1023,
+    "5.0": 0.0938
+   },
+   "fit": "crop",
+   "box": [
+    358,
+    52,
+    212
+   ],
+   "ncc": 0.997,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3387433141/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3387433141/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3387433141.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 66
+  },
+  {
+   "id": "3422383300",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0932,
+   "measures": {
+    "ssim": 0.0279,
+    "hist": 0.2261,
+    "edges": 0.0385,
+    "local": 0.1063
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1118,
+    "1.0": 0.1132,
+    "2.0": 0.1109,
+    "5.0": 0.0932
+   },
+   "fit": "crop",
+   "box": [
+    214,
+    2,
+    289
+   ],
+   "ncc": 0.996,
+   "preview_frames": 48,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3422383300/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422383300/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3422383300.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 67
+  },
+  {
+   "id": "1884904087",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0916,
+   "measures": {
+    "ssim": 0.0517,
+    "hist": 0.063,
+    "edges": 0.0526,
+    "local": 0.1765
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1069,
+    "1.0": 0.1271,
+    "2.0": 0.1615,
+    "5.0": 0.0916
+   },
+   "fit": "crop",
+   "box": [
+    86,
+    0,
+    360
+   ],
+   "ncc": 0.998,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1884904087/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1884904087/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1884904087.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 68
+  },
+  {
+   "id": "2679885269",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0901,
+   "measures": {
+    "ssim": 0.0525,
+    "hist": 0.1032,
+    "edges": 0.0706,
+    "local": 0.132
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0901,
+    "1.0": 0.0908,
+    "2.0": 0.0926,
+    "5.0": 0.0938
+   },
+   "fit": "crop",
+   "box": [
+    283,
+    0,
+    189
+   ],
+   "ncc": 0.993,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2679885269/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2679885269/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2679885269.png",
+   "native": [
+    533,
+    300
+   ],
+   "rank": 69
+  },
+  {
+   "id": "3422085307",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0884,
+   "measures": {
+    "ssim": 0.0333,
+    "hist": 0.2575,
+    "edges": 0.0153,
+    "local": 0.0793
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0951,
+    "1.0": 0.0884,
+    "2.0": 0.0966,
+    "5.0": 0.0981
+   },
+   "fit": "crop",
+   "box": [
+    124,
+    0,
+    360
+   ],
+   "ncc": 0.996,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3422085307/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3422085307/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3422085307.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 70
+  },
+  {
+   "id": "1556245028",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0873,
+   "measures": {
+    "ssim": 0.0079,
+    "hist": 0.3308,
+    "edges": 0.0232,
+    "local": 0.0472
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.1035,
+    "1.0": 0.1049,
+    "2.0": 0.0873,
+    "5.0": 0.0952
+   },
+   "fit": "crop",
+   "box": [
+    137,
+    0,
+    360
+   ],
+   "ncc": 0.997,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1556245028/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1556245028/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1556245028.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 71
+  },
+  {
+   "id": "3023509773",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0864,
+   "measures": {
+    "ssim": 0.0409,
+    "hist": 0.1599,
+    "edges": 0.0207,
+    "local": 0.1267
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.115,
+    "1.0": 0.1104,
+    "2.0": 0.1055,
+    "5.0": 0.0864
+   },
+   "fit": "crop",
+   "box": [
+    180,
+    0,
+    360
+   ],
+   "ncc": 0.995,
+   "preview_frames": 50,
+   "preview_frame": 4,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3023509773/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3023509773/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3023509773.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 72
+  },
+  {
+   "id": "1264170639",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0838,
+   "measures": {
+    "ssim": 0.0659,
+    "hist": 0.0355,
+    "edges": 0.0494,
+    "local": 0.1569
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0838,
+    "1.0": 0.0997,
+    "2.0": 0.0972,
+    "5.0": 0.0991
+   },
+   "fit": "crop",
+   "box": [
+    60,
+    22,
+    322
+   ],
+   "ncc": 0.992,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1264170639/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1264170639/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1264170639.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 73
+  },
+  {
+   "id": "3029971128",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0806,
+   "measures": {
+    "ssim": 0.0204,
+    "hist": 0.2466,
+    "edges": 0.0506,
+    "local": 0.0502
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0818,
+    "1.0": 0.0806,
+    "2.0": 0.0854,
+    "5.0": 0.0821
+   },
+   "fit": "crop",
+   "box": [
+    135,
+    2,
+    356
+   ],
+   "ncc": 0.998,
+   "preview_frames": 48,
+   "preview_frame": 47,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3029971128/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3029971128/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3029971128.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 74
+  },
+  {
+   "id": "2672425887",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.078,
+   "measures": {
+    "ssim": 0.0283,
+    "hist": 0.2282,
+    "edges": 0.026,
+    "local": 0.0622
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0973,
+    "1.0": 0.078,
+    "2.0": 0.15,
+    "5.0": 0.1553
+   },
+   "fit": "crop",
+   "box": [
+    174,
+    6,
+    349
+   ],
+   "ncc": 0.999,
+   "preview_frames": 40,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2672425887/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2672425887/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2672425887.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 75
+  },
+  {
+   "id": "3089687436",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0778,
+   "measures": {
+    "ssim": 0.0468,
+    "hist": 0.1368,
+    "edges": 0.0223,
+    "local": 0.1066
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0778,
+    "1.0": 0.0977,
+    "2.0": 0.1254,
+    "5.0": 0.0851
+   },
+   "fit": "crop",
+   "box": [
+    158,
+    0,
+    360
+   ],
+   "ncc": 0.993,
+   "preview_frames": 48,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3089687436/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3089687436/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3089687436.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 76
+  },
+  {
+   "id": "3366535880",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0765,
+   "measures": {
+    "ssim": 0.0418,
+    "hist": 0.1318,
+    "edges": 0.0455,
+    "local": 0.095
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0804,
+    "1.0": 0.0768,
+    "2.0": 0.0765,
+    "5.0": 0.0765
+   },
+   "fit": "crop",
+   "box": [
+    150,
+    0,
+    360
+   ],
+   "ncc": 0.997,
+   "preview_frames": 48,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3366535880/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3366535880/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3366535880.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 77
+  },
+  {
+   "id": "2679248947",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0748,
+   "measures": {
+    "ssim": 0.0386,
+    "hist": 0.2024,
+    "edges": 0.0171,
+    "local": 0.0644
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.1363,
+    "1.0": 0.097,
+    "2.0": 0.1363,
+    "5.0": 0.0748
+   },
+   "fit": "crop",
+   "box": [
+    124,
+    2,
+    345
+   ],
+   "ncc": 0.995,
+   "preview_frames": 60,
+   "preview_frame": 21,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2679248947/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2679248947/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2679248947.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 78
+  },
+  {
+   "id": "3432876246",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0739,
+   "measures": {
+    "ssim": 0.035,
+    "hist": 0.1174,
+    "edges": 0.0486,
+    "local": 0.1007
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0873,
+    "1.0": 0.1332,
+    "2.0": 0.1245,
+    "5.0": 0.0739
+   },
+   "fit": "crop",
+   "box": [
+    85,
+    21,
+    358
+   ],
+   "ncc": 0.998,
+   "preview_frames": 48,
+   "preview_frame": 38,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3432876246/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3432876246/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3432876246.png",
+   "native": [
+    571,
+    400
+   ],
+   "rank": 79
+  },
+  {
+   "id": "2189783622",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0687,
+   "measures": {
+    "ssim": 0.0464,
+    "hist": 0.0391,
+    "edges": 0.0805,
+    "local": 0.103
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0816,
+    "1.0": 0.0687,
+    "2.0": 0.1325,
+    "5.0": 0.0981
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    71,
+    289
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2189783622/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2189783622/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2189783622.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 80
+  },
+  {
+   "id": "3413117423",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0653,
+   "measures": {
+    "ssim": 0.0532,
+    "hist": 0.0777,
+    "edges": 0.0198,
+    "local": 0.0995
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0668,
+    "1.0": 0.0662,
+    "2.0": 0.0653,
+    "5.0": 0.0698
+   },
+   "fit": "crop",
+   "box": [
+    146,
+    3,
+    295
+   ],
+   "ncc": 0.996,
+   "preview_frames": 50,
+   "preview_frame": 13,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3413117423/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3413117423/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3413117423.png",
+   "native": [
+    585,
+    308
+   ],
+   "rank": 81
+  },
+  {
+   "id": "2815800031",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0628,
+   "measures": {
+    "ssim": 0.0175,
+    "hist": 0.1716,
+    "edges": 0.0311,
+    "local": 0.0567
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0694,
+    "1.0": 0.0691,
+    "2.0": 0.0628,
+    "5.0": 0.0676
+   },
+   "fit": "crop",
+   "box": [
+    189,
+    12,
+    262
+   ],
+   "ncc": 0.998,
+   "preview_frames": 66,
+   "preview_frame": 18,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2815800031/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2815800031/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2815800031.png",
+   "native": [
+    585,
+    292
+   ],
+   "rank": 82
+  },
+  {
+   "id": "1174926427",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0609,
+   "measures": {
+    "ssim": 0.0504,
+    "hist": 0.0438,
+    "edges": 0.0255,
+    "local": 0.1063
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0624,
+    "1.0": 0.0632,
+    "2.0": 0.0614,
+    "5.0": 0.0609
+   },
+   "fit": "crop",
+   "box": [
+    116,
+    2,
+    244
+   ],
+   "ncc": 0.996,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1174926427/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1174926427/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1174926427.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 83
+  },
+  {
+   "id": "3022080536",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0558,
+   "measures": {
+    "ssim": 0.0296,
+    "hist": 0.0395,
+    "edges": 0.0623,
+    "local": 0.0885
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0558,
+    "1.0": 0.0588,
+    "2.0": 0.0771,
+    "5.0": 0.0559
+   },
+   "fit": "crop",
+   "box": [
+    139,
+    2,
+    348
+   ],
+   "ncc": 0.996,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3022080536/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3022080536/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3022080536.png",
+   "native": [
+    620,
+    352
+   ],
+   "rank": 84
+  },
+  {
+   "id": "3104056709",
+   "preview": "preview.gif",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0528,
+   "measures": {
+    "ssim": 0.0267,
+    "hist": 0.1255,
+    "edges": 0.0141,
+    "local": 0.0563
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0528,
+    "1.0": 0.0544,
+    "2.0": 0.054,
+    "5.0": 0.053
+   },
+   "fit": "crop",
+   "box": [
+    171,
+    35,
+    281
+   ],
+   "ncc": 0.996,
+   "preview_frames": 50,
+   "preview_frame": 45,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3104056709/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3104056709/preview.gif",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3104056709.png",
+   "native": [
+    622,
+    350
+   ],
+   "rank": 85
+  },
+  {
+   "id": "2683776412",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.046,
+   "measures": {
+    "ssim": 0.031,
+    "hist": 0.0589,
+    "edges": 0.0281,
+    "local": 0.0645
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0754,
+    "1.0": 0.0676,
+    "2.0": 0.046,
+    "5.0": 0.0678
+   },
+   "fit": "crop",
+   "box": [
+    176,
+    36,
+    289
+   ],
+   "ncc": 0.991,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2683776412/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2683776412/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2683776412.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 86
+  },
+  {
+   "id": "3134525336",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0458,
+   "measures": {
+    "ssim": 0.0289,
+    "hist": 0.033,
+    "edges": 0.0248,
+    "local": 0.0852
+   },
+   "t": 0.5,
+   "per_t": {
+    "0.5": 0.0458,
+    "1.0": 0.046,
+    "2.0": 0.0504,
+    "5.0": 0.0558
+   },
+   "fit": "crop",
+   "box": [
+    163,
+    0,
+    345
+   ],
+   "ncc": 0.998,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3134525336/lwe-smoke-0.5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3134525336/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3134525336.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 87
+  },
+  {
+   "id": "2047150134",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0441,
+   "measures": {
+    "ssim": 0.0279,
+    "hist": 0.0389,
+    "edges": 0.0239,
+    "local": 0.0773
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0478,
+    "1.0": 0.0451,
+    "2.0": 0.0441,
+    "5.0": 0.0488
+   },
+   "fit": "crop",
+   "box": [
+    123,
+    0,
+    256
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2047150134/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2047150134/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2047150134.png",
+   "native": [
+    455,
+    256
+   ],
+   "rank": 88
+  },
+  {
+   "id": "3749550751",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0441,
+   "measures": {
+    "ssim": 0.0342,
+    "hist": 0.0335,
+    "edges": 0.0146,
+    "local": 0.0808
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0443,
+    "1.0": 0.0446,
+    "2.0": 0.0441,
+    "5.0": 0.0445
+   },
+   "fit": "crop",
+   "box": [
+    136,
+    3,
+    272
+   ],
+   "ncc": 0.998,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3749550751/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3749550751/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3749550751.png",
+   "native": [
+    600,
+    278
+   ],
+   "rank": 89
+  },
+  {
+   "id": "2638125030",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0436,
+   "measures": {
+    "ssim": 0.0191,
+    "hist": 0.109,
+    "edges": 0.0329,
+    "local": 0.0317
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0465,
+    "1.0": 0.0474,
+    "2.0": 0.0451,
+    "5.0": 0.0436
+   },
+   "fit": "crop",
+   "box": [
+    146,
+    0,
+    359
+   ],
+   "ncc": 0.998,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2638125030/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2638125030/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2638125030.png",
+   "native": [
+    639,
+    359
+   ],
+   "rank": 90
+  },
+  {
+   "id": "2219762084",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0402,
+   "measures": {
+    "ssim": 0.0168,
+    "hist": 0.0826,
+    "edges": 0.0169,
+    "local": 0.0508
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0453,
+    "1.0": 0.0427,
+    "2.0": 0.0411,
+    "5.0": 0.0402
+   },
+   "fit": "crop",
+   "box": [
+    126,
+    0,
+    311
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2219762084/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2219762084/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2219762084.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 91
+  },
+  {
+   "id": "1195626192",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0376,
+   "measures": {
+    "ssim": 0.0176,
+    "hist": 0.0463,
+    "edges": 0.0235,
+    "local": 0.0612
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0407,
+    "1.0": 0.0379,
+    "2.0": 0.0376,
+    "5.0": 0.0484
+   },
+   "fit": "crop",
+   "box": [
+    263,
+    0,
+    337
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1195626192/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1195626192/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1195626192.png",
+   "native": [
+    600,
+    337
+   ],
+   "rank": 92
+  },
+  {
+   "id": "1797172968",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0348,
+   "measures": {
+    "ssim": 0.0127,
+    "hist": 0.0796,
+    "edges": 0.0216,
+    "local": 0.0358
+   },
+   "t": 5.0,
+   "per_t": {
+    "0.5": 0.0378,
+    "1.0": 0.0409,
+    "2.0": 0.0441,
+    "5.0": 0.0348
+   },
+   "fit": "crop",
+   "box": [
+    48,
+    21,
+    358
+   ],
+   "ncc": 0.997,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1797172968/lwe-smoke-5s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1797172968/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1797172968.png",
+   "native": [
+    640,
+    400
+   ],
+   "rank": 93
+  },
+  {
+   "id": "2371103399",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0265,
+   "measures": {
+    "ssim": 0.0026,
+    "hist": 0.061,
+    "edges": 0.0106,
+    "local": 0.0381
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0267,
+    "1.0": 0.0265,
+    "2.0": 0.0283,
+    "5.0": 0.0282
+   },
+   "fit": "crop",
+   "box": [
+    39,
+    0,
+    180
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/2371103399/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/2371103399/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/2371103399.png",
+   "native": [
+    640,
+    180
+   ],
+   "rank": 94
+  },
+  {
+   "id": "3291729669",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0204,
+   "measures": {
+    "ssim": 0.016,
+    "hist": 0.0231,
+    "edges": 0.0024,
+    "local": 0.035
+   },
+   "t": 1.0,
+   "per_t": {
+    "0.5": 0.0211,
+    "1.0": 0.0204,
+    "2.0": 0.0213,
+    "5.0": 0.0222
+   },
+   "fit": "crop",
+   "box": [
+    274,
+    26,
+    302
+   ],
+   "ncc": 0.996,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/3291729669/lwe-smoke-1s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/3291729669/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/3291729669.png",
+   "native": [
+    640,
+    360
+   ],
+   "rank": 95
+  },
+  {
+   "id": "1155728109",
+   "preview": "preview.jpg",
+   "exit": 0,
+   "status": "scored",
+   "score": 0.0172,
+   "measures": {
+    "ssim": 0.0079,
+    "hist": 0.0282,
+    "edges": 0.0159,
+    "local": 0.0201
+   },
+   "t": 2.0,
+   "per_t": {
+    "0.5": 0.0177,
+    "1.0": 0.019,
+    "2.0": 0.0172,
+    "5.0": 0.0181
+   },
+   "fit": "crop",
+   "box": [
+    278,
+    31,
+    360
+   ],
+   "ncc": 0.999,
+   "preview_frames": 1,
+   "preview_frame": 0,
+   "frame": "/tmp/liascape-scene-preview-run3/scenes/1155728109/lwe-smoke-2s.png",
+   "preview_path": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960/1155728109/preview.jpg",
+   "side_by_side": "/tmp/liascape-scene-preview-run3/sbs/1155728109.png",
+   "native": [
+    640,
+    421
+   ],
+   "rank": 96
+  }
+ ]
+}

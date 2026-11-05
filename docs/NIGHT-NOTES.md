@@ -521,3 +521,15 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   particle), the test fails on the old pin (7.0 px bow) and passes now (4.0 px; WE's maths says 4.2).
 - Gates: the 20 rope scenes' health 15 clean / 5 degraded / 0 failed on both pins (no class or loss changed); shader
   sweep the same 6 failing checks, none new; player tests 743 passed.
+
+## 2026-11-05 morning (scene preview compare, finished)
+- Pushed `lp-player` through the scene-preview work: LWE pin `9b2b244` (fork 0103 culling puppets draw — 3490034653's
+  and 3363252053's characters were invisible; 0104 `thisLayer` / `thisObject` are the running script — 3163060610's
+  clocks stuck on "Loading..."). Live player rebuilt and restarted on it.
+- New report `docs/player/reports/scene-preview.md`: every scene scored against its author's preview. Everything above
+  the clean band was looked at; no further render bug — the rest are previews with badges / frames / signatures,
+  other animation moments, audio or media-driven parts, or user properties that default off.
+- One question only you can settle: **3516174947** at its default "Lens size" 0.75 shows black borders in ours (the
+  decoded zoom formula); its preview has none. A WE screenshot of it at the default settles which is right.
+- `mpv_source_teardown_never_skips_bus_cycles` fails today on the old commit as well (a flake of this machine's
+  state, in TODO); nothing in this work touches mpv.

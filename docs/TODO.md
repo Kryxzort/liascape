@@ -1254,8 +1254,12 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] camera zoom direction contested: 3516174947 letterboxed at its default "Lens size" 0.75, 3042492564's
                 preview = our zoom 1; the decode (B5) and 3490034653's "Panorama" say zoom < 1 shows more — needs an
                 owner's WE capture of 3516174947.
-          - [ ] 3163060610's clock text colour (a Media Integration colour without media) vs the preview's.
-          - [ ] look at the unexamined rows below rank 30 (scores ≤ 0.24) once the list above is settled.
+          - [x] 3163060610's clock text colour: by design — the preview's is auto-picked from a playing track's
+                cover; without media the script uses `m_text_color` (ours).
+          - [x] every row above 0.115 looked at (57 / 96, pin 9b2b244): no new render bug; the 39 unexamined score
+                ≤ 0.115 (the clean band). See the audit's "The list worked down".
+          - [ ] `mpv_source_teardown_never_skips_bus_cycles` fails alone on 8fefe58 and 1cb88ba alike (2026-11-05,
+                3 / 3 runs: a 64–256-sample exact-silence run as a V→V stream leaves) — re-check on a quiet machine.
     - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object

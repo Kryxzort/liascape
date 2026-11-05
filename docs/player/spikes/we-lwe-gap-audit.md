@@ -3013,3 +3013,29 @@ a real difference: a bug, a 3D scene, another moment of a video, or other art.
 |---|---|---|
 | `puppet_cullmode_normal_draws` | two 4 × 4 MDLV0016 puppet squares with a `cullmode: normal` material in a 64 × 32 scene, one drawn straight into the scene and one through an effect (its composite): both white | both the clear colour (red 0, 0) |
 | `this_layer_is_the_running_script` | sq1's script shares a class keeping thisLayer / thisObject and a function returning thisLayer.name; sq2's init makes one and calls it, a timer it sets reads its own layer, sq1's update still sees sq1: both squares visible | sq2 hidden (the class and the function said sq1) |
+
+**The list worked down (pin `9b2b244`, 2026-11-05, run `/tmp/liascape-scene-preview-run3`, the release worker on the
+pinned core):** every scene above 0.115 was looked at (57 of 96); classes `ok` 25, `by-design` 16, `time` 7,
+`property` 3, `fixed` 3, `known` 2, `bug?` 1, and the 39 unexamined all score ≤ 0.115 (the calibrated clean band).
+No new render bug: each remaining difference is explained in `scene_preview_notes.json`. The ones that needed a test:
+
+- **3028473503** (0.28): its audio-bar compose layer (colour blend 4, the bars' `TRANSPARENCY` replace mode) looked
+  like a wash-out; rendered without it the frame is identical. The gif blinks and zooms in.
+- **2883756643** (0.39): bloom (threshold 1.0) changes nothing (rendered without); its colour-blend-31 dust overlay
+  draws its specks additively (rendered alone); the preview's grain is GIF dithering and its sharper, darker
+  background an earlier edit than the scene's `blurprecise` / `godrays` layers.
+- **3163060610** (0.26): after 0104 the clocks tick; the preview's brown text is Media Integration's auto colour
+  picking from a playing track's cover (`mediaThumbnailChanged` returns early without a thumbnail, the script then
+  sets `m_text_color`, the light blue we draw): by design, not the open colour item.
+- **3046119914, 3042865984**: user properties — rain / VHS layers off by default; audio-driven `pulse` on every layer.
+- **3042492564 → `property`**: its preview is our view at camera zoom 1, an editor capture at another zoom; B5's
+  runtime formula (zoom < 1 shows more) agrees with its "Zoom (lossless)" 0.73–1 slider (the 6000 × 2805 background is
+  1 / 0.73 of the canvas, all of it visible at 0.73). **3516174947** stays `bug?` until an owner's WE capture.
+- The fixed ones after the fix: 3490034653 0.629 → 0.438 (her puppet animation and petals), 3363252053 0.515 → 0.431
+  (sparkles and glow at another moment), 3163060610 0.257 → 0.255 (text colour as above).
+
+Gates on `9b2b244`: health (`/tmp/liascape-scene-health-preview1`) 89 clean / 7 degraded / 0 failed, no scene worse
+(loss, errors, problems); player tests DEBUG 741 passed, 3 failed, 3 ignored in the full suite — two timing tests pass
+alone, `mpv_source_teardown_never_skips_bus_cycles` fails alone too, and fails the same way on `8fefe58` (before this
+pin): a machine-state flake of the mpv V→V recording, not this change.
+Shader sweep (4085 checks, release worker on `9b2b244`): 6 failed in 4 shaders, the known 6 — none new.
