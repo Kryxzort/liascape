@@ -1,0 +1,21 @@
+{
+  "2890767643": {"class": "time", "note": "its face is a 665 MB video texture (materials/outfinal.tex, an MP4); the preview's dark silhouette with yellow eyes is a later moment of that video. The tint mask (a bottom vignette) is applied."},
+  "2694785040": {"class": "by-design", "note": "the preview is other art (her full figure); copy.tex (4193 x 3380) is the whole picture we draw."},
+  "2783122117": {"class": "by-design", "note": "a still scene (two images); the preview is another crop / frame of the source animation."},
+  "3509243656": {"class": "known", "note": "a 3D (perspective) scene: TODO \"LWE: 3D / perspective scenes\"; ours shows its script UI, the preview its clock."},
+  "3477054430": {"class": "known", "note": "a 3D (perspective) scene; the moon's tint differs."},
+  "3516174947": {"class": "bug?", "note": "letterboxed black at its default camera zoom (\"Lens size\" 0.75): zoom < 1 shows more, as decoded in B5 (GH 0x1401afbf0 scales the projection by general.zoom x camera zoom). Its preview shows no border and the tree larger than at zoom 1; 3042492564's preview matches our zoom-1 view. Contested: 3490034653's 0.65 camera is labelled \"Panorama\" (shows more). Needs an owner's WE capture at the default."},
+  "3042492564": {"class": "bug?", "note": "the preview's framing is exactly our view at zoom 1 (crop side 0.733 of our frame = its default g_zoom 0.73); see 3516174947. The clock and cover appear after 1 s (scripts) and are the size the user property sets."},
+  "3490034653": {"class": "bug", "note": "the character (人物1, a puppet, material cullmode normal, parallaxDepth -0.02 0.05, 5 effects) is built and on the canvas (health bbox) but not visible; the preview shows her. 3363252053's puppet (cullmode normal, negative parallaxDepth) is missing the same way; 3479521040's cullmode-normal puppet draws. Not fixed yet (deadline): next step is nocull in an unpacked copy (/dev/shm/lsc-preview/3490034653)."},
+  "3363252053": {"class": "bug", "note": "the white-clad girl (身体部件, a puppet, cullmode normal, parallaxDepth -0.52 -0.16) is missing; see 3490034653."},
+  "3414858021": {"class": "fixed", "note": "calibration: 0.665 before the head fix (pin 157c111), 0.32 after; the rest is its sway and rain."},
+  "2134765860": {"class": "by-design", "note": "the preview has an audio visualiser (no audio in the smoke) and another clock time."},
+  "2388299037": {"class": "time", "note": "colour-cycling lights: the score swings 0.34-0.42 across our times."},
+  "2561227934": {"class": "time", "note": "random light-shaft particles (sphererandom, starttime 15); the preview caught other shafts."},
+  "1726902114": {"class": "time", "note": "the characters sway; matches otherwise."},
+  "3326873240": {"class": "by-design", "note": "the preview carries a 4K badge and other crop."},
+  "3243449890": {"class": "by-design", "note": "the preview carries a 4K badge."},
+  "3219908811": {"class": "by-design", "note": "the preview carries a 4K badge."},
+  "3480481965": {"class": "by-design", "note": "the preview is a poster with a frame and signature."},
+  "3354740764": {"class": "by-design", "note": "a clock (other time) and its placeholder windows."}
+}

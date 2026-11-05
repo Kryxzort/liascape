@@ -176,6 +176,29 @@ def align(frame, prev):
     if best[0] <= -1.5:  # flat preview: the centred full-height square
         s = min(H, W)
         x, y = (W - s) / 2, (H - s) / 2
+        return (int(round(x)), int(round(y)), int(round(s))), best[0]
+    # refine: twice the resolution, sizes within ±8 % in 1 % steps, positions near the coarse match
+    k2 = min(1.0, 2 * SEARCH_H / H)
+    f2 = cv2.GaussianBlur(grey(resize(frame, max(1, round(W * k2)), max(1, round(H * k2)))), (5, 5), 1.2)
+    for m in np.linspace(0.92, 1.08, 17):
+        side = int(round(s * m * k2))
+        if side < 16 or side > min(f2.shape):
+            continue
+        cx, cy = (x + s / 2) * k2, (y + s / 2) * k2
+        pad = max(4, int(0.1 * side))
+        x0 = int(max(0, min(f2.shape[1] - side, cx - side / 2 - pad)))
+        y0 = int(max(0, min(f2.shape[0] - side, cy - side / 2 - pad)))
+        x1 = int(min(f2.shape[1], x0 + side + 2 * pad))
+        y1 = int(min(f2.shape[0], y0 + side + 2 * pad))
+        win = f2[y0:y1, x0:x1]
+        if win.shape[0] < side or win.shape[1] < side:
+            continue
+        t = cv2.GaussianBlur(grey(resize(prev, side, side)), (5, 5), 1.2)
+        r = cv2.matchTemplate(win, t, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, loc = cv2.minMaxLoc(r)
+        if mx > best[0]:
+            best = (mx, ((x0 + loc[0]) / k2, (y0 + loc[1]) / k2, side / k2))
+    x, y, s = best[1]
     return (int(round(x)), int(round(y)), int(round(s))), best[0]
 
 
@@ -190,6 +213,7 @@ def crop(frame, box):
 def score_scene(shots, prevs):
     """Best (frame, preview frame) pair: dict with the measures, the time, the gif frame index, the box."""
     best = None
+    per_t = {}
     pv = [resize(p, SIDE, SIDE) for p in prevs]
     for t, fr in shots:
         H, W = fr.shape[:2]
@@ -201,8 +225,10 @@ def score_scene(shots, prevs):
             if sq["dist"] < m["dist"]:
                 sq.update(t=t, gif_frame=i, box=[0, 0, 0], ncc=None, fit="squeeze")
                 m = sq
+            per_t[t] = min(per_t.get(t, 9.0), m["dist"])
             if best is None or m["dist"] < best["dist"]:
                 best = m
+    best["per_t"] = {str(t): round(d, 4) for t, d in sorted(per_t.items())}
     return best
 
 
@@ -300,6 +326,7 @@ def main():
                 score=round(b["dist"], 4),
                 measures={k: round(b[k], 4) for k in WEIGHTS},
                 t=b["t"],
+                per_t=b["per_t"],
                 fit=b["fit"],
                 box=b["box"],
                 ncc=b["ncc"],
