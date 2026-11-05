@@ -555,8 +555,10 @@ struct Renderer {
     scene: Option<SceneImpl>,
     /// The newest tick not rendered yet (older ones are answered by its `Frame`).
     pending: Option<(u64, f64)>,
-    /// The newest visualiser input not handed to the scene yet.
-    input: Option<Vec<u8>>,
+    /// System audio not handed to the scene yet: interleaved stereo f32 at `input_rate`, every
+    /// tick's in order (the newest `AUDIO_INPUT_MAX_FRAMES` kept).
+    input: Vec<f32>,
+    input_rate: u32,
     /// The synthetic `input_level` scene's current level.
     level: f32,
     /// The pointer in native scene pixels (y down) + buttons; `None` until the host sends one (an
@@ -884,8 +886,17 @@ impl Renderer {
                 }
             }
             ToWorker::Tick { seq, t, input } if !self.dead => {
-                if let Some(v) = input.filter(|v| !v.is_empty()) {
-                    self.input = Some(v);
+                if let Some(a) = input {
+                    if a.rate != self.input_rate {
+                        self.input.clear();
+                        self.input_rate = a.rate;
+                    }
+                    self.input.extend(a.to_stereo());
+                    let cap = proto::AUDIO_INPUT_MAX_FRAMES * 2;
+                    if self.input.len() > cap {
+                        let drop = self.input.len() - cap;
+                        self.input.drain(..drop);
+                    }
                 }
                 self.pending = Some((seq, t));
             }
@@ -966,13 +977,13 @@ impl Renderer {
                 warn(&format!("release fence: {e}"));
             }
         }
-        let input = self.input.take();
+        let input = std::mem::take(&mut self.input);
         self.timer.begin(&self.gfx.gl);
         let mut report_gpu_ms = None;
         match scene {
             SceneImpl::Synthetic(s) => {
-                if let Some(v) = &input {
-                    self.level = input_level(v);
+                if !input.is_empty() {
+                    self.level = input_level(&input);
                 }
                 // The pointer comes in native pixels; the dot is drawn in ring pixels.
                 let (nw, nh) = (self.native.0.max(1) as f64, self.native.1.max(1) as f64);
@@ -983,8 +994,8 @@ impl Renderer {
             }
             #[cfg(feature = "lwe")]
             SceneImpl::Lwe(s) => {
-                if let Some(v) = &input {
-                    s.set_input(v);
+                if !input.is_empty() {
+                    s.push_input(&input, self.input_rate);
                 }
                 s.render(&self.gfx, t, &slot.fbo, w, h);
             }
@@ -1199,7 +1210,8 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         ring: None,
         scene: None,
         pending: None,
-        input: None,
+        input: Vec::new(),
+        input_rate: 48_000,
         level: 0.0,
         pointer: None,
         next_slot_id: 0,

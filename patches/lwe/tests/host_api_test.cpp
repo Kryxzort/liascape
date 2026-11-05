@@ -1713,6 +1713,145 @@ static bool particle_control_points () {
     return true;
 }
 
+// P30 rope spline (the audit's "Attachment result" → rope spline buffer): WE's rope segment b → c is a bezier whose inner
+// points are b + 0.15 · (c − a) and c + 0.15 · (b − d) (a, d its neighbours; genericropeparticle.vert), uniform
+// Catmull-Rom (LWE's) the same bezier with 1/6. Four emitters, each one particle at a fixed origin (no velocity), in
+// emitter order a (30, 244), b (−30, 20), c (30, 20), d (−30, 244): the b → c chord is 20 px off the centre, outside
+// the 64 × 32 view, and the segment bows 0.72 · f · 224 back across it (default subdivision 4: its flat middle piece
+// t 0.4..0.6 crosses x 32). WE's 0.15: the rope's centre is 4.2 px off the centre row; Catmull-Rom: 6.9 px
+static bool rope_spline_tangent_factor () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto emitter = [] (const char* origin) {
+        return std::string ("{\"name\":\"sphererandom\",\"origin\":\"") + origin
+             + "\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1}";
+    };
+    const std::string sys = std::string ("{\"material\":\"materials/opaque.json\",\"maxcount\":8,")
+                          + "\"renderer\":[{\"name\":\"rope\"}],\"emitter\":[" + emitter ("30 244 0") + ","
+                          + emitter ("-30 20 0") + "," + emitter ("30 20 0") + "," + emitter ("-30 244 0") + "],"
+                          + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":2,\"max\":2},"
+                          + "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+                          + "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (particle_object (1, "rope.json", 32, 16), "0 0 0", { { "rope.json", sys } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    std::string column;
+    double sum = 0;
+    int lit = 0;
+    for (int y = 0; y < 32; y++) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, 32, y, px);
+        const bool on = px[0] > 128;
+        column += on ? '#' : '.';
+        if (on) {
+            sum += y + 0.5;
+            lit++;
+        }
+    }
+    const double off = lit ? std::abs (sum / lit - 16.0) : -1.0;
+    printf ("    x 32 rows 0..31: %s; the rope's centre %.2f px off the centre row (0.15: 4.2, 1/6: 6.9)\n", column.c_str (),
+            off);
+    CHECK (lit > 0 && lit <= 6, "no thin rope across x 32 (%d px lit)", lit);
+    CHECK (off >= 3.0 && off <= 5.5, "the rope bows %.2f px off the centre (WE's 0.15 factor: 4.2; Catmull-Rom: 6.9)", off);
+    return true;
+}
+
+// system flags bit 0 is the editor's "Worldspace" (Leftovers): a particle stays where it was emitted in the scene when
+// its system moves on. Two systems emit one particle each at the start and then move right by 3 px a frame to x 50
+// (a script on the origin); the local one's particle goes with it, the world-space one's stays near x 20 (unpatched:
+// both at x 50)
+static bool particle_world_space_stays () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto sys = [] (int flags) {
+        return "{\"material\":\"materials/opaque.json\",\"maxcount\":1,\"flags\":" + std::to_string (flags)
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,"
+               "\"instantaneous\":1}],\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4},"
+               "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+               "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    };
+    auto moving = [] (int id, const std::string& file, int y) {
+        std::string o = particle_object (id, file, 20, y);
+        const std::string from = "\"origin\":\"20 " + std::to_string (y) + " 0\"";
+        o.replace (o.find (from), from.size (),
+                   scripted ("origin", "\"20 " + std::to_string (y) + " 0\"",
+                             "let n = 0;\nexport function update(value) {\n  n++;\n  value.x = 20 + Math.min(n, 10) * 3;\n  return value;\n}\n"));
+        return o;
+    };
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (moving (1, "local.json", 6) + "," + moving (2, "world.json", 14), "0 0 0",
+                                            { { "local.json", sys (0) }, { "world.json", sys (1) } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 14; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    // the mean lit column around a row (either way up: rows 6 and 14 don't overlap 31 - each other)
+    auto columnOf = [&] (int y) {
+        int sum = 0, count = 0;
+        for (const int row : { y - 2, y - 1, y, y + 1, y + 2, 29 - y, 30 - y, 31 - y, 32 - y, 33 - y }) {
+            for (int x = 0; x < 64; x++) {
+                read_pixel (rig.fbo, x, row, px);
+                if (px[0] > 128) {
+                    sum += x;
+                    count++;
+                }
+            }
+        }
+        return count ? sum / count : -1;
+    };
+    const int local = columnOf (6), world = columnOf (14);
+    printf ("    after the systems moved 20 -> 50: the local particle at x %d, the world-space one at x %d\n", local, world);
+    CHECK (local >= 46 && local <= 54, "the local particle (x %d) didn't move with its system to x 50", local);
+    CHECK (world >= 14 && world <= 34, "the world-space particle (x %d) moved with its system (expected near x 20)", world);
+    return true;
+}
+
+// an instanceoverride value takes a script like any property (Leftovers: 11 library scenes script rate / size / count
+// / speed / controlpoint1 / colorn / alpha; 2290002190's rate follows the audio): a size override scripted to 3
+// draws the size-4 particle (2 px across in this 64 x 32 scene) 3 times as wide (unpatched: the script never ran, 2 px)
+static bool particle_override_scripts_run () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string sys = "{\"material\":\"materials/opaque.json\",\"maxcount\":1,\"emitter\":[{\"name\":\"sphererandom\","
+                            "\"origin\":\"0 0 0\",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1}],"
+                            "\"initializer\":[{\"name\":\"sizerandom\",\"min\":4,\"max\":4},"
+                            "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"},"
+                            "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}]}\n";
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "one.json", 32, 16, scripted ("size", "1", "export function update(value) {\n  return 3;\n}\n")), "0 0 0",
+        { { "one.json", sys } }, files);
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 6; i++) {
+        rig.step ();
+    }
+    unsigned char px[4] = { 0, 0, 0, 0 };
+    int x0 = 64, x1 = -1;
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 64; x++) {
+            read_pixel (rig.fbo, x, y, px);
+            if (px[0] > 128) {
+                x0 = std::min (x0, x);
+                x1 = std::max (x1, x);
+            }
+        }
+    }
+    const int width = x1 >= x0 ? x1 - x0 + 1 : 0;
+    printf ("    the particle with a size override scripted to 3: %d px wide (2 px without)\n", width);
+    CHECK (width >= 5 && width <= 7, "the scripted size override didn't apply (%d px, expected 6)", width);
+    return true;
+}
+
 // B12: puppet warp (docs/player/spikes/we-lwe-gap-audit.md G06-G09), decoded from wallpaper64.exe 2.8.485: the MDL
 // loader GH 0x1402873f0, the layer clock GH 0x1401d6a00, the mixing GH 0x140228470 (normal GH 0x140223b90, additive
 // GH 0x140224390), the attachment transform GH 0x1401b5170
@@ -1896,6 +2035,61 @@ static bool puppet_warp_as_we () {
     CHECK (lit (24, 16) && !lit (5, 16) && !lit (16, 16), "MDLV0016 puppet isn't the skinned 4 px square at x 22..25");
     CHECK (lit (55, 16) && lit (56, 16) && !lit (47, 16) && !lit (51, 16), "normal + additive layers aren't at +8 (x 54..57)");
     CHECK (dark (55, 7) && !dark (47, 7), "the attached square doesn't follow the bone (x 54..57, rows 6..9)");
+    return true;
+}
+
+// the attachment matrix whole (GH 0x14024b530: local ← (bone · MDAT) · local): a 32 x 32 puppet at (32, 16) on a
+// 64 x 32 scene whose attachment "tip" is the MDAT matrix scale 2 on the bone (bind pose); a black 4 x 4 square pinned
+// to it at "0 4 0" sits 2 · 4 = 8 px up and is 8 px wide: x 28..35, rows 4..11. Unpatched: only the attachment's
+// offset and z turn were kept, so the square was 4 px wide 4 px up (x 30..33, rows 10..13)
+static bool attachment_matrix_is_whole () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter b;
+    b.out = puppet_mesh (23);
+    MdlWriter attach;
+    attach.u16 (1).u16 (0).str ("tip");
+    for (int i = 0; i < 16; i++) {
+        attach.f32 (i == 15 ? 1.0f : i % 5 == 0 ? 2.0f : 0.0f);
+    }
+    b.section ("MDLS0004", puppet_skeleton (4)).section ("MDAT0001", attach.out)
+        .section ("MDLA0006", puppet_animations (6, { { 1, 0.0f } }));
+    const std::string objects
+        = "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false}]},"
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "\"origin\":\"0 4 0\",\"parent\":2,\"attachment\":\"tip\"}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pb.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pb.mdl\"}\n");
+    write_file (dir + "/models/pb.mdl", b.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pb.json", "models/pb.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    auto dark = [&] (int x, int y) {
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        read_pixel (rig.fbo, x, y, px);
+        return px[2] < 64;
+    };
+    std::string column;
+    for (int y = 0; y < 16; y++) {
+        column += dark (32, y) ? '#' : '.';
+    }
+    std::string row;
+    for (int x = 24; x < 40; x++) {
+        row += dark (x, 8) ? '#' : '.';
+    }
+    printf ("    x 32 rows 0..15: %s; row 8 x 24..39: %s\n", column.c_str (), row.c_str ());
+    CHECK (dark (28, 5) && dark (35, 10) && !dark (31, 13) && !dark (27, 8) && !dark (36, 8),
+           "the attached square isn't the 8 px square 8 px up (x 28..35, rows 4..11)");
     return true;
 }
 
@@ -2891,6 +3085,40 @@ static bool usertexture_reads_its_property () {
     return true;
 }
 
+// a slot WE leaves to the pass is no missing asset (Leftovers; the health report's 25 in 3516106265 and 3042865984):
+// a sampler annotated "default":"" names no file, and a usertexture naming a `usershortcut` property (an app
+// shortcut's icon, GH 0x140184980) with none picked keeps the slot's texture. Unpatched: "materials/.tex" and
+// "materials/shortcut.tex" were looked up and reported missing. A "Text" label property (3319542538) is a label like
+// "text" (unpatched: "unsupported user property type Text")
+static bool unset_slots_are_not_missing () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1", b9_object (1, 16),
+        "\"shortcut\":{\"type\":\"usershortcut\",\"value\":\"\",\"text\":\"s\"},\"label\":{\"type\":\"Text\",\"text\":\"a label\"}");
+    b9_layer (dir, "uniform sampler2D g_Texture1; // {\"default\":\"\",\"label\":\"t\"}\n",
+              "gl_FragColor = vec4(texSample2D(g_Texture1, vec2(0.5, 0.5)).rgb, 1.0);");
+    write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                            "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/black\",\"util/white\"],"
+                                            "\"usertextures\":[null,\"shortcut\"]}]}\n");
+    const std::string path = dir + "/health.jsonl";
+    setenv ("WPENGINE_HEALTH", path.c_str (), 1);
+    ScriptRig rig;
+    const bool opened = rig.open (dir);
+    unsetenv ("WPENGINE_HEALTH");
+    CHECK (opened, "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto lines = health_lines (path);
+    const auto px = b9_pixel (rig);
+    const std::string* missing = health_find (lines, { "\"ev\":\"missing_asset\"" });
+    printf ("    g_Texture1 %d %d %d; missing assets: %s\n", px[0], px[1], px[2], missing ? missing->c_str () : "none");
+    CHECK (px[0] > 250 && px[1] > 250 && px[2] > 250, "the slot lost its texture (%d %d %d)", px[0], px[1], px[2]);
+    CHECK (missing == nullptr, "reported missing: %s", missing->c_str ());
+    const std::string* unsupported = health_find (lines, { "\"ev\":\"unsupported\"" });
+    CHECK (unsupported == nullptr, "a \"Text\" label property is reported: %s", unsupported->c_str ());
+    return true;
+}
+
 // an effect pass of the E41 test: the previous output with channel `ch` raised to 1
 static void e41_effect (const std::string& dir, const std::string& name, const char* ch) {
     mkdir ((dir + "/effects").c_str (), 0755);
@@ -3431,6 +3659,35 @@ static bool script_plays_a_keyframe_animation () {
     printf ("    after %d ticks: played %d, paused %d\n", rig.frames, played, paused);
     CHECK (near (played, 0), "the played fade didn't reach 0: r=%d", played);
     CHECK (near (paused, 0.75 * 255), "the paused fade moved: r=%d", paused);
+    return true;
+}
+
+
+// a timeline with `options.parent.key` runs on its sibling's clock (Leftovers, B2's left list: 5 library scenes —
+// 3163060610's scripted Radius drives Size and opacity): square 1's alpha fade follows its paused origin timeline
+// and stays at its first key, square 2's follows a playing one and ends (unpatched: both faded out on their own)
+static bool animation_follows_its_parent () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string fade = "\"c0\":[" + key (0, 0.75) + "," + key (10, 0) + "]";
+    auto origin = [] (int x, bool paused) {
+        const std::string still = "\"c0\":[" + key (0, x) + "," + key (10, x) + "]";
+        return animated ("origin", "\"" + std::to_string (x) + " 16 0\"", still,
+                         std::string ("\"fps\":30,\"length\":10,\"mode\":\"single\"") + (paused ? ",\"startpaused\":true" : "")
+                             + ",\"children\":[{\"key\":\"alpha\"}]");
+    };
+    const std::string child = animated ("alpha", "1.0", fade, "\"fps\":30,\"length\":10,\"mode\":\"single\",\"parent\":{\"key\":\"origin\"}");
+    const std::string dir = script_scene (white_square (1, origin (4, true) + "," + child) + "," + white_square (2, origin (14, false) + "," + child));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 20) {
+        rig.step ();
+    }
+    const int paused = red_at (rig, 4), played = red_at (rig, 14);
+    printf ("    after %d ticks: fade under a paused parent %d, under a playing one %d\n", rig.frames, paused, played);
+    CHECK (near (paused, 0.75 * 255), "the child of a paused timeline moved: r=%d", paused);
+    CHECK (near (played, 0), "the child of a playing timeline didn't end: r=%d", played);
     return true;
 }
 
@@ -4890,6 +5147,23 @@ static bool text_lays_out_like_we () {
     return true;
 }
 
+// text is shaped as WE shapes it, with HarfBuzz (Leftovers): NotoSans kerns A-V by -40/1000 em in GPOS only (no kern
+// table), so "AVAVAVAV" (7 kerned pairs) is narrower than "AAAAVVVV" (1) by ~6 x 40/1000 x 83 px at 20 pt; unpatched
+// (FreeType's kern table) both are as wide
+static bool text_shapes_with_harfbuzz () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    InkBox kerned, apart;
+    CHECK (one_text (text_object (1, "AVAVAVAV", "\"pointsize\":20,\"origin\":\"256 64 0\""), kerned, 512, 128), "load failed");
+    CHECK (one_text (text_object (1, "AAAAVVVV", "\"pointsize\":20,\"origin\":\"256 64 0\""), apart, 512, 128), "load failed");
+    printf ("    20 pt \"AVAVAVAV\" %d px wide, \"AAAAVVVV\" %d (GPOS: ~20 px apart)\n", kerned.width (), apart.width ());
+    CHECK (kerned.count > 0 && apart.count > 0, "nothing drawn");
+    CHECK (apart.width () - kerned.width () >= 14 && apart.width () - kerned.width () <= 26,
+           "GPOS kerning: AVAVAVAV %d px vs AAAAVVVV %d (expected ~20 px narrower)", kerned.width (), apart.width ());
+    return true;
+}
+
 // a text layer takes effects (here one turning it red, keeping its alpha) and its colour (E34/T1; unpatched: drawn
 // flat by its own shader, white)
 static bool text_takes_effects_and_colour () {
@@ -5039,52 +5313,78 @@ static bool hdr_bloom_is_wes_chain () {
 
 // an effect FBO is the format it names: rg88 keeps red and green only (blue reads 0), rgba_backbuffer is half float
 // in an HDR scene (2.0 · 0.25 = 0.5) and 8-bit otherwise (clipped: 1 · 0.25). Unpatched: every FBO was RGBA8
+// a white square through an rg88 effect FBO (`rg`, x 16) and one through an rgba_backbuffer FBO of 2.0 read · 0.25
+// (`wide`, x 48), in a scene with `general` (bloom on with strength 0 leaves the picture as it is)
+static bool b13_fbo_run (const std::string& general, std::array<unsigned char, 4>& rg, std::array<unsigned char, 4>& wide) {
+    const std::string dir = camera_scene (general,
+        b7_object (1, "b13base", 16, "8 8", ",\"effects\":[{\"id\":2,\"name\":\"rg\",\"file\":\"effects/b13rg/effect.json\",\"visible\":true}]")
+            + "," + b7_object (3, "b13base", 48, "8 8",
+                               ",\"effects\":[{\"id\":4,\"name\":\"w\",\"file\":\"effects/b13wide/effect.json\",\"visible\":true}]"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b13base", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    const std::string sampler = "uniform sampler2D g_Texture0;\n";
+    for (const auto& f : { b7_layer (dir, "b13put", "gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13big", "gl_FragColor = vec4(2.0, 0.0, 0.0, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13get", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);", "", true, sampler),
+                           b7_layer (dir, "b13qtr", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb * 0.25, 1.0);", "", true,
+                                     sampler) }) {
+        rig.extra.insert (rig.extra.end (), f.begin (), f.end ());
+    }
+    mkdir ((dir + "/effects").c_str (), 0755);
+    const auto effect = [&dir, &rig] (const std::string& name, const std::string& format, const std::string& put, const std::string& get) {
+        mkdir ((dir + "/effects/" + name).c_str (), 0755);
+        write_file (dir + "/effects/" + name + "/effect.json",
+                    "{\"name\":\"" + name + "\",\"fbos\":[{\"name\":\"_x\",\"format\":\"" + format + "\",\"scale\":1}],\"passes\":["
+                    "{\"material\":\"materials/" + put + ".json\",\"target\":\"_x\"},"
+                    "{\"material\":\"materials/" + get + ".json\",\"bind\":[{\"name\":\"_x\",\"index\":0}]}]}\n");
+        rig.extra.push_back ("effects/" + name + "/effect.json");
+    };
+    effect ("b13rg", "rg88", "b13put", "b13get");
+    effect ("b13wide", "rgba_backbuffer", "b13big", "b13qtr");
+    if (!rig.open (dir)) {
+        return false;
+    }
+    rig.step ();
+    rg = pixel_at (rig, 16);
+    wide = pixel_at (rig, 48);
+    return true;
+}
+
+static const char* const kB13Bloom0 = ",\"bloom\":true,\"bloomstrength\":0,\"bloomhdrstrength\":0";
+
 static bool fbo_formats_as_written () {
     if (!script_tests_can_run ()) {
         return true;
     }
-    auto run = [] (bool hdr, std::array<unsigned char, 4>& rg, std::array<unsigned char, 4>& wide) {
-        const std::string dir = camera_scene (hdr ? "\"hdr\":true" : "\"hdr\":false",
-            b7_object (1, "b13base", 16, "8 8", ",\"effects\":[{\"id\":2,\"name\":\"rg\",\"file\":\"effects/b13rg/effect.json\",\"visible\":true}]")
-                + "," + b7_object (3, "b13base", 48, "8 8",
-                                   ",\"effects\":[{\"id\":4,\"name\":\"w\",\"file\":\"effects/b13wide/effect.json\",\"visible\":true}]"));
-        ScriptRig rig;
-        rig.extra = b7_layer (dir, "b13base", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
-        const std::string sampler = "uniform sampler2D g_Texture0;\n";
-        for (const auto& f : { b7_layer (dir, "b13put", "gl_FragColor = vec4(0.2, 0.4, 0.6, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13big", "gl_FragColor = vec4(2.0, 0.0, 0.0, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13get", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);", "", true, sampler),
-                               b7_layer (dir, "b13qtr", "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb * 0.25, 1.0);", "", true,
-                                         sampler) }) {
-            rig.extra.insert (rig.extra.end (), f.begin (), f.end ());
-        }
-        mkdir ((dir + "/effects").c_str (), 0755);
-        const auto effect = [&dir, &rig] (const std::string& name, const std::string& format, const std::string& put, const std::string& get) {
-            mkdir ((dir + "/effects/" + name).c_str (), 0755);
-            write_file (dir + "/effects/" + name + "/effect.json",
-                        "{\"name\":\"" + name + "\",\"fbos\":[{\"name\":\"_x\",\"format\":\"" + format + "\",\"scale\":1}],\"passes\":["
-                        "{\"material\":\"materials/" + put + ".json\",\"target\":\"_x\"},"
-                        "{\"material\":\"materials/" + get + ".json\",\"bind\":[{\"name\":\"_x\",\"index\":0}]}]}\n");
-            rig.extra.push_back ("effects/" + name + "/effect.json");
-        };
-        effect ("b13rg", "rg88", "b13put", "b13get");
-        effect ("b13wide", "rgba_backbuffer", "b13big", "b13qtr");
-        if (!rig.open (dir)) {
-            return false;
-        }
-        rig.step ();
-        rg = pixel_at (rig, 16);
-        wide = pixel_at (rig, 48);
-        return true;
-    };
     std::array<unsigned char, 4> rgH {}, wideH {}, rgL {}, wideL {};
-    CHECK (run (true, rgH, wideH), "load/build of the HDR scene failed");
-    CHECK (run (false, rgL, wideL), "load/build of the LDR scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":true") + kB13Bloom0, rgH, wideH), "load/build of the HDR scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":false") + kB13Bloom0, rgL, wideL), "load/build of the LDR scene failed");
     printf ("    rg88 FBO of (0.2 0.4 0.6): %d %d %d (want 51 102 0); rgba_backbuffer of 2.0, read · 0.25: HDR %d (want 127), "
             "LDR %d (want 64)\n", rgL[0], rgL[1], rgL[2], wideH[0], wideL[0]);
     CHECK (rgb_near (rgL, 51, 102, 0) && rgb_near (rgH, 51, 102, 0), "the rg88 FBO isn't red-green only (%d %d %d)", rgL[0], rgL[1], rgL[2]);
     CHECK (near (wideH[0], 127, 3), "rgba_backbuffer isn't half float in an HDR scene (r=%d)", wideH[0]);
     CHECK (near (wideL[0], 64, 3), "rgba_backbuffer isn't 8-bit in an LDR scene (r=%d)", wideL[0]);
+    return true;
+}
+
+// WE renders a scene HDR only when scene.json's general has `bloom` and `hdr` both the literal true (its project
+// classifier GH 0x14013f860 tests rapidjson's bool flag on each, then the "postprocessing" setting "ultra" sets the
+// renderer's 0x2000). hdr without bloom (2511663284), or with bloom bound to a user property, is an LDR scene: the
+// rgba_backbuffer FBO is 8-bit (2.0 clipped, · 0.25 = 64). Unpatched: `hdr` alone made it half float (127)
+static bool hdr_needs_literal_bloom () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::array<unsigned char, 4> rg {}, noBloom {}, userBloom {}, both {};
+    CHECK (b13_fbo_run ("\"hdr\":true,\"bloom\":false", rg, noBloom), "load/build of the hdr-only scene failed");
+    CHECK (b13_fbo_run ("\"hdr\":true,\"bloom\":{\"user\":\"b\",\"value\":true},\"bloomstrength\":0", rg, userBloom),
+           "load/build of the user-bloom scene failed");
+    CHECK (b13_fbo_run (std::string ("\"hdr\":true") + kB13Bloom0, rg, both), "load/build of the hdr+bloom scene failed");
+    printf ("    rgba_backbuffer of 2.0, read · 0.25: hdr + bloom false %d (want 64), hdr + user bloom %d (want 64), "
+            "hdr + bloom true %d (want 127)\n", noBloom[0], userBloom[0], both[0]);
+    CHECK (near (noBloom[0], 64, 3), "hdr without bloom rendered HDR (r=%d)", noBloom[0]);
+    CHECK (near (userBloom[0], 64, 3), "hdr with a user-bound bloom rendered HDR (r=%d)", userBloom[0]);
+    CHECK (near (both[0], 127, 3), "hdr with bloom true didn't render HDR (r=%d)", both[0]);
     return true;
 }
 
@@ -5409,10 +5709,10 @@ static bool shadow_occludes_a_lit_point () {
 }
 
 // a TEXV0005 / TEXB0003 ARGB8888 texture, `w` x `h`, no interpolation, clamped
-static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba) {
+static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba, uint32_t flags = 1 | 2) {
     MdlWriter t;
     t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
-    t.u32 (0).u32 (1 | 2).u32 (w).u32 (h).u32 (w).u32 (h).u32 (0);
+    t.u32 (0).u32 (flags).u32 (w).u32 (h).u32 (w).u32 (h).u32 (0);
     t.out += std::string ("TEXB0003", 8) + '\0';
     t.u32 (1).u32 (0xffffffff);
     t.u32 (1).u32 (w).u32 (h).u32 (0).u32 (w * h * 4).u32 (w * h * 4);
@@ -5420,6 +5720,74 @@ static std::string f1_texture (int w, int h, const std::vector<uint32_t>& rgba) 
         t.u8 (px >> 24).u8 ((px >> 16) & 0xff).u8 ((px >> 8) & 0xff).u8 (px & 0xff);
     }
     return t.out;
+}
+
+// g_LayerModelMatrix is the layer's matrix in WE's world (uniform 0x19: GH 0x14010a0e0 reads ctx +0xa30, which
+// GH 0x1402176a0 fills from the layer's own draw matrix for its effect passes): an effect on a layer scaled 2 x 3 and
+// turned reads its column lengths as 2 and 3 (frame_builder's FIXSCALE, 3516106265). Unpatched: not registered, zero
+static bool layer_model_matrix_is_fed () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"bloom\":false",
+        b7_object (1, "lmbase", 32, "8 8", ",\"scale\":\"2 3 1\",\"angles\":\"0 0 0.5\","
+                                          "\"effects\":[{\"id\":2,\"name\":\"lm\",\"file\":\"effects/lm/effect.json\",\"visible\":true}]"));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "lmbase", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/lm").c_str (), 0755);
+    auto files = b7_layer (dir, "lm",
+                           "gl_FragColor = vec4(length(vec2(g_LayerModelMatrix[0][0], g_LayerModelMatrix[0][1])) / 4.0, "
+                           "length(vec2(g_LayerModelMatrix[1][0], g_LayerModelMatrix[1][1])) / 4.0, 0.0, 1.0);",
+                           "", true, "uniform sampler2D g_Texture0;\nuniform mat4 g_LayerModelMatrix;\n");
+    unlink ((dir + "/models/lm.json").c_str ());
+    files.pop_back ();
+    write_file (dir + "/effects/lm/effect.json", "{\"name\":\"lm\",\"passes\":[{\"material\":\"materials/lm.json\"}]}\n");
+    files.push_back ("effects/lm/effect.json");
+    rig.extra.insert (rig.extra.end (), files.begin (), files.end ());
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    const auto px = pixel_at (rig, 32);
+    printf ("    scale 2 x 3, turned 0.5: column lengths / 4 read %d %d (want 127 191)\n", px[0], px[1]);
+    CHECK (near (px[0], 127, 3) && near (px[1], 191, 3), "g_LayerModelMatrix isn't the layer's matrix (%d %d)", px[0], px[1]);
+    return true;
+}
+
+// a sampler's "components" combos follow the bound texture's flags 0x100000 << i (WE's shader preamble GH 0x14019b550;
+// resourcecompiler64.exe sets the bit for each channel built from a component image): a mask with 0x800000 (the alpha
+// component, as 3509243656's PBR masks) defines the fourth component's combo, one with 0xa00000 (3477054430's) the
+// second and fourth, one without neither. Unpatched: none ever defined (the flags were ignored)
+static bool texture_components_define_combos () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (uint32_t flags, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene ("\"bloom\":false", b7_object (1, "c1", 16, "8 8"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "c1", "gl_FragColor = vec4(C_G > 0 ? 1.0 : 0.0, 0.0, C_A > 0 ? 1.0 : 0.0, 1.0);",
+                              "[\"util/white\",\"c1mask\"]", true,
+                              "uniform sampler2D g_Texture1; // {\"combo\":\"C1MASK\",\"components\":[{\"combo\":\"C_R\"},"
+                              "{\"combo\":\"C_G\"},{\"combo\":\"C_B\"},{\"combo\":\"C_A\"}]}\n"
+                              "#ifndef C_G\n#define C_G 0\n#endif\n#ifndef C_A\n#define C_A 0\n#endif\n");
+        write_file (dir + "/materials/c1mask.tex", f1_texture (1, 1, { 0xffffffff }, flags));
+        rig.extra.push_back ("materials/c1mask.tex");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 16);
+        return true;
+    };
+    std::array<unsigned char, 4> plain {}, alpha {}, both {};
+    CHECK (run (1 | 2, plain), "load/build with the plain mask failed");
+    CHECK (run (0x800002, alpha), "load/build with the 0x800000 mask failed");
+    CHECK (run (0xa00002, both), "load/build with the 0xa00000 mask failed");
+    printf ("    C_G / C_A as red / blue: flags 3 %d %d, 0x800002 %d %d, 0xa00002 %d %d\n", plain[0], plain[2], alpha[0], alpha[2],
+            both[0], both[2]);
+    CHECK (plain[0] < 10 && plain[2] < 10, "a mask without component bits defined a component combo (%d %d)", plain[0], plain[2]);
+    CHECK (alpha[0] < 10 && alpha[2] > 245, "0x800000 didn't define the alpha component's combo alone (%d %d)", alpha[0], alpha[2]);
+    CHECK (both[0] > 245 && both[2] > 245, "0xa00000 didn't define the green and alpha components' combos (%d %d)", both[0], both[2]);
+    return true;
 }
 
 // a spot with usecookie projects its `cookie` texture (GH 0x140282140 loads it, default cookie/flashlight1; the
@@ -6254,18 +6622,21 @@ int main (int argc, char** argv) {
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
+    run ("unset_slots_are_not_missing", unset_slots_are_not_missing);
     run ("effect_visible_is_live", effect_visible_is_live);
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);
     run ("composite_a_is_what_the_last_pass_reads", composite_a_is_what_the_last_pass_reads);
     run ("compose_layer_draws_its_children", compose_layer_draws_its_children);
     run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
     run ("fbo_formats_as_written", fbo_formats_as_written);
+    run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
     run ("text_follows_its_parent_and_turns", text_follows_its_parent_and_turns);
     run ("text_lays_out_like_we", text_lays_out_like_we);
+    run ("text_shapes_with_harfbuzz", text_shapes_with_harfbuzz);
     run ("text_takes_effects_and_colour", text_takes_effects_and_colour);
     run ("colour_property_whole_numbers", colour_property_whole_numbers);
     run ("text_wraps_and_limits", text_wraps_and_limits);
@@ -6278,12 +6649,16 @@ int main (int argc, char** argv) {
     run ("model_skins_and_morphs", model_skins_and_morphs);
     run ("shadow_occludes_a_lit_point", shadow_occludes_a_lit_point);
     run ("cookie_projects_its_texture", cookie_projects_its_texture);
+    run ("texture_components_define_combos", texture_components_define_combos);
+    run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
+    run ("attachment_matrix_is_whole", attachment_matrix_is_whole);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);
     run ("media_events_reach_scripts", media_events_reach_scripts);
     run ("effect_script_this_object_is_the_effect", effect_script_this_object_is_the_effect);
     run ("script_plays_a_keyframe_animation", script_plays_a_keyframe_animation);
+    run ("animation_follows_its_parent", animation_follows_its_parent);
     run ("cursor_events_reach_layers", cursor_events_reach_layers);
     run ("local_storage_persists", local_storage_persists);
     run ("script_controls_a_sound", script_controls_a_sound);
@@ -6312,6 +6687,9 @@ int main (int argc, char** argv) {
     run ("camera_paths_and_fade", camera_paths_and_fade);
     run ("transparent_sort_takes_sortorder", transparent_sort_takes_sortorder);
     run ("particle_stock_motion_operators", particle_stock_motion_operators);
+    run ("particle_world_space_stays", particle_world_space_stays);
+    run ("rope_spline_tangent_factor", rope_spline_tangent_factor);
+    run ("particle_override_scripts_run", particle_override_scripts_run);
     run ("particle_stock_collisions", particle_stock_collisions);
     run ("particle_stock_initializers", particle_stock_initializers);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);

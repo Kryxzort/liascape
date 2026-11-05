@@ -1,0 +1,107 @@
+From f50bc8258688f972249992742b0a5c78e420a12c Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 02:56:45 +0530
+Subject: [PATCH 100/102] render: feed g_LayerModelMatrix, the layer's matrix
+ in WE's world
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE's uniform 0x19 (GH 0x14010a0e0) reads the render context's +0xa30. GH 0x1402176a0 fills it, for
+a layer's effect passes, from image +0x384: the matrix the layer's own draw (GH 0x140214b50, the
+object's vtable +0x80) pushes as its model matrix, T (origin) · Rz · Ry · Rx · S with its parents'.
+LWE never registered it, so it read zero: 3516106265's frame_builder takes the layer's scale from
+its columns (FIXSCALE, the default) and collapsed to a point. It is now CScene::worldMatrixOf of
+the layer, every frame.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Decode leftovers result" (E11)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp        | 3 +++
+ src/core/WallpaperEngine/Render/Objects/CImage.h          | 2 ++
+ src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp | 6 ++++++
+ src/core/WallpaperEngine/Render/Objects/Effects/CPass.h   | 4 ++++
+ 4 files changed, 15 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 41e1230..5d8af02 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1328,6 +1328,7 @@ void CImage::setupPasses () {
+ 
+ 
+ 	pass->setModelMatrix (&this->m_modelMatrix);
++	pass->setLayerModelMatrix (&this->m_layerModelMatrix);
+ 	pass->setViewProjectionMatrix (&this->m_viewProjectionMatrix);
+ 
+ 	writesToTarget = this->configurePassTarget (pass, drawTo, asInput, effectInput, inTargetEffectSequence);
+@@ -1812,6 +1813,8 @@ void CImage::updateWorldPosition () {
+ 
+ void CImage::updateScreenSpacePosition () {
+     const ResolvedTransform transform = this->updateGeometryBuffers ();
++    // g_LayerModelMatrix: WE's world matrix of the layer this frame (origin, angles, scale and the parents')
++    this->m_layerModelMatrix = this->getScene ().worldMatrixOf (this->getImage ());
+ 
+     if (this->isWorldPlaced ()) {
+ 	this->updateWorldPosition ();
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 382312a..fa3235a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -255,6 +255,8 @@ private:
+     glm::mat4 m_modelViewProjectionCopyInverse = {};
+ 
+     glm::mat4 m_modelMatrix = {};
++    /** g_LayerModelMatrix (CPass::setLayerModelMatrix) */
++    glm::mat4 m_layerModelMatrix = glm::mat4 (1.0f);
+     glm::mat4 m_viewProjectionMatrix = {};
+ 
+     /**
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 6fcd984..5d0d794 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -638,6 +638,8 @@ void CPass::setModelViewProjectionMatrixInverse (const glm::mat4* projection) {
+ 
+ void CPass::setModelMatrix (const glm::mat4* model) { this->m_modelMatrix = model; }
+ 
++void CPass::setLayerModelMatrix (const glm::mat4* layerModel) { this->m_layerModelMatrix = layerModel; }
++
+ void CPass::setViewProjectionMatrix (const glm::mat4* viewProjection) { this->m_viewProjectionMatrix = viewProjection; }
+ 
+ void CPass::setBlendingMode (BlendingMode blendingmode) { this->m_blendingmode = blendingmode; }
+@@ -1076,6 +1078,10 @@ void CPass::setupUniforms () {
+     this->addUniform ("g_EffectModelViewProjectionMatrix", &this->m_modelViewProjectionMatrix);
+     this->addUniform ("g_ModelMatrix", &this->m_modelMatrix);
+     this->addUniform ("g_EffectModelMatrix", &this->m_modelMatrix);
++    // WE's uniform 0x19 (GH 0x14010a0e0 reads ctx +0xa30): the layer's world matrix, T · Rz · Ry · Rx · S with its
++    // parents', which the layer's draw (GH 0x140214b50, vtable +0x80) stores at image +0x384 and GH 0x1402176a0 copies
++    // for its effect passes. frame_builder (3516106265) reads the layer's scale from its columns. It was unregistered
++    this->addUniform ("g_LayerModelMatrix", &this->m_layerModelMatrix);
+     this->addUniform ("g_NormalModelMatrix", glm::identity<glm::mat3> ());
+     this->addUniform ("g_ViewProjectionMatrix", &this->m_viewProjectionMatrix);
+     this->addUniform ("g_PointerPosition", scene.getMousePosition ());
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 4f5cd18..4607163 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -46,6 +46,8 @@ public:
+     void setModelViewProjectionMatrix (const glm::mat4* projection);
+     void setModelViewProjectionMatrixInverse (const glm::mat4* projection);
+     void setModelMatrix (const glm::mat4* model);
++    /** g_LayerModelMatrix: the layer's own matrix in WE's world (GH 0x1402176a0 copies image +0x384 to ctx +0xa30) */
++    void setLayerModelMatrix (const glm::mat4* layerModel);
+     void setViewProjectionMatrix (const glm::mat4* viewProjection);
+     void setBlendingMode (BlendingMode blendingmode);
+     [[nodiscard]] BlendingMode getBlendingMode () const;
+@@ -203,6 +205,8 @@ private:
+     const glm::mat4* m_modelViewProjectionMatrix;
+     const glm::mat4* m_modelViewProjectionMatrixInverse;
+     const glm::mat4* m_modelMatrix;
++    const glm::mat4* m_layerModelMatrix = &kIdentityMatrix;
++    static inline const glm::mat4 kIdentityMatrix = glm::mat4 (1.0f);
+     const glm::mat4* m_viewProjectionMatrix;
+ 
+     /**

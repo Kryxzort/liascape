@@ -1,0 +1,100 @@
+From d0e0b4ab7a871527bb313e657fd9d4da6b1a23cc Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 02:44:30 +0530
+Subject: [PATCH 098/102] render: a scene renders HDR only with bloom and hdr
+ both literally true, as WE's gate
+
+WE's project classifier (GH 0x14013f860) sets the renderer's HDR flag 0x2000 when scene.json's
+general has `bloom` and `hdr` (string 0x1404c9650) both present with rapidjson's bool flag
+(value +0xe & 8) and true, and the "postprocessing" setting is "ultra" ("displayhdr": 0x6000).
+A user-property object or a number doesn't count. LWE rendered every `hdr` scene HDR: 2511663284
+(hdr true, bloom false) gets RGBA8 targets again, as in WE. WPENGINE_HDR=0 still stands in for a
+post-processing setting below Ultra.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Decode leftovers result" (B13's inferred gate)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Data/Model/Wallpaper.h           | 6 ++++++
+ src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp | 7 +++++++
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp     | 7 +++++--
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.h       | 4 ++--
+ 4 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Wallpaper.h b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+index f7e5c65..40505d3 100644
+--- a/src/core/WallpaperEngine/Data/Model/Wallpaper.h
++++ b/src/core/WallpaperEngine/Data/Model/Wallpaper.h
+@@ -94,6 +94,12 @@ struct SceneData {
+ 	    UserSettingUniquePtr hdrFeather;
+ 	    UserSettingUniquePtr hdrScatter;
+ 	    UserSettingUniquePtr hdrIterations;
++	    /**
++	     * WE renders the scene HDR (renderer flag 0x2000) only when scene.json's `general.bloom` and `general.hdr` are
++	     * both the JSON literal true (rapidjson's bool flag: a user-property object or a number doesn't count) and the
++	     * "postprocessing" setting is "ultra" (GH 0x14013f860); read here from the file as written
++	     */
++	    bool hdrGate = false;
+ 	} bloom;
+ 	/**
+ 	 * Parallax effect configuration
+diff --git a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+index 18342a2..087e71d 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/WallpaperParser.cpp
+@@ -138,6 +138,12 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+     const JSON projection = perspective ? JSON::object () : *orthogonal;
+     const auto objects = scene.require ("objects", "Scenes must have an objects section");
+     const auto& properties = project.properties;
++    // WE's project classifier (GH 0x14013f860) tests scene.json's general for literal booleans: `bloom` and `hdr` both
++    // true (and its post-processing at ultra) set the renderer's HDR flag 0x2000
++    const auto literalTrue = [&general] (const char* key) {
++	const auto it = general.find (key);
++	return it != general.end () && it->is_boolean () && it->get<bool> ();
++    };
+ 
+     // TODO: FIND IF THESE DEFAULTS ARE SENSIBLE OR NOT AND PERFORM PROPER VALIDATION WHEN CAMERA PREVIEW AND CAMERA
+     // PARALLAX ARE PRESENT
+@@ -173,6 +179,7 @@ SceneUniquePtr WallpaperParser::parseScene (const JSON& file, Project& project)
+                     .hdrFeather = general.user ("bloomhdrfeather", properties, 0.1f),
+                     .hdrScatter = general.user ("bloomhdrscatter", properties, 1.619f),
+                     .hdrIterations = general.user ("bloomhdriterations", properties, 8),
++                    .hdrGate = literalTrue ("bloom") && literalTrue ("hdr"),
+                 },
+                 .parallax = {
+                     .enabled = general.user ("cameraparallax", properties, false),
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 208910b..4871f65 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -98,9 +98,12 @@ CScene::CScene (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     // WE starts the smoothed parallax position at the centre (GH 0x1401b6c60), g_ParallaxPosition at 0.5 0.5
+     this->m_parallaxPosition = { width / 2.0f, height / 2.0f };
+ 
+-    // an HDR scene renders into half float targets (WPENGINE_HDR=0: as WE below Ultra post-processing, LDR)
++    // an HDR scene renders into half float targets: WE's renderer flag 0x2000, set by its project classifier
++    // (GH 0x14013f860) only when scene.json's general has `bloom` and `hdr` both literally true and the
++    // "postprocessing" setting is "ultra" ("displayhdr" adds 0x4000). An hdr scene without bloom renders LDR in WE.
++    // LWE has no quality setting: Ultra, unless WPENGINE_HDR=0 (as WE below Ultra, LDR)
+     const char* hdrSetting = std::getenv ("WPENGINE_HDR");
+-    this->m_hdr = scene->camera.bloom.hdr->value->getBool ()
++    this->m_hdr = scene->camera.bloom.hdrGate
+ 	&& !(hdrSetting != nullptr && std::string_view (hdrSetting) == "0");
+     this->m_sceneFormat = this->m_hdr ? TextureFormat_RGBA16161616f : TextureFormat_ARGB8888;
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 2fab9e2..fce0c49 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -202,8 +202,8 @@ public:
+     /** The scene's scripts call `getEffect`: every effect is built, a script may show it (SceneScript IEffect.visible) */
+     [[nodiscard]] bool scriptsReachEffects () const;
+     /**
+-     * WE renders this scene HDR: `general.hdr`, with WE's post-processing at Ultra (renderer flag 0x2000, set from the
+-     * "postprocessing" setting "ultra", GH 0x14013f860). LWE has no quality setting: on unless WPENGINE_HDR=0.
++     * WE renders this scene HDR: `general.bloom` and `general.hdr` both literally true in scene.json, with WE's
++     * post-processing at Ultra (renderer flag 0x2000, GH 0x14013f860). LWE has no quality setting: on unless WPENGINE_HDR=0.
+      * Its targets are half float, its bloom is the HDR chain
+      */
+     [[nodiscard]] bool rendersHDR () const;

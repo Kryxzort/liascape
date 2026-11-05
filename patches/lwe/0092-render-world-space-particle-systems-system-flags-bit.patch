@@ -1,0 +1,109 @@
+From aaba3a76b772993145480ef8bafe94fcb861bbdc Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 01:38:19 +0530
+Subject: [PATCH 092/102] render: world-space particle systems (system flags
+ bit 0)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The particle editor names the system's flags (wallpaperui.exe's list: worldspace beside the
+disable-colour / -lifetime / -count / -speed / -size overrides, which are 8 / 0x40 / 0x20 / 0x10 /
+0x80; bit 1 is the sheet blend's opt-out, bit 2 perspective): bit 0 is "Worldspace", set on 16
+library scenes' systems. Its particles stay where they were emitted in the scene when the system
+moves, turns or scales; 3104056709's "zzz" follows the cursor layer by script and now leaves its
+trail behind instead of dragging it along.
+
+Inferred (the simulation's world-space branch wasn't read): LWE keeps the particles in the system's
+space and carries them across each change of its transform (positions by M_now⁻¹ · M_last,
+velocity and acceleration by its linear part); the parallax, a view offset, isn't part of it.
+Children keep their parent's space.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Leftovers result" (P39, B11's left list)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/CParticle.cpp              | 38 +++++++++++++++++++
+ .../Render/Objects/CParticle.h                |  5 +++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index db1930d..97c247e 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -675,6 +675,27 @@ void CParticle::update (float dt) {
+ 	refreshTransform ();
+     }
+ 
++    // a world-space system (system flags bit 0, the editor's "Worldspace" — wallpaperui.exe lists it among the system's
++    // flags: disable colour / lifetime / count / speed / size overrides are 8 / 0x40 / 0x20 / 0x10 / 0x80, bit 1 the
++    // sheet blend, bit 2 perspective): its particles stay where they were emitted in the scene when the system moves,
++    // turns or scales (a pointer-following emitter leaves a trail). Inferred: LWE keeps them in the system's space and
++    // carries them across each change of its transform (parallax, a view effect, excluded)
++    if (m_parentSystem == nullptr && (m_particle.flags & 1) != 0) {
++	const glm::mat4 now = this->systemMatrix ();
++	if (m_worldSpaceSeen && now != m_worldSpaceLast) {
++	    const glm::mat4 carry = glm::inverse (now) * m_worldSpaceLast;
++	    const glm::mat3 linear (carry);
++	    for (uint32_t i = 0; i < m_particleCount; i++) {
++		auto& p = m_particles[i];
++		p.position = glm::vec3 (carry * glm::vec4 (p.position, 1.0f));
++		p.velocity = linear * p.velocity;
++		p.acceleration = linear * p.acceleration;
++	    }
++	}
++	m_worldSpaceLast = now;
++	m_worldSpaceSeen = true;
++    }
++
+     // the control points this step (GH 0x140251f70 → 0x1402504f0). An instanceoverride `controlpointN` replaces the
+     // offset unless the control point follows the pointer or has flags 0x10004; live, so a slider or script moves it
+     // (P10). A scene-space point (bit 1, not control point 0) is turned into the system's space by the inverse of
+@@ -2428,6 +2449,23 @@ const Object& CParticle::drawingObject () const {
+     return m_parentSystem != nullptr ? m_parentSystem->drawingObject () : this->getObject ();
+ }
+ 
++glm::mat4 CParticle::systemMatrix () const {
++    // updateMatrices' model matrix without the parallax
++    glm::vec3 angles = m_particle.angles->value->getVec3 ();
++    angles.z = m_resolvedAngle;
++    glm::mat4 m = glm::translate (glm::mat4 (1.0f), m_transformedOrigin);
++    m = glm::rotate (m, -angles.z, glm::vec3 (0, 0, 1));
++    m = glm::rotate (m, angles.y, glm::vec3 (0, 1, 0));
++    m = glm::rotate (m, -angles.x, glm::vec3 (1, 0, 0));
++    glm::vec3 scale = m_resolvedScale;
++    for (int i = 0; i < 3; i++) {
++	if (std::abs (scale[i]) < 1e-6f) {
++	    scale[i] = 1e-6f;
++	}
++    }
++    return glm::scale (m, scale);
++}
++
+ void CParticle::updateMatrices () {
+     if (m_parentSystem != nullptr) {
+ 	// a child is drawn in its parent's matrices (its particles are in the parent's space)
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.h b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+index 0b3ae50..8b87f94 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.h
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.h
+@@ -193,6 +193,8 @@ protected:
+     [[nodiscard]] bool childAlive () const;
+     void stopEmitters ();
+     /** from the scene's centred space to the system's: the inverse of its rotation and scale */
++    /** The system's model matrix without the parallax (world-space carry, flags bit 0) */
++    [[nodiscard]] glm::mat4 systemMatrix () const;
+     [[nodiscard]] glm::mat3 localFromScene () const;
+     /** the object whose target a system draws into (a child: its top-level system's) */
+     [[nodiscard]] const Object& drawingObject () const;
+@@ -393,6 +395,9 @@ private:
+     static constexpr int ROPE_FLOATS_PER_VERTEX = 26;
+ 
+     // Transformed origin (screen space to centered space conversion)
++    /** flags bit 0 (world space): the system's matrix at the last step */
++    glm::mat4 m_worldSpaceLast { 1.0f };
++    bool m_worldSpaceSeen = false;
+     glm::vec3 m_transformedOrigin { 0.0f };
+     glm::vec3 m_resolvedScale { 1.0f };
+     float m_resolvedAngle { 0.0f };

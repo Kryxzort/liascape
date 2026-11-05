@@ -1,0 +1,165 @@
+From 564634243f6a218253fc6e8161ef4e46f5e4fd6a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 02:52:27 +0530
+Subject: [PATCH 099/102] render: a sampler's components combos follow the
+ bound texture's channel flags, as WE's
+
+WE's shader preamble (GH 0x14019b550) defines, for every sampler bound to a texture, its
+"components"' i-th combo when the texture's flags have 0x100000 << i. resourcecompiler64.exe sets
+that bit for each channel it builds from a separate component image (or [flags], 0x100000 << channel
+at 0x140060f1c): the .tex flags 2^20..2^23. The stock PBRMASKS sampler names METALLIC_MAP,
+ROUGHNESS_MAP, REFLECTION_MAP, EMISSIVE_MAP. LWE ignored the bits: 3477054430's mask (0xa00000)
+lost its roughness and emission, 3509243656's four masks (0x800000) their emission.
+
+The format resolver now returns the bound texture's flags with its format.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Decode leftovers result" (.tex flags 2^21 / 2^23)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/Effects/CPass.cpp          | 15 +++++-----
+ .../Render/Objects/Effects/CPass.h            |  4 +--
+ .../Render/Shaders/ShaderUnit.cpp             | 28 ++++++++++++++++++-
+ .../Render/Shaders/ShaderUnit.h               | 13 +++++++--
+ 4 files changed, 47 insertions(+), 13 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 1f21b7f..6fcd984 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -706,7 +706,7 @@ GLuint CPass::compileShader (const char* shader, GLuint type) {
+     return shaderID;
+ }
+ 
+-int CPass::shaderFormatOf (int index, const std::string& defaultName) const {
++Render::Shaders::ResolvedTexture CPass::shaderFormatOf (int index, const std::string& defaultName) const {
+     // what setupTextureUniforms will bind at `index`, most important first: a bind, the effect's user / plain texture
+     // overrides, the pass's user / plain textures, the sampler's default
+     std::string name;
+@@ -726,7 +726,7 @@ int CPass::shaderFormatOf (int index, const std::string& defaultName) const {
+     };
+     if (const auto bind = this->m_binds.find (index); bind != this->m_binds.end ()) {
+ 	if (bind->second == "previous") {
+-	    return 0; // the chain's previous output: an RGBA target
++	    return {}; // the chain's previous output: an RGBA target
+ 	}
+ 	name = bind->second;
+     }
+@@ -738,7 +738,7 @@ int CPass::shaderFormatOf (int index, const std::string& defaultName) const {
+ 	name = defaultName;
+     }
+     if (name.empty ()) {
+-	return 0;
++	return {};
+     }
+     std::shared_ptr<const TextureProvider> texture = nullptr;
+     try {
+@@ -748,18 +748,19 @@ int CPass::shaderFormatOf (int index, const std::string& defaultName) const {
+ 	    texture = this->getContext ().resolveTexture (name);
+ 	}
+     } catch (const std::exception&) {
+-	return 0; // reported when it's bound
++	return {}; // reported when it's bound
+     }
+     if (texture == nullptr) {
+-	return 0;
++	return {};
+     }
++    const uint32_t flags = texture->getFlags ();
+     // a .tex holding a JPEG / PNG is decoded to RGBA8 (CTexture::setupInternalFormat)
+     if (const auto* tex = dynamic_cast<const CTexture*> (texture.get ());
+ 	tex != nullptr && tex->isFreeImage ()) {
+-	return 0;
++	return { 0, flags };
+     }
+     const auto format = texture->getFormat ();
+-    return format == TextureFormat_UNKNOWN ? 0 : static_cast<int> (format);
++    return { format == TextureFormat_UNKNOWN ? 0 : static_cast<int> (format), flags };
+ }
+ 
+ void CPass::setupShaders () {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 88b3fdc..4f5cd18 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -62,8 +62,8 @@ public:
+ 
+     /** `command: swap` (GH 0x1402131b0 reads it as command 2): render () exchanges the two named FBOs instead */
+     void setSwap (std::string first, std::string second);
+-    /** the WE texture format bound at sampler `index` (TEX<n>FORMAT, ShaderUnit::TextureFormatResolver) */
+-    [[nodiscard]] int shaderFormatOf (int index, const std::string& defaultName) const;
++    /** the WE texture format and .tex flags bound at sampler `index` (TEX<n>FORMAT, components; TextureFormatResolver) */
++    [[nodiscard]] Render::Shaders::ResolvedTexture shaderFormatOf (int index, const std::string& defaultName) const;
+     [[nodiscard]] bool isSwap () const;
+ 
+     // Custom geometry rendering support (for particles, etc.)
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index adeb702..9eed10b 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -802,11 +802,37 @@ void ShaderUnit::parseParameterConfiguration (
+ 	    if (!this->m_combos.contains (name) && !this->m_overrideCombos.contains (name)) {
+ 		const std::string defaultName
+ 		    = textureName != data.end () && textureName->is_string () ? textureName->get<std::string> () : "";
+-		const int format = this->m_formatOf && index != 0 ? this->m_formatOf (static_cast<int> (index), defaultName) : 0;
++		const int format = this->m_formatOf && index != 0 ? this->m_formatOf (static_cast<int> (index), defaultName).format : 0;
+ 		this->m_discoveredCombos.emplace (name, format);
+ 	    }
+ 	}
+ 
++	// "components": WE's shader preamble (GH 0x14019b550) defines component i's combo when the texture bound at the
++	// slot has flag 0x100000 << i. resourcecompiler64.exe sets that flag for each channel it builds from a
++	// "component" image (`or [flags], 0x100000 << channel`, 0x140060f1c): the PBRMASKS sampler's METALLIC_MAP,
++	// ROUGHNESS_MAP, REFLECTION_MAP, EMISSIVE_MAP (3477054430's mask: 0xa00000, roughness + emissive; 3509243656's
++	// four: 0x800000, emissive). LWE never defined them: the shaders took g_Metallic / g_Roughness and no emission
++	const auto components = data.find ("components");
++	if (components != data.end () && components->is_array () && this->m_formatOf) {
++	    const std::string defaultName
++		= textureName != data.end () && textureName->is_string () ? textureName->get<std::string> () : "";
++	    const uint32_t flags = this->m_formatOf (static_cast<int> (index), defaultName).flags;
++	    for (size_t i = 0; i < components->size () && i < 12; i++) {
++		const auto& component = (*components)[i];
++		if ((flags & (0x100000u << i)) == 0 || !component.is_object ()) {
++		    continue;
++		}
++		const auto componentCombo = component.find ("combo");
++		if (componentCombo == component.end () || !componentCombo->is_string ()) {
++		    continue;
++		}
++		const std::string name = componentCombo->get<std::string> ();
++		if (!this->m_combos.contains (name) && !this->m_overrideCombos.contains (name)) {
++		    this->m_discoveredCombos.emplace (name, 1);
++		}
++	    }
++	}
++
+ 	// "default": "" names no file (refract's normal map, 3042865984): the slot is the pass's (it was looked up as
+ 	// "materials/.tex" and reported missing)
+ 	if (textureName != data.end () && !(textureName->is_string () && textureName->get<std::string> ().empty ())) {
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index 182950c..2c5662a 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -18,11 +18,18 @@ using JSON = WallpaperEngine::Data::JSON::JSON;
+ using namespace WallpaperEngine::Assets;
+ using namespace WallpaperEngine::Data::Model;
+ 
++/** What a pass binds at a sampler slot, as the shader's combos need it */
++struct ResolvedTexture {
++    /** the WE texture format (common_fragment.h's FORMAT_*): a `formatcombo` sampler's TEX<n>FORMAT */
++    int format = 0;
++    /** the .tex header's flags (0x100000 << i: channel i was built from a `components` image) */
++    uint32_t flags = 0;
++};
++
+ /**
+- * The WE texture format (common_fragment.h's FORMAT_*) of what a pass binds at sampler slot `index` (`defaultName`: the
+- * sampler's own default texture, empty if none): a `formatcombo` sampler's TEX<n>FORMAT
++ * What a pass binds at sampler slot `index` (`defaultName`: the sampler's own default texture, empty if none)
+  */
+-using TextureFormatResolver = std::function<int (int index, const std::string& defaultName)>;
++using TextureFormatResolver = std::function<ResolvedTexture (int index, const std::string& defaultName)>;
+ 
+ /**
+  * Represents a whole shader unit

@@ -1,0 +1,81 @@
+From ed7c15b761ebfe10ed74df8111da66a6c6c0e7d1 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 01:38:19 +0530
+Subject: [PATCH 093/102] render: slots WE leaves to the pass aren't missing
+ assets
+
+Three findings of the scene health report that WE doesn't have:
+
+- a sampler annotated "default": "" names no file (3042865984's refract normal map, set by the
+  pass): it was looked up as materials/.tex and reported missing;
+- a usertexture naming a `usershortcut` property (3516106265's 24-icon app dock): WE binds the
+  picked shortcut's icon ("usershortcut_" + the property, GH 0x140184980); none picked keeps the
+  slot's texture (the author's default icon there; inferred). It was looked up as
+  materials/launcherN.tex. A picked Windows shortcut's icon can't be read here: it keeps the slot
+  too (logged);
+- a user property of type "Text" (3319542538's five link labels) is the same value-less label as
+  "text": nothing in a scene reads one, so it changes no picture either way (WE's compare wasn't
+  read). It was reported as an unsupported property type.
+
+Origin: ours
+Why: docs/player/reports/scene-health.md (missing assets, unsupported)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Data/Parsers/PropertyParser.cpp   |  4 +++-
+ .../WallpaperEngine/Render/Objects/Effects/CPass.cpp  | 11 +++++++++++
+ .../WallpaperEngine/Render/Shaders/ShaderUnit.cpp     |  4 +++-
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+index 2a43cbb..e860420 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/PropertyParser.cpp
+@@ -37,7 +37,9 @@ PropertySharedPtr PropertyParser::parse (const JSON& it, const std::string& name
+     if (type == "combo") {
+ 	return parseCombo (it, name);
+     }
+-    if (type == "text") {
++    // "Text" (3319542538's five link labels in the properties panel) is the same value-less label: nothing in a scene
++    // can read one, so it changes no picture whichever way WE spells the type (its parser's compare wasn't read)
++    if (type == "text" || type == "Text") {
+ 	return parseText (it, name);
+     }
+     if (type == "scenetexture") {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index a345c1b..1f21b7f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -134,6 +134,17 @@ std::optional<std::string> CPass::userTextureName (const std::string& name) cons
+ 	return value;
+     }
+ 
++    // a usertexture naming another kind of property: in the library, `usershortcut` (3516106265's app dock), whose
++    // texture is the picked shortcut's icon (WE names it "usershortcut_" + the property, GH 0x140184980). None picked
++    // keeps the slot's texture (inferred: the author's default icon is the material's texture there); a Windows
++    // shortcut's icon can't be read here, so a picked one keeps it too
++    if (const auto text = property->second->asOrNull<Data::Model::PropertyTextInput> ()) {
++	if (!text->getString ().empty ()) {
++	    sLog.out ("CPass: usertexture ", name, " (", text->getString (), ") is a shortcut's icon: the slot keeps its texture");
++	}
++	return std::nullopt;
++    }
++
+     return name;
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 204f486..adeb702 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -807,7 +807,9 @@ void ShaderUnit::parseParameterConfiguration (
+ 	    }
+ 	}
+ 
+-	if (textureName != data.end ()) {
++	// "default": "" names no file (refract's normal map, 3042865984): the slot is the pass's (it was looked up as
++	// "materials/.tex" and reported missing)
++	if (textureName != data.end () && !(textureName->is_string () && textureName->get<std::string> ().empty ())) {
+ 	    this->m_defaultTextures.emplace (index, *textureName);
+ 	}
+ 

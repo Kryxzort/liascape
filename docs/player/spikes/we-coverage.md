@@ -36,7 +36,7 @@
 | Effect keys the library uses | 41 | 25 / 0 / 2 / 14 | 25 / 0 / 2 / 14 | **27 / 0 / 0 / 14** | 27 / 0 / 0 / 14 |
 | Material keys the library uses | 13 | 12 / 0 / 1 / 0 | 12 / 0 / 1 / 0 | **13 / 0 / 0 / 0** | 13 / 0 / 0 / 0 |
 | Model keys the library uses | 19 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 | 16 / 1 / 1 / 1 |
-| Particle keys the library uses | 100 | 97 / 0 / 3 / 0 | 97 / 0 / 3 / 0 | **98 / 2 / 0 / 0** | 98 / 2 / 0 / 0 (system flags bit 2, perspective, now drawn as WE) |
+| Particle keys the library uses | 100 | 97 / 0 / 3 / 0 | 97 / 0 / 3 / 0 | **98 / 2 / 0 / 0** | 98 / 2 / 0 / 0 (system flags bit 2, perspective, now drawn as WE); **99 / 1 / 0 / 0** after the leftovers (0092: system flags bit 0, world space) |
 | Particle emitter / initializer / operator / renderer types (library + stock) | 48 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 | 28 / 0 / 20 / 0 (all 28 the library uses are impl) | **32 / 16 / 1 / 0** of 49: the stock-only list below is 21 types, not 20 (F6: capvelocity, maintaindistancebetweencontrolpoints, reducemovementnearcontrolpoint as WE and collisionbox a no-op as in WE; 15 with inferred parts, vortex_v2 still LWE's own model; layerimage missing) |
 | Material blend modes | 4 | 3 / 0 / 1 / 0 | 4 / 0 / 0 / 0 | 4 / 0 / 0 / 0 | 4 / 0 / 0 / 0 |
 | .tex formats | 14 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) | 14 / 0 / 0 / 0 (+ TEX<n>FORMAT per bound texture, 0075) |
@@ -389,3 +389,31 @@ sits on an unread rigid-body helper family), root motion, MORPHING_MODIFIERS.
 
 Tests (host_api_test, each RED on 78128d1): `shape_draws_its_effect_in_place`, `volumetric_lights_glow`,
 `puppet_ik_reaches_its_target`.
+
+## Implemented: the leftovers (fork patches 0091–0097 + the worker's stereo feed, 2026-11-05)
+
+Decoded addresses and what's inferred: the audit's "Leftovers result".
+- **Stereo visualiser input (player + worker, protocol 5).** SysMon mixes every stream in stereo on the graph clock;
+  each scene gets every frame in order (`Tick.input` = `AudioInput`, 48 kHz s16 stereo), pushed through
+  `wp_context_audio_input_push`: `g_AudioSpectrum*Left` and `*Right` differ. 37 of the 41 audio scenes react to a
+  110 Hz tone or white noise (22 of 39 on the u8 mono snapshots).
+- **The worker's output clips at ±1 after its gain**, as WE's miniaudio device does (mediaextensions64.dll
+  0x180013c35 → 0x180029cb0).
+- **0091 text: HarfBuzz shaping + WE's fallback chain** (GH 0x1401da3c0, table 0x1404c5030). 22 of 66 literal texts
+  now match the editor's saved size to the pixel (was 4), 53 within 3 % of its width (46).
+- **0092 render: world-space particle systems** (system flags bit 0, "Worldspace" in the editor; 16 scenes, 1 moving:
+  3104056709's cursor trail). The carry across the system's transform is inferred.
+- **0093 render: slots WE leaves to the pass** — `"default": ""` samplers, `usershortcut` usertextures (GH
+  0x140184980), the `Text` label type. Health: 3042865984, 3319542538, 3516106265 clean.
+- **0094 render: instanceoverride scripts run** (11 scenes script rate / size / count / speed / controlpoint1 /
+  colorn / alpha).
+- **0095 render: `options.parent` timelines** (GH 0x1401d1740; 5 scenes). The shared clock is inferred.
+- **0096: the turbulence's simplex is WE's** (GH 0x14012c280 = Gustavson + Perlin's permutation, the tables equal).
+- **0097 render: rope subdivision** = TRAILSUBDIVISION + 1 pieces (genericropeparticle.geom; 19 rope/ropetrail scenes).
+- `SPRITESHEETBLENDNPOT` (2 padded sheets, 3 scenes): not needed — LWE uploads those sheets at their image size, where
+  the plain frame walk is WE's NPOT walk (tried; a comment in 0097).
+
+Tests (host_api_test, each RED on f4aa7c5): `text_shapes_with_harfbuzz`, `particle_world_space_stays`,
+`unset_slots_are_not_missing`, `particle_override_scripts_run`, `animation_follows_its_parent`; player units
+`visual_mix_is_stereo_and_clock_aligned`, `ring_follows_the_clock`, `audio_input_keeps_both_channels`,
+`output_clips_at_full_scale_after_the_gain`. 0096–0097: no host test (a comment; 0097 checked by smoke pairs).

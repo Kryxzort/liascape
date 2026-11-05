@@ -464,3 +464,60 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   enables it, and WE's simulation code is a large unread rigid-body layer.
 - Health report 86 clean / 10 degraded / 0 failed (3319542538 lost its VolumeLight error, nothing else moved);
   shader sweep 6 failing, none new; player tests 740 passed.
+
+## 2026-11-05 — the scene-compatibility leftovers (fork 0091–0097, pin `262d97b`)
+- **Audio-reactive scenes see stereo now, and react far more.** The worker used to hand LWE a mono, 8-bit snapshot of
+  the system audio each frame (Left = Right); it now passes every captured frame in order, in stereo. With a test tone
+  37 of your 41 audio scenes react (22 before). 2290002190's audio-driven particles needed a second fix (scripts on a
+  particle system's override values never ran; 11 scenes use those). 3445973124's pulse still doesn't move, unexplained.
+- **Scene sound above full scale now clips like WE** (WE's audio library hard-clips its output at 0 dBFS; found in its
+  DLL): a sound slider above 1 (2375914945's `musicvolume` 2) clips at the scene's output instead of reaching the bus
+  above 0 dBFS. Your volume and the loudness normalization come first, so turning a scene down keeps its peaks whole.
+- **Text is shaped like WE's (HarfBuzz)**: kerning pairs and ligatures, and WE's own list of fallback fonts for
+  characters a font lacks (Arial → emoji → Arial Unicode → Segoe UI → WE's Twemoji → symbols → Chinese → Korean, each
+  mapped to what your system has). 22 of 66 texts now match the size the editor saved to the pixel (4 before).
+- **"World space" particle systems** keep their particles where they were emitted when the system moves:
+  3104056709's cursor trail now trails. **Linked animations** (`parent` timelines, 5 scenes) run on one clock:
+  3163060610's rounded panel waits for its script instead of animating at load.
+- Health report **89 clean / 7 degraded** (was 86 / 10): the 25 "missing assets" were slots WE leaves to the material
+  (an app-dock icon nobody picked, an empty default) and the `Text` warnings were link labels. The 7 left are script
+  bugs in the scenes themselves — I checked each throws in WE too.
+- Smoke of all 96 scenes: none newly blank. Shader sweep: the same 6 failing, none new. Player tests 743 passed.
+- Left / for you: a WE capture of 3414858021's "WEDNESDAY" (reaches the screen edge here) and of 3445973124 with music.
+
+## 2026-11-05 — the decode leftovers (fork 0098–0100, pin `f50bc82`)
+- **HDR scenes follow WE's real switch.** WE renders a scene HDR only when its file turns on both `hdr` and
+  `bloom` (and WE's post-processing is Ultra); found in its project loader. 2511663284 (HDR on, bloom off) is
+  drawn the ordinary way now, as WE draws it. The other four HDR scenes are unchanged.
+- **PBR masks work.** Masks painted in WE's editor mark which channels they carry (metallic / roughness /
+  reflection / emissive); WE switches the matching shader options on from those marks, LWE ignored them.
+  3477054430's mask now gives roughness + glow, 3509243656's models their glow.
+- **3516106265's frame builder** gets the layer's transform it reads its scale from (was all zeros, so the frame
+  collapsed).
+- Checked against WE's code and left as they were (LWE's guesses were right): the particle force step's frame
+  time, when a particle sub-system counts as finished, the additive puppet layer's scale, SceneScript angles in
+  degrees. Read but not changed: the puppet attachment (WE applies the whole bone matrix; LWE its offset + turn)
+  and the rope curve (WE's control points sit within 10 % of LWE's). Not found: what WE's g_TexelSize divides by.
+- Health report 89 clean / 7 degraded / 0 failed (no scene worse, none newly blank); shader sweep the same 6
+  failing, none new; player tests 743 passed.
+
+## 2026-11-05 — the last decode leftovers (fork 0101, pin `7b2517c`)
+- **Puppet attachments apply WE's whole matrix.** WE pins a child (3463520581's hair, cloth and accessories) with the
+  bone's full matrix times the attachment's; LWE used only its position and turn. Read from WE's code which matrices
+  those are (the posed bones, as LWE assumed) and ported the rest (a bone's scale now reaches the child). Nothing in
+  your library looks different: all its puppet bones keep unit scale, and the attached layers sit exactly where they
+  did.
+- Read, not changed: the rope curve's control points (the neighbouring particles, as LWE has; only a 0.15 vs 1/6
+  tangent factor differs, under a pixel for a segment up to ~150 px), and the SceneScript degrees flag (it also marks
+  shader angles WE shows scripts in degrees; no scene of yours scripts one). Still not found: what WE's g_TexelSize
+  divides by.
+- Health report 89 clean / 7 degraded / 0 failed (no scene changed); shader sweep the same 6 failing, none new;
+  player tests 743 passed.
+
+## 2026-11-05 — rope curves bend as WE's (fork 0102, pin `9683b9c`)
+- **A rope's curve now uses WE's own tangent factor** (0.15 where LWE's Catmull-Rom had 1/6): a bent rope bows about
+  10 % less, as in WE. Under a pixel for ordinary rope segments, so nothing in your 20 rope scenes looks different in
+  the smoke frames beyond run-to-run particle noise. New test rig: a rope of particles at fixed spots (one emitter per
+  particle), the test fails on the old pin (7.0 px bow) and passes now (4.0 px; WE's maths says 4.2).
+- Gates: the 20 rope scenes' health 15 clean / 5 degraded / 0 failed on both pins (no class or loss changed); shader
+  sweep the same 6 failing checks, none new; player tests 743 passed.

@@ -1,0 +1,53 @@
+From 5d199f6f362ebe29fd7a48c9504c590c2343f126 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 01:42:01 +0530
+Subject: [PATCH 094/102] render: scripts on a particle's instanceoverride
+ values run
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The editor lets a script drive an instanceoverride value like any property; 11 library scenes do
+(rate 4, size 3, count 3, speed 1, controlpoint1 2, colorn 2, alpha 1 — 2290002190's emission rate
+follows the audio through registerAudioBuffers). CParticle registered only scale, angles,
+visible and parallaxDepth with the script engine, so those scripts never ran and the values kept
+their defaults. The overrides an object sets (alpha, size, lifetime, rate, speed, count, color,
+colorn, controlpoint0..7) are registered too; keyframe animations on them already played.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Leftovers result" (the audio scenes that didn't react)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Objects/CParticle.cpp               | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index 97c247e..baf5495 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -29,6 +29,24 @@ CParticle::CParticle (Wallpapers::CScene& scene, const Particle& particle) :
+     this->registerProperty ("angles", *particle.angles->value);
+     this->registerProperty ("visible", *particle.visible->value);
+     this->registerProperty ("parallaxDepth", *particle.parallaxDepth->value);
++    // the instanceoverride values are scriptable like any property (the editor puts scripts on them: 11 library scenes,
++    // rate / size / count / speed / controlpoint1 / colorn / alpha; 2290002190's audio-driven rate). They weren't
++    // registered, so their scripts never ran and the value stayed at its default
++    const auto& io = particle.instanceOverride;
++    const std::pair<const char*, const UserSettingUniquePtr*> overrides[] = {
++	{ "alpha", &io.alpha }, { "size", &io.size }, { "lifetime", &io.lifetime }, { "rate", &io.rate },
++	{ "speed", &io.speed }, { "count", &io.count }, { "color", &io.color }, { "colorn", &io.colorn },
++    };
++    for (const auto& [name, setting] : overrides) {
++	if (*setting != nullptr) {
++	    this->registerProperty (name, *(*setting)->value);
++	}
++    }
++    for (int i = 0; i < 8; i++) {
++	if (io.controlPoint[i] != nullptr) {
++	    this->registerProperty ("controlpoint" + std::to_string (i), *io.controlPoint[i]->value);
++	}
++    }
+ 
+     this->detectTexture ();
+ 

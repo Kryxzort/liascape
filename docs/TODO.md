@@ -993,12 +993,15 @@ Two bug classes kept recurring; fix the class, not the instance:
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
 - [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world (both still build the
       pre-rewrite Avalonia app).
-- [ ] **Scene sound peaks (owner 2026-10-29, for a later REA batch):** WE's sound `volume²` is unclamped, so a slider
+- [x] **Scene sound peaks (owner 2026-10-29, for a later REA batch):** WE's sound `volume²` is unclamped, so a slider
       above 1 pushes peaks over 0 dBFS (2375914945 at `musicvolume` 2 peaks at 2.04). Find out with REA what WE does at
       its output — clip, soft-clip or limit (`we-sound-semantics.md` only infers a clip at ±1; no master limiter was
       seen) — then decide: match it, or add a soft limiter on the player bus (normalisation lowers the level but can't
       undo a clipped peak). Loudness normalisation itself is unaffected by the squared curve: the learner and the
-      estimator measure the real output.
+      estimator measure the real output. **Done 2026-11-05 (Leftovers batch):** WE hard-clips — mediaextensions64.dll's
+      miniaudio runs its f32 clip loop (0x180029cb0, `noClip` off) over the summed output, after `volume²` and the
+      wallpaper's level. Matched: the scene worker clamps its output to ±1 after the stream's own gain (WE's order, so a
+      lower user gain or the normalization still leaves peaks whole). Audit "Leftovers result".
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
@@ -1021,7 +1024,8 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [x] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
           `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M. **Done 2026-11-02:** fork patches 0022
           (live object uniforms, `g_Color4` = (colour, alpha)) + 0023 (keyframe animations, decoded from
-          wallpaper64.exe), pin `ccb545d`. Left: `timeofday`, shared `parent`/`children` timelines, events and the
+          wallpaper64.exe), pin `ccb545d`. Left: `timeofday` (0 users), shared `parent`/`children` timelines (done 2026-11-05,
+          0095: a child runs on its parent's clock, 5 scenes), events and the
           SceneScript animation API (`getAnimation`, play/stop — B10), G05. Result + corpus delta: the audit's
           "B2 result" (§ 5).
     - [x] **B3 Particle core semantics.** `starttime` prewarm, shared colorrandom `t`, `exponent`, `rate`/`count`
@@ -1041,8 +1045,10 @@ Two bug classes kept recurring; fix the class, not the instance:
           texts match the editor's saved height within 2 px. See the audit's "B4 result".
           - [ ] WE captures of two clock scenes (1884904087, 2134765860) for size and line layout (T10 is decoded;
                 this checks it).
-          - [ ] HarfBuzz shaping (ligatures, GPOS kerning; most of the width misses) and WE's own font fallback
-                chain; T6/T7 (background, outline, shadow, MSDF; 0 scenes); `anchor` for crop/letterbox (G32/C5).
+          - [x] HarfBuzz shaping (ligatures, GPOS kerning; most of the width misses) and WE's own font fallback
+                chain — done 2026-11-05 (fork patch 0091, pin `262d97b`: WE's run split GH 0x1401da3c0, its 8-font chain
+                0x1404c5030; 22 of 66 literal texts match the editor's saved size exactly, was 4). Left: T6/T7
+                (background, outline, shadow, MSDF; 0 scenes); `anchor` for crop/letterbox (G32/C5).
           - [ ] Cursor hit tests now reach text layers (they are CImages); check 2325974975's buttons still behave.
     - [x] **B5 Parallax + camera.** Delay smoothing (read as a bool → 14 of 25 frozen), a centred target,
           `g_ParallaxPosition`, `general.zoom`/fov, camera objects, shake (G10–G19, E1). 25 + 8 scenes. M. **Done
@@ -1079,16 +1085,21 @@ Two bug classes kept recurring; fix the class, not the instance:
           `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
           **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a
           synthetic tone; see the audit's "B8 result".
-          - [ ] Feed stereo: the worker still sends SysMon's u8 mono mix (Left = Right). Send f32 stereo frames
-                through `wp_context_audio_input_push` (a protocol change).
-          - [ ] Re-check the 17 audio scenes that didn't change with a 110 Hz tone, with a sweep or music.
+          - [x] Feed stereo — done 2026-11-05 (Leftovers batch, player side): SysMon mixes in stereo on the graph clock,
+                each scene gets every frame in order (`Tick.input` = 48 kHz s16 stereo, protocol 5) and the worker
+                pushes it through `wp_context_audio_input_push`; Left ≠ Right.
+          - [x] Re-check the 17 audio scenes that didn't change with a 110 Hz tone — done 2026-11-05: with the stereo
+                feed 37 of 41 react to a 110 Hz tone or white noise (the old snapshots spliced each analysis window);
+                2290002190's audio was an instanceoverride script that never ran (fixed, 0094); 2388299037 and
+                3509243656 have every default audio effect off (content); 3445973124's left-channel pulse doesn't move
+                and isn't explained (a WE capture with music). Audit "Leftovers result".
     - [x] **B9 Small uniform/property/shader fixes.** `g_Frametime`, `g_PointerState`, `g_Daytime` (0 scenes read it),
           time wrap, annotation defaults, the foliagesway varying, live bloom, textinput quotes, usertextures (E4,
           E5, E9, E11, E17–E20, E36–E41, C1, C3, U1, U2, S18). ≤ 10 scenes each. S.
           **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
           tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
           2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
-          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9/E11 (not decoded), E20, E38, loading a user-picked picture, 3414858021's vertex units that
+          its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found, also not via the RSSetViewports sites — 2026-11-05; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
           don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
           **E41 done 2026-11-03** (fork patch 0037, pin `3eaac6e`): an effect's `visible` (user property or script)
           turns it on/off live — built when it can be visible, the pass chain re-picked and retargeted on a change.
@@ -1120,15 +1131,25 @@ Two bug classes kept recurring; fix the class, not the instance:
                 scene to confirm the decoded forms against WE itself.
           - [x] P29 sprite `orientation` — done 2026-11-04 (fork patch 0072: WE's g_Orientation* from
                 GH 0x14024fd30; 3174556087's splashes follow WE's axes).
-          - [ ] P30 rope/trail combos (TRAILSUBDIVISION, ORIENTATION, TRAILFADE*).
+          - [x] P30 rope/trail combos — done 2026-11-05 as far as the library goes (0097): a segment is subdivision + 1
+                pieces (WE's TRAILSUBDIVISION in genericropeparticle.geom); every library rope is ORIENTATION 0 and
+                sets no TRAILSCROLL/FADE key. The CPU spline buffer is read too (2026-11-05, GH 0x140255e50): CP0 / CP1
+                are the neighbouring particles, clamped to the segment's own ends, as in LWE's Catmull-Rom.
+          - [x] P30 tangent factor — done 2026-11-05 (0102): a rope segment is WE's bezier with inner points 0.15 along
+                the neighbours' chord (LWE's Catmull-Rom had 1/6). Rig + test: host_api_test
+                `rope_spline_tangent_factor` (one fixed-origin emitter per particle).
           - [x] P27 mapsequencearoundcontrolpoint `bounds`/`limitbehavior`/`axis` — the 3 scenes use WE's defaults
                 (GH 0x1401e8c90), which is what LWE does; other values are reported to the health report (0072).
           - [ ] P27 non-default bounds / limitbehavior / axis semantics (decode the spawn interpreter's case; 0
                 scenes).
-          - [ ] `controlpointangle0-7`, system flags bit 0 (world-space simulation, 16 scenes), WE's simplex
-                gradient hash (GH 0x14012c280), vortex_v2 (case 0x10, 0 scenes), P24 cone, P25/P26 (0 scenes).
-          - [ ] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0);
-                both are inferred now.
+          - [x] System flags bit 0 (world space, 16 scenes) — done 2026-11-05 (0092; "Worldspace" in the editor's
+                strings, the carry inferred). WE's simplex (GH 0x14012c280) is Gustavson's on Perlin's permutation, the
+                tables equal LWE's: nothing to port (0096 notes it).
+          - [ ] `controlpointangle0-7`, vortex_v2 (case 0x10), P24 cone, P25/P26: 0 library users and unread —
+                listed in the audit's "Leftovers result".
+          - [x] Read the fdt frame-time source (host +0x14c) and the child-instance alive test (GH 0x1402524c0) —
+                done 2026-11-05, both confirm LWE's inference: the host is the render context, +0x14c its
+                g_Frametime; alive = particles, live emitters or a live child (audit "Decode leftovers result").
     - [x] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
           unmerged). 14 scenes. L. **Done 2026-11-04** (fork patch 0054, pin `36ad6a0`): WE's MDL loader (GH
           0x1402873f0: the vertex layout from the mesh's format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT by section),
@@ -1145,7 +1166,13 @@ Two bug classes kept recurring; fix the class, not the instance:
                 reached from the mixer GH 0x140228470); root motion (MDLA flags bit 0, 18 bytes, undecoded);
                 `autosort`/`index` layer order (0 users, not in the exe's strings).
           - [ ] The scripted layer API (`getAnimationLayer`, `playSingleAnimation`; S26).
-          - [ ] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale (inferred now).
+          - [x] Read the attachment builder (the puppet image's vtable +0x78) and the additive scale — done
+                2026-11-05: the additive scale is the position's rule (confirmed); the attachment is (bone matrix ·
+                MDAT) · local (GH 0x14024b530).
+          - [x] The whole attachment matrix — done 2026-11-05 (fork patch 0101, pin `7b2517c`): the animator's +0x30
+                is the posed bone world (GH 0x140243600), and LWE now applies bone · MDAT whole (2D: offset, z turn and
+                the axes' scale; worldMatrixOf and the script matrices: the whole matrix). No library scene changes
+                (every library bone / MDAT is unit scale). Audit "Attachment result".
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
     - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
@@ -1155,8 +1182,9 @@ Two bug classes kept recurring; fix the class, not the instance:
           rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 64/64 (2 new); corpus 93/96
           on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
           - [ ] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
-          - [ ] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 (set from the "postprocessing" setting
-                `ultra`, GH 0x14013f860). Today: HDR whenever `general.hdr`, unless WPENGINE_HDR=0.
+          - [x] Find how `general.hdr` gates WE's renderer HDR flag 0x2000 — done 2026-11-05 (0098): `bloom` and
+                `hdr` both literal JSON true in scene.json, then "postprocessing" `ultra` (GH 0x14013f860).
+                2511663284 (hdr, no bloom) is LDR now, as in WE.
           - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
     - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
           E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
@@ -1183,8 +1211,13 @@ Two bug classes kept recurring; fix the class, not the instance:
                 pastes includes; hoisting the include's `#define`s builds it but the left cloth then vanishes — read
                 the effect before enabling it.
           - [ ] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — check in WE.
-          - [ ] Locate WE's SceneScript angles binding (xrefs of 0x1404928d0 / 0x140492628) to make the degrees
-                Observed in the binary, not only in scene scripts.
+          - [x] Locate WE's SceneScript angles binding — done 2026-11-05 as far as it goes: `angles` is the one
+                script property with descriptor flag 4 (GH 0x14020dcc0), getAttachmentAngles returns degrees
+                (GH 0x14020db20; constants at 0x1404d4460 / 0x1404d411c), WE's baseclasses.js is degrees throughout.
+                The bridge's use of flag 4 itself wasn't located.
+          - [ ] Flag 4's reader (2026-11-05, audit "Attachment result"): not in the exe nor found in scenescript64.dll;
+                flag 4 also marks shader constants annotated `"conversion":"rad2deg"` (GH 0x140192430), which a script
+                would see in degrees in WE and radians in LWE — 0 library scenes script or bind one.
     - [ ] **Scene health report — pick fixes from it** (2026-11-04, fork patches 0061–0062 `WPENGINE_HEALTH`, runner
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
@@ -1207,7 +1240,10 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [x] scripts: `getVideoTexture()` not a function (2), `.split()` on a non-string (2), `cannot set alignment /
                 parallaxDepth of undefined` (2 each: createLayer), `.copy of undefined` (3), RegExp.$1 (1) — done in
                 the coverage batch. Left (11), failing in WE too (content): see `we-coverage.md` § 1.
-          - [ ] user property type `Text` unsupported (3319542538). (Its "VolumeLight" object — a shape — draws since F2, 0086.)
+          - [x] user property type `Text` unsupported (3319542538) — done 2026-11-05 (0093: a value-less label like
+                `text`). Also 0093: 3516106265's 24 `usershortcut` usertextures and 3042865984's `"default": ""` sampler
+                are no missing assets (WE keeps the slot's texture). Health 86 → 89 clean, 10 → 7 degraded (the 7: the
+                content script errors, re-checked against WE in the audit's "Leftovers result").
     - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object
@@ -1253,7 +1289,9 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] F7 CursorEvent.hitBox: decode where WE keeps a puppet's hit boxes (not MDLE/MDMP; likely the rest
                 of MDLS, which LWE skips) — 0 library readers.
           - [ ] ITextLayer writes (font, padding, anchor, limitrows, limitwidth, backgroundcolor) re-laying the text
-                (0 library writers); IEffectLayer.transformAttachmentToTexture; .tex flags 64 / 2²¹ / 2²³.
+                (0 library writers); IEffectLayer.transformAttachmentToTexture; .tex flag 64 (a slice count, 0 users).
+                .tex flags 2²⁰–2²³ done 2026-11-05 (0099): channel-built-from-a-component bits that define a
+                sampler's `components` combos (PBRMASKS: 3477054430, 3509243656).
   - [x] **Owner-run `--ab-legacy`** — DONE in the 2026-10-29 02:24 run (`scene-corpus.md` § A/B): legacy started 54/96, **0 start under legacy but not here**, 37 start here but not under legacy. (draws on a real output): `bash src/player/tests/onmachine/scene_corpus.sh
         --ab-legacy --legacy-output DP-1 --reuse /tmp/liascape-scene-corpus-<stamp>` (after `liascape kill`). Lists the
         scenes that start under the installed `linux-wallpaperengine` but not here (§11.5: newly failing vs legacy

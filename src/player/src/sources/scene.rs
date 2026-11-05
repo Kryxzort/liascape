@@ -45,7 +45,7 @@ use crate::log::{self, Level};
 use crate::scene::budget::Budget;
 use crate::units::{GainSlot, Gains};
 use crate::worker::dmabuf::{ImportedRing, Latch};
-use crate::worker::proto::{AudioRoute, FromWorker, ToWorker};
+use crate::worker::proto::{AUDIO_INPUT_MAX_FRAMES, AudioInput, AudioRoute, FromWorker, ToWorker};
 use crate::worker::{
     HANG_TIMEOUT, RestartBudget, WorkerEvent, WorkerHost, WorkerSpec, WorkerState,
 };
@@ -380,8 +380,11 @@ pub struct SceneSource {
     latch_times: VecDeque<Instant>,
     /// Task 7: the scene reacts to audio (`Ready.wants_audio_input`) — the runtime feeds it.
     wants_audio_input: bool,
-    /// The visualiser samples for the next tick (the runtime's latest system-audio frame).
-    pending_input: Option<Vec<u8>>,
+    /// The system audio for the next tick: interleaved stereo f32 at `audio::bus::RATE`, every
+    /// frame since the last tick's (newest [`AUDIO_INPUT_MAX_FRAMES`] kept), and this scene's
+    /// cursor in `SysMon::visual_since`.
+    pending_input: Vec<f32>,
+    input_cursor: Option<i64>,
     /// RMS (dBFS) of the last input sent (`workers` probe `input_dbfs`).
     input_dbfs: Option<f64>,
     /// The pointer over the scene in native pixels + buttons (re-sent after a restart).
@@ -724,7 +727,8 @@ impl SceneSource {
             latency_ms: VecDeque::new(),
             latch_times: VecDeque::new(),
             wants_audio_input: false,
-            pending_input: None,
+            pending_input: Vec::new(),
+            input_cursor: None,
             input_dbfs: None,
             pointer: None,
             prop_results: BTreeMap::new(),
@@ -1531,8 +1535,12 @@ impl SceneSource {
     fn send_tick(&mut self, now: Instant, t: f64) -> Option<u64> {
         let host = self.host.as_mut()?;
         let seq = self.seq;
-        let input = self.pending_input.take().filter(|_| self.wants_audio_input);
-        let dbfs = input.as_deref().map(crate::scene::synthetic::input_dbfs);
+        let pending = std::mem::take(&mut self.pending_input);
+        let input = (self.wants_audio_input && !pending.is_empty())
+            .then(|| AudioInput::from_stereo(crate::audio::bus::RATE, &pending));
+        let dbfs = input
+            .is_some()
+            .then(|| crate::scene::synthetic::input_dbfs(&pending));
         let tick = ToWorker::Tick { seq, t, input };
         match host.send(&tick, &[]) {
             Ok(()) => {
@@ -1640,7 +1648,8 @@ impl SceneSource {
         self.opts.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
             .map(|p| p.to_string_lossy().into_owned());
         self.wants_audio_input = false;
-        self.pending_input = None;
+        self.pending_input.clear();
+        self.input_cursor = None;
         self.input_dbfs = None;
         self.prop_results.clear();
         let now = Instant::now();
@@ -1698,9 +1707,21 @@ impl SceneSource {
         self.wants_audio_input && self.worker_ready && self.error.is_none()
     }
 
-    /// The visualiser samples (≤ 1024 u8, centre 128) for the next tick (the latest wins).
-    pub fn set_input(&mut self, samples: Vec<u8>) {
-        self.pending_input = Some(samples);
+    /// This scene's cursor in the system-audio mix (`SysMon::visual_since`).
+    pub fn input_cursor(&self) -> Option<i64> {
+        self.input_cursor
+    }
+
+    /// System audio captured since the last call (interleaved stereo f32) and the new cursor:
+    /// appended for the next tick, in order (only the newest [`AUDIO_INPUT_MAX_FRAMES`] kept).
+    pub fn set_input(&mut self, samples: &[f32], cursor: Option<i64>) {
+        self.input_cursor = cursor;
+        self.pending_input.extend_from_slice(samples);
+        let cap = AUDIO_INPUT_MAX_FRAMES * 2;
+        if self.pending_input.len() > cap {
+            let drop = self.pending_input.len() - cap;
+            self.pending_input.drain(..drop);
+        }
     }
 
     /// `scene_props` changed: each new or changed entry goes to the worker (and into the

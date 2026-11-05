@@ -1,0 +1,170 @@
+From 7b2517c21dec4a8ea2d2f665e49601625d531860 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 03:59:54 +0530
+Subject: [PATCH 101/102] =?UTF-8?q?render:=20a=20puppet=20attachment=20app?=
+ =?UTF-8?q?lies=20whole=20(bone=20=C2=B7=20MDAT),=20not=20just=20its=20off?=
+ =?UTF-8?q?set=20and=20turn?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE's attachment builder (GH 0x14024b530, the puppet image's vtable +0x78) computes
+local ← (bone matrix · MDAT matrix) · local, with the bone matrix from the animator's +0x30
+array: the posed bone world in the model's space (GH 0x140243600 composes each bone's
+pose with its parent's, the bind pose world without an animation; the skinning product
+goes to +0x90 and the inverse bind to +0x18, GH 0x1402423b0). LWE kept only that matrix's
+translation and z turn, so a bone's (or the MDAT's) scale never reached the child.
+
+The 2D transform now also takes the attachment's axis lengths into the child's scale
+(and so into its children's offsets); CScene::worldMatrixOf multiplies the whole matrix
+in (world = parent world · attachment · local, GH 0x1401b5170) for g_LayerModelMatrix,
+world-placed layers and the script matrices; the script bridge's `__attachments` hands
+out the whole matrix (getAttachment* multiply the layer's matrix by it, GH 0x14020db20).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Attachment result" (B12's attachment builder)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/CObject.cpp   | 19 ++++++++++++-------
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  6 ++----
+ .../WallpaperEngine/Render/Objects/CImage.h   | 10 ++++++----
+ .../Render/Wallpapers/CScene.cpp              | 12 ++++++++++++
+ .../Adapters/ScriptableObjectAdapter.cpp      | 11 ++++-------
+ 5 files changed, 36 insertions(+), 22 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/CObject.cpp b/src/core/WallpaperEngine/Render/CObject.cpp
+index 67fc71e..7fd8944 100644
+--- a/src/core/WallpaperEngine/Render/CObject.cpp
++++ b/src/core/WallpaperEngine/Render/CObject.cpp
+@@ -93,19 +93,24 @@ CObject::ResolvedTransform CObject::resolveTransform (const Object& object) cons
+     for (int i = count - 2; i >= 0; --i) {
+ 	ResolvedTransform local = localTransform (*chain[i]);
+ 	// G09: a child pinned to its parent puppet's attachment is in the attachment's space, under the parent's
+-	// (GH 0x1401b5170: world = parent world · attachment · local)
++	// (GH 0x1401b5170: world = parent world · attachment · local; GH 0x14024b530 applies the attachment whole). In
++	// this 2D form: its offset, its z turn and its axes' lengths (the bone's and the MDAT's scale)
+ 	if (chain[i]->attachment.has_value ()) {
+ 	    const auto* parentObject = this->getScene ().getObject (chain[i + 1]->id);
+ 	    if (parentObject != nullptr && parentObject->is<Objects::CImage> ()) {
+ 		auto* puppet = const_cast<Objects::CImage*> (parentObject->as<Objects::CImage> ());
+-		glm::vec2 offset;
+-		float attachmentAngle = 0.0f;
+-		if (puppet->attachmentTransform (*chain[i]->attachment, offset, attachmentAngle)) {
+-		    const glm::vec2 moved
+-			= rotateVec2 ({ offset.x * resolved.scale.x, offset.y * resolved.scale.y }, resolved.angle);
++		glm::mat4 attachment (1.0f);
++		if (puppet->attachmentMatrix (*chain[i]->attachment, attachment)) {
++		    const glm::vec2 moved = rotateVec2 (
++			{ attachment[3].x * resolved.scale.x, attachment[3].y * resolved.scale.y }, resolved.angle
++		    );
+ 		    resolved.origin.x += moved.x;
+ 		    resolved.origin.y += moved.y;
+-		    resolved.angle += attachmentAngle;
++		    resolved.angle += std::atan2 (attachment[0][1], attachment[0][0]);
++		    resolved.scale *= glm::vec3 (
++			glm::length (glm::vec3 (attachment[0])), glm::length (glm::vec3 (attachment[1])),
++			glm::length (glm::vec3 (attachment[2]))
++		    );
+ 		}
+ 	    }
+ 	}
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 5d8af02..b19d9ab 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -658,7 +658,7 @@ void CImage::setBlendShapeWeight (int index, const std::optional<float>& weight)
+     this->m_puppetPoseDirty = true;
+ }
+ 
+-bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, float& angle) {
++bool CImage::attachmentMatrix (const std::string& name, glm::mat4& matrix) {
+     for (const auto& attachment : this->m_puppet.attachments) {
+ 	if (attachment.name != name) {
+ 	    continue;
+@@ -672,9 +672,7 @@ bool CImage::attachmentTransform (const std::string& name, glm::vec2& offset, fl
+ 	    Puppet::bindWorldMatrices (this->m_puppet, bind);
+ 	    bone = bind[attachment.bone];
+ 	}
+-	const glm::mat4 world = bone * attachment.matrix;
+-	offset = glm::vec2 (world[3]);
+-	angle = std::atan2 (world[0][1], world[0][0]);
++	matrix = bone * attachment.matrix;
+ 	return true;
+     }
+     return false;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index fa3235a..021338e 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -83,11 +83,13 @@ public:
+     void pinpongFramebuffer (std::shared_ptr<const CFBO>* drawTo, std::shared_ptr<const TextureProvider>* asInput);
+ 
+     /**
+-     * A puppet attachment's place in this layer at the current pose: its offset from the layer's origin in the
+-     * layer's own pixels (y up, before the layer's scale and angle) and its z angle. False when there's none by that
+-     * name (G09; the attachment is the bone's posed world · the MDAT matrix)
++     * A puppet attachment's matrix in this layer at the current pose, in the layer's own pixels (y up, before the
++     * layer's scale and angle): the bone's posed world · the MDAT matrix, whole (GH 0x14024b530, the puppet's
++     * vtable +0x78: local ← (bone · MDAT) · local; the bone is the animator's +0x30 array, the posed bone world in the
++     * model's space: GH 0x140243600 composes it parent-first, the skinning product goes to +0x90). False when there's
++     * none by that name (G09)
+      */
+-    [[nodiscard]] bool attachmentTransform (const std::string& name, glm::vec2& offset, float& angle);
++    [[nodiscard]] bool attachmentMatrix (const std::string& name, glm::mat4& matrix);
+     /** The puppet's attachment names, in the model's order (none without a puppet) */
+     [[nodiscard]] std::vector<std::string> attachmentNames () const;
+     /** IImageLayer.alignment from a script: where the quad sits on the origin, from the next frame */
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 4871f65..f7a7d30 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1165,6 +1165,18 @@ glm::mat4 CScene::worldMatrixOf (const Object& object) const {
+ 
+     glm::mat4 world (1.0f);
+     for (int i = count - 1; i >= 0; --i) {
++	// a child pinned to its parent puppet's attachment: world = parent world · (bone · MDAT) · local
++	// (GH 0x14024b530, the puppet's vtable +0x78)
++	if (i + 1 < count && chain[i]->attachment.has_value ()) {
++	    const CObject* parent = this->getObject (chain[i + 1]->id);
++	    if (parent != nullptr && parent->is<Objects::CImage> ()) {
++		glm::mat4 attachment (1.0f);
++		if (const_cast<Objects::CImage*> (parent->as<Objects::CImage> ())
++			->attachmentMatrix (*chain[i]->attachment, attachment)) {
++		    world = world * attachment;
++		}
++	    }
++	}
+ 	world = world * localMatrixOf (*chain[i]);
+     }
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 3b88b09..074b7e1 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -556,21 +556,18 @@ JSValue layer_method (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
+ 	case Method_Valid:
+ 	    return JS_NewBool (ctx, object.getScene ().isLayerAlive (&object));
+ 	case Method_Attachments: {
+-	    // [{ name, m }]: a puppet's attachments, `m` their matrix in the layer's own space (posed now)
++	    // [{ name, m }]: a puppet's attachments, `m` their matrix in the layer's own space (posed now), whole: WE's
++	    // getAttachment* (GH 0x14020db20) multiply the layer's matrix by the vtable +0x78 product (bone · MDAT)
+ 	    JSValue result = JS_NewArray (ctx);
+ 	    if (image == nullptr) {
+ 		return result;
+ 	    }
+ 	    uint32_t count = 0;
+ 	    for (const auto& name : image->attachmentNames ()) {
+-		glm::vec2 offset (0.0f);
+-		float angle = 0.0f;
+-		if (!image->attachmentTransform (name, offset, angle)) {
++		glm::mat4 local (1.0f);
++		if (!image->attachmentMatrix (name, local)) {
+ 		    continue;
+ 		}
+-		const glm::mat4 local = glm::rotate (
+-		    glm::translate (glm::mat4 (1.0f), glm::vec3 (offset, 0.0f)), angle, glm::vec3 (0.0f, 0.0f, 1.0f)
+-		);
+ 		JSValue entry = JS_NewObject (ctx);
+ 		JS_SetPropertyStr (ctx, entry, "name", JS_NewString (ctx, name.c_str ()));
+ 		JS_SetPropertyStr (ctx, entry, "m", matrixArray (ctx, local));

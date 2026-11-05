@@ -134,8 +134,9 @@ impl LweScene {
         self.scene.hint_screen(w, h);
     }
 
-    pub fn set_input(&self, samples: &[u8]) {
-        self.scene.set_input(samples);
+    /// System audio (interleaved stereo f32 at `rate`), in order: the scene's visualiser input.
+    pub fn push_input(&self, interleaved: &[f32], rate: u32) {
+        self.scene.push_input(interleaved, rate);
     }
 
     pub fn set_property(&self, name: &str, value: &Value) -> Result<(), String> {

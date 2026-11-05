@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change; `Hello.protocol` must equal it.
-pub const PROTOCOL: u32 = 4;
+pub const PROTOCOL: u32 = 5;
 /// Largest datagram either side sends or accepts.
 pub const MAX_MSG: usize = 64 * 1024;
 /// Most fds one datagram may carry (a 4-plane buffer + a fence, with room to spare).
@@ -65,12 +65,13 @@ pub enum ToWorker {
         #[serde(default = "yes")]
         loudness: bool,
     },
-    /// Render one frame at scene time `t` (seconds). `input` = 1024 u8 visualiser samples.
+    /// Render one frame at scene time `t` (seconds). `input` = the system audio captured since
+    /// the previous tick's (stereo, in order; [`AudioInput`]), for the scene's visualiser.
     /// Answered by a `Frame` carrying `seq` (the heartbeat: an unanswered one is a hang).
     Tick {
         seq: u64,
         t: f64,
-        input: Option<Vec<u8>>,
+        input: Option<AudioInput>,
     },
     /// The compositor stopped sampling `slot`; optional release fence fd attached.
     Release {
@@ -234,6 +235,104 @@ pub enum AudioRoute {
     Device(String),
 }
 
+/// Most frames one [`AudioInput`] carries: the newest are kept (WE's analysis looks at the last
+/// two hops, 2 × 1280 frames at 48 kHz, so older ones would be dropped by the core anyway). 4096
+/// stereo s16 frames are 21.8 KiB of base64, well inside [`MAX_MSG`].
+pub const AUDIO_INPUT_MAX_FRAMES: usize = 4096;
+
+/// System audio for a scene's visualiser (B8 "feed stereo"): consecutive frames of 16-bit
+/// interleaved stereo (left, right) at `rate` Hz, little-endian, base64 in `s16` (JSON carries a
+/// 4 KiB tick's worth of floats badly). WE analyses each channel of its float loopback capture
+/// apart (`g_AudioSpectrum*Left` / `*Right`, the gap audit's A1); 16 bits keep 96 dB of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioInput {
+    pub rate: u32,
+    pub s16: String,
+}
+
+impl AudioInput {
+    /// From interleaved stereo f32 (clamped to ±1); only the newest [`AUDIO_INPUT_MAX_FRAMES`].
+    pub fn from_stereo(rate: u32, interleaved: &[f32]) -> AudioInput {
+        let frames = interleaved.len() / 2;
+        let skip = frames.saturating_sub(AUDIO_INPUT_MAX_FRAMES) * 2;
+        let mut bytes = Vec::with_capacity((interleaved.len() - skip) * 2);
+        for v in &interleaved[skip..frames * 2] {
+            let q = (v.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+        AudioInput {
+            rate,
+            s16: b64_encode(&bytes),
+        }
+    }
+
+    /// Interleaved stereo f32 (−1..1); empty for a malformed payload.
+    pub fn to_stereo(&self) -> Vec<f32> {
+        let bytes = b64_decode(&self.s16).unwrap_or_default();
+        let frames = bytes.len() / 4;
+        bytes[..frames * 4]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32767.0)
+            .collect()
+    }
+
+    pub fn frames(&self) -> usize {
+        let pad = self.s16.bytes().rev().take_while(|&c| c == b'=').count();
+        (self.s16.len() / 4 * 3).saturating_sub(pad) / 4
+    }
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b64_encode(b: &[u8]) -> String {
+    let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        for k in 0..4 {
+            if k <= c.len() {
+                out.push(B64[(n >> (18 - 6 * k) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let s = s.as_bytes();
+    if s.len() % 4 != 0 {
+        return None;
+    }
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    for c in s.chunks_exact(4) {
+        let pad = c.iter().rev().take_while(|&&x| x == b'=').count();
+        if pad > 2 {
+            return None;
+        }
+        let mut n = 0u32;
+        for &x in &c[..4 - pad] {
+            n = n << 6 | val(x)?;
+        }
+        n <<= 6 * pad as u32;
+        let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        out.extend_from_slice(&bytes[..3 - pad]);
+    }
+    Some(out)
+}
+
 /// One dmabuf plane's layout (its fd travels alongside) — the GPU side's own type.
 pub use crate::gfx::dmabuf::Plane;
 
@@ -377,4 +476,46 @@ pub fn recv<M: DeserializeOwned>(fd: BorrowedFd) -> io::Result<Option<(M, Vec<Ow
         })?;
         Ok(Some((m, fds)))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_input_keeps_both_channels() {
+        // left a ramp, right its negation: the two channels survive the trip apart
+        let x: Vec<f32> = (0..1001)
+            .flat_map(|i| {
+                let v = i as f32 / 1000.0 - 0.5;
+                [v, -v]
+            })
+            .collect();
+        let a = AudioInput::from_stereo(48_000, &x);
+        assert_eq!(a.frames(), 1001);
+        let y = a.to_stereo();
+        assert_eq!(y.len(), x.len());
+        for (u, v) in x.iter().zip(&y) {
+            assert!((u - v).abs() < 1.0 / 30_000.0, "{u} vs {v}");
+        }
+        assert!(y[0] < 0.0 && y[1] > 0.0, "left and right differ");
+        // clamped, and only the newest frames past the cap
+        let long = vec![2.0f32; (AUDIO_INPUT_MAX_FRAMES + 10) * 2];
+        let a = AudioInput::from_stereo(48_000, &long);
+        assert_eq!(a.frames(), AUDIO_INPUT_MAX_FRAMES);
+        assert!(a.to_stereo().iter().all(|v| *v == 1.0));
+        // base64 edge lengths
+        for n in 0..7 {
+            let b: Vec<u8> = (0..n).map(|i| (i * 37 + 5) as u8).collect();
+            assert_eq!(b64_decode(&b64_encode(&b)).unwrap(), b);
+        }
+        assert!(
+            AudioInput {
+                rate: 1,
+                s16: "!!!".into()
+            }
+            .to_stereo()
+            .is_empty()
+        );
+    }
 }
