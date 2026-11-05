@@ -2038,6 +2038,60 @@ static bool puppet_warp_as_we () {
     return true;
 }
 
+// a puppet whose material culls (`cullmode: normal`, which WE keeps for puppets: GH 0x140230ec0 writes the pass's own
+// cull back into its combos) draws: WE's mesh is front-facing counter-clockwise with y up; LWE's layer and scene
+// pixels are y down and a flat layer draws them upside down into its target, so the triangles reached GL clockwise
+// and were culled (3490034653's and 3363252053's characters). A 4 x 4 puppet square at (16, 16) drawn straight into
+// the scene and one at (48, 16) through an effect (its layer composite) are both white. Unpatched: both the clear blue
+static bool puppet_cullmode_normal_draws () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"normal\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }));
+    const std::string layers = ",\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]";
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"16 16 0\",\"size\":\"32 32\"" + layers + "},"
+          "{\"id\":2,\"name\":\"b\",\"image\":\"models/pa.json\",\"origin\":\"48 16 0\",\"size\":\"32 32\"" + layers
+          + ",\"effects\":[{\"id\":9,\"name\":\"copy\",\"file\":\"effects/copy/effect.json\"}]}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/copy").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    write_file (dir + "/shaders/copy.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/copy.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n}\n");
+    write_file (dir + "/materials/copy.json", "{\"passes\":[{\"shader\":\"copy\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+    write_file (dir + "/effects/copy/effect.json", "{\"name\":\"copy\",\"passes\":[{\"material\":\"materials/copy.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl", "effects/copy/effect.json",
+                  "shaders/copy.vert", "shaders/copy.frag", "materials/copy.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char direct[4] = {}, composed[4] = {}, outside[4] = {};
+    read_pixel (rig.fbo, 16, 16, direct);
+    read_pixel (rig.fbo, 48, 16, composed);
+    read_pixel (rig.fbo, 32, 16, outside);
+    printf ("    red at the direct puppet %d, the composed one %d, between them %d\n", direct[0], composed[0], outside[0]);
+    CHECK (direct[0] > 200, "the culling puppet drawn into the scene is missing (red %d)", direct[0]);
+    CHECK (composed[0] > 200, "the culling puppet drawn through an effect is missing (red %d)", composed[0]);
+    CHECK (outside[0] < 40, "something drew between the puppets (red %d)", outside[0]);
+    return true;
+}
+
 // the attachment matrix whole (GH 0x14024b530: local ← (bone · MDAT) · local): a 32 x 32 puppet at (32, 16) on a
 // 64 x 32 scene whose attachment "tip" is the MDAT matrix scale 2 on the bone (bind pose); a black 4 x 4 square pinned
 // to it at "0 4 0" sits 2 · 4 = 8 px up and is 8 px wide: x 28..35, rows 4..11. Unpatched: only the attachment's
@@ -4462,6 +4516,52 @@ static bool script_events_reach_scripts () {
 }
 
 
+// WE's thisLayer / thisObject are accessors over the running script (scenescript64.dll getters 0x1810d5fd0 /
+// 0x1810d60d0: the top of the engine's running-script deque): code one script shares sees whoever calls it. sq1's
+// script shares a class that keeps thisLayer / thisObject and a function returning thisLayer.name; sq2's init makes
+// one and calls it, and a timer it sets reads its own layer; sq1's own update still sees sq1. Both squares stay
+// visible (x 4..11, 20..27). Unpatched (module-scope bindings): the class and the function said sq1, sq2 hid
+static bool this_layer_is_the_running_script () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string owner =
+        "class Owner { constructor() { this.layer = thisLayer; this.obj = thisObject; } }\n"
+        "shared.Owner = Owner;\n"
+        "shared.mine = function() { return thisLayer.name; };\n"
+        "export function update(value) { return thisLayer.name === 'sq1'; }\n";
+    const std::string caller =
+        "let frames = 0, result = true;\n"
+        "export function init(value) {\n"
+        "  const o = new shared.Owner();\n"
+        "  shared.ownerName = o.layer.name; shared.objName = o.obj.name; shared.called = shared.mine();\n"
+        "  engine.setTimeout(() => { shared.timer = thisLayer.name; }, 10);\n"
+        "}\n"
+        "export function update(value) {\n"
+        "  if (++frames == 10) {\n" + js_checks (
+        "check('class', shared.ownerName === 'sq2' && shared.objName === 'sq2');\n"
+        "check('call', shared.called === 'sq2');\n"
+        "check('timer', shared.timer === 'sq2');\n"
+        "check('own', thisLayer.name === 'sq2');\n"
+        "if (fails.length) console.log('owner ' + shared.ownerName + ' obj ' + shared.objName + ' call ' + shared.called + ' timer ' + shared.timer);\n")
+        + "    result = fails.length == 0;\n  }\n  return frames < 10 ? true : result;\n}";
+    const std::string dir = script_scene (square (1, scripted ("visible", "true", owner) + ",\"origin\":\"8 16 0\"") + ","
+                                          + square (2, scripted ("visible", "true", caller) + ",\"origin\":\"24 16 0\""));
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    while (rig.frames < 14) {
+        rig.step ();
+    }
+    const std::string got = rig.row ();
+    printf ("    %s\n", got.c_str ());
+    std::string want = covered (4, 11);
+    for (int x = 20; x <= 27; x++) {
+        want[x] = '#';
+    }
+    CHECK (got == want, "want %s (4..11: sq1 lost its own thisLayer; 20..27: a check failed, see FAILS above)", want.c_str ());
+    return true;
+}
+
 // F8: the host's wp_project_hint_size is the screen the scene shows on: engine.screenResolution reads it, a change
 // sends resizeScreen (size) (WE: on every change of the screen resolution, never on creation), and
 // IInput.cursorScreenPosition is in its pixels (the scene covering it: the pointer at 48 8 of the 64×32 scene is 96 16
@@ -6671,8 +6771,10 @@ int main (int argc, char** argv) {
     run ("puppet_animation_events", puppet_animation_events);
     run ("puppet_blend_shapes_and_alpha", puppet_blend_shapes_and_alpha);
     run ("puppet_ik_reaches_its_target", puppet_ik_reaches_its_target);
+    run ("puppet_cullmode_normal_draws", puppet_cullmode_normal_draws);
     run ("particle_system_api", particle_system_api);
     run ("script_events_reach_scripts", script_events_reach_scripts);
+    run ("this_layer_is_the_running_script", this_layer_is_the_running_script);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
     run ("blending_sets_combos", blending_sets_combos);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);

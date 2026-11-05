@@ -1,7 +1,7 @@
 From c60fd2e9ca31869ae29d8d7886016c603d41b9d6 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 20:36:58 +0530
-Subject: [PATCH 044/102] scripting: console's methods are writable;
+Subject: [PATCH 044/104] scripting: console's methods are writable;
  console.warn/info/debug
 
 `console.log = () => {}` (3363252053, 3414858021 silence their logs

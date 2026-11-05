@@ -1,0 +1,292 @@
+From 9b2b2443acfac241c48eea2e37f18cfab717eac1 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 08:03:16 +0530
+Subject: [PATCH 104/104] scripting: thisLayer and thisObject are the script
+ running now
+
+WE defines both as accessors on the global (scenescript64.dll: getters 0x1810d5fd0 and
+0x1810d60d0, set on the global template at 0x1810d89d3 / 0x1810d8a29) that return the object of
+the last entry of the engine's running-script deque (engine +0x4b0), undefined when none. Code a
+script shares therefore sees its caller: 3163060610's clocks register an event listener (a class
+from another object's script) that keeps `thisObject` and writes its text there; with LWE's
+module-scope bindings it wrote to the other object and the clocks stayed "Loading...".
+
+The engine now pushes [layer, object] around every entry into a script (a module's evaluation
+and exports, a text layer's script, its hooks and events); a timer or a video-ended callback
+runs with the script that set it (Inferred: WE's timers are not decoded).
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Preview compare result" (3163060610)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Adapters/ScriptableObjectAdapter.cpp      |  3 +-
+ .../Scripting/EngineObject.cpp                | 10 ++-
+ .../Scripting/ScriptEngine.cpp                | 75 +++++++++++++++++--
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  7 ++
+ .../Scripting/resources/builtins.js           | 29 +++++++
+ 5 files changed, 113 insertions(+), 11 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index 074b7e1..fe5c85a 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -1180,7 +1180,8 @@ void video_texture_finalizer (JSRuntime* rt, JSValueConst val) {
+ }
+ 
+ void ScriptableObjectAdapter::addVideoEndedCallback (CImage& image, JSValueConst callback) {
+-    this->m_videoEnded.push_back ({ .image = &image, .callback = JS_DupValue (this->m_engine.getContext (), callback), .ended = false });
++    // called outside any script: it runs with the script that registered it (thisLayer, builtins.js)
++    this->m_videoEnded.push_back ({ .image = &image, .callback = this->m_engine.bindToRunningScript (callback), .ended = false });
+ }
+ 
+ void ScriptableObjectAdapter::pollVideoEnded () {
+diff --git a/src/core/WallpaperEngine/Scripting/EngineObject.cpp b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+index 943c769..0b5705f 100644
+--- a/src/core/WallpaperEngine/Scripting/EngineObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/EngineObject.cpp
+@@ -151,7 +151,10 @@ JSValue engine_set_interval (JSContext* ctx, JSValueConst this_val, int argc, JS
+ 	return JS_EXCEPTION;
+     }
+ 
+-    int id = it->second.reserveNextIntervalId (function, delay);
++    // the callback runs with the script that set it on the running-script stack (builtins.js __scriptBound)
++    JSValue bound = it->second.getEngine ().bindToRunningScript (function);
++    int id = it->second.reserveNextIntervalId (bound, delay);
++    JS_FreeValue (ctx, bound);
+ 
+     JSValue args[] = { JS_NewInt32 (ctx, id) };
+ 
+@@ -181,7 +184,10 @@ JSValue engine_set_timeout (JSContext* ctx, JSValueConst this_val, int argc, JSV
+ 	return JS_EXCEPTION;
+     }
+ 
+-    int id = it->second.reserveNextTimeoutId (function, delay);
++    // the callback runs with the script that set it on the running-script stack (builtins.js __scriptBound)
++    JSValue bound = it->second.getEngine ().bindToRunningScript (function);
++    int id = it->second.reserveNextTimeoutId (bound, delay);
++    JS_FreeValue (ctx, bound);
+ 
+     JSValue args[] = { JS_NewInt32 (ctx, id) };
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 843141a..691d8f1 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -416,6 +416,7 @@ ScriptEngine::~ScriptEngine () {
+ 
+     for (const auto& module : this->m_scriptModules) {
+ 	JS_FreeValue (this->m_context, module->ns);
++	JS_FreeValue (this->m_context, module->binding);
+     }
+ 
+     for (auto& ctor : this->m_vecCtors) {
+@@ -459,6 +460,42 @@ static void logJSException (JSContext* ctx, const char* context) {
+     JS_FreeValue (ctx, exc);
+ }
+ 
++void ScriptEngine::pushScript (JSValueConst binding) {
++    JSContext* ctx = this->m_context;
++    JSValue stack = JS_GetPropertyStr (ctx, this->m_globalThis, "__scriptStack");
++    if (JS_IsArray (stack)) {
++	int64_t length = 0;
++	JS_GetLength (ctx, stack, &length);
++	JS_SetPropertyInt64 (ctx, stack, length, JS_DupValue (ctx, binding));
++    }
++    JS_FreeValue (ctx, stack);
++}
++
++JSValue ScriptEngine::bindToRunningScript (JSValueConst fn) {
++    JSContext* ctx = this->m_context;
++    JSValue bind = JS_GetPropertyStr (ctx, this->m_globalThis, "__scriptBound");
++    JSValue bound = JS_IsFunction (ctx, bind) ? JS_Call (ctx, bind, JS_UNDEFINED, 1, &fn) : JS_DupValue (ctx, fn);
++    JS_FreeValue (ctx, bind);
++    if (JS_IsException (bound)) {
++	JS_FreeValue (ctx, JS_GetException (ctx));
++	return JS_DupValue (ctx, fn);
++    }
++    return bound;
++}
++
++void ScriptEngine::popScript () {
++    JSContext* ctx = this->m_context;
++    JSValue stack = JS_GetPropertyStr (ctx, this->m_globalThis, "__scriptStack");
++    if (JS_IsArray (stack)) {
++	int64_t length = 0;
++	JS_GetLength (ctx, stack, &length);
++	if (length > 0) {
++	    JS_SetPropertyStr (ctx, stack, "length", JS_NewInt64 (ctx, length - 1));
++	}
++    }
++    JS_FreeValue (ctx, stack);
++}
++
+ void ScriptEngine::installBuiltins () {
+     if (this->m_builtinsInstalled || !this->m_context) {
+ 	return;
+@@ -649,7 +686,7 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	<< "    },\n"
+ 	<< "    has: function(t, k) { return (k in t) || globalThis.__layerProp(__id, k) !== undefined; }\n"
+ 	<< "  });\n"
+-	<< "  var thisLayer = globalThis.__layerSeedLayer, thisObject = thisLayer;\n"
++	<< "  var thisLayer = globalThis.__layerSeedLayer, thisObject = thisLayer, __binding = [thisLayer, thisLayer];\n"
+ 	// `thisScene` and `engine` are the real objects (getLayer, setInterval, …) seen through a layer of the text
+ 	// layer's own clock: time/currentTime/dt/fps and `frametime` (the per-frame delta in seconds, what
+ 	// InsertFPS reads) come from the text object's tick
+@@ -694,6 +731,7 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	<< "  function __adopt(r) { if (typeof r === 'string') thisLayer.text = r; }\n"
+ 	<< "  globalThis.__textLayers[__id] = {\n"
+ 	<< "    thisLayer: thisLayer,\n"
++	<< "    __binding: __binding,\n"
+ 	<< "    thisScene: thisScene,\n"
+ 	<< "    _init:    (typeof init    === 'function') ? function() { __adopt(init(thisLayer.text)); } : null,\n"
+ 	<< "    _destroy: (typeof destroy === 'function') ? destroy : null,\n"
+@@ -708,7 +746,14 @@ ScriptLayerHandle ScriptEngine::createLayerScript (
+ 	    << "})();\n";
+ 
+     const std::string evalScript = wrapper.str ();
++    JSValue seed = JS_GetPropertyStr (ctx, this->m_globalThis, "__layerSeedLayer");
++    JSValue binding = JS_NewArray (ctx);
++    JS_SetPropertyUint32 (ctx, binding, 0, JS_DupValue (ctx, seed));
++    JS_SetPropertyUint32 (ctx, binding, 1, seed);
++    this->pushScript (binding);
+     JSValue result = JS_Eval (ctx, evalScript.c_str (), evalScript.size (), "<layer-script>", JS_EVAL_TYPE_GLOBAL);
++    this->popScript ();
++    JS_FreeValue (ctx, binding);
+ 
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__layerSeedLayer", JS_UNDEFINED);
+ 
+@@ -759,7 +804,11 @@ void ScriptEngine::callLayerHook (ScriptLayerHandle handle, const char* name, in
+     JSValue fn = JS_IsObject (holder) ? JS_GetPropertyStr (ctx, holder, name) : JS_UNDEFINED;
+ 
+     if (JS_IsFunction (ctx, fn)) {
++	JSValue binding = JS_GetPropertyStr (ctx, layerObj, "__binding");
++	this->pushScript (binding);
+ 	JSValue ret = JS_Call (ctx, fn, layerObj, argc, argv);
++	this->popScript ();
++	JS_FreeValue (ctx, binding);
+ 	if (JS_IsException (ret)) {
+ 	    const std::string tag = std::string ("layer.") + name;
+ 	    logJSException (ctx, tag.c_str ());
+@@ -843,7 +892,11 @@ void ScriptEngine::destroyLayer (ScriptLayerHandle handle) {
+     if (!JS_IsUndefined (layerObj) && !JS_IsNull (layerObj)) {
+ 	JSValue fn = JS_GetPropertyStr (ctx, layerObj, "_destroy");
+ 	if (JS_IsFunction (ctx, fn)) {
++	    JSValue binding = JS_GetPropertyStr (ctx, layerObj, "__binding");
++	    this->pushScript (binding);
+ 	    JSValue ret = JS_Call (ctx, fn, layerObj, 0, nullptr);
++	    this->popScript ();
++	    JS_FreeValue (ctx, binding);
+ 	    if (JS_IsException (ret)) {
+ 		logJSException (ctx, "layer.destroy");
+ 	    }
+@@ -971,12 +1024,10 @@ void ScriptEngine::evaluateModule (LoadedModule& module) {
+     JSContext* ctx = this->m_context;
+     module.evaluated = true;
+ 
+-    // `thisLayer` and `thisObject` are the object the script is attached to, for this module alone: module-scope
+-    // bindings, so its event handlers and timer callbacks see them too. Prepended on the first line so that
+-    // error line numbers stay those of the script
+-    // (thisObject is the effect for a script on an effect's `visible`)
+-    const std::string source
+-	= "const thisLayer = globalThis.__thisLayerBinding, thisObject = globalThis.__thisObjectBinding; " + module.source;
++    // `thisLayer` and `thisObject` are WE's global accessors over the running scripts (builtins.js): the module's
++    // binding (its object; thisObject is the effect for a script on an effect's `visible`) is pushed around each call
++    // into it, so code it shares sees its caller's layer, as in WE
++    const std::string& source = module.source;
+ 
+     JSValue function = JS_Eval (
+ 	ctx, source.c_str (), source.size (), module.key.c_str (), JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
+@@ -1007,12 +1058,18 @@ void ScriptEngine::evaluateModule (LoadedModule& module) {
+ 	}
+ 	JS_FreeValue (ctx, of);
+     }
+-    JS_SetPropertyStr (ctx, this->m_globalThis, "__thisObjectBinding", thisObject);
++    JS_SetPropertyStr (ctx, this->m_globalThis, "__thisObjectBinding", JS_DupValue (ctx, thisObject));
++    JS_FreeValue (ctx, module.binding);
++    module.binding = JS_NewArray (ctx);
++    JS_SetPropertyUint32 (ctx, module.binding, 0, JS_GetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding"));
++    JS_SetPropertyUint32 (ctx, module.binding, 1, thisObject);
+     // createScriptProperties().finish() binds the stored script properties of the module being evaluated
+     this->m_runningModule = &module;
+     this->m_evaluatingModule = true;
++    this->pushScript (module.binding);
+     JSValue promise = JS_EvalFunction (ctx, function);
+     this->runPendingJobs ();
++    this->popScript ();
+     this->m_evaluatingModule = false;
+     this->m_runningModule = nullptr;
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__thisLayerBinding", JS_UNDEFINED);
+@@ -1050,7 +1107,9 @@ void ScriptEngine::callModule (LoadedModule& module, const char* name, int argc,
+     }
+ 
+     this->m_runningModule = &module;
++    this->pushScript (module.binding);
+     JSValue result = JS_Call (ctx, function, JS_UNDEFINED, argc, argv);
++    this->popScript ();
+     this->m_runningModule = nullptr;
+     JS_FreeValue (ctx, function);
+ 
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 638c86f..73bc90d 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -68,6 +68,8 @@ public:
+ 	float scriptScale = 1.0f;
+ 	/** the module namespace once evaluated (JS_UNDEFINED before, or when it failed to load) */
+ 	JSValue ns = JS_UNDEFINED;
++	/** [thisLayer, thisObject] while its code runs (pushed on the running-script stack, builtins.js) */
++	JSValue binding = JS_UNDEFINED;
+ 	bool evaluated = false;
+ 	bool initialized = false;
+ 	int errors = 0;
+@@ -76,6 +78,11 @@ public:
+ 	std::unique_ptr<Adapters::ScriptableObjectAdapter> object;
+     };
+ 
++    /** push `[layer, object]` (dups it) on the running-script stack that `thisLayer` / `thisObject` read */
++    void pushScript (JSValueConst binding);
++    void popScript ();
++    /** `fn` wrapped to run with the script running now on the stack (a new reference; `fn` itself when none) */
++    JSValue bindToRunningScript (JSValueConst fn);
+     ~ScriptEngine ();
+     ScriptEngine (Render::Wallpapers::CScene& scene);
+     ScriptEngine (const ScriptEngine&) = delete;
+diff --git a/src/core/WallpaperEngine/Scripting/resources/builtins.js b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+index dc71b3e..f1742dd 100644
+--- a/src/core/WallpaperEngine/Scripting/resources/builtins.js
++++ b/src/core/WallpaperEngine/Scripting/resources/builtins.js
+@@ -1,4 +1,33 @@
+ globalThis.__intervals = Object.create(null);
++// WE's `thisLayer` / `thisObject` are accessors on the global (scenescript64.dll: native getters 0x1810d5fd0 and
++// 0x1810d60d0, set on the global template at 0x1810d89d3 / 0x1810d8a29) that return the object of the script running
++// NOW: the last of the engine's running scripts (a deque at engine +0x4b0), undefined when none. So code a script shares
++// (a class in `shared`) sees its caller's layer, not its own (3163060610's clocks: an event listener made in the clock's
++// init keeps the clock as its thisObject). The engine pushes [layer, object] around every entry into a script; a
++// timer runs with the script that set it.
++(function () {
++  const stack = [];
++  Object.defineProperty(globalThis, '__scriptStack', { value: stack });
++  const top = (i) => (stack.length ? stack[stack.length - 1][i] : undefined);
++  Object.defineProperty(globalThis, 'thisLayer', { get: () => top(0), configurable: true });
++  Object.defineProperty(globalThis, 'thisObject', { get: () => top(1), configurable: true });
++  Object.defineProperty(globalThis, '__scriptBound', {
++    value: function (fn) {
++      const own = stack.length ? stack[stack.length - 1] : undefined;
++      if (own === undefined || typeof fn !== 'function') {
++        return fn;
++      }
++      return function () {
++        stack.push(own);
++        try {
++          return fn.apply(this, arguments);
++        } finally {
++          stack.pop();
++        }
++      };
++    },
++  });
++})();
+ // SceneScript's ILocalStorage: get/set/delete/clear (key, location), LOCATION_GLOBAL ("global") and LOCATION_SCREEN
+ // ("screen", the default). Values keep their type (JSON), and persist in the project's file (__storage, the host's
+ // storage dir) up to WE's 100 KB; without one they live as long as the scene. One "screen" store per project (the core

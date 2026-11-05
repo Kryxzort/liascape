@@ -1,7 +1,7 @@
 From 68c40c832d675fbda76ad5b48ee365950cb719a6 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 20:28:38 +0530
-Subject: [PATCH 041/102] scripting: cursor events and the cursor in input
+Subject: [PATCH 041/104] scripting: cursor events and the cursor in input
 
 The cursor reaches scripts the way SceneScript documents it:
 

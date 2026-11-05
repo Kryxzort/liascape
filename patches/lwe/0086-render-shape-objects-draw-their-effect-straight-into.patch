@@ -1,7 +1,7 @@
 From d467a716a292bb3340d36785e897c6a587e12302 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 23:46:32 +0530
-Subject: [PATCH 086/102] render: shape objects draw their effect straight into
+Subject: [PATCH 086/104] render: shape objects draw their effect straight into
  the scene
 
 A `"shape": "quad"` object (upstream logged it as an unsupported VolumeLight) is, in

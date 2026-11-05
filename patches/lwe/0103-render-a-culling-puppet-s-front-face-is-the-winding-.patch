@@ -1,0 +1,67 @@
+From 1f5a7bfdf37d933455556744f457b5f24666db2d Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 07:24:29 +0530
+Subject: [PATCH 103/104] render: a culling puppet's front face is the winding
+ its mesh lands with
+
+A puppet's material keeps its `cullmode` in WE (GH 0x140230ec0 writes the pass's own cull back
+into the puppet's combos: "normal" unless the pass says nocull). WE's mesh is front-facing
+counter-clockwise with y up; LWE builds the puppet's positions in y-down layer / scene pixels
+and a flat layer's projection draws them upside down into its target, so its triangles reached
+GL clockwise and a `cullmode: normal` puppet was culled whole: 3490034653's and 3363252053's
+characters were missing. The puppet draw now sets the front face from its matrix (clockwise
+while it keeps the y-down orientation); a perspective layer's camera turns it back, as before.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Preview compare result" (3490034653, 3363252053)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp   | 12 +++++++++++-
+ .../WallpaperEngine/Render/Objects/Effects/CPass.h   |  1 +
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index b19d9ab..2770696 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -877,7 +877,7 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) co
+ 		glVertexAttribPointer (color, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+ 	    }
+ 	},
+-	[this] () {
++	[this, pass] () {
+ 	    GLint currentFramebuffer = 0;
+ 	    glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &currentFramebuffer);
+ 	    if (currentFramebuffer
+@@ -890,8 +890,18 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) co
+ 		    previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]
+ 		);
+ 	    }
++	    // the mesh's triangles are WE's (front = counter-clockwise, y up); its positions here are y-down layer / scene
++	    // pixels, which a flat layer's projection draws upside down into its target, so they reach GL clockwise and a
++	    // `cullmode: normal` material (WE keeps it for puppets, GH 0x140230ec0) culled the whole puppet (3490034653,
++	    // 3363252053). Front is whichever winding the mesh's own front lands as: clockwise when the matrix keeps the
++	    // y-down orientation (det > 0). A perspective layer's camera turns it back (unchanged: counter-clockwise).
++	    const glm::mat4* mvp = pass->getModelViewProjectionMatrix ();
++	    const bool clockwise = !this->isPerspectiveLayer () && mvp != nullptr
++		&& (*mvp)[0][0] * (*mvp)[1][1] - (*mvp)[0][1] * (*mvp)[1][0] > 0.0f;
++	    glFrontFace (clockwise ? GL_CW : GL_CCW);
+ 	    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, this->m_puppetIndices);
+ 	    glDrawElements (GL_TRIANGLES, this->m_puppetIndexCount, GL_UNSIGNED_INT, nullptr);
++	    glFrontFace (GL_CCW);
+ 	},
+ 	[pass] () {
+ 	    const GLint position = glGetAttribLocation (pass->getProgramID (), "a_Position");
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 4607163..fa2e33a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -44,6 +44,7 @@ public:
+     void setTexCoord (GLuint texcoord);
+     void setPosition (GLuint position);
+     void setModelViewProjectionMatrix (const glm::mat4* projection);
++    [[nodiscard]] const glm::mat4* getModelViewProjectionMatrix () const { return this->m_modelViewProjectionMatrix; }
+     void setModelViewProjectionMatrixInverse (const glm::mat4* projection);
+     void setModelMatrix (const glm::mat4* model);
+     /** g_LayerModelMatrix: the layer's own matrix in WE's world (GH 0x1402176a0 copies image +0x384 to ctx +0xa30) */
