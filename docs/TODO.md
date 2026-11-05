@@ -1244,6 +1244,18 @@ Two bug classes kept recurring; fix the class, not the instance:
                 `text`). Also 0093: 3516106265's 24 `usershortcut` usertextures and 3042865984's `"default": ""` sampler
                 are no missing assets (WE keeps the slot's texture). Health 86 → 89 clean, 10 → 7 degraded (the 7: the
                 content script errors, re-checked against WE in the audit's "Leftovers result").
+    - [ ] **Scene preview compare — every scene against its author's preview** (2026-11-05, runner
+          `src/player/tests/onmachine/scene_preview_compare.sh`, notes `scene_preview_notes.json`):
+          [`docs/player/reports/scene-preview.md`](player/reports/scene-preview.md) — a ranked "look here first" list
+          (SSIM + colour histogram + edges + the worst local cells, the crop found by correlation; 3414858021 scores
+          0.665 before its head fix, 0.32 after). Result: the audit's "Preview compare result".
+          - [x] culling puppets culled whole (3490034653's, 3363252053's characters) — fork 0103.
+          - [x] `thisLayer` / `thisObject` are the running script, as WE's accessors (3163060610's clocks) — fork 0104.
+          - [ ] camera zoom direction contested: 3516174947 letterboxed at its default "Lens size" 0.75, 3042492564's
+                preview = our zoom 1; the decode (B5) and 3490034653's "Panorama" say zoom < 1 shows more — needs an
+                owner's WE capture of 3516174947.
+          - [ ] 3163060610's clock text colour (a Media Integration colour without media) vs the preview's.
+          - [ ] look at the unexamined rows below rank 30 (scores ≤ 0.24) once the list above is settled.
     - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object

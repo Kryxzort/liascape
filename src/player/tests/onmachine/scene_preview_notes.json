@@ -6,8 +6,8 @@
   "3477054430": {"class": "known", "note": "a 3D (perspective) scene; the moon's tint differs."},
   "3516174947": {"class": "bug?", "note": "letterboxed black at its default camera zoom (\"Lens size\" 0.75): zoom < 1 shows more, as decoded in B5 (GH 0x1401afbf0 scales the projection by general.zoom x camera zoom). Its preview shows no border and the tree larger than at zoom 1; 3042492564's preview matches our zoom-1 view. Contested: 3490034653's 0.65 camera is labelled \"Panorama\" (shows more). Needs an owner's WE capture at the default."},
   "3042492564": {"class": "bug?", "note": "the preview's framing is exactly our view at zoom 1 (crop side 0.733 of our frame = its default g_zoom 0.73); see 3516174947. The clock and cover appear after 1 s (scripts) and are the size the user property sets."},
-  "3490034653": {"class": "bug", "note": "the character (人物1, a puppet, material cullmode normal, parallaxDepth -0.02 0.05, 5 effects) is built and on the canvas (health bbox) but not visible; the preview shows her. 3363252053's puppet (cullmode normal, negative parallaxDepth) is missing the same way; 3479521040's cullmode-normal puppet draws. Not fixed yet (deadline): next step is nocull in an unpacked copy (/dev/shm/lsc-preview/3490034653)."},
-  "3363252053": {"class": "bug", "note": "the white-clad girl (身体部件, a puppet, cullmode normal, parallaxDepth -0.52 -0.16) is missing; see 3490034653."},
+  "3490034653": {"class": "fixed", "note": "the character (人物1, a puppet whose material culls, cullmode normal) was culled whole: LWE's y-down puppet positions reached GL clockwise. Fixed in fork 0103 (pin 9b2b244); the rest is its falling petals."},
+  "3363252053": {"class": "fixed", "note": "the white-clad girl (身体部件, a culling puppet) was culled whole; fixed with 3490034653 (fork 0103)."},
   "3414858021": {"class": "fixed", "note": "calibration: 0.665 before the head fix (pin 157c111), 0.32 after; the rest is its sway and rain."},
   "2134765860": {"class": "by-design", "note": "the preview has an audio visualiser (no audio in the smoke) and another clock time."},
   "2388299037": {"class": "time", "note": "colour-cycling lights: the score swings 0.34-0.42 across our times."},
@@ -17,5 +17,6 @@
   "3243449890": {"class": "by-design", "note": "the preview carries a 4K badge."},
   "3219908811": {"class": "by-design", "note": "the preview carries a 4K badge."},
   "3480481965": {"class": "by-design", "note": "the preview is a poster with a frame and signature."},
-  "3354740764": {"class": "by-design", "note": "a clock (other time) and its placeholder windows."}
+  "3354740764": {"class": "by-design", "note": "a clock (other time) and its placeholder windows."},
+  "3163060610": {"class": "bug?", "note": "the clocks stayed \"Loading...\" (a shared class keeping thisObject wrote into the framework object); fixed in fork 0104. Its clock text colour (a Media Integration colour without media) differs from the preview's."}
 }

@@ -2942,3 +2942,74 @@ rows 4..11). On `f50bc82`: 4 px wide, 4 px up (rows 10..13).
   loss, problem count or errors.
 - Shader sweep (4085 checks vs the decode leftovers'): 6 failing before, 6 still failing, 0 fixed, 0 newly failing.
 - Player tests (DEBUG, on this core): 743 passed, 0 failed, 3 ignored.
+
+### Preview compare result: every scene against its author's preview; culling puppets, the running script's thisLayer (fork patches 0103–0104, 2026-11-05)
+
+Build check 3 of the scene-correctness plan: does each scene look like what its author saw? The health report catches
+what the core leaves out; this catches scenes that build cleanly and still look wrong (3414858021's head was one).
+
+**The runner** (`src/player/tests/onmachine/scene_preview_compare.sh` + `scene_preview_report.py`, report
+`docs/player/reports/scene-preview.{md,json}`, side-by-sides and a contact sheet of the worst 20 in the results dir):
+one `--lwe-smoke` per scene with the new `--shots 0.5,2,5 --shot-width 640` (small box-filtered PNGs: no 4K files on
+the throttling NVMe; particle seed 7). Every preview here is a square from WE's editor (all 96: 39 jpg, 57 gif of
+30–50 frames, 160–1080 px), i.e. a crop of the canvas. Per (our frame, preview frame) pair — a gif sampled to 12
+frames — the crop is found by normalised cross-correlation of blurred grey images over square windows of 100–40 % of
+the frame's height (13 sizes, every position), refined at twice the resolution within ±8 % in 1 % steps; the frame
+squeezed square is tried too. The aligned pair (128 × 128) is scored: `0.30 (1 − SSIM) + 0.20 HSV-histogram
+Bhattacharyya + 0.20 (1 − Canny-edge F1, 2 px tolerance) + 0.30 local`, local = the mean of the worst 3 of 4 × 4
+cells' (1 − SSIM + colour difference). The scene keeps its best pair. A ranked "look here first" list, not pass/fail;
+`scene_preview_notes.json` records the explained differences (classes in the report).
+
+**Calibration:** 3414858021 with the core before its head fix (157c111) scores **0.665** (ssim 0.55, edges 0.68, local
+0.97: the missing head and the bright band), after it **0.32** (its sway and rain); the refined crop search took the
+good scenes down further (1174926427 0.29 → 0.06: the coarse 5 % size steps mis-scaled the crop). On the first run
+(core f4aa7c5) the clean matches sit at 0.02–0.15, animated or edited ones 0.15–0.35, and every score above 0.39 was
+a real difference: a bug, a 3D scene, another moment of a video, or other art.
+
+**Found and fixed:**
+
+- **Culling puppets were culled whole (0103, Observed):** 3490034653's character (人物1) and 3363252053's girl
+  (身体部件) were built, on the canvas (health bbox) and invisible; the preview shows them. Both are puppets whose
+  material says `cullmode: normal`. WE keeps a puppet's material cull (GH 0x140230ec0 writes the pass's own nocull flag
+  +500 back into the puppet combos as "nocull", else "normal"; +0x1f2 / 499 are depth test / write the same way). The
+  mesh is front-facing counter-clockwise with y up (every puppet in these three scenes: all triangles CCW in mesh
+  space, a probe of `loadPuppetMesh`); LWE builds its positions in y-down pixels (`size / 2 − y`) and a flat layer's
+  projection draws them upside down, so they reached GL clockwise. The puppet draw sets the front face from the
+  pass's matrix (clockwise while det > 0, the y-down orientation kept); a perspective layer is unchanged
+  (3479521040's cull-normal puppet is a `perspective` layer and drew before and after). Library: 3 puppet materials
+  cull (these two and 3479521040); 3490034653's 落花 puppet also culls.
+- **`thisLayer` / `thisObject` are the running script (0104, Observed):** 3163060610's clocks stayed "Loading...":
+  its framework script (object 13) shares an event dispatcher whose `Listener` class keeps `thisObject` (its comment:
+  "the class is instantiated in the source script, so this points to the caller"), and the clock's init makes one;
+  with LWE's module-scope `const thisLayer` the listener wrote the time into object 13. WE (scenescript64.dll, read
+  without Ghidra — its V8 import didn't finish in 30 min — by scanning for RIP-relative references): the strings
+  `thisObject` / `thisLayer` are used once, at 0x1810d89d3 / 0x1810d8a29, to install native accessors (getters
+  0x1810d5fd0 / 0x1810d60d0) on the global template; the getter returns the object of the **last entry of a deque**
+  in the engine state (+0x4b0 map, +0x4c0 start, +0x4c8 size), undefined (+0x378) when it is empty: the running
+  script. Ours: `thisLayer` / `thisObject` are global accessors over a running-script stack (builtins.js); the engine
+  pushes `[layer, object]` around every entry (module evaluation, every export it calls, a text layer's evaluation,
+  hooks and events); timers and video-ended callbacks run with the script that set them (Inferred: WE's timer path
+  isn't decoded). No library script uses async / promises with `thisLayer`. A scan for shared classes reading
+  `thisLayer` / `thisObject` hits 3042492564, 3163060610, 3363252053 and 3414858021. After: the clock reads the time
+  (08:00 at 08:00); its text colour differs from the preview's (a Media Integration colour without media).
+
+**Explained, not fixed** (notes file; the report has each):
+
+- **2890767643** (0.73): the face is a 665 MB MP4 video texture; the preview's dark silhouette with yellow eyes is a
+  later moment of it. **2694785040** (0.66): the preview is other art (the full figure). **2783122117**: a still
+  crop. **3509243656, 3477054430**: 3D scenes (known). **2134765860, 3354740764**: audio visualiser / clock time;
+  **3326873240, 3243449890, 3219908811, 3480481965**: a 4K badge or a poster frame in the preview;
+  **2388299037, 2561227934, 1726902114**: colour cycling, random light shafts, sway.
+- **Camera zoom, contested (3516174947, 3042492564):** 3516174947 is letterboxed black at its default "Lens size"
+  0.75 (zoom < 1 shows more, B5's decode: GH 0x1401afbf0 scales the projection, `param_1[10]`, by `general.zoom ·
+  camera zoom`; the camera object's +0x2dc is copied straight to +0x114 by GH 0x1401b8af0); its preview shows no
+  border and a larger tree. 3042492564's preview is exactly our view at zoom 1 (crop side 0.733 of our frame = its
+  default 0.73). But 3490034653 labels its 0.65 camera "Panorama" (shows more), which agrees with the decode. Left for
+  an owner's WE capture of 3516174947 at the default.
+
+**Fork tests** (`host_api_test`): 120/120; both new ones fail on `9683b9c`.
+
+| Test | What it checks | On `9683b9c` |
+|---|---|---|
+| `puppet_cullmode_normal_draws` | two 4 × 4 MDLV0016 puppet squares with a `cullmode: normal` material in a 64 × 32 scene, one drawn straight into the scene and one through an effect (its composite): both white | both the clear colour (red 0, 0) |
+| `this_layer_is_the_running_script` | sq1's script shares a class keeping thisLayer / thisObject and a function returning thisLayer.name; sq2's init makes one and calls it, a timer it sets reads its own layer, sq1's update still sees sq1: both squares visible | sq2 hidden (the class and the function said sq1) |
