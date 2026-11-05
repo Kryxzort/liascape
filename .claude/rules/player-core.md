@@ -2968,7 +2968,14 @@ only marked the client side, which is why the bus's links were synchronous befor
 `tests/api.rs::bus_producers_link_asynchronously` (`pw-dump`: every link into the bus is
 `link.async`), `scene_worker_exit_never_skips_bus_cycles` (full-live, 20 switches, recorded
 sink: 0 runs; RED 1 in ~10 switches before), `mpv_source_teardown_never_skips_bus_cycles`
-(V→V, RED before). Cost: one quantum per hop (the latency rule above).
+(V→V, RED before). Cost: one quantum per hop (the latency rule above). **The recording tests need an RT
+test server** (2026-11-05): the private daemon (`tests/common/pw.rs`) drives the graph, and at
+this machine's 64-frame quantum (`/etc/pipewire/client.conf.d/99-lowlatency.conf` on every
+client stream) a non-RT data thread there skipped whole cycles on its own (`pw-profiler`:
+driver position +128) — failures that looked like this race; it loads `module-rt` (rtkit, so
+`support.dbus = true`) like `scenes.sh`. `LIASCAPE_TEST_PW_PROFILE=<dir>` makes
+`mpv_source_teardown_never_skips_bus_cycles` save the private server's profile, `pw-dump`,
+the player's events and the recording there.
 
 **Meter.** `Meter::start(&bus)` (a capture stream on the bus thread: 48 kHz F32 stereo,
 `node.latency = 480/48000` — a 10 ms *request*; the graph runs at the smallest request, on

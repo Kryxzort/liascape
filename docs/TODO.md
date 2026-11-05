@@ -1258,8 +1258,16 @@ Two bug classes kept recurring; fix the class, not the instance:
                 cover; without media the script uses `m_text_color` (ours).
           - [x] every row above 0.115 looked at (57 / 96, pin 9b2b244): no new render bug; the 39 unexamined score
                 ≤ 0.115 (the clean band). See the audit's "The list worked down".
-          - [ ] `mpv_source_teardown_never_skips_bus_cycles` fails alone on 8fefe58 and 1cb88ba alike (2026-11-05,
+          - [x] `mpv_source_teardown_never_skips_bus_cycles` fails alone on 8fefe58 and 1cb88ba alike (2026-11-05,
                 3 / 3 runs: a 64–256-sample exact-silence run as a V→V stream leaves) — re-check on a quiet machine.
+                **Done 2026-11-05: the test's own PipeWire, not the player.** Not a regression (680e4c9, the commit
+                that added it, fails 3 / 8 alternated with cc2466d's 0 / 8; 5 / 26 unfixed runs overall, quiet).
+                `pw-profiler` on the private server: every lost cycle was its *driver* skipping a period (position
+                +128, `Dummy-Driver` + bus playback xrun) — `tests/common/pw.rs`'s daemon had no `module-rt`, so
+                its data thread ran SCHED_OTHER nice 5 at the 1.33 ms quantum `/etc/pipewire/client.conf.d/
+                99-lowlatency.conf` asks for. Fixed: module-rt (rtkit, `support.dbus = true`), as `scenes.sh`
+                already had. After: 0 / 20 quiet, no exact-silence run at all; under 20 busy threads 38–90 runs
+                per test unfixed vs 0–1 fixed. `LIASCAPE_TEST_PW_PROFILE=<dir>` on that test saves the profile.
     - [ ] **WE coverage — the master gap list** (2026-11-04, fork patches 0065–0070):
           [`docs/player/spikes/we-coverage.md`](player/spikes/we-coverage.md) — everything WE supports vs our fork,
           item by item (SceneScript d.ts 2.8: 421 / 453 implemented, was 329; keys, blend modes, formats, object

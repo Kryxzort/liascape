@@ -533,3 +533,18 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   decoded zoom formula); its preview has none. A WE screenshot of it at the default settles which is right.
 - `mpv_source_teardown_never_skips_bus_cycles` fails today on the old commit as well (a flake of this machine's
   state, in TODO); nothing in this work touches mpv.
+
+## 2026-11-05 — the failing bus-cycle test was the test's own PipeWire
+- **`mpv_source_teardown_never_skips_bus_cycles` is fixed; the player was never at fault.** The short silent gaps
+  came from the private PipeWire server the tests start, not from Liascape. Its graph timer ran at normal priority
+  (no real-time module in the test config) while your system config asks every stream for a 64-sample quantum
+  (1.3 ms). Whenever that thread woke 1.3 ms late, the whole test graph skipped one cycle. PipeWire's own profiler
+  showed it on every gap: the server's driver skipped a period, while the player's streams were on time.
+- Not a regression: the commit that added the test (680e4c9) fails just as often (3 of 8) when alternated with
+  today's (0 of 8). It slipped through because it fails only about 1 run in 5 when the machine is quiet.
+- Fix: the test server now runs real-time, like your real PipeWire and like the on-machine harness (`scenes.sh`)
+  already did. Before → after: quiet 5 failed of 26 runs → 0 of 20 (no gap at all); with the CPU saturated
+  38–90 gaps per run, 4 of 4 failed → 0–1 gaps, 1 of 4 failed. Your own audio setup is untouched.
+- Full player suite with the fix: 743 passed, 1 failed, 3 ignored. The one failure,
+  `scene::gpu_stall_that_starves_the_worker_is_not_a_hang`, doesn't use PipeWire and passed 3 of 3 alone (a timing
+  flake under the full suite's load).

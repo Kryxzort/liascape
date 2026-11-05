@@ -1,9 +1,21 @@
 //! A **private, hermetic** PipeWire + WirePlumber for tests that need real audio flow (I7;
 //! moved here from `tests/api.rs` by Phase 2 Task 6 so every target can use it): their own
-//! runtime/config/state dirs, no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/
+//! runtime/config/state dirs, no session D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/
 //! V4L2 monitors, so no real device is ever touched; one null sink (`hermetic-sink`) as the
 //! only output. The owner's PipeWire is never involved: `PIPEWIRE_RUNTIME_DIR` points every
 //! client of a test (the bus, mpv's AO, a scene worker's stream) at the private socket.
+//!
+//! **The daemon runs its graph real-time, like the owner's** (`libpipewire-module-rt` via rtkit
+//! on the system bus — hence `support.dbus = true`; the session bus stays unreachable; the same
+//! config as `tests/onmachine/scenes.sh`). Its data thread drives the graph (the null sink's
+//! timer), and this machine's `client.conf.d/99-lowlatency.conf` asks every client stream for
+//! `node.latency = 64/48000`, so a cycle is 1.33 ms. Without RT that thread ran SCHED_OTHER at
+//! the test's nice level and lost whole cycles whenever it woke late — the driver skipping a
+//! period (`pw-profiler`: position +128, `Dummy-Driver` and the bus playback xrun), each one
+//! 64 frames of exact silence at the sink, mostly as a stream joined or left the graph: the
+//! recording tests' (`tests/api.rs::*_never_skips_bus_cycles`) "lost cycles" that weren't the
+//! player's (2026-11-05: `mpv_source_teardown_never_skips_bus_cycles` failed 5 of 26 runs
+//! quiet, 4 of 4 under CPU load with 38–90 runs each; with RT 0 of 20 quiet, 0–1 runs loaded).
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -47,9 +59,10 @@ impl PrivatePw {
         std::fs::write(
             dir.join("pw.conf"),
             r#"context.properties = { core.daemon = true core.name = pipewire-0
-  default.clock.rate = 48000 support.dbus = false log.level = 1 }
+  default.clock.rate = 48000 support.dbus = true log.level = 1 }
 context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
 context.modules = [
+  { name = libpipewire-module-rt args = { nice.level = -11 rt.prio = 88 } flags = [ ifexists nofail ] }
   { name = libpipewire-module-protocol-native } { name = libpipewire-module-profiler }
   { name = libpipewire-module-access } { name = libpipewire-module-metadata }
   { name = libpipewire-module-spa-device-factory } { name = libpipewire-module-spa-node-factory }

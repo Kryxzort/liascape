@@ -7769,6 +7769,7 @@ fn mpv_source_teardown_never_skips_bus_cycles() {
     let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
     let wav = root.join("sink.wav");
     let rec = record_sink(&pw, &wav);
+    let prof = profile_pw(&pw);
     std::thread::sleep(Duration::from_millis(500));
     let a = create_src(&mut c, json!({"path": red, "loop": true}));
     show_all(&mut c, &a);
@@ -7781,6 +7782,7 @@ fn mpv_source_teardown_never_skips_bus_cycles() {
         switch_and_wait(&mut c, json!({"path": to, "loop": true}));
     }
     let (left, runs) = stop_sink_recording(rec, &wav);
+    end_profile(&pw, prof, &mut c, &wav);
     let audible = left.iter().filter(|v| v.abs() > 0.01).count();
     println!(
         "F7/mpv: {SWITCHES} full-live V→V, {:.1} s recorded ({:.1} s audible): exact-silence runs {runs:?}",
@@ -7965,6 +7967,32 @@ fn record_sink(pw: &PrivatePw, wav: &Path) -> std::process::Child {
     .stdout(std::process::Stdio::null())
     .stderr(std::process::Stdio::null());
     rec.spawn().expect("pw-record")
+}
+
+/// Diagnostics: with `LIASCAPE_TEST_PW_PROFILE=<dir>`, the private server's profiler
+/// (`pw-profiler -J`: every graph cycle, each node's status and times) runs alongside a
+/// recording; [`end_profile`] stops it and adds `pw-dump` + the player's events to `<dir>`.
+fn profile_pw(pw: &PrivatePw) -> Option<(std::process::Child, PathBuf)> {
+    let dir = PathBuf::from(std::env::var_os("LIASCAPE_TEST_PW_PROFILE")?);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut p = pw.command("pw-profiler");
+    p.args(["-J", "-o", dir.join("profiler.json").to_str().unwrap()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::fs::File::create(dir.join("profiler.out")).unwrap())
+        .stderr(std::fs::File::create(dir.join("profiler.err")).unwrap());
+    Some((p.spawn().expect("pw-profiler"), dir))
+}
+
+fn end_profile(pw: &PrivatePw, prof: Option<(std::process::Child, PathBuf)>, c: &mut Client, wav: &Path) {
+    let Some((mut p, dir)) = prof else {
+        return;
+    };
+    std::fs::write(dir.join("pw-dump.json"), pw.dump().to_string()).unwrap();
+    unsafe { libc::kill(p.id() as i32, libc::SIGINT) };
+    let _ = p.wait();
+    let ev = c.ok("logs", json!({"min_level": "debug", "limit": 100_000}));
+    std::fs::write(dir.join("events.json"), ev.to_string()).unwrap();
+    std::fs::copy(wav, dir.join("sink.wav")).unwrap();
 }
 
 /// Stops [`record_sink`] and returns the left channel and its runs of exact silence
