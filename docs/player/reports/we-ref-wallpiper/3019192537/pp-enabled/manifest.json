@@ -1,0 +1,57 @@
+{
+  "id": "3019192537",
+  "source": "wallpiper",
+  "wallpiper": "6319fe3+scope-pids",
+  "tag": "pp-enabled",
+  "desktop": false,
+  "kind": "ortho",
+  "canvas": [
+    3185,
+    1792
+  ],
+  "window": [
+    1920,
+    1080
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [],
+  "pointer": "1588,892:1592,896",
+  "pointer_time": "0-0.3",
+  "fps": 30,
+  "we_settings": [
+    "postprocessing=enabled"
+  ],
+  "d3dcompiler": "WE's own bin\\d3dcompiler_47.dll (Microsoft)",
+  "fonts": "windows",
+  "item_blobs": false,
+  "clock": "Wine wall clock",
+  "we_crashed": false,
+  "first_frame_ms": 3698,
+  "wall_ms": 9799,
+  "we_gpu_mib": 326,
+  "rss_mib": 1350,
+  "cpu_s": 5.0,
+  "shots": [
+    {
+      "t": 0.5,
+      "late_ms": 94,
+      "capture_ms": 400,
+      "t_actual": 0.594
+    },
+    {
+      "t": 2,
+      "late_ms": 14,
+      "capture_ms": 415,
+      "t_actual": 2.014
+    },
+    {
+      "t": 5,
+      "late_ms": 7,
+      "capture_ms": 392,
+      "t_actual": 5.007
+    }
+  ],
+  "captured": "2026-11-06T17:58:50+05:30",
+  "time_base": "seconds after the first non-flat captured frame (probe every ~0.2 s); shot t was requested late_ms after t (t_actual); wallpiperctl capture reads the frame the portal holds at the request"
+}

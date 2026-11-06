@@ -1,0 +1,55 @@
+{
+  "id": "2371103399",
+  "source": "wallpiper",
+  "wallpiper": "6319fe3+scope-pids",
+  "tag": "",
+  "desktop": false,
+  "kind": "ortho",
+  "canvas": [
+    3840,
+    1080
+  ],
+  "window": [
+    1920,
+    540
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [],
+  "pointer": "1916,536:1920,540",
+  "pointer_time": "0-0.3",
+  "fps": 30,
+  "we_settings": [],
+  "d3dcompiler": "WE's own bin\\d3dcompiler_47.dll (Microsoft)",
+  "fonts": "windows",
+  "item_blobs": false,
+  "clock": "Wine wall clock",
+  "we_crashed": false,
+  "first_frame_ms": 7719,
+  "wall_ms": 13738,
+  "we_gpu_mib": 285,
+  "rss_mib": 1362,
+  "cpu_s": 5.1,
+  "shots": [
+    {
+      "t": 0.5,
+      "late_ms": 8,
+      "capture_ms": 204,
+      "t_actual": 0.508
+    },
+    {
+      "t": 2,
+      "late_ms": 22,
+      "capture_ms": 238,
+      "t_actual": 2.022
+    },
+    {
+      "t": 5,
+      "late_ms": 19,
+      "capture_ms": 235,
+      "t_actual": 5.019
+    }
+  ],
+  "captured": "2026-11-06T17:57:58+05:30",
+  "time_base": "seconds after the first non-flat captured frame (probe every ~0.2 s); shot t was requested late_ms after t (t_actual); wallpiperctl capture reads the frame the portal holds at the request"
+}
