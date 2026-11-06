@@ -25,8 +25,8 @@
     "note": "fixed 2026-11-06 (fork d5f244a, 313e1d2): the black box behind the dog (an `alphatocoverage` layer with effects drew its last pass unblended) and the light shafts (every particle sprite was drawn upside down: they rose from the field; WE's hang from the sky). Left: ours is black at 0.5 s because the scene opens with a black `fadeout` layer (opaque to 0.6 s, gone at 1.6 s) that WE draws too. The capture's t = 0 is WE's first non-flat frame, already inside that fade (its probe frames; wallpiper's 0.5 s frame is still dimmed), so WE's frames are about 1 s ahead of ours. The colour/contrast is WE's Ultra post-processing; the labels are the Windows fonts."
   },
   "3276522107": {
-    "class": "known",
-    "note": "a 3D train interior: ours lights the red seats and the beige aisle; WE keeps them near-black. The windows match. Lighting of 3D models (TODO \"LWE: 3D / perspective scenes\")."
+    "class": "time",
+    "note": "not the lighting: the lit train layer flashes on a 2 s alpha loop (15 fps, 30 frames), and these frames catch WE between flashes and ours inside one. WE's scene clock is already 0.25–0.9 s along at its first frame (changes per run; 4 runs fitted, seat rms 1.6–2.2 of ~19 once aligned). Rendered 0.85 s later, ours scores 0.29–0.31; the rest is the windows' scrolling buildings (g_Time) and god rays (gap audit \"3D scenes against WE\")."
   },
   "2672425887": {
     "class": "time",
@@ -34,7 +34,7 @@
   },
   "3509243656": {
     "class": "time",
-    "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\"). (Its frames are re-encoded from WE's FP16 swap chain, like the other HDR scenes.)"
+    "note": "not the intro script and not the brightness: against the re-encoded (FP16 swap chain) reference WE and ours match at 5 s (mean 17.8 / 17.9). WE's scene clock is already ~0.75 s along at its first frame, so its intro (an engine.runtime fade from 2 to 5 s) is further along at 2 s (gap audit \"3D scenes against WE\")."
   },
   "2783122117": {
     "class": "time",
@@ -79,5 +79,9 @@
   "2134765860": {
     "class": "time",
     "note": "A room whose daylight follows the wall clock: WE was captured by day, ours renders at the compare's own hour (evening here). Compare at the capture's hour."
+  },
+  "3477054430": {
+    "class": "ok",
+    "note": "the moon now takes the scene's distance fog like WE (0108: 149 → 129.6, WE 129.5). Left: the kitty's head turns from input.cursorWorldPosition, which WE casts into the 3D world and ours gives in scene pixels (head turned left in WE, front in ours)."
   }
 }

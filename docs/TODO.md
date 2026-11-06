@@ -353,9 +353,8 @@ Two bug classes kept recurring; fix the class, not the instance:
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
     - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real differences:
-          3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
-          the intro timelines of 2672425887 / 3509243656; 3490034653 (a warm glow from its `light_shafts_1`
-          particles drawn upside down: fixed with 3354740764's in 313e1d2;
+          3354740764 (a black box behind the dog sprite, extra light shafts); 3490034653 (a warm glow from its
+          `light_shafts_1` particles drawn upside down: fixed with 3354740764's in 313e1d2;
           the rest is a few px of layer registration — camera shake / parallax phase).
     - [ ] The WE-reference time base: WE's scene clock is already 0.2–1.1 s along at the first frame the probe takes
           (varying per run), and a scene that opens black pushes t = 0 into its own fade. Scenes with intros
@@ -369,6 +368,14 @@ Two bug classes kept recurring; fix the class, not the instance:
           in (the effect follows the scene fps); to look like their Windows, Liascape's scene fps has to be 240 too
           (GPU cost). Open: whether Liascape should offer WE's fps presets / a per-scene "match WE fps" option.
           Refs: `we-ref/3184155462/ripple-*`.
+    - [ ] `input.cursorWorldPosition` in a 3D scene: WE casts the pointer into the world (3477054430's head turns
+          left with the pointer at the centre / left and faces front at the right; captures `ptrL-3d`, `ptrR-3d`).
+          Ours gives scene pixels. Decode what wallpaper64 hands scenescript64's getter (0x1810e6dd4: host +0x498,
+          vtable +0xa8): ray depth or plane. Gap audit "3D scenes against WE".
+    - [ ] The flag-0x10 last draw for 2D layers is still genericimage3's (`effectpassthrough.json`). WE picks
+          `effectpassthrough_4` when its renderer's vtable +0x40 is > 2 (Inferred: the scene `version`). The two
+          differ only in lighting (genericimage3: the deprecated lights), which a passthrough doesn't use. A 2D layer
+          of a WE flag-0x100 image (unknown meaning) gets no last draw in ours.
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as

@@ -3693,6 +3693,28 @@ static bool color_blend_modes_read_the_scene () {
     return true;
 }
 
+// a colour-blend layer takes its colour once: WE draws its base with the context colour 1 and sets the layer's colour
+// for the BLENDMODE draw only (GH 0x140214b50, 0x1402321d0). A white layer of colour 0.5 multiplied (mode 2) over red
+// is 128 0 0; both draws taking g_Color4 made it 64 0 0 (2371103399's 0.3 layers were 128 where WE has 143)
+static bool blend_mode_layer_takes_its_colour_once () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1",
+        b7_object (1, "b7red", 32, "64 32") + "," + b7_object (2, "b7col", 16, "8 8", ",\"colorBlendMode\":2,\"color\":\"0.5 0.5 0.5\""));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b7red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const auto col = b7_layer (dir, "b7col", "gl_FragColor = g_Color4;", "", true, "uniform vec4 g_Color4;\n");
+    rig.extra.insert (rig.extra.end (), col.begin (), col.end ());
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const auto px = pixel_at (rig, 16);
+    printf ("    red × colour 0.5 (mode 2) → %d %d %d (want 128 0 0; 64 0 0 when both draws take the colour)\n", px[0], px[1], px[2]);
+    CHECK (rgb_near (px, 128, 0, 0), "the layer's colour didn't apply once (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // B10: the SceneScript API surface (docs/player/spikes/we-lwe-gap-audit.md S10–S37)
 
@@ -6084,6 +6106,50 @@ static bool fog_and_depth () {
     return true;
 }
 
+// fog reaches a 3D scene's image layers: WE gives every layer of a fog scene image flag 0x10, so its last draw is
+// effectpassthrough_4 (genericimage4) with FOG_COMPUTED and the scene's FOG_DIST (GH 0x140212f90, 0x140230ec0,
+// 0x1401d2a20). A white genericimage4 layer 10 units out, fog red from 0 to 5 at density 0 → 1: all red. Its alpha
+// applies once (the base draws with the context colour 1, GH 0x140214b50): a 0.5 white layer over the 0 0 0.5 clear,
+// the fog far off, is 128 128 191 (64 64 159 when both draws take it). Unpatched: the layer stays white
+static bool fog_reaches_world_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (const std::string& general, const std::string& more, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene (general, "{\"id\":1,\"name\":\"w\",\"image\":\"models/fogimg.json\",\"size\":\"200 200\","
+                                                      "\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\"" + more + "}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/fogimg.json", "{\"material\":\"materials/fogimg.json\"}\n");
+        write_file (dir + "/materials/fogimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                    "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/fogimg.json", "materials/fogimg.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> clear {}, fogged {}, half {};
+    CHECK (centre ("", "", clear), "load failed (no fog)");
+    CHECK (centre (",\"fogdistance\":true,\"fogdistancecolor\":\"1 0 0\",\"fogdistancestart\":0,\"fogdistanceend\":5,"
+                   "\"fogdistancestartdensity\":0,\"fogdistanceenddensity\":1", "", fogged),
+           "load failed (fog)");
+    CHECK (centre (",\"fogdistance\":true,\"fogdistancecolor\":\"1 0 0\",\"fogdistancestart\":50,\"fogdistanceend\":100,"
+                   "\"fogdistancestartdensity\":0,\"fogdistanceenddensity\":1", ",\"alpha\":0.5", half),
+           "load failed (alpha)");
+    printf ("    no fog %d %d %d (want white), fog %d %d %d (want red), alpha 0.5 with the fog far off %d %d %d (want 128 128 191)\n",
+            clear[0], clear[1], clear[2], fogged[0], fogged[1], fogged[2], half[0], half[1], half[2]);
+    CHECK (clear[0] > 240 && clear[1] > 240 && clear[2] > 240, "the layer isn't white without fog");
+    CHECK (fogged[0] > 240 && fogged[1] < 16 && fogged[2] < 16, "the fog didn't turn the far layer red");
+    CHECK (near (half[0], 128, 4) && near (half[1], 128, 4) && near (half[2], 191, 4), "the layer's alpha didn't apply once");
+    return true;
+}
+
 // F1: a generic4 quad material (white, lit), and an invisible one (additive black, no depth write) for an occluder
 // that only casts its shadow
 static void f1_materials (const std::string& dir, ScriptRig& rig) {
@@ -7073,6 +7139,7 @@ int main (int argc, char** argv) {
     run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
     run ("hdr_brightness_scales_colour", hdr_brightness_scales_colour);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
+    run ("blend_mode_layer_takes_its_colour_once", blend_mode_layer_takes_its_colour_once);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
@@ -7086,6 +7153,7 @@ int main (int argc, char** argv) {
     run ("layer_tilts_and_moves_in_depth", layer_tilts_and_moves_in_depth);
     run ("model_draws_and_lights", model_draws_and_lights);
     run ("fog_and_depth", fog_and_depth);
+    run ("fog_reaches_world_layers", fog_reaches_world_layers);
     run ("shadow_casters_compile", shadow_casters_compile);
     run ("skinned_casters_compile", skinned_casters_compile);
     run ("model_skins_and_morphs", model_skins_and_morphs);

@@ -799,6 +799,16 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         it. 2672425887's demon fades in at 2.07–2.6 s in both; WE's clock is 0.2–1.1 s ahead of t = 0, a different
         amount each run (4 runs; the 3D agent measured 0.25–0.9 s on 3276522107 / 3509243656). Ours at 2 s is
         0.07 s before the fade starts, which made it look like a 2 s vs 5 s gap at the 0.5 / 2 / 5 s samples.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] **The 3D scenes** — done 2026-11-06 (fork `dc2f07e`, `f6802a0`, patches 0108–0109; gap audit "3D scenes
+        against WE"). 3276522107 isn't a lighting difference. Its lit train layer flashes on a 2 s alpha loop, and
+        WE's scene clock is already 0.25–0.9 s along at its first frame (4 runs; seats match once aligned, rms ~2 of
+        19). 3509243656's darkness was the FP16 swap chain capture; against the re-encoded reference only the same
+        clock head start is left. 3477054430: a 3D scene's fog now reaches its image layers (WE's image flag 0x10 →
+        a last `effectpassthrough_4` draw with FOG_COMPUTED; the moon 149 → 129.6, WE 129.5), 0.085 → 0.058. Found
+        with it: a colour-blend layer took its colour and alpha twice (base and BLENDMODE draw; WE only the last).
+        2371103399 0.071 → 0.013, 3309103316 0.141 → 0.136. Fork tests `fog_reaches_world_layers`,
+        `blend_mode_layer_takes_its_colour_once`.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "The WE-reference time base: WE's scene clock is already 0.2–1.1 s along at the first frame":
   - [x] The "HDR at Ultra" look (3019192537, 3395587987; also 2542468435, 3509243656) — done 2026-11-06: the
         **references** were wrong, not ours. At Ultra WE presents those scenes through an FP16 (scRGB) swap
