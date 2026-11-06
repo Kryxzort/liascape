@@ -973,6 +973,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       while every reopen re-reads; only worth it if `resync` ever gets expensive.
 
 ## Follow-up projects (each gets its own brainstorm)
+- [ ] **Experimental: render a scene with real Wallpaper Engine** (owner, 2026-11-06: "maybe as a future
+      experimental feature"; after the port, not instead of it). An opt-in per-scene backend that runs WE itself under
+      Proton and imports its frames as a graph source (dmabuf, like the scene worker), for scenes our port still gets
+      wrong. Watch [wallpiper](https://github.com/ejalxndr/wallpiper) (MIT, early: runs WE under Proton, patches the PE
+      APIs WE needs, pipes frames as zero-copy dmabuf to a desktop portal) — borrow or integrate once it matures. Open
+      questions: Steam running/logged in (DRM), cost per instance (RAM/VRAM/start-up), bridging pause/transitions/
+      audio bus/pointer/properties/per-monitor, a clean WE install. The reference-capture setup
+      (`scripts/dev/we-ref-capture.sh`, `docs/player/spikes/we-proton.md`) is its first half.
 - [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
       upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Passed on the owner's machine and
       flipped 2026-11-02: the shipped auto-mute under liascape-player; `AudioMonitor` stays for legacy.
