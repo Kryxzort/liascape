@@ -649,6 +649,8 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// `--fps N` renders `N` frames per second of scene time (default 30); `--we-fps R` is the rate the scene is
 /// meant to tick at (`wp_project_set_frame_rate`, default `N`): a simulation effect (cursorripple) steps at `R`
 /// whatever `N` is, as the worker's scene does at its outputs' rate when the GPU budget throttles it.
+/// `--pointer-time A-B` moves it only between scene seconds A and B (parked at the first point before, at the last
+/// after) — the path `scripts/dev/we-ref-capture.sh --pointer-time` drives in real Wallpaper Engine (a cursor ripple).
 /// The core's build report (`WPENGINE_HEALTH`, fork patch 0061: each object built or dropped and why, shader /
 /// script / asset errors, each layer's canvas bbox at frames 1 and 31) goes to `<out>/health.json` beside the PNGs.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` (synthetic: nothing is played), 48 kHz
@@ -671,6 +673,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut tone = Tone::default();
     let mut paced = true;
     let mut pointer: Option<Vec<[f64; 2]>> = None;
+    let mut pointer_time: Option<[f64; 2]> = None;
     let mut fps = 30.0f32;
     let mut we_fps: Option<f32> = None;
     let mut shot_at: Vec<f32> = Vec::new();
@@ -732,6 +735,12 @@ pub fn smoke(args: &[String]) -> ! {
                     .filter(|f: &f32| *f >= 1.0)
                     .unwrap_or(30.0)
             }
+            "--pointer-time" => {
+                pointer_time = it.next().and_then(|v| {
+                    let (a, b) = v.split_once('-')?;
+                    Some([a.parse().ok()?, b.parse().ok()?])
+                })
+            }
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
                 let at = it.next().and_then(|v| v.parse().ok());
@@ -744,7 +753,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1[:X2,Y2…]] [--fps N] [--we-fps R] [--unpaced] [--shots T,T…] [--shot-width W]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1[:X2,Y2…] [--pointer-time A-B]] [--fps N] [--we-fps R] [--unpaced] [--shots T,T…] [--shot-width W]"
         );
         std::process::exit(2)
     };
@@ -759,7 +768,7 @@ pub fn smoke(args: &[String]) -> ! {
         audio_dump,
         tone,
         paced,
-        pointer.as_deref(),
+        pointer.as_deref().map(|p| (p, pointer_time)),
         (fps, we_fps.unwrap_or(fps)),
         (&shot_at, shot_width),
         &props,
@@ -841,7 +850,7 @@ fn run_smoke(
     audio_dump: f32,
     tone: Tone,
     paced: bool,
-    pointer: Option<&[[f64; 2]]>,
+    pointer: Option<(&[[f64; 2]], Option<[f64; 2]>)>,
     (fps, we_fps): (f32, f32),
     (shot_at, shot_width): (&[f32], u32),
     props: &[(String, serde_json::Value)],
@@ -946,8 +955,13 @@ fn run_smoke(
             let pcm = tone.render(&mut tone_phase, (f - 1) as f32 / fps, t, seconds);
             scene.push_input(&pcm, SAMPLE_RATE as u32);
         }
-        if let Some(path) = pointer {
-            let k = if frames > 1 { (f - 1) as f64 / (frames - 1) as f64 } else { 1.0 };
+        if let Some((path, window)) = pointer {
+            let k = match window {
+                // `--pointer-time A-B`: parked at the first point until A s, at the last from B s
+                Some([a, b]) => ((f64::from(t) - a) / (b - a).max(1e-6)).clamp(0.0, 1.0),
+                None if frames > 1 => (f - 1) as f64 / (frames - 1) as f64,
+                None => 1.0,
+            };
             let [x, y] = pointer_at(path, k);
             scene.set_pointer(x, y, 0);
         }
