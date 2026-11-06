@@ -26,6 +26,7 @@
 
 pub mod automute;
 pub mod covered;
+pub mod cursor;
 pub mod hypr;
 pub mod mpris;
 pub mod sway;

@@ -563,3 +563,22 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   Before / after pictures: `/tmp/claude-1000/ripple/3184155462-ripple-before-after.png`.
 - To get WE's look at another fps (e.g. WE's "ultra" 30 fps, where the water is strong), set the output's scene fps to
   it. Not decoded yet: whether WE also caps its fps at the monitor's refresh (your main screen is 144 Hz, WE set to 240).
+
+## 2026-11-06 — WE's frame rate and the mouse behind windows
+- **How WE limits its frame rate (read from its program):** after each frame it sleeps so that your "FPS" setting's
+  number of frames fill each second, and it shows frames without waiting for the screen's refresh. So WE really runs
+  at your setting even above the monitor's refresh: at 240 on your 144 Hz screen it draws 240 a second and Windows
+  shows the newest 144 of them. (The number the earlier notes called "the fps timer" is how often WE reads system audio
+  for visualisers — twice per frame — not the frame limiter.) WE's default for a fresh install is **15 fps**.
+- **Ours now does the same:** a scene runs at the fps you set for that monitor, even above its refresh (before, it was
+  capped at the refresh). The default for a monitor you haven't set is now 15 (WE's), in the player, the backend and
+  the Settings page (adding or detecting a monitor fills in 15, not the refresh). **Nothing changes for you today:**
+  your monitors are set to 144 and 240 explicitly.
+- **The mouse behind windows:** WE follows the mouse over the whole desktop — over windows and the other screen too.
+  Ours only saw it over the bare wallpaper, so a mouse-following scene froze while the cursor was over a window. Now,
+  on Hyprland, the player asks Hyprland where the cursor is, as often as the scene draws (at 240 a second: about 1.4 % of
+  one CPU core in the player and 0.6 % in Hyprland), and only while a scene is playing. Scenes follow the cursor everywhere, like
+  WE; clicks still count only on the bare wallpaper (as before). If Hyprland can't be asked, it falls back to the old
+  behaviour by itself.
+- Pushed and restarted the player (it came back with your scene; at the moment it is held paused because a window
+  covers the screen, so it isn't asking Hyprland anything).

@@ -163,7 +163,11 @@ def main():
             m["t_ours"] = ta
             pairs.append(m)
             rows.append((t, we, us))
-        r = {"id": sid, "exit": ex.get("exit"), "times": [p["t"] for p in pairs], "pairs": pairs,
+        # a WE reference that isn't one: WE crashed (its dialog is in the frames: Proton's mfmediaengine and video
+        # textures) or every frame is black
+        black = bool(rows) and all(float(w.max()) < 8 / 255 for _, w, _ in rows)
+        invalid = "WE crashed" if man.get("we_crashed") else ("WE black" if black else "")
+        r = {"id": sid, "exit": ex.get("exit"), "invalid": invalid, "times": [p["t"] for p in pairs], "pairs": pairs,
              "props": man.get("props", []), "pointer": man.get("pointer", ""), "window": man.get("window"),
              "class": (notes.get(sid) or {}).get("class", ""), "note": (notes.get(sid) or {}).get("note", "")}
         if pairs:
@@ -181,11 +185,11 @@ def main():
             r["dist"] = None
         res.append(r)
     first = [x for x in a.first.split(",") if x]
-    res.sort(key=lambda r: (r["id"] not in first, first.index(r["id"]) if r["id"] in first else 0,
+    res.sort(key=lambda r: (r["id"] not in first, bool(r.get("invalid")), first.index(r["id"]) if r["id"] in first else 0,
                             -(r["dist"] if r["dist"] is not None else 9)))
     # contact sheet of the worst 20 (WE | ours at the worst time)
     sheet_rows = []
-    for r in [r for r in res if r.get("dist") is not None][:20]:
+    for r in [r for r in res if r.get("dist") is not None and not r.get("invalid")][:20]:
         p = os.path.join(a.results, "sbs", f"{r['id']}.png")
         im = Image.open(p)
         sheet_rows.append((f"{r['id']}  {r['dist']:.3f}", im.resize((720, round(im.height * 720 / im.width)))))
@@ -226,9 +230,22 @@ def render_md(out, a, first):
     if sbs_rel:
         L.append(f"- **Images:** side-by-sides (WE | ours | |diff| x4, a row per time) `{sbs_rel}/<id>.jpg`; "
                  "WE frames (960 px JPEG) + manifests `docs/player/reports/we-ref/<id>/`.\n")
+    notes = read_json(a.notes, {})
+    focus = [r for r in res if (notes.get(r["id"]) or {}).get("focus")]
+    if focus:
+        L.append("## Focus\n")
+        for r in focus:
+            sc = f"score {r['dist']:.3f}" if r.get("dist") is not None else "not scored"
+            L.append(f"### {r['id']} ({sc})\n")
+            L.append(notes[r["id"]]["focus"].rstrip() + "\n")
+            if sbs_rel and r.get("dist") is not None:
+                L.append(f"![{r['id']} WE | ours | diff]({sbs_rel}/{r['id']}.jpg)\n")
+    L.append("## Ranked\n")
     L.append("| # | id | score | worst (t) | ssim | hist | edges | local | |Δ| | class | note |")
     L.append("|---|---|---|---|---|---|---|---|---|---|---|")
-    for i, r in enumerate(res, 1):
+    ranked = [r for r in res if not r.get("invalid")]
+    bad = [r for r in res if r.get("invalid")]
+    for i, r in enumerate(ranked, 1):
         if r.get("dist") is None:
             L.append(f"| {i} | {r['id']} | — | | | | | | | {r['class']} | no pair (exit {r.get('exit')}) {r['note']} |")
             continue
@@ -236,6 +253,17 @@ def render_md(out, a, first):
         L.append(f"| {i} | {r['id']} | {r['dist']:.3f} | {r['worst_dist']:.3f} ({r['worst_t']:g} s) | {r['ssim']:.2f} | "
                  f"{r['hist']:.2f} | {r['edges']:.2f} | {r['local']:.2f} | {r['mean_abs']:.3f} | {r['class']} | "
                  f"{r['note']} {img} |")
+    if bad:
+        L.append("\n## No usable WE reference\n")
+        L.append("WE under Proton crashed on these (a null read in `wallpaper64.exe` called back from Proton's "
+                 "`mfmediaengine.dll`: scenes with video textures; the same with UMU-Proton 10, proton-cachyos 11, "
+                 "`videohardwareacceleration` off and `videoframework` `mfEngine`) or drew only black. Their frames show "
+                 "WE's crash dialog; the scores below compare against that and mean nothing.\n")
+        L.append("| id | why | score (meaningless) | note |")
+        L.append("|---|---|---|---|")
+        for r in bad:
+            sc = f"{r['dist']:.3f}" if r.get("dist") is not None else "—"
+            L.append(f"| {r['id']} | {r['invalid']} | {sc} | {r['note']} |")
     L.append("")
     return "\n".join(L) + "\n"
 

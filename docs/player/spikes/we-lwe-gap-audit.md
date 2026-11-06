@@ -173,8 +173,9 @@ capture of the same scene:
 - ~~**Media integration** (S11–S14, 19 scenes): feed WE's media events from MPRIS? Which player?~~ Decided in B10: the scene worker reads MPRIS (the playing player, else the first paused one).
 - ~~**`engine.openUserShortcut`** (S21, 1 scene, Windows app launchers): ignore, or map to `xdg-open`?~~ Decided in B10: ignored (returns false).
 - **`scenetexture` properties** (E40, 9 scenes): the UI file picker the TODO already lists.
-- **The cursor behind windows** (C6): WE tracks the cursor everywhere. liascape sees it only over the bare desktop.
-  Accept that, or poll the compositor (Hyprland IPC) for a global cursor?
+- ~~**The cursor behind windows** (C6): WE tracks the cursor everywhere. liascape sees it only over the bare desktop.
+  Accept that, or poll the compositor (Hyprland IPC) for a global cursor?~~ Done 2026-11-06: Hyprland `cursorpos`
+  polled at the scenes' rate ("Frame limiter and desktop pointer result").
 
 ## 1. Scene graph, objects, camera, 3D, puppet (G)
 
@@ -1184,7 +1185,7 @@ C2 (`g_Frametime`) is E5. C4 (`g_PointerState`) is E4.
 | C1 | `g_Daytime` is always 0 | **Observed**: per frame `scene+0x150 = FUN_14013f370()` = local `h/24 + m/1440 + s/86400 + ms/86400000` ∈ [0,1) (FUN_140141520 [E7] → FUN_14013f370 [L2]); the uniform setter reads it as `g_Daytime` (case 5, [L3]) | `Context::daytime` is initialised to 0 and never written (Context.cpp:15); bound at CPass.cpp:872 | **0** shaders in the library or WE's stock shaders reference `g_Daytime` | none today (the TODO item is low priority) | S — set it in `Context::update` |
 | C3 | `g_Time` wraps every 5 days | **Observed**: `time += dt` in a double, reset to 0 when > 432000 s (FUN_1401afbf0 [L4], const `0x1404d44fc` = 432000.0) | `renderTime` = host clock, float, no wrap (Context.cpp:35) | all | after days of uptime float precision degrades (ulp 7.8 ms at 1 day, 31 ms at 5) — jitter in slow animations; WE has the same until its wrap | S — wrap at 432000 like WE |
 | C5 | Pointer normalisation | **Observed**: `g_PointerPosition = client px / window size` (x/+0x84, y/+0x88) per frame ([E7] → setter case 0x70 [L3]) | position / camera (scene) width/height (Render/Wallpapers/CScene.cpp:379-390); liascape sends native scene px mapped through fill+viewport (`scene/pointer.rs`) | 10 pkg shaders + 6 stock (cursor ripple, parallax-to-cursor) | equivalent when liascape's mapping is right; when a scene is cropped (cover fit) WE's value is relative to the **window**, LWE's to the **scene** — they differ at the edges | S — decide and document; compare with a WE capture |
-| C6 | Cursor feed on a wallpaper layer | **Observed**: WE polls `GetCursorPos` every frame regardless of focus ([E7]) | liascape forwards Wayland pointer events from its background layer surface (`ToWorker::Pointer`, sources/scene.rs:1340) — only while the pointer is over the bare desktop; no events when a window covers it | 10–25 (cursor uniforms, parallax with mouse influence, cursor scripts) | parity on an empty desktop; frozen behind windows (WE keeps tracking) — a platform limit, not an LWE gap | — (document; a compositor-wide cursor would need a Hyprland IPC poll) |
+| C6 | Cursor feed on a wallpaper layer | **Observed**: WE polls `GetCursorPos` every frame regardless of focus ([E7]) | liascape forwards Wayland pointer events from its background layer surface (`ToWorker::Pointer`, sources/scene.rs:1340) — only while the pointer is over the bare desktop; no events when a window covers it | 10–25 (cursor uniforms, parallax with mouse influence, cursor scripts) | parity on an empty desktop; frozen behind windows (WE keeps tracking) — a platform limit, not an LWE gap | **Done 2026-11-06** on Hyprland (`cursorpos` poll, `signal/cursor.rs`; elsewhere the surface as before) |
 | C7 | Frame pacing / dt | **Observed**: the scene tick takes the measured dt (FUN_1401afbf0 `param_2`) | renderTime − renderTimeLast from the host clock (CScene.cpp:400-402) | all | parity | — |
 
 ## Evidence index
@@ -3067,7 +3068,8 @@ because the slot is used, and the mask decodes and samples as expected).
 - `g_Frametime` (case 4, ctx+0x14c) = the frame's dt (B9).
 - The fps: FUN_14006dd90 reads `general.user.fps` and derives `clamp(round(1000/fps) · 0.5, 6, 100)` (DAT_140527614;
   its use — a timer interval in ms, Inferred — and whether presenting is also bounded by the refresh are not decoded,
-  Unknown). WE's quality presets (ui/dist): low 10, medium 15, high 25, ultra 30 fps. The owner's Windows config
+  Unknown; **decoded 2026-11-06**, "Frame limiter and desktop pointer result": it is the audio capture's sleep; the
+  limiter is in the render loop and WE presents without vsync). WE's quality presets (ui/dist): low 10, medium 15, high 25, ultra 30 fps. The owner's Windows config
   (`/mnt/Windows/.../wallpaper_engine/config.json`) has `fps` **240** for the main accounts (Kryxzort, second-profile), 15 for
   the others; the Linux library's copy says 30.
 
@@ -3123,5 +3125,74 @@ changed; shader sweep 6 failed checks, the 6 known; player suite 745 passed, 0 f
 simulation effects (stock and packaged, the rule above) finds only 3184155462; `g_PointerPositionLast` is read only by
 cursorripple, so 0106 changes nothing else either.
 
-Not done: WE keeps tracking the pointer under windows (C6) — ours freezes there and now takes the return as a jump;
+Not done: WE keeps tracking the pointer under windows (C6) — ours freezes there and now takes the return as a jump
+(done on Hyprland, next section);
 a simulation's trailing `swap` (none in the library) runs once on a frame with steps, not once per step.
+
+### Frame limiter and desktop pointer result: WE's `fps` is the scene's rate, above the refresh too; the cursor is the desktop's (2026-11-06)
+
+Two follow-ups of the cursor ripple result. Owner policy: a faithful port.
+
+**WE's frame limiter — Decoded (wallpaper64.exe 2.8.485, `all.c` / `all.asm`):**
+- The `clamp(round(1000/fps) · 0.5, 6, 100)` FUN_14006dd90 stores (DAT_140527614) is **not** the frame limiter. It is
+  field +0x14 of the audio-capture object at DAT_140527600 (+0xc `audioinputvolume` × 0.02, +0x10
+  `audioinputthreshold` × 0.001); the capture thread (FUN_140103630, started by FUN_14006fff0 via `_beginthreadex`
+  → 0x1400854a0) runs `Sleep(this+0x14)` between reads (all.c 190053, 190406; ×4 at 190103). So WE reads the
+  system audio about twice per frame, 6–100 ms apart.
+- The frame limiter is in the render loop FUN_140141520 (the same one that polls `GetCursorPos`). `fps` is read
+  per wallpaper window by FUN_1401461e0 into window +0x18c (at setup, FUN_1401447f0, and on window message 0x467 =
+  settings changed). After each frame: `fps == 0` → no wait; else a one-second budget (QueryPerformanceFrequency at
+  +0x168) is split over the frames left in that second: `Sleep((budget_left / (fps − k) − this_frame) / (freq/1000))`
+  ms (k = the frame's index in the second; the window restarts after `fps` frames or when the budget is overrun),
+  so the loop averages `fps` frames a second. Sleep's granularity: `highprecisiontimer` → `timeBeginPeriod(1)`
+  (FUN_14006ec80).
+- Presenting: `IDXGISwapChain1::Present1(0, DXGI_PRESENT_ALLOW_TEARING, …)` (vtable +0xb0, `edx` 0, `r8d` 0x200,
+  GH 0x140144442), its result checked against DXGI_ERROR_DEVICE_REMOVED / RESET. Sync interval 0: the present never
+  waits for a vblank, so **WE's frame rate is its `fps`, not bounded by the monitor's refresh** — a flip-model
+  window with sync interval 0 hands DWM its newest frame at each vblank and drops the rest. At fps 240 on a 144 Hz
+  monitor, WE renders and steps its scene (cursorripple included) 240 times a second; 144 of them are shown.
+- The default: the settings defaults (FUN_140048ca0, all.c 52530) writes `fps` = **15** when it isn't a number, and
+  the first-run wizard's `qualityPreset` starts at "medium" = 15 (ui/dist: low 10, medium 15, high 25, ultra 30).
+  The settings slider is `floor 10, ceil runtime.frequencymax` (the host fills `frequencymax`; Inferred: the highest
+  monitor refresh — the owner's 240 matches his 240 Hz DP-2). WE's `fps` is one global setting.
+- Not measured under Proton: the reference capture runs WE headless, where there is no real refresh to compare; the
+  decode answers the question.
+
+**Ours before:** the scene ticked (and `ToWorker::Rate` stepped its simulations) at `max eff_fps(scene_fps, refresh)`
+= `min(scene_fps, refresh)`; default `scene_fps` 30 (D5, LWE's default).
+
+**Changed (player only, no fork change):** `sources::scene::scene_rate(scene_fps, refresh)` = `scene_fps` as set,
+**not capped by the refresh** (0 = the refresh, liascape's: WE's UI can't reach 0 and its exe takes 0 as "no limit")
+→ the tick rate and `ToWorker::Rate`. An output still presents a scene's frames at most at `eff_fps` (≤ its refresh,
+the redraw gate) — the compositor shows the newest at each frame callback, like DWM. Default **15** everywhere: the
+player's `out:<c>.scene_fps`, the backend's `SceneMonitor.Fps` / `DefaultSceneFps`, and the UI's detected / added
+monitors (they took the refresh before). The owner's settings are explicit (DP-1 144, DP-2 240), so nothing changes
+for him today; at WE's 240 on the 144 Hz DP-1 ours would now tick 240 like WE. Not changed: the range (ours 0–480 per
+output, WE's 10..`frequencymax` global), the GPU budget's auto-throttle (liascape's, owner setting).
+Test: api `scene_fps_is_wes_rate_above_the_refresh` (default 15; 240 on a 60 Hz output → `fps_target` and
+`rate_sent` 240 — fails before: 30, then 60); unit `eff_fps_and_demand`; `scene_tick_rate_follows_demand` and
+`scene_fps_change_is_live_same_pid` start from 15.
+
+**The desktop pointer (C6) — done.** WE reads `GetCursorPos` each frame over the whole desktop. No Wayland protocol
+gives a client the global pointer (wlr-virtual-pointer only writes; `ext-*` has nothing; libinput needs root; Hyprland's
+socket2 has no cursor event), so on Hyprland the player polls the read-only `cursorpos` request (`.socket.sock`,
+global logical pixels — the space of each output's xdg-output position) on its own thread `lia-cursor`
+(`signal/cursor.rs`), off the loop: at the highest rate of the unpaused scenes (WE: once per frame), parked with no
+scene, published only when it moved (the loop's check is one atomic load). The runtime maps it like `ScreenToClient`:
+through each output's desktop rect into its pixels, then the layer's fit **unclamped** (off the scene on the other
+monitor, as WE's lies outside 0..1; LWE's parallax clamps 0..1 itself, as WE's does). A scene on two outputs takes the
+one the cursor is on. While it reads, nothing is a jump (the cursor never jumps in WE) except a scene's first
+placement; the surface's samples give only the buttons (a press is seen only over the bare desktop, as before).
+Fallback: not Hyprland, no socket, or a failed request (retried every 2 s) → the surface pointer, the behaviour
+before (0106's enter jumps), its first sample after a loss a jump. `LIASCAPE_PLAYER_POINTER_SOURCE=surface` forces it.
+Probe `pointer`.
+Cost (owner's machine, Hyprland 0.57, a headless release player with one synthetic scene at 240 fps, 15 s windows,
+desktop vs `surface` A/B ×2): `lia-cursor` 1.33 % / 1.40 % of one core at 240 polls/s (~56 µs CPU a poll: connect,
+write, read, close — Hyprland closes the socket after each reply), the whole player +1.3 %; a request's wall time
+121–129 µs mean (Hyprland answers from its main loop). Hyprland's own share, measured alone with 920 req/s on/off ×4:
+~24 µs a request → ~0.6 % of a core at 240/s (the A/B windows are within its ±1.5 % noise). In the live player the
+scene was held paused by the cover rule at the time: rate 0, no requests at all.
+Test: api `desktop_pointer_from_a_fake_hyprland` (a fake `.socket.sock`: placed once from the
+desktop, moves, onto the other output off the scene unclamped with no jump, the surface's press only sets the
+buttons, only `cursorpos` requests, a failing reply falls back to the surface with a jump); units in `signal::cursor`
+(reply parsing, the mapping, the choice, change-only publishing) and `scene::pointer` (unclamped).

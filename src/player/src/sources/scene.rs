@@ -8,9 +8,9 @@
 //! Task 5 makes it a graph [`Source`] (`kind: scene`): opened by `SourceHost` from the node's
 //! props ([`SceneSource::open`]), the worker spawned at the first [`set_demand`] that names an
 //! output (the ring is exported at the cover size of the largest output showing it), ticked
-//! at the outputs' `eff(scene_fps, refresh)`, on a **scene clock** that excises paused time
-//! and advances at `speed` ([`SceneClock`]); `paused` stops ticks and latching at once (the
-//! held texture is exact); `Ready` = the first latched frame of a load; a live `path` change
+//! at the outputs' [`scene_rate`] (WE's `fps`, not capped by the refresh), on a **scene clock**
+//! that excises paused time and advances at `speed` ([`SceneClock`]); `paused` stops ticks and
+//! latching at once (the held texture is exact); `Ready` = the first latched frame of a load; a live `path` change
 //! = a new worker on the new folder with the old frame held until its first frame; stepped
 //! mode ticks exactly the step's scene time ([`step_to`]).
 //!
@@ -58,8 +58,10 @@ const MAX_INFLIGHT: u64 = 2;
 /// frame when the scene runs at the loop's rate).
 const TICK_SLACK: Duration = Duration::from_millis(2);
 
-/// The scene frame rate when nothing says otherwise (D5: LWE's default).
-pub const DEFAULT_SCENE_FPS: f64 = 30.0;
+/// The scene frame rate when nothing says otherwise: WE's own default `fps` (2026-11-06, decoded
+/// from wallpaper64.exe 2.8.485: the settings loader writes 15 when `general.user.fps` is missing,
+/// and the first-run wizard's preset is "medium" = 15). It was 30 (D5, LWE's default) before.
+pub const DEFAULT_SCENE_FPS: f64 = 15.0;
 
 /// `Position` events at most this often (like `MpvSource`).
 const POSITION_EVERY: Duration = Duration::from_millis(100);
@@ -111,7 +113,8 @@ pub struct OutputDemand {
     pub scene_fps: f64,
 }
 
-/// The frame rate a scene runs at for one output: `scene_fps`, never above the refresh;
+/// The rate output `<c>` lets a scene's new frames wake it at (the redraw gate,
+/// `redraw::scene_gate_period`): `scene_fps`, never above the refresh (an output can't show more);
 /// `0` = the refresh; neither known → [`DEFAULT_SCENE_FPS`].
 pub fn eff_fps(scene_fps: f64, refresh_hz: f64) -> f64 {
     let r = if scene_fps <= 0.0 {
@@ -124,9 +127,26 @@ pub fn eff_fps(scene_fps: f64, refresh_hz: f64) -> f64 {
     if r > 0.0 { r } else { DEFAULT_SCENE_FPS }
 }
 
+/// The rate a scene **ticks** at for one output — WE's `fps` semantics (2026-11-06, decoded from
+/// wallpaper64.exe 2.8.485's render loop FUN_140141520): WE sleeps each frame to `fps` frames a
+/// second and presents with `Present1(0, DXGI_PRESENT_ALLOW_TEARING)` — no vsync wait — so its
+/// scene (and every per-frame simulation, cursorripple) runs at `fps` even above the monitor's
+/// refresh; DWM shows the newest frame at each vblank. So: `scene_fps` as is, **not** capped by
+/// the refresh (the output still presents at most at its refresh — [`eff_fps`] gates that);
+/// `0` = the refresh (liascape's; WE's UI can't go below 10, its exe takes 0 as "no limit");
+/// neither known → [`DEFAULT_SCENE_FPS`].
+pub fn scene_rate(scene_fps: f64, refresh_hz: f64) -> f64 {
+    let r = if scene_fps > 0.0 {
+        scene_fps
+    } else {
+        refresh_hz
+    };
+    if r > 0.0 { r } else { DEFAULT_SCENE_FPS }
+}
+
 /// What the ring is exported for and how fast the scene ticks, from every output showing
 /// it: `max_size` = the largest width and height (so the cover size covers each output),
-/// tick rate = the highest [`eff_fps`]. `None` for no output.
+/// tick rate = the highest [`scene_rate`]. `None` for no output.
 pub fn demand_of(outs: &[OutputDemand]) -> Option<([u32; 2], f64)> {
     if outs.is_empty() {
         return None;
@@ -135,7 +155,7 @@ pub fn demand_of(outs: &[OutputDemand]) -> Option<([u32; 2], f64)> {
     let h = outs.iter().map(|o| o.height).max().unwrap_or(0).max(1);
     let hz = outs
         .iter()
-        .map(|o| eff_fps(o.scene_fps, o.refresh_hz))
+        .map(|o| scene_rate(o.scene_fps, o.refresh_hz))
         .fold(0.0, f64::max);
     Some(([w, h], hz))
 }
@@ -821,7 +841,7 @@ impl SceneSource {
     /// The outputs showing this scene now (`SourceHost::sync`, every iteration): the ring is
     /// exported at the cover size of the largest (a change → `Resize`; the worker re-exports
     /// and the old frame stays until the first new one latched), ticks at the highest
-    /// [`eff_fps`]. The first call naming an output spawns the worker. No output (all
+    /// [`scene_rate`]. The first call naming an output spawns the worker. No output (all
     /// unplugged — parked) changes nothing.
     pub fn set_demand(&mut self, outs: &[OutputDemand]) {
         let Some((max, hz)) = demand_of(outs) else {
@@ -1719,6 +1739,11 @@ impl SceneSource {
         {
             self.stats.rate_sent = hz;
         }
+    }
+
+    /// `paused` (the source's own, a player pause included): no ticks, no frames.
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     /// The last pointer handed to the worker (native pixels + buttons).
@@ -2690,6 +2715,11 @@ mod tests {
         assert_eq!(eff_fps(0.0, 144.0), 144.0, "0 = the refresh");
         assert_eq!(eff_fps(45.0, 0.0), 45.0, "unknown refresh");
         assert_eq!(eff_fps(0.0, 0.0), DEFAULT_SCENE_FPS);
+        // WE's `fps`: the scene ticks at the setting even above the refresh (Present1 sync 0).
+        assert_eq!(scene_rate(240.0, 144.0), 240.0, "not capped by the refresh");
+        assert_eq!(scene_rate(30.0, 144.0), 30.0);
+        assert_eq!(scene_rate(0.0, 144.0), 144.0, "0 = the refresh");
+        assert_eq!(scene_rate(0.0, 0.0), 15.0, "WE's default");
         let o = |w, h, hz, fps| OutputDemand {
             name: "out:X".into(),
             width: w,
@@ -2703,6 +2733,11 @@ mod tests {
             Some(([1920, 1920], 60.0)),
             "covers every output; the fastest wins"
         );
+        assert_eq!(
+            demand_of(&[o(1920, 1080, 144.0, 240.0)]),
+            Some(([1920, 1080], 240.0)),
+            "WE at fps 240 on a 144 Hz monitor steps 240 times a second"
+        );
     }
 
     #[test]
@@ -2714,10 +2749,10 @@ mod tests {
         let e = kind_change_unsupported(&PropValue::Str("video".into()));
         assert_eq!(e.code, "unsupported");
         assert!(e.message.contains("create a new source"), "{e}");
-        // `preview` is a Source prop; `scene_fps` an Output one (D5: 30, 0–480).
+        // `preview` is a Source prop; `scene_fps` an Output one (WE's default 15, 0–480).
         assert!(props::schema_for(NodeKind::Source, "preview").is_some());
         let fps = props::schema_for(NodeKind::Output, "scene_fps").unwrap();
-        assert_eq!(fps.default, PropValue::F64(30.0));
+        assert_eq!(fps.default, PropValue::F64(15.0));
         let e = props::validate_value(NodeKind::Output, "scene_fps", &PropValue::F64(481.0), true)
             .unwrap_err();
         assert_eq!(e.code, "out_of_range");

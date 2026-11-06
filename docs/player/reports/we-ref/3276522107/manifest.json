@@ -1,0 +1,46 @@
+{
+  "id": "3276522107",
+  "tag": "",
+  "desktop": false,
+  "kind": "auto",
+  "canvas": [
+    1920,
+    1080
+  ],
+  "window": [
+    1920,
+    1080
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [],
+  "pointer": "960,540",
+  "pointer_time": "",
+  "fps": 30,
+  "we_settings": [],
+  "we_crashed": false,
+  "first_frame_ms": 6566,
+  "wall_ms": 12001,
+  "we_gpu_mib": 598,
+  "rss_mib": 1708,
+  "cpu_s": 20.5,
+  "shots": [
+    {
+      "t": 0.5,
+      "late_ms": 15,
+      "t_actual": 0.515
+    },
+    {
+      "t": 2,
+      "late_ms": 12,
+      "t_actual": 2.012
+    },
+    {
+      "t": 5,
+      "late_ms": 12,
+      "t_actual": 5.012
+    }
+  ],
+  "captured": "2026-11-06T16:00:57+05:30",
+  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"
+}

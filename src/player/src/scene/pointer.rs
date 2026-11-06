@@ -27,6 +27,18 @@ pub fn to_source_uv(rect: &UvRect, px: f64, py: f64) -> Option<(f64, f64)> {
     Some((ux + fx * uw, uy + fy * uh))
 }
 
+/// [`to_source_uv`] without the bounds: a point off the drawn rectangle (another monitor, a
+/// letterbox bar) maps on along the same line — the desktop pointer, like WE's `ScreenToClient`
+/// ÷ the window size, which goes outside 0..1 off the window. `None` only for an empty rect.
+pub fn to_source_uv_unclamped(rect: &UvRect, px: f64, py: f64) -> Option<(f64, f64)> {
+    let [dx, dy, dw, dh] = rect.dst;
+    if dw <= 0.0 || dh <= 0.0 {
+        return None;
+    }
+    let [ux, uy, uw, uh] = rect.uv;
+    Some((ux + (px - dx) / dw * uw, uy + (py - dy) / dh * uh))
+}
+
 /// `(u, v)` → the scene's native pixels (what LWE's mouse callbacks hand `CScene`, which
 /// divides by its own width/height).
 pub fn to_native_px(uv: (f64, f64), native: [u32; 2]) -> (f64, f64) {
@@ -67,5 +79,21 @@ mod tests {
         let (u, _) = to_source_uv(&r, 1920.0, 540.0).unwrap();
         assert!((u - 1.0).abs() < 1e-9, "{u}");
         assert_eq!(to_native_px((0.5, 0.25), [3840, 2160]), (1920.0, 540.0));
+    }
+
+    #[test]
+    fn unclamped_goes_on_past_the_edges() {
+        let r = fit_rect((3840, 1920), (1920, 1080), Fit::Fill, FULL);
+        let inside = to_source_uv(&r, 960.0, 540.0).unwrap();
+        assert_eq!(to_source_uv_unclamped(&r, 960.0, 540.0), Some(inside));
+        // One output width to the left (the cursor on the other monitor): u < 0, same line.
+        let (u0, _) = to_source_uv_unclamped(&r, 0.0, 540.0).unwrap();
+        let (u1, v1) = to_source_uv_unclamped(&r, -1920.0, 540.0).unwrap();
+        assert!(
+            u1 < 0.0 && (u0 - u1 - (inside.0 - u0) * 2.0).abs() < 1e-9,
+            "{u0} {u1}"
+        );
+        assert!((v1 - 0.5).abs() < 1e-9);
+        assert_eq!(to_source_uv(&r, -1920.0, 540.0), None);
     }
 }
