@@ -2565,6 +2565,82 @@ static bool hidden_parent_hides_children () {
     return true;
 }
 
+// a sprite's texture stands as in WE: its v = 0 row at +up (common_particles.h ComputeParticlePosition), up on the
+// screen, and its own z rotation turns it the way WE's does. A sprite draws red where v < 0.5, green below; a white
+// sprite near the top-right corner marks the screen's top in the read-back. Sprite 1 is upright, sprite 2 is turned
+// by +π/2 (WE: up = (sin, cos) → (1, 0), its red half to the right on the screen: the rotation's sense). Unpatched
+// (U = (0,1,0) in LWE's y-down particle space) every sprite was mirrored top to bottom: the upright one's red half
+// at the bottom (3354740764's light shafts lit from below)
+static bool sprite_texture_stands_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const char* rotation) {
+        return std::string ("{\"material\":\"materials/uvp.json\",\"maxcount\":1")
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":1}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":20,\"max\":20}," + white + "," + life
+             + ",{\"name\":\"rotationrandom\",\"min\":\"0 0 " + rotation + "\",\"max\":\"0 0 " + rotation + "\"}]}\n";
+    };
+    // the marker: a plain white sprite (util/white) near the top-right corner
+    std::string mark = sys ("0");
+    mark.replace (mark.find ("materials/uvp.json"), 18, "materials/opaque.json");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "up.json", 16, 16) + "," + particle_object (2, "turned.json", 44, 16) + ","
+            + particle_object (3, "mark.json", 60, 28),
+        "0 0 0", { { "up.json", sys ("0") }, { "turned.json", sys ("1.5707964") }, { "mark.json", mark } }, files);
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    write_file (dir + "/shaders/uvp.vert",
+                "#include \"common_particles.h\"\nattribute vec3 a_Position;\nattribute vec4 a_TexCoordVec4;\n"
+                "attribute vec4 a_Color;\nattribute vec2 a_TexCoordC2;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                "\tvec3 right, up;\n\tComputeParticleTangents(vec3(a_TexCoordC2.xy, a_TexCoordVec4.z), right, up);\n"
+                "\tvec3 position = ComputeParticlePosition(a_TexCoordVec4.xy, 1.0, vec4(a_Position, a_TexCoordVec4.w), right, up);\n"
+                "\tgl_Position = mul(vec4(position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoordVec4.xy;\n}\n");
+    write_file (dir + "/shaders/uvp.frag", "varying vec2 v_TexCoord;\nvoid main() {\n"
+                                           "\tgl_FragColor = v_TexCoord.y < 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : vec4(0.0, 1.0, 0.0, 1.0);\n}\n");
+    write_file (dir + "/materials/uvp.json", "{\"passes\":[{\"shader\":\"uvp\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                                             "\"blending\":\"translucent\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n");
+    files.insert (files.end (), { "shaders/uvp.vert", "shaders/uvp.frag", "materials/uvp.json" });
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    // the marker sprite at WE's y 28 (near the top): which read-back row is the screen's top
+    unsigned char px[4] = {};
+    if (getenv ("HOST_API_TEST_DUMP")) {
+        for (int y = 31; y >= 0; y--) {
+            std::string line;
+            for (int x = 0; x < 64; x++) {
+                read_pixel (rig.fbo, x, y, px);
+                line += px[0] > 200 && px[1] > 200 ? 'W' : px[0] > 200 ? 'R' : px[1] > 200 ? 'G' : px[2] > 100 ? 'b' : '.';
+            }
+            printf ("    %2d %s\n", y, line.c_str ());
+        }
+    }
+    read_pixel (rig.fbo, 60, 28, px);
+    const bool topIsHighRow = px[0] > 200 && px[1] > 200;
+    const int above = topIsHighRow ? 18 : 13, below = topIsHighRow ? 13 : 18;
+    auto red = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 200 && px[1] < 60;
+    };
+    auto green = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[1] > 200 && px[0] < 60;
+    };
+    printf ("    upright sprite: above red %d green %d, below red %d green %d; turned π/2: right red %d, left red %d "
+            "(screen top = read-back row %s)\n", red (16, above), green (16, above), red (16, below), green (16, below),
+            red (46, 16), red (41, 16), topIsHighRow ? "31" : "0");
+    CHECK (red (16, above) && green (16, below), "the upright sprite's v = 0 half isn't at the top");
+    CHECK (red (46, 16) && green (41, 16), "the sprite turned by +π/2 doesn't have its v = 0 half on the right");
+    return true;
+}
+
+
 // a particle system's origin is in its parent's space: a rotated, scaled group places it, a moving image parent
 // carries it along, and a hidden group hides it (unpatched: its own origin in the scene, frozen at setup)
 static bool particle_follows_its_parent () {
@@ -4839,6 +4915,56 @@ static bool blending_sets_combos () {
 }
 
 
+// a layer whose material blends `alphatocoverage` and that has an effect: WE moves the layer's blending to its last
+// pass (AlphaToCoverageEnable, no blending, GH 0x14009ac30); at MSAA a pixel keeps its alpha's share of the samples,
+// so its transparent pixels stay transparent. Layer 1 draws alpha 0 through a passthrough effect: the 0 0 0.5 clear
+// shows. Layer 2 draws alpha 1: white. Unpatched the effect's last pass drew unblended (3354740764's dog on an
+// opaque black box): layer 1 was white too
+static bool alphatocoverage_layer_with_effects () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"pass\",\"file\":\"effects/pass/effect.json\"}]}";
+    std::string clear = b9_object (1, 16), solid = "{\"id\":2,\"name\":\"solid\",\"image\":\"models/b9one.json\","
+                                                   "\"size\":\"8 8\",\"origin\":\"48 16 0\"}";
+    clear.pop_back ();
+    solid.pop_back ();
+    const std::string dir = camera_scene ("\"zoom\":1", clear + effect + "," + solid + effect, "");
+    b9_layer (dir, "uniform float u_TestAlpha; // {\"material\":\"testalpha\",\"default\":0}\n",
+              "gl_FragColor = vec4(1.0, 1.0, 1.0, u_TestAlpha);");
+    std::string material = read_file (dir + "/materials/b9.json");
+    material.replace (material.find ("\"normal\""), 8, "\"alphatocoverage\"");
+    write_file (dir + "/materials/b9.json", material);
+    std::string one = material;
+    one.replace (one.find ("\"blending\""), 10, "\"constantshadervalues\":{\"testalpha\":1},\"blending\"");
+    write_file (dir + "/materials/b9one.json", one);
+    write_file (dir + "/models/b9one.json", "{\"material\":\"materials/b9one.json\",\"solidlayer\":true}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/pass").c_str (), 0755);
+    write_file (dir + "/shaders/pass.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/pass.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n}\n");
+    write_file (dir + "/materials/pass.json", "{\"passes\":[{\"shader\":\"pass\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/pass/effect.json", "{\"name\":\"pass\",\"passes\":[{\"material\":\"materials/pass.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/b9one.json", "models/b9one.json", "effects/pass/effect.json", "shaders/pass.vert",
+                  "shaders/pass.frag", "materials/pass.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char transparent[4] = {}, opaque[4] = {};
+    read_pixel (rig.fbo, 16, 16, transparent);
+    read_pixel (rig.fbo, 48, 16, opaque);
+    printf ("    alphatocoverage + effect: alpha 0 → %d %d %d, alpha 1 → %d %d %d\n", transparent[0], transparent[1],
+            transparent[2], opaque[0], opaque[1], opaque[2]);
+    CHECK (transparent[0] < 30 && transparent[2] > 100, "the alpha-0 layer covered the clear (drawn unblended)");
+    CHECK (opaque[0] > 200 && opaque[1] > 200 && opaque[2] > 200, "the alpha-1 layer isn't white");
+    return true;
+}
+
+
 // F9/E39: a material pass's `alphawriting` (WE: default / enabled / disabled, GH 0x140186aa0). The layer's pass
 // writes (1, 1, 1, 0.25) into its composite and an effect after it shows that alpha as grey: by default a pass that
 // isn't the last writes alpha (64), with "disabled" it doesn't (the composite's alpha before it). Unpatched the key
@@ -5668,6 +5794,35 @@ static bool hdr_needs_literal_bloom () {
     CHECK (near (noBloom[0], 64, 3), "hdr without bloom rendered HDR (r=%d)", noBloom[0]);
     CHECK (near (userBloom[0], 64, 3), "hdr with a user-bound bloom rendered HDR (r=%d)", userBloom[0]);
     CHECK (near (both[0], 127, 3), "hdr with bloom true didn't render HDR (r=%d)", both[0]);
+    return true;
+}
+
+// an image's `brightness` scales its draw colour (g_Color, g_Color4.rgb) when the renderer runs HDR, else not (WE's
+// GH 0x1402321d0: ctx colour = image colour × (flags & 0x2000 ? brightness : 1)). A layer drawing g_Color4.rgb with
+// colour 0.25 and brightness 2: 0.5 (127) in an HDR scene, 0.25 (64) in the same scene with hdr false. Unpatched: 64
+// in both (2542468435's 1.15 never showed: its genericimage2 VERSION 2 has no g_Brightness term)
+static bool hdr_brightness_scales_colour () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& general, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene (general,
+            b7_object (1, "hdrbright", 16, "8 8", ",\"color\":\"0.25 0.25 0.25\",\"brightness\":2"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "hdrbright", "gl_FragColor = vec4(g_Color4.rgb, 1.0);", "", true, "uniform vec4 g_Color4;\n");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 16);
+        return true;
+    };
+    std::array<unsigned char, 4> hdr {}, ldr {};
+    CHECK (run (std::string ("\"hdr\":true") + kB13Bloom0, hdr), "load/build of the HDR scene failed");
+    CHECK (run (std::string ("\"hdr\":false") + kB13Bloom0, ldr), "load/build of the LDR scene failed");
+    printf ("    colour 0.25, brightness 2: HDR %d (want 127), LDR %d (want 64)\n", hdr[0], ldr[0]);
+    CHECK (rgb_near (hdr, 127, 127, 127), "an HDR scene's brightness didn't scale the colour (%d %d %d)", hdr[0], hdr[1], hdr[2]);
+    CHECK (rgb_near (ldr, 64, 64, 64), "an LDR scene's brightness scaled the colour (%d %d %d)", ldr[0], ldr[1], ldr[2]);
     return true;
 }
 
@@ -6898,6 +7053,7 @@ int main (int argc, char** argv) {
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);
     run ("sprite_orientation_as_we", sprite_orientation_as_we);
+    run ("sprite_texture_stands_as_we", sprite_texture_stands_as_we);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
     run ("simulation_steps_at_the_frame_rate", simulation_steps_at_the_frame_rate);
@@ -6915,6 +7071,7 @@ int main (int argc, char** argv) {
     run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
     run ("fbo_formats_as_written", fbo_formats_as_written);
     run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
+    run ("hdr_brightness_scales_colour", hdr_brightness_scales_colour);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
@@ -6962,6 +7119,7 @@ int main (int argc, char** argv) {
     run ("this_layer_is_the_running_script", this_layer_is_the_running_script);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
     run ("blending_sets_combos", blending_sets_combos);
+    run ("alphatocoverage_layer_with_effects", alphatocoverage_layer_with_effects);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
     run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
     run ("texture_format_combos_per_slot", texture_format_combos_per_slot);

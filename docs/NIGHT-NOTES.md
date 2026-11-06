@@ -605,6 +605,58 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   `.NET 10.0.403` (`/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet`; battery.sh's
   fallback updated).
 
+## 2026-11-06 — the "HDR at Ultra" look was the references, not ours
+- **3019192537 and 3395587987 look on Windows the way ours does, and that is WE at Ultra.** The dark, oversaturated
+  reference frames came from DXVK, not from a WE feature we were missing. At Ultra, WE draws a scene whose
+  settings have both `bloom` and `hdr` into a 16-bit float swap chain, written in linear light. Windows converts
+  that back to normal sRGB for your SDR monitors, so it looks as composed. Under Proton, DXVK has no HDR colour
+  space on the virtual screen, so it showed the linear values raw: too dark. Found in WE's own code (the swap-chain
+  format follows the Ultra flag) and in DXVK's source.
+- wallpiper's frames agreed with the dark ones only because it reads the same DXVK output. Re-encoded the way
+  Windows does it, both WE sources match ours to 2–4 / 255.
+- `postprocessing=enabled` matches ours with LWE's `WPENGINE_HDR=0` (0.5–0.8 / 255). So you don't need to check
+  which Windows profile you run: neither one looks dark. Ours renders as WE at Ultra, and has no quality setting
+  for WE's post-processing tiers. A player setting for that is in TODO, not built.
+- **The capture is fixed.** For the 4 affected scenes (2542468435, 3019192537, 3395587987, 3509243656),
+  `we-ref-capture.sh` re-encodes the frames as Windows shows them, keeps the raw ones, and marks them in the report.
+  All 4 were recaptured. No other reference was affected: every other scene uses an 8-bit swap chain.
+- **One real bug of ours, fixed:** at Ultra, WE multiplies a layer's colour by its `brightness` in these HDR scenes.
+  2542468435's layer is set 15 % brighter and ours never showed it. Scores (0 = identical): 3019192537
+  0.60 → 0.12, 3395587987 0.48 → 0.08, 2542468435 0.48 → 0.02.
+- 3490034653 is something else: a warm glow from its light-shaft particles that WE doesn't draw. They were drawn
+  upside down, the same bug as 3354740764's extra light shafts. Another agent's fix for that one removes the glow
+  here too (tried locally). What is left are small position differences: the camera sway is at a different
+  moment in each run.
+- Your Windows `config.json` says MSAA **x2**; the references use x8. That changes edges only, not colour, so they
+  weren't recaptured.
+- Checks: LWE host tests 123 / 123 (1 new), scene health 89 / 7 / 0 (as before), shader sweep the known 6 failures.
+  Player suite 738 passed / 14 failed with other agents loading the machine (load 20–50). Run again alone, 13 passed.
+  `mpv_source_teardown_never_skips_bus_cycles` still failed 3 times at load 20–53. That test's own note says a
+  loaded debug run can lose a bus cycle, and nothing it runs changed here (no player code, only the scene core).
+  Re-run it on a quiet machine.
+
+## 2026-11-06 — WE-reference fixes: 3354740764's dog and light shafts (3490034653's glow too); two "time" rows that are the capture's
+- **The dog's black box is gone** (fork `d5f244a, patch 0110`). The dog image uses WE's `alphatocoverage` blending and has effects
+  (clouds, blur, shake). With effects, the layer's blending moves to its last pass, and ours drew that pass without
+  blending, so the dog's transparent surroundings came out as an opaque dark square. WE (both references) cuts it
+  out. Only this scene uses `alphatocoverage`.
+- **Particle sprites were upside down in every scene** (fork `313e1d2, patch 0111`). Round sprites hid it; light shafts didn't:
+  in 3354740764, 1726902114 and 2561227934 the shafts rose from the grass at a slant, where WE has them hanging from
+  the top of the sky. Now they stand as in WE. If some other particle effect in your scenes looks different (flipped)
+  from before, this is why — and it should now match Windows.
+- **Not bugs of ours** (proved with extra WE captures, nothing to fix in the renderer):
+  - 3354740764 "black at 0.5 s": the scene opens with a black fade layer (gone at 1.6 s) that WE draws too. The
+    reference's t = 0 is taken at WE's first frame with a picture, already inside that fade, so WE's frames are about
+    1 s ahead of ours. wallpiper's 0.5 s frame is still dimmed by it.
+  - 2672425887 "the demon fades in 3 s later in ours": it fades in at 2.07–2.6 s in both. WE's clock is 0.2–1.1 s
+    ahead of the reference's t = 0, a different amount every run (four captures), and ours at 2 s is 0.07 s before
+    the fade starts — the 0.5 / 2 / 5 s samples made it look like 3 s.
+  - The reference time base itself is in TODO (scenes with intros need a per-run clock estimate or some slack).
+- Scores (WE compare): 3354740764 0.545 → 0.523 (2 s: 0.342 → 0.294; the 0.5 s frame is the time base, the rest mostly Ultra post-processing), 2561227934 0.256 → 0.218, 1726902114 0.092 → 0.080, 3490034653 0.424 → 0.414; 2672425887 unchanged.
+- The regenerated report (whole corpus, fork head 313e1d2 with the other agents' HDR / fog / colour-blend fixes) has
+  2134765860 at 0.46: it is a day/night scene on the wall clock, captured by WE at 16:56 and rendered by ours after
+  18:00 (night). Same picture at the same hour; noted in the report.
+
 ## 2026-11-06 — scene normalization is set once per play
 - **What was moving the volume:** the backend's normalization, not anything in the scene worker (it has no automatic
   gain or limiter). Every time a scene's loudness report came in (after its first ~60 s of sound, then every further

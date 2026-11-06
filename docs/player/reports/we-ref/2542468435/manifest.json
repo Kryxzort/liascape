@@ -22,29 +22,36 @@
   "fonts": "windows",
   "clock": "Wine wall clock",
   "we_settings": [],
+  "gamescope_args": [],
   "we_crashed": false,
-  "first_frame_ms": 6513,
-  "wall_ms": 12121,
+  "first_frame_ms": 7835,
+  "wall_ms": 13457,
   "we_gpu_mib": 412,
-  "rss_mib": 1949,
-  "cpu_s": 21.2,
+  "rss_mib": 1470,
+  "cpu_s": 21.9,
   "shots": [
     {
       "t": 0.5,
-      "late_ms": 37,
-      "t_actual": 0.537
+      "late_ms": 12,
+      "t_actual": 0.512
     },
     {
       "t": 2,
-      "late_ms": 12,
-      "t_actual": 2.012
+      "late_ms": 8,
+      "t_actual": 2.008
     },
     {
       "t": 5,
-      "late_ms": 9,
-      "t_actual": 5.009
+      "late_ms": 20,
+      "t_actual": 5.02
     }
   ],
-  "captured": "2026-11-06T16:59:08+05:30",
-  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"
+  "captured": "2026-11-06T18:00:19+05:30",
+  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame",
+  "swap_chain": {
+    "format": "R16G16B16A16_FLOAT",
+    "corrected": "srgb-encode",
+    "raw": "fp16-raw/",
+    "note": "fp16 swap chain (Ultra + bloom + hdr): presented by DXVK as sRGB (linear values shown raw); the frames are sRGB-encoded after capture, as Windows shows an FP16 (scRGB) swap chain on an SDR display"
+  }
 }

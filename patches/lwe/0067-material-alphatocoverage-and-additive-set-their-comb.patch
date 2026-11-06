@@ -1,7 +1,7 @@
 From bf65684865ad682e8161331996a2f5a9ba1972f0 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 18:31:14 +0530
-Subject: [PATCH 067/106] material: alphatocoverage and additive set their
+Subject: [PATCH 067/111] material: alphatocoverage and additive set their
  combos
 
 WE's material pass setup (GH 0x140183570) turns a pass's blending into combos: `alphatocoverage`

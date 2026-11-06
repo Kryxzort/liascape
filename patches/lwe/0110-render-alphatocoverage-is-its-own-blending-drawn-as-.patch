@@ -1,0 +1,88 @@
+From d5f244a4a46f003594026ea79a72bec2ea5a53f9 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 18:12:15 +0530
+Subject: [PATCH 110/111] render: alphatocoverage is its own blending, drawn as
+ WE draws it at MSAA
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE's blending 3 `alphatocoverage` (GH 0x140182410) is a blend state with AlphaToCoverageEnable and no
+blending (FUN_14009ac30 builds the D3D11_BLEND_DESC: mode 3 sets field 0, the rest as `normal`); its
+material pass also gets the ALPHATOCOVERAGE combo (GH 0x140183570), with which the stock shaders sharpen
+the alpha and, on GLSL, discard below 0.5. LWE took it for `normal` (unblended) plus the combo. That is
+right for a layer drawn in one pass, but a layer with effects hands its blending to its last pass (an
+effect's shader, without the combo): drawn unblended, its transparent pixels covered the scene.
+3354740764's dog (genericimage4, alphatocoverage, with clouds / blurprecise / shake effects) sat on an
+opaque black box; both WE references (Proton and wallpiper) cut it out.
+
+BlendingMode_AlphaToCoverage keeps the mode to the pass that draws. Our targets have one sample; at
+the owner's MSAA x8 a pixel keeps its alpha's share of the samples, so the pass blends by alpha
+(src-alpha / one-minus-src-alpha). A one-pass layer is as before, but for its edge pixels (alpha
+0.5–1 after the sharpening), which now blend like WE's coverage instead of being opaque.
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md 3354740764 (the dog's black box)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Data/Model/Material.h           | 6 ++++++
+ src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp | 5 +++--
+ .../WallpaperEngine/Render/Objects/Effects/CPass.cpp     | 9 +++++++++
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Model/Material.h b/src/core/WallpaperEngine/Data/Model/Material.h
+index 758b48a..d3ccc21 100644
+--- a/src/core/WallpaperEngine/Data/Model/Material.h
++++ b/src/core/WallpaperEngine/Data/Model/Material.h
+@@ -14,6 +14,12 @@ enum BlendingMode {
+     BlendingMode_Normal = 1,
+     BlendingMode_Translucent = 2,
+     BlendingMode_Additive = 3,
++    /**
++     * `alphatocoverage` (WE's blending 3, GH 0x140182410): no blending, the pixel shader's alpha gives the sample
++     * coverage (D3D11_BLEND_DESC.AlphaToCoverageEnable, GH 0x14009ac30). Drawn here as WE draws it at MSAA: the
++     * covered fraction of a pixel is its alpha, so the colour is blended by alpha (CPass::setupRenderFramebuffer)
++     */
++    BlendingMode_AlphaToCoverage = 4,
+ };
+ 
+ enum CullingMode { CullingMode_Unknown = 0, CullingMode_Normal = 1, CullingMode_Disable = 2 };
+diff --git a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+index 07033fe..94113d4 100644
+--- a/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
++++ b/src/core/WallpaperEngine/Data/Parsers/MaterialParser.cpp
+@@ -102,9 +102,10 @@ BlendingMode MaterialParser::parseBlendMode (const std::string& mode) {
+ 	return BlendingMode_Translucent;
+     }
+ 
+-    // alpha to coverage: no blending, the pass's ALPHATOCOVERAGE combo cuts the alpha (parsePass)
++    // alpha to coverage: no blending, the alpha gives the coverage (the pass's ALPHATOCOVERAGE combo also sharpens
++    // it, parsePass). Its own mode: a layer with effects hands it to its last pass, whose shader has no combo
+     if (mode == "alphatocoverage") {
+-	return BlendingMode_Normal;
++	return BlendingMode_AlphaToCoverage;
+     }
+ 
+     sLog.error ("Unknown blending mode: ", mode, " defaulting to normal");
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 5d0d794..0b072d5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -179,6 +179,15 @@ void CPass::setupRenderFramebuffer () const {
+ 	    glEnable (GL_BLEND);
+ 	    glBlendFuncSeparate (GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+ 	    break;
++	case BlendingMode_AlphaToCoverage:
++	    // WE: no blending, AlphaToCoverageEnable (its blend states, GH 0x14009ac30), into an MSAA target (the
++	    // owner's x8): a pixel keeps its alpha's share of the samples. Our targets have one sample, so that share
++	    // is an alpha blend. A shader with the ALPHATOCOVERAGE combo has already sharpened (or, on GLSL, cut) the
++	    // alpha; an effect's last pass that took the layer's blending hasn't, so its transparent pixels stay
++	    // transparent (3354740764's dog: before, drawn unblended, the layer's box was opaque black)
++	    glEnable (GL_BLEND);
++	    glBlendFuncSeparate (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++	    break;
+ 	default:
+ 	    glDisable (GL_BLEND);
+ 	    break;

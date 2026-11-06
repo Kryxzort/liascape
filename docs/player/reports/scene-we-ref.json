@@ -3,159 +3,17 @@
   "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
   "refs": "/home/kryxzort/.cache/liascape/we-ref/captures",
   "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
-  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/we-ref/src/player/target/release/liascape-scene-worker",
-  "core": "",
-  "started": "2026-11-06T17:18:49+05:30",
-  "commit": "bb0bde8+dirty",
-  "pin": "b9fed3991cc6",
+  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/weref-dog/src/player/target/release/liascape-scene-worker",
+  "core": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/weref-dog/build/lwe-core-weref-dog/lib",
+  "started": "2026-11-06T18:37:16+05:30",
+  "commit": "1a40b61+dirty",
+  "pin": "313e1d21cdc3",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
   "we": "2.8.485",
   "proton": "experimental-11.0-20261027b-x86_64"
  },
- "generated": "2026-11-06T17:36:40+0530",
+ "generated": "2026-11-06T19:20:36+0530",
  "scenes": [
-  {
-   "id": "3184155462",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.027711033821105957,
-     "hist": 0.17477607532622436,
-     "edges": 0.03618252944070122,
-     "local": 0.1169486902654171,
-     "worst_cell": [
-      0,
-      1
-     ],
-     "mean_abs": 0.016590682789683342,
-     "dist": 0.08558963817934202,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.03888577222824097,
-     "hist": 0.1826763011655967,
-     "edges": 0.03615216271297994,
-     "local": 0.13636165267477432,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.019483041018247604,
-     "dist": 0.09633992024661991,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.021526753902435303,
-     "hist": 0.15709010682273972,
-     "edges": 0.041616353477441415,
-     "local": 0.10810933262109756,
-     "worst_cell": [
-      0,
-      0
-     ],
-     "mean_abs": 0.01564832217991352,
-     "dist": 0.07863211801709609,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "measured",
-   "note": "owner report: the cursor ripple is much stronger than on Windows. At a matched 30 fps it isn't (see Focus).",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.086853892147686,
-   "ssim": 0.02937451998392741,
-   "hist": 0.1715141611048536,
-   "edges": 0.037983681877040855,
-   "local": 0.12047322518709631,
-   "mean_abs": 0.017240681995948155,
-   "worst_t": 2.0,
-   "worst_dist": 0.09633992024661991
-  },
-  {
-   "id": "3019192537",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.4281277656555176,
-     "hist": 0.4422999519417764,
-     "edges": 0.6305565085673965,
-     "local": 0.9400908847649893,
-     "worst_cell": [
-      2,
-      3
-     ],
-     "mean_abs": 0.15521635115146637,
-     "dist": 0.6250368872279866,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.405451238155365,
-     "hist": 0.44345605837398383,
-     "edges": 0.5342158479741843,
-     "local": 0.9091727634270986,
-     "worst_cell": [
-      0,
-      3
-     ],
-     "mean_abs": 0.15337882936000824,
-     "dist": 0.5899215817443727,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.3852449059486389,
-     "hist": 0.4424080329031467,
-     "edges": 0.5795539344247067,
-     "local": 0.9088966399431229,
-     "worst_cell": [
-      0,
-      3
-     ],
-     "mean_abs": 0.15113328397274017,
-     "dist": 0.5926348572330993,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1588,892:1592,896",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "bug?",
-   "note": "HDR at Ultra: WE is far more saturated and contrasty (a deep orange and red sky, a near-black foreground, a lens-flare streak through the sun); ours is flat and washed out. Probably the Ultra post-processing (HDR bloom / tone mapping). The biggest real difference found.",
-   "trust": "FXC",
-   "dist": 0.6025311087351529,
-   "ssim": 0.40627463658650714,
-   "hist": 0.4427213477396356,
-   "edges": 0.5814420969887625,
-   "local": 0.919386762711737,
-   "mean_abs": 0.15324282149473825,
-   "worst_t": 0.5,
-   "worst_dist": 0.6250368872279866
-  },
   {
    "id": "2783122117",
    "exit": 0,
@@ -252,30 +110,30 @@
      "t_ours": 0.5
     },
     {
-     "ssim": 0.25259554386138916,
-     "hist": 0.325364251345145,
-     "edges": 0.10433274666340764,
-     "local": 0.59755046851933,
-     "worst_cell": [
-      2,
-      1
-     ],
-     "mean_abs": 0.07540715485811234,
-     "dist": 0.3409832033159263,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.2270227074623108,
-     "hist": 0.32345103034979916,
-     "edges": 0.12073881078543558,
-     "local": 0.5905433067431053,
+     "ssim": 0.21708035469055176,
+     "hist": 0.2497032780359111,
+     "edges": 0.07289006073877591,
+     "local": 0.5470569711178541,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.07167171686887741,
-     "dist": 0.3341077724886718,
+     "mean_abs": 0.06536579132080078,
+     "dist": 0.29375986549745914,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.21345162391662598,
+     "hist": 0.25902323370052566,
+     "edges": 0.108979865575076,
+     "local": 0.5962805816282829,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.06498731672763824,
+     "dist": 0.316520281518593,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -286,15 +144,15 @@
     1920,
     1080
    ],
-   "class": "bug?",
-   "note": "ours draws the dog sprite on an opaque black box, adds diagonal yellow light shafts across the field that WE doesn't draw, and is still black at 0.5 s. Its system fonts (Arial / Comic Sans / Consolas) are the real ones in WE.",
+   "class": "time",
+   "note": "fixed 2026-11-06 (fork d5f244a, 313e1d2): the black box behind the dog (an `alphatocoverage` layer with effects drew its last pass unblended) and the light shafts (every particle sprite was drawn upside down: they rose from the field; WE's hang from the sky). Left: ours is black at 0.5 s because the scene opens with a black `fadeout` layer (opaque to 0.6 s, gone at 1.6 s) that WE draws too. The capture's t = 0 is WE's first non-flat frame, already inside that fade (its probe frames; wallpiper's 0.5 s frame is still dimmed), so WE's frames are about 1 s ahead of ours. The colour/contrast is WE's Ultra post-processing; the labels are the Windows fonts.",
    "trust": "FXC, system fonts: Windows' arial/comicsans/consolas, clock: Wine's",
-   "dist": 0.5447106059172497,
-   "ssim": 0.4794965187708537,
-   "hist": 0.5019041779824693,
-   "edges": 0.4083571858162811,
-   "local": 0.7293645917541451,
-   "mean_abs": 0.1513774593671163,
+   "dist": 0.5231069963210677,
+   "ssim": 0.46313442786534625,
+   "hist": 0.45520792132963356,
+   "edges": 0.3939566421046173,
+   "local": 0.714445850915379,
+   "mean_abs": 0.1458022048075994,
    "worst_t": 0.5,
    "worst_dist": 0.9590408419471511
   },
@@ -370,7 +228,7 @@
    "worst_dist": 0.49907898574205534
   },
   {
-   "id": "2542468435",
+   "id": "2134765860",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -380,136 +238,136 @@
    ],
    "pairs": [
     {
-     "ssim": 0.37645775079727173,
-     "hist": 0.5095801758584734,
-     "edges": 0.05411422527865262,
-     "local": 0.7536022712786993,
+     "ssim": 0.23462748527526855,
+     "hist": 0.32737732912359435,
+     "edges": 0.32321874025569075,
+     "local": 0.8666197061538696,
      "worst_cell": [
       2,
-      1
+      0
      ],
-     "mean_abs": 0.14207394421100616,
-     "dist": 0.4517568868502165,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.48116230964660645,
-     "hist": 0.5073826582212234,
-     "edges": 0.06799787838787652,
-     "local": 0.9231065362691879,
-     "worst_cell": [
-      3,
-      3
-     ],
-     "mean_abs": 0.1591220498085022,
-     "dist": 0.5363567610965583,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.3956155776977539,
-     "hist": 0.5116584897936948,
-     "edges": 0.054673094750355644,
-     "local": 0.7424139976501465,
-     "worst_cell": [
-      2,
-      1
-     ],
-     "mean_abs": 0.14261654019355774,
-     "dist": 0.4546751895131802,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "unexamined",
-   "note": "colour (hist 0.51); not looked at closely.",
-   "trust": "FXC (3 compiled)",
-   "dist": 0.4809296124866516,
-   "ssim": 0.4177452127138774,
-   "hist": 0.5095404412911305,
-   "edges": 0.058928399472294925,
-   "local": 0.8063742683993446,
-   "mean_abs": 0.14793751140435538,
-   "worst_t": 2.0,
-   "worst_dist": 0.5363567610965583
-  },
-  {
-   "id": "3395587987",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.15322548151016235,
-     "hist": 0.5822647880883265,
-     "edges": 0.352799010791367,
-     "local": 0.7212436695893606,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.12499683350324631,
-     "dist": 0.4493535051057956,
+     "mean_abs": 0.095352403819561,
+     "dist": 0.46049337130459844,
      "t": 0.5,
      "t_ours": 0.6
     },
     {
-     "ssim": 0.1780918836593628,
-     "hist": 0.5687753676345169,
-     "edges": 0.39316635342749595,
-     "local": 0.7471549212932587,
+     "ssim": 0.23461836576461792,
+     "hist": 0.32738793190319565,
+     "edges": 0.32324189367791734,
+     "local": 0.8665613333384196,
      "worst_cell": [
-      1,
-      2
+      2,
+      0
      ],
-     "mean_abs": 0.12293174862861633,
-     "dist": 0.469962385698189,
+     "mean_abs": 0.09537593275308609,
+     "dist": 0.4604798748471339,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.2111203670501709,
-     "hist": 0.5979746306850924,
-     "edges": 0.44608484395440096,
-     "local": 0.7857948442300161,
+     "ssim": 0.23476624488830566,
+     "hist": 0.3274746327561219,
+     "edges": 0.32057789398041103,
+     "local": 0.8666354715824127,
      "worst_cell": [
-      1,
-      2
+      2,
+      0
      ],
-     "mean_abs": 0.12202082574367523,
-     "dist": 0.5078864583119548,
+     "mean_abs": 0.09537123143672943,
+     "dist": 0.46003102028852205,
      "t": 5.0,
      "t_ours": 5.0
     }
    ],
    "props": [],
-   "pointer": "1916,1076:1920,1080",
+   "pointer": "956,536:960,540",
    "window": [
     1920,
     1080
    ],
-   "class": "bug?",
-   "note": "HDR at Ultra: in WE the girl's face and hair are deep, dark blue and the particles brighter; in ours they are a light, washed-out blue. The same family as 3019192537.",
+   "class": "time",
+   "note": "A room whose daylight follows the wall clock: WE was captured by day, ours renders at the compare's own hour (evening here). Compare at the capture's hour.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.4603347554800848,
+   "ssim": 0.2346706986427307,
+   "hist": 0.3274132979276373,
+   "edges": 0.3223461759713397,
+   "local": 0.8666055036915673,
+   "mean_abs": 0.09536652266979218,
+   "worst_t": 0.5,
+   "worst_dist": 0.46049337130459844
+  },
+  {
+   "id": "2672425887",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.2590104937553406,
+     "hist": 0.08423763086181638,
+     "edges": 0.0685241482675597,
+     "local": 0.5066231824457645,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.05432581529021263,
+     "dist": 0.26024245868620677,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.5021650791168213,
+     "hist": 0.4507812151669542,
+     "edges": 0.36518578824374814,
+     "local": 0.9634208877881368,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.20422691106796265,
+     "dist": 0.6028691907536279,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.4022544026374817,
+     "hist": 0.1846214771371645,
+     "edges": 0.18675524231165141,
+     "local": 0.738292932510376,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.10497928410768509,
+     "dist": 0.41643954443412046,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "time",
+   "note": "not a slower timeline: the demon's alpha keyframes (frames 62\u201378 at 30 fps, 2.07\u20132.6 s) fade it in over the same 0.5 s in WE. WE's scene clock is ahead of the capture's t = 0 by a different amount each run (0.19, 0.79, 0.80 and 1.1 s in four fresh captures), so its 2 s frame catches the fade done or not. The capture's time base, not ours.",
    "trust": "FXC",
-   "dist": 0.47573411637197976,
-   "ssim": 0.18081257740656534,
-   "hist": 0.5830049288026452,
-   "edges": 0.397350069391088,
-   "local": 0.7513978117042118,
-   "mean_abs": 0.12331646929184596,
-   "worst_t": 5.0,
-   "worst_dist": 0.5078864583119548
+   "dist": 0.4265170646246517,
+   "ssim": 0.38780999183654785,
+   "hist": 0.23988010772197835,
+   "edges": 0.20682172627431974,
+   "local": 0.7361123342480925,
+   "mean_abs": 0.12117733682195346,
+   "worst_t": 2.0,
+   "worst_dist": 0.6028691907536279
   },
   {
    "id": "3276522107",
@@ -522,44 +380,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.33047837018966675,
-     "hist": 0.40999712845826863,
-     "edges": 0.1634750493841417,
-     "local": 0.8022329732775688,
+     "ssim": 0.3225783109664917,
+     "hist": 0.4162764208120543,
+     "edges": 0.17248462246674579,
+     "local": 0.7994585124154886,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.026869090273976326,
-     "dist": 0.45450783860865274,
+     "mean_abs": 0.026706932112574577,
+     "dist": 0.4543632556703541,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.14655905961990356,
-     "hist": 0.21599072254544596,
-     "edges": 0.08298077524610803,
-     "local": 0.6705172061920166,
+     "ssim": 0.1406598687171936,
+     "hist": 0.19662739146870178,
+     "edges": 0.07842241727860799,
+     "local": 0.6216785168896118,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.03444575518369675,
-     "dist": 0.3049171793018869,
+     "mean_abs": 0.03419463336467743,
+     "dist": 0.2837114774315036,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.40129923820495605,
-     "hist": 0.4957097372000281,
-     "edges": 0.21537740097092406,
-     "local": 0.9126223102211952,
+     "ssim": 0.3971942067146301,
+     "hist": 0.48528610171509273,
+     "edges": 0.1978073961050787,
+     "local": 0.916334388156732,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.0364757739007473,
-     "dist": 0.5363938921620358,
+     "mean_abs": 0.035665448755025864,
+     "dist": 0.530677278025443,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -573,14 +431,14 @@
    "class": "known",
    "note": "a 3D train interior: ours lights the red seats and the beige aisle; WE keeps them near-black. The windows match. Lighting of 3D models (TODO \"LWE: 3D / perspective scenes\").",
    "trust": "FXC",
-   "dist": 0.4319396366908585,
-   "ssim": 0.2927788893381755,
-   "hist": 0.3738991960679143,
-   "edges": 0.1539444085337246,
-   "local": 0.7951241632302603,
-   "mean_abs": 0.03259687311947346,
+   "dist": 0.42291733704243356,
+   "ssim": 0.28681079546610516,
+   "hist": 0.366063304665283,
+   "edges": 0.14957147861681083,
+   "local": 0.7791571391539441,
+   "mean_abs": 0.03218900474409262,
    "worst_t": 5.0,
-   "worst_dist": 0.5363938921620358
+   "worst_dist": 0.530677278025443
   },
   {
    "id": "3490034653",
@@ -593,44 +451,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.3880160450935364,
-     "hist": 0.13515271878978227,
-     "edges": 0.07941631475519506,
-     "local": 0.8206679771343867,
+     "ssim": 0.3773959279060364,
+     "hist": 0.12707407983651342,
+     "edges": 0.07752457653856992,
+     "local": 0.7613993155149122,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.09481105953454971,
-     "dist": 0.4055190133773724,
+     "mean_abs": 0.09001815319061279,
+     "dist": 0.3825583043013012,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.40450984239578247,
-     "hist": 0.2357876957074445,
-     "edges": 0.058323546424267736,
-     "local": 0.8584298590819041,
+     "ssim": 0.3969026803970337,
+     "hist": 0.22860567502617424,
+     "edges": 0.05137912385073018,
+     "local": 0.8583408991495768,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.10601236671209335,
-     "dist": 0.43770415886964836,
+     "mean_abs": 0.10184376686811447,
+     "dist": 0.43257003363936397,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.3730182647705078,
-     "hist": 0.23830882201374773,
-     "edges": 0.06519498461171247,
-     "local": 0.8594940404097239,
+     "ssim": 0.3674042820930481,
+     "hist": 0.23016153177864626,
+     "edges": 0.06497903197623622,
+     "local": 0.8595280547936758,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.10581933706998825,
-     "dist": 0.4304544528791615,
+     "mean_abs": 0.10081331431865692,
+     "dist": 0.42710781381699364,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -642,87 +500,16 @@
     804
    ],
    "class": "bug?",
-   "note": "ours is lighter in the shadows (less contrast) across the whole frame; perhaps the same family as the HDR scenes. The petals are random.",
+   "note": "Not the HDR family: an LDR scene with an 8-bit swap chain, and both WE sources agree. Ours drew a warm glow left of the girl that WE doesn't: its `light_shafts_1` particles upside down. Fixed with 3354740764's particle-sprite orientation (313e1d2). What remains is registration: the layers sit a few px apart from WE's (camera shake and parallax phase; WE's clock is 0.25\u20130.9 s along at its first frame) and the petals are random.",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.424559208375394,
-   "ssim": 0.3885147174199422,
-   "hist": 0.2030830788369915,
-   "edges": 0.06764494859705843,
-   "local": 0.8461972922086716,
-   "mean_abs": 0.1022142544388771,
+   "dist": 0.4140787172525529,
+   "ssim": 0.38056763013203937,
+   "hist": 0.19528042888044464,
+   "edges": 0.06462757745517878,
+   "local": 0.826422756486055,
+   "mean_abs": 0.09755841145912807,
    "worst_t": 2.0,
-   "worst_dist": 0.43770415886964836
-  },
-  {
-   "id": "2672425887",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.25913918018341064,
-     "hist": 0.08421020620854386,
-     "edges": 0.0685241482675597,
-     "local": 0.5066231824457645,
-     "worst_cell": [
-      0,
-      2
-     ],
-     "mean_abs": 0.054346922785043716,
-     "dist": 0.26027557968397325,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.5004483461380005,
-     "hist": 0.4496540421455858,
-     "edges": 0.3708963447515884,
-     "local": 0.969517836968104,
-     "worst_cell": [
-      0,
-      2
-     ],
-     "mean_abs": 0.2041899710893631,
-     "dist": 0.6050999323112662,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.3985390067100525,
-     "hist": 0.18217159454061002,
-     "edges": 0.17824095943130025,
-     "local": 0.6940793419877688,
-     "worst_cell": [
-      3,
-      3
-     ],
-     "mean_abs": 0.10318957269191742,
-     "dist": 0.39986801540372846,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "956,536:960,540",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "time",
-   "note": "the demon face in the background has faded in by 2 s in WE but only by 5 s in ours: an intro timeline runs slower in ours.",
-   "trust": "FXC",
-   "dist": 0.42174784246632263,
-   "ssim": 0.38604217767715454,
-   "hist": 0.23867861429824655,
-   "edges": 0.2058871508168161,
-   "local": 0.7234067871338791,
-   "mean_abs": 0.1205754888554414,
-   "worst_t": 2.0,
-   "worst_dist": 0.6050999323112662
+   "worst_dist": 0.43257003363936397
   },
   {
    "id": "3219908811",
@@ -735,44 +522,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.8030358552932739,
-     "hist": 0.11478077288202745,
-     "edges": 0.3813995396196954,
-     "local": 0.9781834607323011,
+     "ssim": 0.8032684326171875,
+     "hist": 0.11660676180408713,
+     "edges": 0.3825217071808187,
+     "local": 0.9988422046105067,
      "worst_cell": [
-      1,
+      3,
       0
      ],
-     "mean_abs": 0.1663038432598114,
-     "dist": 0.6336018573080171,
+     "mean_abs": 0.16699665784835815,
+     "dist": 0.6404588849652895,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.2626688480377197,
-     "hist": 0.07366131521230126,
-     "edges": 0.11720626520364608,
-     "local": 0.5662714975575606,
+     "ssim": 0.26389575004577637,
+     "hist": 0.0743362523581553,
+     "edges": 0.11681900819556867,
+     "local": 0.5752120427787304,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.07582419365644455,
-     "dist": 0.28685561976177354,
+     "mean_abs": 0.0764094814658165,
+     "dist": 0.28996338995809684,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.16294491291046143,
-     "hist": 0.08013899082775923,
-     "edges": 0.047731918940495666,
-     "local": 0.39224127617975074,
+     "ssim": 0.1629442572593689,
+     "hist": 0.07810500402036712,
+     "edges": 0.050094605730388486,
+     "local": 0.391331447288394,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.04847688972949982,
-     "dist": 0.19213003868071463,
+     "mean_abs": 0.04877256602048874,
+     "dist": 0.19192263331447998,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -786,156 +573,14 @@
    "class": "time",
    "note": "random petals; the lantern's clock text is fainter in ours at 0.5 s (a fade).",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.3708625052501684,
-   "ssim": 0.40954987208048504,
-   "hist": 0.08952702630736264,
-   "edges": 0.18211257458794572,
-   "local": 0.6455654114898708,
-   "mean_abs": 0.0968683088819186,
+   "dist": 0.37411496941262207,
+   "ssim": 0.4100361466407776,
+   "hist": 0.08968267272753651,
+   "edges": 0.18314510703559195,
+   "local": 0.6551285648925437,
+   "mean_abs": 0.09739290177822113,
    "worst_t": 0.5,
-   "worst_dist": 0.6336018573080171
-  },
-  {
-   "id": "3509243656",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.02556544542312622,
-     "hist": 0.07069365488376288,
-     "edges": 0.16326530612244894,
-     "local": 0.12179868451009195,
-     "worst_cell": [
-      2,
-      1
-     ],
-     "mean_abs": 0.0010129711590707302,
-     "dist": 0.09100103118120782,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.016152918338775635,
-     "hist": 0.06692175153015512,
-     "edges": 0.8235294117647058,
-     "local": 0.08033773799737294,
-     "worst_cell": [
-      2,
-      1
-     ],
-     "mean_abs": 0.0004583800327964127,
-     "dist": 0.20703742955981677,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.8014017343521118,
-     "hist": 0.3664286068668129,
-     "edges": 0.8747234221894427,
-     "local": 0.9840221156676611,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.06312454491853714,
-     "dist": 0.7838575608171829,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "956,536:960,540",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "time",
-   "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\").",
-   "trust": "FXC, system fonts: Windows' arial, clock: Wine's",
-   "dist": 0.3606320071860692,
-   "ssim": 0.2810400327046712,
-   "hist": 0.16801467109357696,
-   "edges": 0.6205060466921991,
-   "local": 0.39538617939170867,
-   "mean_abs": 0.02153196537013476,
-   "worst_t": 5.0,
-   "worst_dist": 0.7838575608171829
-  },
-  {
-   "id": "3233141951",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.5575053691864014,
-     "hist": 0.10163762851646692,
-     "edges": 0.20092625134613906,
-     "local": 0.9021977204829454,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.126650869846344,
-     "dist": 0.49842370287332527,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.26416581869125366,
-     "hist": 0.09924425689242103,
-     "edges": 0.04737220328383773,
-     "local": 0.3868074035272002,
-     "worst_cell": [
-      2,
-      1
-     ],
-     "mean_abs": 0.058763064444065094,
-     "dist": 0.2246152587007879,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.31588125228881836,
-     "hist": 0.13514371498515088,
-     "edges": 0.06903657606088887,
-     "local": 0.5834889796872934,
-     "worst_cell": [
-      1,
-      0
-     ],
-     "mean_abs": 0.0720636174082756,
-     "dist": 0.31064712780204146,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "2044,1144:2048,1148",
-   "window": [
-    1920,
-    1076
-   ],
-   "class": "time",
-   "note": "the dragon and the girl sit about 20 px apart vertically (sway / puppet phase); the colours match.",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.3445620297920515,
-   "ssim": 0.3791841467221578,
-   "hist": 0.11200853346467961,
-   "edges": 0.10577834356362188,
-   "local": 0.6241647012324797,
-   "mean_abs": 0.08582585056622823,
-   "worst_t": 0.5,
-   "worst_dist": 0.49842370287332527
+   "worst_dist": 0.6404588849652895
   },
   {
    "id": "3419466417",
@@ -948,44 +593,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.2800765037536621,
-     "hist": 0.04393923232384695,
-     "edges": 0.1600806509978292,
-     "local": 0.6217371957997481,
+     "ssim": 0.28042006492614746,
+     "hist": 0.04466048929187235,
+     "edges": 0.16036447859421588,
+     "local": 0.6225151022275289,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.04348146915435791,
-     "dist": 0.3113480865303583,
+     "mean_abs": 0.043539851903915405,
+     "dist": 0.31188554372332056,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.30255424976348877,
-     "hist": 0.04104229215113913,
-     "edges": 0.18853286927339885,
-     "local": 0.6702728054175774,
+     "ssim": 0.3031628131866455,
+     "hist": 0.043622246921436604,
+     "edges": 0.18597307150321907,
+     "local": 0.670271597802639,
      "worst_cell": [
       2,
       0
      ],
-     "mean_abs": 0.04659009724855423,
-     "dist": 0.3377631488392274,
+     "mean_abs": 0.04670635238289833,
+     "dist": 0.3379493869817165,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.3442315459251404,
-     "hist": 0.044804340028121656,
-     "edges": 0.19853795849678535,
-     "local": 0.6912414999678731,
+     "ssim": 0.3413558006286621,
+     "hist": 0.04687784008333564,
+     "edges": 0.18623582501356206,
+     "local": 0.696478009223938,
      "worst_cell": [
       2,
       0
      ],
-     "mean_abs": 0.04966650903224945,
-     "dist": 0.3593103734728854,
+     "mean_abs": 0.04970428720116615,
+     "dist": 0.3579728759751596,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -999,17 +644,17 @@
    "class": "time",
    "note": "the sword-glint sweep at another phase; matches otherwise.",
    "trust": "FXC (11 compiled)",
-   "dist": 0.3361405362808237,
-   "ssim": 0.3089540998140971,
-   "hist": 0.04326195483436925,
-   "edges": 0.18238382625600447,
-   "local": 0.6610838337283995,
-   "mean_abs": 0.0465793584783872,
+   "dist": 0.3359359355600655,
+   "ssim": 0.30831289291381836,
+   "hist": 0.045053525432214865,
+   "edges": 0.17752445837033234,
+   "local": 0.6630882364180354,
+   "mean_abs": 0.04665016382932663,
    "worst_t": 5.0,
-   "worst_dist": 0.3593103734728854
+   "worst_dist": 0.3579728759751596
   },
   {
-   "id": "3414858021",
+   "id": "3233141951",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -1019,65 +664,136 @@
    ],
    "pairs": [
     {
-     "ssim": 0.4958231449127197,
-     "hist": 0.12466515463286423,
-     "edges": 0.25801332910187247,
-     "local": 0.6984291300177574,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.08201798796653748,
-     "dist": 0.4348113792260905,
-     "t": 0.5,
-     "t_ours": 0.6
-    },
-    {
-     "ssim": 0.13583797216415405,
-     "hist": 0.11808737498838724,
-     "edges": 0.11695959102513231,
-     "local": 0.2801251771549384,
+     "ssim": 0.531800389289856,
+     "hist": 0.08308548528915673,
+     "edges": 0.19121125615565593,
+     "local": 0.902331660191218,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.03839537128806114,
-     "dist": 0.17179833799843167,
+     "mean_abs": 0.1141265332698822,
+     "dist": 0.4850989631332847,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.2515134811401367,
+     "hist": 0.0960782382935224,
+     "edges": 0.05277397077407753,
+     "local": 0.3743663566807906,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.05574218928813934,
+     "dist": 0.2175343931597982,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.13272100687026978,
-     "hist": 0.12184644872206798,
-     "edges": 0.1098689493814139,
-     "local": 0.2690489875773589,
+     "ssim": 0.28586721420288086,
+     "hist": 0.09166174100577172,
+     "edges": 0.06103888247673761,
+     "local": 0.538215346634388,
      "worst_cell": [
-      3,
+      2,
       1
      ],
-     "mean_abs": 0.03978320583701134,
-     "dist": 0.166874077954985,
+     "mean_abs": 0.059849973767995834,
+     "dist": 0.27776489294768253,
      "t": 5.0,
      "t_ours": 5.0
     }
    ],
    "props": [],
-   "pointer": "1916,1076:1920,1080",
+   "pointer": "2044,1144:2048,1148",
+   "window": [
+    1920,
+    1076
+   ],
+   "class": "time",
+   "note": "the dragon and the girl sit about 20 px apart vertically (sway / puppet phase); the colours match.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.3267994164135885,
+   "ssim": 0.3563936948776245,
+   "hist": 0.09027515486281695,
+   "edges": 0.10167470313549036,
+   "local": 0.6049711211687988,
+   "mean_abs": 0.07657289877533913,
+   "worst_t": 0.5,
+   "worst_dist": 0.4850989631332847
+  },
+  {
+   "id": "3509243656",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.016709566116333008,
+     "hist": 0.09920344734321761,
+     "edges": 0.18048780487804872,
+     "local": 0.08202891595040758,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.000896356999874115,
+     "dist": 0.08555979506427544,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.16864556074142456,
+     "hist": 0.46461135579426194,
+     "edges": 0.8839076825798293,
+     "local": 0.6382658593356609,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.0056755985133349895,
+     "dist": 0.5117772336979439,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.0467221736907959,
+     "hist": 0.29718232295575536,
+     "edges": 0.2870209699714714,
+     "local": 0.17788244597613811,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.011718902736902237,
+     "dist": 0.18422204448552557,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
    "window": [
     1920,
     1080
    ],
-   "class": "ok",
-   "note": "matches once WE sees the pointer. It says FRIDAY: WEDNESDAY needs a Wednesday run. The rain is random.",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.25782793172650237,
-   "ssim": 0.25479404131571454,
-   "hist": 0.12153299278110648,
-   "edges": 0.16161395650280622,
-   "local": 0.4158677649166849,
-   "mean_abs": 0.05339885503053665,
-   "worst_t": 0.5,
-   "worst_dist": 0.4348113792260905
+   "class": "time",
+   "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\"). (Its frames are re-encoded from WE's FP16 swap chain, like the other HDR scenes.)",
+   "trust": "FXC, system fonts: Windows' arial, FP16 swap chain: re-encoded, clock: Wine's",
+   "dist": 0.26051969108258166,
+   "ssim": 0.07735910018285115,
+   "hist": 0.28699904203107834,
+   "edges": 0.45047215247644984,
+   "local": 0.2993924070874022,
+   "mean_abs": 0.006096952750037114,
+   "worst_t": 2.0,
+   "worst_dist": 0.5117772336979439
   },
   {
    "id": "2375914945",
@@ -1090,44 +806,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.35337233543395996,
-     "hist": 0.09953597722850585,
-     "edges": 0.14395447947295936,
-     "local": 0.6068515814840794,
+     "ssim": 0.3524155020713806,
+     "hist": 0.09840839906194561,
+     "edges": 0.14316633580177773,
+     "local": 0.6071907207369804,
      "worst_cell": [
       1,
       3
      ],
-     "mean_abs": 0.06910032778978348,
-     "dist": 0.3367652664157048,
+     "mean_abs": 0.0689263641834259,
+     "dist": 0.33619681381525296,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.17492127418518066,
-     "hist": 0.10734605692827842,
-     "edges": 0.0958042155359714,
-     "local": 0.4733778688435753,
+     "ssim": 0.1746622920036316,
+     "hist": 0.1164879701364122,
+     "edges": 0.09259422518327531,
+     "local": 0.4744558734819293,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.03975171968340874,
-     "dist": 0.23511979740147673,
+     "mean_abs": 0.03966246545314789,
+     "dist": 0.23655188870960578,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.15869826078414917,
-     "hist": 0.06521584044917896,
-     "edges": 0.06539920259601995,
-     "local": 0.4153438208935161,
+     "ssim": 0.1585749387741089,
+     "hist": 0.0652459156560811,
+     "edges": 0.06498171086088067,
+     "local": 0.4156209600623697,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.03564777597784996,
-     "dist": 0.19833563311233937,
+     "mean_abs": 0.03575144335627556,
+     "dist": 0.1983042949543359,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1141,17 +857,17 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.2567402323098403,
-   "ssim": 0.22899729013442993,
-   "hist": 0.09069929153532108,
-   "edges": 0.10171929920165024,
-   "local": 0.49852442374039024,
-   "mean_abs": 0.04816660781701406,
+   "dist": 0.25701766582639823,
+   "ssim": 0.22855091094970703,
+   "hist": 0.0933807616181463,
+   "edges": 0.10024742394864457,
+   "local": 0.49908918476042646,
+   "mean_abs": 0.04811342433094978,
    "worst_t": 0.5,
-   "worst_dist": 0.3367652664157048
+   "worst_dist": 0.33619681381525296
   },
   {
-   "id": "2561227934",
+   "id": "3414858021",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -1161,65 +877,65 @@
    ],
    "pairs": [
     {
-     "ssim": 0.08824539184570312,
-     "hist": 0.15912428756632016,
-     "edges": 0.07440773491425401,
-     "local": 0.5770023018121719,
+     "ssim": 0.4988529682159424,
+     "hist": 0.1286768086922647,
+     "edges": 0.2632181825053568,
+     "local": 0.693363606929779,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.06595276296138763,
-     "dist": 0.24628071259347734,
+     "mean_abs": 0.08346787840127945,
+     "dist": 0.4360439707832407,
      "t": 0.5,
-     "t_ours": 0.5
+     "t_ours": 0.6
     },
     {
-     "ssim": 0.10404586791992188,
-     "hist": 0.16155198079690836,
-     "edges": 0.09043348821076824,
-     "local": 0.6327089021603266,
+     "ssim": 0.13159185647964478,
+     "hist": 0.09389655680762736,
+     "edges": 0.10503982975169157,
+     "local": 0.26105959589282673,
      "worst_cell": [
-      0,
-      2
+      1,
+      1
      ],
-     "mean_abs": 0.0642765536904335,
-     "dist": 0.2714235248256099,
+     "mean_abs": 0.03583207726478577,
+     "dist": 0.15758271302360524,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.09443140029907227,
-     "hist": 0.11242795900743717,
-     "edges": 0.11317444575796898,
-     "local": 0.5943660338719686,
+     "ssim": 0.1269681453704834,
+     "hist": 0.08820244028356727,
+     "edges": 0.11242553422574597,
+     "local": 0.25414933388431865,
      "worst_cell": [
-      0,
-      2
+      1,
+      1
      ],
-     "mean_abs": 0.05978289991617203,
-     "dist": 0.2517597112043935,
+     "mean_abs": 0.03598889335989952,
+     "dist": 0.15446083867830326,
      "t": 5.0,
      "t_ours": 5.0
     }
    ],
    "props": [],
-   "pointer": "2596,1546:2600,1550",
+   "pointer": "1916,1076:1920,1080",
    "window": [
-    1812,
+    1920,
     1080
    ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, system fonts: Windows' comicsans",
-   "dist": 0.25648798287449354,
-   "ssim": 0.09557422002156575,
-   "hist": 0.1443680757902219,
-   "edges": 0.09267188962766375,
-   "local": 0.601359079281489,
-   "mean_abs": 0.06333740552266438,
-   "worst_t": 2.0,
-   "worst_dist": 0.2714235248256099
+   "class": "ok",
+   "note": "matches once WE sees the pointer. It says FRIDAY: WEDNESDAY needs a Wednesday run. The rain is random.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.24936250749504973,
+   "ssim": 0.2524709900220235,
+   "hist": 0.10359193526115311,
+   "edges": 0.1602278488275981,
+   "local": 0.4028575122356415,
+   "mean_abs": 0.05176294967532158,
+   "worst_t": 0.5,
+   "worst_dist": 0.4360439707832407
   },
   {
    "id": "2951169110",
@@ -1232,44 +948,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.6061575412750244,
-     "hist": 0.07985672646915833,
-     "edges": 0.6261566589830784,
-     "local": 0.9139023274183273,
+     "ssim": 0.6062883734703064,
+     "hist": 0.07945476076238175,
+     "edges": 0.6331350732599401,
+     "local": 0.9151765654484431,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.1573464423418045,
-     "dist": 0.5972206376984528,
+     "mean_abs": 0.15713109076023102,
+     "dist": 0.5989574484800892,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.021461904048919678,
-     "hist": 0.015679033173879222,
-     "edges": 0.017385716721361688,
-     "local": 0.09053085243795067,
+     "ssim": 0.01875835657119751,
+     "hist": 0.014552320904556873,
+     "edges": 0.009173959377927532,
+     "local": 0.07340453076176345,
      "worst_cell": [
-      2,
+      1,
       3
      ],
-     "mean_abs": 0.00667648296803236,
-     "dist": 0.040210776925109284,
+     "mean_abs": 0.006397007033228874,
+     "dist": 0.03239412225638517,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.02075415849685669,
-     "hist": 0.010765358719053673,
-     "edges": 0.02055076109957199,
-     "local": 0.08938413198726873,
+     "ssim": 0.018168151378631592,
+     "hist": 0.009403328814654468,
+     "edges": 0.006191271597530523,
+     "local": 0.07116034952923656,
      "worst_cell": [
-      2,
+      1,
       3
      ],
-     "mean_abs": 0.005564650520682335,
-     "dist": 0.03930471110896276,
+     "mean_abs": 0.005291614215821028,
+     "dist": 0.029917470354797443,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1283,14 +999,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.22557870857750828,
-   "ssim": 0.2161245346069336,
-   "hist": 0.03543370612069707,
-   "edges": 0.22136437893467067,
-   "local": 0.3646057706145156,
-   "mean_abs": 0.0565291919435064,
+   "dist": 0.2204230136970906,
+   "ssim": 0.2144049604733785,
+   "hist": 0.0344701368271977,
+   "edges": 0.21616676807846605,
+   "local": 0.3532471485798143,
+   "mean_abs": 0.05627323733642697,
    "worst_t": 0.5,
-   "worst_dist": 0.5972206376984528
+   "worst_dist": 0.5989574484800892
   },
   {
    "id": "3363252053",
@@ -1303,44 +1019,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.37447112798690796,
-     "hist": 0.09947363709394397,
-     "edges": 0.25050524176285427,
-     "local": 0.5862389113754034,
+     "ssim": 0.3727317452430725,
+     "hist": 0.10090274566931617,
+     "edges": 0.25585848570288117,
+     "local": 0.5867835438499848,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.06849870085716248,
-     "dist": 0.35820878758005303,
+     "mean_abs": 0.06903856247663498,
+     "dist": 0.3592068330023567,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.15013748407363892,
-     "hist": 0.059538582769577006,
-     "edges": 0.11076165805899185,
-     "local": 0.2755821477621794,
+     "ssim": 0.15265780687332153,
+     "hist": 0.062107688754247894,
+     "edges": 0.107163395825699,
+     "local": 0.2780707472314437,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.038937266916036606,
-     "dist": 0.16177593771645926,
+     "mean_abs": 0.040031954646110535,
+     "dist": 0.16307278314741896,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.13698220252990723,
-     "hist": 0.04388361681992795,
-     "edges": 0.057658069724117245,
-     "local": 0.25255198931942385,
+     "ssim": 0.141829252243042,
+     "hist": 0.04528698048561929,
+     "edges": 0.06551905343780351,
+     "local": 0.2409104605515798,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.030137374997138977,
-     "dist": 0.13716859486360836,
+     "mean_abs": 0.030630843713879585,
+     "dist": 0.1369831206230711,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1354,14 +1070,85 @@
    "class": "time",
    "note": "fireworks at other moments; matches otherwise.",
    "trust": "FXC, system fonts: Windows' calibri, clock: Wine's",
-   "dist": 0.21905110672004022,
-   "ssim": 0.22053027153015137,
-   "hist": 0.06763194556114964,
-   "edges": 0.13964165651532112,
-   "local": 0.3714576828190022,
-   "mean_abs": 0.04585778092344602,
+   "dist": 0.21975424559094892,
+   "ssim": 0.222406268119812,
+   "hist": 0.06943247163639445,
+   "edges": 0.1428469783221279,
+   "local": 0.3685882505443361,
+   "mean_abs": 0.04656712027887503,
    "worst_t": 0.5,
-   "worst_dist": 0.35820878758005303
+   "worst_dist": 0.3592068330023567
+  },
+  {
+   "id": "2561227934",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.08821791410446167,
+     "hist": 0.19606414753148213,
+     "edges": 0.08662883542835786,
+     "local": 0.41747213155031204,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.04712240397930145,
+     "dist": 0.2082456102884001,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.11812591552734375,
+     "hist": 0.1986775616554914,
+     "edges": 0.09477462186508256,
+     "local": 0.42413572408258915,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.04549776017665863,
+     "dist": 0.22136892858709464,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.10858583450317383,
+     "hist": 0.1772673942936745,
+     "edges": 0.08217203325095379,
+     "local": 0.4628048936525981,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.05487529933452606,
+     "dist": 0.22330510395565722,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "2596,1546:2600,1550",
+   "window": [
+    1812,
+    1080
+   ],
+   "class": "ok",
+   "note": "the light shafts stand as in WE since 313e1d2 (particle sprites were upside down); they are random in WE.",
+   "trust": "FXC, system fonts: Windows' comicsans",
+   "dist": 0.2176398809437173,
+   "ssim": 0.10497655471165974,
+   "hist": 0.190669701160216,
+   "edges": 0.0878584968481314,
+   "local": 0.43480424976183313,
+   "mean_abs": 0.04916515449682871,
+   "worst_t": 5.0,
+   "worst_dist": 0.22330510395565722
   },
   {
    "id": "3463520581",
@@ -1374,44 +1161,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.14816999435424805,
-     "hist": 0.0357389593911729,
+     "ssim": 0.14822274446487427,
+     "hist": 0.0351945698558094,
      "edges": 0.12417410453871669,
-     "local": 0.39802228659391403,
+     "local": 0.39778680230180424,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.03728330507874489,
-     "dist": 0.19584029707042655,
+     "mean_abs": 0.03726730868220329,
+     "dist": 0.19567659890890876,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.1373882293701172,
-     "hist": 0.036062661508971874,
-     "edges": 0.0967007198401646,
-     "local": 0.3872293798873822,
+     "ssim": 0.1374140977859497,
+     "hist": 0.03610565119792718,
+     "edges": 0.09705175721501103,
+     "local": 0.3875646988550822,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.03256600350141525,
-     "dist": 0.1839379590470771,
+     "mean_abs": 0.032573431730270386,
+     "dist": 0.1841251206748972,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.13880592584609985,
-     "hist": 0.033245684349310654,
-     "edges": 0.08104984529223691,
-     "local": 0.3519909083843231,
+     "ssim": 0.1386612057685852,
+     "hist": 0.03301800308806591,
+     "edges": 0.08552106053212438,
+     "local": 0.35182080666224164,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.03506151959300041,
-     "dist": 0.1700981561974364,
+     "mean_abs": 0.03504979982972145,
+     "dist": 0.1708524164532861,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1425,14 +1212,14 @@
    "class": "",
    "note": "",
    "trust": "FXC (13 compiled)",
-   "dist": 0.18329213743831332,
-   "ssim": 0.14145471652348837,
-   "hist": 0.03501576841648515,
-   "edges": 0.1006415565570394,
-   "local": 0.3790808582885398,
-   "mean_abs": 0.034970276057720184,
+   "dist": 0.18355137867903068,
+   "ssim": 0.14143268267313638,
+   "hist": 0.034772741380600825,
+   "edges": 0.10224897409528404,
+   "local": 0.37905743593970936,
+   "mean_abs": 0.03496351341406504,
    "worst_t": 0.5,
-   "worst_dist": 0.19584029707042655
+   "worst_dist": 0.19567659890890876
   },
   {
    "id": "3289734539",
@@ -1516,44 +1303,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.06449562311172485,
-     "hist": 0.26588924107995043,
-     "edges": 0.14670004357184985,
+     "ssim": 0.0688941478729248,
+     "hist": 0.2658714953512499,
+     "edges": 0.14669439945443707,
      "local": 0.35903697709242505,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.045742493122816086,
-     "dist": 0.20957763699160503,
+     "mean_abs": 0.04638320580124855,
+     "dist": 0.21089251645074236,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.025570154190063477,
-     "hist": 0.16406490984970165,
-     "edges": 0.17770108189672085,
-     "local": 0.12607619756211838,
+     "ssim": 0.02993994951248169,
+     "hist": 0.16405988765637242,
+     "edges": 0.1773719899283206,
+     "local": 0.13684757115940252,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.024798359721899033,
-     "dist": 0.11384710387493906,
+     "mean_abs": 0.025418497622013092,
+     "dist": 0.11832263171850387,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.03444737195968628,
-     "hist": 0.2593005377501624,
-     "edges": 0.20508666279460763,
+     "ssim": 0.038761258125305176,
+     "hist": 0.2593185511850489,
+     "edges": 0.2050557744981203,
      "local": 0.25323478877544403,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.039211247116327286,
-     "dist": 0.17918208832949312,
+     "mean_abs": 0.039818763732910156,
+     "dist": 0.1804736792068586,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1567,14 +1354,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.16753560973201242,
-   "ssim": 0.0415043830871582,
-   "hist": 0.22975156289327148,
-   "edges": 0.17649592942105943,
-   "local": 0.2461159878099958,
-   "mean_abs": 0.036584033320347466,
+   "dist": 0.16989627579203495,
+   "ssim": 0.04586511850357056,
+   "hist": 0.22974997806422373,
+   "edges": 0.17637405462695932,
+   "local": 0.2497064456757572,
+   "mean_abs": 0.0372068223853906,
    "worst_t": 0.5,
-   "worst_dist": 0.20957763699160503
+   "worst_dist": 0.21089251645074236
   },
   {
    "id": "3489263099",
@@ -1587,44 +1374,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.06302046775817871,
-     "hist": 0.15250358132164676,
-     "edges": 0.17245590253292287,
-     "local": 0.21349601292361817,
+     "ssim": 0.0631071925163269,
+     "hist": 0.15261108969110732,
+     "edges": 0.16304247371693703,
+     "local": 0.21323318608726063,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.011556149460375309,
-     "dist": 0.147946840975453,
+     "mean_abs": 0.011590772308409214,
+     "dist": 0.14603282626268513,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.07096076011657715,
-     "hist": 0.143319917980556,
-     "edges": 0.17543307936973507,
-     "local": 0.2527235079711924,
+     "ssim": 0.07105976343154907,
+     "hist": 0.1434042748029428,
+     "edges": 0.18075616079050516,
+     "local": 0.25266446856160957,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.012443222105503082,
-     "dist": 0.16085587989638908,
+     "mean_abs": 0.012475132942199707,
+     "dist": 0.16194935671663718,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.08178561925888062,
-     "hist": 0.13289322795347033,
-     "edges": 0.17196648310806661,
-     "local": 0.26347611875583726,
+     "ssim": 0.08186763525009155,
+     "hist": 0.1330328457984092,
+     "edges": 0.1794946484884553,
+     "local": 0.26280970095346373,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.013443944975733757,
-     "dist": 0.16455046361672276,
+     "mean_abs": 0.013477199710905552,
+     "dist": 0.16590869971843947,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1638,14 +1425,85 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.1577843948295216,
-   "ssim": 0.07192228237787883,
-   "hist": 0.14290557575189103,
-   "edges": 0.17328515500357486,
-   "local": 0.24323187988354925,
-   "mean_abs": 0.012481105513870716,
+   "dist": 0.1579636275659206,
+   "ssim": 0.07201153039932251,
+   "hist": 0.14301607009748643,
+   "edges": 0.17443109433196582,
+   "local": 0.24290245186744466,
+   "mean_abs": 0.012514368320504824,
    "worst_t": 5.0,
-   "worst_dist": 0.16455046361672276
+   "worst_dist": 0.16590869971843947
+  },
+  {
+   "id": "3309103316",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.4252486824989319,
+     "hist": 0.05397299136968078,
+     "edges": 0.2718804837678932,
+     "local": 0.6807617694139481,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.07350704818964005,
+     "dist": 0.39697383060137875,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.001771092414855957,
+     "hist": 0.008015639305162936,
+     "edges": 0.0016378525932665422,
+     "local": 0.006800939600604276,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.001493247109465301,
+     "dist": 0.004502307984323966,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.0015990138053894043,
+     "hist": 0.006721126785295013,
+     "edges": 0.012871442956282952,
+     "local": 0.008783327143949768,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.001466664019972086,
+     "dist": 0.007033216233117345,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.1361697849396067,
+   "ssim": 0.14287292957305908,
+   "hist": 0.02290325248671291,
+   "edges": 0.0954632597724809,
+   "local": 0.23211534538616738,
+   "mean_abs": 0.02548898643969248,
+   "worst_t": 0.5,
+   "worst_dist": 0.39697383060137875
   },
   {
    "id": "3516174947",
@@ -1658,44 +1516,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.18677300214767456,
-     "hist": 0.08126312651686728,
-     "edges": 0.0590652047018716,
-     "local": 0.5030556550870339,
+     "ssim": 0.1825854778289795,
+     "hist": 0.08324343419509765,
+     "edges": 0.04833889404879643,
+     "local": 0.49664792108039063,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.042664166539907455,
-     "dist": 0.2350142634141603,
+     "mean_abs": 0.03912366181612015,
+     "dist": 0.23008648532158985,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.07432425022125244,
-     "hist": 0.11039554198046048,
-     "edges": 0.03249911749118117,
-     "local": 0.2634493559598923,
+     "ssim": 0.0625772476196289,
+     "hist": 0.10734419288055551,
+     "edges": 0.03267200571869622,
+     "local": 0.20781140898664793,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.025891028344631195,
-     "dist": 0.12991101374867176,
+     "mean_abs": 0.021836668252944946,
+     "dist": 0.10911983670173339,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.033021628856658936,
-     "hist": 0.08363937108630211,
-     "edges": 0.016760493714629954,
-     "local": 0.10453607173015673,
+     "ssim": 0.028232872486114502,
+     "hist": 0.08546164042850204,
+     "edges": 0.0157227846576955,
+     "local": 0.08172927657142282,
      "worst_cell": [
       2,
-      1
+      0
      ],
-     "mean_abs": 0.012467266991734505,
-     "dist": 0.06134728313623111,
+     "mean_abs": 0.011088156141340733,
+     "dist": 0.053225529734500704,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1709,85 +1567,14 @@
    "class": "ok",
    "note": "the preview-compare question (\"needs a WE capture\"): at its default lens size 0.75 WE also shows more than the canvas \u2014 black on all four sides at the canvas's aspect, bars top and bottom (132 px of 1080, the 0.125 that zoom 0.75 predicts) on a 16:9 desktop (we-ref/3516174947/desktop/); at lens 1 the canvas fills (lens1/). Our letterbox is WE's. The rest is its random camera path and the prompt box's timing.",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.14209085343302105,
-   "ssim": 0.09803962707519531,
-   "hist": 0.09176601319454329,
-   "edges": 0.03610827196922758,
-   "local": 0.290347027592361,
-   "mean_abs": 0.027007487292091053,
+   "dist": 0.13081061725260798,
+   "ssim": 0.09113186597824097,
+   "hist": 0.09201642250138507,
+   "edges": 0.032244561475062716,
+   "local": 0.2620628688794871,
+   "mean_abs": 0.024016162070135277,
    "worst_t": 0.5,
-   "worst_dist": 0.2350142634141603
-  },
-  {
-   "id": "3309103316",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.42538297176361084,
-     "hist": 0.058039822109077106,
-     "edges": 0.277324877802252,
-     "local": 0.6807617694139481,
-     "worst_cell": [
-      0,
-      1
-     ],
-     "mean_abs": 0.07372868806123734,
-     "dist": 0.3989163623355335,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.0020122528076171875,
-     "hist": 0.020024116893854776,
-     "edges": 0.006492337779447466,
-     "local": 0.015394184350346526,
-     "worst_cell": [
-      2,
-      0
-     ],
-     "mean_abs": 0.0024921384174376726,
-     "dist": 0.010525222082049562,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.001854240894317627,
-     "hist": 0.020572055984973754,
-     "edges": 0.020577697755815638,
-     "local": 0.01911450084298849,
-     "worst_cell": [
-      2,
-      0
-     ],
-     "mean_abs": 0.0024705606047064066,
-     "dist": 0.014520573269349715,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC",
-   "dist": 0.14132071922897757,
-   "ssim": 0.14308315515518188,
-   "hist": 0.03287866499596854,
-   "edges": 0.10146497111250503,
-   "local": 0.23842348486909437,
-   "mean_abs": 0.026230462361127138,
-   "worst_t": 0.5,
-   "worst_dist": 0.3989163623355335
+   "worst_dist": 0.23008648532158985
   },
   {
    "id": "3163060610",
@@ -1800,44 +1587,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.188867449760437,
-     "hist": 0.07115724741382488,
-     "edges": 0.0730614758736382,
+     "ssim": 0.18891876935958862,
+     "hist": 0.07043489176024485,
+     "edges": 0.07284032121856254,
      "local": 0.4045575304577748,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.038980718702077866,
-     "dist": 0.20687123872295615,
+     "mean_abs": 0.03901093453168869,
+     "dist": 0.20669793254097052,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.043308258056640625,
-     "hist": 0.06472083718524177,
-     "edges": 0.03486052205116008,
-     "local": 0.17846900907655558,
+     "ssim": 0.04445922374725342,
+     "hist": 0.06798356981100244,
+     "edges": 0.0466049419267941,
+     "local": 0.18252138420939445,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.0112279849126935,
-     "dist": 0.08644945198723923,
+     "mean_abs": 0.011460077948868275,
+     "dist": 0.09101188473455367,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.04236477613449097,
-     "hist": 0.06933833977790237,
-     "edges": 0.031044689213450494,
-     "local": 0.18471375604470572,
+     "ssim": 0.0436934232711792,
+     "hist": 0.06930713487885014,
+     "edges": 0.043866447053990676,
+     "local": 0.1871587305019299,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.01103236898779869,
-     "dist": 0.08820016545202958,
+     "mean_abs": 0.011335773393511772,
+     "dist": 0.09189036251850088,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1851,14 +1638,85 @@
    "class": "",
    "note": "",
    "trust": "FXC (29 compiled), system fonts: Windows' comicsans, clock: Wine's",
-   "dist": 0.12717361872074165,
-   "ssim": 0.09151349465052287,
-   "hist": 0.068405474792323,
-   "edges": 0.04632222904608293,
-   "local": 0.2559134318596787,
-   "mean_abs": 0.020413690867523353,
+   "dist": 0.12986672659800835,
+   "ssim": 0.09235713879267375,
+   "hist": 0.0692418654833658,
+   "edges": 0.05443723673311577,
+   "local": 0.2580792150563664,
+   "mean_abs": 0.02060226195802291,
    "worst_t": 0.5,
-   "worst_dist": 0.20687123872295615
+   "worst_dist": 0.20669793254097052
+  },
+  {
+   "id": "3019192537",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.06178581714630127,
+     "hist": 0.24838954165811,
+     "edges": 0.2186642563279434,
+     "local": 0.14890272620444497,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.01599297858774662,
+     "dist": 0.15661732260243455,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.035341501235961914,
+     "hist": 0.24814630467412357,
+     "edges": 0.036815684882195665,
+     "local": 0.0860743986753126,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.012799304910004139,
+     "dist": 0.0934171678846462,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.025221288204193115,
+     "hist": 0.24666949987661121,
+     "edges": 0.1483908394531096,
+     "local": 0.08909376400212447,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.010204569436609745,
+     "dist": 0.11330658352783944,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1588,892:1592,896",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "Was the worst (0.60): WE looked far darker and more saturated. That was the reference, not us. At Ultra WE presents an HDR scene through an FP16 (scRGB) swap chain holding lin () of the picture; Windows sRGB-encodes it for an SDR display, DXVK under Proton showed it raw. The frames are re-encoded now (we-proton.md \"The FP16 swap chain\"), and ours matches. The rest is camera shake (random).",
+   "trust": "FXC, FP16 swap chain: re-encoded",
+   "dist": 0.12111369133830674,
+   "ssim": 0.0407828688621521,
+   "hist": 0.24773511540294826,
+   "edges": 0.13462359355441622,
+   "local": 0.10802362962729402,
+   "mean_abs": 0.012998950978120169,
+   "worst_t": 0.5,
+   "worst_dist": 0.15661732260243455
   },
   {
    "id": "3480481965",
@@ -1871,44 +1729,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.01772373914718628,
-     "hist": 0.3585066593195911,
-     "edges": 0.07560975609756093,
-     "local": 0.05370481149293482,
+     "ssim": 0.018402934074401855,
+     "hist": 0.35824383446395275,
+     "edges": 0.08232445520581111,
+     "local": 0.05521567685840031,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.004586389288306236,
-     "dist": 0.10825184827546674,
+     "mean_abs": 0.004623123910278082,
+     "dist": 0.11019924121379343,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.018641889095306396,
-     "hist": 0.358865111575465,
-     "edges": 0.07953063885267275,
-     "local": 0.060797426383942366,
+     "ssim": 0.021680176258087158,
+     "hist": 0.35910791634359546,
+     "edges": 0.09323116219667937,
+     "local": 0.0743291238322854,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.004341106861829758,
-     "dist": 0.11151094472940219,
+     "mean_abs": 0.004607856273651123,
+     "dist": 0.11927060573516673,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.028100192546844482,
-     "hist": 0.35766928136416304,
-     "edges": 0.051754801233414915,
-     "local": 0.0885834526270628,
+     "ssim": 0.02772378921508789,
+     "hist": 0.3581152650918912,
+     "edges": 0.05183427398665985,
+     "local": 0.08346708274135987,
      "worst_cell": [
-      1,
-      1
+      2,
+      3
      ],
-     "mean_abs": 0.0039300271309912205,
-     "dist": 0.11688991007168778,
+     "mean_abs": 0.0039036129601299763,
+     "dist": 0.11534716940264453,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1922,14 +1780,14 @@
    "class": "",
    "note": "",
    "trust": "FXC (5 compiled), fonts: the scene's own, clock: Wine's",
-   "dist": 0.11221756769218556,
-   "ssim": 0.021488606929779053,
-   "hist": 0.3583470174197397,
-   "edges": 0.06896506539454954,
-   "local": 0.06769523016798,
-   "mean_abs": 0.004285841093709071,
-   "worst_t": 5.0,
-   "worst_dist": 0.11688991007168778
+   "dist": 0.11493900545053488,
+   "ssim": 0.022602299849192303,
+   "hist": 0.3584890052998131,
+   "edges": 0.07579663046305012,
+   "local": 0.07100396114401519,
+   "mean_abs": 0.004378197714686394,
+   "worst_t": 2.0,
+   "worst_dist": 0.11927060573516673
   },
   {
    "id": "3478602089",
@@ -1942,44 +1800,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.014628112316131592,
-     "hist": 0.17372667924179663,
-     "edges": 0.13402500007596652,
-     "local": 0.23453817764918009,
+     "ssim": 0.010256528854370117,
+     "hist": 0.12010543954319125,
+     "edges": 0.06123455759329399,
+     "local": 0.1459855114420255,
      "worst_cell": [
       0,
-      1
+      3
      ],
-     "mean_abs": 0.048485156148672104,
-     "dist": 0.13630022285314614,
+     "mean_abs": 0.031524691730737686,
+     "dist": 0.08314061151621574,
      "t": 0.5,
      "t_ours": 0.6
     },
     {
-     "ssim": 0.00800621509552002,
-     "hist": 0.14454212959889617,
-     "edges": 0.0711660069660166,
-     "local": 0.16104129701852798,
+     "ssim": 0.013107001781463623,
+     "hist": 0.16101117095578016,
+     "edges": 0.07111507743241374,
+     "local": 0.20258001486460367,
      "worst_cell": [
       0,
-      1
+      3
      ],
-     "mean_abs": 0.03525565192103386,
-     "dist": 0.09385588094719696,
+     "mean_abs": 0.03962058946490288,
+     "dist": 0.11113135467145896,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.005454361438751221,
-     "hist": 0.1896316289951953,
-     "edges": 0.055616360737437254,
-     "local": 0.15024070690075556,
+     "ssim": 0.009687721729278564,
+     "hist": 0.23802272315403566,
+     "edges": 0.1238007786310451,
+     "local": 0.1856585144996643,
      "worst_cell": [
-      3,
-      0
+      0,
+      3
      ],
-     "mean_abs": 0.030410252511501312,
-     "dist": 0.09575811844837855,
+     "mean_abs": 0.0471649244427681,
+     "dist": 0.13096857122569902,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -1993,14 +1851,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.10863807408290721,
-   "ssim": 0.009362896283467611,
-   "hist": 0.16930014594529605,
-   "edges": 0.08693578925980679,
-   "local": 0.1819400605228212,
-   "mean_abs": 0.03805035352706909,
-   "worst_t": 0.5,
-   "worst_dist": 0.13630022285314614
+   "dist": 0.10841351247112457,
+   "ssim": 0.011017084121704102,
+   "hist": 0.17304644455100235,
+   "edges": 0.08538347121891761,
+   "local": 0.1780746802687645,
+   "mean_abs": 0.03943673521280289,
+   "worst_t": 5.0,
+   "worst_dist": 0.13096857122569902
   },
   {
    "id": "2511663284",
@@ -2013,44 +1871,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.09706085920333862,
+     "ssim": 0.0970602035522461,
      "hist": 0.05818555884014163,
-     "edges": 0.05632646957730114,
-     "local": 0.1851904777189096,
+     "edges": 0.05631873167809909,
+     "local": 0.18519110480944315,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.021129891276359558,
-     "dist": 0.10757780676016301,
+     "mean_abs": 0.02112983725965023,
+     "dist": 0.10757625061215492,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.08060199022293091,
-     "hist": 0.059406511848678345,
-     "edges": 0.05542305323696839,
-     "local": 0.16650551091879606,
+     "ssim": 0.08060222864151001,
+     "hist": 0.05940690786668041,
+     "edges": 0.05543033967505906,
+     "local": 0.16650231958677372,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.017998451367020607,
-     "dist": 0.09709816335964744,
+     "mean_abs": 0.017998501658439636,
+     "dist": 0.09709881397683301,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.09359622001647949,
-     "hist": 0.06147178165560954,
+     "ssim": 0.09359484910964966,
+     "hist": 0.06143073118637531,
      "edges": 0.07308170830352578,
-     "local": 0.20739196923871836,
+     "local": 0.20738745294511318,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.019492127001285553,
-     "dist": 0.11720715476838642,
+     "mean_abs": 0.019491907209157944,
+     "dist": 0.11719717851440907,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2064,14 +1922,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.1072943749627323,
-   "ssim": 0.09041968981424968,
-   "hist": 0.059687950781476505,
-   "edges": 0.061610410372598436,
-   "local": 0.1863626526254747,
-   "mean_abs": 0.019540156548221905,
+   "dist": 0.10729074770113234,
+   "ssim": 0.09041909376780193,
+   "hist": 0.059674399297732446,
+   "edges": 0.06161025988556131,
+   "local": 0.18636029244711003,
+   "mean_abs": 0.019540082042415936,
    "worst_t": 5.0,
-   "worst_dist": 0.11720715476838642
+   "worst_dist": 0.11719717851440907
   },
   {
    "id": "2290002190",
@@ -2084,16 +1942,16 @@
    ],
    "pairs": [
     {
-     "ssim": 0.03763645887374878,
+     "ssim": 0.03763622045516968,
      "hist": 0.03671511203360715,
      "edges": 0.026893616857842417,
-     "local": 0.08528790933390458,
+     "local": 0.08528767029444377,
      "worst_cell": [
       1,
       0
      ],
-     "mean_abs": 0.020308803766965866,
-     "dist": 0.04959905624058592,
+     "mean_abs": 0.020308807492256165,
+     "dist": 0.04959891300317395,
      "t": 0.5,
      "t_ours": 0.5
     },
@@ -2101,27 +1959,27 @@
      "ssim": 0.08502811193466187,
      "hist": 0.05441951356414352,
      "edges": 0.03462479426424092,
-     "local": 0.19338092828790346,
+     "local": 0.19338063398996988,
      "worst_cell": [
       1,
       0
      ],
-     "mean_abs": 0.03666697442531586,
-     "dist": 0.10133157363244649,
+     "mean_abs": 0.036666978150606155,
+     "dist": 0.10133148534306641,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.14206832647323608,
+     "ssim": 0.14206838607788086,
      "hist": 0.06751779099300864,
      "edges": 0.04256757607249395,
-     "local": 0.35372450947761536,
+     "local": 0.3537243902683258,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.05548027530312538,
-     "dist": 0.17075492419835595,
+     "mean_abs": 0.055480267852544785,
+     "dist": 0.17075490631696252,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2135,14 +1993,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.10722851802379611,
-   "ssim": 0.08824429909388225,
+   "dist": 0.1072284348877343,
+   "ssim": 0.08824423948923747,
    "hist": 0.05288413886358644,
    "edges": 0.034695329064859094,
-   "local": 0.21079778236647448,
+   "local": 0.21079756485091314,
    "mean_abs": 0.037485351165135704,
    "worst_t": 5.0,
-   "worst_dist": 0.17075492419835595
+   "worst_dist": 0.17075490631696252
   },
   {
    "id": "3479521040",
@@ -2155,44 +2013,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.008398294448852539,
-     "hist": 0.06021592621414384,
-     "edges": 0.026276845712502883,
-     "local": 0.049834929794693984,
+     "ssim": 0.008393824100494385,
+     "hist": 0.06020674129506993,
+     "edges": 0.026271547186953903,
+     "local": 0.049838509798670806,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.00868111290037632,
-     "dist": 0.0347685216583933,
+     "mean_abs": 0.008679906837642193,
+     "dist": 0.034765357866154326,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.0730597972869873,
-     "hist": 0.2613535946167091,
-     "edges": 0.06160174682396169,
-     "local": 0.28188358650853235,
+     "ssim": 0.07304888963699341,
+     "hist": 0.2614248958722504,
+     "edges": 0.061593005052855254,
+     "local": 0.2818488320335746,
      "worst_cell": [
       2,
       0
      ],
-     "mean_abs": 0.044896140694618225,
-     "dist": 0.17107408342679006,
+     "mean_abs": 0.044894058257341385,
+     "dist": 0.17107289668619152,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.05152404308319092,
-     "hist": 0.13609638214781603,
-     "edges": 0.03265822739229296,
-     "local": 0.21359950924913088,
+     "ssim": 0.048114895820617676,
+     "hist": 0.06422832795349936,
+     "edges": 0.03754173566057717,
+     "local": 0.25040676537901163,
      "worst_cell": [
-      1,
+      2,
       2
      ],
-     "mean_abs": 0.024374233558773994,
-     "dist": 0.11328798760771834,
+     "mean_abs": 0.01703646406531334,
+     "dist": 0.1099105110827041,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2206,14 +2064,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, system fonts: Windows' arial, clock: Wine's",
-   "dist": 0.10637686423096725,
-   "ssim": 0.044327378273010254,
-   "hist": 0.15255530099288964,
-   "edges": 0.04017893997625251,
-   "local": 0.18177267518411908,
-   "mean_abs": 0.02598382905125618,
+   "dist": 0.10524958854501665,
+   "ssim": 0.04318586985270182,
+   "hist": 0.12861998837360655,
+   "edges": 0.04180209596679544,
+   "local": 0.19403136907041904,
+   "mean_abs": 0.023536809720098972,
    "worst_t": 2.0,
-   "worst_dist": 0.17107408342679006
+   "worst_dist": 0.17107289668619152
   },
   {
    "id": "3042492564",
@@ -2226,44 +2084,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.06465554237365723,
-     "hist": 0.058386484299491066,
-     "edges": 0.15704717878615682,
-     "local": 0.2140309102833271,
+     "ssim": 0.06467509269714355,
+     "hist": 0.058259604327654896,
+     "edges": 0.15775376895500193,
+     "local": 0.2141398808453232,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.016871614381670952,
-     "dist": 0.12669266841422488,
+     "mean_abs": 0.0168730728328228,
+     "dist": 0.12684716671927138,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.04605269432067871,
-     "hist": 0.06114771347787499,
-     "edges": 0.0720264816798255,
-     "local": 0.16652519380052885,
+     "ssim": 0.04775470495223999,
+     "hist": 0.06139078478500519,
+     "edges": 0.07324110461806499,
+     "local": 0.17614723617831865,
      "worst_cell": [
-      3,
+      1,
       2
      ],
-     "mean_abs": 0.012613324448466301,
-     "dist": 0.09040820546790236,
+     "mean_abs": 0.012882453389465809,
+     "dist": 0.09409696021978163,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.04520058631896973,
-     "hist": 0.06029195448098064,
-     "edges": 0.0694132472632305,
-     "local": 0.15658669918775558,
+     "ssim": 0.047039687633514404,
+     "hist": 0.06075669902238643,
+     "edges": 0.06984340437813918,
+     "local": 0.16443233067790666,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.012350647710263729,
-     "dist": 0.08647722600085982,
+     "mean_abs": 0.01261807605624199,
+     "dist": 0.08956162617353144,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2277,14 +2135,85 @@
    "class": "",
    "note": "",
    "trust": "FXC, system fonts: Windows' comicsans, clock: Wine's",
-   "dist": 0.10119269996099568,
-   "ssim": 0.05196960767110189,
-   "hist": 0.05994205075278223,
-   "edges": 0.0994956359097376,
-   "local": 0.1790476010905372,
-   "mean_abs": 0.013945195513466993,
+   "dist": 0.10350191770419481,
+   "ssim": 0.053156495094299316,
+   "hist": 0.06013569604501551,
+   "edges": 0.10027942598373536,
+   "local": 0.1849064825671828,
+   "mean_abs": 0.014124534092843533,
    "worst_t": 0.5,
-   "worst_dist": 0.12669266841422488
+   "worst_dist": 0.12684716671927138
+  },
+  {
+   "id": "3184155462",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.030745089054107666,
+     "hist": 0.17928454241521735,
+     "edges": 0.034713590568623776,
+     "local": 0.1285485401749611,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0186163317412138,
+     "dist": 0.09058771536548885,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.041810572147369385,
+     "hist": 0.18597206478012818,
+     "edges": 0.03162921789645712,
+     "local": 0.13663479313254356,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.02138451673090458,
+     "dist": 0.09705386611929094,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.025852859020233154,
+     "hist": 0.15440979201013463,
+     "edges": 0.037068762203868566,
+     "local": 0.13864858526115617,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.01563723012804985,
+     "dist": 0.08764614412721744,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "measured",
+   "note": "owner report: the cursor ripple is much stronger than on Windows. At a matched 30 fps it isn't (see Focus).",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.09176257520399907,
+   "ssim": 0.032802840073903404,
+   "hist": 0.1732221330684934,
+   "edges": 0.03447052355631649,
+   "local": 0.13461063952288696,
+   "mean_abs": 0.018546026200056076,
+   "worst_t": 2.0,
+   "worst_dist": 0.09705386611929094
   },
   {
    "id": "1726902114",
@@ -2297,44 +2226,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.028637290000915527,
-     "hist": 0.09223853010490737,
-     "edges": 0.04492217779745211,
-     "local": 0.21324905504782996,
+     "ssim": 0.02863544225692749,
+     "hist": 0.07291637866667787,
+     "edges": 0.03882118507136634,
+     "local": 0.22116950526833534,
      "worst_cell": [
       0,
       0
      ],
-     "mean_abs": 0.027361584827303886,
-     "dist": 0.09999804509509554,
+     "mean_abs": 0.020802805200219154,
+     "dist": 0.09728899700518769,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.028282880783081055,
-     "hist": 0.08067994499286991,
-     "edges": 0.03355666278758851,
-     "local": 0.20677284399668375,
+     "ssim": 0.024409353733062744,
+     "hist": 0.0697236227272079,
+     "edges": 0.024554325706675484,
+     "local": 0.16526327530543009,
      "worst_cell": [
       0,
       0
      ],
-     "mean_abs": 0.02545115351676941,
-     "dist": 0.09336403899002113,
+     "mean_abs": 0.017888035625219345,
+     "dist": 0.07575737839832453,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.02741187810897827,
-     "hist": 0.06968527709737,
-     "edges": 0.03282306377792443,
-     "local": 0.18194676066438356,
+     "ssim": 0.023639321327209473,
+     "hist": 0.06506121985784337,
+     "edges": 0.023443366350758832,
+     "local": 0.140703359618783,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.021566055715084076,
-     "dist": 0.08330925980706744,
+     "mean_abs": 0.016178864985704422,
+     "dist": 0.06700372152551819,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2345,20 +2274,20 @@
     1554,
     1080
    ],
-   "class": "",
-   "note": "",
+   "class": "ok",
+   "note": "the light shafts hang from the top left as in WE since 313e1d2 (particle sprites were upside down). They are random in WE.",
    "trust": "FXC",
-   "dist": 0.09222378129739471,
-   "ssim": 0.02811068296432495,
-   "hist": 0.08086791739838244,
-   "edges": 0.03710063478765502,
-   "local": 0.20065621990296575,
-   "mean_abs": 0.024792931353052456,
+   "dist": 0.08001669897634346,
+   "ssim": 0.02556137243906657,
+   "hist": 0.06923374041724305,
+   "edges": 0.02893962570960022,
+   "local": 0.17571204673084947,
+   "mean_abs": 0.01828990193704764,
    "worst_t": 0.5,
-   "worst_dist": 0.09999804509509554
+   "worst_dist": 0.09728899700518769
   },
   {
-   "id": "2905264428",
+   "id": "3395587987",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -2368,68 +2297,68 @@
    ],
    "pairs": [
     {
-     "ssim": 0.07686573266983032,
-     "hist": 0.0868546085060613,
-     "edges": 0.04047694299763338,
-     "local": 0.18493914604187012,
+     "ssim": 0.01303410530090332,
+     "hist": 0.04642660743303683,
+     "edges": 0.06455026455026458,
+     "local": 0.048170944675803185,
      "worst_cell": [
-      0,
-      0
+      1,
+      2
      ],
-     "mean_abs": 0.033660002052783966,
-     "dist": 0.10400777391424906,
+     "mean_abs": 0.006192372180521488,
+     "dist": 0.04055688938967223,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.03181624412536621,
-     "hist": 0.07763177871106881,
-     "edges": 0.016881227676918575,
-     "local": 0.13139575067907572,
+     "ssim": 0.05428290367126465,
+     "hist": 0.062078901769173925,
+     "edges": 0.10797821211150282,
+     "local": 0.1314328983426094,
      "worst_cell": [
-      0,
-      0
+      1,
+      2
      ],
-     "mean_abs": 0.01854727976024151,
-     "dist": 0.06786619971893006,
+     "mean_abs": 0.010697664692997932,
+     "dist": 0.08972616338029757,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.030139625072479248,
-     "hist": 0.09597141083033883,
-     "edges": 0.013762487284488478,
-     "local": 0.17361984650293985,
+     "ssim": 0.08069491386413574,
+     "hist": 0.0383172526906919,
+     "edges": 0.1511557689452061,
+     "local": 0.1534434324130416,
      "worst_cell": [
       0,
-      0
+      1
      ],
-     "mean_abs": 0.024618908762931824,
-     "dist": 0.08307462109559119,
+     "mean_abs": 0.012733664363622665,
+     "dist": 0.1081361082103328,
      "t": 5.0,
      "t_ours": 5.0
     }
    ],
    "props": [],
-   "pointer": "1276,716:1280,720",
+   "pointer": "1916,1076:1920,1080",
    "window": [
     1920,
     1080
    ],
-   "class": "",
-   "note": "",
-   "trust": "FXC",
-   "dist": 0.0849828649095901,
-   "ssim": 0.04627386728922526,
-   "hist": 0.08681926601582297,
-   "edges": 0.02370688598634681,
-   "local": 0.16331824774129522,
-   "mean_abs": 0.025608730191985767,
-   "worst_t": 0.5,
-   "worst_dist": 0.10400777391424906
+   "class": "ok",
+   "note": "Was 0.48 (WE a deep, dark blue): the FP16 swap-chain skew of 3019192537, fixed in the capture. Matches; the particles are random.",
+   "trust": "FXC, FP16 swap chain: re-encoded",
+   "dist": 0.07947305366010086,
+   "ssim": 0.049337307612101235,
+   "hist": 0.048940920630967555,
+   "edges": 0.10789474853565784,
+   "local": 0.1110157584771514,
+   "mean_abs": 0.009874567079047361,
+   "worst_t": 5.0,
+   "worst_dist": 0.1081361082103328
   },
   {
-   "id": "3477054430",
+   "id": "2469881470",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -2439,44 +2368,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.040727853775024414,
-     "hist": 0.05285772269366123,
-     "edges": 0.06571098272673304,
-     "local": 0.15204234588115165,
+     "ssim": 0.033478736877441406,
+     "hist": 0.04043967715925151,
+     "edges": 0.03862264951744754,
+     "local": 0.14973189402371645,
      "worst_cell": [
       1,
-      3
+      1
      ],
-     "mean_abs": 0.012844578363001347,
-     "dist": 0.08154480098093167,
+     "mean_abs": 0.0097787044942379,
+     "dist": 0.07077565460568716,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.04326748847961426,
-     "hist": 0.05301822392896371,
-     "edges": 0.06996837553600355,
-     "local": 0.16910984801749387,
+     "ssim": 0.04490005970001221,
+     "hist": 0.03821854061129258,
+     "edges": 0.022626911168704744,
+     "local": 0.198476976249367,
      "worst_cell": [
       1,
-      3
+      1
      ],
-     "mean_abs": 0.012822230346500874,
-     "dist": 0.08831052084212589,
+     "mean_abs": 0.010344010777771473,
+     "dist": 0.08518220114081322,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.04350078105926514,
-     "hist": 0.05303275632030843,
-     "edges": 0.0714005930503595,
-     "local": 0.1541801542043686,
+     "ssim": 0.0453646183013916,
+     "hist": 0.03235962656897985,
+     "edges": 0.05814589240530477,
+     "local": 0.15129758254624903,
      "worst_cell": [
-      1,
-      3
+      3,
+      1
      ],
-     "mean_abs": 0.01287142839282751,
-     "dist": 0.08419095045322371,
+     "mean_abs": 0.011160201393067837,
+     "dist": 0.07709976404914912,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2489,15 +2418,15 @@
    ],
    "class": "",
    "note": "",
-   "trust": "FXC, fonts: the scene's own",
-   "dist": 0.08468209075876043,
-   "ssim": 0.04249870777130127,
-   "hist": 0.052969567647644454,
-   "edges": 0.06902665043769869,
-   "local": 0.15844411603433803,
-   "mean_abs": 0.012846079034109911,
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.0776858732652165,
+   "ssim": 0.041247804959615074,
+   "hist": 0.03700594811317465,
+   "edges": 0.03979848436381902,
+   "local": 0.1665021509397775,
+   "mean_abs": 0.01042763888835907,
    "worst_t": 2.0,
-   "worst_dist": 0.08831052084212589
+   "worst_dist": 0.08518220114081322
   },
   {
    "id": "2679885269",
@@ -2510,44 +2439,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.028129160404205322,
-     "hist": 0.05911426507321958,
-     "edges": 0.0434277475162258,
-     "local": 0.1206777160987258,
+     "ssim": 0.030153930187225342,
+     "hist": 0.06071387120099928,
+     "edges": 0.04540716323759808,
+     "local": 0.1361651485785842,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.006947293411940336,
-     "dist": 0.0651504654687684,
+     "mean_abs": 0.007501300424337387,
+     "dist": 0.07111993051746233,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.03616756200790405,
-     "hist": 0.08712997771019729,
-     "edges": 0.046358980126888105,
-     "local": 0.17044085574646792,
+     "ssim": 0.03113323450088501,
+     "hist": 0.08727762537734723,
+     "edges": 0.04731492551966676,
+     "local": 0.14727710963537297,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.01028253510594368,
-     "dist": 0.08868031689372867,
+     "mean_abs": 0.009683089330792427,
+     "dist": 0.0804416134202802,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.031983792781829834,
-     "hist": 0.09191975539771764,
-     "edges": 0.035796608497324245,
-     "local": 0.16576052457094193,
+     "ssim": 0.0287473201751709,
+     "hist": 0.08920545064371571,
+     "edges": 0.03531654504971782,
+     "local": 0.1452124354739984,
      "worst_cell": [
-      1,
+      2,
       1
      ],
-     "mean_abs": 0.009347919374704361,
-     "dist": 0.08486656798483991,
+     "mean_abs": 0.008645123802125454,
+     "dist": 0.07709232583343749,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2561,85 +2490,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.07956578344911233,
-   "ssim": 0.0320935050646464,
-   "hist": 0.0793879993937115,
-   "edges": 0.04186111204681272,
-   "local": 0.1522930321387119,
-   "mean_abs": 0.008859249297529459,
+   "dist": 0.07621795659039333,
+   "ssim": 0.030011494954427082,
+   "hist": 0.07906564907402074,
+   "edges": 0.042679544602327556,
+   "local": 0.1428848978959852,
+   "mean_abs": 0.008609837852418423,
    "worst_t": 2.0,
-   "worst_dist": 0.08868031689372867
-  },
-  {
-   "id": "2469881470",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.03702300786972046,
-     "hist": 0.04043967715925151,
-     "edges": 0.03862264951744754,
-     "local": 0.14973233795414367,
-     "worst_cell": [
-      1,
-      1
-     ],
-     "mean_abs": 0.009987972676753998,
-     "dist": 0.07183906908249904,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.04844784736633301,
-     "hist": 0.03821854061129258,
-     "edges": 0.022626911168704744,
-     "local": 0.19847696973010898,
-     "worst_cell": [
-      1,
-      1
-     ],
-     "mean_abs": 0.010553674772381783,
-     "dist": 0.08624653548493205,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.04887515306472778,
-     "hist": 0.03235962656897985,
-     "edges": 0.05814589240530477,
-     "local": 0.1512977348951002,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.011369878426194191,
-     "dist": 0.07815297018280531,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "956,536:960,540",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.07874619158341213,
-   "ssim": 0.044782002766927086,
-   "hist": 0.03700594811317465,
-   "edges": 0.03979848436381902,
-   "local": 0.16650234752645096,
-   "mean_abs": 0.010637175291776657,
-   "worst_t": 2.0,
-   "worst_dist": 0.08624653548493205
+   "worst_dist": 0.0804416134202802
   },
   {
    "id": "2679248947",
@@ -2652,44 +2510,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.02239525318145752,
-     "hist": 0.026335155790583115,
-     "edges": 0.02239606958619289,
-     "local": 0.05886949102083842,
+     "ssim": 0.02126610279083252,
+     "hist": 0.02569832895587877,
+     "edges": 0.017090158633051633,
+     "local": 0.05888421336809794,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.014471171423792839,
-     "dist": 0.03412566833604398,
+     "mean_abs": 0.014408047311007977,
+     "dist": 0.03260279236546522,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.06905490159988403,
-     "hist": 0.028093575973171084,
-     "edges": 0.024516369536567884,
-     "local": 0.2307662070573618,
+     "ssim": 0.06749999523162842,
+     "hist": 0.02789710458607727,
+     "edges": 0.012820501997131806,
+     "local": 0.2307645179486523,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.02524978667497635,
-     "dist": 0.10046832169912154,
+     "mean_abs": 0.025157513096928596,
+     "dist": 0.09762287527072602,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.06188309192657471,
-     "hist": 0.038552765085212194,
-     "edges": 0.0303983651130032,
-     "local": 0.21377700908730426,
+     "ssim": 0.05965828895568848,
+     "hist": 0.04099031077400071,
+     "edges": 0.025846316934707736,
+     "local": 0.21366832995166382,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.023155923932790756,
-     "dist": 0.09648825634380676,
+     "mean_abs": 0.0229958426207304,
+     "dist": 0.09536531121394738,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2703,14 +2561,156 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.07702741545965743,
-   "ssim": 0.051111082235972084,
-   "hist": 0.030993832282988798,
-   "edges": 0.025770268078587993,
-   "local": 0.1678042357218348,
-   "mean_abs": 0.02095896067718665,
+   "dist": 0.07519699295004621,
+   "ssim": 0.04947479565938314,
+   "hist": 0.03152858143865225,
+   "edges": 0.01858565918829706,
+   "local": 0.167772353756138,
+   "mean_abs": 0.020853801009555657,
    "worst_t": 2.0,
-   "worst_dist": 0.10046832169912154
+   "worst_dist": 0.09762287527072602
+  },
+  {
+   "id": "2905264428",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0770297646522522,
+     "hist": 0.08922311956124336,
+     "edges": 0.04051352604775915,
+     "local": 0.1516133613574008,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0342668816447258,
+     "dist": 0.0945402669246964,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.02860039472579956,
+     "hist": 0.0923387097324728,
+     "edges": 0.0280091621954921,
+     "local": 0.09842779363195102,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.02225423790514469,
+     "dist": 0.06217803089291815,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.01852470636367798,
+     "hist": 0.12588413983042404,
+     "edges": 0.027422150610863394,
+     "local": 0.08232045111556847,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.018226560205221176,
+     "dist": 0.060914805332031426,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.07254436771654865,
+   "ssim": 0.04138495524724325,
+   "hist": 0.10248198970804674,
+   "edges": 0.03198161295137155,
+   "local": 0.11078720203497343,
+   "mean_abs": 0.024915893251697224,
+   "worst_t": 0.5,
+   "worst_dist": 0.0945402669246964
+  },
+  {
+   "id": "2288455459",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0400998592376709,
+     "hist": 0.04035036675038944,
+     "edges": 0.05062373857151814,
+     "local": 0.16141718222449222,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.01162296999245882,
+     "dist": 0.07864993350303046,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.034420013427734375,
+     "hist": 0.03853087277554228,
+     "edges": 0.04316266418492842,
+     "local": 0.1280779840114216,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.008563646115362644,
+     "dist": 0.06508810662384093,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.04081547260284424,
+     "hist": 0.0369681026666081,
+     "edges": 0.053839298477592834,
+     "local": 0.14277822772661844,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.010077104903757572,
+     "dist": 0.07323959032767899,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.07232587681818346,
+   "ssim": 0.038445115089416504,
+   "hist": 0.03861644739751327,
+   "edges": 0.04920856707801313,
+   "local": 0.14409113132084408,
+   "mean_abs": 0.010087907003859678,
+   "worst_t": 0.5,
+   "worst_dist": 0.07864993350303046
   },
   {
    "id": "3174556087",
@@ -2723,44 +2723,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.04969912767410278,
-     "hist": 0.04417997548826095,
-     "edges": 0.054092982851224325,
-     "local": 0.12907359609380364,
+     "ssim": 0.05111205577850342,
+     "hist": 0.04384655786521282,
+     "edges": 0.04659089650721937,
+     "local": 0.1380024322619041,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.0170554518699646,
-     "dist": 0.07328640879826898,
+     "mean_abs": 0.01700759120285511,
+     "dist": 0.07482183728660868,
      "t": 0.5,
      "t_ours": 0.6
     },
     {
-     "ssim": 0.047323763370513916,
-     "hist": 0.036262867027199275,
-     "edges": 0.050619865274697085,
-     "local": 0.11475002757894497,
+     "ssim": 0.0447615385055542,
+     "hist": 0.03719422897167415,
+     "edges": 0.06056852571547988,
+     "local": 0.10275311923275392,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.016326144337654114,
-     "dist": 0.06599868374521693,
+     "mean_abs": 0.01589435152709484,
+     "dist": 0.06380694825892325,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.052886247634887695,
-     "hist": 0.049515970469117446,
-     "edges": 0.07087074753234068,
-     "local": 0.1318079431851705,
+     "ssim": 0.04912334680557251,
+     "hist": 0.0546643802148164,
+     "edges": 0.06771220561630731,
+     "local": 0.11358529981225729,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.016797469928860664,
-     "dist": 0.07948560084630908,
+     "mean_abs": 0.01655794121325016,
+     "dist": 0.07328791115157368,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2774,156 +2774,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, system fonts: Windows' arial/consolas, clock: Wine's",
-   "dist": 0.07292356446326499,
-   "ssim": 0.04996971289316813,
-   "hist": 0.04331960432819256,
-   "edges": 0.058527865219420695,
-   "local": 0.12521052228597304,
-   "mean_abs": 0.016726355378826458,
-   "worst_t": 5.0,
-   "worst_dist": 0.07948560084630908
-  },
-  {
-   "id": "2288455459",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.04011738300323486,
-     "hist": 0.04025646328798984,
-     "edges": 0.05080105136811586,
-     "local": 0.16146510746330023,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.011623702943325043,
-     "dist": 0.07868625007118166,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.03443336486816406,
-     "hist": 0.03852126269829371,
-     "edges": 0.04305915470040611,
-     "local": 0.12811631600682935,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.00856352224946022,
-     "dist": 0.06508098774223799,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.0408322811126709,
-     "hist": 0.037686409508897074,
-     "edges": 0.053839298477592834,
-     "local": 0.14285089572270712,
-     "worst_cell": [
-      3,
-      3
-     ],
-     "mean_abs": 0.01007707230746746,
-     "dist": 0.07341009464791139,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC",
-   "dist": 0.072392444153777,
-   "ssim": 0.038461009661356606,
-   "hist": 0.03882137849839354,
-   "edges": 0.04923316818203827,
-   "local": 0.14414410639761224,
-   "mean_abs": 0.010088099166750908,
+   "dist": 0.0706388988990352,
+   "ssim": 0.04833231369654337,
+   "hist": 0.045235055683901126,
+   "edges": 0.058290542613002184,
+   "local": 0.1181136171023051,
+   "mean_abs": 0.016486627981066704,
    "worst_t": 0.5,
-   "worst_dist": 0.07868625007118166
-  },
-  {
-   "id": "2371103399",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.01145237684249878,
-     "hist": 0.1390715087075631,
-     "edges": 0.023024046201415738,
-     "local": 0.11856552585959435,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.010313396342098713,
-     "dist": 0.07142448179242371,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.011352121829986572,
-     "hist": 0.13627605857742597,
-     "edges": 0.028578860159162445,
-     "local": 0.11978624264399211,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.010277165099978447,
-     "dist": 0.07231249308951129,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.011009633541107178,
-     "hist": 0.13401327805612206,
-     "edges": 0.01885947229315066,
-     "local": 0.12063821777701378,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.010190597735345364,
-     "dist": 0.07006890546529083,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,536:1920,540",
-   "window": [
-    1920,
-    540
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC",
-   "dist": 0.0712686267824086,
-   "ssim": 0.011271377404530844,
-   "hist": 0.1364536151137037,
-   "edges": 0.023487459551242946,
-   "local": 0.11966332876020008,
-   "mean_abs": 0.010260386392474174,
-   "worst_t": 2.0,
-   "worst_dist": 0.07231249308951129
+   "worst_dist": 0.07482183728660868
   },
   {
    "id": "3516106265",
@@ -2936,44 +2794,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.03383469581604004,
-     "hist": 0.08175014661639413,
-     "edges": 0.03470719605693395,
-     "local": 0.10035325431575377,
+     "ssim": 0.034025609493255615,
+     "hist": 0.08174383727497143,
+     "edges": 0.03557947945808759,
+     "local": 0.10032313720633586,
      "worst_cell": [
       1,
       3
      ],
-     "mean_abs": 0.006449237000197172,
-     "dist": 0.06354785357420376,
+     "mean_abs": 0.006461259443312883,
+     "dist": 0.06376928735648925,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.03393429517745972,
-     "hist": 0.04970672756731558,
-     "edges": 0.04396208407039759,
-     "local": 0.07855344812075298,
+     "ssim": 0.034137189388275146,
+     "hist": 0.04976222763123533,
+     "edges": 0.04402024180132824,
+     "local": 0.07859031017869711,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.00549341831356287,
-     "dist": 0.052480085317006445,
+     "mean_abs": 0.0055074007250368595,
+     "dist": 0.05257474375660439,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.044801950454711914,
-     "hist": 0.06916021052282752,
-     "edges": 0.12158581829620185,
-     "local": 0.14001288979003826,
+     "ssim": 0.04496312141418457,
+     "hist": 0.06913596389504333,
+     "edges": 0.121983795468115,
+     "local": 0.1400182545185089,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.005044180899858475,
-     "dist": 0.09359365783723093,
+     "mean_abs": 0.00505659868940711,
+     "dist": 0.09371836465243971,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -2987,14 +2845,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.06987386557614704,
-   "ssim": 0.03752364714940389,
-   "hist": 0.06687236156884574,
-   "edges": 0.06675169947451114,
-   "local": 0.10630653074218166,
-   "mean_abs": 0.005662278737872839,
+   "dist": 0.07002079858851111,
+   "ssim": 0.03770864009857178,
+   "hist": 0.06688067626708337,
+   "edges": 0.06719450557584361,
+   "local": 0.10631056730118062,
+   "mean_abs": 0.005675086285918951,
    "worst_t": 5.0,
-   "worst_dist": 0.09359365783723093
+   "worst_dist": 0.09371836465243971
   },
   {
    "id": "3366535880",
@@ -3220,44 +3078,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.04700958728790283,
-     "hist": 0.030185626380709745,
+     "ssim": 0.04702252149581909,
+     "hist": 0.029973846225560173,
      "edges": 0.05516398784535881,
-     "local": 0.14482763704533377,
+     "local": 0.1448585786856711,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.011595205403864384,
-     "dist": 0.07462109014518468,
+     "mean_abs": 0.011598161421716213,
+     "dist": 0.07459189686863085,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.04674720764160156,
-     "hist": 0.024976640082845558,
+     "ssim": 0.046808481216430664,
+     "hist": 0.02497770156600927,
      "edges": 0.08949696077896163,
-     "local": 0.10418408441667755,
+     "local": 0.10440348259483774,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.011250008828938007,
-     "dist": 0.06817410778984517,
+     "mean_abs": 0.011254852637648582,
+     "dist": 0.06825852161237471,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.036904215812683105,
-     "hist": 0.02437313545599797,
-     "edges": 0.050581266678049186,
-     "local": 0.1171710491956522,
+     "ssim": 0.036963045597076416,
+     "hist": 0.024214192003265536,
+     "edges": 0.04903349739976859,
+     "local": 0.11753165698610246,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.010375515557825565,
-     "dist": 0.06121345992931002,
+     "mean_abs": 0.010384973138570786,
+     "dist": 0.06099794865556049,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3271,14 +3129,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.06800288595477996,
-   "ssim": 0.043553670247395836,
-   "hist": 0.02651180063985109,
-   "edges": 0.06508073843412321,
-   "local": 0.1220609235525545,
-   "mean_abs": 0.011073576596875986,
+   "dist": 0.06794945571218867,
+   "ssim": 0.043598016103108726,
+   "hist": 0.026388579931611658,
+   "edges": 0.064564815341363,
+   "local": 0.1222645727555371,
+   "mean_abs": 0.011079329065978527,
    "worst_t": 0.5,
-   "worst_dist": 0.07462109014518468
+   "worst_dist": 0.07459189686863085
   },
   {
    "id": "2921510865",
@@ -3291,44 +3149,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.05513465404510498,
-     "hist": 0.05881270284287968,
-     "edges": 0.02292247654477153,
-     "local": 0.1118360358911256,
+     "ssim": 0.05637383460998535,
+     "hist": 0.06078890642202583,
+     "edges": 0.016365021633806376,
+     "local": 0.1210429201213022,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.026987873017787933,
-     "dist": 0.06643824285839942,
+     "mean_abs": 0.027132434770464897,
+     "dist": 0.06865581203055271,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.05366218090057373,
-     "hist": 0.062840415390847,
-     "edges": 0.01462178337076403,
-     "local": 0.1341838901862502,
+     "ssim": 0.05409306287765503,
+     "hist": 0.06365003242594298,
+     "edges": 0.01663401485414795,
+     "local": 0.13360265890757242,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.02574929967522621,
-     "dist": 0.07184626107836939,
+     "mean_abs": 0.02585286647081375,
+     "dist": 0.07236552599158642,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.043701171875,
-     "hist": 0.06168441179058705,
-     "edges": 0.012163087601216316,
-     "local": 0.09550212509930134,
+     "ssim": 0.04340296983718872,
+     "hist": 0.06131535547146503,
+     "edges": 0.014988676987201743,
+     "local": 0.10066872152189414,
      "worst_cell": [
-      1,
-      1
+      2,
+      2
      ],
-     "mean_abs": 0.023851098492741585,
-     "dist": 0.05653048897065107,
+     "mean_abs": 0.023796839639544487,
+     "dist": 0.05848231389945821,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3342,14 +3200,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.06493833096913997,
-   "ssim": 0.050832668940226235,
-   "hist": 0.06111251000810458,
-   "edges": 0.016569115838917292,
-   "local": 0.11384068372555906,
-   "mean_abs": 0.025529423728585243,
+   "dist": 0.06650121730719911,
+   "ssim": 0.05128995577494303,
+   "hist": 0.06191809810647794,
+   "edges": 0.01599590449171869,
+   "local": 0.11843810018358959,
+   "mean_abs": 0.02559404696027438,
    "worst_t": 2.0,
-   "worst_dist": 0.07184626107836939
+   "worst_dist": 0.07236552599158642
   },
   {
    "id": "2828233985",
@@ -3362,44 +3220,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.13598847389221191,
-     "hist": 0.020908748458536144,
-     "edges": 0.03531671110136825,
-     "local": 0.2185708748487135,
+     "ssim": 0.13604378700256348,
+     "hist": 0.01842500625221461,
+     "edges": 0.026164007321627603,
+     "local": 0.21699085497918227,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.0351097546517849,
-     "dist": 0.11761289653425851,
+     "mean_abs": 0.03516760841012001,
+     "dist": 0.11482819530929217,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.015810847282409668,
-     "hist": 0.01765376544293646,
-     "edges": 0.032171094601782135,
-     "local": 0.04968661714034776,
+     "ssim": 0.01693427562713623,
+     "hist": 0.015283220494704023,
+     "edges": 0.021130929087644468,
+     "local": 0.05368468506882588,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.005099387839436531,
-     "dist": 0.029614211335770947,
+     "mean_abs": 0.005159706808626652,
+     "dist": 0.028468518125258333,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.023944854736328125,
-     "hist": 0.029426881235664115,
-     "edges": 0.02286698838335277,
-     "local": 0.08919132376710574,
+     "ssim": 0.025137662887573242,
+     "hist": 0.0281965963205086,
+     "edges": 0.012390793041848203,
+     "local": 0.09499288261091958,
      "worst_cell": [
       0,
       3
      ],
-     "mean_abs": 0.006646327208727598,
-     "dist": 0.04439962747483354,
+     "mean_abs": 0.0067121125757694244,
+     "dist": 0.0441566415220192,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3413,14 +3271,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, system fonts: Windows' consolas, clock: Wine's",
-   "dist": 0.06387557844828766,
-   "ssim": 0.05858139197031657,
-   "hist": 0.02266313171237891,
-   "edges": 0.03011826469550105,
-   "local": 0.11914960525205566,
-   "mean_abs": 0.01561848989998301,
+   "dist": 0.0624844516521899,
+   "ssim": 0.05937190850575765,
+   "hist": 0.020634941022475744,
+   "edges": 0.019895243150373425,
+   "local": 0.12188947421964258,
+   "mean_abs": 0.015679809264838696,
    "worst_t": 0.5,
-   "worst_dist": 0.11761289653425851
+   "worst_dist": 0.11482819530929217
   },
   {
    "id": "2189783622",
@@ -3565,6 +3423,77 @@
    "worst_dist": 0.06602133576941524
   },
   {
+   "id": "3477054430",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.033544957637786865,
+     "hist": 0.032216195111870405,
+     "edges": 0.058058035400211594,
+     "local": 0.08464822116366122,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0061817774549126625,
+     "dist": 0.05351279974285082,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.035940587520599365,
+     "hist": 0.03375342407002321,
+     "edges": 0.06376325549755935,
+     "local": 0.10587172528418402,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.005954809952527285,
+     "dist": 0.06204702975495153,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.03621619939804077,
+     "hist": 0.029145624042859006,
+     "edges": 0.061388618841246356,
+     "local": 0.0985897599797075,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.00613451236858964,
+     "dist": 0.058548636390145556,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own",
+   "dist": 0.05803615529598264,
+   "ssim": 0.035233914852142334,
+   "hist": 0.03170508107491754,
+   "edges": 0.06106996991300576,
+   "local": 0.09636990214251757,
+   "mean_abs": 0.006090366592009862,
+   "worst_t": 2.0,
+   "worst_dist": 0.06204702975495153
+  },
+  {
    "id": "2815800031",
    "exit": 0,
    "invalid": "",
@@ -3578,41 +3507,41 @@
      "ssim": 0.04212522506713867,
      "hist": 0.03862772375084752,
      "edges": 0.024616410419944335,
-     "local": 0.12425740579298387,
+     "local": 0.12425741883149992,
      "worst_cell": [
       0,
       0
      ],
      "mean_abs": 0.02184576354920864,
-     "dist": 0.06256361609219513,
+     "dist": 0.06256362000374995,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.04590529203414917,
-     "hist": 0.03370826034666489,
+     "ssim": 0.04590517282485962,
+     "hist": 0.03373649057116791,
      "edges": 0.020060033045441017,
-     "local": 0.15414265093083182,
+     "local": 0.15414233366027474,
      "worst_cell": [
       0,
       0
      ],
      "mean_abs": 0.022380948066711426,
-     "dist": 0.07076804156791547,
+     "dist": 0.07077355666886209,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.020444750785827637,
-     "hist": 0.03407183806684084,
+     "ssim": 0.020444631576538086,
+     "hist": 0.03408811311180807,
      "edges": 0.020033265665745925,
-     "local": 0.0548147523853307,
+     "local": 0.05481488478835672,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.014964446425437927,
-     "dist": 0.03339887169786485,
+     "mean_abs": 0.014964439906179905,
+     "dist": 0.03340213066497924,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3626,85 +3555,14 @@
    "class": "",
    "note": "",
    "trust": "FXC (2 compiled)",
-   "dist": 0.05557684311932515,
-   "ssim": 0.03615842262903849,
-   "hist": 0.035469274054784415,
+   "dist": 0.055579769112530424,
+   "ssim": 0.036158343156178795,
+   "hist": 0.03548410914460783,
    "edges": 0.021569903043710426,
-   "local": 0.11107160303638212,
-   "mean_abs": 0.019730386013786,
+   "local": 0.1110715457600438,
+   "mean_abs": 0.01973038384069999,
    "worst_t": 2.0,
-   "worst_dist": 0.07076804156791547
-  },
-  {
-   "id": "1884904087",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.03569900989532471,
-     "hist": 0.018526706516478506,
-     "edges": 0.03252591201275623,
-     "local": 0.15889210191865763,
-     "worst_cell": [
-      0,
-      1
-     ],
-     "mean_abs": 0.008868777193129063,
-     "dist": 0.06858785725004164,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.023764610290527344,
-     "hist": 0.018418684775634672,
-     "edges": 0.02262808859130716,
-     "local": 0.11138359038159251,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.006549666170030832,
-     "dist": 0.04875381487502432,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.02327495813369751,
-     "hist": 0.016693776703912405,
-     "edges": 0.018951641473203606,
-     "local": 0.11136163926372926,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.006487268954515457,
-     "dist": 0.04752006285465123,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "956,536:960,540",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, system fonts: Windows' comicsans, clock: Wine's",
-   "dist": 0.05495391165990573,
-   "ssim": 0.02757952610651652,
-   "hist": 0.017879722665341862,
-   "edges": 0.024701880692422334,
-   "local": 0.12721244385465982,
-   "mean_abs": 0.007301904105891784,
-   "worst_t": 0.5,
-   "worst_dist": 0.06858785725004164
+   "worst_dist": 0.07077355666886209
   },
   {
    "id": "3291745179",
@@ -3717,44 +3575,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.03334784507751465,
-     "hist": 0.029860427343190277,
+     "ssim": 0.03008103370666504,
+     "hist": 0.02982248673476045,
      "edges": 0.003469080088189358,
-     "local": 0.09520889011522134,
+     "local": 0.09520489008476336,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.006683116778731346,
-     "dist": 0.04523292204409672,
+     "mean_abs": 0.006455141119658947,
+     "dist": 0.04424409050201848,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.031724512577056885,
-     "hist": 0.0440135798181824,
+     "ssim": 0.034417688846588135,
+     "hist": 0.04412498344366795,
      "edges": 0.07541839108281656,
-     "local": 0.08421972021460533,
+     "local": 0.09040540414086233,
      "worst_cell": [
-      3,
+      0,
       0
      ],
-     "mean_abs": 0.008366883732378483,
-     "dist": 0.05866966401769846,
+     "mean_abs": 0.008708820678293705,
+     "dist": 0.061355602801532044,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.031000792980194092,
-     "hist": 0.026849837508248445,
-     "edges": 0.023590391175911662,
-     "local": 0.08539354133730133,
+     "ssim": 0.03078293800354004,
+     "hist": 0.02691319555203225,
+     "edges": 0.027974203314059642,
+     "local": 0.08540947595611215,
      "worst_cell": [
       2,
       0
      ],
-     "mean_abs": 0.006220759823918343,
-     "dist": 0.045006346032080646,
+     "mean_abs": 0.0062730321660637856,
+     "dist": 0.045835203961114034,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3768,14 +3626,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.049636310697958604,
-   "ssim": 0.032024383544921875,
-   "hist": 0.03357461488987371,
-   "edges": 0.03415928744897253,
-   "local": 0.08827405055570932,
-   "mean_abs": 0.007090253445009391,
+   "dist": 0.05047829908822152,
+   "ssim": 0.03176055351893107,
+   "hist": 0.03362022191015355,
+   "edges": 0.03562055816168852,
+   "local": 0.09033992339391261,
+   "mean_abs": 0.007145664654672146,
    "worst_t": 2.0,
-   "worst_dist": 0.05866966401769846
+   "worst_dist": 0.061355602801532044
   },
   {
    "id": "1195626192",
@@ -3788,44 +3646,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.018807947635650635,
-     "hist": 0.03356273175009248,
-     "edges": 0.02788652299705696,
-     "local": 0.10673831962049007,
+     "ssim": 0.021352112293243408,
+     "hist": 0.031617241964562365,
+     "edges": 0.02527706580665401,
+     "local": 0.11860802335043748,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.009106187149882317,
-     "dist": 0.0499537311262721,
+     "mean_abs": 0.009242062456905842,
+     "dist": 0.05336690224734754,
      "t": 0.5,
      "t_ours": 0.6
     },
     {
-     "ssim": 0.01684403419494629,
-     "hist": 0.03994201723268578,
-     "edges": 0.029943027852004422,
-     "local": 0.0881330434543391,
+     "ssim": 0.016750574111938477,
+     "hist": 0.036660582079803564,
+     "edges": 0.029999556858691934,
+     "local": 0.08189919590950012,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.008447591215372086,
-     "dist": 0.04547013231172366,
+     "mean_abs": 0.008190987631678581,
+     "dist": 0.04292695879413068,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.021329641342163086,
-     "hist": 0.031905994262492667,
-     "edges": 0.03723781186588593,
-     "local": 0.09859444678295404,
+     "ssim": 0.020961523056030273,
+     "hist": 0.03693408390899986,
+     "edges": 0.03617545167125402,
+     "local": 0.09838384079436462,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.008446397259831429,
-     "dist": 0.04980598766321086,
+     "mean_abs": 0.008724094368517399,
+     "dist": 0.05042551627116924,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -3839,14 +3697,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.048409950367068875,
-   "ssim": 0.018993874390920002,
-   "hist": 0.03513691441509031,
-   "edges": 0.03168912090498244,
-   "local": 0.09782193661926107,
-   "mean_abs": 0.008666725208361944,
+   "dist": 0.048906459104215816,
+   "ssim": 0.019688069820404053,
+   "hist": 0.03507063598445526,
+   "edges": 0.030484024778866654,
+   "local": 0.09963035335143407,
+   "mean_abs": 0.008719048152367273,
    "worst_t": 0.5,
-   "worst_dist": 0.0499537311262721
+   "worst_dist": 0.05336690224734754
   },
   {
    "id": "3134525336",
@@ -3920,7 +3778,7 @@
    "worst_dist": 0.04770935033827716
   },
   {
-   "id": "2182433068",
+   "id": "1884904087",
    "exit": 0,
    "invalid": "",
    "times": [
@@ -3930,65 +3788,65 @@
    ],
    "pairs": [
     {
-     "ssim": 0.029554307460784912,
-     "hist": 0.013986058077758837,
-     "edges": 0.0,
-     "local": 0.10213571119432648,
+     "ssim": 0.029184579849243164,
+     "hist": 0.019378595745741807,
+     "edges": 0.026526588004590068,
+     "local": 0.12871559476479888,
      "worst_cell": [
-      1,
+      0,
       1
      ],
-     "mean_abs": 0.004031107760965824,
-     "dist": 0.04230421721208518,
+     "mean_abs": 0.008618284948170185,
+     "dist": 0.05655108913427899,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.02750343084335327,
-     "hist": 0.01861682618538801,
-     "edges": 0.016170212765957426,
-     "local": 0.10274881776422262,
+     "ssim": 0.017300069332122803,
+     "hist": 0.019796106704287393,
+     "edges": 0.020556512331715626,
+     "local": 0.07340483530424535,
      "worst_cell": [
-      1,
-      1
+      3,
+      2
      ],
-     "mean_abs": 0.0037883061449974775,
-     "dist": 0.046033082372541854,
+     "mean_abs": 0.0063009317964315414,
+     "dist": 0.03528199519811105,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.02724003791809082,
-     "hist": 0.018005919455114712,
-     "edges": 0.011082693947144118,
-     "local": 0.10236406997622301,
+     "ssim": 0.016772150993347168,
+     "hist": 0.017585753100796492,
+     "edges": 0.017417865065097904,
+     "local": 0.07338320215543111,
      "worst_cell": [
-      1,
-      1
+      3,
+      2
      ],
-     "mean_abs": 0.0037508357781916857,
-     "dist": 0.044698955048745916,
+     "mean_abs": 0.0062384638004004955,
+     "dist": 0.03404732957781236,
      "t": 5.0,
      "t_ours": 5.0
     }
    ],
    "props": [],
-   "pointer": "741,720:745,724",
+   "pointer": "956,536:960,540",
    "window": [
-    1112,
+    1920,
     1080
    ],
    "class": "",
    "note": "",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.04434541821112432,
-   "ssim": 0.028099258740743,
-   "hist": 0.01686960123942052,
-   "edges": 0.009084302237700514,
-   "local": 0.10241619964492403,
-   "mean_abs": 0.003856749894718329,
-   "worst_t": 2.0,
-   "worst_dist": 0.046033082372541854
+   "trust": "FXC, system fonts: Windows' comicsans, clock: Wine's",
+   "dist": 0.04196013797006747,
+   "ssim": 0.021085600058237713,
+   "hist": 0.018920151850275232,
+   "edges": 0.021500321800467865,
+   "local": 0.09183454407482511,
+   "mean_abs": 0.007052560181667407,
+   "worst_t": 0.5,
+   "worst_dist": 0.05655108913427899
   },
   {
    "id": "3042865984",
@@ -4001,44 +3859,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.03413623571395874,
-     "hist": 0.10910343722224217,
-     "edges": 0.038025865964683714,
-     "local": 0.07297027142097552,
+     "ssim": 0.034210920333862305,
+     "hist": 0.10911939802391758,
+     "edges": 0.034525628673020115,
+     "local": 0.0732345034678777,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.010922127403318882,
-     "dist": 0.061557812777865456,
+     "mean_abs": 0.01093678455799818,
+     "dist": 0.060962632479909545,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.006806015968322754,
-     "hist": 0.09983538703752343,
-     "edges": 0.018595819013395243,
-     "local": 0.017594382166862488,
+     "ssim": 0.00675654411315918,
+     "hist": 0.09936665200451705,
+     "edges": 0.008518738650150626,
+     "local": 0.01740709280905624,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.004022060893476009,
-     "dist": 0.031006360650739306,
+     "mean_abs": 0.0040005710907280445,
+     "dist": 0.028826169207598163,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.007258415222167969,
-     "hist": 0.10091426480867165,
-     "edges": 0.027493331383725228,
-     "local": 0.01819161729266246,
+     "ssim": 0.0071890950202941895,
+     "hist": 0.10087757640768932,
+     "edges": 0.027363835374192846,
+     "local": 0.017951659004514415,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.004196874797344208,
-     "dist": 0.03331652899292851,
+     "mean_abs": 0.004176562186330557,
+     "dist": 0.03319050856381902,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4052,14 +3910,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.04196023414051109,
-   "ssim": 0.016066888968149822,
-   "hist": 0.10328436302281241,
-   "edges": 0.028038338787268063,
-   "local": 0.036252090293500155,
-   "mean_abs": 0.006380354364713033,
+   "dist": 0.040993103417108906,
+   "ssim": 0.016052186489105225,
+   "hist": 0.1031212088120413,
+   "edges": 0.023469400899121196,
+   "local": 0.03619775176048278,
+   "mean_abs": 0.0063713059450189275,
    "worst_t": 0.5,
-   "worst_dist": 0.061557812777865456
+   "worst_dist": 0.060962632479909545
   },
   {
    "id": "3022080536",
@@ -4072,44 +3930,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.029353022575378418,
-     "hist": 0.03917373289815299,
+     "ssim": 0.029348790645599365,
+     "hist": 0.03926161612121737,
      "edges": 0.03709919135181783,
-     "local": 0.09486196434590966,
+     "local": 0.09486490476410836,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.010394001379609108,
-     "dist": 0.052519080926380586,
+     "mean_abs": 0.010393147356808186,
+     "dist": 0.05253627011751936,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.009701013565063477,
+     "ssim": 0.009695172309875488,
      "hist": 0.041502317606571124,
-     "edges": 0.019702189035379236,
-     "local": 0.037129024509340525,
+     "edges": 0.02027936331152258,
+     "local": 0.03715915817883797,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.005371137987822294,
-     "dist": 0.026289912750711273,
+     "mean_abs": 0.00536916870623827,
+     "dist": 0.02641263533023278,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.017442405223846436,
-     "hist": 0.043712667107864686,
+     "ssim": 0.017459630966186523,
+     "hist": 0.04371513607948894,
      "edges": 0.03103267866275561,
-     "local": 0.05816441122442484,
+     "local": 0.058275918321063123,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.008344876579940319,
-     "dist": 0.03763111408860544,
+     "mean_abs": 0.008342841640114784,
+     "dist": 0.03767022773462381,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4123,14 +3981,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.03881336925523243,
-   "ssim": 0.018832147121429443,
-   "hist": 0.04146290587086294,
-   "edges": 0.029278019683317558,
-   "local": 0.06338513335989167,
-   "mean_abs": 0.008036671982457241,
+   "dist": 0.03887304439412532,
+   "ssim": 0.01883453130722046,
+   "hist": 0.04149302326909248,
+   "edges": 0.029470411108698674,
+   "local": 0.06343332708800316,
+   "mean_abs": 0.008035052567720413,
    "worst_t": 0.5,
-   "worst_dist": 0.052519080926380586
+   "worst_dist": 0.05253627011751936
   },
   {
    "id": "3422085307",
@@ -4143,44 +4001,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.016071200370788574,
-     "hist": 0.06973535594032458,
+     "ssim": 0.016070902347564697,
+     "hist": 0.0697165017513457,
      "edges": 0.03496285653435738,
-     "local": 0.04558010228599111,
+     "local": 0.045580420177429914,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.006750878412276506,
-     "dist": 0.039435033291970296,
+     "mean_abs": 0.006750904954969883,
+     "dist": 0.039431268414638995,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
      "ssim": 0.015040695667266846,
-     "hist": 0.027339867613037236,
+     "hist": 0.027333562999467386,
      "edges": 0.02382097912417125,
-     "local": 0.04899771340812246,
+     "local": 0.048989825726797186,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.0059390622191131115,
-     "dist": 0.029443692070058487,
+     "mean_abs": 0.00593835161998868,
+     "dist": 0.029440064842946936,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.018695175647735596,
+     "ssim": 0.018695414066314697,
      "hist": 0.0637932706810253,
      "edges": 0.0410106148125714,
-     "local": 0.0654982733540237,
+     "local": 0.06548493433122833,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.008458486758172512,
-     "dist": 0.046218811799247125,
+     "mean_abs": 0.008457187563180923,
+     "dist": 0.04621488161798225,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4194,14 +4052,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.038365845720425305,
-   "ssim": 0.016602357228597004,
-   "hist": 0.053622831411462374,
+   "dist": 0.03836207162518939,
+   "ssim": 0.01660233736038208,
+   "hist": 0.05361444514394612,
    "edges": 0.03326481682370001,
-   "local": 0.053358696349379085,
-   "mean_abs": 0.00704947579652071,
+   "local": 0.05335172674515182,
+   "mean_abs": 0.007048814712713162,
    "worst_t": 5.0,
-   "worst_dist": 0.046218811799247125
+   "worst_dist": 0.04621488161798225
   },
   {
    "id": "3445973124",
@@ -4214,44 +4072,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.008820831775665283,
-     "hist": 0.028173499430672995,
-     "edges": 0.01992419097708864,
-     "local": 0.03829033843552073,
+     "ssim": 0.008810698986053467,
+     "hist": 0.028198278355624277,
+     "edges": 0.020274798442892483,
+     "local": 0.03828685466820995,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.0033443549182265997,
-     "dist": 0.02375288914490813,
+     "mean_abs": 0.0033423425629734993,
+     "dist": 0.023823881455982375,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.014990687370300293,
-     "hist": 0.025357066192531492,
-     "edges": 0.054088466049593054,
-     "local": 0.061165772999326386,
-     "worst_cell": [
-      3,
-      3
-     ],
-     "mean_abs": 0.003658049274235964,
-     "dist": 0.03873604455931291,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.019504010677337646,
-     "hist": 0.02980529126355523,
-     "edges": 0.05797963978073617,
-     "local": 0.07151198383265485,
+     "ssim": 0.014949500560760498,
+     "hist": 0.025329066233675788,
+     "edges": 0.052819606708760736,
+     "local": 0.061012887473528586,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.004071787465363741,
-     "dist": 0.04486178456185603,
+     "mean_abs": 0.003654122119769454,
+     "dist": 0.03841845099877403,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.019469141960144043,
+     "hist": 0.02955156706450247,
+     "edges": 0.057154180189739834,
+     "local": 0.0714394284101824,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.004067796748131514,
+     "dist": 0.044613720561946395,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4265,85 +4123,14 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.03578357275535902,
-   "ssim": 0.014438509941101074,
-   "hist": 0.02777861896225324,
-   "edges": 0.04399743226913929,
-   "local": 0.05698936508916732,
-   "mean_abs": 0.003691397219275435,
+   "dist": 0.03561868433890093,
+   "ssim": 0.014409780502319336,
+   "hist": 0.02769297055126751,
+   "edges": 0.043416195113797684,
+   "local": 0.05691305685064032,
+   "mean_abs": 0.003688087143624822,
    "worst_t": 5.0,
-   "worst_dist": 0.04486178456185603
-  },
-  {
-   "id": "2047150134",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.013036072254180908,
-     "hist": 0.017633878786731845,
-     "edges": 0.029530711813820387,
-     "local": 0.05779731946919734,
-     "worst_cell": [
-      0,
-      1
-     ],
-     "mean_abs": 0.0026358244940638542,
-     "dist": 0.030682935637123918,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.018149256706237793,
-     "hist": 0.024074328453102735,
-     "edges": 0.035355841458282966,
-     "local": 0.05152776517206803,
-     "worst_cell": [
-      3,
-      0
-     ],
-     "mean_abs": 0.0032213786616921425,
-     "dist": 0.03278914054576889,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.024044036865234375,
-     "hist": 0.018172142932562706,
-     "edges": 0.04246285632095115,
-     "local": 0.0650108257541433,
-     "worst_cell": [
-      0,
-      1
-     ],
-     "mean_abs": 0.00352472229860723,
-     "dist": 0.03884345863651607,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "679,380:683,384",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, system fonts: Windows' consolas, clock: Wine's",
-   "dist": 0.03410517827313629,
-   "ssim": 0.018409788608551025,
-   "hist": 0.01996011672413243,
-   "edges": 0.03578313653101817,
-   "local": 0.05811197013180289,
-   "mean_abs": 0.003127308484787742,
-   "worst_t": 5.0,
-   "worst_dist": 0.03884345863651607
+   "worst_dist": 0.044613720561946395
   },
   {
    "id": "2932157836",
@@ -4359,41 +4146,41 @@
      "ssim": 0.013546228408813477,
      "hist": 0.016346409981193133,
      "edges": 0.014620245322760517,
-     "local": 0.04479344026185572,
+     "local": 0.044793354269737996,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.007744973991066217,
-     "dist": 0.02369523166199149,
+     "mean_abs": 0.007744975853711367,
+     "dist": 0.02369520586435617,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.022763967514038086,
-     "hist": 0.02093491883440397,
-     "edges": 0.03614789371830851,
-     "local": 0.07431922344646107,
+     "ssim": 0.024008631706237793,
+     "hist": 0.0212766931529994,
+     "edges": 0.037853175167135045,
+     "local": 0.0767523447284475,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.010058923624455929,
-     "dist": 0.04054151979869224,
+     "mean_abs": 0.010183654725551605,
+     "dist": 0.042054266594432475,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.015921175479888916,
-     "hist": 0.01665481191805411,
-     "edges": 0.07559636295277572,
-     "local": 0.04869561731660118,
+     "ssim": 0.016917109489440918,
+     "hist": 0.017017017292678866,
+     "edges": 0.07856106499139937,
+     "local": 0.05198353536737462,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.008988304063677788,
-     "dist": 0.037835272813113,
+     "mean_abs": 0.009098020382225513,
+     "dist": 0.039785809913860305,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4407,14 +4194,85 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.03402400809126558,
-   "ssim": 0.017410457134246826,
-   "hist": 0.017978713577883738,
-   "edges": 0.04212150066461492,
-   "local": 0.05593609367497265,
-   "mean_abs": 0.008930733893066645,
+   "dist": 0.03517842745754965,
+   "ssim": 0.018157323201497395,
+   "hist": 0.0182133734756238,
+   "edges": 0.04367816182709831,
+   "local": 0.057843078121853374,
+   "mean_abs": 0.009008883653829495,
    "worst_t": 2.0,
-   "worst_dist": 0.04054151979869224
+   "worst_dist": 0.042054266594432475
+  },
+  {
+   "id": "2182433068",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.025172710418701172,
+     "hist": 0.01473975845993202,
+     "edges": 0.0,
+     "local": 0.07661931387459238,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0038841585628688335,
+     "dist": 0.03348555897997447,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.022654414176940918,
+     "hist": 0.0180974988700474,
+     "edges": 0.016170212765957426,
+     "local": 0.07482816779520363,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.003617464564740658,
+     "dist": 0.036098316918844325,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.022682666778564453,
+     "hist": 0.01890352140250004,
+     "edges": 0.011082693947144118,
+     "local": 0.0761090384524626,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0035973205231130123,
+     "dist": 0.035634754639236946,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "741,720:745,724",
+   "window": [
+    1112,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.03507287684601858,
+   "ssim": 0.02350326379140218,
+   "hist": 0.01724692624415982,
+   "edges": 0.009084302237700514,
+   "local": 0.07585217337408619,
+   "mean_abs": 0.0036996478835741677,
+   "worst_t": 2.0,
+   "worst_dist": 0.036098316918844325
   },
   {
    "id": "3029971128",
@@ -4427,44 +4285,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.05183154344558716,
-     "hist": 0.029697674130311505,
+     "ssim": 0.05183136463165283,
+     "hist": 0.02968886077164723,
      "edges": 0.03077194896776414,
-     "local": 0.14330123543428877,
+     "local": 0.1433038447673122,
      "worst_cell": [
       1,
       3
      ],
-     "mean_abs": 0.0176315326243639,
-     "dist": 0.0706337582835779,
+     "mean_abs": 0.017631443217396736,
+     "dist": 0.07063272476757178,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.006306350231170654,
+     "ssim": 0.006305277347564697,
      "hist": 0.013561531513287928,
      "edges": 0.013485526378195445,
-     "local": 0.024387949146330357,
+     "local": 0.02438783987114827,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.004284595139324665,
-     "dist": 0.014617701391546977,
+     "mean_abs": 0.00428453553467989,
+     "dist": 0.014617346743910565,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.007980763912200928,
-     "hist": 0.012427815757973467,
+     "ssim": 0.007979094982147217,
+     "hist": 0.012439259472273931,
      "edges": 0.01000552385069653,
-     "local": 0.02948318588702629,
+     "local": 0.029484550119377673,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.004917698912322521,
-     "dist": 0.015725852861502167,
+     "mean_abs": 0.0049175298772752285,
+     "dist": 0.01572805019505156,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4478,14 +4336,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.03365910417887568,
-   "ssim": 0.022039552529652912,
-   "hist": 0.018562340467190967,
+   "dist": 0.033659373902177964,
+   "ssim": 0.022038578987121582,
+   "hist": 0.01856321725240303,
    "edges": 0.01808766639888537,
-   "local": 0.06572412348921514,
-   "mean_abs": 0.008944608892003695,
+   "local": 0.06572541158594604,
+   "mean_abs": 0.008944502876450619,
    "worst_t": 0.5,
-   "worst_dist": 0.0706337582835779
+   "worst_dist": 0.07063272476757178
   },
   {
    "id": "3461192631",
@@ -4569,44 +4427,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.02215266227722168,
-     "hist": 0.023321963708915806,
-     "edges": 0.019000630083552128,
-     "local": 0.06860674583973984,
+     "ssim": 0.022177815437316895,
+     "hist": 0.023389806275533297,
+     "edges": 0.01912228246269898,
+     "local": 0.06860949758750697,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.0079869469627738,
-     "dist": 0.03569234119358204,
+     "mean_abs": 0.007986285723745823,
+     "dist": 0.03573861165509361,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.017302393913269043,
-     "hist": 0.02163468757528586,
+     "ssim": 0.017292678356170654,
+     "hist": 0.021584050292167187,
      "edges": 0.017784249106270078,
-     "local": 0.05193570064147934,
+     "local": 0.05192435961604739,
      "worst_cell": [
       3,
       1
      ],
-     "mean_abs": 0.007120002061128616,
-     "dist": 0.028655215702735704,
+     "mean_abs": 0.0071145109832286835,
+     "dist": 0.028638771271352868,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.02149379253387451,
-     "hist": 0.02216067727388945,
-     "edges": 0.02134483762697137,
-     "local": 0.06706081804198523,
+     "ssim": 0.021556735038757324,
+     "hist": 0.022164449930813287,
+     "edges": 0.021467544456245435,
+     "local": 0.06729545855584244,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.00813953299075365,
-     "dist": 0.035267486152930086,
+     "mean_abs": 0.008144091814756393,
+     "dist": 0.03538205695579168,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4620,14 +4478,85 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.033205014349749276,
-   "ssim": 0.020316282908121746,
-   "hist": 0.022372442852697034,
-   "edges": 0.019376572272264525,
-   "local": 0.0625344215077348,
-   "mean_abs": 0.007748827338218689,
+   "dist": 0.033253146627412716,
+   "ssim": 0.02034240961074829,
+   "hist": 0.02237943549950459,
+   "edges": 0.019458025341738166,
+   "local": 0.06260977191979894,
+   "mean_abs": 0.0077482961739103,
    "worst_t": 0.5,
-   "worst_dist": 0.03569234119358204
+   "worst_dist": 0.03573861165509361
+  },
+  {
+   "id": "2047150134",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.012420415878295898,
+     "hist": 0.014378667614862471,
+     "edges": 0.02946619855753585,
+     "local": 0.052759197036114834,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0025884511414915323,
+     "dist": 0.028322857108802883,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.016564130783081055,
+     "hist": 0.024883940669257042,
+     "edges": 0.0353075384172169,
+     "local": 0.0471908914235731,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.003158978885039687,
+     "dist": 0.031164802479291036,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.023283839225769043,
+     "hist": 0.02302814873622722,
+     "edges": 0.038424765199737254,
+     "local": 0.057950894037882485,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0036493618972599506,
+     "dist": 0.03666100276628835,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "679,380:683,384",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, system fonts: Windows' consolas, clock: Wine's",
+   "dist": 0.032049554118127425,
+   "ssim": 0.017422795295715332,
+   "hist": 0.02076358567344891,
+   "edges": 0.03439950072483,
+   "local": 0.05263366083252347,
+   "mean_abs": 0.003132263974597057,
+   "worst_t": 5.0,
+   "worst_dist": 0.03666100276628835
   },
   {
    "id": "3422383300",
@@ -4843,6 +4772,77 @@
    "worst_dist": 0.031757977146236446
   },
   {
+   "id": "2542468435",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00423431396484375,
+     "hist": 0.05023513636383284,
+     "edges": 0.00719840229028168,
+     "local": 0.016950869001448154,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.010143795050680637,
+     "dist": 0.017842262620710474,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.0032458901405334473,
+     "hist": 0.05143957700510702,
+     "edges": 0.012896218379677249,
+     "local": 0.010591281733165184,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.01016367506235838,
+     "dist": 0.017018310639066444,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.015750885009765625,
+     "hist": 0.0691804850832001,
+     "edges": 0.01522238953831967,
+     "local": 0.030685888525719445,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.02294338122010231,
+     "dist": 0.030811606984949474,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed.",
+   "trust": "FXC (3 compiled), FP16 swap chain: re-encoded",
+   "dist": 0.02189072674824213,
+   "ssim": 0.007743696371714274,
+   "hist": 0.05695173281737998,
+   "edges": 0.011772336736092867,
+   "local": 0.019409346420110926,
+   "mean_abs": 0.014416950444380442,
+   "worst_t": 5.0,
+   "worst_dist": 0.030811606984949474
+  },
+  {
    "id": "2388299037",
    "exit": 0,
    "invalid": "",
@@ -4853,44 +4853,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.0025931596755981445,
-     "hist": 0.11946480740030964,
+     "ssim": 0.0025935769081115723,
+     "hist": 0.11941971627928254,
      "edges": 0.02833665354665016,
-     "local": 0.04106409971912702,
+     "local": 0.041063940773407616,
      "worst_cell": [
       0,
       0
      ],
-     "mean_abs": 0.014689864590764046,
-     "dist": 0.04265747000780951,
+     "mean_abs": 0.014687823131680489,
+     "dist": 0.0426485292696423,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.00115966796875,
-     "hist": 0.02821057390257131,
+     "ssim": 0.0011590123176574707,
+     "hist": 0.028155921883779026,
      "edges": 0.017367141092841765,
-     "local": 0.012031119627257189,
+     "local": 0.012032079976052046,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.00302438298240304,
-     "dist": 0.013072779277884772,
+     "mean_abs": 0.0030215862207114697,
+     "dist": 0.013061940283437014,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.0011283159255981445,
-     "hist": 0.014532274817328286,
-     "edges": 0.017161953135909958,
-     "local": 0.008152453422856828,
+     "ssim": 0.0011276602745056152,
+     "hist": 0.014330928871102282,
+     "edges": 0.017165588964925704,
+     "local": 0.008152390480972826,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.001413351041264832,
-     "dist": 0.00912307639518414,
+     "mean_abs": 0.001411446020938456,
+     "dist": 0.00908331879384913,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -4904,14 +4904,85 @@
    "class": "",
    "note": "",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.021617775226959474,
-   "ssim": 0.001627047856648763,
-   "hist": 0.0540692187067364,
-   "edges": 0.020955249258467295,
-   "local": 0.020415890923080347,
-   "mean_abs": 0.006375866204810639,
+   "dist": 0.02159792944897615,
+   "ssim": 0.001626749833424886,
+   "hist": 0.05396885567805462,
+   "edges": 0.020956461201472543,
+   "local": 0.02041613707681083,
+   "mean_abs": 0.0063736184577768045,
    "worst_t": 0.5,
-   "worst_dist": 0.04265747000780951
+   "worst_dist": 0.0426485292696423
+  },
+  {
+   "id": "1556245028",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0031414031982421875,
+     "hist": 0.0507098346718634,
+     "edges": 0.017301763479909527,
+     "local": 0.022027911618351936,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0034267941955477,
+     "dist": 0.021153114075332824,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.0027870535850524902,
+     "hist": 0.04255763070866928,
+     "edges": 0.027508836637467393,
+     "local": 0.021198723232373595,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0034604487009346485,
+     "dist": 0.02120902651445516,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.0028366446495056152,
+     "hist": 0.03746437198195166,
+     "edges": 0.0145482879278932,
+     "local": 0.018300240316117804,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.003409049939364195,
+     "dist": 0.016743597471655998,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.019701912687147997,
+   "ssim": 0.0029217004776000977,
+   "hist": 0.043577279120828115,
+   "edges": 0.01978629601509004,
+   "local": 0.02050895838894778,
+   "mean_abs": 0.0034320976119488478,
+   "worst_t": 2.0,
+   "worst_dist": 0.02120902651445516
   },
   {
    "id": "2325974975",
@@ -4985,77 +5056,6 @@
    "worst_dist": 0.0348456583525826
   },
   {
-   "id": "1556245028",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.002184152603149414,
-     "hist": 0.050533377549401085,
-     "edges": 0.016799724239506597,
-     "local": 0.01749093652081986,
-     "worst_cell": [
-      3,
-      1
-     ],
-     "mean_abs": 0.003288548905402422,
-     "dist": 0.019369147094972318,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.002740204334259033,
-     "hist": 0.04235961903949172,
-     "edges": 0.027485169316752378,
-     "local": 0.021783597224081557,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.003399402368813753,
-     "dist": 0.021326098138750995,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.0026076436042785645,
-     "hist": 0.03744461786272515,
-     "edges": 0.014625581403733712,
-     "local": 0.017643860541284084,
-     "worst_cell": [
-      3,
-      2
-     ],
-     "mean_abs": 0.003389608347788453,
-     "dist": 0.016489491096960567,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC",
-   "dist": 0.019061578776894624,
-   "ssim": 0.002510666847229004,
-   "hist": 0.043445871483872654,
-   "edges": 0.01963682498666423,
-   "local": 0.018972798095395167,
-   "mean_abs": 0.0033591865406682095,
-   "worst_t": 2.0,
-   "worst_dist": 0.021326098138750995
-  },
-  {
    "id": "1934084447",
    "exit": 0,
    "invalid": "",
@@ -5066,44 +5066,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.004861176013946533,
-     "hist": 0.03426326407360581,
-     "edges": 0.0427687547930683,
-     "local": 0.014032310883825025,
+     "ssim": 0.004885554313659668,
+     "hist": 0.03448902043722811,
+     "edges": 0.042707236110470004,
+     "local": 0.014036854185784856,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.002152391942217946,
-     "dist": 0.02107444984266629,
+     "mean_abs": 0.0021541593596339226,
+     "dist": 0.021115973859372982,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.0029718875885009766,
-     "hist": 0.034751196509851714,
-     "edges": 0.021641746471021572,
-     "local": 0.010194242078190049,
+     "ssim": 0.0029677152633666992,
+     "hist": 0.03436358453418524,
+     "edges": 0.021650491520896264,
+     "local": 0.010126524527246753,
      "worst_cell": [
       3,
       2
      ],
-     "mean_abs": 0.001967179821804166,
-     "dist": 0.015228427496181966,
+     "mean_abs": 0.0019672729540616274,
+     "dist": 0.015131087148200337,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.0028728842735290527,
-     "hist": 0.035200760122117536,
-     "edges": 0.04533876719307184,
-     "local": 0.01100689172744751,
+     "ssim": 0.0028527379035949707,
+     "hist": 0.03529396710215813,
+     "edges": 0.04531970276737052,
+     "local": 0.011008891820286712,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.0017105351435020566,
-     "dist": 0.020271838263330844,
+     "mean_abs": 0.0017102741403505206,
+     "dist": 0.020281222891070236,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5117,14 +5117,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.0188582385340597,
-   "ssim": 0.0035686492919921875,
-   "hist": 0.03473840690185836,
-   "edges": 0.03658308948572057,
-   "local": 0.011744481563154196,
-   "mean_abs": 0.001943368969174723,
+   "dist": 0.018842761299547855,
+   "ssim": 0.0035686691602071128,
+   "hist": 0.034715524024523825,
+   "edges": 0.03655914346624559,
+   "local": 0.011724090177772773,
+   "mean_abs": 0.0019439021513486903,
    "worst_t": 0.5,
-   "worst_dist": 0.02107444984266629
+   "worst_dist": 0.021115973859372982
   },
   {
    "id": "1797172968",
@@ -5137,44 +5137,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.006443798542022705,
-     "hist": 0.01637423332740488,
-     "edges": 0.013112062219436948,
-     "local": 0.023457123160672683,
+     "ssim": 0.007476150989532471,
+     "hist": 0.0163815167552731,
+     "edges": 0.013116208447807476,
+     "local": 0.028955989400856197,
      "worst_cell": [
       0,
       3
      ],
-     "mean_abs": 0.005919694900512695,
-     "dist": 0.014867535620176982,
+     "mean_abs": 0.005840766709297895,
+     "dist": 0.016829187157732715,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.006756007671356201,
-     "hist": 0.01637796745687435,
-     "edges": 0.006578117780727699,
-     "local": 0.02674341865349561,
+     "ssim": 0.00729292631149292,
+     "hist": 0.016398147253558388,
+     "edges": 0.006577342846796563,
+     "local": 0.029800878643679123,
      "worst_cell": [
       0,
       3
      ],
-     "mean_abs": 0.005770938005298376,
-     "dist": 0.014641044944975952,
+     "mean_abs": 0.005638077389448881,
+     "dist": 0.0157232395066226,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.009047508239746094,
-     "hist": 0.01572597062555689,
-     "edges": 0.009368999765595909,
-     "local": 0.04014002617138127,
+     "ssim": 0.009468913078308105,
+     "hist": 0.0157723644371788,
+     "edges": 0.009367650940731331,
+     "local": 0.042773299772913255,
      "worst_cell": [
       0,
       3
      ],
-     "mean_abs": 0.006396942306309938,
-     "dist": 0.01977525440156877,
+     "mean_abs": 0.006172741297632456,
+     "dist": 0.020700666930948436,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5188,14 +5188,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.016427944988907234,
-   "ssim": 0.007415771484375,
-   "hist": 0.016159390469945373,
-   "edges": 0.00968639325525352,
-   "local": 0.030113522661849856,
-   "mean_abs": 0.00602919173737367,
+   "dist": 0.017751031198434585,
+   "ssim": 0.008079330126444498,
+   "hist": 0.016184009482003433,
+   "edges": 0.009687067411778457,
+   "local": 0.033843389272482864,
+   "mean_abs": 0.0058838617987930775,
    "worst_t": 5.0,
-   "worst_dist": 0.01977525440156877
+   "worst_dist": 0.020700666930948436
   },
   {
    "id": "2694785040",
@@ -5208,44 +5208,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.0018483996391296387,
-     "hist": 0.057568181001780405,
-     "edges": 0.0047708096524357035,
-     "local": 0.011278013233095407,
+     "ssim": 0.0019254684448242188,
+     "hist": 0.058508896060163844,
+     "edges": 0.003766836443645616,
+     "local": 0.011323968724658092,
      "worst_cell": [
       2,
       0
      ],
-     "mean_abs": 0.0025530620478093624,
-     "dist": 0.016405721992510735,
+     "mean_abs": 0.0025809123180806637,
+     "dist": 0.016429977651606587,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.0015930533409118652,
-     "hist": 0.061216065431292876,
-     "edges": 0.00483415268823062,
-     "local": 0.007031917630229145,
+     "ssim": 0.0017447471618652344,
+     "hist": 0.06309922309585866,
+     "edges": 0.004579376907097976,
+     "local": 0.007649150094948709,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.002537947380915284,
-     "dist": 0.015797534915247,
+     "mean_abs": 0.00245282961986959,
+     "dist": 0.01635388917763551,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.0015021562576293945,
-     "hist": 0.06289891817065615,
-     "edges": 0.0022679875768042423,
-     "local": 0.009929570757473508,
+     "ssim": 0.0013304352760314941,
+     "hist": 0.06272255631060548,
+     "edges": 0.004290406601850316,
+     "local": 0.00969107278312246,
      "worst_cell": [
       2,
-      1
+      0
      ],
-     "mean_abs": 0.0025167949497699738,
-     "dist": 0.016462899254022948,
+     "mean_abs": 0.0024573698174208403,
+     "dist": 0.016709045000237347,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5259,14 +5259,156 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.016222052053926895,
-   "ssim": 0.0016478697458902996,
-   "hist": 0.06056105486790981,
-   "edges": 0.003957649972490189,
-   "local": 0.009413167206932686,
-   "mean_abs": 0.00253593479283154,
+   "dist": 0.016497637276493147,
+   "ssim": 0.0016668836275736492,
+   "hist": 0.061443558488876004,
+   "edges": 0.004212206650864636,
+   "local": 0.009554730534243086,
+   "mean_abs": 0.0024970372517903647,
    "worst_t": 5.0,
-   "worst_dist": 0.016462899254022948
+   "worst_dist": 0.016709045000237347
+  },
+  {
+   "id": "2371103399",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.004417836666107178,
+     "hist": 0.02690952492667694,
+     "edges": 0.008423874245236607,
+     "local": 0.019978410641973216,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.003971063997596502,
+     "dist": 0.014385554026806828,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.004414677619934082,
+     "hist": 0.023735300230764422,
+     "edges": 0.008730056887877868,
+     "local": 0.019931150794339676,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.003971118945628405,
+     "dist": 0.013796819948010585,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.0041272640228271484,
+     "hist": 0.02178786471749115,
+     "edges": 0.0029712406860852303,
+     "local": 0.017892135540023446,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.003929021768271923,
+     "dist": 0.011557640949570454,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,536:1920,540",
+   "window": [
+    1920,
+    540
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.01324667164146262,
+   "ssim": 0.004319926102956136,
+   "hist": 0.024144229958310837,
+   "edges": 0.0067083906063999015,
+   "local": 0.019267232325445447,
+   "mean_abs": 0.00395706823716561,
+   "worst_t": 0.5,
+   "worst_dist": 0.014385554026806828
+  },
+  {
+   "id": "3291729669",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.007978439331054688,
+     "hist": 0.006469511642140398,
+     "edges": 0.0,
+     "local": 0.029768870900928352,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.001653004321269691,
+     "dist": 0.01261809539802299,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.008298218250274658,
+     "hist": 0.006155343962197557,
+     "edges": 0.0,
+     "local": 0.02927399343267704,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.0016415095888078213,
+     "dist": 0.012502732297325021,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.008603215217590332,
+     "hist": 0.006657866207107729,
+     "edges": 0.0,
+     "local": 0.02981685929747376,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.0016552560264244676,
+     "dist": 0.012857595595940774,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.012659474430429597,
+   "ssim": 0.008293290932973226,
+   "hist": 0.006427573937148562,
+   "edges": 0.0,
+   "local": 0.029619907877026383,
+   "mean_abs": 0.0016499233121673267,
+   "worst_t": 5.0,
+   "worst_dist": 0.012857595595940774
   },
   {
    "id": "3749550751",
@@ -5279,44 +5421,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.0009663701057434082,
-     "hist": 0.0117843810019356,
-     "edges": 0.038542428823821306,
-     "local": 0.0072442425104479,
+     "ssim": 0.000828862190246582,
+     "hist": 0.011747584720894044,
+     "edges": 0.03853034918563447,
+     "local": 0.006562676707593103,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.0018940841546282172,
-     "dist": 0.012528545750008774,
+     "mean_abs": 0.0018770784372463822,
+     "dist": 0.01227304845065761,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.0010570287704467773,
-     "hist": 0.011756840406331348,
-     "edges": 0.038566613883281975,
-     "local": 0.006867620676833515,
+     "ssim": 0.001124739646911621,
+     "hist": 0.011806653151454313,
+     "edges": 0.0389547087076767,
+     "local": 0.007037454245922466,
      "worst_cell": [
       2,
       2
      ],
-     "mean_abs": 0.001988108502700925,
-     "dist": 0.012442085692106752,
+     "mean_abs": 0.0019878256134688854,
+     "dist": 0.012600930539676428,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.0012720227241516113,
-     "hist": 0.012043433624573581,
-     "edges": 0.04167017062002609,
-     "local": 0.008887221415837606,
+     "ssim": 0.0012366771697998047,
+     "hist": 0.011932935430477952,
+     "edges": 0.03854088464520433,
+     "local": 0.008774356761326393,
      "worst_cell": [
-      2,
+      1,
       2
      ],
-     "mean_abs": 0.0019480270566418767,
-     "dist": 0.0137904940909167,
+     "mean_abs": 0.0019498789915814996,
+     "dist": 0.013098074194474316,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5330,14 +5472,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.012920375177677407,
-   "ssim": 0.0010984738667805989,
-   "hist": 0.01186155167761351,
-   "edges": 0.03959307110904312,
-   "local": 0.007666361534373008,
-   "mean_abs": 0.001943406571323673,
+   "dist": 0.012657351061602784,
+   "ssim": 0.0010634263356526692,
+   "hist": 0.01182905776760877,
+   "edges": 0.03867531417950517,
+   "local": 0.007458162571613987,
+   "mean_abs": 0.0019382610140989225,
    "worst_t": 5.0,
-   "worst_dist": 0.0137904940909167
+   "worst_dist": 0.013098074194474316
   },
   {
    "id": "1174926427",
@@ -5350,44 +5492,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.005320429801940918,
-     "hist": 0.010230423172969181,
+     "ssim": 0.00535130500793457,
+     "hist": 0.010336617028840065,
      "edges": 0.021499582110069304,
-     "local": 0.014856259057220692,
+     "local": 0.01490705531614367,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.0016106420662254095,
-     "dist": 0.01239900771435618,
+     "mean_abs": 0.0016055208398029208,
+     "dist": 0.012444747925005346,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.005364537239074707,
-     "hist": 0.006383073102732646,
+     "ssim": 0.005365610122680664,
+     "hist": 0.006397593885696154,
      "edges": 0.017300348433263446,
-     "local": 0.019270499527920038,
+     "local": 0.01926996976059551,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.0011607289779931307,
-     "dist": 0.012127195337297642,
+     "mean_abs": 0.0011603488819673657,
+     "dist": 0.012130262428774772,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.003361821174621582,
-     "hist": 0.006281133344235456,
-     "edges": 0.0051590081001180454,
-     "local": 0.011947923223488033,
+     "ssim": 0.0033637285232543945,
+     "hist": 0.006226277837484903,
+     "edges": 0.005157982161984487,
+     "local": 0.011980473975806186,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.0010963140521198511,
-     "dist": 0.006880951608303584,
+     "mean_abs": 0.0010960438521578908,
+     "dist": 0.006880112749612052,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5401,14 +5543,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.010469051553319135,
-   "ssim": 0.004682262738545735,
-   "hist": 0.007631543206645761,
-   "edges": 0.014652979547816932,
-   "local": 0.01535822726954292,
-   "mean_abs": 0.0012892283654461305,
+   "dist": 0.010485041034464057,
+   "ssim": 0.00469354788462321,
+   "hist": 0.007653496250673707,
+   "edges": 0.014652637568439078,
+   "local": 0.015385833017515123,
+   "mean_abs": 0.0012873045246427257,
    "worst_t": 0.5,
-   "worst_dist": 0.01239900771435618
+   "worst_dist": 0.012444747925005346
   },
   {
    "id": "3104056709",
@@ -5435,16 +5577,16 @@
      "t_ours": 0.5
     },
     {
-     "ssim": 0.001256406307220459,
+     "ssim": 0.0012562870979309082,
      "hist": 0.026610403703247406,
      "edges": 0.004850345781263199,
-     "local": 0.004142397005731861,
+     "local": 0.004142128784830372,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.00409085676074028,
-     "dist": 0.007911790890787817,
+     "mean_abs": 0.0040908376686275005,
+     "dist": 0.007911674661730506,
      "t": 2.0,
      "t_ours": 2.0
     },
@@ -5452,13 +5594,13 @@
      "ssim": 0.0010718107223510742,
      "hist": 0.03459939979039482,
      "edges": 0.0038310192928627806,
-     "local": 0.0040209293365478516,
+     "local": 0.004020902871464689,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.004749649204313755,
-     "dist": 0.009213905834321199,
+     "mean_abs": 0.004749645944684744,
+     "dist": 0.00921389789479625,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5472,12 +5614,12 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.010069239475243456,
-   "ssim": 0.0014339288075764973,
+   "dist": 0.010069198085716035,
+   "ssim": 0.0014338890711466472,
    "hist": 0.0361550784301665,
    "edges": 0.004910575152281845,
-   "local": 0.004753100388269458,
-   "mean_abs": 0.0047089702760179835,
+   "local": 0.004753002159607907,
+   "mean_abs": 0.0047089628254373865,
    "worst_t": 0.5,
    "worst_dist": 0.013082021700621352
   },
@@ -5495,27 +5637,27 @@
      "ssim": 0.00203704833984375,
      "hist": 0.012908239173181202,
      "edges": 0.018207175914534135,
-     "local": 0.005445738623772438,
+     "local": 0.005445669085020199,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.0023547932505607605,
-     "dist": 0.008467919106627924,
+     "mean_abs": 0.002354792784899473,
+     "dist": 0.008467898245002253,
      "t": 0.5,
      "t_ours": 1.1
     },
     {
-     "ssim": 0.0037039518356323242,
+     "ssim": 0.0037038326263427734,
      "hist": 0.015419523735695027,
      "edges": 0.026229794419261543,
-     "local": 0.007887774050080528,
+     "local": 0.007887340267188847,
      "worst_cell": [
       2,
       3
      ],
-     "mean_abs": 0.004991930443793535,
-     "dist": 0.011807381396705171,
+     "mean_abs": 0.0049919243901968,
+     "dist": 0.0118072154990508,
      "t": 2.0,
      "t_ours": 2.0
     },
@@ -5528,7 +5670,7 @@
       0,
       1
      ],
-     "mean_abs": 0.003645398886874318,
+     "mean_abs": 0.003645396325737238,
      "dist": 0.009739031694789372,
      "t": 5.0,
      "t_ours": 5.0
@@ -5543,85 +5685,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.010004777399374156,
-   "ssim": 0.0027928749720255532,
+   "dist": 0.01000471514628081,
+   "ssim": 0.002792835235595703,
    "hist": 0.013740073039459387,
    "edges": 0.022364328025622198,
-   "local": 0.006486782315833908,
-   "mean_abs": 0.003664040860409538,
+   "local": 0.006486614541952602,
+   "mean_abs": 0.0036640378336111703,
    "worst_t": 2.0,
-   "worst_dist": 0.011807381396705171
-  },
-  {
-   "id": "3291729669",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.0056386590003967285,
-     "hist": 0.006282251426496041,
-     "edges": 0.0,
-     "local": 0.017098757991334423,
-     "worst_cell": [
-      3,
-      0
-     ],
-     "mean_abs": 0.0013320042053237557,
-     "dist": 0.008077675382818554,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.0077288150787353516,
-     "hist": 0.006016678313973619,
-     "edges": 0.0,
-     "local": 0.024681687347765546,
-     "worst_cell": [
-      3,
-      0
-     ],
-     "mean_abs": 0.001491730916313827,
-     "dist": 0.010926486390744993,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.007200896739959717,
-     "hist": 0.006420035205187068,
-     "edges": 0.0,
-     "local": 0.02078458997614992,
-     "worst_cell": [
-      3,
-      0
-     ],
-     "mean_abs": 0.0014469935558736324,
-     "dist": 0.009679653055870305,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "1916,1076:1920,1080",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.009561271609811283,
-   "ssim": 0.006856123606363933,
-   "hist": 0.006239654981885576,
-   "edges": 0.0,
-   "local": 0.020855011771749962,
-   "mean_abs": 0.0014235762258370717,
-   "worst_t": 2.0,
-   "worst_dist": 0.010926486390744993
+   "worst_dist": 0.0118072154990508
   },
   {
    "id": "1155728109",
@@ -5634,44 +5705,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.0041890740394592285,
-     "hist": 0.012345115030713736,
+     "ssim": 0.004491686820983887,
+     "hist": 0.01235500731740916,
      "edges": 0.005599611372030799,
-     "local": 0.011401991049448649,
-     "worst_cell": [
-      1,
-      1
-     ],
-     "mean_abs": 0.0021234536543488503,
-     "dist": 0.00826626480722127,
-     "t": 0.5,
-     "t_ours": 0.5
-    },
-    {
-     "ssim": 0.004690825939178467,
-     "hist": 0.011607730269122613,
-     "edges": 0.0055821668011761805,
-     "local": 0.01439544886428242,
+     "local": 0.013135731259050468,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.0021616301964968443,
-     "dist": 0.009163861855098024,
+     "mean_abs": 0.0021335899364203215,
+     "dist": 0.008879149161898298,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.004445910453796387,
+     "hist": 0.011639161227916197,
+     "edges": 0.0055821668011761805,
+     "local": 0.013914552012768885,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0021496510598808527,
+     "dist": 0.008952404345788057,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.003661036491394043,
-     "hist": 0.013106124849269915,
-     "edges": 0.0033865822776509846,
-     "local": 0.009951399425820759,
+     "ssim": 0.003386557102203369,
+     "hist": 0.01321467798542471,
+     "edges": 0.003386118901995805,
+     "local": 0.008909636080109825,
      "worst_cell": [
       1,
       1
      ],
-     "mean_abs": 0.0021229798439890146,
-     "dist": 0.007382272200548621,
+     "mean_abs": 0.0021219877526164055,
+     "dist": 0.007009017332178061,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5685,14 +5756,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.008270799620955971,
-   "ssim": 0.004180312156677246,
-   "hist": 0.012352990049702089,
-   "edges": 0.004856120150285988,
-   "local": 0.01191627977985061,
-   "mean_abs": 0.00213602123161157,
+   "dist": 0.008280190279954806,
+   "ssim": 0.004108051458994548,
+   "hist": 0.012402948843583355,
+   "edges": 0.004855965691734261,
+   "local": 0.011986639783976393,
+   "mean_abs": 0.002135076249639193,
    "worst_t": 2.0,
-   "worst_dist": 0.009163861855098024
+   "worst_dist": 0.008952404345788057
   },
   {
    "id": "2219762084",
@@ -5705,44 +5776,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.0053806304931640625,
-     "hist": 0.009519097680561396,
-     "edges": 0.0035889070146819524,
-     "local": 0.012712101131910458,
+     "ssim": 0.00538402795791626,
+     "hist": 0.010212890168782492,
+     "edges": 0.008855362413906276,
+     "local": 0.012688378512393683,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.0017441839445382357,
-     "dist": 0.008049420426571025,
+     "mean_abs": 0.0017462755786255002,
+     "dist": 0.009235372457630737,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.005547821521759033,
-     "hist": 0.010664711682313744,
+     "ssim": 0.0055481791496276855,
+     "hist": 0.010112307465404525,
      "edges": 0.0,
-     "local": 0.012943122128490359,
+     "local": 0.012996170247788541,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.001716806087642908,
-     "dist": 0.007680225431537567,
+     "mean_abs": 0.0017127998871728778,
+     "dist": 0.007585766312305773,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.006001710891723633,
-     "hist": 0.010710296557514066,
+     "ssim": 0.005943000316619873,
+     "hist": 0.00943320033011716,
      "edges": 0.0,
-     "local": 0.013068927655695006,
+     "local": 0.012975937803275883,
      "worst_cell": [
       0,
       3
      ],
-     "mean_abs": 0.0016977203777059913,
-     "dist": 0.007863250875728405,
+     "mean_abs": 0.0016960517968982458,
+     "dist": 0.007562321501992158,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5756,85 +5827,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.007864298911278999,
-   "ssim": 0.005643387635548909,
-   "hist": 0.010298035306796403,
-   "edges": 0.0011963023382273175,
-   "local": 0.012908050305365274,
-   "mean_abs": 0.001719570136629045,
+   "dist": 0.00812782009064289,
+   "ssim": 0.0056250691413879395,
+   "hist": 0.009919465988101393,
+   "edges": 0.002951787471302092,
+   "local": 0.012886828854486035,
+   "mean_abs": 0.001718375754232208,
    "worst_t": 0.5,
-   "worst_dist": 0.008049420426571025
-  },
-  {
-   "id": "2134765860",
-   "exit": 0,
-   "invalid": "",
-   "times": [
-    0.5,
-    2.0,
-    5.0
-   ],
-   "pairs": [
-    {
-     "ssim": 0.0007864832878112793,
-     "hist": 0.009168115015864318,
-     "edges": 0.012261381721974884,
-     "local": 0.005138953526814778,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.0013339518336579204,
-     "dist": 0.006063530391955658,
-     "t": 0.5,
-     "t_ours": 0.6
-    },
-    {
-     "ssim": 0.0008256435394287109,
-     "hist": 0.009157800067776988,
-     "edges": 0.012267584509814022,
-     "local": 0.005234983254922554,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.0013443917268887162,
-     "dist": 0.0061032649538235815,
-     "t": 2.0,
-     "t_ours": 2.0
-    },
-    {
-     "ssim": 0.0008803606033325195,
-     "hist": 0.00917279938171124,
-     "edges": 0.011223831205956825,
-     "local": 0.005551675955454509,
-     "worst_cell": [
-      1,
-      2
-     ],
-     "mean_abs": 0.0013726971810683608,
-     "dist": 0.006008937085169722,
-     "t": 5.0,
-     "t_ours": 5.0
-    }
-   ],
-   "props": [],
-   "pointer": "956,536:960,540",
-   "window": [
-    1920,
-    1080
-   ],
-   "class": "",
-   "note": "",
-   "trust": "FXC, fonts: the scene's own, clock: Wine's",
-   "dist": 0.006058577476982987,
-   "ssim": 0.0008308291435241699,
-   "hist": 0.009166238155117516,
-   "edges": 0.011917599145915244,
-   "local": 0.005308537579063947,
-   "mean_abs": 0.0013503469138716657,
-   "worst_t": 2.0,
-   "worst_dist": 0.0061032649538235815
+   "worst_dist": 0.009235372457630737
   },
   {
    "id": "1864677589",
@@ -5847,30 +5847,30 @@
    ],
    "pairs": [
     {
-     "ssim": 0.00042426586151123047,
+     "ssim": 0.00043213367462158203,
      "hist": 0.007530361980142235,
-     "edges": 0.005973087700346658,
-     "local": 0.0023030141940883673,
+     "edges": 0.005971730101218764,
+     "local": 0.0023443864435345554,
      "worst_cell": [
       1,
       2
      ],
-     "mean_abs": 0.0009445723262615502,
-     "dist": 0.003518873952777658,
+     "mean_abs": 0.0009460434084758162,
+     "dist": 0.0035333744517190412,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.0014307498931884766,
-     "hist": 0.012230309845652456,
+     "ssim": 0.0014435648918151855,
+     "hist": 0.012234081537856207,
      "edges": 0.003072696940790487,
-     "local": 0.012121624313294888,
+     "local": 0.012203842285089195,
      "worst_cell": [
       0,
       1
      ],
-     "mean_abs": 0.0014802507357671857,
-     "dist": 0.007126313619233598,
+     "mean_abs": 0.0014815062750130892,
+     "dist": 0.007155577848800653,
      "t": 2.0,
      "t_ours": 2.0
     },
@@ -5898,14 +5898,14 @@
    "class": "",
    "note": "",
    "trust": "FXC",
-   "dist": 0.00558783095733555,
-   "ssim": 0.0009550253550211588,
-   "hist": 0.010835080377864703,
-   "edges": 0.004092716669070666,
-   "local": 0.007719213138140428,
-   "mean_abs": 0.001230691773040841,
+   "dist": 0.005602419200171696,
+   "ssim": 0.0009619196256001791,
+   "hist": 0.010836337608599289,
+   "edges": 0.004092264136028034,
+   "local": 0.007760409878553926,
+   "mean_abs": 0.0012316006468608975,
    "worst_t": 2.0,
-   "worst_dist": 0.007126313619233598
+   "worst_dist": 0.007155577848800653
   },
   {
    "id": "3243449890",
@@ -5918,44 +5918,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9924716949462891,
-     "hist": 0.899613748197872,
+     "ssim": 0.9923520088195801,
+     "hist": 0.8993766969551323,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.21750794351100922,
-     "dist": 0.9776642581234611,
+     "mean_abs": 0.21723543107509613,
+     "dist": 0.9775809420369005,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.9923142790794373,
-     "hist": 0.9024065204852908,
+     "ssim": 0.9921942353248596,
+     "hist": 0.9022441213250252,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.21410362422466278,
-     "dist": 0.9781755878208893,
+     "mean_abs": 0.2137020230293274,
+     "dist": 0.978107094862463,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.8935744166374207,
-     "hist": 0.8973597184952852,
-     "edges": 0.565265111457601,
+     "ssim": 0.8941057324409485,
+     "hist": 0.8970162317417804,
+     "edges": 0.5658611957594747,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.6063809394836426,
-     "dist": 0.8605972909818035,
+     "mean_abs": 0.6061336994171143,
+     "dist": 0.8608072052325355,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -5969,14 +5969,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for consolas, clock: Wine's, video: crashed",
-   "dist": 0.9388123789753847,
-   "ssim": 0.9594534635543823,
-   "hist": 0.8997933290594826,
-   "edges": 0.855088370485867,
+   "dist": 0.9388317473772997,
+   "ssim": 0.959550658861796,
+   "hist": 0.899545683340646,
+   "edges": 0.8552870652531582,
    "local": 1.0,
-   "mean_abs": 0.3459975024064382,
+   "mean_abs": 0.34569038450717926,
    "worst_t": 2.0,
-   "worst_dist": 0.9781755878208893
+   "worst_dist": 0.978107094862463
   },
   {
    "id": "3046119914",
@@ -5989,44 +5989,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9989032745361328,
-     "hist": 0.9262481335011673,
+     "ssim": 0.9989013671875,
+     "hist": 0.9258881457825844,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.4369283616542816,
-     "dist": 0.9849206090610734,
+     "mean_abs": 0.4364389479160309,
+     "dist": 0.9848480393127669,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.9989398717880249,
-     "hist": 0.9277563557418066,
+     "ssim": 0.9989379644393921,
+     "hist": 0.9268688924996425,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.43418431282043457,
-     "dist": 0.9852332326847688,
+     "mean_abs": 0.43454834818840027,
+     "dist": 0.9850551678317461,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.7033553123474121,
-     "hist": 0.8644350054318138,
-     "edges": 0.5368244178191914,
+     "ssim": 0.7038164138793945,
+     "hist": 0.8630957702378532,
+     "edges": 0.5451205507101795,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.4969559609889984,
-     "dist": 0.7912584783544246,
+     "mean_abs": 0.49735671281814575,
+     "dist": 0.7927881883534249,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6040,14 +6040,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, video: crashed",
-   "dist": 0.9204707733667555,
-   "ssim": 0.9003994862238566,
-   "hist": 0.9061464982249293,
-   "edges": 0.8456081392730638,
+   "dist": 0.9208971318326459,
+   "ssim": 0.9005519151687622,
+   "hist": 0.9052842695066934,
+   "edges": 0.8483735169033931,
    "local": 1.0,
-   "mean_abs": 0.45602287848790485,
+   "mean_abs": 0.45611466964085895,
    "worst_t": 2.0,
-   "worst_dist": 0.9852332326847688
+   "worst_dist": 0.9850551678317461
   },
   {
    "id": "3426575339",
@@ -6060,44 +6060,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9969974160194397,
-     "hist": 0.9751030619342662,
+     "ssim": 0.9970046877861023,
+     "hist": 0.9784402815578155,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3269514739513397,
-     "dist": 0.9941198371926852,
+     "mean_abs": 0.3268163502216339,
+     "dist": 0.9947894626473938,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.8780191540718079,
-     "hist": 0.9105203896753892,
-     "edges": 0.5862191601464021,
+     "ssim": 0.8780432939529419,
+     "hist": 0.9042692468179817,
+     "edges": 0.5833149841369906,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.6011029481887817,
-     "dist": 0.8627536561859006,
+     "mean_abs": 0.6015764474868774,
+     "dist": 0.860929834376877,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.8787872791290283,
-     "hist": 0.9060718761206443,
-     "edges": 0.5827998119843752,
+     "ssim": 0.8791141510009766,
+     "hist": 0.9041677118207434,
+     "edges": 0.586077853788552,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.6015258431434631,
-     "dist": 0.8614105213597124,
+     "mean_abs": 0.601586639881134,
+     "dist": 0.861783358422152,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6111,14 +6111,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, video: crashed",
-   "dist": 0.9060946715794328,
-   "ssim": 0.9179346164067587,
-   "hist": 0.9305651092434332,
-   "edges": 0.7230063240435926,
+   "dist": 0.9058342184821409,
+   "ssim": 0.9180540442466736,
+   "hist": 0.9289590800655135,
+   "edges": 0.7231309459751808,
    "local": 1.0,
-   "mean_abs": 0.5098600884278616,
+   "mean_abs": 0.5099931458632151,
    "worst_t": 0.5,
-   "worst_dist": 0.9941198371926852
+   "worst_dist": 0.9947894626473938
   },
   {
    "id": "3089687436",
@@ -6131,7 +6131,7 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9985644221305847,
+     "ssim": 0.9985648393630981,
      "hist": 1.0,
      "edges": 1.0,
      "local": 1.0,
@@ -6139,36 +6139,36 @@
       3,
       3
      ],
-     "mean_abs": 0.40943145751953125,
-     "dist": 0.9995693266391754,
+     "mean_abs": 0.40956711769104004,
+     "dist": 0.9995694518089294,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.8169109225273132,
-     "hist": 0.9401027671107662,
-     "edges": 0.5967397017407607,
+     "ssim": 0.8171854615211487,
+     "hist": 0.9396851636641661,
+     "edges": 0.5937287925079417,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.5236766934394836,
-     "dist": 0.8524417705284993,
+     "mean_abs": 0.5235325694084167,
+     "dist": 0.8518384296907662,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.8172671794891357,
-     "hist": 0.940393480959825,
-     "edges": 0.6006153723397543,
+     "ssim": 0.8175491094589233,
+     "hist": 0.9399716917728216,
+     "edges": 0.597287046222749,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.5233584642410278,
-     "dist": 0.8533819245066566,
+     "mean_abs": 0.5232218503952026,
+     "dist": 0.8527164804367912,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6182,14 +6182,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
-   "dist": 0.9017976738914438,
-   "ssim": 0.8775808413823446,
-   "hist": 0.9601654160235303,
-   "edges": 0.7324516913601716,
+   "dist": 0.9013747873121623,
+   "ssim": 0.87776647011439,
+   "hist": 0.9598856184789959,
+   "edges": 0.7303386129102303,
    "local": 1.0,
-   "mean_abs": 0.4854888717333476,
+   "mean_abs": 0.4854405124982198,
    "worst_t": 0.5,
-   "worst_dist": 0.9995693266391754
+   "worst_dist": 0.9995694518089294
   },
   {
    "id": "2886313155",
@@ -6202,44 +6202,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9993805289268494,
-     "hist": 0.9926069759513871,
+     "ssim": 0.9993382096290588,
+     "hist": 0.9941598525369615,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3720950782299042,
-     "dist": 0.9983355538683323,
+     "mean_abs": 0.359287828207016,
+     "dist": 0.99863343339611,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.5120229721069336,
-     "hist": 0.9296100283941666,
+     "ssim": 0.5103124976158142,
+     "hist": 0.9351621579993743,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3279702961444855,
-     "dist": 0.8395288973109134,
+     "mean_abs": 0.32718518376350403,
+     "dist": 0.8401261808846191,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.7404090166091919,
-     "hist": 0.9696904510890384,
-     "edges": 0.675022741020183,
+     "ssim": 0.7417598962783813,
+     "hist": 0.9736668534546832,
+     "edges": 0.6841404465113836,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.5666045546531677,
-     "dist": 0.8510653434046018,
+     "mean_abs": 0.5726850628852844,
+     "dist": 0.8540894288767278,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6253,14 +6253,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, video: crashed",
-   "dist": 0.8963099315279491,
-   "ssim": 0.7506041725476583,
-   "hist": 0.9639691518115306,
-   "edges": 0.8916742470067277,
+   "dist": 0.8976163477191523,
+   "ssim": 0.7504702011744181,
+   "hist": 0.9676629546636729,
+   "edges": 0.8947134821704612,
    "local": 1.0,
-   "mean_abs": 0.4222233096758525,
+   "mean_abs": 0.41971935828526813,
    "worst_t": 0.5,
-   "worst_dist": 0.9983355538683323
+   "worst_dist": 0.99863343339611
   },
   {
    "id": "3326873240",
@@ -6273,7 +6273,7 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9984433054924011,
+     "ssim": 0.9950993657112122,
      "hist": 1.0,
      "edges": 1.0,
      "local": 1.0,
@@ -6281,36 +6281,36 @@
       3,
       3
      ],
-     "mean_abs": 0.5545675754547119,
-     "dist": 0.9995329916477204,
+     "mean_abs": 0.3603156507015228,
+     "dist": 0.9985298097133637,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.7217267751693726,
-     "hist": 0.8908437588725352,
-     "edges": 0.6491611374952566,
+     "ssim": 0.7626845836639404,
+     "hist": 0.9731325281256564,
+     "edges": 0.5795701600102955,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.40764859318733215,
-     "dist": 0.8245190118243702,
+     "mean_abs": 0.5747260451316833,
+     "dist": 0.8393459127263725,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.7269203066825867,
-     "hist": 0.8959028584074421,
-     "edges": 0.668324967003795,
+     "ssim": 0.7617807984352112,
+     "hist": 0.9070446045376145,
+     "edges": 0.6040309732927567,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3500926196575165,
-     "dist": 0.8309216570870234,
+     "mean_abs": 0.4898909628391266,
+     "dist": 0.8307493550966376,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6324,14 +6324,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, fonts: the scene's own, clock: Wine's, video: crashed",
-   "dist": 0.8849912201863713,
-   "ssim": 0.8156967957814535,
-   "hist": 0.9289155390933258,
-   "edges": 0.7724953681663506,
+   "dist": 0.8895416925121246,
+   "ssim": 0.839854915936788,
+   "hist": 0.9600590442210902,
+   "edges": 0.7278670444343508,
    "local": 1.0,
-   "mean_abs": 0.4374362627665202,
+   "mean_abs": 0.4749775528907776,
    "worst_t": 0.5,
-   "worst_dist": 0.9995329916477204
+   "worst_dist": 0.9985298097133637
   },
   {
    "id": "2883756643",
@@ -6344,44 +6344,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9997662305831909,
-     "hist": 1.0,
+     "ssim": 0.6903926134109497,
+     "hist": 0.6873054979674433,
      "edges": 1.0,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.638982892036438,
-     "dist": 0.9999298691749573,
+     "mean_abs": 0.10533822327852249,
+     "dist": 0.8445788836167736,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.7543969750404358,
-     "hist": 0.8178987900506465,
-     "edges": 0.6780446655113106,
+     "ssim": 0.9317856431007385,
+     "hist": 0.9855734717214607,
+     "edges": 0.617000395665432,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.36428865790367126,
-     "dist": 0.8255077836245222,
+     "mean_abs": 0.810031533241272,
+     "dist": 0.9000504664076001,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.7455756664276123,
-     "hist": 0.8023563610411726,
-     "edges": 0.6911314473089857,
+     "ssim": 0.893218994140625,
+     "hist": 0.9728199970689204,
+     "edges": 0.6421019153958163,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3484988212585449,
-     "dist": 0.8223702615983153,
+     "mean_abs": 0.7688237428665161,
+     "dist": 0.8909500807351348,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6395,14 +6395,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, fonts: the scene's own, clock: Wine's, video: crashed",
-   "dist": 0.8826026381325982,
-   "ssim": 0.8332462906837463,
-   "hist": 0.8734183836972731,
-   "edges": 0.7897253709400988,
+   "dist": 0.8785264769198361,
+   "ssim": 0.8384657502174377,
+   "hist": 0.8818996555859414,
+   "edges": 0.7530341036870828,
    "local": 1.0,
-   "mean_abs": 0.4505901237328847,
-   "worst_t": 0.5,
-   "worst_dist": 0.9999298691749573
+   "mean_abs": 0.5613978331287702,
+   "worst_t": 2.0,
+   "worst_dist": 0.9000504664076001
   },
   {
    "id": "3556794116",
@@ -6415,21 +6415,21 @@
    ],
    "pairs": [
     {
-     "ssim": 0.6373617053031921,
-     "hist": 0.9969177554055222,
-     "edges": 0.8021359417107496,
+     "ssim": 0.6446296572685242,
+     "hist": 0.9980365468989204,
+     "edges": 0.7740217814801759,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.43020087480545044,
-     "dist": 0.851019251014212,
+     "mean_abs": 0.43535229563713074,
+     "dist": 0.8478005628563765,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.639602541923523,
+     "ssim": 0.6396012306213379,
      "hist": 0.9971171119377036,
      "edges": 0.826771068634502,
      "local": 1.0,
@@ -6437,22 +6437,22 @@
       3,
       3
      ],
-     "mean_abs": 0.43240150809288025,
-     "dist": 0.856658398691498,
+     "mean_abs": 0.4324018657207489,
+     "dist": 0.8566580053008425,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.6606377363204956,
+     "ssim": 0.6606193780899048,
      "hist": 1.0,
-     "edges": 0.7349812291728182,
+     "edges": 0.7353624819554208,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.4543538987636566,
-     "dist": 0.8451875667307123,
+     "mean_abs": 0.45435526967048645,
+     "dist": 0.8452583098180556,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6466,14 +6466,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
-   "dist": 0.8509550721454741,
-   "ssim": 0.6458673278490702,
-   "hist": 0.9980116224477419,
-   "edges": 0.7879627465060232,
+   "dist": 0.8499056259917581,
+   "ssim": 0.6482834219932556,
+   "hist": 0.9983845529455414,
+   "edges": 0.7787184440233662,
    "local": 1.0,
-   "mean_abs": 0.4389854272206624,
+   "mean_abs": 0.440703143676122,
    "worst_t": 2.0,
-   "worst_dist": 0.856658398691498
+   "worst_dist": 0.8566580053008425
   },
   {
    "id": "2890767643",
@@ -6486,44 +6486,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.3785979747772217,
+     "ssim": 0.3431869149208069,
      "hist": 1.0,
      "edges": 1.0,
-     "local": 1.0,
+     "local": 0.9722743531068166,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.17826758325099945,
-     "dist": 0.8135793924331665,
+     "mean_abs": 0.1699872612953186,
+     "dist": 0.794638380408287,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.6188924312591553,
-     "hist": 0.9925556953724886,
-     "edges": 0.7603334491142758,
+     "ssim": 0.6256215572357178,
+     "hist": 0.9894138366377246,
+     "edges": 0.7753270989966163,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3753143846988678,
-     "dist": 0.8362455582750995,
+     "mean_abs": 0.37102288007736206,
+     "dist": 0.8406346542975836,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.6262288093566895,
-     "hist": 0.9953061753722736,
-     "edges": 0.7788641385429493,
+     "ssim": 0.6230078935623169,
+     "hist": 0.9912691573148288,
+     "edges": 0.7759270621119482,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.3685165345668793,
-     "dist": 0.8427027055900514,
+     "mean_abs": 0.36742743849754333,
+     "dist": 0.8403416119540504,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6537,14 +6537,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for consolas, clock: Wine's, video: crashed",
-   "dist": 0.8308425520994391,
-   "ssim": 0.5412397384643555,
-   "hist": 0.9959539569149207,
-   "edges": 0.8463991958857416,
-   "local": 1.0,
-   "mean_abs": 0.30736616750558216,
-   "worst_t": 5.0,
-   "worst_dist": 0.8427027055900514
+   "dist": 0.8252048822199737,
+   "ssim": 0.5306054552396139,
+   "hist": 0.9935609979841845,
+   "edges": 0.8504180537028548,
+   "local": 0.9907581177022723,
+   "mean_abs": 0.302812526623408,
+   "worst_t": 2.0,
+   "worst_dist": 0.8406346542975836
   },
   {
    "id": "3028473503",
@@ -6557,7 +6557,7 @@
    ],
    "pairs": [
     {
-     "ssim": 0.33673548698425293,
+     "ssim": 0.3358728289604187,
      "hist": 0.9976567116707658,
      "edges": 1.0,
      "local": 0.9496562679608663,
@@ -6565,36 +6565,36 @@
       0,
       0
      ],
-     "mean_abs": 0.20541785657405853,
-     "dist": 0.7854488688176889,
+     "mean_abs": 0.20535610616207123,
+     "dist": 0.7851900714105386,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.5186868906021118,
-     "hist": 0.9548570049650746,
-     "edges": 0.8775044020368343,
+     "ssim": 0.5256398320198059,
+     "hist": 0.9543915970819421,
+     "edges": 0.8929010303431326,
      "local": 1.0,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.18581005930900574,
-     "dist": 0.8220783485810154,
+     "mean_abs": 0.18331046402454376,
+     "dist": 0.8271504750909567,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.5925279855728149,
-     "hist": 0.9551711944306391,
-     "edges": 0.8661537079542674,
+     "ssim": 0.5867724418640137,
+     "hist": 0.9553874864656628,
+     "edges": 0.8564411860305536,
      "local": 1.0,
      "worst_cell": [
       3,
       0
      ],
-     "mean_abs": 0.21027247607707977,
-     "dist": 0.8420233761488258,
+     "mean_abs": 0.2093307226896286,
+     "dist": 0.8383974670584474,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6608,14 +6608,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
-   "dist": 0.8165168645158434,
-   "ssim": 0.4826501210530599,
-   "hist": 0.9692283036888266,
-   "edges": 0.9145527033303672,
+   "dist": 0.8169126711866476,
+   "ssim": 0.4827617009480794,
+   "hist": 0.9691452650727902,
+   "edges": 0.9164474054578955,
    "local": 0.9832187559869555,
-   "mean_abs": 0.20050013065338135,
+   "mean_abs": 0.19933243095874786,
    "worst_t": 5.0,
-   "worst_dist": 0.8420233761488258
+   "worst_dist": 0.8383974670584474
   },
   {
    "id": "3432999904",
@@ -6628,7 +6628,7 @@
    ],
    "pairs": [
     {
-     "ssim": 0.9997714161872864,
+     "ssim": 0.9997714757919312,
      "hist": 1.0,
      "edges": 1.0,
      "local": 1.0,
@@ -6636,36 +6636,36 @@
       3,
       3
      ],
-     "mean_abs": 0.6070645451545715,
-     "dist": 0.9999314248561859,
+     "mean_abs": 0.6071634888648987,
+     "dist": 0.9999314427375794,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.2233518362045288,
-     "hist": 0.8831633264106538,
+     "ssim": 0.22314757108688354,
+     "hist": 0.8817378830460649,
      "edges": 1.0,
-     "local": 0.5786980440219244,
+     "local": 0.5781242549419403,
      "worst_cell": [
       0,
       2
      ],
-     "mean_abs": 0.10924286395311356,
-     "dist": 0.6172476293500667,
+     "mean_abs": 0.1091112494468689,
+     "dist": 0.6167291244178601,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.5041045546531677,
-     "hist": 0.9378235978904375,
-     "edges": 0.919726049215577,
+     "ssim": 0.5041335821151733,
+     "hist": 0.9379210090257157,
+     "edges": 0.9196748744919914,
      "local": 1.0,
      "worst_cell": [
       3,
       3
      ],
-     "mean_abs": 0.33428651094436646,
-     "dist": 0.8227412958171532,
+     "mean_abs": 0.33420053124427795,
+     "dist": 0.8227592513380935,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6679,14 +6679,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for comicsans, clock: Wine's, video: crashed",
-   "dist": 0.8133067833411353,
-   "ssim": 0.5757426023483276,
-   "hist": 0.9403289747670304,
-   "edges": 0.9732420164051924,
-   "local": 0.8595660146739749,
-   "mean_abs": 0.35019797335068387,
+   "dist": 0.8131399394978444,
+   "ssim": 0.5756842096646627,
+   "hist": 0.9398862973572601,
+   "edges": 0.9732249581639971,
+   "local": 0.8593747516473135,
+   "mean_abs": 0.3501584231853485,
    "worst_t": 0.5,
-   "worst_dist": 0.9999314248561859
+   "worst_dist": 0.9999314427375794
   },
   {
    "id": "3432876246",
@@ -6770,44 +6770,44 @@
    ],
    "pairs": [
     {
-     "ssim": 0.36726588010787964,
-     "hist": 0.9588057724952138,
+     "ssim": 0.3666965961456299,
+     "hist": 0.9587403203983125,
      "edges": 1.0,
-     "local": 0.9183256030082703,
+     "local": 0.9196720619996389,
      "worst_cell": [
       1,
       3
      ],
-     "mean_abs": 0.25786298513412476,
-     "dist": 0.7774385994338877,
+     "mean_abs": 0.2577582001686096,
+     "dist": 0.7776586615232431,
      "t": 0.5,
      "t_ours": 0.5
     },
     {
-     "ssim": 0.5274215936660767,
-     "hist": 0.7760449004728422,
-     "edges": 0.8348008760559603,
-     "local": 0.9675149718920389,
+     "ssim": 0.5286656618118286,
+     "hist": 0.7758638953585347,
+     "edges": 0.8347594446238296,
+     "local": 0.9675042976935705,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.12956669926643372,
-     "dist": 0.7706501249731952,
+     "mean_abs": 0.12963931262493134,
+     "dist": 0.7709756558480926,
      "t": 2.0,
      "t_ours": 2.0
     },
     {
-     "ssim": 0.5277315974235535,
-     "hist": 0.774653480494151,
-     "edges": 0.8277191775133186,
-     "local": 0.9712918549776077,
+     "ssim": 0.5294620990753174,
+     "hist": 0.7747636726295106,
+     "edges": 0.8282779300721447,
+     "local": 0.971264198422432,
      "worst_cell": [
       2,
       1
      ],
-     "mean_abs": 0.12953956425189972,
-     "dist": 0.7701815673218423,
+     "mean_abs": 0.1296396404504776,
+     "dist": 0.7708262097896559,
      "t": 5.0,
      "t_ours": 5.0
     }
@@ -6821,14 +6821,14 @@
    "class": "",
    "note": "",
    "trust": "d3dc?, system fonts: Proton's stand-ins for cambria, clock: Wine's, video: crashed",
-   "dist": 0.7727567639096417,
-   "ssim": 0.4741396903991699,
-   "hist": 0.8365013844874024,
-   "edges": 0.8875066845230929,
-   "local": 0.9523774766259723,
-   "mean_abs": 0.17232308288415274,
+   "dist": 0.7731535090536639,
+   "ssim": 0.4749414523442586,
+   "hist": 0.8364559627954525,
+   "edges": 0.8876791248986581,
+   "local": 0.9528135193718805,
+   "mean_abs": 0.1723457177480062,
    "worst_t": 0.5,
-   "worst_dist": 0.7774385994338877
+   "worst_dist": 0.7776586615232431
   }
  ]
 }

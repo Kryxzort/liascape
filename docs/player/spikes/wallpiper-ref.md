@@ -29,6 +29,12 @@
   luma, the luma standard deviation and the mean saturation match to the third decimal (table below).
   wallpiper reads WE's swapchain image directly: no compositor, no gamescope and no colour management. So
   gamescope's colour handling is not what makes the first set contrasty.
+- **Correction (2026-11-06, `we-proton.md` "The FP16 swap chain"): the cause is DXVK, not a WE look.** At Ultra
+  WE presents a `bloom` + `hdr` scene through an FP16 (scRGB) swap chain holding lin () of the picture, which
+  Windows sRGB-encodes for an SDR display. DXVK, on a surface with no HDR colour space, shows it raw, and
+  wallpiper's layer reads DXVK's blit output, so it agrees with the gamescope set. Re-encoded, both match ours
+  (2–4 / 255); `enabled` matches ours with `WPENGINE_HDR=0`. The owner's Windows look is Ultra too. The
+  original reading follows.
 - **The cause is WE's own Ultra post-processing.** The same two scenes captured with `postprocessing=enabled`
   instead of `ultra` match ours: 0.067 and 0.157, against 0.59 and 0.51 at Ultra. If Windows looks like ours,
   WE on Windows is not running the Ultra post-processing path for those scenes.

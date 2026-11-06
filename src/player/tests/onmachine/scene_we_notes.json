@@ -9,20 +9,20 @@
     "note": "the preview-compare question (\"needs a WE capture\"): at its default lens size 0.75 WE also shows more than the canvas — black on all four sides at the canvas's aspect, bars top and bottom (132 px of 1080, the 0.125 that zoom 0.75 predicts) on a 16:9 desktop (we-ref/3516174947/desktop/); at lens 1 the canvas fills (lens1/). Our letterbox is WE's. The rest is its random camera path and the prompt box's timing."
   },
   "3019192537": {
-    "class": "bug?",
-    "note": "HDR at Ultra: WE is far more saturated and contrasty (a deep orange and red sky, a near-black foreground, a lens-flare streak through the sun); ours is flat and washed out. Probably the Ultra post-processing (HDR bloom / tone mapping). The biggest real difference found."
+    "class": "ok",
+    "note": "Was the worst (0.60): WE looked far darker and more saturated. That was the reference, not us. At Ultra WE presents an HDR scene through an FP16 (scRGB) swap chain holding lin () of the picture; Windows sRGB-encodes it for an SDR display, DXVK under Proton showed it raw. The frames are re-encoded now (we-proton.md \"The FP16 swap chain\"), and ours matches. The rest is camera shake (random)."
   },
   "3395587987": {
-    "class": "bug?",
-    "note": "HDR at Ultra: in WE the girl's face and hair are deep, dark blue and the particles brighter; in ours they are a light, washed-out blue. The same family as 3019192537."
+    "class": "ok",
+    "note": "Was 0.48 (WE a deep, dark blue): the FP16 swap-chain skew of 3019192537, fixed in the capture. Matches; the particles are random."
   },
   "3490034653": {
     "class": "bug?",
-    "note": "ours is lighter in the shadows (less contrast) across the whole frame; perhaps the same family as the HDR scenes. The petals are random."
+    "note": "Not the HDR family: an LDR scene with an 8-bit swap chain, and both WE sources agree. Ours drew a warm glow left of the girl that WE doesn't: its `light_shafts_1` particles upside down. Fixed with 3354740764's particle-sprite orientation (313e1d2). What remains is registration: the layers sit a few px apart from WE's (camera shake and parallax phase; WE's clock is 0.25–0.9 s along at its first frame) and the petals are random."
   },
   "3354740764": {
-    "class": "bug?",
-    "note": "ours draws the dog sprite on an opaque black box, adds diagonal yellow light shafts across the field that WE doesn't draw, and is still black at 0.5 s. Its system fonts (Arial / Comic Sans / Consolas) are the real ones in WE."
+    "class": "time",
+    "note": "fixed 2026-11-06 (fork d5f244a, 313e1d2): the black box behind the dog (an `alphatocoverage` layer with effects drew its last pass unblended) and the light shafts (every particle sprite was drawn upside down: they rose from the field; WE's hang from the sky). Left: ours is black at 0.5 s because the scene opens with a black `fadeout` layer (opaque to 0.6 s, gone at 1.6 s) that WE draws too. The capture's t = 0 is WE's first non-flat frame, already inside that fade (its probe frames; wallpiper's 0.5 s frame is still dimmed), so WE's frames are about 1 s ahead of ours. The colour/contrast is WE's Ultra post-processing; the labels are the Windows fonts."
   },
   "3276522107": {
     "class": "known",
@@ -30,11 +30,11 @@
   },
   "2672425887": {
     "class": "time",
-    "note": "the demon face in the background has faded in by 2 s in WE but only by 5 s in ours: an intro timeline runs slower in ours."
+    "note": "not a slower timeline: the demon's alpha keyframes (frames 62–78 at 30 fps, 2.07–2.6 s) fade it in over the same 0.5 s in WE. WE's scene clock is ahead of the capture's t = 0 by a different amount each run (0.19, 0.79, 0.80 and 1.1 s in four fresh captures), so its 2 s frame catches the fade done or not. The capture's time base, not ours."
   },
   "3509243656": {
     "class": "time",
-    "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\")."
+    "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\"). (Its frames are re-encoded from WE's FP16 swap chain, like the other HDR scenes.)"
   },
   "2783122117": {
     "class": "time",
@@ -65,7 +65,19 @@
     "note": "matches once WE sees the pointer. It says FRIDAY: WEDNESDAY needs a Wednesday run. The rain is random."
   },
   "2542468435": {
-    "class": "unexamined",
-    "note": "colour (hist 0.51); not looked at closely."
+    "class": "ok",
+    "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed."
+  },
+  "1726902114": {
+    "class": "ok",
+    "note": "the light shafts hang from the top left as in WE since 313e1d2 (particle sprites were upside down). They are random in WE."
+  },
+  "2561227934": {
+    "class": "ok",
+    "note": "the light shafts stand as in WE since 313e1d2 (particle sprites were upside down); they are random in WE."
+  },
+  "2134765860": {
+    "class": "time",
+    "note": "A room whose daylight follows the wall clock: WE was captured by day, ours renders at the compare's own hour (evening here). Compare at the capture's hour."
   }
 }

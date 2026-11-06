@@ -335,7 +335,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 | E39 | Material `alphawriting` | **Observed** key with values default / disabled / enabled (GH 0x140182450) | not parsed. Final pass masks alpha out; every other pass writes alpha (CImage.cpp:926, 948) | 32 have the key, "enabled" only in 1 (3184155462, cursorripple sim) | none visible beyond E4/E5 | S |
 | E40 | Non-system `usertextures` | **Inferred**: the name is a project user property of type texture, resolved to the user's file or its default | the name itself is resolved as a texture path and fails, so the slot keeps its fallback (CPass.cpp:756-805) | 3: 2388299037, 3243449890, 3516106265 (usertexture1-24) | user-picked images missing (`$mediaThumbnail` and `$mediaPreviousThumbnail` do work: RenderContext.cpp:16-32) | M |
 | E41 | Effect `visible` is evaluated once | **Inferred** live (SceneScript `getEffect().visible`, user properties; GH 0x140219c60 exposes `getEffect`) | invisible effects are not built; visible ones never skip per frame (CImage.cpp:633, 801-803 TODO) | 33 have `visible.user` (10 with condition) | toggling an effect at runtime does nothing | **Done** (patch 0037, "E41 result" in § 5): built when it can be visible, the chain re-picked on a change; `getEffect()` is B10 |
-| E42 | Brightness under `VERSION`/genericimage4 | **Unknown** (WE has no brightness term in g_Color4 by the case-2 layout; it may premultiply the ctx colour) | `g_Brightness` only exists in non-VERSION genericimage2 | 3: 2511663284, 2542468435, 3509243656 | possible brightness mismatch | — |
+| E42 | Brightness under `VERSION`/genericimage4 | **Observed (2026-11-06)**: the image draw sets the ctx colour (g_Color, g_Color4.rgb) to colour × (renderer flag 0x2000 ? brightness : 1) (GH 0x1402321d0, 0x1402328e0, 0x140231dc0: ctx+0x124 = image+0x330 × image+0x340). So brightness shows only in an HDR scene at Ultra | `g_Brightness` only exists in non-VERSION genericimage2 | 3: 2511663284 (LDR in WE: no bloom), 2542468435, 3509243656 | 2542468435 15 % too dark | **Done**: fork "an HDR scene's image brightness scales its draw colour" |
 | E43 | Object `perspective` / `depthtest` / `castshadow` | **Observed** image properties (GH 0x140219c60) | ignored | perspective=true 4 (2469881470, 3354740764, 3422085307); depthtest 29; castshadow false only | mostly 3D; the effect of the 4 perspective=true images is **Unknown** | M |
 | E44 | `clearenabled` | **Observed** key (GH 0x1401c7880) | always clears with clearcolor (CScene.cpp:88, 364) | 0 (true or absent in all 96) | none | S |
 | E45 | Uniform `default` given as a non-string vec | **Unknown** | `VectorBuilder::parse(*defvalue)` with a number (ShaderUnit.cpp:511-518) | 1: 3414858021 (`u_PrlxPos` default 0) | possible throw, which drops the effect | S |
@@ -1769,6 +1769,11 @@ Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 w
 - The combine is `combine_hdr_upsample_linear` (no `lin ()`). WE's `combine_hdr` and `combine_srgb` apply `lin ()`
   and × g_RenderVar0.x. That only round-trips through an sRGB backbuffer view, which is **inferred** (an HDR scene
   without bloom would otherwise look darker in WE than in its editor). We write to a plain RGBA8 target.
+  **Settled 2026-11-06 (Observed):** not an sRGB view. With flag 0x2000 WE creates its swap chain as
+  R16G16B16A16_FLOAT (GH 0x14015a0f0, flag from GH 0x140141520) and never sets a colour space, so Windows takes it
+  as scRGB and sRGB-encodes it on an SDR display; g_RenderVar0.x defaults to 1 (+0x228). The round trip is real, and
+  ours is the same picture. Under Proton, DXVK shows that swap chain raw (no HDR colour space on the surface), which
+  made the first WE references too dark (`we-proton.md` "The FP16 swap chain").
 
 **Inferred / not WE's:**
 

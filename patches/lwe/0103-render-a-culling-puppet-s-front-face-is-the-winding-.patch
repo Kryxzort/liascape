@@ -1,7 +1,7 @@
 From 1f5a7bfdf37d933455556744f457b5f24666db2d Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 07:24:29 +0530
-Subject: [PATCH 103/106] render: a culling puppet's front face is the winding
+Subject: [PATCH 103/111] render: a culling puppet's front face is the winding
  its mesh lands with
 
 A puppet's material keeps its `cullmode` in WE (GH 0x140230ec0 writes the pass's own cull back
