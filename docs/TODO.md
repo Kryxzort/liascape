@@ -21,7 +21,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in liascape-player.
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
-- [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [x] **LICENSE** for the repo — done in `a955654` (GPL-3.0, with `LICENSE.upstream-MIT` for the livepaper portions). Was: There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 - [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
@@ -76,7 +76,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Harden `AUDIO_SETTLE` in `liascape-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
 - [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in liascape-player.
-- [ ] Delete stale branches: `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
+- [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 - [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
       owner's call.
 
