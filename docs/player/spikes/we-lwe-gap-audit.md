@@ -3039,3 +3039,84 @@ Gates on `9b2b244`: health (`/tmp/liascape-scene-health-preview1`) 89 clean / 7 
 alone, `mpv_source_teardown_never_skips_bus_cycles` fails alone too, and fails the same way on `8fefe58` (before this
 pin): a machine-state flake of the mpv V→V recording, not this change.
 Shader sweep (4085 checks, release worker on `9b2b244`): 6 failed in 4 shaders, the known 6 — none new.
+
+### Cursor ripple result: the simulation steps at the scene's rate; a pointer that arrives is no move (fork patches 0105–0106, 2026-11-06)
+
+Owner report: in 3184155462 the mouse-driven water (WE's stock `cursorripple` on the Background layer: ripplescale
+0.33, rippledecay 1, ripplespeed 0.5, ripplestrength 0.55) looks much stronger than on Windows, "triggered by the
+mouse's movement at the sides of the wallpaper".
+
+**What the effect is.** Three passes: apply_force → `_rt_EightBuffer1`, simulate_force → `_rt_EightBuffer2`, combine
+(512-fit rgba8888 FBOs). The water lives in those two FBOs from frame to frame, and the shaders count **per frame**:
+apply_force adds `pointerDist · min(1/30, g_Frametime)/0.02 · 100·|g_PointerPosition − g_PointerPositionLast|` along
+the segment from the last pointer to this one; simulate_force spreads it by `100 · ripplespeed · min(1/30, dt)` texels
+and takes off `max(1.001/255, 1.5/255 · dt/0.02 · decay)` — at least one 8-bit step per frame. For a pointer moving at
+speed v the force per second goes as v · dt, so **the strength depends on the frame rate, in WE too**. The scene's
+collision mask (`masks/cursorripple_simulate_force_mask_623f4bef`, R8 512 × 288, slot 1 → `MASK` 1) is white over the
+girl: the water only moves at the sides, in WE as in ours (that is the "sides" the owner saw; LWE sets the combo
+because the slot is used, and the mask decodes and samples as expected).
+
+**Decoded (wallpaper64.exe 2.8.485, `all.c` / `all.asm`):**
+- `g_PointerPosition` (uniform 0x70) = ctx+0x8c, `g_PointerPositionLast` (0x6f) = ctx+0x94 (setter GH 0x14010a0e0;
+  names registered at GH 0x140002a20). Per frame, FUN_140141520 polls `GetCursorPos`
+  → `ScreenToClient` of the wallpaper's window → / the window size into ctx+0x8c (written through its owner at +0x9c,
+  the context being owner+0x10) — on the whole desktop, other monitors and windows included (a point off the window is
+  outside 0..1). At the end of the scene tick FUN_1401afbf0 copies ctx+0x8c to ctx+0x94 (GH 0x1401b1c0b) and sets the
+  pointer flags' "seen" bit. Both start at 0 0 (GH 0x1401acb91). So the last pointer is the previous frame's — LWE's
+  `CScene::updateMouse` already does that.
+- `g_Frametime` (case 4, ctx+0x14c) = the frame's dt (B9).
+- The fps: FUN_14006dd90 reads `general.user.fps` and derives `clamp(round(1000/fps) · 0.5, 6, 100)` (DAT_140527614;
+  its use — a timer interval in ms, Inferred — and whether presenting is also bounded by the refresh are not decoded,
+  Unknown). WE's quality presets (ui/dist): low 10, medium 15, high 25, ultra 30 fps. The owner's Windows config
+  (`/mnt/Windows/.../wallpaper_engine/config.json`) has `fps` **240** for the main accounts (Kryxzort, second-profile), 15 for
+  the others; the Linux library's copy says 30.
+
+**Measured.** The reference captures (lp-player e56dda7, `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`):
+the same 1 s drag, |on − off| in the path's band — WE at 30 fps 5.6, WE at 120 fps 0.6, ours at 30 fps 3.7. Ours
+before the fix, smoke with a pointer path up and down the left side (mean |pointer − still| in the left third, 0–255;
+the centre / right differences in these runs are the camera parallax following the pointer, not water):
+
+| drawn at | 30 fps | 60 fps | 144 fps | 240 fps |
+|---|---|---|---|---|
+| before (t = 1 / 2 / 3 s) | 5.8 / 6.9 / 7.0 | 3.9 / 4.7 / 2.4 | 0.75 / 0.30 / 0.31 | 0.22 / 0.30 / 0.31 |
+| after, scene rate 240 | 0.22 / 0.30 / 0.31 | 0.22 / 0.30 / 0.31 | 0.22 / 0.30 / 0.31 | 0.22 / 0.30 / 0.31 |
+| after, scene rate 30 | 5.8 / 6.9 / 7.0 | | | |
+
+**Why ours was stronger (Inferred — the owner's live rate for this scene wasn't observed):**
+1. LWE ran the simulation once per frame *drawn*. The worker ticks a scene at its outputs' refresh (240 Hz here) until
+   the GPU budget throttles it (`scene/budget.rs`: missed compositor frames and ≥ 400 ms GPU per second → half the
+   rate, down to 10 fps). This scene costs ~4.3 ms a frame at its native 3840 × 2160 (smoke, glFinish timed) — ~1 s of
+   GPU per second at 240 Hz, "heavy" — so any missed frames cap it, and a late tick is a long frame: at 60 fps drawn
+   it is ~15× the water of 240.
+2. A Wayland host sees the pointer only over its own surface. When it entered the output (from the other monitor, or
+   back from behind a window — at the wallpaper's sides), the next position was a jump from wherever it had left, and
+   apply_force stroked a saturated line along the whole jump. WE, polling the desktop cursor, never jumps.
+
+**Fixed:**
+- **0105** `wp_project_set_frame_rate (hz)`: the rate the host means to draw at. An effect whose passes read one of its
+  own FBOs before this frame writes it and never the layer's picture (`previous`, or texture 0 unbound) is a
+  simulation; the passes that write its FBOs step at that rate — a late frame runs several steps (≤ 32), an early one
+  none — each with `g_Frametime` 1/rate, the pointer along the line from the last step's to this frame's, and a press
+  seen between steps on the next step's `g_PointerState.z`; a frame drawn again at the same time doesn't step. The
+  drawing pass (combine) runs every frame. No rate: once per frame, as before. Of WE's stock effects only cursorripple
+  is one (motionblur's accumulation reads `previous`). The player sends `ToWorker::Rate` = the outputs' demand
+  (`max eff_fps(out:<c>.scene_fps, refresh)`), never the budget's throttled rate.
+- **0106** `wp_project_pointer_jump`: the next pointer position is a jump — that frame's `g_PointerPositionLast` is it
+  too, and a simulation's next step starts there. The Wayland backend's `enter` → `PointerSample.entered` →
+  `ToWorker::Pointer {jump: true}`.
+
+**The port stays WE's (owner decision 2026-11-06: a faithful port, fps-dependent ripple included).** The water does
+exactly WE's per-frame arithmetic at the scene's rate: at rate 30 it is WE at 30 fps (strong), at 240 WE at 240
+(faint). The rate is liascape's WE-style setting `out:<c>.scene_fps` (0 = the output's refresh — the owner's WE is
+at 240, his wallpaper output at 240 Hz). WE's own default for a fresh install isn't decoded (the presets top out at
+30); liascape's default stays the refresh.
+
+Tests: host_api_test `simulation_steps_at_the_frame_rate` (rate 30 under a 240 Hz host: 31 steps in 1 s, each 1/30 s
+and 8 frames' move, none for a frame drawn again, a press between steps kept; rate 240 under a 30 Hz host: 8 steps a
+frame of 1/240 s and ⅛ of the move) and `pointer_jump_is_no_move` (a 32 px jump reads 0, a move after it counts; a
+simulation's step after a jump holds only the move since) — both fail on 9b2b244 (241 steps of 1/240 s; the jump read
+as a 255 move) and pass on b9fed39. Player: api `pointer_enter_is_a_jump_and_rate_is_the_demand`. The smoke gained
+`--fps N` (frames per second of scene time), `--we-fps R` (the scene's rate) and a polyline `--pointer`.
+
+Not done: WE keeps tracking the pointer under windows (C6) — ours freezes there and now takes the return as a jump;
+a simulation's trailing `swap` (none in the library) runs once on a frame with steps, not once per step.

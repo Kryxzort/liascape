@@ -868,6 +868,21 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         (`scripts/test-settings-latency.sh`); the global Volume/Speed sliders preview through a throttled
         `/preview {global:true}` (only wallpapers without their own override move; matrix `globalDrag*`).
 
+- [x] **3184155462's mouse water much stronger than WE** (owner, 2026-11-06): cursorripple's force and decay count per
+      frame, so its strength follows the frame rate (in WE too: refs at 30 vs 120 fps). The worker ran it once per tick
+      — a throttled or late tick pushed several frames' force — and a pointer entering the output stroked a saturated
+      line from where it left. Fork 0105 (`wp_project_set_frame_rate`: a simulation effect steps at the scene's rate,
+      `ToWorker::Rate` = the outputs' demand, never the budget's cap) and 0106 (`wp_project_pointer_jump`, Wayland
+      `enter` → `Pointer {jump}`); pin b9fed39. Audit "Cursor ripple result". Guards host_api
+      `simulation_steps_at_the_frame_rate`, `pointer_jump_is_no_move`, api `pointer_enter_is_a_jump_and_rate_is_the_demand`.
+- [ ] **WE's frame limiter, decoded**: FUN_14006dd90 turns `general.user.fps` into `clamp(round(1000/fps)·0.5, 6, 100)`
+      (DAT_140527614) — what uses it, and whether WE's frames are also bounded by the monitor's refresh, aren't decoded.
+      Matters for parity of rate-dependent effects (cursorripple) when the owner's WE fps (240) is above an output's
+      refresh (144 Hz primary): ours steps at `min(scene_fps, refresh)`. WE's fresh-install default fps too.
+- [ ] **Pointer under windows** (audit C6): WE keeps tracking the desktop cursor behind windows; ours sees it only over
+      the bare wallpaper and now takes its return as a jump (no stroke). A compositor-wide cursor (Hyprland IPC poll)
+      would close it.
+
 ## Backend structure (2026-10-26, after the matrix's ~19 seam bugs)
 Two bug classes kept recurring; fix the class, not the instance:
 - [x] **Shared state files written in place** (settings, playlist_state, index — torn reads, lost updates).
