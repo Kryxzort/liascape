@@ -680,3 +680,21 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   auto-mute `/stop` timing check, the auto-mute section alone then 63 / 1 (a different timing check) and 64 / 0. Its
   scene-loudness section's new checks: a louder third play moves the stored value but keeps its own level through
   further reports and a full settings pass; the fourth play opens at the new level.
+
+## 2026-11-06 — the 3D scenes against real WE
+- **3276522107 (night metro): the lighting was never wrong.** The lit version of the train flashes on and off every
+  2 s (the passing street lights), and the three reference frames happened to catch WE between flashes and ours in
+  one. Four separate WE runs flash exactly like ours, same brightness. WE's own clock is already 0.25–0.9 s along when
+  its first frame shows, a different amount each run, so the flashes land at other moments. Nothing to fix there.
+- **3509243656 (space HUD): nothing wrong in ours.** Its "darker in WE" was the capture of WE's HDR output (fixed in
+  the references by the HDR work). Against the corrected reference the brightness is the same; its intro only looks
+  "late" in ours for the same clock reason as above (~0.75 s).
+- **3477054430 (kitty on a rooftop): fixed, the moon now sits in the scene's fog like in WE.** It was too bright: WE
+  fogs 3D image layers, ours only fogged models. Found with it: a layer with a colour blend mode took its colour and
+  transparency twice. 2371103399's two see-through layers were too faint, and are now as in WE (its score 0.071 →
+  0.013). Left: the kitty's head follows the mouse differently in a 3D scene (WE casts the mouse into the 3D world;
+  in TODO).
+- Checks (fork `dc2f07e` + `f6802a0`, patches 0108–0109; already in the pin `313e1d2` the dog fix landed): LWE host
+  tests 125 / 125 (2 new, both fail before the fix). Scene health 89 / 7 / 0 and the shader sweep's known 6 failures,
+  both as before. Player suite: 734 passed and 18 failed at load 40–74 (supervisor, bus-cycle and transport timing),
+  and all 18 passed when run alone. No player code changed.

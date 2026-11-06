@@ -3201,3 +3201,72 @@ Test: api `desktop_pointer_from_a_fake_hyprland` (a fake `.socket.sock`: placed 
 desktop, moves, onto the other output off the scene unclamped with no jump, the surface's press only sets the
 buttons, only `cursorpos` requests, a failing reply falls back to the surface with a jump); units in `signal::cursor`
 (reply parsing, the mapping, the choice, change-only publishing) and `scene::pointer` (unclamped).
+
+### 3D scenes against WE: fog on the layers, the colour once, the clock's head start (fork patches 0108–0109, 2026-11-06)
+
+The three 3D library scenes against the real-WE references (`scene-we-ref.md`): 3276522107 0.43 ("ours lights the
+red seats and the aisle, WE keeps them near-black"), 3509243656 0.36 ("WE still fading its intro at 5 s"), 3477054430
+0.085.
+
+**3276522107 — no lighting difference; a 2 s flicker sampled at another phase.** None of its layers is lit (both
+train layers are `genericimage4` with LIGHTING 0; ambient 0.75, skylight 0). The train is two full-screen images: the
+dark one (`Mask_0005_NoLightingNoAriane`, colour 0.33) and the lit one (`Mask_0004_NormalLightingNoAriane`) whose
+alpha is a 15 fps, 30-frame loop: ~0 for frames 0–14, then 1 / 0.3 / 1 / 0.3 / 1 / 0.3 at 16–26, 0 at 28. Measured on
+WE (the red of the seats, x 100–600, y 800–1050) over a dense capture (20 frames, 0.25–5 s) and three more runs
+(`--repeat 3`, 15 frames each): WE flashes exactly like ours, peak 18–20 (ours 17–19). Fitting a time offset per run,
+ours matches WE at every frame (rms 1.6–2.2 of ~19). The fitted offsets are **0.25, 0.25, 0.35 and 0.70 s** (mod 2):
+WE's scene clock is already that far along at its first visible frame, by an amount that changes from run to run.
+3509243656's fade fits a 0.75 s lead in the dense run. Ours starts at 0 on its first frame. So the report's three
+frames caught WE between flashes and ours inside one. With ours rendered 0.85 s later (the default capture's fit),
+3276522107 scores 0.29–0.31 instead of 0.43. What's left is the scrolling buildings' phase in the windows (their
+scroll runs on g_Time) and the god rays that follow them. Not a renderer difference; WE's head start depends on its
+load (not ported).
+
+**3509243656 — WE's clock head start; the brightness was the capture.** Its overlay (`RST界面背景备用`, alpha
+script: 1 until engine.runtime 2 s, a 3 s smoothstep to 0) fades as written in both. The first reference set showed
+WE ~10× darker after the fade. That was DXVK showing WE's FP16 swap chain raw (`we-proton.md`, "The FP16 swap
+chain"): our frame through sRGB → linear gave mean 1.53 against that capture's 1.63, and with `--we-setting
+postprocessing=enabled` (no HDR, no FP16 swap chain) WE was as bright as ours. Against the re-encoded reference WE and
+ours agree at 5 s (mean 17.82 / 17.86). What's left is the head start: at 2 s WE is already 1.38 and ours 0.13. A
+0.75 s lead fits the dense run.
+
+**3477054430 — the moon misses the scene's fog (Observed, fixed).** The moon is a `genericimage4` image layer 180
+units out, the scene's distance fog from 6.53 to 500 (density 0 → 0.98, quadratic: 0.12 there). WE's moon is 129.5
+(mean of its disc), ours was 149, and 149 × 0.88 = 131.
+
+- GH 0x140212f90 (the image's setup) sets image flag 0x10 when the layer has a colour blend mode (≠ 0, ≠ 31), flag
+  0x100, or the scene has distance or height fog (scene flags 0x1800000).
+- With 0x10, GH 0x140230ec0 builds a material override, `combos` {BLENDMODE (0 for modes 0 / 31, GH 0x140211f90),
+  FOG_COMPUTED 1}, `depthtest` / `depthwrite` from the layer's material, LIGHTING / REFLECTION from the model's flags.
+  FOG and FOG_COMPUTED are removed when the layer's material shader has no FOG combo or 0. It loads
+  `materials/util/effectpassthrough_4.json` (genericimage4) with that override as the layer's last draw
+  (`effectpassthrough.json`, genericimage3, when the renderer's vtable +0x40 is ≤ 2; Inferred: the scene `version`,
+  4–5 here, stored at scene +0x438). A puppet reloads its own material with the override instead.
+- GH 0x140214b50 (the image draw): with 0x10 the base and **all** effects draw off screen (the effect count, not
+  count − 1). The context colour is set to (1, 1, 1, 1), GH 0x1402321d0 sets the layer's colour and alpha, and the
+  passthrough draws into the scene. The colour and alpha apply once, on the last draw.
+- GH 0x1401d2a20 (every draw's defines): FOG_DIST / FOG_HEIGHT when the scene's fog bits are set and the draw's FOG
+  combo is on. genericimage4 then fogs by `length (g_EyePosition − worldPos)`.
+
+**Ours (0108).** A world-placed layer of a fog scene whose material's FOG is on (pass combos, else the shader's
+`[COMBO]` default) gets the last draw: `effectpassthrough_4` with BLENDMODE, FOG_COMPUTED, FOG_DIST / FOG_HEIGHT,
+the base material's depth test and write, `g_EyePosition`, the fog uniforms and its world matrix as `g_ModelMatrix`.
+Its base pass reads `g_Color4` (1, 1, 1, 1). So does a colour-blend layer's base pass (**0109**). Its existing
+genericimage3 BLENDMODE draw was the only one that should take the colour, but both did: a 0.3 layer came out at
+0.09. On the 12 library scenes with a blend-mode layer whose alpha or colour isn't 1: 2371103399 0.071 → 0.013 (its
+two mode-7 layers at alpha 0.3: 128 → 143.6 where they differ, WE 142.9), 3309103316 0.141 → 0.136 (64.3 there, WE
+64.5). The other 10 were unchanged within the clock digits' noise. The moon: 149 → 129.6 (WE 129.5). 3477054430 0.085 → 0.058. 3276522107's layers all
+take the new draw (fog from 0 to 500 at density 1: nothing at 2–25 units). Applying the lit train's alpha on both
+draws had put its 0.3 frames at 0.09 (seat rms against WE 3.2–3.9); once, 1.6–2.2.
+Tests: api `fog_reaches_world_layers` (a white genericimage4 layer 10 units out, fog red 0 → 5: red; alpha 0.5
+under far fog: 127 127 191, once; on b9fed39 the layer stays white) and `blend_mode_layer_takes_its_colour_once`
+(colour 0.5 multiplied over red: 128 0 0; 64 0 0 on b9fed39).
+
+**Not done / found:**
+- `input.cursorWorldPosition` in a 3D scene. 3477054430's head turns toward `cursorWorldPosition − its origin`
+  (4.78, 0.81, −20.6) once that is over 100 apart. In WE the head turns left with the pointer at the centre or the
+  left, and faces front with it at the right (captures `ptrL-3d`, `ptrR-3d`): WE's value is the pointer cast into
+  the world (the kitty is right of the centre on screen). Ours is scene pixels (960, 540 at the centre), so the head
+  faces front. The getter is in scenescript64.dll (0x1810e6dd4: host interface +0x498, vtable +0xa8). Which world
+  point wallpaper64 hands it (ray depth, plane) wasn't decoded.
+- WE's clock head start at the first frame (above), and its g_Time epoch (the building scroll).
