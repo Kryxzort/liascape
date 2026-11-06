@@ -965,6 +965,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       override not saved, `pending × seq:next+next` landed one item short) — both passed alone 2×.
 
 ## Next up (handoff 2026-10-26, weekly limit)
+- [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
+      changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
+      loud quiet", "like audio in reverse or some ghost". Suspects: the worker's WSOLA stretch (`stretch.rs`) engaging
+      when an effect or `compress_to` changes A's speed (non-periodic sound through 20 ms Hann segments → phasey/reversed
+      grains and amplitude pumping), a crossfade gain ramp fighting the auto-mute's mute/unmute bursts (Spotify + a
+      notification flapped it 6× in 16 s on 2026-11-06), or a comb/phase effect from A and B carrying the same sound.
+      Reproduce on the private PipeWire (record the bus during scene→video and scene→scene transitions across effects
+      and speeds) before fixing.
 - [x] **Trash during a volume change** — a slider's persist (250 ms after release) or an `item`-mode volume key landing
       right AFTER the item is trashed: `SetMeta` creates the entry if missing → a ghost index entry for a trashed item
       (a later download with that key inherits it), and Undo restores the pre-drag volume. Add a matrix cell (RED
