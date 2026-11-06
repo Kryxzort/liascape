@@ -1010,6 +1010,21 @@ Two bug classes kept recurring; fix the class, not the instance:
       `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
+  - [x] **Real-WE references (goal pictures)** — done 2026-11-06, `docs/player/spikes/we-proton.md`. The real
+        Wallpaper Engine 2.8.485 runs headless under Proton Experimental (umu, own prefix, own config, in
+        `gamescope --backend headless`, no audio device, Steam not needed): `scripts/dev/we-ref-capture.sh <id>
+        [--times …] [--prop k=v] [--pointer X0,Y0:X1,Y1 --pointer-time A-B] [--fps N] [--desktop]`, `--batch` over
+        the Workshop folder. Every library scene has frames at 0.5 / 2 / 5 s in `docs/player/reports/we-ref/<id>/`;
+        `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
+        (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
+    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured).
+    - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
+          at 30); at a matched 30 fps ours is WE's strength. Check what frame rate / `g_Frametime` the player gives
+          scenes (the owner's Windows WE runs at 240 fps). Refs: `we-ref/3184155462/ripple-*`.
+    - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as
+          WE's default output, winepulse pointed at it, a track played into it (the spike's "Blockers").
+    - [ ] 3414858021's "WEDNESDAY": capture on a Wednesday (`we-ref-capture.sh 3414858021 --tag wednesday`);
+          libfaketime didn't reach Wine's clock.
   - [ ] **WE ↔ LWE gap audit → porting batches** (2026-10-29,
         `docs/player/spikes/we-lwe-gap-audit.md`). It has 185 rows: what WE 2.8.485 scenes do (decompiled, or from
         assets/docs) that the fork doesn't, each with the number of the owner's 96 scenes that use it. Port it in
