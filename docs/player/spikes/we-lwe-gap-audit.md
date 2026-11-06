@@ -3118,5 +3118,10 @@ simulation's step after a jump holds only the move since) — both fail on 9b2b2
 as a 255 move) and pass on b9fed39. Player: api `pointer_enter_is_a_jump_and_rate_is_the_demand`. The smoke gained
 `--fps N` (frames per second of scene time), `--we-fps R` (the scene's rate) and a polyline `--pointer`.
 
+Gates on b9fed39: host_api_test 122/122; scene health 89 clean / 7 degraded / 0 failed, no scene's class or loss
+changed; shader sweep 6 failed checks, the 6 known; player suite 745 passed, 0 failed, 3 ignored. A library scan for
+simulation effects (stock and packaged, the rule above) finds only 3184155462; `g_PointerPositionLast` is read only by
+cursorripple, so 0106 changes nothing else either.
+
 Not done: WE keeps tracking the pointer under windows (C6) — ours freezes there and now takes the return as a jump;
 a simulation's trailing `swap` (none in the library) runs once on a frame with steps, not once per step.
