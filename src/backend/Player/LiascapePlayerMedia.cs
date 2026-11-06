@@ -388,6 +388,14 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneLoudness", () => { if (SceneLoudnessOf(e) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State); });
             return;
         }
+        if (kind == "source.rejected")
+        {
+            // a value a source refused (it keeps playing; e.g. an `af` mpv couldn't build → it plays without it,
+            // un-normalized) — no source changed, only worth a line in the log
+            var rp = Str(e, "path");
+            LiascapePlayerClient.Log($"player refused {Str(e, "prop")} on {Str(e, "id")} ({(rp.Length > 0 ? Path.GetFileName(rp) : "?")}): {Str(e, "reason")}");
+            return;
+        }
         // every subscribed kind (LiascapePlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         if (kind == "source.broken")

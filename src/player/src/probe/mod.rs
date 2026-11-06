@@ -242,6 +242,14 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("hwdec_interop".into(), json!(m.hwdec_interop()));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
+            // The graph `af` mpv refused to build (it plays the fallback chain: no user filters).
+            o.insert(
+                "af_refused".into(),
+                json!(
+                    m.af_refused()
+                        .map(|r| json!({"af": r.af, "reason": r.reason}))
+                ),
+            );
             // How often its dropped first frame was asked for again (`REFETCH_AFTER`, sources/mpv.rs).
             o.insert("frame_refetches".into(), json!(m.frame_refetches()));
             // Phase 2: where it renders, and the worker's timings for it.

@@ -324,6 +324,25 @@ pub fn mpv_af(value: &str) -> String {
 /// The tempo filter [`mpv_af`] keeps in every chain.
 const TEMPO_AF: &str = "@liascape-tempo:scaletempo2";
 
+/// A graph `af` mpv could not build ([`MpvSource::af_failed`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AfRefusal {
+    /// The graph value (what `read("af")` still says: what was asked for).
+    pub af: String,
+    /// mpv's / ffmpeg's own words for it, e.g. `ffmpeg: filter: Value 0.000000 for
+    /// parameter 'I' out of range [-70 - -5]`.
+    pub reason: String,
+}
+
+/// mpv's log line when an audio filter chain can't be built (`player/audio.c`, at the
+/// file's audio init AND on a live `af` change; mpv 0.41 spells it "initialized failed!").
+/// Matched by prefix so a corrected spelling still counts.
+fn is_af_failure(prefix: &str, text: &str) -> bool {
+    prefix == "cplayer"
+        && text.trim_start().starts_with("Audio filter init")
+        && text.contains("failed")
+}
+
 /// What an in-flight async request was, so its reply can be reported/reverted.
 struct Request {
     /// e.g. `af=no_such_filter (af)` — what an `Error` event names.
@@ -573,6 +592,13 @@ pub struct MpvSource {
     ctx_error_sent: bool,
     last_pos_emit: Option<Instant>,
     last_error_log: Option<String>,
+    /// The last few error-level mpv log lines (oldest first) — what an "Audio filter
+    /// initialized failed!" names as its cause (the lines ffmpeg/lavfi logged just before it).
+    recent_errors: std::collections::VecDeque<String>,
+    /// The graph `af` mpv refused to build, and why (see [`MpvSource::af_failed`]): mpv
+    /// plays the fallback chain ([`mpv_af`] of `""`) instead. Cleared by the next `af` apply
+    /// with another value.
+    af_refused: Option<AfRefusal>,
     pending: Vec<SourceEvent>,
     /// The current load failed (cleared by the next load): stepped mode doesn't wait on it.
     load_failed: Option<String>,
@@ -987,6 +1013,8 @@ impl MpvSource {
             ctx_error_sent: false,
             last_pos_emit: None,
             last_error_log: None,
+            recent_errors: std::collections::VecDeque::new(),
+            af_refused: None,
             pending: Vec::new(),
             load_failed: None,
             stepped,
@@ -1377,6 +1405,74 @@ impl MpvSource {
         }
     }
 
+    /// mpv couldn't build the audio filter chain (TODO "A rejected `af` silences the
+    /// video", owner 2026-11-06): a filter with an argument ffmpeg rejects — `loudnorm=I=0`
+    /// (its `I` takes −70…−5) — passes mpv's own option check (the filter exists), so the
+    /// `af` set succeeds and only building the chain fails. At the file's audio init mpv then
+    /// plays NO audio at all ("Audio: no audio": the track is deselected, `current-ao`
+    /// unset — the video went silent); on a live change it keeps the old chain but the bad
+    /// value stays mpv's `af`, so the next rebuild (a re-route after a bus bounce) goes silent.
+    /// Either way: fall back to the chain without the user's filters (sound un-normalized
+    /// beats no sound), re-select the audio track (mpv deselected it; a plain `aid=auto` is a
+    /// no-op then — measured, like [`Self::set_audio_route`]'s), and report it as a
+    /// `Rejected` `af` naming mpv's reason (the host logs `source.rejected`; the `sources`
+    /// probe shows `af_refused`). `read("af")` keeps the graph value — the backend's diff
+    /// then doesn't send it again — and an `apply` of that same value is a no-op.
+    fn af_failed(&mut self) {
+        let af = match self.props.get("af") {
+            Some(PropValue::Str(s)) => s.trim().to_string(),
+            _ => String::new(),
+        };
+        // Nothing of the user's to drop (our own tempo chain failed), or already handled.
+        if af.is_empty() || self.af_refused.as_ref().is_some_and(|r| r.af == af) {
+            return;
+        }
+        let reason = self
+            .recent_errors
+            .iter()
+            .filter(|l| !l.starts_with("cplayer:"))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
+        let reason = if reason.is_empty() {
+            "mpv could not build the audio filter chain".to_string()
+        } else {
+            reason
+        };
+        self.recent_errors.clear();
+        self.af_refused = Some(AfRefusal {
+            af: af.clone(),
+            reason: reason.clone(),
+        });
+        if self.live {
+            // A failure of the fallback itself reverts to the graph value (nothing changes).
+            self.prev_value = self.props.get("af").cloned();
+            if let Err(e) = self.set("af", "af", &mpv_af("")) {
+                self.last_error_log = Some(format!("af fallback: {}", e.message));
+            }
+            if !matches!(self.props.get("no_audio"), Some(PropValue::Bool(true))) {
+                for v in ["no", "auto"] {
+                    self.prev_value = self.props.get("no_audio").cloned();
+                    let _ = self.set("no_audio", "aid", v);
+                }
+                if !matches!(self.props.get("paused"), Some(PropValue::Bool(true))) {
+                    self.arm_audio_flowing();
+                }
+            }
+        }
+        self.pending.push(SourceEvent::Rejected {
+            prop: "af".into(),
+            reason: format!(
+                "af {af:?} refused by mpv ({reason}): playing without it (sound not normalized)"
+            ),
+        });
+    }
+
+    /// The graph `af` mpv refused, if any ([`Self::af_failed`]; `sources` probe).
+    pub fn af_refused(&self) -> Option<&AfRefusal> {
+        self.af_refused.as_ref()
+    }
+
     /// R85: arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
     /// un-pause request is queued. Nothing to wait for (fires at once) when: stepped mode
     /// (mpv stays paused for good there — audio is always silent, § Sources "Stepped
@@ -1645,7 +1741,15 @@ impl MpvSource {
                         );
                     }
                     if matches!(level.as_str(), "error" | "fatal") {
-                        self.last_error_log = Some(format!("{prefix}: {}", text.trim_end()));
+                        let line = format!("{prefix}: {}", text.trim_end());
+                        self.last_error_log = Some(line.clone());
+                        if is_af_failure(&prefix, &text) {
+                            self.af_failed();
+                        }
+                        if self.recent_errors.len() >= 4 {
+                            self.recent_errors.pop_front();
+                        }
+                        self.recent_errors.push_back(line);
                     }
                 }
                 Event::PropertyChange { id, value, .. } => self.on_prop(id, value),
@@ -2339,7 +2443,16 @@ impl Source for MpvSource {
                 };
                 self.set(prop, name, &val)
             }
-            "af" => self.set(prop, "af", &mpv_af(&s)),
+            "af" => {
+                // The value mpv already refused: it keeps playing the fallback chain (sending
+                // it again would only fail again, rebuilding the audio chain each time).
+                if self.af_refused.as_ref().is_some_and(|r| r.af == s.trim()) {
+                    self.prev_value = None;
+                    return Ok(());
+                }
+                self.af_refused = None;
+                self.set(prop, "af", &mpv_af(&s))
+            }
             // Phase 2: a scene's still image and user properties; stored (a global `set`
             // never fails here).
             "preview" | "scene_props" | "loudness_seed" | "loudness_key" => Ok(()),

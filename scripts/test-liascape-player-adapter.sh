@@ -351,6 +351,40 @@ g55=$(dB 55); g20=$(dB 20)
 post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
 
+echo "== normalization: an out-of-range target in settings.json is clamped; an af mpv can't build plays without it, never silent"
+# TODO "A rejected `af` silences the video" (owner 2026-11-06): a target of 0 LUFS built a loudnorm ffmpeg refuses
+# (I takes −70…−5) and mpv then played the video with NO audio. The backend clamps a stored target; the player survives any
+# af mpv can't build (falls back to its chain without it, re-selects the audio track, reports `source.rejected`).
+sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
+src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
+af_has() { cur af | grep -q -- "$1"; }
+refused_set() { src_probe "$1" | jq -e '.refused != null and .ao == "null"' >/dev/null; }
+sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'   # written straight into the file (the UI can't send 0 any more)
+post /apply "{\"path\":\"$C\"}" >/dev/null
+waitfor $WAIT shows "$C" || bad "/apply c → cur $(cur path)"
+# c's loudness is measured on first need; once it lands the backend re-applies: c's af becomes a loudnorm
+waitfor 30000 af_has loudnorm && af_has 'I=-5:' && ok "target 0 in settings.json → loudnorm clamped to I=-5 ($(cur af | cut -c1-40)…)" \
+  || bad "target 0: c's af = $(cur af)"
+SIDC=$(srcIdForPath "$C")
+src_probe "$SIDC" | jq -e '.ao == "null" and .refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
+  || bad "clamped loudnorm: $(src_probe "$SIDC")"
+# any af mpv can't build, set on the live source: it plays on without it (audio up), refused + logged by the backend
+ctl set "{\"path\":\"$SIDC.af\",\"value\":\"loudnorm=I=0:TP=-1.5:LRA=11\"}" >/dev/null
+waitfor $WAIT refused_set "$SIDC" && ok "an unbuildable af on the live source → refused, audio output still up ($(src_probe "$SIDC" | cut -c1-160))" \
+  || bad "unbuildable af live: $(src_probe "$SIDC")"
+ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -e --arg id "$SIDC" '[.events[] | select(.id==$id and .prop=="af")] | length == 1' >/dev/null \
+  && ok "…one source.rejected (af) logged by the player" || bad "source.rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
+waitfor $WAIT grep -q "player refused af on $SIDC" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…and the backend's log says so" || bad "backend log has no 'player refused af on $SIDC'"
+# the same file opened with it from the start (the owner's case: a NEW source whose af mpv can't build): audio up
+ctl create "$(jq -nc --arg p "$C" '{kind:"source", props:{path:$p, loop:true, af:"loudnorm=I=0:TP=-1.5:LRA=11"}}')" > "$T/afc.json"
+SIDX=$(jq -r .id "$T/afc.json")
+waitfor $WAIT refused_set "$SIDX" && ok "a new source opened with it: refused, audio output up ($(src_probe "$SIDX" | cut -c1-120))" \
+  || bad "new source with an unbuildable af: $(src_probe "$SIDX")"
+ctl destroy "{\"id\":\"$SIDX\"}" >/dev/null 2>&1
+sf_raw '.NormalizeAudio = false | .NormalizeTargetLufs = -14'
+setting '.NormalizeAudio = false'; waitfor $WAIT cur_is af "" || bad "normalization off → af $(cur af)"
+
 echo "== timed playlist: advance-on-end, no minimum play time (2 s clips → advance on end)"
 # A rotation's rate is counted on the PLAYER's clock: the handoffs (after index $1) whose t_mono_ms lies
 # within $2 ms of the first one (the play's own switch). The sleep only lets that window pass. Counting
