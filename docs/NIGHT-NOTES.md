@@ -576,7 +576,9 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   your monitors are set to 144 and 240 explicitly.
 - **The mouse behind windows:** WE follows the mouse over the whole desktop — over windows and the other screen too.
   Ours only saw it over the bare wallpaper, so a mouse-following scene froze while the cursor was over a window. Now,
-  on Hyprland, the player asks Hyprland where the cursor is, as often as the scene draws (about 0.6 % of one CPU core
-  in Hyprland at 240 a second), and only while a scene is playing. Scenes follow the cursor everywhere, like
+  on Hyprland, the player asks Hyprland where the cursor is, as often as the scene draws (at 240 a second: about 1.4 % of
+  one CPU core in the player and 0.6 % in Hyprland), and only while a scene is playing. Scenes follow the cursor everywhere, like
   WE; clicks still count only on the bare wallpaper (as before). If Hyprland can't be asked, it falls back to the old
   behaviour by itself.
+- Pushed and restarted the player (it came back with your scene; at the moment it is held paused because a window
+  covers the screen, so it isn't asking Hyprland anything).

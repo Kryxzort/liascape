@@ -3185,7 +3185,14 @@ one the cursor is on. While it reads, nothing is a jump (the cursor never jumps 
 placement; the surface's samples give only the buttons (a press is seen only over the bare desktop, as before).
 Fallback: not Hyprland, no socket, or a failed request (retried every 2 s) → the surface pointer, the behaviour
 before (0106's enter jumps), its first sample after a loss a jump. `LIASCAPE_PLAYER_POINTER_SOURCE=surface` forces it.
-Probe `pointer`. Test: api `desktop_pointer_from_a_fake_hyprland` (a fake `.socket.sock`: placed once from the
+Probe `pointer`.
+Cost (owner's machine, Hyprland 0.57, a headless release player with one synthetic scene at 240 fps, 15 s windows,
+desktop vs `surface` A/B ×2): `lia-cursor` 1.33 % / 1.40 % of one core at 240 polls/s (~56 µs CPU a poll: connect,
+write, read, close — Hyprland closes the socket after each reply), the whole player +1.3 %; a request's wall time
+121–129 µs mean (Hyprland answers from its main loop). Hyprland's own share, measured alone with 920 req/s on/off ×4:
+~24 µs a request → ~0.6 % of a core at 240/s (the A/B windows are within its ±1.5 % noise). In the live player the
+scene was held paused by the cover rule at the time: rate 0, no requests at all.
+Test: api `desktop_pointer_from_a_fake_hyprland` (a fake `.socket.sock`: placed once from the
 desktop, moves, onto the other output off the scene unclamped with no jump, the surface's press only sets the
 buttons, only `cursorpos` requests, a failing reply falls back to the surface with a jump); units in `signal::cursor`
 (reply parsing, the mapping, the choice, change-only publishing) and `scene::pointer` (unclamped).

@@ -4292,7 +4292,8 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   `surface`; default Hyprland on Wayland when `HYPRLAND_INSTANCE_SIGNATURE` is set, surface
   headless. Events `pointer.source`, `pointer.desktop`, `pointer.desktop_lost`; probe **`pointer`**
   `{source, in_use, ok, reason, rate_hz, pos, polls, changes, fails, request_us_mean, forwards,
-  jumps}`. Cost (owner's machine, 240 Hz): see the audit's "C6 result". API
+  jumps}`. Cost (owner's machine, 240 polls/s): `lia-cursor` ~1.4 % of a core, Hyprland ~0.6 % (audit "Frame
+  limiter and desktop pointer result"); none while every scene is paused. API
   `desktop_pointer_from_a_fake_hyprland`; units in `signal::cursor`, `scene::pointer`.
 - **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
   `SysMon::start()` (thread `lia-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
