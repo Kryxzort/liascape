@@ -2,10 +2,70 @@
   "3184155462": {
     "class": "measured",
     "note": "owner report: the cursor ripple is much stronger than on Windows. At a matched 30 fps it isn't (see Focus).",
-    "focus": "The owner reports that the mouse-driven \"liquid\" (`cursorripple` on the Background layer 16: ripplescale 0.33, rippledecay 1, ripplespeed 0.5, ripplestrength 0.55, behind the `watereffect` property) looks much stronger in ours than on Windows. **At the same frame rate it isn't.** WE's own ripple depends on the frame rate:\n\n- **The cause.** `cursorripple_apply_force.frag` scales each frame's force by `timeAmt = min(1/30, g_Frametime) / 0.02` times that frame's pointer delta. The simulate pass's decay has a per-frame floor (`max(1.001/255, …)`). So the force added per second goes with the frame time, and at a high frame rate the decay also wins.\n- **The test.** A 1 s drag from (200,1600) to (1600,1600) native px between 1 and 2 s. `cameraparallax=false`, so only the ripple differs between `watereffect=true` and `false`. The measure is mean \\|on − off\\| (0–255) in the path's band (y 700–900 of the 1920 × 1080 frame).\n\n| t (s) | 1.5 | 1.8 | 2.1 | 2.4 | 2.7 | 3.0 | 3.5 |\n|---|---|---|---|---|---|---|---|\n| WE, 30 fps | 2.1 | 4.8 | **5.6** | 4.2 | 2.4 | 1.2 | 0.4 |\n| WE, 30 fps, two \"on\" runs (noise) | 1.3 | 2.0 | 2.0 | 1.5 | 1.0 | 0.7 | 0.4 |\n| WE, 120 fps | 0.6 | 0.4 | 0.2 | 0.1 | 0.1 | 0.1 | 0.1 |\n| ours, 30 fps (deterministic) | 1.7 | 2.9 | **3.7** | 3.0 | 1.6 | 0.6 | 0.0 |\n\n- **The result.** At 30 fps ours has WE's strength, shape and masked area (the rock mass on the left; `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`). At 120 fps, WE's ripple is about a tenth as strong. The owner's Windows WE is configured for **240 fps**, so what they see is the weak one.\n- **What a fix should look at.** The frame rate and `g_Frametime` the player gives this scene, and how often it updates `g_PointerPosition` / `…Last` (a pointer delta accumulated over several frames but applied in one also overdrives it). The effect's constants and shaders are not the problem.\n- **The references** are in `docs/player/reports/we-ref/3184155462/`: `drag/` (defaults, a drag along y = 1080 at 1–2 s), `ripple-on/`, `ripple-off/`, `ripple-on-120fps/` and `ripple-off-120fps/`. The full-size PNGs are in `~/.cache/liascape/we-ref/captures/{drag,rip-on1,rip-on2,rip-off1,rip120-on1,rip120-off1}/3184155462/`. The worker replays the same path with `--pointer 200,1600:1600,1600 --pointer-time 1-2 --prop cameraparallax=false --prop watereffect=true`.\n- **Below,** the default capture (pointer still) matches: 0.055, near the noise."
+    "focus": "The owner reports that the mouse-driven \"liquid\" (`cursorripple` on the Background layer 16: ripplescale 0.33, rippledecay 1, ripplespeed 0.5, ripplestrength 0.55, behind the `watereffect` property) looks much stronger in ours than on Windows. **At the same frame rate it isn't.** WE's own ripple depends on the frame rate:\n\n- **The cause.** `cursorripple_apply_force.frag` scales each frame's force by `timeAmt = min(1/30, g_Frametime) / 0.02` times that frame's pointer delta. The simulate pass's decay has a per-frame floor (`max(1.001/255, …)`). So the force added per second goes with the frame time, and at a high frame rate the decay also wins.\n- **The test.** A 1 s drag from (200,1600) to (1600,1600) native px between 1 and 2 s. `cameraparallax=false`, so only the ripple differs between `watereffect=true` and `false`. The measure is mean \\|on − off\\| (0–255) in the path's band (y 700–900 of the 1920 × 1080 frame).\n\n| t (s) | 1.5 | 1.8 | 2.1 | 2.4 | 2.7 | 3.0 | 3.5 |\n|---|---|---|---|---|---|---|---|\n| WE, 30 fps | 2.1 | 4.8 | **5.6** | 4.2 | 2.4 | 1.2 | 0.4 |\n| WE, 30 fps, two \"on\" runs (noise) | 1.3 | 2.0 | 2.0 | 1.5 | 1.0 | 0.7 | 0.4 |\n| WE, 120 fps | 0.6 | 0.4 | 0.2 | 0.1 | 0.1 | 0.1 | 0.1 |\n| ours, 30 fps (deterministic) | 1.7 | 2.9 | **3.7** | 3.0 | 1.6 | 0.6 | 0.0 |\n\n- **The result.** At 30 fps ours has WE's strength, shape and masked area (the rock mass on the left; `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`). At 120 fps, WE's ripple is about a tenth as strong. The owner's Windows WE is configured for **240 fps**, so what they see is the weak one.\n- **What a fix should look at.** The frame rate and `g_Frametime` the player gives this scene, and how often it updates `g_PointerPosition` / `…Last` (a pointer delta accumulated over several frames but applied in one also overdrives it). The effect's constants and shaders are not the problem.\n- **The references** are in `docs/player/reports/we-ref/3184155462/`: `drag/` (defaults, a drag along y = 1080 at 1–2 s), `ripple-on/`, `ripple-off/`, `ripple-on-120fps/` and `ripple-off-120fps/`. The full-size PNGs are in `~/.cache/liascape/we-ref/captures/{drag,rip-on1,rip-on2,rip-off1,rip120-on1,rip120-off1}/3184155462/`. The worker replays the same path with `--pointer 200,1600:1600,1600 --pointer-time 1-2 --prop cameraparallax=false --prop watereffect=true`.\n- **Below,** the default capture (the pointer still) matches: it is the lowest-scoring scene, at the noise."
   },
   "3516174947": {
     "class": "ok",
     "note": "the preview-compare question (\"needs a WE capture\"): at its default lens size 0.75 WE also shows more than the canvas — black on all four sides at the canvas's aspect, bars top and bottom (132 px of 1080, the 0.125 that zoom 0.75 predicts) on a 16:9 desktop (we-ref/3516174947/desktop/); at lens 1 the canvas fills (lens1/). Our letterbox is WE's. The rest is its random camera path and the prompt box's timing."
+  },
+  "3019192537": {
+    "class": "bug?",
+    "note": "HDR at Ultra: WE is far more saturated and contrasty (a deep orange and red sky, a near-black foreground, a lens-flare streak through the sun); ours is flat and washed out. Probably the Ultra post-processing (HDR bloom / tone mapping). The biggest real difference found."
+  },
+  "3395587987": {
+    "class": "bug?",
+    "note": "HDR at Ultra: in WE the girl's face and hair are deep, dark blue and the particles brighter; in ours they are a light, washed-out blue. The same family as 3019192537."
+  },
+  "3490034653": {
+    "class": "bug?",
+    "note": "ours is lighter in the shadows (less contrast) across the whole frame; perhaps the same family as the HDR scenes. The petals are random."
+  },
+  "3354740764": {
+    "class": "bug?",
+    "note": "ours draws the dog sprite on an opaque black box, adds diagonal yellow light shafts across the field that WE doesn't draw, and is still black at 0.5 s. Its system fonts (Arial / Comic Sans / Consolas) are the real ones in WE."
+  },
+  "3276522107": {
+    "class": "known",
+    "note": "a 3D train interior: ours lights the red seats and the beige aisle; WE keeps them near-black. The windows match. Lighting of 3D models (TODO \"LWE: 3D / perspective scenes\")."
+  },
+  "2672425887": {
+    "class": "time",
+    "note": "the demon face in the background has faded in by 2 s in WE but only by 5 s in ours: an intro timeline runs slower in ours."
+  },
+  "3509243656": {
+    "class": "time",
+    "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\")."
+  },
+  "2783122117": {
+    "class": "time",
+    "note": "a crowd of skeletons sliding sideways at another phase (scroll speed or start). Compare by eye at one moment."
+  },
+  "3593587273": {
+    "class": "time",
+    "note": "a puppet at another pose; the layout matches."
+  },
+  "3233141951": {
+    "class": "time",
+    "note": "the dragon and the girl sit about 20 px apart vertically (sway / puppet phase); the colours match."
+  },
+  "3419466417": {
+    "class": "time",
+    "note": "the sword-glint sweep at another phase; matches otherwise."
+  },
+  "3219908811": {
+    "class": "time",
+    "note": "random petals; the lantern's clock text is fainter in ours at 0.5 s (a fade)."
+  },
+  "3363252053": {
+    "class": "time",
+    "note": "fireworks at other moments; matches otherwise."
+  },
+  "3414858021": {
+    "class": "ok",
+    "note": "matches once WE sees the pointer. It says FRIDAY: WEDNESDAY needs a Wednesday run. The rain is random."
+  },
+  "2542468435": {
+    "class": "unexamined",
+    "note": "colour (hist 0.51); not looked at closely."
   }
 }

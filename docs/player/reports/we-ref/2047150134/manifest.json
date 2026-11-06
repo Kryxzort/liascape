@@ -14,26 +14,30 @@
   "we": "2.8.485",
   "proton": "1793301796 experimental-11.0-20261027b-x86_64",
   "props": [],
-  "pointer": "683,384",
-  "pointer_time": "",
+  "pointer": "679,380:683,384",
+  "pointer_time": "0-0.3",
   "fps": 30,
+  "d3dcompiler": "native-ms",
+  "shaders_compiled": 0,
+  "fonts": "windows",
+  "clock": "Wine wall clock",
   "we_settings": [],
   "we_crashed": false,
-  "first_frame_ms": 6547,
-  "wall_ms": 12086,
-  "we_gpu_mib": 208,
-  "rss_mib": 2063,
-  "cpu_s": 23.4,
+  "first_frame_ms": 6496,
+  "wall_ms": 12014,
+  "we_gpu_mib": 212,
+  "rss_mib": 2300,
+  "cpu_s": 19.6,
   "shots": [
     {
       "t": 0.5,
-      "late_ms": 6,
-      "t_actual": 0.506
+      "late_ms": 12,
+      "t_actual": 0.512
     },
     {
       "t": 2,
-      "late_ms": 6,
-      "t_actual": 2.006
+      "late_ms": 12,
+      "t_actual": 2.012
     },
     {
       "t": 5,
@@ -41,6 +45,6 @@
       "t_actual": 5.015
     }
   ],
-  "captured": "2026-11-06T15:49:11+05:30",
+  "captured": "2026-11-06T16:55:59+05:30",
   "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"
 }

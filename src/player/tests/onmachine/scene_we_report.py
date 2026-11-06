@@ -12,7 +12,7 @@ Unlike the preview compare there is nothing to align: both frames are the whole 
 Each (WE, ours) pair at the same T is resized to 256 px wide and scored with the preview compare's measures
 (scene_preview_report.py: ssim / hist / edges / local, the same weights), the local grid 4 x 4 over the frame.
 A scene's score is the mean over its times (the worst time is listed too). Two things keep it a ranking, not a
-verdict: WE's clock is the first non-black frame (+-80 ms, an animation that moves fast differs by that much), and
+verdict: WE's clock is the first frame with a picture (about ±0.15 s, an animation that moves fast differs by that much), and
 WE's particles / random choices are not seeded like ours (WPENGINE_PARTICLE_SEED=7).
 
 Side-by-sides (WE | ours | |difference| x4, one row per time) go to <results>/sbs/<id>.png and, as small JPEGs,
@@ -127,6 +127,52 @@ def sbs(rows, h=200):
     return out
 
 
+def scene_traits(sid):
+    """What in the scene WE's reference can't vouch for: text (fonts), the wall clock, video textures."""
+    d = os.path.join(WORKSHOP, sid)
+    raw = b""
+    for f in ("scene.pkg", "scene.json"):
+        try:
+            with open(os.path.join(d, f), "rb") as fh:
+                raw += fh.read()
+        except OSError:
+            pass
+    low = raw.lower()
+    import re
+
+    sysfonts = sorted({m.decode() for m in re.findall(rb"systemfont_([A-Za-z0-9_]+)", raw)})
+    return {
+        "text": b'"text"' in raw and b'"font"' in raw,
+        "sysfonts": sysfonts,
+        "clock": any(k in raw for k in (b"getHours", b"getDay", b"getDate", b"getMinutes", b"toLocaleTimeString")),
+        "video": any(k in low for k in (b"ftypisom", b"ftypmp42", b"\x1aE\xdf\xa3", b".mp4", b".webm")),
+    }
+
+
+def trust_of(man, tr):
+    """One cell: how far this reference can be trusted, class by class."""
+    out = []
+    d = man.get("d3dcompiler")
+    out.append("FXC" if d == "native-ms" else ("builtin-d3dc" if d else "d3dc?"))
+    if man.get("shaders_compiled"):
+        out[-1] += f" ({man['shaders_compiled']} compiled)"
+    if tr["sysfonts"]:
+        src = "Windows'" if man.get("fonts") == "windows" else "Proton's stand-ins for"
+        out.append(f"system fonts: {src} {'/'.join(tr['sysfonts'])}")
+    elif tr["text"]:
+        out.append("fonts: the scene's own")
+    if tr["clock"]:
+        out.append("clock: Wine's")
+    if tr["video"]:
+        out.append("video: crashed" if man.get("we_crashed") else "video")
+    elif man.get("we_crashed"):
+        out.append("crashed")
+    return ", ".join(out)
+
+
+WORKSHOP = os.path.expanduser("~/.local/share/Steam/steamapps/workshop/content/431960")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", required=True)
@@ -169,7 +215,8 @@ def main():
         invalid = "WE crashed" if man.get("we_crashed") else ("WE black" if black else "")
         r = {"id": sid, "exit": ex.get("exit"), "invalid": invalid, "times": [p["t"] for p in pairs], "pairs": pairs,
              "props": man.get("props", []), "pointer": man.get("pointer", ""), "window": man.get("window"),
-             "class": (notes.get(sid) or {}).get("class", ""), "note": (notes.get(sid) or {}).get("note", "")}
+             "class": (notes.get(sid) or {}).get("class", ""), "note": (notes.get(sid) or {}).get("note", ""),
+             "trust": trust_of(man, scene_traits(sid))}
         if pairs:
             for k in ("dist", "ssim", "hist", "edges", "local", "mean_abs"):
                 r[k] = float(np.mean([p[k] for p in pairs]))
@@ -220,13 +267,27 @@ def render_md(out, a, first):
              f"GPU {run.get('gpu', '?')}; references: Wallpaper Engine {run.get('we', '?')} under {run.get('proton', '?')}, "
              "Ultra preset, MSAA x8, 30 fps, no audio device; {} scenes.".format(len(res)))
     L.append("- **How:** WE renders each scene in a window of the canvas's own aspect (<= 1920 x 1080) inside a "
-             "headless gamescope; frames at T s after its first non-black frame (+-80 ms). Ours: `liascape-scene-worker "
+             "headless gamescope; frames at T s after its first frame with a picture (about ±0.15 s; ours at the shot's actual time). Ours: `liascape-scene-worker "
              "--lwe-smoke --shots` at the same T (paced 30 fps, particle seed 7), same props / pointer path. Each pair "
              "at 256 px wide: score = 0.30 ssim + 0.20 hist + 0.20 edges + 0.30 local (the preview compare's measures, "
              "no alignment needed); a scene's score is its mean over the times, `worst` its worst time.")
     L.append("- **Not render bugs by themselves:** WE's particles and random choices are unseeded (ours seed 7), a "
-             "clock / date shows the capture's wall time, WE's time base is +-80 ms (fast motion), and media-driven "
+             "clock / date shows the capture's wall time, WE's time base is about ±0.15 s (fast motion), and media-driven "
              "layers have no media on either side.")
+    L.append("- **Reference trust** (the `reference` column): `FXC` means WE compiled its shaders with Microsoft's "
+             "compiler, as on Windows. WE loads the d3dcompiler_47 it ships (`bin\\d3dcompiler_47.dll`, Microsoft "
+             "10.0.26100.7705) by path, and the Proton log shows it native, so Wine's own compiler was never used. "
+             "Recompiling with the prefix's system32 swapped for the Windows install's gave byte-identical blobs (63 "
+             "of 63). Most shaders come from the shader cache that came with the Windows install (compiled there); "
+             "`(n compiled)` counts the shaders WE compiled here. `system fonts: Windows' …` means "
+             "the scene names Windows system fonts (`systemfont_arial` …) and WE drew them with the real ones, "
+             "linked into the prefix from the Windows install. Our renderer has to find those faces on Linux, so a "
+             "glyph difference there is a font, not a layout bug. `fonts: the scene's own` means the fonts are "
+             "packed in the scene. `clock: Wine's` means the scene reads "
+             "the wall clock, so its time and date are the capture's, not ours. `video` means it has video textures; "
+             "`video: crashed` means WE crashed on them under Proton. Differences in those classes are not our bugs "
+             "until a Windows capture says so. Check by eye against Windows with "
+             "`docs/player/reports/we-ref/compare/`.")
     if sbs_rel:
         L.append(f"- **Images:** side-by-sides (WE | ours | |diff| x4, a row per time) `{sbs_rel}/<id>.jpg`; "
                  "WE frames (960 px JPEG) + manifests `docs/player/reports/we-ref/<id>/`.\n")
@@ -241,17 +302,17 @@ def render_md(out, a, first):
             if sbs_rel and r.get("dist") is not None:
                 L.append(f"![{r['id']} WE | ours | diff]({sbs_rel}/{r['id']}.jpg)\n")
     L.append("## Ranked\n")
-    L.append("| # | id | score | worst (t) | ssim | hist | edges | local | |Δ| | class | note |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| # | id | score | worst (t) | ssim | hist | edges | local | |Δ| | reference | class | note |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
     ranked = [r for r in res if not r.get("invalid")]
     bad = [r for r in res if r.get("invalid")]
     for i, r in enumerate(ranked, 1):
         if r.get("dist") is None:
-            L.append(f"| {i} | {r['id']} | — | | | | | | | {r['class']} | no pair (exit {r.get('exit')}) {r['note']} |")
+            L.append(f"| {i} | {r['id']} | — | | | | | | | {r.get('trust', '')} | {r['class']} | no pair (exit {r.get('exit')}) {r['note']} |")
             continue
         img = f"[sbs]({sbs_rel}/{r['id']}.jpg)" if sbs_rel else ""
         L.append(f"| {i} | {r['id']} | {r['dist']:.3f} | {r['worst_dist']:.3f} ({r['worst_t']:g} s) | {r['ssim']:.2f} | "
-                 f"{r['hist']:.2f} | {r['edges']:.2f} | {r['local']:.2f} | {r['mean_abs']:.3f} | {r['class']} | "
+                 f"{r['hist']:.2f} | {r['edges']:.2f} | {r['local']:.2f} | {r['mean_abs']:.3f} | {r.get('trust', '')} | {r['class']} | "
                  f"{r['note']} {img} |")
     if bad:
         L.append("\n## No usable WE reference\n")

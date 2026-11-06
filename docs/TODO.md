@@ -1057,7 +1057,12 @@ Two bug classes kept recurring; fix the class, not the instance:
         the Workshop folder. Every library scene has frames at 0.5 / 2 / 5 s in `docs/player/reports/we-ref/<id>/`;
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
-    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured).
+    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real differences:
+          the HDR scenes at Ultra (3019192537, 3395587987, maybe 3490034653): WE is much more contrasty and saturated,
+          ours flat; 3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
+          the intro timelines of 2672425887 / 3509243656.
+    - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
+          own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
           at 30); at a matched 30 fps ours is WE's strength. Check what frame rate / `g_Frametime` the player gives
           scenes (the owner's Windows WE runs at 240 fps). Refs: `we-ref/3184155462/ripple-*`.

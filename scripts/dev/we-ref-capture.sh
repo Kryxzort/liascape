@@ -21,6 +21,8 @@
 #                    before, still after — e.g. a 1 s drag then frames while a cursor ripple settles
 #   --fps N          WE's frame-rate limit and gamescope's refresh (default 30, the worker's pace). Frame-time-
 #                    dependent effects differ with it (cursorripple's force is ~ frametime: weaker at 240 fps)
+#   --builtin-d3dcompiler  keep Wine's d3dcompiler_47 (default: Microsoft's, from /mnt/Windows, with a native
+#                    override — WE compiles its shaders at run time). Fonts: the Windows ones, linked into the prefix
 #   --we-setting k=v WE's own setting (config.json general.user, repeatable), e.g. videohardwareacceleration=false
 #   --desktop        render at the full 1920x1080 "desktop" (WE's cover fit) instead of the canvas's own aspect
 #   --tag NAME       a variant (other props / pointer / --desktop): PNGs into <out>/NAME/<id>, JPEGs into
@@ -58,6 +60,8 @@ PROPS=()
 POINTER=
 PTIME=
 FPS=30
+USE_WIN_D3DC=1
+USE_WIN_FONTS=1
 WE_SETTINGS=()
 DESKTOP=0
 REPEAT=1
@@ -91,6 +95,7 @@ while (($#)); do
     --pointer-time) PTIME=$2; shift ;;
     --fps) FPS=$2; shift ;;
     --we-setting) WE_SETTINGS+=("$2"); shift ;;
+    --builtin-d3dcompiler) USE_WIN_D3DC=0 ;;
     --desktop) DESKTOP=1 ;;
     --repeat) REPEAT=$2; shift ;;
     --batch) BATCH=1 ;;
@@ -153,6 +158,40 @@ setup() {
     # our config.json starts from the Linux-side install's (written under Proton, user "steamuser")
     if [[ -f $WE_LINUX/config.json ]]; then cp "$WE_LINUX/config.json" "$WR/config.base.json"; else cp "$src/config.json" "$WR/config.base.json"; fi
     echo "$src|$ver" >"$WE/.source"
+}
+
+# Microsoft's shader compiler and the Windows fonts, from the owner's own Windows install (read-only), into this
+# private prefix only — so WE compiles its HLSL with FXC as on Windows (Wine's builtin d3dcompiler is vkd3d-shader,
+# which differs on loose HLSL) and text uses the real fonts and fallback chain. Nothing else is taken from Windows.
+WIN_SYS=/mnt/Windows/Windows
+D3DC=builtin
+FONTS=proton
+trust_setup() {
+    local pfx=$WR/pfx/pfx/drive_c/windows s32 bak f b
+    [[ -d $pfx/system32 ]] || return 0 # the prefix is made on the first launch; the next run sets it up
+    s32=$pfx/system32
+    bak=$WR/pfx-builtin-bak
+    if ((USE_WIN_D3DC)) && [[ -f $WIN_SYS/System32/D3DCompiler_47.dll ]]; then
+        if ! cmp -s "$WIN_SYS/System32/D3DCompiler_47.dll" "$s32/d3dcompiler_47.dll"; then
+            mkdir -p "$bak"
+            [[ -f $s32/d3dcompiler_47.dll ]] && mv -f "$s32/d3dcompiler_47.dll" "$bak/d3dcompiler_47.dll"
+            cp "$WIN_SYS/System32/D3DCompiler_47.dll" "$s32/d3dcompiler_47.dll"
+        fi
+        D3DC=native-ms
+    fi
+    if ((USE_WIN_FONTS)) && [[ -d $WIN_SYS/Fonts ]]; then
+        if [[ ! -f $pfx/Fonts/.from-windows ]]; then
+            mkdir -p "$bak/Fonts"
+            for f in "$WIN_SYS"/Fonts/*; do
+                [[ -f $f ]] || continue
+                b=$(basename "$f" | tr '[:upper:]' '[:lower:]')
+                [[ -e $pfx/Fonts/$b && ! -L $pfx/Fonts/$b ]] && mv -f "$pfx/Fonts/$b" "$bak/Fonts/$b" # Proton's stand-in
+                ln -sfn "$f" "$pfx/Fonts/$b"                                                          # a link: no 560 MB copy
+            done
+            : >"$pfx/Fonts/.from-windows"
+        fi
+        FONTS=windows
+    fi
 }
 
 # ------------------------------------------------------------------ one WE session in a headless gamescope
@@ -228,6 +267,7 @@ EOF
         export WINEPREFIX=$WR/pfx PROTONPATH=$PROTON UMU_RUNTIME_UPDATE=0
         export GAMEID=umu-liascape-we-ref # not 431960: Proton mustn't associate this run with Steam's WE
         export WINEDLLOVERRIDES="winepulse.drv=d;winealsa.drv=d" PULSE_SERVER=unix:/nonexistent
+        if [[ $D3DC == native-ms ]]; then WINEDLLOVERRIDES+=";d3dcompiler_47=n"; else WINEDLLOVERRIDES+=";d3dcompiler_47=b"; fi
         if [[ -n ${WE_REF_DEBUG:-} ]]; then # a Proton log (+seh, +loaddll …) into the session dir
             export PROTON_LOG=1 PROTON_LOG_DIR=$SESSION
         else
@@ -260,17 +300,15 @@ capture_one() { # id run_dir
     else # the canvas's own aspect, fitted into 1920x1080: WE then shows exactly the canvas, as our worker renders it
         read -r w h < <(awk -v cw="$cw" -v ch="$ch" 'BEGIN{s=1920/cw; if (1080/ch<s) s=1080/ch; w=int(cw*s/2+0.5)*2; h=int(ch*s/2+0.5)*2; print w, h}')
     fi
-    # WE writes compiled shaders into the item's shaders/ dir: it gets a farm of the item (symlinked files, a real
-    # copy of shaders/) so the Workshop folder is never written
-    local farm=$WR/ws/$id
+    # WE writes compiled shaders into the item's shaders/blobs*/: it gets a farm of the item (symlinked files) so the
+    # Workshop folder is never written. The Workshop's own blobs are left out — they were compiled by whatever WE
+    # ran there (under Proton: Wine's d3dcompiler); WE compiles them afresh with the compiler set up below.
+    local farm=$WR/ws/$id f
     if [[ ! -f $farm/project.json ]]; then
-        mkdir -p "$WR/ws"
-        cp -as "$dir" "$farm" || { log "$id: can't build $farm"; return 1; }
-        if [[ -d $dir/shaders ]]; then
-            find "$farm/shaders" -type l -exec sh -c 'for l; do cp --remove-destination --reflink=auto "$(readlink "$l")" "$l"; done' _ {} +
-        else
-            mkdir -p "$farm/shaders"
-        fi
+        mkdir -p "$farm/shaders"
+        (cd "$dir" && find . -path './shaders/blobs*' -prune -o -type d -print) | while IFS= read -r f; do mkdir -p "$farm/$f"; done
+        (cd "$dir" && find . -path './shaders/blobs*' -prune -o ! -type d -print) | while IFS= read -r f; do ln -s "$dir/${f#./}" "$farm/$f"; done
+        [[ -f $farm/project.json ]] || { log "$id: can't build $farm"; return 1; }
     fi
     dir=$farm
     file=$(jq -r '.file // "scene.json"' "$dir/project.json")
@@ -295,13 +333,16 @@ capture_one() { # id run_dir
 
     local t_launch t_up t0 tlast dumps0
     dumps0=$(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) # WE's crash handler writes a minidump + a dialog
+    # shaders WE had to compile itself (not in the Windows install's cache): real .dxs files in the farms
+    local blobs0
+    blobs0=$(find "$WE/assets" "$WR/ws/$id" -type f -name '*.dxs' 2>/dev/null | wc -l)
     t_launch=$(date +%s%3N)
     start_session "$w" "$h" "$wfile" || return 1
     [[ -n $p0x ]] && pointer_at "$(awk -v v="$p0x" -v s="$sx" 'BEGIN{print int(v*s)}')" "$(awk -v v="$p0y" -v s="$sy" 'BEGIN{print int(v*s)}')"
     # the first non-black frame: requests kept 2 deep (gamescope writes one PNG per ~140 ms, in order, each from
     # the next composited frame), each stamped at request. Black frames all encode to the same size, so a file
     # clearly bigger than the first black one has a picture (python only looks at the first, to know it's black).
-    local i=0 k=0 f mx t_req=() ok=0 black=0 sz deadline=$(($(date +%s%3N) + 45000))
+    local i=0 k=0 f mx mean sd t_req=() ok=0 black=0 sz deadline=$(($(date +%s%3N) + 45000))
     local pd=$WR/probe # reused: files truncated, never deleted (gamescope overwrites them)
     mkdir -p "$pd"
     for f in "$pd"/*.png "$rd"/t*s.png; do [[ -f $f ]] && : >"$f"; done
@@ -315,14 +356,15 @@ capture_one() { # id run_dir
             sleep 0.02
             sz=$(stat -c %s "$pd/p$k.png")
             if ((black == 0)); then
-                read -r mx _ sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
-                ((mx > 8)) && [[ ${sd%.*} -ge 3 ]] && { ok=1; break 2; }
+                read -r mx mean sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
+                ((mx > 8)) && { [[ ${sd%.*} -ge 3 ]] || ((${mean%.*} < 40 && mx > 24)); } && { ok=1; break 2; }
                 black=$sz
             elif ((sz > black + black / 4 + 4096)); then
                 # a picture, unless it is flat: Wine paints a new window's background (one colour) before WE's
                 # first present, and a loading scene shows black after it — that flash isn't t = 0
-                read -r mx _ sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
-                if [[ ${sd%.*} -ge 3 ]]; then ok=1; break 2; fi
+                read -r mx mean sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
+                # (a dark scene — a night sky, a 3D room — is flat too, but dark with some light in it)
+                if [[ ${sd%.*} -ge 3 ]] || ((${mean%.*} < 40 && mx > 24)); then ok=1; break 2; fi
             fi
             k=$((k + 1))
         done
@@ -381,15 +423,17 @@ capture_one() { # id run_dir
     gpu_mib=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null |
         awk -F', *' -v ps=" $(descendants "$GS_PID" | tr '\n' ' ') $GS_PID " 'index(ps, " "$1" ") {s+=$2} END{print s+0}')
     tlast=$(($(date +%s%3N) - t_launch))
+    local compiled
+    compiled=$(($(find "$WE/assets" "$WR/ws/$id" -type f -name '*.dxs' 2>/dev/null | wc -l) - blobs0))
     local crashed=false
     (($(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) > dumps0)) && crashed=true
     ((KEEP)) || stop_session
     jq -n --arg id "$id" --arg kind "$kind" --argjson canvas "[$cw,$ch]" --argjson window "[$w,$h]" \
         --arg we "$(cut -d'|' -f2 "$WE/.source")" --arg proton "$(cat "$PROTON/version" 2>/dev/null)" \
         --argjson props "$(printf '%s\n' "${PROPS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" \
-        --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --argjson crashed "$crashed" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
+        --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --arg d3dc "$D3DC" --argjson compiled "$compiled" --arg fonts "$FONTS" --argjson crashed "$crashed" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
         --argjson shots "[$(IFS=,; echo "${shots[*]}")]" --arg when "$(date -Iseconds)" \
-        '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, we_settings:$we_settings,
+        '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, d3dcompiler:$d3dc, shaders_compiled:$compiled, fonts:$fonts, clock:"Wine wall clock", we_settings:$we_settings,
           we_crashed:$crashed, first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, captured:$when,
           time_base:"seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"}' >"$rd/manifest.json"
     log "$id: first frame after $((t_up))ms, done in ${tlast}ms → $rd$([[ $crashed == true ]] && echo " — WE CRASHED (its dialog is in the frames)")"
@@ -411,6 +455,7 @@ setup) setup; log "ready: $WE ($(cut -d'|' -f2 "$WE/.source"))"; exit 0 ;;
 stop) exit 0 ;; # sessions never outlive their run unless --keep; the lock above proves none is running
 esac
 setup
+trust_setup
 
 if ((BATCH)); then
     forbidden() { case "$(realpath -m -- "$1")/" in */steamcmd_workshop/*) return 0 ;; esac; return 1; }

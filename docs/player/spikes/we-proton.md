@@ -42,14 +42,20 @@ drive's files.
    - User properties go into `wproperties[<file>][Ref|Monitor0]`, the place WE's UI stores them.
      `-control applyProperties` is ignored on a running window without WE's UI (§ Findings), so every scene
      starts fresh.
-3. **A farm per Workshop item**, `~/.cache/liascape/we-ref/ws/<id>`: symlinked files with a real copy of
-   `shaders/`.
-   - WE compiles a scene's shaders into the item's `shaders/blobsSM40/`. My first run wrote 60 blobs into
-     3516174947's real Workshop folder; I trashed them and restored the folder. The farm keeps the Workshop
-     folder read-only from now on.
+3. **From the owner's Windows install, into this prefix only:**
+   - Microsoft's `System32/D3DCompiler_47.dll`, with the builtin moved to `pfx-builtin-bak/`.
+   - Links to `Windows/Fonts`, with Proton's stand-ins moved aside.
+   - See § Trust. `--builtin-d3dcompiler` keeps Wine's compiler.
+4. **A farm per Workshop item**, `~/.cache/liascape/we-ref/ws/<id>`: symlinked files, without the item's own
+   `shaders/blobs*`.
+   - WE compiles a scene's shaders into the item's `shaders/blobsSM40/`, or the shared `assets/shaders/` cache.
+     My first run (2.8.42) wrote 60 blobs into 3516174947's real Workshop folder; I trashed them and restored the
+     folder. The farm keeps the Workshop folder read-only from now on.
+   - The Workshop's blobs were written by earlier WE runs under Proton. They are left out, and WE compiles
+     whatever it lacks afresh.
    - The farm also keeps the cache between captures. 3184155462's first frame took 17 s on the first run and
      6.5 s on every run after.
-4. **The launch.** The command is `gamescope --backend headless -W w -H h -w w -h h -r 30 -- child.sh`, and
+5. **The launch.** The command is `gamescope --backend headless -W w -H h -w w -h h -r 30 -- child.sh`, and
    `child.sh` runs `steam-run umu-run wallpaper64.exe -control openWallpaper -file Z:\…\project.json -playInWindow Ref -width w -height h -x 0 -y 0 -borderless`.
    - **umu**: `~/.local/share/lutris/runtime/umu/umu-run`, version 1.4.4. It runs under `steam-run` because
      umu's pressure-vessel probe needs an FHS on NixOS, as the `.exe` binfmt handler does too.
@@ -59,7 +65,7 @@ drive's files.
      - `WINEPREFIX=~/.cache/liascape/we-ref/pfx`
      - `GAMEID=umu-liascape-we-ref`
      - `UMU_RUNTIME_UPDATE=0`
-     - `WINEDLLOVERRIDES=winepulse.drv=d;winealsa.drv=d`
+     - `WINEDLLOVERRIDES=winepulse.drv=d;winealsa.drv=d;d3dcompiler_47=n`
      - `PULSE_SERVER=unix:/nonexistent`
    - The first instance takes the `-control openWallpaper` itself: WE starts and opens the scene. Giving it
      `project.json` matters. A first instance given `scene.pkg` looked for a loose `scene.json` and showed
@@ -67,7 +73,7 @@ drive's files.
    - **The window is the canvas's own aspect**, fitted into 1920 × 1080. 3516174947's 3440 × 1440 canvas gets
      1920 × 804, for example. WE then shows exactly the canvas, as our worker renders it, so nothing has to
      be aligned. `--desktop` gives the 16:9 desktop view instead (WE's cover fit).
-5. **The time base.** Screenshots are requested two at a time until one has a picture. A black PNG always encodes
+6. **The time base.** Screenshots are requested two at a time until one has a picture. A black PNG always encodes
    to the same size, so "clearly bigger than the first black one" needs no image decoding.
    - The first one with a picture is t = 0. It is stamped at its request, to within about 0.15 s.
    - The frame for T is requested at t0 + T (`gamescopectl screenshot <path>`, the next composited frame).
@@ -75,10 +81,13 @@ drive's files.
      and two frames went missing that way. So each request now waits for the previous file, up to 0.5 s.
      `late_ms` / `t_actual` in the manifest record what that cost, and the compare renders ours at
      `t_actual`.
-6. **The pointer.** `xdotool mousemove` on gamescope's Xwayland: Wine sees it, and parallax follows. It is parked at
+7. **The pointer.** `xdotool mousemove` on gamescope's Xwayland: Wine sees it, and parallax follows. It is parked at
    the canvas centre, where the worker puts it, unless `--pointer X0,Y0[:X1,Y1]` is given (native scene px,
    y down, as the worker's). `--pointer-time A-B` limits the move to scene seconds A–B.
-7. **The stop.** SIGTERM to gamescope, a wait of up to 10 s for every process under it, then SIGKILL for
+   - A parked pointer is reached by a 4 px move in the first 0.3 s, and the compare replays that move.
+   - WE takes no pointer position until it sees a motion event after the scene has loaded. Without the move,
+     parallax scenes sat 15–140 px off ours (3309103316: 47 px, 2951169110: 135 px); with it, 0.2 px.
+8. **The stop.** SIGTERM to gamescope, a wait of up to 10 s for every process under it, then SIGKILL for
    whatever is left. The script only kills the PIDs it started.
 
 ## Answers
@@ -135,6 +144,45 @@ drive's files.
    - So a WE-vs-ours score below about 0.05 is noise. A difference has to stand out from a second WE run to
      count, which is what the ripple measurement does.
 
+## Trust: how close is Proton's WE to Windows'?
+
+The owner asked how we know Proton reproduces Windows. Class by class:
+
+- **The shader compiler: the same as on Windows.**
+  - WE loads the `d3dcompiler_47.dll` it ships in `bin\` (Microsoft, 10.0.26100.7705) by path. The Proton log
+    (`WE_REF_DEBUG=1`) shows `Loaded …\we\bin\d3dcompiler_47.dll … native` when WE compiles, so Wine's own
+    compiler (vkd3d-shader) is never involved.
+  - Most shaders aren't compiled here at all. They come from `assets/shaders/blobsSM40/`, the cache that came with
+    the Windows install (721 blobs, compiled on Windows).
+  - Test: Microsoft's own `System32/D3DCompiler_47.dll` from the Windows install was copied into the prefix's
+    system32 with `d3dcompiler_47=n` (Proton's builtin is in `~/.cache/liascape/we-ref/pfx-builtin-bak/`). The
+    capture script does this by default now. Every blob WE had compiled before was recompiled, and all 63 came
+    out byte-identical. So the compiler never was a difference.
+  - `shaders_compiled` in each manifest counts what WE compiled here: 3 scenes, 3–13 shaders each.
+  - WE doesn't load d3dcompiler_43.
+- **Fonts: now the Windows ones.**
+  - The Windows install's `Windows/Fonts` (396 files, 563 MB) are linked, not copied, into the prefix's
+    `windows/Fonts`. Proton's same-name stand-ins are moved to `pfx-builtin-bak/Fonts/`.
+  - This matters for the 19 scenes that name Windows system fonts (`systemfont_arial`, `_consolas`, `_comicsans`,
+    `_calibri`, `_cambria`). In 3354740764, before the swap, the "Your Image / GIF" label and the Notepad text
+    were drawn in Proton's stand-ins. After it, they are in the real Comic Sans and Consolas.
+  - Scenes whose fonts are packed in them didn't change (3414858021, 3516174947).
+  - Our renderer has to find those faces on Linux, so a glyph difference in those 19 scenes is a font question.
+    The report's `reference` column flags them.
+- **Everything else, before vs after the swap** (83 scenes, mean |after − before| at 2 s and 5 s):
+  - The median is 2.0, inside the run-to-run noise of 0.2–3. Above that, the scenes have random motion
+    (2783122117 scrolling, 2561227934 random light shafts) or a clock (the minutes moved).
+  - None changed because of the compiler.
+- **Video textures:** WE crashes on them under Proton (§ Findings). There is no Proton reference for those 13
+  scenes.
+- **The clock and date:** Wine's wall clock, at the time of the capture.
+- **Rendering:** DXVK (D3D11 → Vulkan) on the same GPU and driver.
+  - DXVK is conformant enough for WE's D3D11 that nothing has looked wrong. But it isn't Microsoft's D3D11, so
+    precision corner cases (sRGB, blending of NaN or negative values) could differ.
+  - The owner's check by eye against Windows (`docs/player/reports/we-ref/compare/`) is the final word.
+- **Settings:** our `config.json` is Ultra / MSAA x8, as on the owner's Windows. The frame rate is 30 instead of
+  their 240, and frame-time-dependent effects differ with it (the cursor ripple, § Findings).
+
 ## Findings for the renderer
 
 - **3184155462, cursor ripple ("liquid" much stronger than on Windows).** WE's own ripple depends on the frame
@@ -165,6 +213,8 @@ drive's files.
   - The way forward would be Windows' own Media Foundation DLLs from the owner's Windows install in the
     prefix (a follow-up, not tried).
   - These scenes are listed apart in the report, unranked.
+- **Parallax was a capture fault, not ours.** Once WE sees the pointer (the nudge), parallax scenes register
+  to ours within a pixel (ECC affine fit: 3309103316 at cc 0.9998). The parallax offsets match.
 - **The first frame.** Wine paints a new window's background, a flat colour, before WE's first present. A
   probe that took that for t = 0 made a slow-loading scene black at 0.5 / 2 s. The probe now ignores flat
   frames, and every scene was recaptured with it.
