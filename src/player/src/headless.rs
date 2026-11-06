@@ -62,6 +62,9 @@ pub struct PointerSample {
     pub x: f64,
     pub y: f64,
     pub buttons: u32,
+    /// The pointer entered the output here (Wayland `enter`): it arrived, it didn't move here —
+    /// a scene draws no stroke from where it left (`ToWorker::Pointer.jump`).
+    pub entered: bool,
 }
 
 /// What the runtime needs from a set of outputs. One implementation per platform:
@@ -243,7 +246,13 @@ impl Headless {
 
     /// A virtual pointer over output `name` (`headless.pointer`, Task 7): surface pixels from
     /// the top-left, buttons as in `out:<c>.pointer`.
-    pub fn pointer(&mut self, name: &str, x: f64, y: f64, buttons: u32) -> Result<(), ApiError> {
+    pub fn pointer(
+        &mut self,
+        name: &str,
+        (x, y): (f64, f64),
+        buttons: u32,
+        entered: bool,
+    ) -> Result<(), ApiError> {
         if !self.outs.iter().any(|o| o.info.name == name) {
             return Err(ApiError {
                 code: "no_such_node",
@@ -259,6 +268,7 @@ impl Headless {
             x,
             y,
             buttons,
+            entered,
         });
         Ok(())
     }

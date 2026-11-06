@@ -1,0 +1,214 @@
+From b9fed3991cc654a153810db6af099bdb44ab4338 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 15:00:31 +0530
+Subject: [PATCH 106/106] =?UTF-8?q?core:=20wp=5Fproject=5Fpointer=5Fjump?=
+ =?UTF-8?q?=20=E2=80=94=20a=20pointer=20that=20arrives=20is=20not=20a=20mo?=
+ =?UTF-8?q?ve?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wallpaper Engine polls GetCursorPos on the whole desktop every frame (GH 0x140141520 → ScreenToClient
+of the wallpaper's window / its size, written to ctx+0x8c), so its pointer moves continuously,
+over other monitors and over windows too. A Wayland host only sees the pointer over its own
+surface: when it enters the output, or comes back from behind a window, the next position is a
+jump from wherever it left. g_PointerPositionLast then held the old position, and cursorripple
+drew a saturated stroke along the whole jump — 3184155462's water lashed out at the wallpaper's
+sides as the pointer came on.
+
+wp_project_pointer_jump marks the next position as a jump: the frame that reads it takes it as
+g_PointerPositionLast too, and a simulation's next step (0105) starts where the pointer landed.
+A move after it counts as before.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Cursor ripple result" (3184155462)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ include/linux-wallpaperengine/project.h               | 11 +++++++++++
+ src/core/WallpaperEngine/Project.cpp                  |  6 ++++++
+ src/core/WallpaperEngine/Project.h                    |  1 +
+ src/core/WallpaperEngine/Render/CWallpaper.h          |  6 ++++++
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp    |  6 ++++++
+ src/core/WallpaperEngine/Render/Objects/CImage.h      |  2 ++
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp |  9 +++++++++
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.h   |  3 +++
+ src/core/frontends/project.cpp                        |  6 ++++++
+ 9 files changed, 50 insertions(+)
+
+diff --git a/include/linux-wallpaperengine/project.h b/include/linux-wallpaperengine/project.h
+index 7df8b15..8774073 100644
+--- a/include/linux-wallpaperengine/project.h
++++ b/include/linux-wallpaperengine/project.h
+@@ -447,6 +447,17 @@ WPENGINE_API void wp_project_set_mouse_input (wp_project* project, wp_mouse_inpu
+  */
+ WPENGINE_API void wp_project_set_frame_rate (wp_project* project, float hz);
+ 
++/**
++ * The pointer's next position (what the mouse input's callbacks return on the next frame) is a jump, not a move: the
++ * pointer entered the output, or came back from behind a window. Wallpaper Engine polls the cursor on the whole
++ * desktop, so it never jumps there; a host that only sees the pointer over its own surface says so here, and the
++ * frame that reads the new position takes it as g_PointerPositionLast too (cursorripple strokes no line along the
++ * jump). Before the first frame: nothing to do
++ *
++ * @param project The project
++ */
++WPENGINE_API void wp_project_pointer_jump (wp_project* project);
++
+ /**
+  * Provides a textual representation of the project and it's elements, useful for debugging
+  *
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 67a8c72..79b5081 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -269,6 +269,12 @@ void WallpaperEngine::Project::setFrameRate (float hz) {
+     }
+ }
+ 
++void WallpaperEngine::Project::pointerJump () {
++    if (this->wallpaper != nullptr) {
++	this->wallpaper->markPointerJump ();
++    }
++}
++
+ void WallpaperEngine::Project::hintSize (int width, int height) {
+     this->hintedWidth = width;
+     this->hintedHeight = height;
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index 04348c7..1493ed5 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -38,6 +38,7 @@ public:
+     void setOutputFramebuffer (GLuint newFramebuffer);
+     void setMouseInput (wp_mouse_input* newMouseInput);
+     void setFrameRate (float hz);
++    void pointerJump ();
+     void hintSize (int width, int height);
+     void render ();
+ 
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.h b/src/core/WallpaperEngine/Render/CWallpaper.h
+index 7958cb7..3d9a79c 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.h
++++ b/src/core/WallpaperEngine/Render/CWallpaper.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <utility>
+ #include <glad/glad.h>
+ 
+ #include <map>
+@@ -100,6 +101,10 @@ public:
+     /** The rate the host means to draw at (wp_project_set_frame_rate; 0: unknown): a simulation effect steps at it */
+     void setFrameRate (float hz) { this->m_frameRate = hz; }
+     [[nodiscard]] float getFrameRate () const { return this->m_frameRate; }
++    /** The pointer's next position is a jump (wp_project_pointer_jump): the frame that reads it takes it as the last too */
++    void markPointerJump () { this->m_pointerJump = true; }
++    /** Whether a jump was marked since the last call */
++    bool takePointerJump () { return std::exchange (this->m_pointerJump, false); }
+ 
+     /**
+      * Updates the destination framebuffer for this wallpaper
+@@ -192,5 +197,6 @@ private:
+     /** Current Wallpaper state */
+     wp_mouse_input* m_mouseInput;
+     float m_frameRate = 0.0f;
++    bool m_pointerJump = false;
+ };
+ } // namespace WallpaperEngine::Render
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 0fc08a8..f781665 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1723,6 +1723,12 @@ void CImage::advanceSimulationClock () {
+     if (first) {
+ 	// WE's first frame: its last pointer is 0 0 (GH 0x1401acb91)
+ 	clock.from = *scene.getMousePositionLast ();
++	clock.jumps = scene.getPointerJumps ();
++    }
++    // a jump is no move: the next step starts where the pointer landed
++    if (scene.getPointerJumps () != clock.jumps) {
++	clock.jumps = scene.getPointerJumps ();
++	clock.from = pointer;
+     }
+     clock.to = pointer;
+ 
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 6ac780c..deff9dc 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -307,6 +307,8 @@ private:
+ 	/** where the pointer was at the last step, and the frame's, for the steps between */
+ 	glm::vec2 from = {};
+ 	glm::vec2 to = {};
++	/** CScene::getPointerJumps when last seen: a jump moves `from` to where the pointer landed */
++	uint64_t jumps = 0;
+ 	/** a press seen on a frame without a step (WE's z marks the press on the frame that reads it) */
+ 	bool pressed = false;
+ 	/** the stepping passes' g_Frametime, g_PointerPosition, g_PointerPositionLast, g_PointerState for the step */
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index f7a7d30..c7ae2f0 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -857,6 +857,13 @@ void CScene::updateMouse () {
+     // input.cursorScreenPosition read this, never written (always 0 0)
+     this->m_mousePositionNormalized = this->m_mousePosition;
+ 
++    // a jump (the pointer entered the output, or came back from behind a window: WE, polling GetCursorPos, saw it move
++    // there) is no move: g_PointerPositionLast is where it landed, so cursorripple strokes no line along it
++    if (this->takePointerJump ()) {
++	this->m_mousePositionLast = this->m_mousePosition;
++	this->m_pointerJumps++;
++    }
++
+     // the left button: held → xy 1; the frame it went down → z 1 (WE's flags at ctx+0xa4: bit 0 down, bit 1 already
+     // seen, so z marks the press)
+     const wp_mouse_input* handler = this->getMouseInputHandler ();
+@@ -929,6 +936,8 @@ const glm::vec2* CScene::getMousePosition () const { return &this->m_mousePositi
+ 
+ const glm::vec2* CScene::getMousePositionLast () const { return &this->m_mousePositionLast; }
+ 
++uint64_t CScene::getPointerJumps () const { return this->m_pointerJumps; }
++
+ const glm::vec2* CScene::getMousePositionNormalized () const { return &this->m_mousePositionNormalized; }
+ 
+ const glm::vec2* CScene::getParallaxPosition () const { return &this->m_parallaxPositionNormalized; }
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index fce0c49..89c5574 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -65,6 +65,8 @@ public:
+ 
+     const glm::vec2* getMousePosition () const;
+     const glm::vec2* getMousePositionLast () const;
++    /** How many pointer jumps the frames so far took (wp_project_pointer_jump) */
++    [[nodiscard]] uint64_t getPointerJumps () const;
+     const glm::vec2* getMousePositionNormalized () const;
+     /**
+      * `g_PointerState` (WE uniform 0x71, GH 0x14010a0e0): xy 1 while the left button is down, z 1 on the frame it went
+@@ -287,6 +289,7 @@ private:
+     std::map<int, std::shared_ptr<CFBO>> m_composeTargets = {};
+     glm::vec2 m_mousePosition = {};
+     glm::vec2 m_mousePositionLast = {};
++    uint64_t m_pointerJumps = 0;
+     glm::vec4 m_pointerState = {};
+     bool m_pointerWasDown = false;
+     glm::vec2 m_mousePositionNormalized = {};
+diff --git a/src/core/frontends/project.cpp b/src/core/frontends/project.cpp
+index 934acb0..49b31f5 100644
+--- a/src/core/frontends/project.cpp
++++ b/src/core/frontends/project.cpp
+@@ -208,6 +208,12 @@ WPENGINE_API void wp_project_set_frame_rate (wp_project* project, float hz) {
+     WPENGINE_PROJECT_API_END ();
+ }
+ 
++WPENGINE_API void wp_project_pointer_jump (wp_project* project) {
++    WPENGINE_PROJECT_API_BEGIN
++    static_cast<WallpaperEngine::Project*> (project)->pointerJump ();
++    WPENGINE_PROJECT_API_END ();
++}
++
+ WPENGINE_API void wp_project_describe (wp_project* project, wp_describe_callback* callback) {
+     WPENGINE_PROJECT_API_BEGIN
+     static_cast<WallpaperEngine::Project*> (project)->describe (callback);

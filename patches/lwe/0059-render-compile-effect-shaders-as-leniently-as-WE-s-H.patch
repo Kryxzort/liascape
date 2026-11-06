@@ -1,7 +1,7 @@
 From 0c8d02b220bc55ede0aa7f17181627db1ca4ac27 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 14:18:54 +0530
-Subject: [PATCH 059/104] render: compile effect shaders as leniently as WE's
+Subject: [PATCH 059/106] render: compile effect shaders as leniently as WE's
  HLSL path
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

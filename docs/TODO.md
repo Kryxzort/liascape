@@ -21,7 +21,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in liascape-player.
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
-- [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [x] **LICENSE** for the repo — done in `a955654` (GPL-3.0, with `LICENSE.upstream-MIT` for the livepaper portions). Was: There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 - [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
@@ -76,7 +76,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Harden `AUDIO_SETTLE` in `liascape-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
 - [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in liascape-player.
-- [ ] Delete stale branches: `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
+- [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 - [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
       owner's call.
 
@@ -868,6 +868,21 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
         (`scripts/test-settings-latency.sh`); the global Volume/Speed sliders preview through a throttled
         `/preview {global:true}` (only wallpapers without their own override move; matrix `globalDrag*`).
 
+- [x] **3184155462's mouse water much stronger than WE** (owner, 2026-11-06): cursorripple's force and decay count per
+      frame, so its strength follows the frame rate (in WE too: refs at 30 vs 120 fps). The worker ran it once per tick
+      — a throttled or late tick pushed several frames' force — and a pointer entering the output stroked a saturated
+      line from where it left. Fork 0105 (`wp_project_set_frame_rate`: a simulation effect steps at the scene's rate,
+      `ToWorker::Rate` = the outputs' demand, never the budget's cap) and 0106 (`wp_project_pointer_jump`, Wayland
+      `enter` → `Pointer {jump}`); pin b9fed39. Audit "Cursor ripple result". Guards host_api
+      `simulation_steps_at_the_frame_rate`, `pointer_jump_is_no_move`, api `pointer_enter_is_a_jump_and_rate_is_the_demand`.
+- [ ] **WE's frame limiter, decoded**: FUN_14006dd90 turns `general.user.fps` into `clamp(round(1000/fps)·0.5, 6, 100)`
+      (DAT_140527614) — what uses it, and whether WE's frames are also bounded by the monitor's refresh, aren't decoded.
+      Matters for parity of rate-dependent effects (cursorripple) when the owner's WE fps (240) is above an output's
+      refresh (144 Hz primary): ours steps at `min(scene_fps, refresh)`. WE's fresh-install default fps too.
+- [ ] **Pointer under windows** (audit C6): WE keeps tracking the desktop cursor behind windows; ours sees it only over
+      the bare wallpaper and now takes its return as a jump (no stroke). A compositor-wide cursor (Hyprland IPC poll)
+      would close it.
+
 ## Backend structure (2026-10-26, after the matrix's ~19 seam bugs)
 Two bug classes kept recurring; fix the class, not the instance:
 - [x] **Shared state files written in place** (settings, playlist_state, index — torn reads, lost updates).
@@ -973,6 +988,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       while every reopen re-reads; only worth it if `resync` ever gets expensive.
 
 ## Follow-up projects (each gets its own brainstorm)
+- [ ] **Experimental: render a scene with real Wallpaper Engine** (owner, 2026-11-06: "maybe as a future
+      experimental feature"; after the port, not instead of it). An opt-in per-scene backend that runs WE itself under
+      Proton and imports its frames as a graph source (dmabuf, like the scene worker), for scenes our port still gets
+      wrong. Watch [wallpiper](https://github.com/ejalxndr/wallpiper) (MIT, early: runs WE under Proton, patches the PE
+      APIs WE needs, pipes frames as zero-copy dmabuf to a desktop portal) — borrow or integrate once it matures. Open
+      questions: Steam running/logged in (DRM), cost per instance (RAM/VRAM/start-up), bridging pause/transitions/
+      audio bus/pointer/properties/per-monitor, a clean WE install. The reference-capture setup
+      (`scripts/dev/we-ref-capture.sh`, `docs/player/spikes/we-proton.md`) is its first half.
 - [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
       upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Passed on the owner's machine and
       flipped 2026-11-02: the shipped auto-mute under liascape-player; `AudioMonitor` stays for legacy.

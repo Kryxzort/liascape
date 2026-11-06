@@ -7023,6 +7023,41 @@ fn pointer_reaches_scene_in_source_coords() {
     assert_eq!(r["scenes"], json!([]));
 }
 
+/// The cursorripple fix's player side: a pointer that **entered** the output (Wayland `enter`)
+/// goes to the worker as a jump — Wallpaper Engine sees the cursor on the whole desktop, so it
+/// never jumps there and its ripple strokes no line along one — and a move after it doesn't;
+/// the worker is told the rate the outputs ask for (`Rate`, what the scene's simulation effects
+/// step at), not a throttled one. (unpatched: no jump, no rate — an entering pointer stroked a
+/// saturated line from where it left)
+#[test]
+fn pointer_enter_is_a_jump_and_rate_is_the_demand() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-ptr-jump", &synth(Pattern::PointerDot), json!({}));
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["pointer_jumps"], json!(0), "{w}");
+    assert!(
+        w["rate_sent"].as_f64().is_some_and(|r| r > 0.0) && w["rate_sent"] == w["fps_target"],
+        "the outputs' rate went to the worker: {w}"
+    );
+    c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 10, "y": 20, "entered": true}),
+    );
+    c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 160, "y": 90}),
+    );
+    c.step(16);
+    c.step(16);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["pointer_jumps"], json!(1), "the enter is a jump, the move isn't: {w}");
+    assert_eq!(w["pointer"], json!([480.0, 270.0, 0]));
+}
+
 /// The scene properties' worker side: `scene_props` (name → value) is applied at open and
 /// live (`wp_project_property_set_*` through the protocol; synthetic: `rgb`), same worker; an
 /// unknown property is reported, not fatal.

@@ -548,3 +548,18 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Full player suite with the fix: 743 passed, 1 failed, 3 ignored. The one failure,
   `scene::gpu_stall_that_starves_the_worker_is_not_a_hang`, doesn't use PipeWire and passed 3 of 3 alone (a timing
   flake under the full suite's load).
+
+## 2026-11-06 — 3184155462's mouse water
+- **Why it was much stronger than on Windows:** that wallpaper's water (WE's "cursor ripple") adds a push and takes a
+  little away *every frame*, so how strong it looks depends on the frame rate — WE's own water is strong at 30 fps and
+  faint at 120 (the new reference captures show it). Your Windows WE runs at 240 fps, so you see it faint there. Ours
+  ran it once per frame actually drawn: this scene is heavy at 4K, so when the player lowered its frame rate (or a
+  frame came late) every frame pushed several frames' worth. Also, when the mouse came onto the wallpaper from the
+  other screen or from behind a window, ours drew one big stroke along the jump (WE follows the mouse everywhere, so it
+  never jumps). The collision mask is right: in both, the water only moves at the sides, not over the girl.
+- **Fixed** (LWE pin `b9fed39`, fork patches 0105–0106): the water now steps at the scene's frame rate (your screen's
+  refresh, or `out:<c>.scene_fps` if you set one), whatever rate frames really arrive at — so it behaves like WE at
+  that fps, fps dependence included (your call: a faithful port). A mouse arriving on the wallpaper no longer strokes.
+  Before / after pictures: `/tmp/claude-1000/ripple/3184155462-ripple-before-after.png`.
+- To get WE's look at another fps (e.g. WE's "ultra" 30 fps, where the water is strong), set the output's scene fps to
+  it. Not decoded yet: whether WE also caps its fps at the monitor's refresh (your main screen is 144 Hz, WE set to 240).

@@ -564,6 +564,8 @@ struct Renderer {
     /// The pointer in native scene pixels (y down) + buttons; `None` until the host sends one (an
     /// LWE scene then keeps its pointer at the centre, `lwe::Scene::first_render`).
     pointer: Option<(f64, f64, u32)>,
+    /// `ToWorker::Rate`'s (0 until the compositor says)
+    rate: f64,
     next_slot_id: u8,
     /// A fatal error was reported: idle until `Quit`.
     dead: bool,
@@ -704,6 +706,9 @@ impl Renderer {
         };
         if let Some((x, y, b)) = self.pointer {
             scene.set_pointer(x, y, b);
+        }
+        if self.rate > 0.0 {
+            scene.set_frame_rate(self.rate);
         }
         if scene.has_audio {
             self.install_audio(Box::new(scene.audio_puller()));
@@ -905,11 +910,26 @@ impl Renderer {
                     r.release(slot, fds.into_iter().next());
                 }
             }
-            ToWorker::Pointer { x, y, buttons } => {
+            ToWorker::Pointer {
+                x,
+                y,
+                buttons,
+                jump,
+            } => {
                 self.pointer = Some((x, y, buttons));
                 #[cfg(feature = "lwe")]
                 if let Some(SceneImpl::Lwe(s)) = self.scene.as_ref() {
                     s.set_pointer(x, y, buttons);
+                    if jump {
+                        s.pointer_jump();
+                    }
+                }
+            }
+            ToWorker::Rate { hz } => {
+                self.rate = hz;
+                #[cfg(feature = "lwe")]
+                if let Some(SceneImpl::Lwe(s)) = self.scene.as_ref() {
+                    s.set_frame_rate(hz);
                 }
             }
             ToWorker::SetProperty { name, value } if !self.dead => self.set_property(&name, &value),
@@ -1214,6 +1234,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         input_rate: 48_000,
         level: 0.0,
         pointer: None,
+        rate: 0.0,
         next_slot_id: 0,
         dead: false,
         crash_at: k.crash_after_ms.map(|ms| now + Duration::from_millis(ms)),

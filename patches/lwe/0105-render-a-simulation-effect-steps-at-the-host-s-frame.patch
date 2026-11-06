@@ -1,0 +1,474 @@
+From 909d0bfc21041f476d198692f3fa494b75b561e1 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 14:58:58 +0530
+Subject: [PATCH 105/106] render: a simulation effect steps at the host's frame
+ rate, not per frame drawn
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+cursorripple (apply_force, simulate_force, combine) carries its water in two of its own FBOs from
+frame to frame, and its shaders count per frame: each frame adds a force from the pointer's move
+that frame times min(1/30, g_Frametime)/0.02, and takes at least 1/255 off. Per second the force
+is proportional to the frame time, so the water's strength depends on the frame rate — in WE too
+(its fps setting: WE draws once per frame, every pass once). LWE ran it once per frame *drawn*:
+a scene the host throttles, or a frame that comes late, pushed several frames' force at once —
+3184155462's ripple was much stronger than the owner's WE at its 240 fps.
+
+wp_project_set_frame_rate (hz) says the rate the host means to draw at (WE's fps setting, the
+rate before any throttling). An effect whose passes read one of its own FBOs before this frame
+writes it (last frame's state) and never the layer's picture (`previous`, or texture 0 unbound)
+is a simulation: the passes that write its FBOs step at that rate — a late frame runs several
+steps, an early one none (at most 32 in a frame) — each with g_Frametime 1/rate, the pointer and
+the last pointer along the line from the last step's to this frame's (WE samples the pointer
+once per frame and copies it to g_PointerPositionLast after drawing, GH 0x1401b1c0b), and a press
+seen between steps on the next step's g_PointerState.z. A frame drawn again at the same time
+doesn't step. The passes that draw its picture run every frame. No rate set: one step per frame,
+as before. motionblur's accumulation reads `previous`, so it isn't one.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "Cursor ripple result" (3184155462)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ include/linux-wallpaperengine/project.h       |  12 ++
+ src/core/WallpaperEngine/Project.cpp          |  11 ++
+ src/core/WallpaperEngine/Project.h            |   3 +
+ src/core/WallpaperEngine/Render/CWallpaper.h  |   4 +
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 174 +++++++++++++++++-
+ .../WallpaperEngine/Render/Objects/CImage.h   |  36 ++++
+ .../Render/Objects/Effects/CPass.h            |   2 +-
+ src/core/frontends/project.cpp                |   6 +
+ 8 files changed, 246 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/project.h b/include/linux-wallpaperengine/project.h
+index 30f384b..7df8b15 100644
+--- a/include/linux-wallpaperengine/project.h
++++ b/include/linux-wallpaperengine/project.h
+@@ -435,6 +435,18 @@ WPENGINE_API void wp_project_set_output_framebuffer (wp_project* project, unsign
+  */
+ WPENGINE_API void wp_project_set_mouse_input (wp_project* project, wp_mouse_input* mouse_input);
+ 
++/**
++ * The frame rate the host means to draw the project at (Wallpaper Engine's fps setting; the rate before any
++ * throttling). A simulation effect — passes that carry state in the effect's own FBOs from frame to frame, as
++ * cursorripple's — steps at it: a frame that comes late runs several steps, one that comes early none, so the
++ * simulation behaves as in WE at that fps whatever rate the frames actually arrive at. 0 (the default) steps once
++ * per frame drawn. Can be called before or after the first frame, and again when the rate changes
++ *
++ * @param project The project
++ * @param hz The rate in frames per second, 0 for none
++ */
++WPENGINE_API void wp_project_set_frame_rate (wp_project* project, float hz);
++
+ /**
+  * Provides a textual representation of the project and it's elements, useful for debugging
+  *
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index f77d180..67a8c72 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -11,6 +11,8 @@
+ #include "Render/Wallpapers/CWeb.h"
+ #include "Scripting/ScriptEngine.h"
+ 
++#include <cmath>
++
+ using namespace WallpaperEngine;
+ 
+ Context* active_context = nullptr;
+@@ -259,6 +261,14 @@ void WallpaperEngine::Project::setMouseInput (wp_mouse_input* newMouseInput) {
+     }
+ }
+ 
++void WallpaperEngine::Project::setFrameRate (float hz) {
++    this->frameRate = std::isfinite (hz) && hz > 0.0f ? hz : 0.0f;
++
++    if (this->wallpaper != nullptr) {
++	this->wallpaper->setFrameRate (this->frameRate);
++    }
++}
++
+ void WallpaperEngine::Project::hintSize (int width, int height) {
+     this->hintedWidth = width;
+     this->hintedHeight = height;
+@@ -290,6 +300,7 @@ void WallpaperEngine::Project::render () {
+ 	    throw;
+ 	}
+ 	this->wallpaper->setDestinationFramebuffer (this->framebuffer);
++	this->wallpaper->setFrameRate (this->frameRate);
+ 	// give hint about size to the wallpaper only if web
+ 	if (this->wallpaper->is<Wallpapers::CWeb> ()) {
+ 	    this->wallpaper->as<Wallpapers::CWeb> ()->setSize (this->hintedWidth, this->hintedHeight);
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index bea5b5c..04348c7 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -37,6 +37,7 @@ public:
+     int getHeight () const;
+     void setOutputFramebuffer (GLuint newFramebuffer);
+     void setMouseInput (wp_mouse_input* newMouseInput);
++    void setFrameRate (float hz);
+     void hintSize (int width, int height);
+     void render ();
+ 
+@@ -82,6 +83,8 @@ protected:
+     std::unique_ptr<CWallpaper> wallpaper;
+     std::unique_ptr<RenderContext> renderContext;
+     wp_mouse_input* mouse_input;
++    /** wp_project_set_frame_rate's, 0 until the host says */
++    float frameRate = 0.0f;
+     Context& context;
+     Properties::const_iterator property_it;
+     wp_project_property* current_property;
+diff --git a/src/core/WallpaperEngine/Render/CWallpaper.h b/src/core/WallpaperEngine/Render/CWallpaper.h
+index 3d0f4a5..7958cb7 100644
+--- a/src/core/WallpaperEngine/Render/CWallpaper.h
++++ b/src/core/WallpaperEngine/Render/CWallpaper.h
+@@ -97,6 +97,9 @@ public:
+      * @param newMouseInput The new mouse input to use for this wallpaper
+      */
+     void setMouseInputHandler (wp_mouse_input* newMouseInput);
++    /** The rate the host means to draw at (wp_project_set_frame_rate; 0: unknown): a simulation effect steps at it */
++    void setFrameRate (float hz) { this->m_frameRate = hz; }
++    [[nodiscard]] float getFrameRate () const { return this->m_frameRate; }
+ 
+     /**
+      * Updates the destination framebuffer for this wallpaper
+@@ -188,5 +191,6 @@ private:
+     AudioContext& m_audioContext;
+     /** Current Wallpaper state */
+     wp_mouse_input* m_mouseInput;
++    float m_frameRate = 0.0f;
+ };
+ } // namespace WallpaperEngine::Render
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 2770696..0fc08a8 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -5,6 +5,7 @@
+ #undef GLM_ENABLE_EXPERIMENTAL
+ 
+ #include <algorithm>
++#include <set>
+ #include <cmath>
+ 
+ #include "CRenderable.h"
+@@ -29,6 +30,52 @@ using namespace WallpaperEngine::Data::Builders;
+ using namespace WallpaperEngine::Data::Utils;
+ 
+ namespace {
++/**
++ * The passes of `effect` that carry a simulation from frame to frame (CImage::m_simulation): the passes that write one
++ * of the effect's own FBOs, when some pass reads one of those FBOs before this frame wrote it (last frame's state — a
++ * ping-pong across frames, not within one) and none of them reads the layer's picture (`previous`, or texture 0 left
++ * unbound, which is the picture so far). cursorripple's apply_force and simulate_force are; its combine, which draws,
++ * is not. motionblur's accumulation reads `previous`, so it runs every frame as before
++ */
++std::set<const WallpaperEngine::Data::Model::EffectPass*> simulationPassesOf (const WallpaperEngine::Data::Model::Effect& effect) {
++    std::set<std::string> own;
++    for (const auto& fbo : effect.fbos) {
++	own.insert (fbo->name);
++    }
++    std::set<std::string> written;
++    std::set<const WallpaperEngine::Data::Model::EffectPass*> writers;
++    bool carries = false;
++    bool readsPicture = false;
++
++    for (const auto& pass : effect.passes) {
++	std::vector<std::string> reads;
++	for (const auto& [index, name] : pass->binds) {
++	    reads.push_back (name);
++	}
++	if (!pass->material.has_value () && pass->source.has_value ()) {
++	    reads.push_back (*pass->source);
++	}
++	for (const auto& name : reads) {
++	    if (own.contains (name) && !written.contains (name)) {
++		carries = true;
++	    }
++	}
++	if (!pass->target.has_value () || !own.contains (*pass->target)) {
++	    continue;
++	}
++	writers.insert (pass.get ());
++	written.insert (*pass->target);
++	const bool picture = std::ranges::any_of (reads, [] (const std::string& name) { return name == "previous"; })
++	    || (pass->material.has_value () && !pass->binds.contains (0));
++	readsPicture = readsPicture || picture;
++    }
++
++    if (!carries || readsPicture) {
++	return {};
++    }
++    return writers;
++}
++
+ bool isMagentaNeonTint (const glm::vec3& color) { return color.r > 0.55f && color.g < 0.25f && color.b > 0.45f; }
+ 
+ std::optional<glm::vec3> findMagentaCompositeTint (const Image& image, const std::vector<int>& skippedEffectIds) {
+@@ -1048,6 +1095,12 @@ void CImage::setup () {
+ 		});
+ 	    }
+ 
++	    // a simulation (cursorripple): the effect's passes that write its own FBOs, when one of them reads an FBO of
++	    // the effect before this frame writes it (last frame's state) and none reads the layer's picture, run on
++	    // WE's frame rate (m_simulation)
++	    const auto simulation = simulationPassesOf (*cur->effect);
++	    std::vector<const CPass*> simulationPasses;
++
+ 	    // TODO: MAKE USE OF ZIP OPERATOR IN BOOST? WAY OVERKILL JUST FOR THIS...
+ 
+ 	    auto curEffect = cur->effect->passes.begin ();
+@@ -1100,6 +1153,9 @@ void CImage::setup () {
+ 		    if ((*curEffect)->command == Command_Swap) {
+ 			this->m_passes.back ()->setSwap (*(*curEffect)->source, (*curEffect)->target.value ());
+ 		    }
++		    if (simulation.contains (curEffect->get ())) {
++			simulationPasses.push_back (this->m_passes.back ());
++		    }
+ 		} else {
+ 		    for (auto& pass : (*curEffect)->material.value ()->passes) {
+ 			const auto override = curOverride != endOverride
+@@ -1112,6 +1168,9 @@ void CImage::setup () {
+ 			this->m_passes.push_back (
+ 			    new CPass (*this, fboProvider, *pass, override, (*curEffect)->binds, target)
+ 			);
++			if (simulation.contains (curEffect->get ())) {
++			    simulationPasses.push_back (this->m_passes.back ());
++			}
+ 		    }
+ 
+ 		    if (curOverride != endOverride) {
+@@ -1134,6 +1193,17 @@ void CImage::setup () {
+ 		    delete this->m_passes.back ();
+ 		    this->m_passes.pop_back ();
+ 		}
++		simulationPasses.clear ();
++	    }
++
++	    // the simulation's passes read their clock's frame time and pointer (WE's, sampled when it steps)
++	    for (const auto* pass : simulationPasses) {
++		auto* writable = const_cast<CPass*> (pass);
++		writable->addUniform ("g_Frametime", &this->m_simulation.frametime);
++		writable->addUniform ("g_PointerPosition", &this->m_simulation.pointer);
++		writable->addUniform ("g_PointerPositionLast", &this->m_simulation.pointerLast);
++		writable->addUniform ("g_PointerState", &this->m_simulation.pointerState);
++		this->m_simulationPasses.push_back (pass);
+ 	    }
+ 
+ 	    // the passes just added are this effect's: they run only while it is visible
+@@ -1578,6 +1648,9 @@ void CImage::render () {
+     glPushDebugGroup (GL_DEBUG_SOURCE_APPLICATION, 0, -1, str.c_str ());
+ #endif /* DEBUG */
+ 
++    // a simulation steps at WE's frame rate: between its steps its passes keep last step's state
++    this->advanceSimulationClock ();
++
+     auto cur = this->m_activePasses.begin ();
+ 
+     // the last draw keeps the scene's alpha (a compose layer that starts transparent takes this layer's as coverage)
+@@ -1588,11 +1661,29 @@ void CImage::render () {
+ 	    glColorMask (true, true, true, !keepAlpha);
+ 	}
+ 
++	// a simulation's passes in a row run once per step of its clock (none on a frame between steps)
++	if (this->isSimulationPass (*cur)) {
++	    auto run = cur;
++	    while (std::next (run) != end && this->isSimulationPass (*std::next (run))) {
++		++run;
++	    }
++	    for (int step = 0; step < this->m_simulation.steps; step++) {
++		this->enterSimulationStep (step);
++		for (auto pass = cur; pass != std::next (run); ++pass) {
++		    (*pass)->render ();
++		}
++	    }
++	    cur = run;
++	    continue;
++	}
++
+ 	(*cur)->render ();
+     }
+ 
+     for (auto* swap : this->m_trailingSwaps) {
+-	swap->render ();
++	if (!this->isSimulationPass (swap) || this->m_simulation.steps > 0) {
++	    swap->render ();
++	}
+     }
+ 
+ #if !NDEBUG
+@@ -1600,6 +1691,87 @@ void CImage::render () {
+ #endif /* DEBUG */
+ }
+ 
++namespace {
++/** The most steps a simulation runs in one frame (a frame 1/8 s late at 240 Hz); a longer stall drops the rest */
++constexpr int kMaxSimulationSteps = 32;
++} // namespace
++
++void CImage::advanceSimulationClock () {
++    if (this->m_simulationPasses.empty ()) {
++	return;
++    }
++
++    auto& clock = this->m_simulation;
++    const auto& scene = this->getScene ();
++    const auto& context = scene.getContext ().getContext ();
++    const float now = context.renderTime;
++    const float rate = scene.getFrameRate ();
++    const glm::vec2 pointer = *scene.getMousePosition ();
++    const glm::vec4 state = *scene.getPointerState ();
++    const bool first = clock.seenTime < 0.0f;
++
++    // the same time again (paused, or drawn twice): nothing steps
++    if (!first && now == clock.seenTime) {
++	clock.steps = 0;
++	return;
++    }
++
++    const float dt = first ? context.frameTime : std::max (0.0f, now - clock.seenTime);
++    clock.seenTime = now;
++    clock.pressed = clock.pressed || state.z > 0.5f;
++
++    if (first) {
++	// WE's first frame: its last pointer is 0 0 (GH 0x1401acb91)
++	clock.from = *scene.getMousePositionLast ();
++    }
++    clock.to = pointer;
++
++    if (rate <= 0.0f) {
++	// no rate: a step per frame drawn, as every other pass
++	clock.steps = 1;
++	clock.frametime = dt;
++	return;
++    }
++
++    const float period = 1.0f / rate;
++    clock.phase += dt;
++    // a little slack: 8 frames of 1/240 s add up to 1/30 s give or take a float's rounding
++    clock.steps = std::min (kMaxSimulationSteps, static_cast<int> (std::floor ((clock.phase + 1e-4f) / period)));
++    clock.phase = std::max (0.0f, clock.phase - static_cast<float> (clock.steps) * period);
++    if (clock.phase >= period) {
++	clock.phase = 0.0f;
++    }
++    // the first frame always steps (WE draws it)
++    if (first && clock.steps == 0) {
++	clock.steps = 1;
++	clock.phase = 0.0f;
++    }
++    clock.frametime = period;
++}
++
++void CImage::enterSimulationStep (int step) {
++    auto& clock = this->m_simulation;
++    const auto& scene = this->getScene ();
++    const glm::vec4 state = *scene.getPointerState ();
++    const float n = static_cast<float> (std::max (1, clock.steps));
++
++    // WE samples the pointer once per frame and its g_PointerPositionLast is the pointer of its frame before (the scene
++    // tick copies ctx+0x8c to ctx+0x94 after drawing, GH 0x1401b1c0b): steps between this frame's and the last step's
++    // pointer move along the line between them
++    clock.pointerLast = glm::mix (clock.from, clock.to, static_cast<float> (step) / n);
++    clock.pointer = glm::mix (clock.from, clock.to, static_cast<float> (step + 1) / n);
++    clock.pointerState = glm::vec4 (state.x, state.y, clock.pressed && step == 0 ? 1.0f : 0.0f, state.w);
++
++    if (step + 1 == clock.steps) {
++	clock.from = clock.to;
++	clock.pressed = false;
++    }
++}
++
++bool CImage::isSimulationPass (const CPass* pass) const {
++    return std::find (this->m_simulationPasses.begin (), this->m_simulationPasses.end (), pass) != this->m_simulationPasses.end ();
++}
++
+ const float& CImage::getBrightness () const { return this->m_image.brightness->value->getFloat (); }
+ 
+ const float& CImage::getUserAlpha () const { return this->m_image.alpha->value->getFloat (); }
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 021338e..6ac780c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -288,6 +288,42 @@ private:
+     int m_visibleEffects = 0;
+     std::vector<MaterialPassUniquePtr> m_virtualPassess = {};
+ 
++    /**
++     * A simulation effect's clock (cursorripple): the passes that carry its state from frame to frame (they read one
++     * of the effect's FBOs before this frame writes it, and never the layer's picture) step at the frame rate the host
++     * means to draw at (wp_project_set_frame_rate: WE's fps setting), not once per frame actually drawn. Their shaders
++     * count per frame — a force per frame from the pointer's move that frame, scaled by the frame's time; a decay of at
++     * least 1/255 per frame in an rgba8888 buffer — so in WE the water's strength depends on its fps, and a frame that
++     * came late (a throttled scene) pushed several frames' worth of force at once. A late frame runs several steps, an
++     * early one none; the passes that draw the effect's picture run every frame. No rate set: one step per frame
++     */
++    struct SimulationClock {
++	/** the host's renderTime the clock last saw (a frame drawn twice at one time steps once) */
++	float seenTime = -1.0f;
++	/** time towards the next step */
++	float phase = 0.0f;
++	/** steps this frame */
++	int steps = 0;
++	/** where the pointer was at the last step, and the frame's, for the steps between */
++	glm::vec2 from = {};
++	glm::vec2 to = {};
++	/** a press seen on a frame without a step (WE's z marks the press on the frame that reads it) */
++	bool pressed = false;
++	/** the stepping passes' g_Frametime, g_PointerPosition, g_PointerPositionLast, g_PointerState for the step */
++	float frametime = 0.0f;
++	glm::vec2 pointer = {};
++	glm::vec2 pointerLast = {};
++	glm::vec4 pointerState = {};
++    };
++    SimulationClock m_simulation;
++    /** The m_passes on m_simulation's clock */
++    std::vector<const Effects::CPass*> m_simulationPasses = {};
++    /** Brings m_simulation to this frame: how many steps the stepping passes run */
++    void advanceSimulationClock ();
++    /** Sets the stepping passes' uniforms for step `step` (0-based) of this frame's m_simulation.steps */
++    void enterSimulationStep (int step);
++    [[nodiscard]] bool isSimulationPass (const Effects::CPass* pass) const;
++
+     glm::vec4 m_pos = {};
+     glm::vec3 m_sceneCenter = {};
+     glm::vec3 m_scenePivot = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index fa2e33a..6d0449d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -76,6 +76,7 @@ public:
+ 
+     // Public uniform setters for external callers (pointer-based, updated per-frame)
+     void addUniform (const std::string& name, const float* value, int count = 1);
++    void addUniform (const std::string& name, const glm::vec2* value);
+     void addUniform (const std::string& name, const glm::vec3* value);
+     void addUniform (const std::string& name, const glm::vec4* value);
+     void addUniform (const std::string& name, const glm::mat4* value);
+@@ -157,7 +158,6 @@ private:
+     void addUniform (const std::string& name, glm::mat4 value);
+     void addUniform (const std::string& name, const int* value, int count = 1);
+     void addUniform (const std::string& name, const double* value, int count = 1);
+-    void addUniform (const std::string& name, const glm::vec2* value);
+     void addUniform (const std::string& name, const glm::mat3* value);
+     void addUniform (const std::string& name, const int** value);
+     void addUniform (const std::string& name, const double** value);
+diff --git a/src/core/frontends/project.cpp b/src/core/frontends/project.cpp
+index b600b71..934acb0 100644
+--- a/src/core/frontends/project.cpp
++++ b/src/core/frontends/project.cpp
+@@ -202,6 +202,12 @@ WPENGINE_API void wp_project_set_mouse_input (wp_project* project, wp_mouse_inpu
+     WPENGINE_PROJECT_API_END ();
+ }
+ 
++WPENGINE_API void wp_project_set_frame_rate (wp_project* project, float hz) {
++    WPENGINE_PROJECT_API_BEGIN
++    static_cast<WallpaperEngine::Project*> (project)->setFrameRate (hz);
++    WPENGINE_PROJECT_API_END ();
++}
++
+ WPENGINE_API void wp_project_describe (wp_project* project, wp_describe_callback* callback) {
+     WPENGINE_PROJECT_API_BEGIN
+     static_cast<WallpaperEngine::Project*> (project)->describe (callback);

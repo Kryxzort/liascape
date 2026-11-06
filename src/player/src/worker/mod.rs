@@ -1403,6 +1403,7 @@ mod tests {
                     x: 1.0,
                     y: 1.0,
                     buttons: 0,
+                    jump: false,
                 },
                 &[],
             )

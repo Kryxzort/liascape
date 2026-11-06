@@ -934,10 +934,12 @@ fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, Api
     let name = arg_str(args, "output")?.to_string();
     let (x, y) = (arg_f64(args, "x")?, arg_f64(args, "y")?);
     let buttons = opt_f64(args, "buttons")?.unwrap_or(0.0).max(0.0) as u32;
+    // `entered`: the pointer came onto the output here (the Wayland backend's `enter`)
+    let entered = args.get("entered").and_then(Value::as_bool).unwrap_or(false);
     rt.backend
         .as_headless_mut()
         .ok_or_else(headless_err)?
-        .pointer(&name, x, y, buttons)?;
+        .pointer(&name, (x, y), buttons, entered)?;
     let scenes = rt.pointer_events();
     Ok(json!({ "scenes": scenes }))
 }

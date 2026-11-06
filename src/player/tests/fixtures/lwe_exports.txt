@@ -1,5 +1,5 @@
 # liascape-scene-worker links these: the exports of LWE core at third_party/lwe/PIN (rev deeb4da = next-v2 ddea3b4 + patches/lwe 0001-0070).
-# 66 upstream + 4 from 0003 (wp_config_set_audio_output, wp_context_audio_pull/_stream_count/_driver_name) + 4 from 0039/0042 (wp_project_notify_track_metadata_extra, wp_project_notify_media_status, wp_project_uses_media, wp_config_set_storage_dir) + 2 from 0045 (wp_context_audio_input_push, wp_context_audio_spectrum) + 1 from 0063 (wp_project_shader_check, the shader sweep).
+# 66 upstream + 4 from 0003 (wp_config_set_audio_output, wp_context_audio_pull/_stream_count/_driver_name) + 4 from 0039/0042 (wp_project_notify_track_metadata_extra, wp_project_notify_media_status, wp_project_uses_media, wp_config_set_storage_dir) + 2 from 0045 (wp_context_audio_input_push, wp_context_audio_spectrum) + 1 from 0063 (wp_project_shader_check, the shader sweep) + 2 from 0105/0106 (wp_project_set_frame_rate, wp_project_pointer_jump).
 # Regenerate after a pin bump: nm -D --defined-only <core>.so | awk '$2 != "A" {sub(/@.*/, "", $3); print $3}' | sort
 wp_background_list_close
 wp_background_list_next
@@ -54,6 +54,7 @@ wp_project_notify_playback_position_and_duration_change
 wp_project_notify_playback_state_change
 wp_project_notify_track_metadata_change
 wp_project_notify_track_metadata_extra
+wp_project_pointer_jump
 wp_project_property_list_next
 wp_project_property_list_reset
 wp_project_property_set_boolean
@@ -72,6 +73,7 @@ wp_project_property_set_text
 wp_project_property_set_text_by_name
 wp_project_property_set_value
 wp_project_property_set_value_by_name
+wp_project_set_frame_rate
 wp_project_set_mouse_input
 wp_project_set_output_framebuffer
 wp_project_shader_check
