@@ -604,3 +604,25 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   everything (new rustc), and the first `nix develop` downloads the new shell (~1 GB). The adapter test now runs on
   `.NET 10.0.403` (`/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet`; battery.sh's
   fallback updated).
+
+## 2026-11-06 — WE-reference fixes: 3354740764's dog and light shafts; two "time" rows that are the capture's
+- **The dog's black box is gone** (fork `d5f244a, patch 0110`). The dog image uses WE's `alphatocoverage` blending and has effects
+  (clouds, blur, shake). With effects, the layer's blending moves to its last pass, and ours drew that pass without
+  blending, so the dog's transparent surroundings came out as an opaque dark square. WE (both references) cuts it
+  out. Only this scene uses `alphatocoverage`.
+- **Particle sprites were upside down in every scene** (fork `313e1d2, patch 0111`). Round sprites hid it; light shafts didn't:
+  in 3354740764, 1726902114 and 2561227934 the shafts rose from the grass at a slant, where WE has them hanging from
+  the top of the sky. Now they stand as in WE. If some other particle effect in your scenes looks different (flipped)
+  from before, this is why — and it should now match Windows.
+- **Not bugs of ours** (proved with extra WE captures, nothing to fix in the renderer):
+  - 3354740764 "black at 0.5 s": the scene opens with a black fade layer (gone at 1.6 s) that WE draws too. The
+    reference's t = 0 is taken at WE's first frame with a picture, already inside that fade, so WE's frames are about
+    1 s ahead of ours. wallpiper's 0.5 s frame is still dimmed by it.
+  - 2672425887 "the demon fades in 3 s later in ours": it fades in at 2.07–2.6 s in both. WE's clock is 0.2–1.1 s
+    ahead of the reference's t = 0, a different amount every run (four captures), and ours at 2 s is 0.07 s before
+    the fade starts — the 0.5 / 2 / 5 s samples made it look like 3 s.
+  - The reference time base itself is in TODO (scenes with intros need a per-run clock estimate or some slack).
+- Scores (WE compare): 3354740764 0.545 → 0.523 (2 s: 0.342 → 0.294; the 0.5 s frame is the time base, the rest mostly Ultra post-processing), 2561227934 0.256 → 0.218, 1726902114 0.092 → 0.080; 2672425887 unchanged.
+- The regenerated report (whole corpus, fork head 313e1d2 with the other agents' HDR / fog / colour-blend fixes) has
+  2134765860 at 0.46: it is a day/night scene on the wall clock, captured by WE at 16:56 and rendered by ours after
+  18:00 (night). Same picture at the same hour; noted in the report.

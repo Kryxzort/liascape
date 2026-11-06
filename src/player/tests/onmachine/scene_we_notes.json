@@ -75,5 +75,9 @@
   "2561227934": {
     "class": "ok",
     "note": "the light shafts stand as in WE since 313e1d2 (particle sprites were upside down); they are random in WE."
+  },
+  "2134765860": {
+    "class": "time",
+    "note": "a day / night scene on the wall clock (SceneScript `timeOfDay`): WE was captured at 16:56 (day), ours renders at the compare run's local time — a run after about 18:00 draws night and scores ~0.46. Same picture at the same hour (0.006)."
   }
 }
