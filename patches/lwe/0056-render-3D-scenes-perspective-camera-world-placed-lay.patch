@@ -1,7 +1,7 @@
 From 157c1119403268457181262195b64394dd0fcd50 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 11:12:07 +0530
-Subject: [PATCH 056/104] =?UTF-8?q?render:=203D=20scenes=20=E2=80=94=20per?=
+Subject: [PATCH 056/106] =?UTF-8?q?render:=203D=20scenes=20=E2=80=94=20per?=
  =?UTF-8?q?spective=20camera,=20world-placed=20layers,=20MDL=20models,=20l?=
  =?UTF-8?q?ights=20and=20fog?=
 MIME-Version: 1.0

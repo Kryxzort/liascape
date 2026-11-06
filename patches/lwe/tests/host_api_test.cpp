@@ -3173,6 +3173,189 @@ static bool unset_slots_are_not_missing () {
     return true;
 }
 
+// a simulation effect as cursorripple is built (apply_force → simulate_force → combine): `simstep` reads B (last
+// frame's state) into A, adding 1/255 to red per run, and writes this run's g_Frametime·15 to green and its pointer
+// move ·16 to blue; `simcopy` copies A to B; `simshow` draws B. Returns the files it wrote
+static std::vector<std::string> simulation_effect (const std::string& dir) {
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/simclock").c_str (), 0755);
+    const std::string vert = "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+                             "\tv_TexCoord = a_TexCoord;\n}\n";
+    const std::string copy = "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                             "void main() {\n\tgl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);\n}\n";
+    std::vector<std::string> files;
+    for (const char* name : { "simstep", "simcopy", "simshow" }) {
+        const std::string n = name;
+        write_file (dir + "/shaders/" + n + ".vert", vert);
+        write_file (dir + "/shaders/" + n + ".frag",
+                    n != "simstep" ? copy
+                                   : "uniform sampler2D g_Texture0;\nuniform float g_Frametime;\nuniform vec2 g_PointerPosition;\n"
+                                     "uniform vec2 g_PointerPositionLast;\nuniform vec4 g_PointerState;\nvarying vec2 v_TexCoord;\n"
+                                     "void main() {\n\tvec4 s = texSample2D(g_Texture0, v_TexCoord);\n"
+                                     "\tgl_FragColor = vec4(s.r + 1.0 / 255.0 + g_PointerState.z * (64.0 / 255.0), g_Frametime * 15.0,\n"
+                                     "\t\tlength(g_PointerPosition - g_PointerPositionLast) * 16.0, 1.0);\n}\n");
+        write_file (dir + "/materials/" + n + ".json", "{\"passes\":[{\"shader\":\"" + n + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                       "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+        files.insert (files.end (), { "shaders/" + n + ".vert", "shaders/" + n + ".frag", "materials/" + n + ".json" });
+    }
+    write_file (dir + "/effects/simclock/effect.json",
+                "{\"name\":\"simclock\",\"passes\":["
+                "{\"material\":\"materials/simstep.json\",\"target\":\"_rt_SimA\",\"bind\":[{\"name\":\"_rt_SimB\",\"index\":0}]},"
+                "{\"material\":\"materials/simcopy.json\",\"target\":\"_rt_SimB\",\"bind\":[{\"name\":\"_rt_SimA\",\"index\":0}]},"
+                "{\"material\":\"materials/simshow.json\",\"bind\":[{\"name\":\"_rt_SimB\",\"index\":0}]}],"
+                "\"fbos\":[{\"name\":\"_rt_SimA\",\"scale\":1,\"format\":\"rgba8888\"},{\"name\":\"_rt_SimB\",\"scale\":1,\"format\":\"rgba8888\"}]}\n");
+    files.push_back ("effects/simclock/effect.json");
+    return files;
+}
+
+// a simulation effect (cursorripple's shape: its passes carry state in the effect's own FBOs from frame to frame and
+// never read the layer) steps at the frame rate the host means to draw at (wp_project_set_frame_rate, WE's fps
+// setting), whatever rate its frames arrive at — its passes count per frame (a force per frame from the pointer's move
+// that frame times the frame's time, a decay floor of 1/255 per frame), so in WE the water's strength depends on the
+// fps, and 3184155462 drawn late or throttled pushed several frames' force at once. Early frames don't step, a late
+// frame runs several steps, each with 1/rate s and its share of the pointer's move; a press between steps reaches the
+// next; a frame drawn again at the same time doesn't step; the drawing pass runs every frame. (unpatched: the
+// simulation ran once per frame drawn, with that frame's time and move)
+static bool simulation_steps_at_the_frame_rate () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"sim\",\"file\":\"effects/simclock/effect.json\"}]}";
+    auto open = [&object] (ScriptRig& rig, float hz) {
+        const std::string dir = script_scene (object);
+        b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+        rig.extra = simulation_effect (dir);
+        rig.mouse = &g_clicker;
+        rig.loaded = [hz] (wp_project* p) { wp_project_set_frame_rate (p, hz); };
+        g_buttonDown = false;
+        g_mouseX = 8.0;
+        g_mouseY = 16.0;
+        return rig.open (dir);
+    };
+    auto frame = [] (ScriptRig& rig, float dt, double move) {
+        g_now += dt;
+        g_mouseX += move;
+        wp_render_update_time (rig.ctx);
+        wp_render_frame (rig.p);
+    };
+
+    // WE at 30 fps, the host at 240 Hz: 1 s, the pointer moving 0.25 px per frame (1/256 of the 64 px scene)
+    ScriptRig fast;
+    CHECK (open (fast, 30.0f), "load/build failed");
+    for (int i = 0; i < 240; i++) {
+        frame (fast, 1.0f / 240.0f, 0.25);
+    }
+    const auto second = b9_pixel (fast);
+    // the same time drawn again: no step
+    frame (fast, 0.0f, 0.0);
+    const auto again = b9_pixel (fast);
+    // a press held for one frame between steps reaches the next step (WE's g_PointerState.z)
+    g_buttonDown = true;
+    frame (fast, 1.0f / 240.0f, 0.25);
+    g_buttonDown = false;
+    for (int i = 0; i < 7; i++) {
+        frame (fast, 1.0f / 240.0f, 0.25);
+    }
+    const auto pressed = b9_pixel (fast);
+    printf ("    WE 30 fps, host 240 Hz, 1 s: steps r=%d (30 + the first frames'), frametime g=%d (1/30 → 127), move b=%d (8 frames' → 127);"
+            " drawn again r=%d; a press between steps r=%d (+64 +1)\n",
+            second[0], second[1], second[2], again[0], pressed[0]);
+    CHECK (second[0] >= 28 && second[0] <= 36, "the simulation didn't step 30 times in 1 s (r=%d)", second[0]);
+    CHECK (near (second[1], 0.5 * 255, 4), "a step's g_Frametime isn't 1/30 s (g=%d)", second[1]);
+    CHECK (near (second[2], 0.5 * 255, 4), "a step's pointer move isn't the move since the last step (b=%d)", second[2]);
+    CHECK (again[0] == second[0], "a frame drawn at the same time stepped (r %d → %d)", second[0], again[0]);
+    CHECK (pressed[0] >= second[0] + 64 && pressed[0] <= second[0] + 66, "the press between steps was lost (r %d → %d)", second[0],
+           pressed[0]);
+
+    // WE at 240 fps, the host at 30 Hz (a throttled scene): 0.5 s, the pointer moving 2 px per frame
+    ScriptRig slow;
+    CHECK (open (slow, 240.0f), "load/build failed");
+    for (int i = 0; i < 15; i++) {
+        frame (slow, 1.0f / 30.0f, 2.0);
+    }
+    const auto late = b9_pixel (slow);
+    printf ("    WE 240 fps, host 30 Hz, 0.5 s: steps r=%d (120 + the first frames'), frametime g=%d (1/240 → 16), move b=%d (1/8 frame's → 16)\n",
+            late[0], late[1], late[2]);
+    CHECK (late[0] >= 115 && late[0] <= 130, "a late frame didn't run 8 steps (r=%d after 15 frames)", late[0]);
+    CHECK (near (late[1], 255.0 / 16.0, 3), "a step's g_Frametime isn't 1/240 s (g=%d)", late[1]);
+    CHECK (near (late[2], 255.0 / 16.0, 3), "a step's pointer move isn't 1/8 of the frame's (b=%d)", late[2]);
+    return true;
+}
+
+// a pointer jump (wp_project_pointer_jump: it entered the output or came back from behind a window — WE, polling the
+// cursor on the whole desktop, never sees one) is no move: the frame that reads the new position has
+// g_PointerPositionLast = g_PointerPosition, and a simulation's next step starts where the pointer landed. A move
+// after it counts again. (unpatched: no such call; the jump was a move of 48 px in one frame — 3184155462's water
+// stroked a saturated line across the screen when the pointer came onto the wallpaper)
+static bool pointer_jump_is_no_move () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "uniform vec2 g_PointerPosition;\nuniform vec2 g_PointerPositionLast;\n",
+              "gl_FragColor = vec4(length(g_PointerPosition - g_PointerPositionLast) * 4.0, 0.0, 0.0, 1.0);");
+    ScriptRig rig;
+    rig.mouse = &g_clicker;
+    g_buttonDown = false;
+    g_mouseX = 8.0;
+    g_mouseY = 16.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    g_mouseX = 24.0;
+    rig.step ();
+    const auto moved = b9_pixel (rig);
+    g_mouseX = 56.0;
+    wp_project_pointer_jump (rig.p);
+    rig.step ();
+    const auto jumped = b9_pixel (rig);
+    g_mouseX = 40.0;
+    rig.step ();
+    const auto after = b9_pixel (rig);
+    printf ("    a 16 px move r=%d (1/4 → 255·1), a 32 px jump r=%d (0), a 16 px move after r=%d\n", moved[0], jumped[0], after[0]);
+    CHECK (moved[0] > 250, "a move isn't a move (r=%d)", moved[0]);
+    CHECK (jumped[0] < 3, "the jump was a move (r=%d)", jumped[0]);
+    CHECK (after[0] > 250, "a move after the jump isn't a move (r=%d)", after[0]);
+
+    // a simulation stepping at 30 fps under a 240 Hz host: a jump between its steps isn't in the next step's move
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"sim\",\"file\":\"effects/simclock/effect.json\"}]}";
+    const std::string sdir = script_scene (object);
+    b9_layer (sdir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    ScriptRig sim;
+    sim.extra = simulation_effect (sdir);
+    sim.mouse = &g_clicker;
+    sim.loaded = [] (wp_project* p) { wp_project_set_frame_rate (p, 30.0f); };
+    g_mouseX = 8.0;
+    CHECK (sim.open (sdir), "load/build of %s failed", sdir.c_str ());
+    auto frame = [&sim] () {
+        g_now += 1.0f / 240.0f;
+        wp_render_update_time (sim.ctx);
+        wp_render_frame (sim.p);
+    };
+    for (int i = 0; i < 16; i++) {
+        frame ();
+    }
+    // 4 frames into a step: jump 40 px, then move 2 px before the step
+    for (int i = 0; i < 4; i++) {
+        frame ();
+    }
+    g_mouseX = 48.0;
+    wp_project_pointer_jump (sim.p);
+    frame ();
+    g_mouseX = 50.0;
+    for (int i = 0; i < 3; i++) {
+        frame ();
+    }
+    const auto step = b9_pixel (sim);
+    printf ("    the step after a 40 px jump and a 2 px move: b=%d (2/64·16 → 127)\n", step[2]);
+    CHECK (near (step[2], 0.5 * 255, 4), "the step's move holds the jump (b=%d)", step[2]);
+    return true;
+}
+
 // an effect pass of the E41 test: the previous output with channel `ch` raised to 1
 static void e41_effect (const std::string& dir, const std::string& name, const char* ch) {
     mkdir ((dir + "/effects").c_str (), 0755);
@@ -6717,6 +6900,8 @@ int main (int argc, char** argv) {
     run ("sprite_orientation_as_we", sprite_orientation_as_we);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
+    run ("simulation_steps_at_the_frame_rate", simulation_steps_at_the_frame_rate);
+    run ("pointer_jump_is_no_move", pointer_jump_is_no_move);
     run ("bloom_is_live_and_tinted", bloom_is_live_and_tinted);
     run ("annotation_defaults_parse", annotation_defaults_parse);
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
