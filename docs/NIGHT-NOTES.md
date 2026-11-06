@@ -604,3 +604,22 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   everything (new rustc), and the first `nix develop` downloads the new shell (~1 GB). The adapter test now runs on
   `.NET 10.0.403` (`/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet`; battery.sh's
   fallback updated).
+
+## 2026-11-06 — scene normalization is set once per play
+- **What was moving the volume:** the backend's normalization, not anything in the scene worker (it has no automatic
+  gain or limiter). Every time a scene's loudness report came in (after its first ~60 s of sound, then every further
+  minute) and the measured value had moved by half a unit or more, the playing scene's volume was ramped to the new
+  value. Your log since this morning has 209 of those; Emilia (2951169110) and Summer feeling (1884904087) each moved
+  three times in one play. Measured on a private player: Emilia's first play moved at 52 s, 96 s and 170 s; its second
+  play (already measured) still moved once, at 115 s.
+- **Now, as you asked:** a scene plays at one level for the whole play. A scene that was never measured plays at its
+  estimate (unity if it has none) and changes once, when its first 60 s of sound are measured (an estimated scene
+  counts the estimate as 10 s, so that's after ~50 s of sound). After that, the measuring only refines the stored
+  value, which the next play starts with. A scene that already has a measurement starts at it and never changes.
+  Your own changes (normalization on/off, the target, a scene property that changes its sound) still apply at once.
+  Same private test after the change: Emilia's first play changed once (at 54 s) and its second play not at all,
+  while the stored value moved four times.
+- **Possibly also what you heard:** auto-mute flips your wallpaper off and on in bursts when another app's sound has
+  short gaps (12:14:30–12:14:46 today: 6 mutes in 16 s with Spotify and a KDE notification stream; your "unmute after"
+  is 500 ms). A longer unmute delay would stop that; not changed.
+- Side note: the player caps the total gain at +12 dB, so a very quiet scene is boosted at most 12 dB (Emilia wants 13).

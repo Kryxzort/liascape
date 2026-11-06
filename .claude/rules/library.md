@@ -75,8 +75,12 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
   has one, else its estimate — moved by ≥ 0.5 LU/dB within one configuration, set exactly on a configuration change
   (`MergeSceneEstimate`); no LRA/Thresh, so the video path never reads it. The seed a new source continues = the
   current configuration's live state, else its estimate's seed — an estimate never displaces live data (the
-  player's `Book` adopts a seed only when it covers more). Applied as the scene source's `gain.normalize`. No
-  estimate (not estimable / failed) = learn on first play as before. The flat `loudnessState/Seconds/Partial` of
+  player's `Book` adopts a seed only when it covers more). Applied as the scene source's `gain.normalize` — **set once
+  per play** (owner 2026-11-06): the applied value is what a NEW play starts with; a playing source keeps its
+  `gain.normalize` to its end, except once, when its configuration's first 60 s window completes (`WindowReached` —
+  a play that started from an estimate, a partial or nothing); every later report refines the stored value for the
+  next play only (player-adapter.md § Scenes → "Loudness" → "Set once per play"). No
+  estimate (not estimable / failed) = learn on first play as before (unity until the window lands). The flat `loudnessState/Seconds/Partial` of
   before were moved by a one-off script (no migration code). Legacy LWE scenes: not normalized.
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)

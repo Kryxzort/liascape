@@ -9320,7 +9320,7 @@ fn scene_loudness_is_learned_once_after_its_window() {
             &mut c,
             name,
             &tone_scene(1000.0),
-            json!({"speed": speed, "gain.user": gain}),
+            json!({"speed": speed, "gain.user": gain, "gain.normalize": 4.5}),
         );
         show_all(&mut c, &id);
         let t0 = now_ms(&mut c);
@@ -9345,6 +9345,20 @@ fn scene_loudness_is_learned_once_after_its_window() {
         let p = loudness_progress(&mut c, &id);
         assert_eq!(p["done"], json!(false), "{p}");
         assert!(p["seconds"].as_f64().unwrap() > secs + 1.0, "still measuring: {p}");
+        // Set once per play (owner 2026-11-06): the player reports, the backend decides — a report
+        // never moves the source's normalization itself (no ramp, no step; the worker's stream gain
+        // is still the create values' sum), measured pre-gain whatever it is.
+        let norm = c.ok("get", json!({"path": format!("{id}.gain.normalize")}))["value"].clone();
+        assert_eq!(norm, json!(4.5), "{name}: gain.normalize after a report");
+        let ramps = c.ok("logs", json!({"kind_prefix": "anim.start", "limit": 10000}))["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["path"].as_str().is_some_and(|p| p.starts_with(&format!("{id}.gain"))))
+            .count();
+        assert_eq!(ramps, 0, "{name}: nothing ramped its gains");
+        let wg = worker_of(&mut c, &id)["audio"]["gain_db"].as_f64().unwrap();
+        assert!((wg - (gain + 4.5)).abs() < 1e-6, "{name}: the stream's gain {wg}");
         c.ok("destroy", json!({"id": id}));
         // What was measured since: one report at the end.
         let evs = wait_for(Duration::from_secs(3), "the end's report", || {

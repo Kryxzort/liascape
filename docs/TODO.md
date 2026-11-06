@@ -501,6 +501,32 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
     - **UI.** The card settings modal's loudness line / tooltip: "≈ −14.6 LUFS (estimated)" vs "−15.2 LUFS
           (measured, 30 min)"; a `low` confidence adds its first note ("two versions of one song play at once — may be
           up to +4.7 LU louder"); `/library` items gain `loudnessEstimated`.
+  - [x] **Scene normalization set once per play** (2026-11-06, owner: "make scene audio normalization not do the real-time
+        normalization where it just changes every second and just make it how you said where it checks for 60s and
+        calculates rest of the scene for future"; player-adapter.md § Scenes → "Loudness" → "Set once per play",
+        library.md § Loudness, player-core.md § "Scene loudness" → "Applying it"). **What moved the gain:** the backend,
+        on every `scene.loudness` report whose applied value moved ≥ 0.5 LU (`OnLoudnessMeasured` → `ApplyEffective` → a
+        500 ms `gain.normalize` ramp) — reports come at the window and after each further 60 s of audible play, so a first
+        play moved at ~50/60 s, ~120 s, ~180 s… (the owner's adapter log: 209 such live moves since 05:50, 2951169110 and
+        1884904087 three times in one play). Nothing in the worker moves it (no AGC/limiter: a ±1 clip after the gain
+        only); the player itself never touches `gain.normalize`. **Measured before** (private backend + headless player,
+        `--ao null`, 2951169110 from its estimate): play 1 (200 s) = 3 ramps — 52 s 11.10 → 13.01 dB, 96 s → 12.04, 170 s
+        → 13.01; play 2 (130 s, already measured) = 1 ramp at 115 s, 12.11 → 13.01. **Now:** each live scene source keeps
+        a pin (`LiascapePlayerMedia.NormalizePin`); the only automatic move is the window landing (`WindowReached`: the
+        report that first completes the current configuration's measurement) — once, for a play that started from an
+        estimate / a partial / nothing (until then it plays at its estimate, else unity); further reports refine the
+        stored value for the next play only; the user's normalization settings and a property commit's new configuration
+        still apply live. **Measured after** (same run): play 1 = 1 ramp, at 54 s (11.10 → 13.01: the window landing),
+        then nothing through 3 further reports (the stored value moved twice, "applied from its next play"); play 2 = 0
+        ramps — it opened at the refined 12.81 dB and kept it while the stored value moved twice more. **Decided:** the
+        window still counts the estimate's 10 s seed (an estimated scene lands after ~50 s of audible play — the
+        measurement then is 50 s measured + the estimate at 1/6 weight); a backend restart mid-play pins what each source
+        runs (a landing missed while away isn't replayed); an estimate landing mid-play changes the stored value only (a
+        never-estimated scene stays at unity until its window). **Seen meanwhile:** the owner's player log has auto-mute
+        flapping in bursts (12:14:30–:46: 6 mute/unmute pairs in 16 s, kded6 + Spotify, the 500 ms unmute delay) — a mute
+        every second or two sounds like "changing every second" too; not touched here. The stream's summed gain is capped
+        at +12 dB by the player (`units::MAX_DB`) while `SceneNormalizeDb` allows +24: a very quiet scene's normalization
+        stops at +12 (2951169110's 13.01 played as 12.0).
   - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
         web-ui.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on

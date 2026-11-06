@@ -4531,7 +4531,7 @@ scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`
 
 Owner decision (Phase 2 plan, "Loudness: learn on first play"): a scene's integrated loudness is measured
 over its first ~60 s of play from its worker's own stream, stored in the item's index like a video's
-`loudness*`, and normalizes the scene from then on. **Refined (owner 2026-10-28: "60s to normalize for
+`loudness*`, and normalizes the scene from then on — set once per play (2026-11-06: "Applying it" below). **Refined (owner 2026-10-28: "60s to normalize for
 rest of scene, keep measuring to get a more accurate measure when the scene is played in future (probably
 add a max cap for people who will never change wallpaper)")**: measuring goes on past the window and on
 every later play, continuing ONE integration over all of them, until a cap. The player measures and
@@ -4660,7 +4660,13 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   measured (above); `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
 - **Applying it** is the backend's: the scene source's **`gain.normalize`** slot (the summed `Gains`
   → the worker's stream; § Units) — set at create from the stored value, live through `animate` (a
-  setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too).
+  setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too). **Set once per play**
+  (owner 2026-11-06, "not … real-time … checks for 60s and calculates rest of the scene for future"; player-adapter.md
+  § Scenes → "Loudness"): a playing source keeps the value it opened with; the only automatic change is the one ramp
+  when its configuration's first window completes (the report that makes the stored measurement complete), and every
+  report after that refines the NEXT play's value. Nothing changes here — the reports, their cadence and the book
+  are the same; the worker has no gain of its own besides the slots (no AGC, no limiter: the ±1 clip after the gain,
+  WE's own device clip).
 - **Probe `workers` → `loudness`**: `{seconds (audible, every play), session_s, seed_s, played_s,
   lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, measuring
   (this source is its path's measuring one — the `Book`; the other values are the path's), received
@@ -4684,7 +4690,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   `cap_stops_measuring`, `state_round_trips_and_a_bad_seed_is_ignored` (RED against the API with the old
   semantics: 5 of 5); worker `loudness_segments_count_only_played_sound` + meter off; lib
   `restart_start_folds_live_changes` + `LoudnessMeter`; api `scene_loudness_is_learned_once_after_its_window`
-  (now: not again before the next window, and a report at the end), `scene_loudness_accumulates_over_two_plays`
+  (now: not again before the next window, and a report at the end; 2026-11-06: a report never moves the source's
+  `gain.normalize` — created at 4.5, still 4.5, no `anim.start` on its gains, the stream's gain = the create sum), `scene_loudness_accumulates_over_two_plays`
   (−20 then −23 dBFS plays of one folder, the second seeded with the first's state → `seed_s`/`session_s`,
   the energy mean of both within 0.3 LU), `scene_loudness_stops_at_the_cap` (window 1, cap 3: reports at
   1/2/3 s, `capped`, `received` stands still, nothing at the end; seeded at the cap → nothing metered) —

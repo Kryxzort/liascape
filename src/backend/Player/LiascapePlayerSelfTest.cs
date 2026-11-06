@@ -535,6 +535,41 @@ public static class LiascapePlayerSelfTest
         m.SceneLoudness["L"].Estimate!.Notes = ["two versions of one song play at once"];
         if (LibraryService.SceneLoudnessInfoOf(m).Note != "two versions of one song play at once") fails.Add("a low estimate's first note is the card's note");
 
+        // Set once per play (owner 2026-11-06): WindowReached = the report that completes the CURRENT configuration's first
+        // window (before: no live measurement or a partial) — the one moment a live source's gain.normalize moves; every
+        // later report only changes the next play's value
+        m = new LibMeta();
+        MergeEst("W", Est(-20, -10), (true, true), "W's estimate");
+        void Reached(string? key, double lufs, double secs, bool complete, bool want, string what)
+        {
+            var got = LibraryService.MergeSceneLoudnessReport(m, key, lufs, -10, secs, complete, St((int)(secs * 10)));
+            if (got.WindowReached != want) fails.Add($"WindowReached({what}) = {got.WindowReached}, want {want} ({got})");
+        }
+        Reached(null, -24, 30, false, false, "a partial (switched away early)");
+        Reached(null, -24, 60, true, true, "the window completed over a partial");
+        Reached(null, -26, 120, true, false, "a further window: refines the next play's value only");
+        Reached(null, -26, 130, true, false, "the end of the play");
+        MergeEst("X", Est(-18, -8), (true, true), "another configuration (a property commit)");
+        Reached("W", -27, 190, true, false, "W's late report after the switch to X (not current)");
+        Reached("X", -19, 60, true, true, "X's own window: X's play sets its normalization once");
+        m = new LibMeta();
+        Reached(null, -22, 60, true, true, "a scene never estimated: its first window");
+
+        // PinNormalize: a live source keeps the gain.normalize it plays with; only a landing / a property commit's new
+        // configuration (repin) or the user's normalization settings move it to the index's value
+        var s14 = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };
+        var p0 = LiascapePlayerMedia.PinNormalize(null, "/s", 3.0, 5.0, s14, repin: false);
+        if (p0.Db != 3.0) fails.Add($"first sight pins what the source runs: {p0.Db}, want 3");
+        if (LiascapePlayerMedia.PinNormalize(null, "/s", null, 5.0, s14, repin: false).Db != 5.0) fails.Add("first sight without a running value: the index's");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 7.5, s14, repin: false) is not { Db: 3.0 } kept || !ReferenceEquals(kept, p0))
+            fails.Add("the index moved (a refinement): the play keeps its value");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 7.5, s14, repin: true).Db != 7.5) fails.Add("a window landing re-pins to the index");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, -2.0, new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -23 }, repin: false).Db != -2.0)
+            fails.Add("a target change re-pins to the index");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 0.0, new AppSettings { NormalizeAudio = false, NormalizeTargetLufs = -14 }, repin: false).Db != 0.0)
+            fails.Add("normalization off re-pins (0)");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/other", 1.0, 9.0, s14, repin: false).Db != 1.0) fails.Add("a reused source id on another path: what it runs");
+
         // SceneNormalizeDb: target − I, never boosting the sample peak past −1.5 dBFS, clamped −60…+24; 0 when off / unlearned
         var on = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };
         (LibMeta? meta, AppSettings s, double want, string what)[] rows =

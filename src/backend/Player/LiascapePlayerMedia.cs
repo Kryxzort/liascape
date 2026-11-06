@@ -472,18 +472,23 @@ public static class LiascapePlayerMedia
     }
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —
-    // MergeSceneLoudness) and, when the applied value moved (≥ 0.5 LU) with normalization on, ramp every live source of
-    // that scene to its new `gain.normalize` — the same worker keeps playing.
+    // MergeSceneLoudness) — the value the scene's NEXT play starts with. A play in progress keeps its normalization
+    // (owner 2026-11-06: "not real-time … checks for 60s and calculates rest of the scene for future"), except once: the
+    // report that completes the configuration's first window (`WindowReached`) sets the live sources' `gain.normalize`
+    // (LandSceneNormalize — a 500 ms ramp, the same worker keeps playing).
     private static void OnSceneLoudness(string path, string key, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
     {
-        var (stored, applied) = LibraryService.StoreSceneLoudness(path, key, lufs, peak, seconds, complete, state);
+        var r = LibraryService.StoreSceneLoudness(path, key, lufs, peak, seconds, complete, state);
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
-            + (key.Length > 0 ? $" [{key}]" : "")
-            + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
-        if (stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
-        if (stored) LiascapePlayerProgram.PushItem(path); // its next source continues this measurement (`loudness_seed`)
-        if (applied) PlayerHelper.OnLoudnessMeasured(path);
+            + (key.Length > 0 ? $" [{key}]" : "") + (complete ? "" : " (partial)")
+            + (!r.Stored ? " — kept the stored one"
+                : r.WindowReached ? (r.Applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)") + " — its window is measured: this play's normalization is set now, once"
+                : r.Applied ? " — stored, applied from its next play (this play keeps its normalization)"
+                : " — stored (< 0.5 LU: not applied)"));
+        if (r.Stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
+        if (r.Stored) LiascapePlayerProgram.PushItem(path); // its next source starts at this value and continues this measurement (`loudness_seed`)
+        if (r.WindowReached && SettingsService.Load().NormalizeAudio) LandSceneNormalize(path);
     }
 
     private static int _eventOutcomes;
@@ -755,6 +760,38 @@ public static class LiascapePlayerMedia
     }
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
+
+    // ---- a scene's normalization is set ONCE per play (owner 2026-11-06) --------------------------------------
+    // "make scene audio normalization not do the real-time normalization where it just changes every second and just
+    // make it how you said where it checks for 60s and calculates rest of the scene for future". Each live scene
+    // source keeps the `gain.normalize` it started with — its pin (`_normPins`, by source id; the queue's worker) —
+    // through every resolver pass: a refinement of the stored loudness (the reports every further 60 s, an estimate
+    // landing) moves the index, i.e. the NEXT play's value, never this one's. A pin changes only on:
+    //  - the window landing (LandSceneNormalize): the report that completes the configuration's first 60 s of audible
+    //    play (`WindowReached`) re-pins every live source of the scene to the measured value — at most once per play,
+    //    and only for a play that started without a complete measurement (until then it plays at its estimate, else
+    //    at unity);
+    //  - the user's own changes: normalization on/off or its target (the pin's settings differ), a property commit
+    //    that changes the scene's audio configuration (`loudness_key` sent by a `sceneprops` pass: another sound).
+    // First sight of a source (no pin yet: created since, or this backend restarted) pins what it RUNS (`have`, its
+    // create value) — not the index, which may have moved since its create (the stopped play's end report).
+    public sealed record NormalizePin(string Path, double Db, bool On, double Target);
+    public static NormalizePin PinNormalize(NormalizePin? pin, string path, double? running, double indexDb, AppSettings s, bool repin)
+    {
+        bool same = pin != null && pin.Path == path;
+        if (!repin && same && pin!.On == s.NormalizeAudio && pin.Target == s.NormalizeTargetLufs) return pin;
+        double db = !repin && !same && running is double r ? r : indexDb;
+        return new NormalizePin(path, db, s.NormalizeAudio, s.NormalizeTargetLufs);
+    }
+    private static readonly Dictionary<string, NormalizePin> _normPins = new();
+    private static readonly object _pinLock = new();
+    private static readonly IReadOnlySet<string> NormalizeOnly = new HashSet<string> { "gain.normalize" };
+
+    // The window landing: every live source of `path` re-pinned to its stored value (the measurement just completed),
+    // ramped. Coalescible per item; Fresh (a source created since the last read is pinned from the index too).
+    public static void LandSceneNormalize(string path) =>
+        QueueBatch("normland", FullPath(path), paths =>
+            ResolveNow(new Req { Items = paths, OnlyItems = true, Props = NormalizeOnly, Fresh = true, RepinNormalize = true }));
 
     // A scene's `gain.normalize` (dB) under `s`: its learned loudness (LibMeta.LoudnessI, the player's
     // `scene.loudness`) brought to NormalizeTargetLufs — like the video loudnorm's linear mode, never boosted past
@@ -1114,7 +1151,9 @@ public static class LiascapePlayerMedia
     //   speed     = clamp(transient item ?? its override ?? transient global ?? Speed, 0.1, 4)
     //   af        = its OWN item's loudnorm at the target ("" off / NoAudio / unmeasured — kicks a measure)
     //   gain.normalize (scenes only) = SceneNormalizeDb(its learned loudness, the target) — 0 off / not
-    //               learned yet; sent as `animate` over NormalizeRampMs (a landing mid-play ramps, never steps)
+    //               learned yet — for a NEW source; a live one keeps its pin (NormalizePin: set once per play —
+    //               the window landing, the user's normalization settings, a property commit's new configuration);
+    //               sent as `animate` over NormalizeRampMs (never a step)
     //   no_audio, hwdec, fps_cap, cache, demuxer_max_mib, demuxer_back_mib = the global settings
     //   gain.mute = −96 when muted, else 0
     //   + the layer: lay:*:main.fit = VideoScale (Fresh passes only; one `set` if any main layer differs)
@@ -1129,7 +1168,9 @@ public static class LiascapePlayerMedia
     //   the pass gives up (R81 re-applies when the player answers again).
     // CALLERS — queue key → what they pass (every one coalescible: the newest pass per key wins):
     //   /settings (`PlayerHelper.ApplyEffectiveLive`), the volume key on the global, normalization, a
-    //     loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
+    //     video's loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
+    //   a scene's window landing (its configuration's first complete loudness report) → `LandSceneNormalize(path)`:
+    //     batch "normland", its sources only, gain.normalize re-pinned from the index, Fresh.
     //   R81 (a restart / the stall breaker closing) → `ReapplyAll()`: "reapply", the same + log + count.
     //   /library/volume|speed, the volume key on an item's own volume (`ApplyOverrideLive`) →
     //     `ApplyOverride(path)`: batch "override" (every item queued since the pending one ran), those
@@ -1158,6 +1199,8 @@ public static class LiascapePlayerMedia
         public IReadOnlySet<string>? Props { get; init; }         // null = every resolved prop (+ fit)
         public bool Fresh { get; init; }                          // diff against a new `state` read
         public bool Force { get; init; }                          // send even when the source already runs it
+        public bool RepinNormalize { get; init; }                 // the items' gain.normalize from the index (a window landing)
+        public bool RepinOnKeyChange { get; init; }               // …for a source whose loudness_key this pass changes (a property commit)
     }
 
     private static readonly IReadOnlySet<string> GainUser = new HashSet<string> { "gain.user" };
@@ -1190,7 +1233,7 @@ public static class LiascapePlayerMedia
             catch (Exception e) { LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-plan failed: {e.Message}"); }
             bool latest = _scenePropsSeq.TryGetValue(FullPath(path), out var now) && now == seq;
             QueueSet("sceneprops:" + FullPath(path), () =>
-                ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps }));
+                ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps, RepinOnKeyChange = true }));
             LiascapePlayerProgram.PushItem(path);
         });
     }
@@ -1378,6 +1421,7 @@ public static class LiascapePlayerMedia
         for (int attempt = 0; attempt < 2; attempt++)
         {
             if ((r.Fresh ? ReadLive(client) : CachedLive(client)) is not { } live) return 0;
+            if (r.Fresh) lock (_pinLock) foreach (var gone in _normPins.Keys.Where(k => !live.Values.ContainsKey(k)).ToList()) _normPins.Remove(gone);
             AppSettings? loaded = null;
             AppSettings S() => loaded ??= SettingsService.Load(); // only when a value needs it (not a drag preview)
             bool muted = PlayerHelper.IsMuted;
@@ -1393,9 +1437,21 @@ public static class LiascapePlayerMedia
                 foreach (var id in ids)
                 {
                     if (!live.Values.TryGetValue(id, out var have)) live.Values[id] = have = [];
+                    bool keyChanged = false;
                     foreach (var (prop, v0) in want)
                     {
                         var v = prop == "scene_props" && v0 is JsonElement sp ? WithResets(path, sp, have.GetValueOrDefault(prop)) : v0;
+                        if (prop == "gain.normalize" && v0 is double indexDb)
+                            lock (_pinLock)
+                            {
+                                // the play keeps its normalization (NormalizePin above)
+                                _normPins.TryGetValue(id, out var pin);
+                                double? running = have.GetValueOrDefault(prop) is double hd ? hd : null;
+                                bool repin = (r.RepinNormalize && item) || (r.RepinOnKeyChange && keyChanged);
+                                var np = PinNormalize(pin, path, running, indexDb, S(), repin);
+                                _normPins[id] = np;
+                                v = np.Db;
+                            }
                         if (!r.Force && have.TryGetValue(prop, out var h) && Same(h, v)) continue;
                         var sent = Send(client, id, prop, v);
                         if (sent == Sent.Ok) have[prop] = v;
@@ -1403,6 +1459,7 @@ public static class LiascapePlayerMedia
                         // state, else its estimate's 10 s seed ({} = nothing: the player's book may still hold some)
                         if (sent == Sent.Ok && prop == "loudness_key")
                         {
+                            keyChanged = true;
                             object seed = LibraryService.SceneLoudnessSeed(path) is JsonElement sd ? sd : new Dictionary<string, object>();
                             if (Send(client, id, "loudness_seed", seed) == Sent.Ok) have["loudness_seed"] = seed;
                         }

@@ -1201,6 +1201,8 @@ waitfor $WAIT cur_near gain.normalize 6 0.1 && [ "$(wpid "$SID5")" = "$WP5" ] &&
   && ok "gain.normalize moved live to $(cur gain.normalize) dB (−14 − (−20)) — same source $SID5, same worker $WP5" || bad "normalize live: $(cur gain.normalize), src $SID5 → $(srcIdForPath "$S5"), worker $WP5 → $(wpid "$SID5")"
 ramp=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
 echo "$ramp" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp), never a step" || bad "normalize not ramped: $ramp"
+grep -q "scene 900000005 loudness .* its window is measured: this play's normalization is set now, once" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…the window landing (adapter log: set now, once)" || bad "adapter log has no window-landing line for s5"
 waitfor $WAIT eval 'near "$(waudio "$SID5" gain_db)" 6 0.1' && ok "…reaches the worker's stream (effective $(waudio "$SID5" gain_db) dB)" || bad "worker gain_db $(waudio "$SID5" gain_db)"
 setting '.NormalizeTargetLufs = -23'
 waitfor $WAIT cur_near gain.normalize -3 0.1 && ok "target −23 → gain.normalize $(cur gain.normalize) live" || bad "target −23 → $(cur gain.normalize)"
@@ -1254,20 +1256,33 @@ waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000
 A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
 [ "$A5b" = 0 ] && near "$(cur gain.normalize)" "$W5" 0.01 && ok "…gain.normalize untouched ($(cur gain.normalize), no ramp)" || bad "a sub-0.5 refinement moved gain.normalize: $(cur gain.normalize), ramps $A5b"
 grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
-# a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU →
-# gain.normalize ramps to it — same source, same worker
+# a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU → the
+# STORED value moves (the next play's), but this play keeps the normalization it started with — set once per play
+# (owner 2026-11-06: "not … real-time … calculates rest of the scene for future"); the next play opens at the new value
 stop_now
 mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-10}'
 post /apply "{\"path\":\"$S5\"}" >/dev/null
 waitfor 5000 scene_ready "$S5" || bad "third play s5 → $(basename "$(cur path)")"
 SID5c=$(srcIdForPath "$S5"); WP5c=$(wpid "$SID5c")
+G5c=$(ctl get "{\"path\":\"$SID5c.gain.normalize\"}" | jq -r .value)
 waitfor 15000 eval 'python3 -c "import sys; sys.exit(0 if float(\"$(loud_i 900000005)\") >= $I5 + 0.5 else 1)"' \
-  && ok "a louder third play moved loudnessI $I5 → $(loud_i 900000005) ($(idx_loud 900000005))" || bad "third play: index $(idx_loud 900000005) (was $I5)"
-W5c=$(python3 -c "print(round(min(-14 - float('$(loud_i 900000005)'), -1.5 - float('$(jq -r '."900000005".loudnessTP' "$IDX")')), 3))")
-waitfor $WAIT cur_near gain.normalize "$W5c" 0.05 && [ "$(srcIdForPath "$S5")" = "$SID5c" ] && [ "$(wpid "$SID5c")" = "$WP5c" ] \
-  && ok "…gain.normalize ramped live to $(cur gain.normalize) dB — same source $SID5c, same worker $WP5c" || bad "third play: gain.normalize $(cur gain.normalize) (want $W5c), src $SID5c → $(srcIdForPath "$S5"), worker $WP5c → $(wpid "$SID5c")"
-ramp5c=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5c.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
-echo "$ramp5c" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp5c)" || bad "third play: normalize not ramped: $ramp5c"
+  && ok "a louder third play moved the stored loudnessI $I5 → $(loud_i 900000005) ($(idx_loud 900000005))" || bad "third play: index $(idx_loud 900000005) (was $I5)"
+n5c=$(ns_l "$SID5c"); waitfor 10000 eval '[ "$(ns_l "$SID5c")" -gt "$n5c" ]' || bad "third play: no further report after the stored value moved"
+pass5c=$(post /settings "$(curl -sf -m 5 "$U/settings" | jq '.Volume = 99')" >/dev/null; waitfor $WAIT cur_near gain.user "$(dB 99)" 0.05 && echo y)   # a full resolver pass meanwhile
+A5c=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5c.gain.normalize" '[.events[] | select(.path==$p)] | length')
+[ "$A5c" = 0 ] && near "$(cur gain.normalize)" "$G5c" 0.001 && [ "$(srcIdForPath "$S5")" = "$SID5c" ] && [ "$pass5c" = y ] \
+  && ok "…this play keeps its normalization: gain.normalize $(cur gain.normalize) = its create value, 0 ramps over $(ns_l "$SID5c") reports + a full resolver pass" \
+  || bad "third play: gain.normalize $(cur gain.normalize) (created $G5c), $A5c ramps, src $SID5c → $(srcIdForPath "$S5"), resolve pass $pass5c"
+grep -q "scene 900000005 loudness .* stored, applied from its next play (this play keeps its normalization)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…adapter log: applied from its next play" || bad "adapter log has no 'applied from its next play' line"
+setting '.Volume = 100'
+stop_now
+post /apply "{\"path\":\"$S5\"}" >/dev/null
+waitfor 5000 scene_ready "$S5" || bad "fourth play s5 → $(basename "$(cur path)")"
+SID5d=$(srcIdForPath "$S5"); G5d=$(ctl get "{\"path\":\"$SID5d.gain.normalize\"}" | jq -r .value)
+A5d=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5d.gain.normalize" '[.events[] | select(.path==$p)] | length')
+python3 -c "import sys; sys.exit(0 if float('$G5d') <= float('$G5c') - 0.4 else 1)" && [ "$A5d" = 0 ] \
+  && ok "the next play opens at the refined value: gain.normalize $G5c → $G5d from its first frame (no ramp)" || bad "fourth play: gain.normalize $G5d (third play's $G5c), ramps $A5d"
 # a scene without sound: nothing learned, never normalized
 post /apply "{\"path\":\"$S6\"}" >/dev/null
 waitfor 5000 scene_ready "$S6" || bad "/apply s6 → $(basename "$(cur path)")"

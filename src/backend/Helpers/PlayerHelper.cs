@@ -4357,8 +4357,8 @@ public static class PlayerHelper
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
 
-    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync — or, for a scene under
-    // liascape-player, the player's own `scene.loudness` learned on first play): with normalization on, the item may be
+    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync; a scene's `scene.loudness`
+    // goes through LiascapePlayerMedia.OnSceneLoudness instead — set once per play): with normalization on, the item may be
     // playing right now — unmeasured when it started (or when normalization was switched on), so it ran without
     // the filter / `gain.normalize` and nothing applied it once measured (until its next switch).
     public static void OnLoudnessMeasured(string path)
