@@ -7,7 +7,7 @@
 # (WE | ours | |diff| x4) into the results dir and, small, into docs/player/reports/we-ref/sbs/.
 #
 # Where the preview compare asks "does it look like the author's poster", this asks "does it look like WE": the
-# goal picture. Still a ranked list, not pass/fail (WE's particles are unseeded, its time base is +-80 ms).
+# goal picture. Still a ranked list, not pass/fail (WE's particles are unseeded, its time base is about ±0.15 s).
 #
 #   bash src/player/tests/onmachine/scene_we_compare.sh                         # every captured scene
 #   bash src/player/tests/onmachine/scene_we_compare.sh --only 3184155462 --refs ~/.cache/liascape/we-ref/captures/rip-drag

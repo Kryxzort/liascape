@@ -98,7 +98,8 @@ def main():
         score = f"{r['dist']:.3f}" if r.get("dist") is not None else "—"
         flag = f" **{r['invalid']}** —" if r.get("invalid") else ""
         links = ", ".join(f"[{f.split('_')[1]}]({f})" for f in files)
-        lines.append(f"- **{sid}** (score {score}; {links}):{flag} {what_to_look_at(r)}")
+        trust = f" — *reference: {r['trust']}*" if r.get("trust") else ""
+        lines.append(f"- **{sid}** (score {score}; {links}):{flag} {what_to_look_at(r)}{trust}")
     with open(os.path.join(a.out, "index.md"), "w") as f:
         f.write("# Liascape vs Wallpaper Engine — side-by-sides to check by eye\n\n")
         f.write("Each JPEG: **left = real Wallpaper Engine** (2.8.485 under Proton, Ultra, MSAA x8, 30 fps, "
