@@ -772,6 +772,29 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
       incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
+- [x] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
+      setting the normalization target to 0): Settings let the target go −100…0 LUFS, but ffmpeg's `loudnorm` takes
+      `I` in −70…−5 only, so `LoudnormAf` built a filter mpv rejected, and mpv then ran the video with **no audio at
+      all** (`sources[].mpv_current_ao` null, no mpv stream on `liascape-player-bus`), not just un-normalized. A player
+      restart (with the target back at −14) brought it back. Fixed the input: the UI bounds the target to −70…−5 and
+      `LibraryService.LoudnormAf` clamps a stored value (2026-11-06). Left: the player should survive any bad `af`
+      — on mpv refusing it, fall back to `""` (sound un-normalized), log a warning and report it (no silent
+      no-AO state); add an IT check with an out-of-range target. (The bus bounce at 20:33 in the same evidence,
+      `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`, was unrelated —
+      audio worked after it.)
+      — done 2026-11-06 night: the player survives any `af` mpv can't build. Root cause (reproduced on mpv 0.41): a
+      filter mpv knows with an argument ffmpeg refuses passes mpv's option check, so the `af` set succeeds and only
+      building the chain fails ("Audio filter initialized failed!"); at a file's audio init mpv then deselects the
+      track ("Audio: no audio": `aid` reads `no`, `current-ao` unset) — the owner's silent video; on a live change it
+      keeps the old chain but the bad value stays its `af` for the next rebuild (a re-route after a bus bounce). The
+      mpv source now catches that log line, falls back to its chain without the user's filters (sound un-normalized),
+      re-selects the track (`aid` no → auto: a plain `auto` is a no-op then) and reports a `Rejected` `af` with
+      ffmpeg's reason → `source.rejected` (+ the path), `af_refused` in the `sources` probe, subscribed and logged by
+      the backend ("player refused af on src…"). `read("af")` keeps the requested value and the same value again
+      sends nothing (no rebuild per settings pass). Tests: `tests/sources.rs` `unbuildable_af_at_open_falls_back_with_audio`
+      / `…_live_…` (RED without the fallback: ao None, aid "no"); adapter IT section "normalization: …" (a target of
+      0 written into settings.json → loudnorm I=-5; an unbuildable af on the live source and on a new one → audio up,
+      refused, logged by player and backend).
 
 ## Follow-up projects (each gets its own brainstorm)
 - [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict

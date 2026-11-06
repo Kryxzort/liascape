@@ -722,3 +722,23 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   stand-ins in your player, so text can wrap differently. A "Windows fonts folder" setting (found on your mounted
   Windows drive) would fix that. Not built.
 - No renderer change in this round, so no LWE pin bump, player rebuild or restart.
+
+## 2026-11-06 night — a broken audio filter no longer silences a video; the scene "warble" not reproduced
+- **Your silent wallpaper (21:35) can't happen again, whatever the filter.** The cause: with the normalization target
+  at 0, the loudness filter got a value ffmpeg refuses; mpv accepted the setting (it knows the filter) and only
+  failed when building it — and then played the video with **no audio at all**. The target is already kept in range
+  since this evening; now the player also survives any filter mpv can't build: it drops it, plays the sound
+  un-normalized, logs a warning (the player's `source.rejected`, and a line in the backend's log "player refused af
+  on …"), and the `sources` probe shows `af_refused` with ffmpeg's own reason. New player tests (they fail without the
+  fix with exactly your symptom: no audio output, track deselected) + adapter IT checks with a target of 0 written
+  straight into a private settings.json.
+- **"Loud quiet loud quiet" when a scene fades out: not found on our side yet.** 39 transitions recorded on a
+  private PipeWire at your quantum (64), real-time, two outputs at 144/240 Hz, with your own pairs from today's log
+  (Lofi Girl → MIKU_MK2, the skeletons → 壁纸循环, Chainsaw Man → EP05, Street Japan → Miku Miku, 流萤 → Lofi Girl,
+  Evernight → Madara) plus synthetic ones, many effects, all three methods, A at 0.8×/1×/1.25×, and the player
+  frozen mid-fade. Each one recorded the scene's own stream: it is the scene's sound file × the fade to within
+  ~0.4 dB (p95). The dips I first took for a warble (Chainsaw Man) are in the song itself. So the scene's audio
+  path, the time stretch, the gain ramps and a stalled player are ruled out. Not covered: your EasyEffects chain on
+  the HDB 630, and multi-second player stalls (your log has 13–34 s ones today). **Ask:** next time, note the time and
+  whether it's the old wallpaper's sound or the new one's — most of today's scenes that faded out had no sound at
+  all, so it may be the incoming video. The recording tools are in `src/player/tests/onmachine/transition_audio/`.

@@ -288,24 +288,31 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Next up (handoff 2026-10-26, weekly limit)
-- [ ] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
-      setting the normalization target to 0): Settings let the target go −100…0 LUFS, but ffmpeg's `loudnorm` takes
-      `I` in −70…−5 only, so `LoudnormAf` built a filter mpv rejected, and mpv then ran the video with **no audio at
-      all** (`sources[].mpv_current_ao` null, no mpv stream on `liascape-player-bus`), not just un-normalized. A player
-      restart (with the target back at −14) brought it back. Fixed the input: the UI bounds the target to −70…−5 and
-      `LibraryService.LoudnormAf` clamps a stored value (2026-11-06). Left: the player should survive any bad `af`
-      — on mpv refusing it, fall back to `""` (sound un-normalized), log a warning and report it (no silent
-      no-AO state); add an IT check with an out-of-range target. (The bus bounce at 20:33 in the same evidence,
-      `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`, was unrelated —
-      audio worked after it.)
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
-      loud quiet", "like audio in reverse or some ghost". Suspects: the worker's WSOLA stretch (`stretch.rs`) engaging
-      when an effect or `compress_to` changes A's speed (non-periodic sound through 20 ms Hann segments → phasey/reversed
-      grains and amplitude pumping), a crossfade gain ramp fighting the auto-mute's mute/unmute bursts (Spotify + a
-      notification flapped it 6× in 16 s on 2026-11-06), or a comb/phase effect from A and B carrying the same sound.
-      Reproduce on the private PipeWire (record the bus during scene→video and scene→scene transitions across effects
-      and speeds) before fixing.
+      loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
+      on a private PipeWire at the owner's quantum (64, real-time) with a private headless player (two outputs at
+      144/240 Hz): scene→video, scene→scene (incl. both with sound), scene→synthetic; fade, rotateTransition,
+      parametric_glitch, static_wipe, splitSlideOutVertical, DirectionalScaled, GlitchDisplace, VerticalClose,
+      TilesWave, randomNoisex, angular, x_axis_translation; full-live, reveal, frozen; A at 0.8×/1×/1.25× (WSOLA on);
+      the compositor SIGSTOPped 4–8× mid-fade (the owner's 13–34 s `worker.host_stalled` gaps, in small); and the
+      owner's own pairs from their 2026-11-06 log (Workshop copies: 3432999904→MIKU_MK2, 2783122117→壁纸循环,
+      2672425887→EP05_01m, 1864677589→Miku Miku, 3243449890→3432999904, 3593587273→3419466417). Each trial recorded
+      the sink AND A's own stream (`pw-record` on `liascape-player-scene.<id>`). **A's stream is the scene's own sound
+      × the equal-power fade, to the dB:** decoding the scene's sound file and aligning it, A − source − cos-fade
+      stays within p95 0.18–0.44 dB, max ≤ 1.03 dB over the fade (13 trials whose scene has one sound file and
+      aligned; the compositor-stall one 1.63 / 2.97 dB — the fade held while stopped, as designed). The "loud quiet"
+      dips seen in 2672425887's fade are in the music itself: the source has them at the same ms.
+      A synthetic tone A under heavy real B scenes: no phase jump or hole on the sink. The debug dropout detector:
+      fit ok, 0 drops on all. Ruled out with that: the WSOLA stretch (owner's A speeds were all 1.0, nothing in a
+      transition changes a speed — `compress_to` only rescales progress/gain), the worker's gain path, gate and
+      clip, a stalled loop, the auto-mute (by-pid ownership of worker streams), scene loudness reports. Not covered:
+      the owner's real output chain (EasyEffects convolver + EQ on the HDB 630, quantum 64 set by another client),
+      a real compositor stall of seconds. Tools for the next try (or the owner's own machine):
+      `src/player/tests/onmachine/transition_audio/` (`rig.sh up`, `record.py`, `srccmp.py`, `afade.py`,
+      `sine.py`). Next step: when it happens, note the time and whether A's sound or B's is the one warbling (most
+      of the owner's 2026-11-06 scene A's had no sound at all — 3042492564, 2638125030, 3419466417, 3104056709 —
+      so the warble may be B's video fading in).
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 
 - [ ] **Matrix shard hung in `scene × sceneProp:restart`** (2026-10-28, the `--changed liascape-player --jobs 2` run for the
