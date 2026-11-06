@@ -1058,9 +1058,27 @@ Two bug classes kept recurring; fix the class, not the instance:
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
     - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real differences:
-          the HDR scenes at Ultra (3019192537, 3395587987, maybe 3490034653): WE is much more contrasty and saturated,
-          ours flat; 3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
-          the intro timelines of 2672425887 / 3509243656.
+          3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
+          the intro timelines of 2672425887 / 3509243656; 3490034653 (a warm glow from its `light_shafts_1`
+          particles that WE doesn't draw: recheck after 3354740764's light-shaft fix).
+      - [x] The "HDR at Ultra" look (3019192537, 3395587987; also 2542468435, 3509243656) — done 2026-11-06: the
+            **references** were wrong, not ours. At Ultra WE presents those scenes through an FP16 (scRGB) swap
+            chain holding lin () of the picture (decoded, GH 0x14015a0f0 / 0x140141520 / 0x1401afbf0). Windows
+            sRGB-encodes it for an SDR display; DXVK on a surface without HDR colour spaces (gamescope's and
+            wallpiper's alike) shows it raw, so too dark. `we-ref-capture.sh` re-encodes those frames
+            (`we_ref_tool.py scrgb`, raw kept in `fp16-raw/`) and the 4 were recaptured: 3019192537 0.60 → 0.12,
+            3395587987 0.48 → 0.08. `we-proton.md` "The FP16 swap chain". Ours at Ultra (default) matches the
+            re-encoded Ultra frames, and ours with `WPENGINE_HDR=0` matches WE at `postprocessing=enabled`
+            (0.5–0.8 / 255).
+      - [x] 2542468435 — done 2026-11-06 (fork "an HDR scene's image brightness scales its draw colour"): WE's
+            draw colour is colour × brightness when the renderer runs HDR (GH 0x1402321d0); its layer's 1.15 never
+            showed (gap audit E42). 0.48 → 0.02 with the re-encoded reference.
+      - [ ] A player setting for WE's post-processing tier (`ultra` = today's default, `enabled` = LWE's
+            `WPENGINE_HDR=0`, `disabled` = no bloom, not in LWE). Ours has no quality setting that maps to WE's
+            presets, so scenes render as WE at Ultra; the owner's main Windows profiles (`Kryxzort`, `second-profile`) are
+            Ultra. Only the 4 `bloom` + `hdr` scenes differ between `ultra` and `enabled` (their bloom chain).
+      - [ ] The references are MSAA x8; the owner's Windows `config.json` says x2. Edges only, not colour:
+            recapture at x2 only if an edge difference ever matters.
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
@@ -1246,6 +1264,9 @@ Two bug classes kept recurring; fix the class, not the instance:
                 `hdr` both literal JSON true in scene.json, then "postprocessing" `ultra` (GH 0x14013f860).
                 2511663284 (hdr, no bloom) is LDR now, as in WE.
           - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
+          - [x] Why LWE's combine skips `lin ()` — settled 2026-11-06: WE's swap chain at Ultra is FP16 (scRGB),
+                so its `lin ()` round-trips on Windows; LWE writing the composed picture into 8 bits is the same.
+                Not an sRGB view (that was the inference). `we-proton.md` "The FP16 swap chain".
     - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
           E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
           also carries B13's 0055): G24, G22, G25, G26 point/spot (E13), G28 (E14), `transparentsorting`, camera
