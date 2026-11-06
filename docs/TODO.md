@@ -301,6 +301,10 @@ Two bug classes kept recurring; fix the class, not the instance:
         work (patches 0115–0116, incl. `input.cursorWorldPosition` in 3D scenes) is already in 92c1ada; it was bumping the
         pin. Commit its worktree state, test, merge after weref-2d's pin. Left: the clock strip for 3276522107 / 3477054430,
         genericimage4 on 2D blend layers' last draw.
+      - **apply-race** (worktree `.claude/worktrees/apply-race`, stopped 2026-11-07 for the night): `/apply b` right after
+        `/apply <library item>` under load never switched. Its fix is committed on the branch, **unmerged**: `9a1119a`
+        "A Switch Lost To A Stalled Player Shows Once It Answers; The IT Refuses A Non-JSON Body". Its adapter-IT runs
+        (fix vs unchanged lp-player) were cut off — rerun both, then merge.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
