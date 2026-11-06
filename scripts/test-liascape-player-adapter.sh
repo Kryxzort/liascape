@@ -358,28 +358,31 @@ echo "== normalization: an out-of-range target in settings.json is clamped; an a
 sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
 src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
 af_has() { cur af | grep -q -- "$1"; }
-refused_set() { src_probe "$1" | jq -e '.refused != null and .ao == "null"' >/dev/null; }
+refused_seen() { ctl logs '{"kind_prefix":"source.rejected","limit":1000}' | jq -e --arg id "$1" '[.events[] | select(.id==$id and .prop=="af")] | length >= 1' >/dev/null; }
+ao_up() { src_probe "$1" | jq -e '.ao == "null"' >/dev/null; }
 sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'   # written straight into the file (the UI can't send 0 any more)
-post /apply "{\"path\":\"$C\"}" >/dev/null
-waitfor $WAIT shows "$C" || bad "/apply c → cur $(cur path)"
-# c's loudness is measured on first need; once it lands the backend re-applies: c's af becomes a loudnorm
+NC=$(lib_import "$C" "norm cee")   # a library item: its loudness is measured and stored on first play
+post /apply "{\"path\":\"$NC\"}" >/dev/null
+waitfor $WAIT shows "$NC" || bad "/apply norm cee → cur $(cur path)"
+# its loudness is measured on first need; once it lands the backend re-applies: its af becomes a loudnorm
 waitfor 30000 af_has loudnorm && af_has 'I=-5:' && ok "target 0 in settings.json → loudnorm clamped to I=-5 ($(cur af | cut -c1-40)…)" \
-  || bad "target 0: c's af = $(cur af)"
-SIDC=$(srcIdForPath "$C")
-src_probe "$SIDC" | jq -e '.ao == "null" and .refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
+  || bad "target 0: its af = $(cur af)"
+SIDC=$(srcIdForPath "$NC")
+waitfor $WAIT ao_up "$SIDC" && src_probe "$SIDC" | jq -e '.refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
   || bad "clamped loudnorm: $(src_probe "$SIDC")"
-# any af mpv can't build, set on the live source: it plays on without it (audio up), refused + logged by the backend
+# any af mpv can't build, set on the live source: refused (source.rejected, the backend's log), audio output still up.
+# (The backend's next settings pass may put its own af back meanwhile — that clears `af_refused`; the event stays.)
 ctl set "{\"path\":\"$SIDC.af\",\"value\":\"loudnorm=I=0:TP=-1.5:LRA=11\"}" >/dev/null
-waitfor $WAIT refused_set "$SIDC" && ok "an unbuildable af on the live source → refused, audio output still up ($(src_probe "$SIDC" | cut -c1-160))" \
-  || bad "unbuildable af live: $(src_probe "$SIDC")"
-ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -e --arg id "$SIDC" '[.events[] | select(.id==$id and .prop=="af")] | length == 1' >/dev/null \
-  && ok "…one source.rejected (af) logged by the player" || bad "source.rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
+waitfor $WAIT refused_seen "$SIDC" && waitfor $WAIT ao_up "$SIDC" \
+  && ok "an unbuildable af on the live source → source.rejected, audio output still up ($(src_probe "$SIDC" | cut -c1-160))" \
+  || bad "unbuildable af live: $(src_probe "$SIDC"), rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
 waitfor $WAIT grep -q "player refused af on $SIDC" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
   && ok "…and the backend's log says so" || bad "backend log has no 'player refused af on $SIDC'"
-# the same file opened with it from the start (the owner's case: a NEW source whose af mpv can't build): audio up
+# a NEW source opened with it (the owner's case: mpv deselected the track at its audio init → no audio at all)
 ctl create "$(jq -nc --arg p "$C" '{kind:"source", props:{path:$p, loop:true, af:"loudnorm=I=0:TP=-1.5:LRA=11"}}')" > "$T/afc.json"
 SIDX=$(jq -r .id "$T/afc.json")
-waitfor $WAIT refused_set "$SIDX" && ok "a new source opened with it: refused, audio output up ($(src_probe "$SIDX" | cut -c1-120))" \
+waitfor $WAIT refused_seen "$SIDX" && waitfor $WAIT ao_up "$SIDX" \
+  && ok "a new source opened with it: source.rejected, audio output up ($(src_probe "$SIDX" | cut -c1-120))" \
   || bad "new source with an unbuildable af: $(src_probe "$SIDX")"
 ctl destroy "{\"id\":\"$SIDX\"}" >/dev/null 2>&1
 sf_raw '.NormalizeAudio = false | .NormalizeTargetLufs = -14'
