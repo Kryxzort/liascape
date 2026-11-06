@@ -1,0 +1,69 @@
+{
+  "id": "3184155462",
+  "kind": "ortho",
+  "canvas": [
+    3840,
+    2160
+  ],
+  "window": [
+    1920,
+    1080
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [
+    "cameraparallax=false",
+    "watereffect=true"
+  ],
+  "pointer": "200,1600:1600,1600",
+  "pointer_time": "1-2",
+  "first_frame_ms": 6496,
+  "wall_ms": 11353,
+  "we_gpu_mib": 488,
+  "rss_mib": 2262,
+  "cpu_s": 23.5,
+  "shots": [
+    {
+      "t": 0.9,
+      "late_ms": 10
+    },
+    {
+      "t": 1.2,
+      "late_ms": 46
+    },
+    {
+      "t": 1.5,
+      "late_ms": 107
+    },
+    {
+      "t": 1.8,
+      "late_ms": 161
+    },
+    {
+      "t": 2.1,
+      "late_ms": 218
+    },
+    {
+      "t": 2.4,
+      "late_ms": 249
+    },
+    {
+      "t": 2.7,
+      "late_ms": 307
+    },
+    {
+      "t": 3,
+      "late_ms": 337
+    },
+    {
+      "t": 3.5,
+      "late_ms": 236
+    },
+    {
+      "t": 4,
+      "late_ms": 94
+    }
+  ],
+  "captured": "2026-11-06T14:50:40+05:30",
+  "time_base": "seconds after the first non-black frame (+-80 ms); each shot within late_ms of its time"
+}

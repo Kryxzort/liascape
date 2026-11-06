@@ -628,6 +628,8 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// `--pointer X0,Y0:X1,Y1` moves the pointer (native scene px, y down, as the host feeds it) in a straight
 /// line from the first point at frame 1 to the second at the last frame — a scripted cursor path, so a
 /// pointer-driven layer (a trail, parallax, a cursor-follow script) can be checked for direction.
+/// `--pointer-time A-B` moves it only between scene seconds A and B (parked before, still after) — the
+/// path `scripts/dev/we-ref-capture.sh --pointer-time` drives in real Wallpaper Engine (a cursor ripple).
 /// The core's build report (`WPENGINE_HEALTH`, fork patch 0061: each object built or dropped and why, shader /
 /// script / asset errors, each layer's canvas bbox at frames 1 and 31) goes to `<out>/health.json` beside the PNGs.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` (synthetic: nothing is played), 48 kHz
@@ -650,6 +652,7 @@ pub fn smoke(args: &[String]) -> ! {
     let mut tone = Tone::default();
     let mut paced = true;
     let mut pointer: Option<[f64; 4]> = None;
+    let mut pointer_time: Option<[f64; 2]> = None;
     let mut shot_at: Vec<f32> = Vec::new();
     let mut shot_width = 0u32;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
@@ -695,6 +698,12 @@ pub fn smoke(args: &[String]) -> ! {
                     (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
                 })
             }
+            "--pointer-time" => {
+                pointer_time = it.next().and_then(|v| {
+                    let (a, b) = v.split_once('-')?;
+                    Some([a.parse().ok()?, b.parse().ok()?])
+                })
+            }
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
                 let at = it.next().and_then(|v| v.parse().ok());
@@ -707,7 +716,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced] [--shots T,T…] [--shot-width W]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1 [--pointer-time A-B]] [--unpaced] [--shots T,T…] [--shot-width W]"
         );
         std::process::exit(2)
     };
@@ -722,7 +731,7 @@ pub fn smoke(args: &[String]) -> ! {
         audio_dump,
         tone,
         paced,
-        pointer,
+        pointer.map(|p| (p, pointer_time)),
         (&shot_at, shot_width),
         &props,
         &props_at,
@@ -792,7 +801,7 @@ fn run_smoke(
     audio_dump: f32,
     tone: Tone,
     paced: bool,
-    pointer: Option<[f64; 4]>,
+    pointer: Option<([f64; 4], Option<[f64; 2]>)>,
     (shot_at, shot_width): (&[f32], u32),
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
@@ -894,8 +903,13 @@ fn run_smoke(
             let pcm = tone.render(&mut tone_phase, (f - 1) as f32 / 30.0, t, seconds);
             scene.push_input(&pcm, SAMPLE_RATE as u32);
         }
-        if let Some([x0, y0, x1, y1]) = pointer {
-            let k = if frames > 1 { (f - 1) as f64 / (frames - 1) as f64 } else { 1.0 };
+        if let Some(([x0, y0, x1, y1], window)) = pointer {
+            let k = match window {
+                // `--pointer-time A-B`: parked at the first point until A s, at the second from B s
+                Some([a, b]) => ((f64::from(t) - a) / (b - a).max(1e-6)).clamp(0.0, 1.0),
+                None if frames > 1 => (f - 1) as f64 / (frames - 1) as f64,
+                None => 1.0,
+            };
             scene.set_pointer(x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, 0);
         }
         let s = std::time::Instant::now();
