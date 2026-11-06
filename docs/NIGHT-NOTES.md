@@ -675,3 +675,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   short gaps (12:14:30–12:14:46 today: 6 mutes in 16 s with Spotify and a KDE notification stream; your "unmute after"
   is 500 ms). A longer unmute delay would stop that; not changed.
 - Side note: the player caps the total gain at +12 dB, so a very quiet scene is boosted at most 12 dB (Emilia wants 13).
+- Checks: backend self-test PASS (new: the "set once" rules and the pin table); player suite 749 passed / 3 failed /
+  3 ignored, the 3 (bus-timing tests under load ~100) passed alone; adapter integration test 406 / 1 — the 1 an
+  auto-mute `/stop` timing check, the auto-mute section alone then 63 / 1 (a different timing check) and 64 / 0. Its
+  scene-loudness section's new checks: a louder third play moves the stored value but keeps its own level through
+  further reports and a full settings pass; the fourth play opens at the new level.
