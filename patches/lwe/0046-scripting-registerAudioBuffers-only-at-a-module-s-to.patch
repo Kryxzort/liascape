@@ -1,7 +1,7 @@
 From 49cb616297b94feb4dc5d43b29babd4321c58fb5 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 05:19:11 +0530
-Subject: [PATCH 046/106] scripting: registerAudioBuffers only at a module's
+Subject: [PATCH 046/107] scripting: registerAudioBuffers only at a module's
  top level, not in update
 
 engine.registerAudioBuffers threw "can only be called from global scope" only while no module ran, but

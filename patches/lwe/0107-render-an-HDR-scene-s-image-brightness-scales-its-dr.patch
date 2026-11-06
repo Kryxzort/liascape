@@ -1,0 +1,63 @@
+From d7bca1f96d2e6c66c73b3a06a44406b4061bd25a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 18:08:44 +0530
+Subject: [PATCH 107/107] render: an HDR scene's image brightness scales its
+ draw colour, as WE's
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wallpaper Engine sets an image's draw-context colour (g_Color, g_Color4.rgb) to the layer's colour times its
+`brightness` when the renderer runs HDR (flag 0x2000: post-processing Ultra with a scene whose general has
+`bloom` and `hdr`), and times 1 otherwise (GH 0x1402321d0, 0x1402328e0, 0x140231dc0: ctx+0x124…0x12c =
+image+0x330…0x338 × (ctx flags & 0x2000 ? image+0x340 : 1)). The VERSION image shaders and genericimage4
+have no g_Brightness term, so this is the only place such a layer's brightness shows. LWE never applied it:
+2542468435's single layer (genericimage2 VERSION 2, brightness 1.15) drew 15 % too dark, and its values
+above 1 never reached the HDR bloom (gap audit E42). g_Brightness is unchanged.
+
+The WE reference of 2542468435 (re-encoded from WE's FP16 swap chain) scores 0.481 -> 0.022.
+
+Origin: ours
+Why: docs/player/spikes/we-proton.md "The FP16 swap chain"; gap audit E42 (2542468435)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 10 +++++++++-
+ src/core/WallpaperEngine/Render/Objects/CImage.h   |  2 ++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index f781665..74b54c3 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1784,7 +1784,15 @@ const float& CImage::getUserAlpha () const { return this->m_image.alpha->value->
+ 
+ const float& CImage::getAlpha () const { return this->m_image.alpha->value->getFloat (); }
+ 
+-const glm::vec3& CImage::getColor () const { return this->m_image.color->value->getVec3 (); }
++const glm::vec3& CImage::getColor () const {
++    // WE's draw context colour (g_Color, g_Color4.rgb) is the layer's colour × its brightness when the renderer runs
++    // HDR (flag 0x2000), else × 1 (GH 0x1402321d0 / 0x1402328e0 / 0x140231dc0: ctx+0x124…0x12c = image+0x330…0x338 ×
++    // (ctx flags & 0x2000 ? image+0x340 : 1)). The VERSION shaders have no g_Brightness term, so this is where an HDR
++    // scene's `brightness` shows (2542468435's 1.15). Bound by address: refreshed by getColor4 () every render ()
++    const float brightness = this->getScene ().rendersHDR () ? this->getBrightness () : 1.0f;
++    this->m_drawColor = this->m_image.color->value->getVec3 () * brightness;
++    return this->m_drawColor;
++}
+ 
+ const glm::vec4& CImage::getColor4 () const {
+     // WE's g_Color4 is (g_Color, g_Alpha): the colour and the layer's alpha, not the colour value's own w
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index deff9dc..8e9fbc4 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -345,6 +345,8 @@ private:
+     bool m_initialized = false;
+     /** (color.rgb, alpha) for g_Color4, refreshed by getColor4 () — every render () */
+     mutable glm::vec4 m_color4 = glm::vec4 (1.0f);
++    /** g_Color: the colour, × brightness in an HDR scene (GH 0x1402321d0), refreshed by getColor4 () */
++    mutable glm::vec3 m_drawColor = glm::vec3 (1.0f);
+ 
+     struct {
+ 	struct {

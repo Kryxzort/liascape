@@ -1075,7 +1075,7 @@ Two bug classes kept recurring; fix the class, not the instance:
             (0.5–0.8 / 255).
       - [x] 2542468435 — done 2026-11-06 (fork "an HDR scene's image brightness scales its draw colour"): WE's
             draw colour is colour × brightness when the renderer runs HDR (GH 0x1402321d0); its layer's 1.15 never
-            showed (gap audit E42). 0.48 → 0.02 with the re-encoded reference.
+            showed (gap audit E42). 0.48 → 0.09 from the re-encoded reference, → 0.02 with the fix.
       - [ ] A player setting for WE's post-processing tier (`ultra` = today's default, `enabled` = LWE's
             `WPENGINE_HDR=0`, `disabled` = no bloom, not in LWE). Ours has no quality setting that maps to WE's
             presets, so scenes render as WE at Ultra; the owner's main Windows profiles (`Kryxzort`, `second-profile`) are

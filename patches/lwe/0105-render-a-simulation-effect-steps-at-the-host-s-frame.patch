@@ -1,7 +1,7 @@
 From 909d0bfc21041f476d198692f3fa494b75b561e1 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 14:58:58 +0530
-Subject: [PATCH 105/106] render: a simulation effect steps at the host's frame
+Subject: [PATCH 105/107] render: a simulation effect steps at the host's frame
  rate, not per frame drawn
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

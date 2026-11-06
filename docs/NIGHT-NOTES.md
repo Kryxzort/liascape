@@ -604,3 +604,26 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   everything (new rustc), and the first `nix develop` downloads the new shell (~1 GB). The adapter test now runs on
   `.NET 10.0.403` (`/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet`; battery.sh's
   fallback updated).
+
+## 2026-11-06 — the "HDR at Ultra" look was the references, not ours
+- **3019192537 and 3395587987 look on Windows the way ours does, and that is WE at Ultra.** The dark, oversaturated
+  reference frames came from DXVK, not from a WE feature we were missing. At Ultra, WE draws a scene whose
+  settings have both `bloom` and `hdr` into a 16-bit float swap chain, written in linear light. Windows converts
+  that back to normal sRGB for your SDR monitors, so it looks as composed. Under Proton, DXVK has no HDR colour
+  space on the virtual screen, so it showed the linear values raw: too dark. Found in WE's own code (the swap-chain
+  format follows the Ultra flag) and in DXVK's source.
+- wallpiper's frames agreed with the dark ones only because it reads the same DXVK output. Re-encoded the way
+  Windows does it, both WE sources match ours to 2–4 / 255.
+- `postprocessing=enabled` matches ours with LWE's `WPENGINE_HDR=0` (0.5–0.8 / 255). So you don't need to check
+  which Windows profile you run: neither one looks dark. Ours renders as WE at Ultra, and has no quality setting
+  for WE's post-processing tiers. A player setting for that is in TODO, not built.
+- **The capture is fixed.** For the 4 affected scenes (2542468435, 3019192537, 3395587987, 3509243656),
+  `we-ref-capture.sh` re-encodes the frames as Windows shows them, keeps the raw ones, and marks them in the report.
+  All 4 were recaptured. No other reference was affected: every other scene uses an 8-bit swap chain.
+- **One real bug of ours, fixed:** at Ultra, WE multiplies a layer's colour by its `brightness` in these HDR scenes.
+  2542468435's layer is set 15 % brighter and ours never showed it. Scores (0 = identical): 3019192537
+  0.60 → 0.12, 3395587987 0.48 → 0.08, 2542468435 0.48 → 0.02.
+- 3490034653 is something else: a warm glow from its light-shaft particles that WE doesn't draw, the same preset
+  as 3354740764's extra light shafts (another agent's fix). It is rechecked after that fix.
+- Your Windows `config.json` says MSAA **x2**; the references use x8. That changes edges only, not colour, so they
+  weren't recaptured.
