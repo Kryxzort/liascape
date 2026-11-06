@@ -642,9 +642,13 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
 /// `--audio-dump` (a live change, as the worker applies `SetProperty`), or without `--audio-dump`
 /// `T` s into the frames, after writing the frame before it as `<out>/lwe-smoke-before-<T>s.png`.
-/// `--pointer X0,Y0:X1,Y1` moves the pointer (native scene px, y down, as the host feeds it) in a straight
-/// line from the first point at frame 1 to the second at the last frame — a scripted cursor path, so a
-/// pointer-driven layer (a trail, parallax, a cursor-follow script) can be checked for direction.
+/// `--pointer X0,Y0:X1,Y1[:X2,Y2…]` moves the pointer (native scene px, y down, as the host feeds it) along
+/// straight lines through the points, from the first at frame 1 to the last at the last frame, each leg the
+/// same share of the run (a point repeated holds it still) — a scripted cursor path, so a pointer-driven layer
+/// (a trail, parallax, a cursor-follow script, cursorripple) can be checked for direction and strength.
+/// `--fps N` renders `N` frames per second of scene time (default 30); `--we-fps R` is the rate the scene is
+/// meant to tick at (`wp_project_set_frame_rate`, default `N`): a simulation effect (cursorripple) steps at `R`
+/// whatever `N` is, as the worker's scene does at its outputs' rate when the GPU budget throttles it.
 /// The core's build report (`WPENGINE_HEALTH`, fork patch 0061: each object built or dropped and why, shader /
 /// script / asset errors, each layer's canvas bbox at frames 1 and 31) goes to `<out>/health.json` beside the PNGs.
 /// `--tone HZ` feeds the visualiser input a full-scale sine of `HZ` (synthetic: nothing is played), 48 kHz
@@ -666,7 +670,9 @@ pub fn smoke(args: &[String]) -> ! {
     let mut audio_dump = 0.0f32;
     let mut tone = Tone::default();
     let mut paced = true;
-    let mut pointer: Option<[f64; 4]> = None;
+    let mut pointer: Option<Vec<[f64; 2]>> = None;
+    let mut fps = 30.0f32;
+    let mut we_fps: Option<f32> = None;
     let mut shot_at: Vec<f32> = Vec::new();
     let mut shot_width = 0u32;
     let mut props: Vec<(String, serde_json::Value)> = Vec::new();
@@ -708,9 +714,23 @@ pub fn smoke(args: &[String]) -> ! {
             "--shot-width" => shot_width = it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--pointer" => {
                 pointer = it.next().and_then(|v| {
-                    let n: Vec<f64> = v.split([',', ':']).filter_map(|x| x.parse().ok()).collect();
-                    (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
+                    let pts: Option<Vec<[f64; 2]>> = v
+                        .split(':')
+                        .map(|p| {
+                            let (x, y) = p.split_once(',')?;
+                            Some([x.trim().parse().ok()?, y.trim().parse().ok()?])
+                        })
+                        .collect();
+                    pts.filter(|p| p.len() >= 2)
                 })
+            }
+            "--we-fps" => we_fps = it.next().and_then(|v| v.parse().ok()).filter(|f: &f32| *f >= 0.0),
+            "--fps" => {
+                fps = it
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .filter(|f: &f32| *f >= 1.0)
+                    .unwrap_or(30.0)
             }
             "--prop" => props.extend(prop(it.next())),
             "--prop-at" => {
@@ -724,7 +744,7 @@ pub fn smoke(args: &[String]) -> ! {
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
         eprintln!(
-            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1] [--unpaced] [--shots T,T…] [--shot-width W]"
+            "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1[:X2,Y2…]] [--fps N] [--we-fps R] [--unpaced] [--shots T,T…] [--shot-width W]"
         );
         std::process::exit(2)
     };
@@ -739,7 +759,8 @@ pub fn smoke(args: &[String]) -> ! {
         audio_dump,
         tone,
         paced,
-        pointer,
+        pointer.as_deref(),
+        (fps, we_fps.unwrap_or(fps)),
         (&shot_at, shot_width),
         &props,
         &props_at,
@@ -801,6 +822,17 @@ fn write_health(out: &Path, lines: &Path, scene: &str, smoke: serde_json::Value)
     let _ = std::fs::write(out.join("health.json"), serde_json::to_vec_pretty(&json).unwrap_or_default());
 }
 
+/// The smoke's pointer at `k` ∈ [0, 1] of the run: on the polyline through `path` (≥ 2 points), each leg
+/// an equal share of `k`.
+fn pointer_at(path: &[[f64; 2]], k: f64) -> [f64; 2] {
+    let legs = path.len().saturating_sub(1).max(1);
+    let pos = k.clamp(0.0, 1.0) * legs as f64;
+    let i = (pos.floor() as usize).min(legs - 1);
+    let (a, b) = (path[i], path[(i + 1).min(path.len() - 1)]);
+    let u = pos - i as f64;
+    [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]
+}
+
 fn run_smoke(
     dir: &Path,
     assets: &Path,
@@ -809,7 +841,8 @@ fn run_smoke(
     audio_dump: f32,
     tone: Tone,
     paced: bool,
-    pointer: Option<[f64; 4]>,
+    pointer: Option<&[[f64; 2]]>,
+    (fps, we_fps): (f32, f32),
     (shot_at, shot_width): (&[f32], u32),
     props: &[(String, serde_json::Value)],
     props_at: &[(f32, String, serde_json::Value)],
@@ -825,6 +858,7 @@ fn run_smoke(
         unsafe { std::env::set_var("LIASCAPE_SCENE_STORAGE_DIR", out.join("storage")) };
     }
     let mut scene = Scene::load(dir, assets)?;
+    scene.set_frame_rate(f64::from(we_fps));
     let load_ms = t0.elapsed().as_secs_f64() * 1e3;
     // before the renderer build, like the worker's `Start.properties`
     let mut prop_errors = Vec::new();
@@ -870,10 +904,11 @@ fn run_smoke(
         px
     };
 
-    // 30 fps of scene time from 0 to `seconds`
+    // `fps` frames per second of scene time from 0 to `seconds`
     let last_shot = shot_at.iter().copied().fold(0.0f32, f32::max);
-    let frames = (seconds.max(last_shot) * 30.0).round().max(30.0) as u32;
-    let shot_frames: Vec<u32> = shot_at.iter().map(|t| (t * 30.0).round().max(1.0) as u32).collect();
+    let one_s = fps.round() as u32;
+    let frames = (seconds.max(last_shot) * fps).round().max(fps.round()) as u32;
+    let shot_frames: Vec<u32> = shot_at.iter().map(|t| (t * fps).round().max(1.0) as u32).collect();
     let write_shot = |gfx: &Gfx, path: &Path| -> Result<(), String> {
         let px = gfx.read_back(&tex, false);
         let px = if shot_width > 0 { px.shrink(shot_width) } else { px };
@@ -887,10 +922,10 @@ fn run_smoke(
     let start = std::time::Instant::now();
     let mut tone_phase = 0.0f64;
     for f in 1..=frames {
-        let t = f as f32 / 30.0;
+        let t = f as f32 / fps;
         if paced {
             // video textures play on the wall clock (libmpv), so scene time may not run ahead of it
-            let due = std::time::Duration::from_secs_f32((f - 1) as f32 / 30.0);
+            let due = std::time::Duration::from_secs_f32((f - 1) as f32 / fps);
             if let Some(wait) = due.checked_sub(start.elapsed()) {
                 std::thread::sleep(wait);
             }
@@ -907,25 +942,26 @@ fn run_smoke(
             }
         }
         if tone.hz != 0.0 {
-            // this frame's 1/30 s of the tone, in order, as the worker feeds system audio
-            let pcm = tone.render(&mut tone_phase, (f - 1) as f32 / 30.0, t, seconds);
+            // this frame's 1/fps s of the tone, in order, as the worker feeds system audio
+            let pcm = tone.render(&mut tone_phase, (f - 1) as f32 / fps, t, seconds);
             scene.push_input(&pcm, SAMPLE_RATE as u32);
         }
-        if let Some([x0, y0, x1, y1]) = pointer {
+        if let Some(path) = pointer {
             let k = if frames > 1 { (f - 1) as f64 / (frames - 1) as f64 } else { 1.0 };
-            scene.set_pointer(x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, 0);
+            let [x, y] = pointer_at(path, k);
+            scene.set_pointer(x, y, 0);
         }
         let s = std::time::Instant::now();
         scene.render(t, fbo_id);
         unsafe { gfx.gl.finish() }; // a diagnostic: time the GPU too
         frame_ms.push(s.elapsed().as_secs_f64() * 1e3);
-        if f == 30 || f == frames || shot_frames.contains(&f) {
+        if f == one_s || f == frames || shot_frames.contains(&f) {
             opaque(&gfx);
             let name = format!("lwe-smoke-{}s.png", (t * 10.0).round() / 10.0);
             let path = out.join(&name);
             write_shot(&gfx, &path)?;
             shots.push(path.display().to_string());
-            if f == 30 {
+            if f == one_s {
                 at_1s = read(&gfx);
             }
         }
@@ -954,7 +990,7 @@ fn run_smoke(
         audio_dump_stretch(
             &mut scene,
             fbo_id,
-            frames as f32 / 30.0,
+            frames as f32 / fps,
             out,
             audio_dump,
             props_at,
