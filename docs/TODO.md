@@ -1012,7 +1012,10 @@ Two bug classes kept recurring; fix the class, not the instance:
       APIs WE needs, pipes frames as zero-copy dmabuf to a desktop portal) — borrow or integrate once it matures. Open
       questions: Steam running/logged in (DRM), cost per instance (RAM/VRAM/start-up), bridging pause/transitions/
       audio bus/pointer/properties/per-monitor, a clean WE install. The reference-capture setup
-      (`scripts/dev/we-ref-capture.sh`, `docs/player/spikes/we-proton.md`) is its first half.
+      (`scripts/dev/we-ref-capture.sh`, `docs/player/spikes/we-proton.md`) is its first half. wallpiper reviewed
+      and run headless 2026-11-06 (`docs/player/spikes/wallpiper-ref.md`): borrow its Vulkan dmabuf capture layer
+      and `GetCursorPos`/Progman shim, not the daemon (global `wallpaper64.exe` kill, Steam-client registration via
+      Proton's steam.exe, one session per user, upside-down frame grabs). Steam is not needed: WE ran as app 0.
 - [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
       upgrade; plus MPRIS mode hearing only the MPRIS player's own streams). Passed on the owner's machine and
       flipped 2026-11-02: the shipped auto-mute under liascape-player; `AudioMonitor` stays for legacy.
@@ -1079,6 +1082,17 @@ Two bug classes kept recurring; fix the class, not the instance:
             Ultra. Only the 4 `bloom` + `hdr` scenes differ between `ultra` and `enabled` (their bloom chain).
       - [ ] The references are MSAA x8; the owner's Windows `config.json` says x2. Edges only, not colour:
             recapture at x2 only if an edge difference ever matters.
+    - [x] **Second reference via wallpiper** — done 2026-11-06, `docs/player/spikes/wallpiper-ref.md`. WE run
+          as a desktop wallpaper by [wallpiper](https://github.com/ejalxndr/wallpiper) (pinned `6319fe3` + the
+          `scripts/dev/wallpiper-scope-pids.patch`) in a headless sway, frames straight from WE's swapchain
+          (`scripts/dev/we-ref-wallpiper.sh`, frames `docs/player/reports/we-ref-wallpiper/`, cross-check
+          `scene_we_crosscheck.py`). 20 scenes: it agrees with the first set wherever nothing moves fast,
+          including the Ultra HDR look; disagreements are timing, the clock, unseeded randomness, and the first
+          set's pointer still easing in at 0.5 s. Video scenes crash the same way (`wallpaper64.exe+0x121a8d`).
+    - [x] ~~Owner: which post-processing does Windows WE really use for 3019192537 / 3395587987?~~ Not needed
+          (2026-11-06): neither tier is dark on Windows. Both Proton references are dark because DXVK shows WE's
+          FP16 Ultra swap chain raw (wallpiper's layer reads DXVK's blit output too); re-encoded, Ultra matches ours
+          by default and `enabled` matches ours with `WPENGINE_HDR=0` (see the HDR item above, `we-proton.md`).
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
