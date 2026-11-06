@@ -35,9 +35,20 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       - **Reveal** hard-cuts A's audio at the freeze (possible click) and starts B's audio at full. It should get a
         ≤ 30 ms anti-click fade on A, and B rising with the reveal (or full from the start, if the owner prefers).
       - **Frozen** is already silent through the effect, which is correct; it needs only the ≤ 30 ms anti-click ramps.
-- [ ] `nix flake update` → mpvpaper **1.9** (PR #132 `glFenceSync` leak fix; flake.lock still pins 1.8). Owner's
-      `RestartMpvpaperEverySeconds` is **0**, so it's leaking now (1.66 GB RSS after 42 min on 1.8). After the bump, soak and
-      check RSS; if flat, the restart daemon's default can go to 0.
+- [x] `nix flake update` → mpvpaper **1.9** (PR #132 `glFenceSync` leak fix). Done 2026-11-06: `nix flake update
+      nixpkgs` → `1d06008` (2026-11-03); the review is the commit message. Headless soak (a private headless sway,
+      synthetic 1080p60 loop, 4 min each): 1.8 grows linearly ~19 MB/min (553 → 626 MB), 1.9 is flat (664 → 668 MB,
+      no growth after 90 s).
+      - [ ] Soak 1.9 on the real desktop (Owner's `RestartMpvpaperEverySeconds` is **0**; 1.8 reached 1.66 GB RSS in
+            42 min). If flat there too, the restart daemon's default (600 s, `AppSettings.RestartMpvpaperEverySeconds`)
+            can go to 0.
+      - [ ] Electron 42 is EOL: nixpkgs marks `electron_42` insecure, so the flake lets electron 42.x only through
+            (`allowInsecurePredicate`). Move the flake, `app/shell/package.json` (+ its `allowScripts` key) and the
+            AppImage to a supported major together (43 in nixpkgs now); check the NVIDIA GPU-process crash-loop first.
+      - [ ] `scripts/lwe.sh --nix` loses the caller's `LIASCAPE_LWE_CORE_DIR`: the devShell sets it to the store core,
+            so `build` tries to install into the read-only store. Workaround: `nix develop -c env
+            LIASCAPE_LWE_CORE_DIR=<dir> bash scripts/lwe.sh build …`. Fix: carry the caller's value (or the
+            `build/lwe-core` default) across the re-exec.
 - [ ] Push `transitions-reveal`: `6f0433a` (cubic volume), `04533a8` (silence flicker) and the design + this TODO are
       not pushed. The `fork` remote is SSH and there's no key on this box; push via `gh auth git-credential` over HTTPS,
       or run `gh auth setup-git`.
