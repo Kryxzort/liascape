@@ -129,6 +129,14 @@ impl LweScene {
         self.scene.set_pointer(x, y, buttons);
     }
 
+    pub fn pointer_jump(&self) {
+        self.scene.pointer_jump();
+    }
+
+    pub fn set_frame_rate(&self, hz: f64) {
+        self.scene.set_frame_rate(hz);
+    }
+
     /// The screen showing it changed size (`resize {max_size}`): the scripts' `resizeScreen`.
     pub fn hint_screen(&self, w: u32, h: u32) {
         self.scene.hint_screen(w, h);

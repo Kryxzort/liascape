@@ -2546,12 +2546,19 @@ impl Runtime {
                 &p(&format!("out:{}.pointer", s.output)),
                 PropValue::List(vec![s.x, s.y, s.buttons as f64]),
             );
-            reached.extend(self.forward_pointer(&s.output, s.x, s.y, s.buttons));
+            reached.extend(self.forward_pointer(&s.output, (s.x, s.y), s.buttons, s.entered));
         }
         reached
     }
 
-    fn forward_pointer(&mut self, output: &str, x: f64, y: f64, buttons: u32) -> Vec<String> {
+    /// `entered` = the pointer came onto the output here (no stroke from where it left).
+    fn forward_pointer(
+        &mut self,
+        output: &str,
+        (x, y): (f64, f64),
+        buttons: u32,
+        entered: bool,
+    ) -> Vec<String> {
         let num = |g: &Graph, path: String| match g.get(&p(&path)) {
             Ok(PropValue::I64(i)) => i as f64,
             Ok(PropValue::F64(f)) => f,
@@ -2587,7 +2594,7 @@ impl Runtime {
             );
             if let Some(uv) = crate::scene::pointer::to_source_uv(&rect, x, y) {
                 let (nx, ny) = crate::scene::pointer::to_native_px(uv, native);
-                sc.set_pointer(nx, ny, buttons);
+                sc.set_pointer(nx, ny, buttons, entered);
                 reached.push(id);
             }
         }

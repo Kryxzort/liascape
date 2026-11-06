@@ -2453,7 +2453,7 @@ note on stderr and exits 0 (or stdout closes).
 | `outbox.ack` | `{seq}` — the backend stored every entry ≤ seq (a seq past the newest acks all) | `{}` (reads skip them at once; the file is compacted on `lia-snapshot`) | `bad_request` (no/bad `seq`) | `ctl outbox.ack '{"seq":14}'` |
 | `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
-| `headless.pointer` | `{output, x, y, buttons? (0)}` — surface px from the top-left (Task 7) | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
+| `headless.pointer` | `{output, x, y, buttons? (0), entered? (false)}` — surface px from the top-left (Task 7); `entered` = the pointer came onto the output there (Wayland `enter`): the scene gets it as a jump, no stroke from where it left | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
 | `headless.cover` | `{output \| "*", state: none\|maximized\|fullscreen, app_id?, pid?}` — the fake cover source (Phase 3 Task 6, § Signals); read by the next tick | `{}` | `no_such_node`, `bad_request`, `unsupported` | `ctl headless.cover '{"output":"*","state":"fullscreen"}'` |
 
 **Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
@@ -4251,6 +4251,14 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   (re-sent after a restart's `Ready`). The worker hands it to LWE's `wp_mouse_input` (`CScene`
   divides by its size; our button bits = `WP_MOUSE_INPUT_BUTTON_*`); the synthetic
   `pointer_dot` scales it to the ring. Unit `pointer_maps_through_fill_and_viewport`.
+  A sample that **entered** the output (Wayland `enter`, `headless.pointer {entered: true}`)
+  goes as `Pointer {jump: true}` → `wp_project_pointer_jump` (fork 0106): WE polls the cursor
+  on the whole desktop and never sees a jump, so the scene's `g_PointerPositionLast` takes the
+  new position too (cursorripple drew a saturated stroke along it). `ToWorker::Rate {hz}` =
+  the outputs' demand (before the GPU budget's cap), on `Ready` and each demand change →
+  `wp_project_set_frame_rate` (fork 0105): a simulation effect (cursorripple) steps at it
+  whatever rate the ticks arrive at. Probe `workers`: `pointer_jumps`, `rate_sent`. API
+  `pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
   `SysMon::start()` (thread `lia-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
   node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but

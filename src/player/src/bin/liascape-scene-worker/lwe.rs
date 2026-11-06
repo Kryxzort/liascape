@@ -81,6 +81,8 @@ unsafe extern "C" {
     fn wp_project_get_height(project: *mut c_void) -> c_int;
     fn wp_project_set_output_framebuffer(project: *mut c_void, framebuffer: c_uint);
     fn wp_project_hint_size(project: *mut c_void, width: c_int, height: c_int);
+    fn wp_project_set_frame_rate(project: *mut c_void, hz: f32);
+    fn wp_project_pointer_jump(project: *mut c_void);
     fn wp_project_property_set_value_by_name(
         project: *mut c_void,
         name: *const c_char,
@@ -387,6 +389,21 @@ impl Scene {
         self.pointer.y.set(y);
         self.pointer.buttons.set(buttons);
         self.pointer.set.set(true);
+    }
+
+    /// The pointer's next position is a jump, not a move (it entered the output, or came back
+    /// from behind a window — Wallpaper Engine sees the cursor on the whole desktop, so it never
+    /// jumps there): the frame that reads it takes it as `g_PointerPositionLast` too, and
+    /// cursorripple strokes no line along it (fork patch 0106).
+    pub fn pointer_jump(&self) {
+        unsafe { wp_project_pointer_jump(self.project) }
+    }
+
+    /// The rate the scene is meant to tick at (what its outputs ask for, before the GPU
+    /// budget's cap): a simulation effect (cursorripple) steps at it whatever rate the frames
+    /// arrive at — its strength depends on the frame rate in WE too (fork patch 0105).
+    pub fn set_frame_rate(&self, hz: f64) {
+        unsafe { wp_project_set_frame_rate(self.project, hz as f32) }
     }
 
     /// System audio, interleaved stereo f32 at `rate` Hz, every frame in order (B8 "feed

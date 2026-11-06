@@ -324,6 +324,10 @@ pub struct SceneStats {
     pub spawns: u64,
     /// Slots imported in the latched frame's ring (3 once a re-export's old ones went).
     pub slots: usize,
+    /// `Pointer` messages sent as a jump (the pointer entered the output).
+    pub pointer_jumps: u64,
+    /// The last `Rate` sent (0 = none yet).
+    pub rate_sent: f64,
 }
 
 pub struct SceneSource {
@@ -830,6 +834,7 @@ impl SceneSource {
             if self.budget.set_demand(hz) {
                 self.unthrottled(from, hz, "demand");
             }
+            self.send_rate();
         }
         self.apply_rate();
         if max != self.opts.max_size {
@@ -1373,10 +1378,13 @@ impl SceneSource {
                 if self.next_tick.is_none() || !self.paused {
                     self.next_tick = Some(now);
                 }
-                // A (re)started worker gets the pointer it missed.
+                // A (re)started worker gets the pointer it missed (placed there, not moved),
+                // and the rate its scene is meant to tick at.
                 if let (Some((x, y, buttons)), Some(h)) = (self.pointer, self.host.as_mut()) {
-                    let _ = h.send(&ToWorker::Pointer { x, y, buttons }, &[]);
+                    let jump = true;
+                    let _ = h.send(&ToWorker::Pointer { x, y, buttons, jump }, &[]);
                 }
+                self.send_rate();
                 // …and the stream's gain (its `Start` carried the folded one; resent in case
                 // a push was refused while it wasn't connected).
                 self.gain_sent = None;
@@ -1685,7 +1693,9 @@ impl SceneSource {
     /// The pointer over this scene (Task 7, mouse on), in the scene's **native pixels** (y
     /// down from the image's top) — the runtime maps an output's `out:<c>.pointer` through the
     /// layer's fit (`scene::pointer`). Kept for a restarted worker.
-    pub fn set_pointer(&mut self, x: f64, y: f64, buttons: u32) {
+    /// `jump` = it arrived here (entered the output) rather than moved here: the scene draws no
+    /// stroke along the way (`ToWorker::Pointer`).
+    pub fn set_pointer(&mut self, x: f64, y: f64, buttons: u32, jump: bool) {
         if self.pointer == Some((x, y, buttons)) {
             return;
         }
@@ -1693,7 +1703,21 @@ impl SceneSource {
         if self.worker_ready
             && let Some(h) = self.host.as_mut()
         {
-            let _ = h.send(&ToWorker::Pointer { x, y, buttons }, &[]);
+            if h.send(&ToWorker::Pointer { x, y, buttons, jump }, &[]).is_ok() && jump {
+                self.stats.pointer_jumps += 1;
+            }
+        }
+    }
+
+    /// The worker's scene steps its simulation effects (cursorripple) at the rate its outputs ask
+    /// for — the demand, not the budget's throttled rate (`ToWorker::Rate`).
+    fn send_rate(&mut self) {
+        let hz = self.demand_hz;
+        if self.worker_ready
+            && let Some(h) = self.host.as_mut()
+            && h.send(&ToWorker::Rate { hz }, &[]).is_ok()
+        {
+            self.stats.rate_sent = hz;
         }
     }
 
@@ -2188,6 +2212,8 @@ impl SceneSource {
             "stale_reuses": st.stale_reuses,
             "queued": st.queued,
             "ticks_sent": st.ticks_sent,
+            "pointer_jumps": st.pointer_jumps,
+            "rate_sent": st.rate_sent,
             "frames_received": st.frames_received,
             "resizes": st.resizes,
             "buffer_sets": st.buffer_sets,

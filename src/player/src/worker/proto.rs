@@ -107,10 +107,22 @@ pub enum ToWorker {
     /// The pointer over the scene, in the scene's **native pixels** (x right, y down from
     /// the image's top — what LWE's mouse callbacks hand `CScene`); `buttons` bit 0 left,
     /// 1 right, 2 middle (= LWE's `WP_MOUSE_INPUT_BUTTON_*`).
+    /// `jump`: the pointer arrived here (entered the output) rather than moved here — no stroke
+    /// along the way for the scene's `g_PointerPositionLast` (Wallpaper Engine sees the cursor on
+    /// the whole desktop, so it never jumps there; fork patch 0106).
     Pointer {
         x: f64,
         y: f64,
         buttons: u32,
+        #[serde(default)]
+        jump: bool,
+    },
+    /// The rate the scene is meant to tick at: what its outputs ask for (`demand_of`), before the
+    /// GPU budget's cap. A simulation effect (cursorripple) steps at it whatever rate the ticks
+    /// arrive at (fork patch 0105) — in Wallpaper Engine its strength depends on the fps setting,
+    /// so a throttled scene would otherwise push several frames' force per tick.
+    Rate {
+        hz: f64,
     },
     /// Set one scene user property live (`wp_project_property_set_*_by_name`): a JSON bool →
     /// boolean, a number → slider, `[r, g, b(, a)]` (0–1) → colour, a string → LWE's own

@@ -1195,6 +1195,7 @@ impl PointerHandler for WlState {
                 x,
                 y,
                 buttons: self.outs[i].buttons,
+                entered: what == "enter",
             });
             self.pointer_log(i, what, x, y, button);
         }
