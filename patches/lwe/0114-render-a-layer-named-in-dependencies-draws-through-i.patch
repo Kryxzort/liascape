@@ -1,0 +1,116 @@
+From ca97141e38a3af23ed1782ed00da06ce8e53bed8 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:02:35 +0530
+Subject: [PATCH 114/117] render: a layer named in `dependencies` draws through
+ its composite, as WE's flag 0x1010
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The scene load (GH 0x1401b7xxx, in the loader after the parents are linked) gathers the ids in every
+object's `dependencies` list and sets image flags 0x1010 on each image or text object among them
+(re-running its setup when 0x10 was not set). Flag 0x10 is the "draw off screen, then a last draw"
+of a colour-blend or fogged layer (GH 0x140212f90, 0x140214b50): the base and all effects go into
+the layer's composite, so `_rt_imageLayerComposite_<id>_a` holds the layer's picture even when it
+has no effects.
+
+3354740764's `Clouds` compose layer runs procedural_noise with LAYERED, its 2nd-layer texture
+`_rt_imageLayerComposite_51_a`, and depends on 51: a white 4 x 4 solid layer "necessary for layered
+clouds". LWE drew 51 straight to the screen and the clouds read an empty composite (0 0 0 0): the
+Worley noise's alpha came out a quarter lower, so its dark clouds covered the bottom 30 % of the grass
+(−14 … −32 / 255) where WE shows a few. Proved with private copies in WE: the clouds recoloured red
+show one patch; with 51 black they move to the high colour; without `dependencies` WE reads a stale
+target (blocky); with the slot empty (neutral 0.5) WE and LWE agree.
+
+Such a layer now gets the same last draw (effectpassthrough, BLENDMODE 0) with its base drawn at
+the colour (1, 1, 1, 1). A compose (passthrough) layer named as a dependency (3243449890's, read by
+clipping masks) keeps LWE's handling. 3354740764: 0.327 → 0.218 against WE (2 s 0.088, 5 s 0.097);
+3042865984 (a 5-effect mask layer named by another) unchanged, 0.044.
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md 3354740764 (the clouds compose layer darkens the grass)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp   |  7 ++++++-
+ .../WallpaperEngine/Render/Wallpapers/CScene.cpp     | 12 ++++++++++++
+ src/core/WallpaperEngine/Render/Wallpapers/CScene.h  | 10 ++++++++++
+ 3 files changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index a54e974..53a6705 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1275,7 +1275,12 @@ void CImage::setup () {
+ 	}
+ 	fogPass = fogCombo != 0;
+     }
+-    if (!debug.baseOnly && !isShape && (blendPass || fogPass)) {
++    // a layer another object names in its `dependencies` takes flag 0x10 too (CScene::isDependency), so its
++    // `_rt_imageLayerComposite_<id>_a` holds its picture: 3354740764's clouds (procedural_noise LAYERED) read the
++    // white 4 x 4 solid layer 51 that way. Ours drew it straight to the screen and the clouds read an empty composite
++    // (0 0 0 0), which set their noise's alpha a quarter lower: the dark clouds covered the bottom of the grass
++    const bool dependencyPass = !this->m_image.model->passthrough && this->getScene ().isDependency (this->getId ());
++    if (!debug.baseOnly && !isShape && (blendPass || fogPass || dependencyPass)) {
+ 	this->m_materials.colorBlending.material = MaterialParser::load (
+ 	    this->getScene ().getScene ().project,
+ 	    fogPass ? "materials/util/effectpassthrough_4.json" : "materials/util/effectpassthrough.json"
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index c7ae2f0..c634660 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -1014,6 +1014,18 @@ bool CScene::composesChildren (const Object& image) const {
+     });
+ }
+ 
++bool CScene::isDependency (int id) const {
++    if (!this->m_dependencyIds.has_value ()) {
++	std::set<int> ids;
++	for (const auto& object : this->getScene ().objects) {
++	    ids.insert (object->dependencies.begin (), object->dependencies.end ());
++	}
++	this->m_dependencyIds = std::move (ids);
++    }
++
++    return this->m_dependencyIds->contains (id);
++}
++
+ std::optional<int> CScene::drawingOwnerOf (const Object& object) const {
+     const auto owner = this->composeOwnerOf (object);
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+index 89c5574..53aec80 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.h
+@@ -8,6 +8,7 @@
+ 
+ #include <map>
+ #include <optional>
++#include <set>
+ #include <random>
+ 
+ namespace WallpaperEngine::Scripting {
+@@ -97,6 +98,13 @@ public:
+     [[nodiscard]] std::optional<int> drawingOwnerOf (const Object& object) const;
+     /** Whether a passthrough layer draws objects of its own (it has a descendant whose compose owner it is) */
+     [[nodiscard]] bool composesChildren (const Object& image) const;
++    /**
++     * Whether some object names this one in its `dependencies` (itself included): the scene load (GH 0x1401b7xxx, in
++     * the loader after the parents are linked) gathers every object's dependency ids and sets image flags 0x1010 on
++     * each image or text among them, so it draws through its composite with a last draw and
++     * `_rt_imageLayerComposite_<id>_a` holds its picture for the layer that reads it
++     */
++    [[nodiscard]] bool isDependency (int id) const;
+     /** The FBO an object draws its last pass into: its compose layer's group target, or the scene's */
+     [[nodiscard]] std::shared_ptr<const CFBO> getTargetFor (const Object& object) const;
+     /**
+@@ -285,6 +293,8 @@ private:
+     int m_healthFrames = 0;
+     /** composeOwnerOf, by object id (built on first use from the scene data) */
+     mutable std::map<int, std::optional<int>> m_composeOwners = {};
++    /** isDependency's ids, gathered on first use */
++    mutable std::optional<std::set<int>> m_dependencyIds = std::nullopt;
+     mutable bool m_composeOwnersBuilt = false;
+     std::map<int, std::shared_ptr<CFBO>> m_composeTargets = {};
+     glm::vec2 m_mousePosition = {};

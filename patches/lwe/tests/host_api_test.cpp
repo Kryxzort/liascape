@@ -849,16 +849,17 @@ static std::string script_scene (const std::string& objects) {
     return d;
 }
 
-// one solid 8x8 square; `props` is the rest of the object's JSON members (each scripted property's object)
+// one solid 8x8 square, nearly black (1/255); `props` is the rest of the object's JSON members (each scripted
+// property's object)
 static std::string square (int id, const std::string& props) {
     return "{\"id\":" + std::to_string (id) + ",\"name\":\"sq" + std::to_string (id)
-         + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\"," + props + "}";
+         + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"0.00392 0.00392 0.00392\"," + props + "}";
 }
 
 // the same square in white (B2 reads its red channel as alpha × 255)
 static std::string white_square (int id, const std::string& props) {
     std::string sq = square (id, props);
-    const std::string from = "\"color\":\"1 1 1\"";
+    const std::string from = "\"color\":\"0.00392 0.00392 0.00392\"";
     sq.replace (sq.find (from), from.size (), "\"color\":\"1.0 1.0 1.0\"");
     return sq;
 }
@@ -1108,7 +1109,8 @@ static bool undefined_leaves_the_property () {
 
 // the red channel at column x of the centre row
 static int red_at (const ScriptRig& rig, int x) {
-    // (the squares are white: "1.0 1.0 1.0" — a colour without a '.' is 0..255, so "1 1 1" is nearly black)
+    // (the squares are white: "1.0 1.0 1.0"; square ()'s are 1/255, nearly black — what the "1 1 1" these tests were
+    // written with drew before LWE read an object colour as WE does, object_colour_and_linked_folder)
     unsigned char px[4] = { 0, 0, 0, 0 };
     read_pixel (rig.fbo, x, 16, px);
     return px[0];
@@ -1987,7 +1989,7 @@ static bool puppet_warp_as_we () {
           "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"48 16 0\",\"size\":\"32 32\","
           "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false},"
           "{\"id\":12,\"animation\":2,\"blend\":0.5,\"additive\":true}]},"
-          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"0.00392 0.00392 0.00392\","
           "\"origin\":\"0 8 0\",\"parent\":2,\"attachment\":\"tip\"}";
     const std::string dir = script_scene (objects);
     mkdir ((dir + "/materials").c_str (), 0755);
@@ -2114,7 +2116,7 @@ static bool attachment_matrix_is_whole () {
     const std::string objects
         = "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
           "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false}]},"
-          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"0.00392 0.00392 0.00392\","
           "\"origin\":\"0 4 0\",\"parent\":2,\"attachment\":\"tip\"}";
     const std::string dir = script_scene (objects);
     mkdir ((dir + "/materials").c_str (), 0755);
@@ -4207,7 +4209,8 @@ static bool create_layer_builds_layers () {
         "export let __workshopId = '77';\n"
         "let made, bar, ok;\n"
         "export function init(value) {\n" + js_checks (
-        "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(1, 1, 1),"
+        // (black, to show on the blue row: the configuration's colour arrives as "x y z", read as WE reads a colour)
+        "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(0, 0, 0),"
         " origin: new Vec3(40, 16, 0) });\n"
         "bar = thisScene.createLayer('models/util/solidlayer.json');\n"
         "const own = thisScene.createLayer('models/own.json');\n"
@@ -6882,6 +6885,117 @@ static std::string stock_velocity (const char* v) {
 // capvelocity (case 0x12: v ×= min (1, maxspeed / |v|)), reducemovementnearcontrolpoint (case 0xd), boids (case
 // 0x11: cohesion pulls two particles 20 px apart together), maintaindistancetocontrolpoint (case 0xb: a particle 10 px
 // from control point 1 put at `distance` 4), remapvalue (lifetimefraction → opacity 0.5)
+// ---------------------------------------------------------------------------------------------
+// An object's colour is WE's vec3 field (GH 0x1401d0bc0: atof per space-separated component), so "1 1 1" is white —
+// LWE read a colour without a '.' as 0..255 (1/255, black). And a project folder whose files are symlinks (a farm of
+// links, as a private copy of a Workshop item is built) loads: LWE resolved each file and refused it as outside the
+// folder
+static bool object_colour_and_linked_folder () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string objects
+        = "{\"id\":1,\"name\":\"w\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\",\"origin\":\"16 16 0\"},"
+          "{\"id\":2,\"name\":\"g\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"0 1 0\",\"origin\":\"48 16 0\"}";
+    const std::string dir = script_scene (objects);
+    CHECK (!dir.empty (), "no scene folder");
+    char tmpl[] = "/tmp/lwe-linked-scene.XXXXXX";
+    const char* farm = mkdtemp (tmpl);
+    CHECK (farm != nullptr, "no farm folder");
+    const std::string linked = farm;
+    for (const char* f : { "project.json", "scene.json" }) {
+        CHECK (symlink ((dir + "/" + f).c_str (), (linked + "/" + f).c_str ()) == 0, "symlink %s failed", f);
+    }
+    bool ok = true;
+    {
+        ScriptRig rig;
+        rig.dir.clear ();
+        const bool opened = rig.open (linked);
+        rig.dir.clear ();
+        if (!opened) {
+            printf ("    FAIL: the folder of symlinks didn't load\n");
+            ok = false;
+        } else {
+            rig.step ();
+            unsigned char white[4] = {}, green[4] = {};
+            read_pixel (rig.fbo, 16, 16, white);
+            read_pixel (rig.fbo, 48, 16, green);
+            printf ("    \"1 1 1\" → %d %d %d, \"0 1 0\" → %d %d %d\n", white[0], white[1], white[2], green[0], green[1], green[2]);
+            if (!(white[0] > 250 && white[1] > 250 && white[2] > 250)) {
+                printf ("    FAIL: \"1 1 1\" isn't white\n");
+                ok = false;
+            }
+            if (!(green[0] < 5 && green[1] > 250 && green[2] < 5)) {
+                printf ("    FAIL: \"0 1 0\" isn't green\n");
+                ok = false;
+            }
+        }
+    }
+    for (const char* f : { "project.json", "scene.json" }) {
+        unlink ((linked + "/" + f).c_str ());
+        unlink ((dir + "/" + f).c_str ());
+    }
+    rmdir (linked.c_str ());
+    rmdir (dir.c_str ());
+    return ok;
+}
+
+// A script on an effect's shader constant: its thisObject is the effect's material, whose properties are the effect's
+// constants (WE). 3163060610's waterripple `scale` script sets `thisObject.scale = 0.22`; LWE's thisObject was the
+// layer, so the cloud layer shrank to 0.22 of its size where WE keeps it whole. Here a white 8 x 8 layer at x 16 has
+// an effect whose `gain` constant's script sets thisObject.gain = 0.5 and thisObject.scale = 0.25: the layer stays
+// 8 columns wide (unpatched: 2) and draws grey (the constant took 0.5 through thisObject)
+static bool constant_script_this_object_is_the_material () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string layer = b9_object (1, 16);
+    layer.pop_back ();
+    const std::string script = "export function update() {\n  thisObject.gain = 0.5;\n  thisObject.scale = 0.25;\n}\n";
+    std::string escaped;
+    for (char c : script) {
+        if (c == '\n') {
+            escaped += "\\n";
+        } else {
+            escaped += c;
+        }
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"gain\",\"file\":\"effects/gain/effect.json\",\"passes\":[{\"constantshadervalues\":"
+                               "{\"gain\":{\"value\":1,\"script\":\"" + escaped + "\"}}}]}]}";
+    const std::string dir = script_scene (layer + effect);
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/gain").c_str (), 0755);
+    write_file (dir + "/shaders/gain.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/gain.frag", "uniform sampler2D g_Texture0;\nuniform float u_Gain; // {\"material\":\"gain\",\"default\":1}\n"
+                                            "varying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(u_Gain, u_Gain, u_Gain, 1.0);\n}\n");
+    write_file (dir + "/materials/gain.json", "{\"passes\":[{\"shader\":\"gain\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/gain/effect.json", "{\"name\":\"gain\",\"passes\":[{\"material\":\"materials/gain.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/gain/effect.json", "shaders/gain.vert", "shaders/gain.frag", "materials/gain.json",
+                  "shaders/b9.vert", "shaders/b9.frag", "materials/b9.json", "models/b9.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    int width = 0;
+    for (int x = 0; x < 64; x++) {
+        unsigned char px[4] = {};
+        read_pixel (rig.fbo, x, 16, px);
+        width += px[2] > 100 && px[0] > 60 ? 1 : 0;
+    }
+    unsigned char centre[4] = {};
+    read_pixel (rig.fbo, 16, 16, centre);
+    printf ("    layer %d columns wide, centre %d %d %d\n", width, centre[0], centre[1], centre[2]);
+    CHECK (width == 8, "the layer is %d columns wide, not 8 (thisObject.scale scaled the layer)", width);
+    CHECK (centre[0] > 100 && centre[0] < 160, "the gain constant didn't take 0.5 through thisObject (%d)", centre[0]);
+    return true;
+}
+
 static bool particle_stock_motion_operators () {
     if (!script_tests_can_run ()) {
         return true;
@@ -7207,6 +7321,8 @@ int main (int argc, char** argv) {
     run ("particle_stock_initializers", particle_stock_initializers);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
+    run ("object_colour_and_linked_folder", object_colour_and_linked_folder);
+    run ("constant_script_this_object_is_the_material", constant_script_this_object_is_the_material);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
     return g_failures ? 1 : 0;
 }
