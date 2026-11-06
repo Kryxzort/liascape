@@ -387,6 +387,12 @@ waitfor $WAIT refused_seen "$SIDX" && waitfor $WAIT ao_up "$SIDX" \
 ctl destroy "{\"id\":\"$SIDX\"}" >/dev/null 2>&1
 sf_raw '.NormalizeAudio = false | .NormalizeTargetLufs = -14'
 setting '.NormalizeAudio = false'; waitfor $WAIT cur_is af "" || bad "normalization off → af $(cur af)"
+# leave things as the sections below expect them: b on screen, the library without this item (an all-scene library
+# check further down counts on it)
+post /apply "{"path":"$Bc"}" >/dev/null; waitfor $WAIT shows "$Bc" || bad "back to b → cur $(cur path)"
+curl -sf -m 5 "$U/library" | jq -c --arg p "$NC" '[.[] | select(.videoPath==$p)][0]' > "$T/nc.json"
+post /library/delete "$(cat "$T/nc.json")" >/dev/null
+curl -sf -m 5 "$U/library" | jq -e --arg p "$NC" '[.[] | select(.videoPath==$p)] | length == 0' >/dev/null || bad "norm cee still in the library"
 
 echo "== timed playlist: advance-on-end, no minimum play time (2 s clips → advance on end)"
 # A rotation's rate is counted on the PLAYER's clock: the handoffs (after index $1) whose t_mono_ms lies
