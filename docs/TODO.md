@@ -288,17 +288,16 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Next up (handoff 2026-10-26, weekly limit)
-- [ ] **Silent after the audio bus bounced** (owner 2026-11-06 21:35 "why is my current wallpaper silent"): the bus went
-      `audio.bus.down` → `retargeting` → `moved` → `up` at 20:33 local (15:03:16Z; default sink = the HDB 630, target
-      `easyeffects_sink`, `overridden: true`). From then on the playing video had **no AO** (`sources[].mpv_current_ao`
-      null, no mpv sink-input; `liascape-player-bus` sink IDLE) — including a source **created an hour later** (src22,
-      21:35), so it's not only the live re-route (`set_audio_route`, I7) but also new opens after it. The `bus` probe
-      still reported `sink_node` 223 / `playback_node` 304 while `pactl` showed the bus sink as 5596 → its idea of
-      the bus was stale. No warn/error logged. A player restart (quit + restore) fixed it at once (AO `pipewire`, the
-      bus RUNNING). Evidence: `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`
-      (sources/bus probes, pw-dump, sinks, the bus events). Reproduce on the private PipeWire (bounce the bus target
-      / restart a filter sink like EasyEffects under a playing source, then open a new one), make the player detect
-      "a source with audio but no AO" (and log it), and fix the reconnect.
+- [ ] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
+      setting the normalization target to 0): Settings let the target go −100…0 LUFS, but ffmpeg's `loudnorm` takes
+      `I` in −70…−5 only, so `LoudnormAf` built a filter mpv rejected, and mpv then ran the video with **no audio at
+      all** (`sources[].mpv_current_ao` null, no mpv stream on `liascape-player-bus`), not just un-normalized. A player
+      restart (with the target back at −14) brought it back. Fixed the input: the UI bounds the target to −70…−5 and
+      `LibraryService.LoudnormAf` clamps a stored value (2026-11-06). Left: the player should survive any bad `af`
+      — on mpv refusing it, fall back to `""` (sound un-normalized), log a warning and report it (no silent
+      no-AO state); add an IT check with an out-of-range target. (The bus bounce at 20:33 in the same evidence,
+      `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`, was unrelated —
+      audio worked after it.)
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". Suspects: the worker's WSOLA stretch (`stretch.rs`) engaging

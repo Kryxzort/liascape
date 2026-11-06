@@ -113,6 +113,9 @@ public static class LibraryService
         var m = ReadLoudness(mediaPath);
         if (m == null) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture; var v = m.Value;
+        // ffmpeg's loudnorm takes I in −70…−5 only; outside it the filter fails and mpv drops the item's audio
+        // altogether (owner 2026-11-06: a target of 0 silenced every video), so a stored target out of range is clamped.
+        targetLufs = Math.Clamp(double.IsFinite(targetLufs) ? targetLufs : -14, -70, -5);
         return "loudnorm=I=" + targetLufs.ToString(inv) + ":TP=-1.5:LRA=11" +
                ":measured_I=" + v.I.ToString(inv) + ":measured_TP=" + v.TP.ToString(inv) +
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
