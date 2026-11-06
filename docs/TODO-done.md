@@ -81,6 +81,8 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       (c stayed, nothing scheduled), GREEN after; plus "two quick clicks (a, c) → c" (green both). Also: the backend
       self-test had stopped before its protocol round-trip since the Settings rename (it wanted "Pause behind windows" in the
       player's cover reason, which still said "Pause when covered") — the player's reason now names the new row.
+      Adapter IT after the reboot: branch 413/1, unchanged lp-player 411/1 — the same pre-existing failure in both (the
+      playlist-restart precondition "the new backend answered after p1's first loop ended").
 - [x] **Settings levels + a wording pass** (owner 2026-11-06: "simple/standard/advanced/expert … the forever final 4
       levels", "Simple" then renamed "Basic"; Standard the default): one saved `settingsLevel` (basic | standard | advanced |
       expert, `AppSettings.SettingsLevel`) replaces "Advanced settings" + "Show expert options" (the owner's both-on became

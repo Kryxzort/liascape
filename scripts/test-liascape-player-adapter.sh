@@ -823,15 +823,15 @@ post /apply "{\"path\":\"$SV1\"}" >/dev/null
 waitfor $WAIT shows "$SV1" && ok "/apply sv1 (library/single-wallpaper mode) → cur sv1" || bad "/apply sv1 → cur $(cur path)"
 
 step_many() {   # $1 = /next|/prev|/random, $2 = iteration count
-  local route=$1 n=$2 allok=1 sceneHit=0 i p code
+  local route=$1 n=$2 allok=1 sceneHit=0 i p code codes=""
   for i in $(seq 1 "$n"); do
     code=$(postcode "$route")
-    [ "$code" = 200 ] || allok=0
+    [ "$code" = 200 ] || { allok=0; codes="$codes #$i:$code"; }
     sleep 0.5
     p=$(cur path)
     { [ "$p" = "$SS1" ] || [ "$p" = "$SS2" ]; } && sceneHit=1
   done
-  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response"
+  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response:$codes (000 = no answer within 10 s)"
   [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — TryStepLibrary/ApplyRandom didn't skip it"
 }
 step_many /next 20
