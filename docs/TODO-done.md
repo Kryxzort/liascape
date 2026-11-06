@@ -63,6 +63,18 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
 ## liascape-player (after design approval)
+- [x] **Settings levels + a wording pass** (owner 2026-11-06: "simple/standard/advanced/expert … the forever final 4
+      levels", "Simple" then renamed "Basic"; Standard the default): one saved `settingsLevel` (basic | standard | advanced |
+      expert, `AppSettings.SettingsLevel`) replaces "Advanced settings" + "Show expert options" (the owner's both-on became
+      Expert); a pill row in the top bar beside the tabs while Settings is open; each level shows its own rows and every
+      row below; a non-default setting a level hides puts a "tucked away" note with Show (no bulk reset: in the first probe
+      run it also flipped the player engine). Sections regrouped (Sound, Auto-mute, Playback, Playlist & rotation, Video, GPU
+      & memory, Look & feel, Wallpaper Engine, Scene monitors, Getting Workshop wallpapers, Under the hood, the raw commands,
+      Keyboard shortcuts, Housekeeping) and rows renamed plainly ("Even out loudness", "Hush when other audio plays", "Pause
+      behind windows", "Ease off heavy scenes", "Play scenes", …); the rotation labels kept (the playlist modal shares them).
+      web-ui.md § "Settings levels". Tests: probe-expert 6/0 (levels), probe-health 9/0, settings-merge 135/0, the matrix's
+      affected cells 784 + the 47 load-hit ones rerun 46/1 → `parked:hold` (its 3 s interval had run out during the slower UI
+      steps before parking — the cell now sets the interval from what the held item already played) 2/2 twice.
 - [x] **Cold boot: the player blocked 10 s on PipeWire and then had no bus for good** (owner's machine, 2026-10-29
       05:59): Hyprland's `liascape restore` started `serve` before WirePlumber was up; `Bus::create` waited 10 s for
       the loopback to link with the socket bound but the loop not running (every `hello` timed out → the backend

@@ -97,12 +97,12 @@ public static class PlayerEngine
         return new { low_active = low, mode = s.VramLowMode };
     }
 
-    public const string SceneSupportOff ="scene support is off (Settings → Wallpaper Engine → Allow scene support)";
+    public const string SceneSupportOff ="scene support is off (Settings → Wallpaper Engine → Play scenes)";
 
     // Why a scene can't be applied right now (Apply's error) — null when it can.
     public static string? SceneUnavailableReason(AppSettings s)
     {
-        if (!s.AllowScenes) return "Enable \"Allow scene support\" in Settings to play scenes";
+        if (!s.AllowScenes) return "Turn on \"Play scenes\" in Settings to play scenes";
         if (!IsLiascapePlayer) return PlayerHelper.IsLweAvailable() ? null : "linux-wallpaperengine not found in PATH — install it to use scenes";
         var (ok, why, _) = LiascapePlayerClient.Shared.SceneStatus(withAssets: false);
         return ok ? null : $"liascape-player can't play scenes here: {why}";

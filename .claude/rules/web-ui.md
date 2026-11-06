@@ -387,24 +387,37 @@ after Z" (", scenes stay" for 0). Semantics: `player-adapter.md` § Rotation. Ma
 (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`); `playlist:sceneTiming` /
 `global:sceneTiming` the toggle + "Switch scenes after".
 
-## Expert options (Phase 3 Task 10, designer call 12)
-A UI tier for settings most users should never touch. **`AppSettings.ShowExpertOptions`** (default false, saved) is the
-checkbox row **"Show expert options"** in Settings → Advanced, directly under "Advanced settings" and **not** gated on it.
-- **Mark a row expert:** give `Row` (`views/Settings.tsx`) the `expert` prop — it renders nothing unless the toggle is on,
-  and when shown carries a small "Expert" tag (`.s-expert`, `data-expert-tag`; the row has `data-expert`). Put it in the
-  page's `<ExpertSection>` (last on the page, rendered only while the toggle is on; heading "Expert"). Add its settings key
-  to **`EXPERT_KEYS`** (same file) so its deviated marker works, and to `SETTINGS_DEFAULTS` (`store/index.ts`) with its default.
-- **Expert settings are ordinary:** the backend knows nothing of the tier — saved and applied live whether or not the group
-  is shown; **hiding never resets a value**. While the group is hidden, a non-default expert value shows the existing reset
-  marker on the "Show expert options" row (`.s-reset[data-deviated]`, tooltip "Some hidden expert settings differ…"); its click
-  resets the expert values to their defaults (never the toggle). With the toggle on, that row's reset is the plain one.
-- **The first expert setting:** `rotateWhileParked` — "When no monitor shows the wallpaper": Keep rotating (default) | Hold until
-  a monitor returns (`prog:main.while_parked`, `player-adapter.md`). Probe: `scripts/test-ui-matrix.sh --probe probe-expert.js`
-  (off → absent; on → present + tagged + persisted across a reload; hidden keeps the value + the marker; the start choice;
-  Pause when covered).
+## Settings levels (owner 2026-11-06 — "the forever final 4 levels", Standard the default; "Simple" renamed "Basic" the same day)
+How much of Settings shows: **Basic · Standard · Advanced · Expert**, a pill row in the top bar beside the tabs while
+Settings is open (`App.tsx`, `[data-settings-level]`, each pill `[data-level]` with a tooltip). One saved setting,
+**`settingsLevel`** (`AppSettings.SettingsLevel`, normalized — anything unknown is `standard`); it replaced the old
+"Advanced settings" + "Show expert options" toggles (the owner's, both on, became Expert). The backend never reads it.
+- **Each level shows its own rows and every row below it.** A row's level: `LEVEL_OF_KEY` in `src/settingsLevel.ts` by its
+  settings key, or `Row`'s `lv` prop (rows without a key; default Basic). `Section` takes `lv` too (a whole section above the
+  level renders nothing). Advanced / Expert rows carry a small tag (`.s-expert`, `data-expert-tag`, text "Advanced" /
+  "Expert"); every row has `data-level`, an Expert row also `data-expert`.
+- **What goes where.** Basic — what everyone touches: volume, mute, even out loudness, hush on other audio, pause behind
+  windows, the rotation timer + transitions, theme, card size, the Workshop folder, play scenes, getting Workshop
+  wallpapers, clear thumbnail cache. Standard — the everyday knobs: loudness target + pre-measuring scenes, the auto-mute
+  details, loop, speed, the rest of rotation, video fit / fps cap, the GPU section's auto-throttle + low-memory rule, look &
+  feel, scene monitors, keyboard shortcuts, reset / clear. Advanced — internals: decoding and buffers, cache, the legacy
+  restart, the per-scene memory cap, copy/replace files, the player engine, transition style + its sync nudge, volume
+  keys, the wallpaper behind every tab. Expert — while parked, debug, the raw mpv / LWE commands.
+- **Hidden settings are ordinary:** saved and applied live whatever the level; **hiding never resets a value**. A
+  non-default value hidden by the current level puts a note at the top of Settings (`[data-hidden-changed]=<count>`: "N
+  settings you changed are tucked away at a higher level"), with **Show** (`[data-hidden-show]`: raises the level to the
+  highest one needed; each row's own reset is there). No bulk reset: it would also reset deliberate choices such as the
+  player engine (it did, in the first probe run).
+- **Names and hints** are plain and friendly (2026-11-06 pass: "Even out loudness", "Hush when other audio plays",
+  "Pause behind windows", "Ease off heavy scenes", …). The rotation labels stay as the playlist modal has them. Tests
+  find rows by label (`m.row(label)`), so a rename updates `app/shell/probe-*.js` too.
+- Probe: `scripts/test-ui-matrix.sh --probe probe-expert.js` (Standard default + the picker in the top bar; each level's rows;
+  saved + kept over a reload; a hidden changed value: kept, the note, Show; the start choice; Pause behind windows).
+  Matrix cell `expert:toggle` (the same through the player: `prog:main.while_parked` stays live while hidden). The matrix
+  stack runs at Advanced (`scripts/test-ui-matrix.sh`'s settings file).
 
 ## Pause when covered, playlist start (Phase 3 Task 10)
-- **Playback → "Pause when covered"** (liascape-player only, `liascapeActive`): Off / A fullscreen window / A fullscreen or
+- **Playback → "Pause behind windows"** (liascape-player only, `liascapeActive`): Off / A fullscreen window / A fullscreen or
   maximized window (default, `pauseWhenCovered`); hint `ROT_HINT.cover`; the health icon comes from `/health/features` →
   `cover` (`hello.health.cover`, `affects: ["pauseWhenCovered"]`: no window-state source here, e.g. GNOME/KDE).
 - **Rotation → "When the playlist starts again"** (`globalPlaylistStart`): Start over / Resume where it left off; hint per value

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { LEVELS, LEVEL_HINT, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
 import { RefreshCw, Square, Undo2, Upload } from "lucide-react";
 import { useStore } from "./store";
@@ -121,7 +122,7 @@ export default function App() {
     document.documentElement.classList.toggle("bg-live", !!s.settings?.liveWallpaperBehindAllTabs);
   }, [s.settings?.liveWallpaperBehindAllTabs]);
 
-  // Settings → Appearance → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
+  // Settings → Look & feel → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
   // the class is set only once the saved settings say `false`)
   useEffect(() => {
     document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
@@ -151,6 +152,14 @@ export default function App() {
           ))}
         </div>
 
+        {tab === "settings" && (
+          <div className="pills level-pills" data-settings-level={levelOf(s.settings?.settingsLevel)} title="How much of Settings to show — hidden settings keep working">
+            {LEVELS.map((l) => (
+              <button key={l} className={`pill${levelOf(s.settings?.settingsLevel) === l ? " active" : ""}`} data-level={l} title={LEVEL_HINT[l]}
+                onClick={() => s.setSetting("settingsLevel", l)}>{LEVEL_LABEL[l]}</button>
+            ))}
+          </div>
+        )}
         {tab === "browse" && (
           <div className="pills">
             {s.sources.filter((x) => x.available).map((x) => (

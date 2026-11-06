@@ -28,7 +28,7 @@ public sealed class LibMeta
     // A WE scene's loudness (liascape-player only — library.md § Loudness): kept PER AUDIO CONFIGURATION, keyed by
     // the offline estimator's `fingerprint` of the scene's sound under its user properties (`liascape-player
     // scene-loudness`; a property that changes no sound keeps it). Each entry holds the estimate (computed from the
-    // scene's files on import / Settings → "Scene loudness") and the live measurement (the player's `scene.loudness`
+    // scene's files on import / Settings → Sound → "Pre-measure scenes") and the live measurement (the player's `scene.loudness`
     // reports, refined on every play up to its cap). SceneLoudnessFp = the CURRENT configuration's fingerprint (null =
     // never estimated: reports go under "" until it is). LoudnessI / LoudnessTP above are the APPLIED value of the
     // current configuration — its live measurement once it has a report, else its estimate (0.5 LU hysteresis

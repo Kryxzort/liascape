@@ -504,7 +504,7 @@ const setting = (name, key, value, drive) => {
 // LIVE — through the values in between, during the drag (RED before: the global sliders only saved 250 ms
 // after the last tick; nothing moved while dragging) — and one with its own override never moves, not even
 // for a moment (override ?? global, R61). The persisted value afterwards is the drag's last one.
-for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
+for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Playback speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
   C[`globalDrag${kind}`] = {
     async pre(c) { if (c.other) await post(kind === "Vol" ? "/library/volume" : "/library/speed", kind === "Vol" ? { path: c.other, intValue: own } : { path: c.other, doubleValue: own }); },
     async run(c) {
@@ -535,21 +535,21 @@ for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "
     } };
 }
 setting("volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`);
-setting("speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`);
-setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
-setting("loopOff", "loop", false, `m.setCheck(m.input("Loop"), false, "Loop");`);
-setting("scaleFit", "videoScale", "fit", `await m.select("Video scale", "fit");`);
-setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video FPS cap"), 24, "fps");`);
+setting("speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`);
+setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
+setting("loopOff", "loop", false, `m.setCheck(m.input("Loop videos"), false, "Loop videos");`);
+setting("scaleFit", "videoScale", "fit", `await m.select("Fit to screen", "Fit");`);
+setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video frame rate cap"), 24, "fps");`);
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
-setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable cache"), true, "Disable cache");`);
-setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
+setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable video cache"), true, "Disable video cache");`);
+setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Read-ahead buffer (MiB)"), 64, "demuxer");`);
 // numeric settings fields type freely and snap on blur (owner: "everything should let you empty out the field
 // entirely and only snap back to minimum when you focus out" — components/NumInput.tsx): focused, the field keeps
 // exactly what was typed (empty / past the max) and nothing is saved; blur → clamped to min / max, saved
-for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demuxer max (MiB)", "demuxerMaxMib", 40, "", 1, true],
-  ["overToMax", "Video FPS cap", "videoFpsCap", 24, "999", 480, false]]) {
+for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Read-ahead buffer (MiB)", "demuxerMaxMib", 40, "", 1, true],
+  ["overToMax", "Video frame rate cap", "videoFpsCap", 24, "999", 480, false]]) {
   C[`num:${name}`] = { states: ["idle", "single"], noSwitch: true,
-    async pre() { await post("/settings", { [key]: start, ...(adv ? { advancedSettings: true } : {}) }); },
+    async pre() { await post("/settings", { [key]: start, ...(adv ? { settingsLevel: "expert" } : {}) }); },
     async run(c) {
       await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.input(${JSON.stringify(label)}); i++) await m.sleep(100);
         const el = m.input(${JSON.stringify(label)}); el.focus(); m.setValue(el, ${JSON.stringify(typed)}, ${JSON.stringify(label)});`);
@@ -708,7 +708,7 @@ for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async 
 // keybind volume-up, then any UI settings save: the keybind's volume must survive (the UI posts its whole copy)
 C["cli:volume-up+uiSave"] = { async run(c) {
     c.cli = await cli("volume-up"); await sleep(400);
-    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop"), false, "Loop");`); await sleep(900); },
+    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop videos"), false, "Loop videos");`); await sleep(900); },
   check: (c) => volKeyAuto(c, "volume-up", " + a UI save") };
 C["plAdvanceOff"] = { async run(c) {
   await ui(`m.click(document.querySelector('button[title="Playlist settings"]'), "pl settings"); await m.sleep(500); m.setCheck(m.plCheck("Switch when video ends"), false, "advance"); await m.sleep(400); m.click(m.byText(".pl-modal button", "Close"), "close");`);
@@ -735,7 +735,7 @@ function volKeyAuto(c, a, what = "") {
 }
 action("volume-up", (c) => volKeyAuto(c, "volume-up"));
 action("volume-down", (c) => volKeyAuto(c, "volume-down"));
-// the same keybinds by VolumeKeyTarget (Advanced → "Volume keys adjust"): "auto" (default) moves the playing
+// the same keybinds by VolumeKeyTarget (Advanced → "Volume keys change"): "auto" (default) moves the playing
 // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own (giving it
 // one); "global" always the global (an overridden one keeps its own). Every other item keeps its own, and every
 // source runs override ?? global (the general oracle, R61). `cur` = the playing item (mid-effect: the incoming).
@@ -1095,7 +1095,7 @@ C["seq:mute+next"] = { states: ["single", ...PL_STATES], switch: true, async run
   }, exp: { muted: true }, check: (c) => stayed(c, "next") };
 // a global setting changed (Settings page), then next: B takes the new global (the other live item keeps its override)
 for (const [name, key, value, drive] of [["volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`],
-  ["speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`]]) {
+  ["speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`]]) {
   C[`seq:set:${name}+next`] = { states: name === "noAudio" ? ["playlist", "effect"] : ["single", ...PL_STATES], switch: true,
     async pre(c) { if (c.other) await post("/library/volume", { path: c.other, intValue: 30 }); },
     async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next"); },
@@ -1280,7 +1280,7 @@ for (const k of Object.keys(TR)) C[`gTr${k}`] = { states: ["pending", "pendingGl
     if (c.state === "pending" && !(req && req.effect_id === "fade" && req.duration_ms === 600)) v.push(`a global change reached the playlist's own transition: the armed switch runs ${fmtSw(req)} (its playlist: fade 600 ms)`);
     return v;
   } };
-C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); await m.select("Transition method", "Frozen");`); await sleep(1200); },
+C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); await m.select("Transition style", "Frozen");`); await sleep(1200); },
   check(c) { const v = [...armedCheck(c)]; const req = armedReq(c);
     if (c.after.s.transitionMethod !== "frozen") v.push(`transitionMethod ${c.after.s.transitionMethod}`);
     if (!(req && req.method === "frozen")) v.push(`the armed switch still runs method ${req?.method}, the setting says frozen`); return v; } };
@@ -1610,34 +1610,34 @@ const NORM_STATES = ["single", "playlist", "effect", "pending", "paused", "pause
 const normOn = async (target) => { const s = await getSettings(); s.normalizeAudio = true; if (target !== undefined) s.normalizeTargetLufs = target; await post("/settings", s); };
 const normMeasured = (c) => (c.measured ? [] : ["the clips were never measured (normalization's background backfill, 30 s)"]);
 C["set:normalizeOn"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === true ? [] : ["normalizeAudio not saved on"])] };
 C["set:normalizeOff"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); await normOn(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), false, "Normalize audio");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), false, "Even out loudness");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === false ? [] : ["normalizeAudio not saved off"])] };
 // the target's preset (−14 → −19): every live measured source re-targets
 C["set:normalizeTarget"] = { states: ["single", "effect", "pending", "paused"], async pre(c) { c.measured = await measureAll(); await normOn(-14); },
-  async run() { await ui(settingsTab(`m.click(m.row("Target loudness")?.querySelector(".combo-caret"), "presets"); await m.sleep(300); m.click(m.byText(".sel-pop .sel-opt", "Quiet (−19)"), "Quiet");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.click(m.row("Loudness target")?.querySelector(".combo-caret"), "presets"); await m.sleep(300); m.click(m.byText(".sel-pop .sel-opt", "Quiet (−19)"), "Quiet");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeTargetLufs === -19 ? [] : [`normalizeTargetLufs ${c.after.s.normalizeTargetLufs}, expected -19`])] };
 // switched on with nothing measured yet: the background backfill measures every clip — and what plays takes its
 // loudnorm once it's measured (not only at its next switch)
 C["set:normalizeFresh"] = { states: ["single", "playlist", "effect"], async pre() { unmeasureAll(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`));
+    await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`));
     c.measured = await waitFor(() => K.every((p) => measured(readIndex(), p)), 30000, 200);
     await sleep(1500);
   }, check: (c) => normMeasured(c) };
 // on, then next: B comes up normalized (its own measurement)
 C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async pre(c) { c.measured = await measureAll(); },
-  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); await cliStep(c, "next"); },
+  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); await cliStep(c, "next"); },
   check: (c) => [...normMeasured(c), ...stayed(c, "next")] };
 // normalization on; Mute audio on → next (B starts with no audio: no filter) → Mute audio off: B's audio comes back
 // normalized — not only at its next switch
 C["seq3:normalize+noAudio+next+noAudioOff"] = { states: ["single", "playlist", "effect"], switch: true, async pre(c) { c.measured = await measureAll(); await normOn(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Mute audio"), true, "Mute audio");`)); await sleep(900);
+    await ui(settingsTab(`m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`)); await sleep(900);
     await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
-    await ui(`m.setCheck(m.input("Mute audio"), false, "Mute audio");`); await sleep(900);
+    await ui(`m.setCheck(m.input("Mute wallpapers"), false, "Mute wallpapers");`); await sleep(900);
   }, check: (c) => [...normMeasured(c), ...stayed(c, "next"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
 
 // --- Settings → Appearance (theme / thumbnail aspect / card size / gif autoplay): UI-only — it must not touch
@@ -1668,15 +1668,15 @@ function untouched(c) {
 }
 const APPEAR = {
   "appear:theme": { states: ["idle", "single", "effect", "pending", "paused", "pausedEffect", "muted"], drive: (c) => `await m.select("Theme", ${JSON.stringify(c.theme)});`, saved: (c) => c.after.s.theme === c.theme },
-  "appear:aspect": { drive: () => `await m.select("Thumbnail aspect", "16:9");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
+  "appear:aspect": { drive: () => `await m.select("Card shape", "Widescreen");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
-  "appear:gifs": { drive: () => `m.setCheck(m.input("Autoplay GIF thumbnails"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
-  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
+  "appear:gifs": { drive: () => `m.setCheck(m.input("Animate GIF previews"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
+  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Wallpaper behind every tab"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
   // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
   // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
-  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
+  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
   "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
-    drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Restart only at playlist changeover"), true, "changeover");`,
+    drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Only restart between wallpapers"), true, "changeover");`,
     saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 && c.after.s.restartOnlyAtPlaylistChangeover === true },
 };
 for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effect", "pending"], noSwitch: true,
@@ -1689,7 +1689,7 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
-// --- Settings → Appearance → "Glow effects" / "Morph animations" / "Autoplay video thumbnails": UI-only toggles. Each cell
+// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Play video previews": UI-only toggles. Each cell
 // turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
 // there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
 const GLOW_JS = String.raw`window.__glow = {
@@ -1776,7 +1776,7 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Morph animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
+// "Smooth window animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
 // settings modal). On: the panel flies (a transform animation, `data-morph` set) out of its source, which is lifted
 // (hidden) meanwhile. Off: no flight at all, nothing lifted — the panel fades in where it is, and closing (backdrop or
 // Escape, even mid-open) fades it out and unmounts it; no animation left running, no box that moves after it appeared.
@@ -1810,7 +1810,7 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     const cands = K.filter((p) => p !== c.shown && inBar(p));
     c.cardItem = cands[0]; c.barItem = cands[1] ?? cands[0];
     if (!c.cardItem) return c.skip = "no non-playing item in the playlist bar";
-    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Morph animations"), ${b}, "Morph animations"); await m.sleep(400);`);
+    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Smooth window animations"), ${b}, "Smooth window animations"); await m.sleep(400);`);
       return waitFor(async () => (await getSettings()).morphs === b, 4000, 100); };
     c.onCard = await morphOpen(c, "card", { full: true }); c.onBar = await morphOpen(c, "bar");
     c.savedOff = await flip(false);
@@ -1845,9 +1845,9 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Autoplay video thumbnails": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
+// "Play video previews": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
 // k2..k4 here; k1 has a gif) play it without a hover — only the ones on screen, at most 4 at a time across the page
-// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Autoplay GIF thumbnails".
+// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Animate GIF previews".
 const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
   return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
     cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
@@ -1857,7 +1857,7 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
     c.off = await settle((r) => r.total === 0, 1500);
     await sleep(600); c.off = await count();                      // the default: nothing plays by itself
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), true, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), true, "Play video previews"); await m.sleep(300);`);
     c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
     c.on = await settle((r) => r.total >= 4 && r.playing >= 1, 6000);
@@ -1874,7 +1874,7 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     c.closed = await settle((r) => r.total >= 4, 4000);
     await loadUi(); await sleep(600);
     c.reloaded = await settle((r) => r.total >= 4, 6000);
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), false, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), false, "Play video previews"); await m.sleep(300);`);
     await ui(`m.tab("Library"); await m.sleep(300);`);
     c.offAgain = await settle((r) => r.total === 0, 3000);
   }, check(c) {
@@ -1929,7 +1929,7 @@ async function amReady() {
   return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
     res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
 }
-const amEnable = settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400);`);
+const amEnable = settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400);`);
 const amSkip = (c) => (PULSE ? false : (c.skip = "no private audio server (pulseaudio) for this stack"));
 const amReadyCheck = (c) => (c.ready ? [] : ["auto-mute's stream watch (pactl subscribe) never connected to the stack's audio server"]);
 // a stream plays: every live source mutes (ramped, while paused too); it ends: after the unmute delay (2 s) they unmute
@@ -1986,7 +1986,7 @@ C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async r
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when system audio plays"), false, "auto-mute");`);
+    const t = Date.now(); await ui(`m.setCheck(m.input("Hush when other audio plays"), false, "auto-mute");`);
     c.unmutedMs = (await waitFor(() => muteNow(false), 3000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
   }, check(c) {
     const v = [...amReadyCheck(c)];
@@ -2008,10 +2008,10 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Min level (dB)"), -6, "min level"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(9000); const stop = sampler(c, 40); await sleep(2500); await stop();
-    const t = Date.now(); await ui(`m.setValue(m.input("Min level (dB)"), -70, "min level");`);
+    const t = Date.now(); await ui(`m.setValue(m.input("Ignore sounds below (dB)"), -70, "min level");`);
     c.mutedMs = (await waitFor(() => muteNow(true), 4000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
     await stopTones(); await waitFor(() => muteNow(false), 5000, 50);
   }, check(c) {
@@ -2025,7 +2025,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
 // Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
 C["autoMute:delay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Mute after (ms)"), 1500, "delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     const t0 = Date.now(); tone(6000); await sleep(800); c.early = await muteNow(true);
     c.mutedMs = (await waitFor(() => muteNow(true), 3500, 40)) ? Date.now() - t0 : null;
@@ -2040,7 +2040,7 @@ C["autoMute:delay"] = { states: ["single"], async run(c) {
 // Unmute after 4000 ms (default 2000): still muted 3 s after the stream ended, unmuted by 8 s
 C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Unmute after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
     await stopTones(); const t1 = Date.now(); // the stream ends here
@@ -2203,7 +2203,7 @@ C["seq3:pause+itemVolDrag+resume"] = { states: ["single", "playlist", "effect"],
 C["seq3:set:speed+next+prev"] = { states: ["playlist", "effect"], switch: true,
   async pre(c) { if (c.other) await post("/library/speed", { path: c.other, doubleValue: 0.8 }); },
   async run(c) {
-    await ui(settingsTab(`m.setValue(m.input("Speed"), 1.5, "Speed");`)); await sleep(900);
+    await ui(settingsTab(`m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`)); await sleep(900);
     await nexts(c, 1); await cliStep(c, "previous");
   }, check: (c) => [...(c.after.cur?.path === c.before.cur?.path ? [] : [`speed → next → previous from ${TITLE(c.before.cur?.path)} landed on ${TITLE(c.after.cur?.path)}`]),
     ...(c.after.s.speed === 1.5 ? [] : [`settings.speed ${c.after.s.speed}, expected 1.5`])] };
@@ -2440,7 +2440,7 @@ for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["item
 
 // Mute audio (NoAudio) on a scene: no_audio on its source (the oracle) and its worker, live, same worker
 C["noAudio:scene"] = { states: ["scene"], async run(c) {
-    await ui(`${settingsRow("Mute audio")} m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
+    await ui(`${settingsRow("Mute wallpapers")} m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
     await waitWorker(SC[0], (w) => w.audio?.no_audio === true, 5000);
   }, check(c) {
     const v = c.after.s.noAudio === true ? [] : [`settings.noAudio ${c.after.s.noAudio}`];
@@ -2511,10 +2511,10 @@ C["settings:sceneFps"] = { states: ["scene"], async run(c) {
 
 // the GPU / VRAM group (liascape-player): each control → its player prop, live, the scene on the same worker
 for (const [name, prop, want, drive, saved] of [
-  ["autoThrottleScenes", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.autoThrottleScenes === false],
-  ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Limit VRAM per scene")} m.setCheck(m.input("Limit VRAM per scene"), true, "VRAM limit"); await m.sleep(300);
-    for (let i = 0; i < 30 && !m.input("VRAM limit (MiB)"); i++) await m.sleep(100); m.setValue(m.input("VRAM limit (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
-  ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When VRAM runs low")} await m.select("When VRAM runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
+  ["autoThrottleScenes", "player.scene_throttle", false, `${settingsRow("Ease off heavy scenes")} m.setCheck(m.input("Ease off heavy scenes"), false, "auto-throttle");`, (s) => s.autoThrottleScenes === false],
+  ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Cap each scene's video memory")} m.setCheck(m.input("Cap each scene's video memory"), true, "VRAM limit"); await m.sleep(300);
+    for (let i = 0; i < 30 && !m.input("Video memory cap (MiB)"); i++) await m.sleep(100); m.setValue(m.input("Video memory cap (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
+  ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When video memory runs low")} await m.select("When video memory runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
 ]) {
   C[`settings:${name}`] = { states: ["scene"], async run(c) {
       c.was = await pget(prop);
@@ -3016,7 +3016,7 @@ C["cover:oneOfTwo"] = { states: ["playlist"], noSwitch: true, async run(c) {
   } };
 // the setting live from the UI: fullscreen-only ignores a maximized window; Off releases at once; the default counts both
 C["cover:modeLive"] = { states: ["playlist"], noSwitch: true, async run(c) {
-    const pick = (opt) => ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Pause when covered"); i++) await m.sleep(100); await m.sleep(300); await m.select("Pause when covered", ${JSON.stringify(opt)}); await m.sleep(400);`);
+    const pick = (opt) => ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Pause behind windows"); i++) await m.sleep(100); await m.sleep(300); await m.select("Pause behind windows", ${JSON.stringify(opt)}); await m.sleep(400);`);
     await pick("A fullscreen window");
     c.saved = await waitFor(async () => (await getSettings()).pauseWhenCovered === "fullscreen", 4000);
     await cover("maximized"); await sleep(1100); c.maxIgnored = !(await heldNow());
@@ -3281,17 +3281,21 @@ for (const mode of ["start_over", "resume"]) {
     } };
 }
 
-// --- parked: no monitor shows the wallpaper — rotating invisibly by default, held in the expert mode
+// --- parked: no monitor shows the wallpaper — rotating invisibly by default, held at the Expert level's "Hold"
 // 3 s interval on a 3-clip timed playlist; outputs removed, then returned
-const EXPERT_HOLD = `m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Show expert options"); i++) await m.sleep(100); await m.sleep(300);
-  m.setCheck(m.row("Show expert options").querySelector("input[type=checkbox]"), true, "Show expert options"); await m.sleep(500);
+const LEVEL = (l) => `for (let i = 0; i < 60 && !document.querySelector('[data-settings-level] [data-level="${l}"]'); i++) await m.sleep(100);
+  m.click(document.querySelector('[data-settings-level] [data-level="${l}"]'), "level ${l}"); await m.sleep(400);`;
+const EXPERT_HOLD = `m.tab("Settings"); ${LEVEL("expert")} for (let i = 0; i < 60 && !m.row("When no monitor shows the wallpaper"); i++) await m.sleep(100); await m.sleep(300);
   await m.select("When no monitor shows the wallpaper", "Hold until a monitor returns"); await m.sleep(500); m.tab("Library"); await m.sleep(500);`;
 async function parkedRun(c, hold) {
   if (hold) { await ui(EXPERT_HOLD); c.heldSet = await waitFor(async () => (await getSettings()).rotateWhileParked === false && (await pget("prog:main.while_parked")) === "hold", 5000, 100); }
   await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" });
   c.parked = await waitFor(async () => progOf(await ctl.call("state"))?.phase === "parked", 5000, 50);
   const ps = (await http("GET", "/playlist/state")).json;
-  await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: null });
+  // hold: the interval counts from what the held item already played (the UI steps before parking take a few seconds),
+  // so it's still 3 s short of due when the outputs return and the held item is what comes back
+  const played = hold ? (progOf(await ctl.call("state"))?.played_ms ?? 0) : 0;
+  await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: hold ? Math.ceil((played + 3000) / 1000) : 3 }, name: null });
   c.p0 = progOf(await ctl.call("state")); c.t0 = Date.now();
   await sleep(hold ? 7000 : 9500);
   c.p1 = progOf(await ctl.call("state"));
@@ -3331,43 +3335,50 @@ C["parked:hold"] = { states: ["playlist"], switch: true, rearms: true, async run
     return v;
   } };
 
-// --- expert:toggle — the tier through the UI, and what it does to the player (the pure-UI cases: probe-expert.js)
-C["expert:toggle"] = { states: ["idle", "playlist"], noSwitch: true, async run(c) {
-    const T = JSON.stringify("Show expert options"), R = JSON.stringify("When no monitor shows the wallpaper");
+// --- expert:toggle — the Settings levels through the UI (the top-bar picker), and what hiding does to the player: an
+// Expert row hidden at Standard keeps its value and stays live; the "tucked away" note counts it and its Show raises the level (the
+// pure-UI cases: probe-expert.js)
+C["expert:toggle"] = { states: ["idle", "playlist"], noSwitch: true,
+  async pre() { await post("/settings", { settingsLevel: "standard" }); },
+  async run(c) {
+    const R = JSON.stringify("When no monitor shows the wallpaper");
     const snap = () => ui(`const sec = [...document.querySelectorAll(".settings .ssection h3")].map((h) => h.textContent.trim());
-      return { sections: sec, expertRows: document.querySelectorAll("[data-expert]").length, row: !!m.row(${R}), toggle: m.row(${T})?.querySelector("input[type=checkbox]")?.checked ?? null,
-        tag: !!m.row(${R})?.querySelector("[data-expert-tag]"), sel: m.row(${R})?.querySelector(".sel")?.textContent?.trim() ?? null, dev: !!m.row(${T})?.querySelector(".s-reset[data-deviated]") };`);
+      return { level: document.querySelector("[data-settings-level]")?.dataset.settingsLevel ?? null, sections: sec, expertRows: document.querySelectorAll("[data-expert]").length, row: !!m.row(${R}),
+        tag: !!m.row(${R})?.querySelector("[data-expert-tag]"), sel: m.row(${R})?.querySelector(".sel")?.textContent?.trim() ?? null,
+        hidden: document.querySelector("[data-hidden-changed]")?.dataset.hiddenChanged ?? null };`);
     const wp = () => (c.state === "playlist" ? pget("prog:main.while_parked") : Promise.resolve(null));
-    await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row(${T}); i++) await m.sleep(100); await m.sleep(300);`);
-    c.s0 = await snap(); c.wp0 = await wp();
-    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), true, "toggle"); await m.sleep(500);`); c.s1 = await snap();
+    await ui(`m.tab("Settings"); ${LEVEL("standard")} await m.sleep(300);`);
+    c.s0 = await snap(); c.wp0 = await wp(); c.n0 = +(c.s0.hidden ?? 0); // the stack's own non-default hidden settings
+    await ui(LEVEL("expert")); c.s1 = await snap();
     await ui(`await m.select(${R}, "Hold until a monitor returns"); await m.sleep(500);`);
     c.saved1 = await waitFor(async () => (await getSettings()).rotateWhileParked === false, 4000, 100);
     if (c.state === "playlist") await waitFor(async () => (await wp()) === "hold", 4000, 100);
     c.wp1 = await wp();
-    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), false, "toggle"); await m.sleep(600);`); c.s2 = await snap();
+    await ui(LEVEL("standard")); c.s2 = await snap();
     c.kept = (await getSettings()).rotateWhileParked; c.wp2 = await wp();
-    await ui(`m.row(${T}).querySelector(".s-reset")?.click(); await m.sleep(600);`);
+    await ui(`m.click(document.querySelector("[data-hidden-show]"), "show"); await m.sleep(500);`); c.s2b = await snap();
+    await ui(`m.row(${R})?.querySelector(".s-reset")?.click(); await m.sleep(600);`);
+    await ui(LEVEL("standard"));
     c.saved3 = await waitFor(async () => (await getSettings()).rotateWhileParked === true, 4000, 100);
     if (c.state === "playlist") await waitFor(async () => (await wp()) === "rotate", 4000, 100);
-    c.s3 = await snap(); c.wp3 = await wp(); c.tog3 = (await getSettings()).showExpertOptions;
+    c.s3 = await snap(); c.wp3 = await wp(); c.lv3 = (await getSettings()).settingsLevel;
   }, check(c) {
     const v = [];
-    if (c.s0.sections.includes("Expert") || c.s0.expertRows || c.s0.row || c.s0.toggle !== false) v.push(`off by default: ${JSON.stringify(c.s0)}`);
-    if (c.s1.sections[c.s1.sections.length - 1] !== "Expert" || !c.s1.row || !c.s1.tag || c.s1.sel !== "Keep rotating") v.push(`on: ${JSON.stringify(c.s1)}`);
+    if (c.s0.level !== "standard" || c.s0.expertRows || c.s0.row) v.push(`Standard hides the Expert rows: ${JSON.stringify(c.s0)}`);
+    if (c.s1.level !== "expert" || !c.s1.row || !c.s1.tag || c.s1.sel !== "Keep rotating") v.push(`Expert shows them: ${JSON.stringify(c.s1)}`);
     if (!c.saved1) v.push("Hold until a monitor returns wasn't saved");
     if (c.state === "playlist") {
       if (c.wp0 !== "rotate") v.push(`prog:main.while_parked ${c.wp0} by default, expected rotate`);
       if (c.wp1 !== "hold") v.push(`prog:main.while_parked ${c.wp1} after choosing Hold, expected hold (live)`);
-      if (c.wp2 !== "hold") v.push(`prog:main.while_parked ${c.wp2} after hiding the group: hiding must not reset it`);
-      if (c.wp3 !== "rotate") v.push(`prog:main.while_parked ${c.wp3} after the marker's reset, expected rotate`);
+      if (c.wp2 !== "hold") v.push(`prog:main.while_parked ${c.wp2} after going back to Standard: hiding must not reset it`);
+      if (c.wp3 !== "rotate") v.push(`prog:main.while_parked ${c.wp3} after the row's reset, expected rotate`);
     }
-    if (c.s2.sections.includes("Expert") || c.s2.expertRows || c.s2.row) v.push(`hidden again: ${JSON.stringify(c.s2)}`);
-    if (c.kept !== false) v.push(`hiding the group changed rotateWhileParked to ${c.kept}`);
-    if (!c.s2.dev) v.push("no deviated marker on \"Show expert options\" while a hidden expert value differs");
-    if (!c.saved3) v.push("the marker's reset didn't restore rotateWhileParked");
-    if (c.s3.dev) v.push("the deviated marker stays after the reset");
-    if (c.tog3 !== false) v.push(`the marker's reset switched the toggle (showExpertOptions ${c.tog3})`);
+    if (c.s2.expertRows || c.s2.row) v.push(`hidden again at Standard: ${JSON.stringify(c.s2)}`);
+    if (c.kept !== false) v.push(`going back to Standard changed rotateWhileParked to ${c.kept}`);
+    if (+(c.s2.hidden ?? 0) !== c.n0 + 1) v.push(`the "tucked away" note should count one more (${c.n0 + 1}) while a hidden Expert value differs: ${JSON.stringify(c.s2)}`);
+    if (c.s2b.level !== "expert" || !c.s2b.row) v.push(`the note's Show didn't raise the level to Expert: ${JSON.stringify(c.s2b)}`);
+    if (!c.saved3) v.push("the row's reset didn't restore rotateWhileParked");
+    if (+(c.s3.hidden ?? 0) !== c.n0) v.push(`after the reset the note should be back to ${c.n0}: ${JSON.stringify(c.s3)}`);
     return v;
   } };
 
@@ -3606,7 +3617,7 @@ const FUZZ_RULES = [
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
-  // Settings → "Mute audio" on disables the Volume slider and "Normalize audio" (and hides the target): their drive
+  // Settings → "Mute wallpapers" on disables the Volume slider and "Even out loudness" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
   [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^playlistBarVol:/, { when: offGlobal(42) }],

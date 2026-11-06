@@ -270,7 +270,7 @@ public static class LiascapePlayerSelfTest
         Want("transitions", false, "no catalogue", "globalTransitionEnabled");
         Want("vram", false, "VRAM", "limitVramPerScene");
         Want("hwdec-interop", null, null, "hwDec");
-        Want("cover", false, "Pause when covered", "pauseWhenCovered");
+        Want("cover", false, "Pause behind windows", "pauseWhenCovered");
         // the audio bus: down → a warning with the reason (affects no setting row: the summary only); unknown with no answer
         if (F(none, "audio-bus").ok != false || !(F(none, "audio-bus").reason ?? "").Contains("default device") || F(none, "audio-bus").affects.Length != 0)
             fails.Add($"health: audio-bus with the bus down: ok={F(none, "audio-bus").ok} ({F(none, "audio-bus").reason}), affects [{string.Join(",", F(none, "audio-bus").affects)}]");

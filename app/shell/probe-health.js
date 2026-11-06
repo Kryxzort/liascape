@@ -63,15 +63,15 @@ async function settingsRows() {
     return { rows, summary: sum ? [...sum.querySelectorAll("[data-feature]")].map((li) => li.dataset.feature) : null };`);
 }
 
-// rows a missing piece must mark, by feature id (the stack runs with AdvancedSettings on and PlayerEngine=liascape-player,
+// rows a missing piece must mark, by feature id (the stack runs at the Advanced settings level and PlayerEngine=liascape-player,
 // so Hardware decoding / Transition method / the GPU section are shown)
 const ROWS = {
-  scenes: ["Allow scene support"],
-  transitions: ["Transitions", "Transition method"],
-  vram: ["Limit VRAM per scene", "When VRAM runs low"],
-  "auto-mute": ["Mute when system audio plays"],
-  mpris: ["Only if MPRIS player active"],
-  ffmpeg: ["Normalize audio"],
+  scenes: ["Play scenes"],
+  transitions: ["Transitions", "Transition style"],
+  vram: ["Cap each scene's video memory", "When video memory runs low"],
+  "auto-mute": ["Hush when other audio plays"],
+  mpris: ["Only for media players"],
+  ffmpeg: ["Even out loudness"],
 };
 // the playlist modal (Library tab → "Playlist settings"): the warning icon beside its TRANSITIONS label, or null; closes it again
 async function playlistModalWarn() {
@@ -221,7 +221,7 @@ app.whenReady().then(async () => {
         else if (!REASON[id].test(r.warn)) v.push(`"${l}" tooltip ${JSON.stringify(r.warn)} doesn't name ${REASON[id]}`);
         if (!r.control) v.push(`"${l}" lost its control`);
       }
-      if (s2.rows["Allow scene support"] && !s2.rows["Allow scene support"].enabled) v.push("the scene toggle is disabled — it must stay usable");
+      if (s2.rows["Play scenes"] && !s2.rows["Play scenes"].enabled) v.push("the scene toggle is disabled — it must stay usable");
       if (s2.rows["Volume"]?.warn) v.push(`"Volume" warns: ${s2.rows["Volume"].warn}`);
       return v;
     });
