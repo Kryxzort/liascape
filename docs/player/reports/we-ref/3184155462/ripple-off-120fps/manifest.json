@@ -1,0 +1,80 @@
+{
+  "id": "3184155462",
+  "kind": "ortho",
+  "canvas": [
+    3840,
+    2160
+  ],
+  "window": [
+    1920,
+    1080
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [
+    "cameraparallax=false",
+    "watereffect=false"
+  ],
+  "pointer": "200,1600:1600,1600",
+  "pointer_time": "1-2",
+  "fps": 120,
+  "first_frame_ms": 6493,
+  "wall_ms": 11279,
+  "we_gpu_mib": 488,
+  "rss_mib": 2273,
+  "cpu_s": 22.0,
+  "shots": [
+    {
+      "t": 0.9,
+      "late_ms": 9,
+      "t_actual": 0.909
+    },
+    {
+      "t": 1.2,
+      "late_ms": 48,
+      "t_actual": 1.248
+    },
+    {
+      "t": 1.5,
+      "late_ms": 87,
+      "t_actual": 1.587
+    },
+    {
+      "t": 1.8,
+      "late_ms": 128,
+      "t_actual": 1.928
+    },
+    {
+      "t": 2.1,
+      "late_ms": 163,
+      "t_actual": 2.263
+    },
+    {
+      "t": 2.4,
+      "late_ms": 196,
+      "t_actual": 2.596
+    },
+    {
+      "t": 2.7,
+      "late_ms": 245,
+      "t_actual": 2.945
+    },
+    {
+      "t": 3,
+      "late_ms": 271,
+      "t_actual": 3.271
+    },
+    {
+      "t": 3.5,
+      "late_ms": 94,
+      "t_actual": 3.594
+    },
+    {
+      "t": 4,
+      "late_ms": 13,
+      "t_actual": 4.013
+    }
+  ],
+  "captured": "2026-11-06T14:52:40+05:30",
+  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"
+}
