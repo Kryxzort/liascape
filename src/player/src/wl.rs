@@ -865,6 +865,14 @@ impl OutputBackend for Wayland {
         std::mem::take(&mut self.state.samples)
     }
 
+    fn desktop_rect(&self, name: &str) -> Option<[f64; 4]> {
+        let o = self.state.outs.iter().find(|o| o.info.name == name)?;
+        let i = self.state.output_state.info(&o.wl_output)?;
+        let (x, y) = i.logical_position?;
+        let (w, h) = i.logical_size?;
+        Some([x as f64, y as f64, w as f64, h as f64])
+    }
+
     fn cover_source(&self) -> Result<&'static str, String> {
         if self.state.ft.is_some() {
             return Ok("wlr-foreign-toplevel");

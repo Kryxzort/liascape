@@ -875,13 +875,19 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       `ToWorker::Rate` = the outputs' demand, never the budget's cap) and 0106 (`wp_project_pointer_jump`, Wayland
       `enter` → `Pointer {jump}`); pin b9fed39. Audit "Cursor ripple result". Guards host_api
       `simulation_steps_at_the_frame_rate`, `pointer_jump_is_no_move`, api `pointer_enter_is_a_jump_and_rate_is_the_demand`.
-- [ ] **WE's frame limiter, decoded**: FUN_14006dd90 turns `general.user.fps` into `clamp(round(1000/fps)·0.5, 6, 100)`
-      (DAT_140527614) — what uses it, and whether WE's frames are also bounded by the monitor's refresh, aren't decoded.
-      Matters for parity of rate-dependent effects (cursorripple) when the owner's WE fps (240) is above an output's
-      refresh (144 Hz primary): ours steps at `min(scene_fps, refresh)`. WE's fresh-install default fps too.
-- [ ] **Pointer under windows** (audit C6): WE keeps tracking the desktop cursor behind windows; ours sees it only over
-      the bare wallpaper and now takes its return as a jump (no stroke). A compositor-wide cursor (Hyprland IPC poll)
-      would close it.
+- [x] **WE's frame limiter, decoded** (2026-11-06): FUN_14006dd90's `clamp(round(1000/fps)·0.5, 6, 100)` is the audio
+      capture thread's `Sleep`, not the limiter. The render loop (FUN_140141520) sleeps to `fps` frames a second and
+      presents with `Present1(0, ALLOW_TEARING)` — no vsync — so WE runs at `fps` even above the refresh; default 15.
+      Ours now ticks (and steps simulations) at `scene_fps` uncapped (`scene_rate`); default 15 in the player, backend
+      and UI. Audit "Frame limiter and desktop pointer result". Guard api `scene_fps_is_wes_rate_above_the_refresh`.
+- [x] **Pointer under windows** (audit C6, 2026-11-06): on Hyprland the player polls `cursorpos` (`lia-cursor`, at the
+      scenes' rate, parked without scenes) and maps the desktop point into every scene like WE's `ScreenToClient`
+      (unclamped, no jumps); elsewhere / on failure the surface pointer as before. Guard api
+      `desktop_pointer_from_a_fake_hyprland`.
+- [ ] Not ported (found in the C6 decode): WE's `g_PointerPositionLast` starts at 0 0, so a freshly loaded scene's first
+      frame sees a move from the top-left corner to the cursor; ours places the first position as a jump (0106).
+      Single frame, likely invisible — check against a WE reference before porting.
+- [ ] Desktop pointer on Sway/other compositors: no global cursor source (Sway's IPC has none) → surface pointer.
 
 ## Backend structure (2026-10-26, after the matrix's ~19 seam bugs)
 Two bug classes kept recurring; fix the class, not the instance:

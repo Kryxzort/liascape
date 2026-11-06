@@ -7058,6 +7058,28 @@ fn pointer_enter_is_a_jump_and_rate_is_the_demand() {
     assert_eq!(w["pointer"], json!([480.0, 270.0, 0]));
 }
 
+/// WE's `fps` (2026-11-06, decoded from wallpaper64.exe's render loop): a scene ticks at
+/// `out:<c>.scene_fps` even above the output's refresh — WE sleeps to `fps` and presents without
+/// vsync — and its simulations step at that rate (`rate_sent`); the default is WE's own 15.
+#[test]
+fn scene_fps_is_wes_rate_above_the_refresh() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let id = create_scene(&mut c, "api-fps-we", &synth(Pattern::PointerDot), json!({}));
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["fps_target"], json!(15.0), "WE's default fps: {w}");
+    assert_eq!(w["rate_sent"], json!(15.0), "{w}");
+    c.ok("set", json!({"path": "out:*.scene_fps", "value": 240}));
+    c.step(16);
+    c.step(16);
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["fps_target"], json!(240.0), "not capped by the 60 Hz refresh: {w}");
+    assert_eq!(w["rate_sent"], json!(240.0), "{w}");
+}
+
 /// The scene properties' worker side: `scene_props` (name → value) is applied at open and
 /// live (`wp_project_property_set_*` through the protocol; synthetic: `rgb`), same worker; an
 /// unknown property is reported, not fatal.
@@ -8617,8 +8639,12 @@ fn scene_fps_change_is_live_same_pid() {
         r.check(&format!("{label} VIRTUAL-1"), r.v1, g1, tol(g1));
         r.check(&format!("{label} VIRTUAL-2"), r.v2, g2, tol(g2));
     };
+    target(&mut c, 15.0);
+    window(&mut c, "default 15/15 (WE's)", 15.0, 15.0, 15.0);
+    c.ok("set", json!({"path": "out:*.scene_fps", "value": 30}));
     target(&mut c, 30.0);
-    window(&mut c, "default 30/30", 30.0, 30.0, 30.0);
+    std::thread::sleep(Duration::from_millis(300));
+    window(&mut c, "30/30", 30.0, 30.0, 30.0);
     c.ok("set", json!({"path": "out:VIRTUAL-1.scene_fps", "value": 60}));
     target(&mut c, 60.0);
     std::thread::sleep(Duration::from_millis(300));
@@ -10454,6 +10480,111 @@ fn cover_from_a_fake_hyprland() {
             .all(|r| r == "[[BATCH]]j/monitors;j/clients"),
         "read-only requests only"
     );
+}
+
+/// Audit C6: the desktop pointer from a fake Hyprland (`cursorpos` on `.socket.sock`), like WE's
+/// per-frame `GetCursorPos`: a scene gets the cursor wherever it is on the desktop — over the other
+/// output too (off the scene, not clamped, as WE's lies outside 0..1) — placed once and never a jump
+/// after; the surface's samples only give the buttons. The thread polls at the scene's rate, only
+/// `cursorpos`. A failing source falls back to the surface pointer, whose next sample is a jump.
+#[test]
+fn desktop_pointer_from_a_fake_hyprland() {
+    use std::os::unix::net::UnixListener;
+    use std::sync::Arc;
+    let Some(mut srv) = Serve::start() else {
+        return;
+    };
+    let serial = srv._serial.take();
+    drop(srv);
+    let root = new_root();
+    let dir = root.join("run/hypr/fake");
+    std::fs::create_dir_all(&dir).unwrap();
+    let reply = Arc::new(Mutex::new(String::from("100, 50")));
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let l1 = UnixListener::bind(dir.join(".socket.sock")).unwrap();
+    let (r, q) = (reply.clone(), requests.clone());
+    std::thread::spawn(move || {
+        for s in l1.incoming() {
+            let Ok(mut s) = s else { return };
+            let mut buf = [0u8; 256];
+            let n = s.read(&mut buf).unwrap_or(0);
+            q.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).into());
+            let _ = s.write_all(r.lock().unwrap().as_bytes());
+        }
+    });
+    let srv = Serve::spawn_env(
+        root,
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_POINTER_SOURCE", Path::new("hyprland")),
+            ("HYPRLAND_INSTANCE_SIGNATURE", Path::new("fake")),
+        ],
+        serial,
+    );
+    let mut c = srv.client();
+    // VIRTUAL-1 640×360 at (0, 0), VIRTUAL-2 320×180 right of it at (640, 0); the scene (native
+    // 1920×1080, 3× VIRTUAL-1) only on VIRTUAL-1.
+    let id = create_scene(&mut c, "api-desktop-ptr", &synth(Pattern::PointerDot), json!({}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": id}));
+    let until = |c: &mut Client, what: &str, f: &dyn Fn(&Value, &Value) -> bool| {
+        let t = Instant::now();
+        loop {
+            c.step(20);
+            let w = worker_of(c, &id);
+            let p = c.ok("probe", json!({"name": "pointer"}));
+            if f(&w, &p) {
+                return (w, p);
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "{what}: {w} {p}");
+        }
+    };
+    let (w, p) = until(&mut c, "placed from the desktop", &|w, _| {
+        w["ready"] == json!(true) && w["pointer"] == json!([300.0, 150.0, 0])
+    });
+    assert_eq!(p["source"], json!("hyprland"), "{p}");
+    assert_eq!(p["in_use"], json!("desktop"), "{p}");
+    // Placed once: a jump if the worker was ready by then, else its Ready resent it as one.
+    let j0 = w["pointer_jumps"].as_u64().unwrap();
+    assert!(j0 <= 1, "placed once: {w}");
+    let rate = p["rate_hz"].as_f64().unwrap();
+    assert!(
+        rate > 0.0 && Some(rate) == w["fps_demand"].as_f64(),
+        "polls at the scene's rate: {p} {w}"
+    );
+    *reply.lock().unwrap() = "200, 100".into();
+    until(&mut c, "a move", &|w, _| w["pointer"] == json!([600.0, 300.0, 0]));
+    // Over VIRTUAL-2: off VIRTUAL-1's scene, on the same line (x 800 px → 2400 native).
+    *reply.lock().unwrap() = "800, 90".into();
+    let (w, _) = until(&mut c, "over the other output", &|w, _| {
+        w["pointer"] == json!([2400.0, 270.0, 0])
+    });
+    assert_eq!(w["pointer_jumps"], json!(j0), "moving onto another output is no jump: {w}");
+    // A press over VIRTUAL-1's surface (an enter): the buttons, at the desktop's position.
+    c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 5, "y": 5, "buttons": 1, "entered": true}),
+    );
+    let (w, _) = until(&mut c, "the surface's buttons", &|w, _| {
+        w["pointer"] == json!([2400.0, 270.0, 1])
+    });
+    assert_eq!(w["pointer_jumps"], json!(j0), "the surface's enter is no jump now: {w}");
+    assert!(
+        requests.lock().unwrap().iter().all(|r| r == "cursorpos"),
+        "read-only cursorpos requests only"
+    );
+    // The source fails: back to the surface pointer, whose next sample is a jump.
+    *reply.lock().unwrap() = "unknown request".into();
+    until(&mut c, "the fallback", &|_, p| p["in_use"] == json!("surface"));
+    c.ok(
+        "headless.pointer",
+        json!({"output": "VIRTUAL-1", "x": 10, "y": 20}),
+    );
+    let (w, p) = until(&mut c, "the surface sample", &|w, _| {
+        w["pointer"] == json!([30.0, 60.0, 0])
+    });
+    assert_eq!(w["pointer_jumps"], json!(j0 + 1), "the first surface sample is a jump: {w}");
+    assert_eq!(p["ok"], json!(false), "{p}");
 }
 
 // ---------------------------------------------- Phase 3 Task 9: the player outbox

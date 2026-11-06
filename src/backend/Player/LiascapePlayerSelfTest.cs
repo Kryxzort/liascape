@@ -1089,8 +1089,8 @@ public static class LiascapePlayerSelfTest
                 if (Math.Abs(Fps() - 45) > 1e-6) fails.Add($"ApplySceneFps(VIRTUAL-1 45) → out:VIRTUAL-1.scene_fps {Fps()}, want 45");
                 LiascapePlayerMedia.ApplySceneFps([new SceneMonitor { Name = "VIRTUAL-1", Fps = 45 }], []);
                 LiascapePlayerMedia.Drain().Wait(2000);
-                if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 30");
-                else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 30 when removed");
+                if (Math.Abs(Fps() - 15) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 15");
+                else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 15 when removed");
                 // Task 8: the GPU / VRAM settings → the player props, live, diffed
                 string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
                 var g0 = new AppSettings();

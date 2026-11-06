@@ -234,13 +234,16 @@ export const Settings = memo(function Settings() {
   const playlistPlaying = useStore((s) => s.playlist.length > 1 && !!s.playingPath && s.playlist.includes(s.playingPath));
   const plStart = g<string>("globalPlaylistStart", "start_over");
   type Mon = { name: string; fps: number; isPrimary: boolean };
+  // Wallpaper Engine's own default FPS limit (its exe writes 15 when unset; the first-run preset is
+  // "medium" = 15). Like WE's, the scene runs at this rate even above the monitor's refresh.
+  const WE_DEFAULT_FPS = 15;
   const monitors = g<Mon[]>("sceneMonitors", []);
   const setMonitors = (m: Mon[]) => set("sceneMonitors", m);
   // Auto-populate the scene monitor list from detected outputs the first time scenes are enabled
   // (empty list). First detected output = primary. Won't clobber a list the user already configured.
   useEffect(() => {
     if (!g("allowScenes", false) || !detected.length || monitors.length) return;
-    setMonitors(detected.map((d) => ({ name: d.name, fps: d.refreshHz, isPrimary: d.primary })));
+    setMonitors(detected.map((d) => ({ name: d.name, fps: WE_DEFAULT_FPS, isPrimary: d.primary })));
   }, [detected, g("allowScenes", false)]); // eslint-disable-line
 
   const mode = g<string>("workshopDownloadMode", "subscribe");
@@ -405,7 +408,8 @@ export const Settings = memo(function Settings() {
 
       {g("allowScenes", false) && (
         <Section title="Monitors (scenes)" icon={<MonitorSmartphone size={15} />}>
-          <Help>Names of the monitors to play scenes on.{detected.length > 0
+          <Help>Names of the monitors to play scenes on, each with Wallpaper Engine's FPS limit (WE's default 15; like WE, a scene
+            runs at it even above the monitor's refresh).{detected.length > 0
             ? <> Detected: {detected.map((d) => <code key={d.name} className="kb">{d.name} {d.refreshHz}Hz{d.primary ? " ★" : ""}</code>)} — type or pick below.</>
             : <> Auto-detect found none; on Hyprland run <code className="kb">hyprctl monitors</code> to list names (use the equivalent for your compositor).</>}</Help>
           <datalist id="liascape-monitors">{detected.map((d) => <option key={d.name} value={d.name} />)}</datalist>
@@ -427,7 +431,7 @@ export const Settings = memo(function Settings() {
           <button className="btn ghost" onClick={() => {
             const used = new Set(monitors.map((m) => m.name));
             const next = detected.find((d) => !used.has(d.name));
-            setMonitors([...monitors, { name: next?.name ?? `DP-${monitors.length + 1}`, fps: next?.refreshHz ?? 60, isPrimary: monitors.length === 0 }]);
+            setMonitors([...monitors, { name: next?.name ?? `DP-${monitors.length + 1}`, fps: WE_DEFAULT_FPS, isPrimary: monitors.length === 0 }]);
           }}>+ Add monitor</button>
         </Section>
       )}

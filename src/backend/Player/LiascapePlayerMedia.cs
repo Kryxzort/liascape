@@ -251,11 +251,12 @@ public static class LiascapePlayerMedia
     // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
     // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
     // under liascape-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
-    // changed entry sets its fps, a removed one goes back to the player's default (30, D5). Coalescible
+    // changed entry sets its fps, a removed one goes back to the player's default (15, WE's own default fps;
+    // 30 before 2026-11-06). Coalescible
     // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
     // fresh or restarted player runs them too. `IsPrimary` has no liascape-player meaning (one worker per scene,
     // every output shows it; its audio is one stream on the bus) — the UI hides it there.
-    public const double DefaultSceneFps = 30;
+    public const double DefaultSceneFps = 15;
 
     public static void ApplySceneFps(IReadOnlyList<SceneMonitor>? prev, IReadOnlyList<SceneMonitor> cur)
     {

@@ -1903,6 +1903,12 @@ fn shared_scene_a_is_untouched() {
         let Some(mut h) = Harness::new(&["VIRTUAL-1", "VIRTUAL-2"]) else {
             return;
         };
+        // 30 fps (this test counts A's frames over the transition; the default is WE's 15)
+        for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+            h.graph
+                .set(&PropPath(format!("out:{o}.scene_fps")), PropValue::F64(30.0))
+                .unwrap();
+        }
         let a = h.play(
             &scene_dir("t9-shared-a"),
             json!({"kind": "scene", "loop": true}),
