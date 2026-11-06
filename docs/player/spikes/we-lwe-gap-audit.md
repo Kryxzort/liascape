@@ -11,7 +11,7 @@
   - WE: `wallpaper64.exe` 2.8.485 (sha256 `da37927f…5a`, the same bytes as the sound spike).
     - `bin/scenescript64.dll` (sha256 `e1a0530f…e5`, the V8 SceneScript runtime). Only its strings were used.
     - WE's `assets/`: shaders, effects, materials, particles, `scripts/jsclasses` + `jsmodules`.
-  - Ours: the LWE fork `livepaper/next-v2` at `45ed25c` (patches 0001–0018). LWE paths are relative to
+  - Ours: the LWE fork `livepaper/next-v2` at `c3a7d68` (patches 0001–0018). LWE paths are relative to
     `src/core/WallpaperEngine/` of that tree unless written in full.
   - The library: the owner's 96 SFW scenes in Workshop folder `431960`. The pkgs were read with a Python port of
     `scene/pkg.rs`, and every text asset was extracted for counting.
@@ -372,7 +372,7 @@ Scripts and data: `$S/audit/work-effects/{resolve,active,uniforms,ann,alpha,vary
 ## 3. Particles (P)
 
 Scope: particle systems (`objects[].particle`), their emitters, initializers, operators, renderers, control points,
-children, `instanceoverride`, timing. LWE = `~/.cache/liascape/src/lwe-dev` @45ed25c. `CP.cpp` =
+children, `instanceoverride`, timing. LWE = `~/.cache/liascape/src/lwe-dev` @c3a7d68. `CP.cpp` =
 `src/core/WallpaperEngine/Render/Objects/CParticle.cpp`, `OP.cpp` = `src/core/WallpaperEngine/Data/Parsers/ObjectParser.cpp`,
 `Obj.h` = `src/core/WallpaperEngine/Data/Model/Object.h`.
 
@@ -576,7 +576,7 @@ extractor is `work-scenescript/extract_scripts.py`, and the per-API counts are i
   - WE's `localStorage` missing-key result.
 - **Evidence files.** `work-scenescript/{extract_scripts.py,stats.py,api.py,textcls.py,scripts.json,api.txt,ss_strings.txt}`.
 
-**Lead's runtime check of S1/S2** (`--lwe-smoke`, LWE 45ed25c):
+**Lead's runtime check of S1/S2** (`--lwe-smoke`, LWE c3a7d68):
 
 - **2890767643:** the scripted media widget (`playerplay`, `playervolume`, the progress bar, all with `origin` scripts) is absent, except for a white bar at the bottom-left corner. That is what S2 predicts: origin zeroed to (0,0).
 - **2325974975:** stderr repeats `ScriptEngine [layer.update]: TypeError: not a function` every frame, the S33/S34 class of failure.
@@ -590,7 +590,7 @@ through layer writes, cursor events and media events (S10, S11, S25, S37), so th
 `layer.update` TypeError in 2325974975 came from the text script's `thisScene.getLayer(…)` on the text shim (S29), not
 from the vector classes.
 
-### B1 result (fork patches 0019–0021, pin `e78d94d`, 2026-10-29)
+### B1 result (fork patches 0019–0021, pin `8902c4a`, 2026-10-29)
 
 - **What runs now.** Every property script is compiled as a module, evaluated on the first tick (in queue order),
   then gets `init(value)`, `applyUserProperties(<all user properties>)` once, and `update(value)` every tick. Its
@@ -610,7 +610,7 @@ from the vector classes.
   - **0019:** `Configuration` left `noSolidFinal` uninitialised. Heap garbage dropped every solid layer's final draw,
     so a solid layer showed in one process and not in another.
   - **0021:** the getter logged once per missing name.
-- **Smoke** (`--lwe-smoke … --seconds 3`, 3 s frame, before = 45ed25c):
+- **Smoke** (`--lwe-smoke … --seconds 3`, 3 s frame, before = c3a7d68):
   - **3291729669:** the "Written Date" text (origin/scale/angles scripts) sat at the top-left corner (0,0), mostly
     off-screen. It now sits at its origin (246, 190), above the clock. Its scale script needs `applyUserProperties`
     to set `speed`; without it, `mix(…, undefined)` = NaN would hide it. No script errors.
@@ -625,7 +625,7 @@ from the vector classes.
   - So the B1 check "stderr has no `TypeError: not a function`" can't hold for 2890767643/2325974975 before B10. The
     remaining TypeErrors are missing APIs, logged now (they were silent before B1).
 - **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`): 8x8 solid squares in a 64x32 scene, read back
-  from the centre row. All three are RED on 45ed25c.
+  from the centre row. All three are RED on c3a7d68.
   - `update_moves_the_property`: `value.add(new Vec3(1,0,0))` moves 1 px per tick. A `visible` script reading
     `thisLayer.origin.z == 5` keeps it shown (z kept, own `thisLayer`). A second object's
     `return thisLayer.origin` stays put.
@@ -639,7 +639,7 @@ from the vector classes.
   The report's timeouts were a slow, shared machine. B1 doesn't touch the load. No scene is newly blank, broken,
   crashed or timed out. The static (2783122117) and the 3 load failures are the same as before.
 
-### B2 result (fork patches 0022–0023, pin `ccb545d`, 2026-11-02)
+### B2 result (fork patches 0022–0023, pin `d4969e4`, 2026-11-02)
 
 Rows E2, E3, G01 and G02 are done. G05 is still Unknown. The animation half of G02 (SceneScript `getAnimation`,
 play/stop, events) is left to B10.
@@ -679,7 +679,7 @@ play/stop, events) is left to B10.
   constants alike. In the library that is 179 animated values: alpha 63, origin 28, effect constants 85 (most
   are `multiply`), angles 9, scale 3, and 3 particle instance overrides.
 - **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). Every value below matches the decoded maths.
-  All three tests fail on e78d94d, and the whole suite is 19/19 on ccb545d.
+  All three tests fail on 8902c4a, and the whole suite is 19/19 on d4969e4.
   - `object_uniforms_are_live`: an alpha script returning 0.25 gives r = 64 (255 before), and a colour script
     reaches the shader. The test ships its own `gl_FragColor = g_Color4` layer, which reads alpha 0.5 as r = 127
     (255 before).
@@ -693,7 +693,7 @@ play/stop, events) is left to B10.
     - the loop wraps (42 at tick 35).
   - `keyframes_move_origin`: a `relative` origin moves from 8 to 23 in 15 ticks. A `mirror` origin reaches 50 at
     frame 10 and is back at 45 at tick 15.
-- **Smoke** (`--lwe-smoke`, 12 animated or translucent scenes, at 3 s and 6 s, before = e78d94d). 11 of the 12
+- **Smoke** (`--lwe-smoke`, 12 animated or translucent scenes, at 3 s and 6 s, before = 8902c4a). 11 of the 12
   differ from before (AE at 3 s, out of 2.07 M or 8.3 M px). The exception is 2134765860, with 57 px: its
   animated `multiply` constants are `startpaused` and played by a `mediaThumbnailChanged` script (B10), and its
   one free-running track is a small `angles` loop. Where WE animates, the 3 s→6 s difference grew:
@@ -721,7 +721,7 @@ play/stop, events) is left to B10.
   by 18 scenes, mostly from media/cursor events, so it belongs to B10. Particle `g_Color4` still has w = the
   colour's own w (particles draw through CParticle). G05 parent alpha is still Unknown.
 
-### B3 result (fork patches 0024–0028, pin `4c75eae`, 2026-11-03)
+### B3 result (fork patches 0024–0028, pin `93438d4`, 2026-11-03)
 
 Rows P1, P3, P4, P5, P6, P7, P8 (without NPOT), P13, P14, P18, P19 and P38 are done. So is P16, which was in no
 batch: sphererandom now has duration, delay and periodic emission through the shared emitter timer. P41 needed
@@ -754,8 +754,8 @@ no change: every system in the library sets maxcount and sizerandom, and LWE's `
   `SPRITESHEETBLENDNPOT` (6 padded sheets) is not done: its shader path needs the sheet's unpadded width in
   `g_Texture0Resolution.z`, which is the frame width in LWE.
 - **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). Additive grey particles stack at fixed points
-  of a 64×32 scene, so the red channel counts them. All four fail on ccb545d (0 of 4), and the whole suite is
-  23/23 on 4c75eae.
+  of a 64×32 scene, so the red channel counts them. All four fail on d4969e4 (0 of 4), and the whole suite is
+  23/23 on 93438d4.
   - `particle_count_rate_and_prewarm`: before the first step, a starttime-1 system has 10.0 particles (0 before).
     After 1.5 s: plain 14.0, count 2 29.0 (14.0 before), rate 0.5 with 0.6 s lives 6.0 (3.0 before), and the
     prewarmed one 24.0.
@@ -765,7 +765,7 @@ no change: every system in the library sets maxcount and sizerandom, and LWE's `
     reference, stays 126 (63 before). No colour source + colorn red is 252 0 0.
   - `particle_hide_resets_and_overrides_live`: a 5-particle burst hidden and shown at 1.1 s is alive again at
     2.7 s (0 before). A `count` slider moved 1 → 3 adds 30 particles in 1 s (10 before).
-- **Smoke** (`--lwe-smoke … --seconds 60`, 10 particle scenes, before = ccb545d with the same worker through
+- **Smoke** (`--lwe-smoke … --seconds 60`, 10 particle scenes, before = d4969e4 with the same worker through
   `LD_LIBRARY_PATH`). The particle count came from a throwaway instrumented core of each rev (one `PSTAT` line per
   system per frame, not committed), summed over all systems at +1 s and +60 s:
 
@@ -794,14 +794,14 @@ no change: every system in the library sets maxcount and sizerandom, and LWE's `
 - **Corpus** (`scene_corpus.sh --results /tmp/sc-b3`, 96 scenes, a release player and worker on the B3 core):
   ok 91, static 0, blank 0, load_failed 3, renderer_failed 0, crashed 0, broken 0, timeout 2. The 2 timeouts,
   2883756643 and 2921510865, ran while another agent's scene runs loaded the machine (load average ~15). Rerun
-  alone (`--only`), both are ok, Ready in 6.5 s and 5.0 s. Their smoke build time is the same on ccb545d and
-  4c75eae (3.9/3.6 s and 4.8/4.9 s), so the prewarm doesn't slow them. That makes it ok 93, the same as B2. The
+  alone (`--only`), both are ok, Ready in 6.5 s and 5.0 s. Their smoke build time is the same on d4969e4 and
+  93438d4 (3.9/3.6 s and 4.8/4.9 s), so the prewarm doesn't slow them. That makes it ok 93, the same as B2. The
   same 3 scenes fail to load: 3276522107, 3477054430 and 3509243656. No scene is newly blank, broken or crashed.
 - **Left of B3:** `SPRITESHEETBLENDNPOT` (P8, 6 sheets). The owner's WE captures of 1797172968 and 1155728109
   (P5, P8/P9) are still the reference for the hues and the sheet timing. The rest of the particle rows stay in
   B6 (P36), B8 (P20, P21) and B11 (child systems P2, P10, P15, P22, P24–P30, P34, P35, P37: the 0.1 s dt cap stays).
 
-### B5 result (fork patch 0029, pin `d7a9f34`, 2026-11-03)
+### B5 result (fork patch 0029, pin `9f64193`, 2026-11-03)
 
 Rows G10, G11, G12, G14 (= E1), G15, G16, G18, G19 and the zoom half of G17 are done. E6 and the pan half of G17
 are left (below). Everything was decoded from the same wallpaper64.exe, with the sound spike's `all.c`:
@@ -845,7 +845,7 @@ The port (0029):
   the smoke mode, or before the first Wayland pointer event, sat pulled towards a corner.
 
 - **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`, a fake `wp_mouse_input`). All three fail on
-  4c75eae, and the suite is 26/26 on d7a9f34.
+  93438d4, and the suite is 26/26 on 9f64193.
   - `parallax_follows_the_pointer`: a depth 0.5 square at x 32 with amount 1, delay 0 and influence 1 sits at 28 with
     the pointer centred, 12 with it at the right edge and 44 at the left. A depth 0 square never moves. Turning the
     bound `cameraparallax` off puts it back at 28. With delay 1.5 the edge follows `28 − 16 · (1 − (5/6)ⁿ)`: 25, 23,
@@ -859,7 +859,7 @@ The port (0029):
   centred capture, and back at the centre it matches the first capture again (0.4 %, its animation). The layers
   move against the pointer: left pointer, content right; top pointer, content down. No border shows. Before, its
   delay of 0.1 read as false and nothing moved.
-- **Smoke** (`--lwe-smoke`, the 36 parallax, shake, zoom and camera-object scenes at 3 s, before = 4c75eae with the
+- **Smoke** (`--lwe-smoke`, the 36 parallax, shake, zoom and camera-object scenes at 3 s, before = 93438d4 with the
   B3 worker). The same 3 fail to load, the same 4 report "not animating", and no scene got blank. Pixel changes
   are 0–28 %, mostly the at-rest re-centring: before, the 11 scenes with delay ≥ 1 sat displaced towards the
   pointer at (0, 0). In these the black-pixel share stayed within 0.2 %. The exception is **3516174947**, which
@@ -882,7 +882,7 @@ The port (0029):
   - The owner's WE captures of 2679248947, 2921510865, 3042492564 and 3516174947. 2679248947 has parallax off, so
     its depthparallax now reads a fixed 0.5 0.5, centred, where it read 0 before.
 
-### B6 result (fork patch 0030, pin `c959e7a`, 2026-11-03)
+### B6 result (fork patch 0030, pin `602de79`, 2026-11-03)
 
 Rows G03, G04 (the particle half), P36 and G31 are done. G04's text half stays in B4 (CText is redrawn there).
 Decoded from the same wallpaper64.exe with the sound spike's `all.c`:
@@ -912,8 +912,8 @@ The port (0030):
   setup. World-space control points stay put in the world. The system's own x/y angles stay its own.
 - CImage rotates about the origin (`m_scenePivot`), not the shifted quad's centre. Centred layers are unchanged.
 
-- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All three fail on d7a9f34, and the suite is 29/29
-  on c959e7a.
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All three fail on 9f64193, and the suite is 29/29
+  on 602de79.
   - `hidden_parent_hides_children`: a hidden group's child and a hidden square's child don't draw, an unparented square
     does. Turning the group's user property on shows its child on the next frame. Before, both children drew.
   - `particle_follows_its_parent`: a group at 20 16 turned 90° and scaled 2 puts its system at local 0 3 at x 14 (10
@@ -922,7 +922,7 @@ The port (0030):
   - `aligned_layer_turns_about_its_origin`: a left-aligned square at 24 turned by π covers 16..23 (24..31 before); a
     centred one turned by π stays put.
 - **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, the 17 playing scenes with a hidden ancestor, a
-  parented particle system or a turned aligned layer; before = d7a9f34 with the B5 worker through `LD_LIBRARY_PATH`).
+  parented particle system or a turned aligned layer; before = 9f64193 with the B5 worker through `LD_LIBRARY_PATH`).
   2 are pixel-identical (3042492564, 3480481965: their hidden children are covered or text). The rest change 0.006–6 %
   of the frame. What changed, all following the decoded rules:
   - **3243449890:** the character is gone. She is the "simple" variant (group 2662, `visible` = combo
@@ -949,7 +949,7 @@ The port (0030):
   (no call site found); G05 (parent alpha) is still Unknown; the owner's WE captures of 3243449890, 3163060610 or
   3319542538, and 3490034653.
 
-### B9 result (fork patches 0031–0036, pin `cc6f1c9`, 2026-11-03)
+### B9 result (fork patches 0031–0036, pin `94cfc2e`, 2026-11-03)
 
 Done: E4, E5, C1, S18, C3 (engine uniforms), E36, E37 (bloom), E17, E45 (annotation defaults; E18 is parity),
 E19 (varyings), U1, U2, U4 (properties), and the property side of E40. Left: E9, E11, E20, E38, E41 (below).
@@ -982,8 +982,8 @@ One patch per theme:
   it names. With nothing picked, which is every default in the library, the slot keeps its fallback quietly. Before,
   the property's name was looked up as a texture, which failed with a log line.
 
-- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All six fail on c959e7a (built against the new
-  headers), and the suite is 35/35 on cc6f1c9.
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`). All six fail on 602de79 (built against the new
+  headers), and the suite is 35/35 on 94cfc2e.
   - `engine_uniforms_are_fed`: frametime 1/30 → r 127, daytime → g = the local time × 255, pointer up / pressed /
     held → b 0 / 255 / 127, and `g_Time` at 432005 s reads 5. Before: 0 0 0 and no wrap.
   - `bloom_is_live_and_tinted`: off at load, then on through its property, glows green only (tint 0 1 0, g 7, r 0).
@@ -992,7 +992,7 @@ One patch per theme:
   - `fragment_gets_vertex_varyings`: a vertex-only `v_Bounds` (0.5, 0.25) reaches the fragment.
   - `properties_list_as_written`: the listing has the textinput "YOURNAME", the combo key "0.5", file 5 and boolean 4.
   - `usertexture_reads_its_property`: a pass's `usertextures [null, "picked"]` samples the property's util/white.
-- **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, before = c959e7a): 3184155462 (cursorripple),
+- **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, before = 602de79): 3184155462 (cursorripple),
   2189783622, 2890767643, 3490034653, 2388299037, 3414858021, 3028473503, 3013489778, 3042865984.
   - **2189783622:** its foliagesway effect is built again ("Leaving out effect" 1 → 0). 0.4 % of the frame changes,
     the swaying foliage.
@@ -1013,7 +1013,7 @@ One patch per theme:
   - **E40's other half:** loading a picture the user picks (not a `.tex`), and the UI picker.
   - The 3414858021 vertex units that don't write `gl_Position`.
 
-### E41 result (fork patch 0037, pin `3eaac6e`, 2026-11-03)
+### E41 result (fork patch 0037, pin `d29b73c`, 2026-11-03)
 
 An effect's `visible` now turns it on and off live, from a user property or a script.
 
@@ -1033,9 +1033,9 @@ An effect's `visible` now turns it on and off live, from a user property or a sc
   way when shown.
 - **Fork test** `effect_visible_is_live`: a red layer, a "green" effect (property `fx`, false at load), then a
   "blue" effect (property `last`, true). Readings: off 255 0 255 → on 255 255 255 → blue off 255 255 0 → both off
-  255 0 0 → both on 255 255 255. On cc6f1c9 it stays 255 0 255 (RED). The suite is 36/36.
+  255 0 0 → both on 255 255 255. On 94cfc2e it stays 255 0 255 (RED). The suite is 36/36.
 - **Smoke, 32 of the 33 scenes** (3556794116's only binding names a deleted property, U7; `--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, a release worker on the dev
-  core vs the same worker on cc6f1c9 by `LD_LIBRARY_PATH`).
+  core vs the same worker on 94cfc2e by `LD_LIBRARY_PATH`).
   - Per scene, one property bound to an effect's `visible` is flipped (bool negated; a combo to a value that
     changes which condition matches). Three runs: (B) flipped at load, (C) flipped live at 1.5 s, (A) not flipped.
   - The metric is the % of pixels differing by > 8 at the 3 s frame.
@@ -1055,7 +1055,7 @@ An effect's `visible` now turns it on and off live, from a user property or a sc
 - **Left:** `getEffect()` (B10). The media-event scripts (B10). The black 3046119914 / 3432999904. The hidden
   effects' shader faults (with 3414858021's `gl_Position` units).
 
-### B10 result (fork patches 0038–0044, pin `c60fd2e`, 2026-11-03)
+### B10 result (fork patches 0038–0044, pin `fd2fc72`, 2026-11-03)
 
 Done: S10, S11, S12, S13, S14, S15, S19, S20, S21 (decided: ignored), S23, S24, S25, S27, S29, S30, S31, S32, S36;
 partly S4, S16, S26, S37 (below). S8 was done in B1.
@@ -1095,8 +1095,8 @@ partly S4, S16, S26, S37 (below). S8 was done in B1.
   missing key is `undefined` (WE's not documented; the library reads it with `||`/`??`).
 - **0044.** `console.log = () => {}` (3363252053, 3414858021) threw "'log' is read-only"; console.warn/info/debug.
 
-- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`): 45/45 on c60fd2e (36 before + 9). They use the
-  new C API, so they don't build against 3eaac6e; what each checks was absent there.
+- **Fork tests** (`host_api_test`, need `LIASCAPE_WE_ASSETS_DIR`): 45/45 on fd2fc72 (36 before + 9). They use the
+  new C API, so they don't build against d29b73c; what each checks was absent there.
   - `layer_api_reaches_layers`: 19 checks of the layer/scene/engine API in one script, and a write through
     `getLayer (2)` moves that square.
   - `script_effect_and_property_changes`: `getEffect ('g').visible = …` shows a literal-false effect (255 0 0 →
@@ -1112,7 +1112,7 @@ partly S4, S16, S26, S37 (below). S8 was done in B1.
     `local_storage_persists` (two loads: 41 + 1 = 42, a Vec3 back as a Vec3, global apart from screen),
     `script_controls_a_sound` (peaks: startsilent 0, play 0.400, pause 0, play 0.400, volume 0.5 → 0.100, stop 0).
 - **Smoke** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`, `LIASCAPE_SCENE_MEDIA=0`, a release worker on
-  the B10 core vs one built on lp-player with the 3eaac6e core), 20 scripted scenes: script errors in stderr 867 →
+  the B10 core vs one built on lp-player with the d29b73c core), 20 scripted scenes: script errors in stderr 867 →
   183 (before 0044). The rest are mostly `engine.registerAudioBuffers` (S17, B8) at module load, `getVideoTexture`
   (S26) and `createLayer` (S37). No scene newly fails to load or draw (2890767643 and 3326873240 report "not
   animating" on both cores). Pixel differences at 3 s: 0–4.2 %.
@@ -1131,7 +1131,7 @@ partly S4, S16, S26, S37 (below). S8 was done in B1.
   92, static 0, blank 0, load_failed 3 (the same 3), renderer_failed 0, crashed 0, broken 0, timeout 1. The timeout
   is 2883756643, which was a timeout in the B1 report too; run alone (`--only 2883756643`) it is ok, ready in
   6.7 s. So 93 ok as B9, nothing newly blank, broken or crashed.
-- **Player tests** (`cargo test -q`, debug, on the pinned c60fd2e core): 737 passed, 0 failed, 3 ignored.
+- **Player tests** (`cargo test -q`, debug, on the pinned fd2fc72 core): 737 passed, 0 failed, 3 ignored.
 - **Left of B10:**
   - S16: `resizeScreen`, `applyGeneralSettings`, `animationEvent` are not sent.
   - S26: `getVideoTexture` (2 scenes), puppet animation layers / `playSingleAnimation` (B12), bones, blend shapes,
@@ -1213,7 +1213,7 @@ The scripts behind the counts are in the session scratchpad's `audit/`:
 
 They are not committed. Re-run them against the Workshop folder to refresh the counts after the library changes.
 
-### B8 result (fork patch 0045, pin `592fdff`, 2026-11-03)
+### B8 result (fork patch 0045, pin `f383c4a`, 2026-11-03)
 
 Done: A1, A3, A4, A5, E8, S17, P20, P21 on the fork side. The decode (GH 0x140103630 capture thread, GH 0x140141520
 frame tick, GH 0x14025cfe0 / 0x140250d80 emitters, scenescript64.dll for `registerAudioBuffers`) is in the
@@ -1248,7 +1248,7 @@ Left:
 - The 17 scenes that showed no change: check with music (a sweep, not one tone) before calling them done.
 
 
-### B7 result (fork patches 0046–0047, pin `c4eea29`, 2026-11-04)
+### B7 result (fork patches 0046–0047, pin `5a365d4`, 2026-11-04)
 
 Done: E27, E28, E30 (= G33), E31, E33. Patch 0047 is the batch; 0046 fixes a B8 bug the fork suite caught
 (below). Every claim was decoded from the sound spike's `all.c` (the same wallpaper64.exe 2.8.485); the addresses
@@ -1298,19 +1298,19 @@ code: the alpha that the children of a `copybackground: false` layer write, and 
 quad (WE renders it in the layer's local ortho space; we render it in scene space and the base pass samples the
 layer's region).
 
-- **Fork tests** (`host_api_test`): 53/53, 4 new. On 592fdff the three that test behaviour fail. The fourth,
+- **Fork tests** (`host_api_test`): 53/53, 4 new. On f383c4a the three that test behaviour fail. The fourth,
   `color_blend_modes_read_the_scene`, also passes there, because NVIDIA happens to read the old texels through the
   loop.
   - `clampuvs_clamps_the_composite`: an effect sampling at u + 0.5 gets the edge (green); `clampuvs:false` wraps (red).
-    On 592fdff the default wrapped.
-  - `composite_a_is_what_the_last_pass_reads`: with two effects, `_a` = base + green and `_b` = base. On 592fdff
+    On f383c4a the default wrapped.
+  - `composite_a_is_what_the_last_pass_reads`: with two effects, `_a` = base + green and `_b` = base. On f383c4a
     they were swapped.
   - `compose_layer_draws_its_children`: the child goes through the layer's tint (yellow). `copybackground` tints the
-    background; `false` leaves it alone; with no effect the layer is just background + child. On 592fdff the child
+    background; `false` leaves it alone; with no effect the layer is just background + child. On f383c4a the child
     stayed red.
   - `color_blend_modes_read_the_scene`: mode 31 adds (255 127 0) and mode 2 multiplies the scene (127 0 0).
 - **Smoke:** all 96 scenes, `--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`. The same release worker ran on
-  592fdff (`we-b8/build/lwe-core-b8`) and on the new core. The metric is the % of pixels differing by more than 8 at
+  f383c4a (`we-b8/build/lwe-core-b8`) and on the new core. The metric is the % of pixels differing by more than 8 at
   the 3 s frame.
   - **88 scenes load on both. None was newly blank and none newly failed.** Total mean frame time over the 88 is
     171.3 ms on the old core and 170.2 ms on the new one. A first build that copied for unused samplers cost
@@ -1326,20 +1326,20 @@ layer's region).
     drew composelayer's base pass straight to the screen, which hid the dragon; that is fixed and covered by the
     "no effect" case of the compose test.
   - The 8 compose-reference scenes are at 0.00–1.6 %. Their references are masks whose last stage differs little.
-- **Can't be checked here:** 8 scenes are blank or fail on both cores, including the pinned 592fdff from the store.
+- **Can't be checked here:** 8 scenes are blank or fail on both cores, including the pinned f383c4a from the store.
   These are 3276522107, 3477054430 and 3509243656 (the known 3D failures); 3046119914 and 3432999904 (black, as in
   E41); and 3426575339, 3432876246 and 3556794116. The last three are blank at 3 s and at 10 s on every core with no
   error logged. That is new since the E41 smoke, so a pre-B7 fault, and it needs a look. 3414858021's compose layers
   have effects bound to a property that is off by default, so they draw background + children, which is unchanged.
 - **0046 (B8 fix).** `engine.registerAudioBuffers` inside `update ()` didn't throw "can only be called from global
   scope". callModule also sets the running module, so the check never fired. The fork's
-  `audio_reaches_shaders_scripts_and_emitters` failed on 592fdff, and B8's "49/49" was not reproducible. The engine
+  `audio_reaches_shaders_scripts_and_emitters` failed on f383c4a, and B8's "49/49" was not reproducible. The engine
   now tracks the module's evaluation.
 
 Left:
 - WE captures of 2883756643 (blend modes) and 3414858021 / 3432999904 (copybackground: false) to confirm the inferred
   parts.
-- ~~Re-check 2883756643 with its video showing~~ (2026-11-04). Paced, c4eea29 vs 592fdff, two runs each:
+- ~~Re-check 2883756643 with its video showing~~ (2026-11-04). Paced, 5a365d4 vs f383c4a, two runs each:
   - the cores differ on 81–83 % of pixels, against 0.4–0.9 % between runs of the same core;
   - the frame is brighter (pixels over 200: 30.6 → 35.6 %; mean RGB 161/142/143 → 177/154/148);
   - the bokeh adds over the sky and the hill instead of tinting it, and the rim light glows;
@@ -1354,7 +1354,7 @@ Left:
 
 ### Blank-scene result (liascape commit, no fork change, 2026-11-04)
 
-- **Not a regression.** The three scenes are blank in `--lwe-smoke` on 3eaac6e (the E41 pin) and c4eea29 alike
+- **Not a regression.** The three scenes are blank in `--lwe-smoke` on d29b73c (the E41 pin) and 5a365d4 alike
   (E41's worker on both cores by `LD_LIBRARY_PATH`: 3426575339 lit 0, 3432876246 lit 118 188 px of 11.2 M = its
   particle trail only, 3556794116 lit 0, nothing changed 1 s → 3 s). E41's own smoke has 3432876246 at `ok: false`
   too, and B5's (`/tmp/claude-1000/b5sm`) 3426575339. They never rendered in a smoke; 0038–0045 aren't involved.
@@ -1366,7 +1366,7 @@ Left:
   93–99 %).
 - **Fix** (`liascape-scene-worker`, `lwe.rs`): the smoke paces frame f to (f−1)/30 s of wall time after the
   first; `--unpaced` keeps the old run. A 3 s smoke now takes about 3 s per scene.
-- **Smoke, all 96 scenes** on c4eea29 (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), the same worker unpaced vs
+- **Smoke, all 96 scenes** on 5a365d4 (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), the same worker unpaced vs
   paced:
   - **Unpaced 88 ok, paced 93 ok.** The only failures left are the three 3D load failures (3276522107,
     3477054430, 3509243656). No scene got worse.
@@ -1384,7 +1384,7 @@ Left:
     within one mode.
 
 
-### B4 result (fork patches 0048–0050, pin `e372e44`, 2026-11-04)
+### B4 result (fork patches 0048–0050, pin `6bc301c`, 2026-11-04)
 
 Done: T1 (= E34's text part), T2, T3, T4, T5, T8, T10, G04 (text), G13, G30, S28. Text objects are image layers now,
 laid out the way WE lays them out. Everything below was decoded from the sound spike's `all.c` (wallpaper64.exe
@@ -1469,9 +1469,9 @@ font" no longer appears in the smoke.
   `dropshadow*`, `blursize` and the MSDF path (T7, 0 scenes); `anchor` (above). On the WE side, `depthtest` picks a
   `_depth` material variant.
 
-**Fork tests** (`host_api_test`): 58/58, 5 new. All five fail on c4eea29.
+**Fork tests** (`host_api_test`): 58/58, 5 new. All five fail on 5a365d4.
 
-| Test | What it checks | On c4eea29 |
+| Test | What it checks | On 5a365d4 |
 |---|---|---|
 | `text_follows_its_parent_and_turns` | a child text at the group's origin + (20, 0) is at x 180; a 90° text is tall | not drawn; upright |
 | `text_lays_out_like_we` | a 10 pt H is 29 px (300 dpi: 29.8); "H\nH" is two lines (34 px); left/right alignment puts the ink at the origin (42 / 215 for 40 / 216); "éé" is as wide as "ee" | 1 px H, no lines, "ee" 0 px |
@@ -1493,7 +1493,7 @@ load; the other 54 are in the two 3D scenes that fail to load. Of the 50 literal
   2 × 2 left is a genuinely empty text whose saved size is the same 66 × 66.
 
 **Smoke, all 96 scenes**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`). The same worker ran on
-c4eea29 (the store core) and on e372e44, one run after the other with nothing else running. The metric is the % of
+5a365d4 (the store core) and on 6bc301c, one run after the other with nothing else running. The metric is the % of
 pixels differing by more than 8 at the 3 s frame.
 
 - **93 ok on both. No scene newly blank or failed.** The 3 failures are the known 3D ones.
@@ -1512,7 +1512,7 @@ pixels differing by more than 8 at the 3 s frame.
 - Mean frame time over the 93: 3.70 → 3.86 ms. On the 43 text scenes it is 4.57 → 4.93 ms (median +0.35 ms): their
   effects run now, and each text is an image's passes.
 
-Player tests (DEBUG, the pinned e372e44): 737 passed, 0 failed, 3 ignored.
+Player tests (DEBUG, the pinned 6bc301c): 737 passed, 0 failed, 3 ignored.
 
 Left:
 - WE captures of 1884904087 and 2134765860 to confirm size and layout against WE itself. The editor's saved sizes
@@ -1520,7 +1520,7 @@ Left:
 - HarfBuzz shaping (ligatures, GPOS kerning), WE's own fallback chain, T6/T7, and `anchor` with G32/C5.
 - Cursor hit tests reach text layers now (they are CImages); B10 listed them as missing.
 
-### B11 result (fork patches 0051–0053, pin `2559b88`, 2026-11-04)
+### B11 result (fork patches 0051–0053, pin `a209070`, 2026-11-04)
 
 Done: P2, P10, P15, P22, P28, P31, P32, P33, P34, P35. Decoded from wallpaper64.exe 2.8.485. The operator interpreter
 GH 0x140265800, which the audit's headless decompile couldn't do, decompiled in REA's Ghidra with the decompile
@@ -1604,15 +1604,15 @@ plane/sphere/box/bounds/quad/model. The jump table is at 0x140271798.
 - Turbulence uses a standard simplex, not WE's gradient hash. vortex_v2 keeps LWE's model; it wasn't decoded and no
   library scene uses it.
 
-**Fork tests** (`host_api_test`): 61/61, 3 new, all failing on e372e44.
+**Fork tests** (`host_api_test`): 61/61, 3 new, all failing on 6bc301c.
 
-| Test | What it checks | On e372e44 |
+| Test | What it checks | On 6bc301c |
 |---|---|---|
 | `particle_operators_as_we` | two alphachange 0.5 → 62/255 (0.25); box particles 10 px from a point with threshold 15 pulled in; sizechange with size 2 is 16 px; a box particle with speed 40 leaves its spawn point | 125/255; stay at their spawn points; 8 px; at rest |
 | `particle_children_run` | a static child at its origin; an eventfollow trail x 10…30 behind a moving particle; an eventdeath child where its particle died; an eventspawn child only at the spawn point | nothing drawn |
 | `particle_control_points` | controlpoint1 override puts the spawn at x 20; a scene-space point (flags 2) of a scale-2 system at x 56; point "0 8 0" on the same row as origin "0 8 0" | x 8; off; rows 23 vs 7 |
 
-**Smoke, all 96 scenes**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), e372e44 then 2559b88. The
+**Smoke, all 96 scenes**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 6bc301c then a209070. The
 second run partly overlapped a `nix build`.
 
 - **93 ok on both. No scene newly blank or failed.** The 3 failures are the known 3D ones.
@@ -1621,7 +1621,7 @@ second run partly overlapped a `nix build`.
   children. The largest movers are videos and animated scenes (2886313155, 3478602089, 3414858021's rain).
 - Mean frame time 3.82 → 3.61 ms. 3174556087 is 6.0 → 7.2 ms with its 350 splash children.
 
-Player tests (DEBUG, the pinned 2559b88): 737 passed, 0 failed, 3 ignored.
+Player tests (DEBUG, the pinned a209070): 737 passed, 0 failed, 3 ignored.
 
 Left (in TODO):
 - WE captures of a child-system scene (3174556087 splashes, 2288455459 firefly trails) and an oscillating one to
@@ -1632,7 +1632,7 @@ Left (in TODO):
 - P24 cone, P25/P26 (0 scenes).
 - The fdt frame-time source (+0x14c) and the child "alive" test (GH 0x1402524c0) to read.
 
-### B12 result (fork patch 0054, pin `36ad6a0`, 2026-11-04)
+### B12 result (fork patch 0054, pin `1eb795e`, 2026-11-04)
 
 Done: G06, G07, G08, G09. Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` (the loader decompiled
 there in full; no REA session was needed). The decoded format parses every one of the library's 50 puppet `.mdl`
@@ -1696,13 +1696,13 @@ files to each section's exact end (a Python port of the loader, scratchpad `b12/
 - A puppet layer without effects draws its only pass to the scene; LWE gave that pass the mesh in layer pixels
   under the scene's projection, so it landed in the wrong place (only puppets with an effect looked right).
 
-**Fork tests** (`host_api_test`): 62/62, 1 new, failing on 2559b88.
+**Fork tests** (`host_api_test`): 62/62, 1 new, failing on a209070.
 
-| Test | What it checks | On 2559b88 |
+| Test | What it checks | On a209070 |
 |---|---|---|
 | `puppet_warp_as_we` | an MDLV0016 puppet (52-byte vertices) skinned by its animation to x 22..25; an MDLV0023 one (80-byte vertices, 32-bit indices) with a normal layer to +4 and an additive one to +8 at blend 0.5 at +8 (x 54..57); a square attached to its "tip" 8 px up at x 54..57 | the whole 32 px quad; nothing (misread); the square on the parent's origin (x 46..49) |
 
-**Smoke, all 96 scenes** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 2559b88 then 36ad6a0, with B13
+**Smoke, all 96 scenes** (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), a209070 then 1eb795e, with B13
 and B14 building on the machine:
 
 - **93 ok on both, none newly blank or failed**; the 3 failures are the known 3D ones. 2883756643 came out with its
@@ -1721,7 +1721,7 @@ Left (in TODO):
   (`getAnimationLayer`, `playSingleAnimation`, S26), `autosort`/`index` layer order.
 - Read the attachment builder (vtable +0x78 of the puppet image) and the additive scale.
 
-### B13 result (fork patch 0055, pin `c62d777`, 2026-11-04)
+### B13 result (fork patch 0055, pin `0d66ae8`, 2026-11-04)
 
 Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` and
 `all.asm`; constants and strings read from the same bytes. The pin also carries B12's 0054.
@@ -1784,14 +1784,14 @@ Done: E35, E23 (E37 was B9's patch 0032). Decoded from wallpaper64.exe 2.8.485 w
 - `bloomhdriterations` is read at load. `hdr` is read at load.
 - g_TexelSize stays LWE's 1 / scene size. WE's is 1 / the current target (renderer +0x74).
 
-**Fork tests** (`host_api_test`): 64/64 with B12's, 2 new, both failing on 2559b88.
+**Fork tests** (`host_api_test`): 64/64 with B12's, 2 new, both failing on a209070.
 
-| Test | What it checks | On 2559b88 |
+| Test | What it checks | On a209070 |
 |---|---|---|
 | `hdr_bloom_is_wes_chain` | two additive 0.6 squares (1.2) glow 3 px out (11 11); a single 0.6 one doesn't (0 0); the same scene with `hdr: false` blooms both through the LDR chain | 6 6 past the dim square: LDR chain, threshold 0.3, 1.2 clipped |
 | `fbo_formats_as_written` | an rg88 FBO of (0.2 0.4 0.6) reads 51 102 0; `rgba_backbuffer` of 2.0 read × 0.25 is 127 in an HDR scene, 64 otherwise | 51 102 153; 64 in both |
 
-**Smoke**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 2559b88 then the B13 core (before the
+**Smoke**, paced (`--lwe-smoke … --seconds 3`, `WPENGINE_PARTICLE_SEED=7`), a209070 then the B13 core (before the
 rebase onto B12):
 
 - **All 96: 93 ok on both, the same 3 known 3D failures, none newly blank.** Lit pixels within 1 % everywhere but
@@ -1815,7 +1815,7 @@ Left (in TODO):
 - Whether `general.hdr` alone gates WE's HDR path (the renderer flag's link to it wasn't found).
 - `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (flag 0x10000) are not ported.
 
-### B14 result (fork patch 0056, pin `157c111`, 2026-11-04)
+### B14 result (fork patch 0056, pin `40f2b85`, 2026-11-04)
 
 Done: G24 (3D scenes load), G22 (3-axis angles, origin z, full parent matrices for world-placed layers), G25 (static
 MDL meshes with `generic4`), G26 point and spot lights (E13), G28 fog (E14), the `transparentsorting` part of G29, and
@@ -1887,7 +1887,7 @@ below decompiled there, so no REA session was needed. The three corpus scenes th
 - `PerformLighting_V1` returned 0, and nothing fed the fog uniforms.
 - `parseTextureFlags` threw for any value ≥ `TextureFlags_All`.
 
-**Fork tests** (`host_api_test`): 68/68 on `157c111` (B12 + B13 + this patch), 4 new, all failing on 36ad6a0
+**Fork tests** (`host_api_test`): 68/68 on `40f2b85` (B12 + B13 + this patch), 4 new, all failing on 1eb795e
 ("load/build failed").
 
 | Test | What it checks |
@@ -1897,14 +1897,14 @@ below decompiled there, so no REA session was needed. The three corpus scenes th
 | `model_draws_and_lights` | an MDLV0016 quad with generic4: unlit it is white; lit with no light it is black; a point light, and a spot whose x axis points at it, light it; a spot pointing away doesn't |
 | `fog_and_depth` | fog from 0 to 5 at density 0 → 1 turns a model 10 units away red; a nearer model drawn first stays in front of a farther one drawn after it (depth test) |
 
-**Smoke, all 96 scenes**, paced (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 36ad6a0 then this patch on it:
+**Smoke, all 96 scenes**, paced (`--seconds 3`, `WPENGINE_PARTICLE_SEED=7`), 1eb795e then this patch on it:
 
 - **93 → 96 ok. No scene newly blank or failed**; lit pixels match within 1 % on every scene that loaded before.
 - The pixel differences above 3 % are videos and clock/animated scenes (2883756643, 2886313155, 2890767643,
   3028473503, 3326873240, 3556794116, 3046119914, 3419466417), as in B11's runs: timing, not this patch (nothing a
   2D scene runs changed, except texture flags none of them carry and a lighting loop with no lights).
 - Mean frame time of the 93: 3.61 → 3.79 ms (the second run overlapped builds). The 3D scenes: 7.6, 1.0 and 11 ms.
-- The 3 scenes also load and draw the same on `157c111` (B13's HDR on top; 3509243656 is an HDR scene).
+- The 3 scenes also load and draw the same on `40f2b85` (B13's HDR on top; 3509243656 is an HDR scene).
 
 - 3276522107 (metro car): matches its preview. The car's interior fills the view, the passing buildings show through
   the windows, and the girl sits on the right.
@@ -1914,7 +1914,7 @@ below decompiled there, so no REA session was needed. The three corpus scenes th
   the clock, the date, the log texts, the skybox's Milky Way and an unlit planet sphere are drawn. The sphere is black:
   the scene has no lights and its material's PBR mask combos aren't set.
 
-Player tests (DEBUG, pin `157c111`): 737 passed, 0 failed, 3 ignored.
+Player tests (DEBUG, pin `40f2b85`): 737 passed, 0 failed, 3 ignored.
 
 Left (in TODO):
 - Shadows (`_rt_shadowAtlas`, PerformShadowMapping), light cookies, volumetrics, tube and directional lights.
@@ -1927,7 +1927,7 @@ Left (in TODO):
 - Hit-testing world-placed layers (cursor events in 3D). WE's transparent sort key. The output-sized render target.
 - WE captures of the three scenes.
 
-### 3414858021 result (fork patches 0057–0060, pin `b6e2878`, 2026-11-04)
+### 3414858021 result (fork patches 0057–0060, pin `e814c25`, 2026-11-04)
 
 The owner reported the scene with the girl's head missing and the cursor trail going up when the pointer went down.
 Both were there before the day's batches (a smoke on the B4-era core shows the head off the bottom and the same trail
@@ -1964,7 +1964,7 @@ varying). Moving the include's `#define`s to the `#include` line builds it, but 
 vanished, so that change is not in; it needs the effect itself read (TODO). **Done:** see "Shader preprocessing
 result" below — the vanish was 0059's writable-varying copy filled only in the first of the unit's three `main`s.
 
-Tests (host_api_test, all RED on 157c111): `particle_pointer_is_y_down`, `script_angles_are_degrees`,
+Tests (host_api_test, all RED on 40f2b85): `particle_pointer_is_y_down`, `script_angles_are_degrees`,
 `shaders_compile_like_hlsl`. The smoke has `--pointer X0,Y0:X1,Y1` (a scripted pointer path) for direction checks.
 
 ### Shader preprocessing result (fork patches 0063–0064, 2026-11-04)
@@ -2052,10 +2052,10 @@ compiles** through the core's own preprocessing, glslang + SPIRV-Cross and the G
 - 3370055069 `depthparallax` with `MODE 1` + `OVERLAY_LOCATOR` (1, a random combination): `g_Texture2` is declared
   only for another MODE. No scene uses it.
 
-Tests (host_api_test, all four red on `42f301d`): `shaders_include_in_place`, `fragment_varying_takes_vertex_type`,
+Tests (host_api_test, all four red on `06cd48b`): `shaders_include_in_place`, `fragment_varying_takes_vertex_type`,
 `hlsl_conversions_compile`, `hlsl_names_and_leftovers_compile`; `shaders_compile_like_hlsl` (0059) still passes.
 
-### F1 result: shadows, light cookies, tube and directional lights (fork patch 0071, pin `4b85ae7`, 2026-11-04)
+### F1 result: shadows, light cookies, tube and directional lights (fork patch 0071, pin `d338e97`, 2026-11-04)
 
 No library scene uses any of it. 3477054430 is the only scene with lights: four spots, all `castshadow: false`,
 no `usecookie`, and its `lightconfig` is `{"spot": 4}`. No scene has a tube or directional light. Of the 44 objects
@@ -2161,9 +2161,9 @@ from wallpaper64.exe 2.8.485 (`all.c` plus the unpacked exe for constants and as
 - Skinned or morphed casters: SKINNING / MORPHING, with F4.
 - Volumetrics: `castvolumetrics`, F2.
 
-**Fork tests** (`host_api_test`): 89/89 on the new commit. The 4 new tests fail on `deeb4da`.
+**Fork tests** (`host_api_test`): 89/89 on the new commit. The 4 new tests fail on `cbe4445`.
 
-| Test | What it checks | On `deeb4da` |
+| Test | What it checks | On `cbe4445` |
 |---|---|---|
 | `shadow_casters_compile` | the 3 stock casters (defaults; ALPHATOCOVERAGE) and generic4 with shadows + cookie, and with 2 directional lights | `'gl_ViewportIndex' : undeclared identifier` |
 | `shadow_occludes_a_lit_point` | a spot, then a point light, over a floor with an invisible 1 x 1 occluder between them: the centre is dark, 1.6 units away it's lit exactly as without the caster (no acne); without the occluder's castshadow nothing changes | centre 255 |
@@ -2194,7 +2194,7 @@ smoke, old core vs new):
 - **Every scene saves the old scene-sized RGBA8 atlas:** about 8 MB at 1080p, 79 MB at 6880 x 2880.
 - **A shadow scene pays one draw per caster per viewport:** 35 draws here.
 
-**Health** (`scene-health.md`, 96 scenes, this core): 86 clean / 10 degraded / 0 failed, the same as on `deeb4da`.
+**Health** (`scene-health.md`, 96 scenes, this core): 86 clean / 10 degraded / 0 failed, the same as on `cbe4445`.
 
 - No scene is worse, newly blank or failed.
 - No scene's lit pixels moved by more than 3 %.
@@ -2209,10 +2209,10 @@ smoke, old core vs new):
   combos, which LWE's static meshes never set (F4).
 - The other 6 are as before.
 
-Pin `4b85ae7`. Player tests (DEBUG): 740 passed, 0 failed, 3 ignored. In the full run, the timing test
+Pin `d338e97`. Player tests (DEBUG): 740 passed, 0 failed, 3 ignored. In the full run, the timing test
 `four_workers_latch_independently` failed once and passed alone.
 
-### F3/F4 result: blend shapes, bone alpha, skinned and morphed models, createModelData (fork patches 0078–0081, pin `1072720`, 2026-11-04)
+### F3/F4 result: blend shapes, bone alpha, skinned and morphed models, createModelData (fork patches 0078–0081, pin `00d7760`, 2026-11-04)
 
 Decoded from wallpaper64.exe 2.8.485 with the sound spike's `all.c` (the MDL loader GH 0x1402873f0 and the puppet
 combo builder GH 0x140230ec0 decompiled there), the stock shaders of the owner's 2.8.42 assets (genericimage4,
@@ -2300,16 +2300,16 @@ REA session was needed. Library numbers come from the Python MDL port (B12's `b1
 - MDLA v6's per-bone float track, MDLE's role (a copy of the local matrices: perhaps physics' rest pose).
 - `autosort` / `index` layer order (no library user; not found in the exe's strings either).
 
-**Fork tests** (`host_api_test`): 99/99 on `1072720`, 4 new, each failing on 24adeff.
+**Fork tests** (`host_api_test`): 99/99 on `00d7760`, 4 new, each failing on bdafdde.
 
-| Test | What it checks | On 24adeff |
+| Test | What it checks | On bdafdde |
 |---|---|---|
 | `skinned_casters_compile` | shadowcaster, shadowcasterfoliage4, shadowcasterfur4 with SKINNING, MORPHING, MORPHING + MORPHING_NORMALS (BONECOUNT 1) and SKINNING + MORPHING (BONECOUNT 4): 12 builds | 10 of 12 fail (array size 0, `g_Texture1Texel` undeclared, no `ApplyMorphPosition` overload) |
 | `puppet_blend_shapes_and_alpha` | four genericimage4 puppets (vec4 positions, MDMP with "stretch" +6 px and "fade" alpha 0): an animation's stretch weight widens A to x 4..13; B's script sets stretch by name and reads the weights back (x 24..33); C's bone alpha 0 and D's fade weight 1 hide them | A and B 4 px wide, C and D drawn, the script checks fail |
 | `model_skins_and_morphs` | a 3D model's skeleton moved +2 units by its animation layer (x 0..4, ±4 px), and with the stretch weight 1 its right edge at 10 units | nothing drawn where expected (the static quad) |
 | `create_model_data_draws` | createModelData (POSITION, NORMAL, UV; a Uint16Array) + createLayer ({ model, origin 48 24 }) is the 8 px square at x 44..51, rows 4..11; applyData moves it 30 px left | nothing drawn |
 
-**Library scenes, old core (24adeff) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the same release worker with
+**Library scenes, old core (bdafdde) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the same release worker with
 each core on its LD_LIBRARY_PATH; scratchpad `f3/pairs/`):
 
 | Scene | Kind | ok | lit px old → new | frame ms old → new | pixels changed (1 s, 6 s) |
@@ -2340,12 +2340,12 @@ each core on its LD_LIBRARY_PATH; scratchpad `f3/pairs/`):
 failing; the 6 left are as in F1 (`puppettexturechannels`' BLENDROWCOUNT, two workshop `auto_sway`, one `depthparallax`).
 "WE: an engine texel uniform declared" applies to 3 checks.
 
-**Health** (`scene-health.md`, 96 scenes, pin `1072720`): 86 clean / 10 degraded / 0 failed, as on 24adeff; no
+**Health** (`scene-health.md`, 96 scenes, pin `00d7760`): 86 clean / 10 degraded / 0 failed, as on bdafdde; no
 scene's class, loss, errors, warnings or built objects changed. In the full run 2883756643 (a video scene) timed out
 at the 90 s limit under load; alone it is clean in 15 s, and the report carries that rerun (the timed-out run is kept
 in the scratchpad's `f3/health-2883-timeout`).
 
-Player tests (DEBUG, pin `1072720`): 740 run, 729 passed, 3 ignored, 11 failed in the full run under a load of 10–26
+Player tests (DEBUG, pin `00d7760`): 740 run, 729 passed, 3 ignored, 11 failed in the full run under a load of 10–26
 (another agent's build): `align_end_hands_off_as_a_last_frame_ends`, `i5_open_burst_is_capped_and_none_lost`,
 `i6_every_onset_waits_for_flowing_audio`, `outbox_is_bounded`, `outbox_persists_across_restart_and_acks`,
 `render_worker_never_composes_a_torn_frame`, `render_worker_quit_is_bounded`, `scene_over_vram_limit_is_stopped_not_crashed`,
@@ -2417,7 +2417,7 @@ transparent sort's key applies to 3477054430 and 3509243656 (`transparentsorting
 人物, a puppet); all at z 0 with no x/y turn, so they draw where they did. **35 2D scenes have perspective particle
 systems**: their particles at z 0 are now the size WE draws them (LWE drew them 1.16 x at fov 50, or as general.fov
 gave), and particles off z 0 grow or shrink with depth. In the 96-scene smoke (3 s, `WPENGINE_PARTICLE_SEED=7`, the
-pinned core's parent 24adeff vs this one) no scene is newly blank or failed and no scene's lit share moved by more
+pinned core's parent bdafdde vs this one) no scene is newly blank or failed and no scene's lit share moved by more
 than 0.4 %. The largest pixel differences are videos, clocks and rain (3028473503 22 %, 3046119914 21 %, 3243449890
 6 %: its clock moved 22:22 → 22:30 between the runs); the three 3D scenes match (3477054430 and 3509243656 0.00 %,
 3276522107 2.6 %: its passing buildings).
@@ -2456,7 +2456,7 @@ remapinitialvalue colour by the distance to control point 1 (red near, blue far 
 its output range being "x y z": fixed in 0085). collisionmodel and layerimage exit 1 on both cores (their scenes
 need a model / an image layer emitter LWE doesn't run).
 
-**Fork tests** (`host_api_test`, each RED on `24adeff`):
+**Fork tests** (`host_api_test`, each RED on `bdafdde`):
 
 | Test | What it checks |
 |---|---|
@@ -2470,18 +2470,18 @@ need a model / an image layer emitter LWE doesn't run).
 **Shader sweep** (4085 checks, against the merged F1 + F7–F9 core's results): 16 failing before and after, 0 newly
 failing.
 
-**Health** (`scene-health.md`, 96 scenes, pin `78128d1`): 86 clean / 10 degraded / 0 failed; every scene's class,
-loss, errors, warnings and built objects the same as on F3/F4's `1072720`. In the full run 2883756643 timed out once
+**Health** (`scene-health.md`, 96 scenes, pin `5e65da4`): 86 clean / 10 degraded / 0 failed; every scene's class,
+loss, errors, warnings and built objects the same as on F3/F4's `00d7760`. In the full run 2883756643 timed out once
 (exit 124); alone it took 15 s and is clean, as before (the report carries the rerun).
 
 **Patch 0085** (after the preview smokes): remap output ranges as vectors, and the operators' blendinstart /
 blendinend as a clamped life ramp (inferred).
 
-Pin `78128d1` (which also carries the rig agent's F3/F4 0078–0081). host_api_test 101/101 on it (105/105 with the
+Pin `5e65da4` (which also carries the rig agent's F3/F4 0078–0081). host_api_test 101/101 on it (105/105 with the
 rig agent's tests merged in). Player tests (DEBUG): 738 passed, 2 failed, 3 ignored; the 2
 (`no_trim_once_shutdown_started`, `align_end_hands_off_as_a_last_frame_ends`) are timing tests and passed alone.
 
-### F2 result: shape objects, volumetric lights, puppet IK (fork patches 0086–0090, pin `f4aa7c5`, 2026-11-05)
+### F2 result: shape objects, volumetric lights, puppet IK (fork patches 0086–0090, pin `127d63b`, 2026-11-05)
 
 Decoded from wallpaper64.exe 2.8.485 (the sound spike's `all.c` plus the exe for vtables, constants and asm; no REA
 session was needed) and the stock assets (2.8.42's `effects/lightshafts`, `materials/util/volumetrics_*`,
@@ -2556,15 +2556,15 @@ effect-object base 0x1404d2168 of GH 0x140212c50): no light at all. Volumetric l
   user would be invention.
 - Root motion (MDLA flags bit 0, 0 users), MORPHING_MODIFIERS (0 users), MDLA v6's per-bone float track.
 
-**Fork tests** (`host_api_test`): 108/108; the 3 new ones fail on `78128d1`.
+**Fork tests** (`host_api_test`): 108/108; the 3 new ones fail on `5e65da4`.
 
-| Test | What it checks | On `78128d1` |
+| Test | What it checks | On `5e65da4` |
 |---|---|---|
 | `shape_draws_its_effect_in_place` | two shapes in a 64 x 32 scene: A's corners (x 0.25..0.75, y 0.25..0.5 of its 32 px square) land in the rows of a white marker 8 px up, red (DIRECTDRAW) left, red + green (uv.x > 0.5) right, nothing outside; B with two effects draws only the second (green) on the first's corners (x 48..63); both add to the blue clear though their materials say `normal` | nothing drawn (blue) |
 | `volumetric_lights_glow` | a point light (radius 3) glows white at the centre, not at the corner; off without castvolumetrics; a spot along +x glows on its axis, not 2.5 units above; from inside the sphere the full-screen march glows; a black depth-writing wall in the sphere cuts the glow (135 → 22) | the clear colour everywhere |
 | `puppet_ik_reaches_its_target` | a three-bone MDLV0016 arm whose hand's IK target is animated to (0, 8): the hand's square at x 30..33, 8 px up | the square at its bind (x 38..41, centre row) |
 
-**Scenes, old core (`78128d1`) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the release worker with each core on
+**Scenes, old core (`5e65da4`) vs new** (6 s smokes, `WPENGINE_PARTICLE_SEED=7`, the release worker with each core on
 LD_LIBRARY_PATH; VRAM at 4 s; scratchpad `f2/pairs/`):
 
 | Scene | What changes | Frame ms old → new | VRAM old → new |
@@ -2582,14 +2582,14 @@ LD_LIBRARY_PATH; VRAM at 4 s; scratchpad `f2/pairs/`):
 **Shader sweep** (4085 compiles, the new core, compared with F5/F6's run): 16 → 6 failures, 10 fixed (F4's caster
 fixes, absent from that run's core), 0 newly failing; the 6 are as in F1.
 
-Player tests (DEBUG, pin `f4aa7c5`): 740 passed, 0 failed, 3 ignored.
+Player tests (DEBUG, pin `127d63b`): 740 passed, 0 failed, 3 ignored.
 
-**Health** (`scene-health.md`, 96 scenes, pin `f4aa7c5`): 86 clean / 10 degraded / 0 failed, as on `78128d1`. The one
+**Health** (`scene-health.md`, 96 scenes, pin `127d63b`): 86 clean / 10 degraded / 0 failed, as on `5e65da4`. The one
 change: 3319542538 loses its "unsupported: VolumeLight (shape) object" error (6 → 5 errors, loss 2 → 1 %: the `Text`
 user property is what's left); no other scene's class, loss, errors or warnings moved. VolumeLight is gone from the
 report.
 
-### Leftovers result: stereo audio feed, HarfBuzz text, world-space particles, health findings (fork patches 0091–0097, pin `262d97b`, 2026-11-05)
+### Leftovers result: stereo audio feed, HarfBuzz text, world-space particles, health findings (fork patches 0091–0097, pin `be51bf7`, 2026-11-05)
 
 The remaining "Left:" items of B1–B14, F1–F9, the health report and the coverage doc, worked in order of library
 usage (scan of `~/.local/share/Steam/steamapps/workshop/content/431960`, 96 scenes). Decoded from the same
@@ -2647,7 +2647,7 @@ flags, script and direction guessed per run.
 
 Size check (as B4's: `WPENGINE_TEXT_DEBUG=1`, the editor's saved `size`, 66 literal texts now that the 3D scenes load):
 
-| | f4aa7c5 | 0091 |
+| | 127d63b | 0091 |
 |---|---|---|
 | width and height within 0 px | 4 | 22 |
 | within 2 px | 12 | 29 |
@@ -2710,9 +2710,9 @@ it for a sheet padded to a power-of-two texture; common_particles.h's NPOT walk 
 stored at their image size (2048 × 1024 / 1024² headers over 1603 × 616 / 516² images), so LWE's plain walk
 (frameWidth = 1 / cols) already is WE's; the NPOT walk over that upload cut the birds up (smoke pair). Comment in 0097.
 
-**Fork tests** (`host_api_test`, 108 → 113 passed): the 5 new ones fail on `f4aa7c5`.
+**Fork tests** (`host_api_test`, 108 → 113 passed): the 5 new ones fail on `127d63b`.
 
-| Test | What it checks | On `f4aa7c5` |
+| Test | What it checks | On `127d63b` |
 |---|---|---|
 | `text_shapes_with_harfbuzz` | NotoSans 20 pt "AVAVAVAV" 24 px narrower than "AAAAVVVV" (GPOS kerning; 384 vs 408) | 412 = 412 |
 | `particle_world_space_stays` | a flags-1 system moved 20 → 50 by script leaves its particle at x 25; a flags-0 one carries it to x 49 | both at x 49 |
@@ -2732,7 +2732,7 @@ Player units (new; the first two can't exist before — the old mix was a mono u
 - The 96-scene smoke (the health run's PNGs vs F2's): none newly blank (lit pixels within 50 % on all 95 that render).
 - Shader sweep (4085 checks vs F2's): 6 failed before, 6 still failing, 0 fixed, 0 newly failing.
 - Audio: 110 Hz and white-noise runs of the 41 audio scenes (`--tone`, scratchpad `lo/t110`, `lo/tnoise`).
-- Player tests (DEBUG, pin `262d97b`): 743 passed, 0 failed, 3 ignored (740 on `f4aa7c5`).
+- Player tests (DEBUG, pin `be51bf7`): 743 passed, 0 failed, 3 ignored (740 on `127d63b`).
 
 **Listed, not ported (no library user and no readable WE code, or no library user and nothing visible):**
 
@@ -2759,7 +2759,7 @@ their reader wasn't looked for in this run; `general.hdr`'s gate on the post-pro
 angles binding's address. WE captures (owner): 3414858021's "WEDNESDAY" (centred at the scripted x8 = 0.967 × canvas,
 it reaches the edge here; whether WE's layout does the same needs WE), 3445973124 with music, the B-batch captures.
 
-### Decode leftovers result: the HDR gate, .tex component flags, g_LayerModelMatrix, and what the rest decode to (fork patches 0098–0100, pin `f50bc82`, 2026-11-05)
+### Decode leftovers result: the HDR gate, .tex component flags, g_LayerModelMatrix, and what the rest decode to (fork patches 0098–0100, pin `4e2f3c8`, 2026-11-05)
 
 The "Still open" items above that have library users or readable code. Decoded from the same wallpaper64.exe 2.8.485
 (`all.c` / `all.asm`), resourcecompiler64.exe 2.8.485 (objdump) and WE's own `assets/`. **Observed** = read in the
@@ -2842,9 +2842,9 @@ property sets; `getAttachmentAngles` (GH 0x14020db20) returns Euler angles × 57
 throughout. The bridge's use of flag 4 (where `thisLayer.angles` is scaled) wasn't located; scenescript64.dll's own
 copies (0x1812ed0a0 / 0x1812ed080) are read only by four V8 builtins.
 
-**Fork tests** (`host_api_test`, 113 → 116 passed): the 3 new ones fail on `262d97b`.
+**Fork tests** (`host_api_test`, 113 → 116 passed): the 3 new ones fail on `be51bf7`.
 
-| Test | What it checks | On `262d97b` |
+| Test | What it checks | On `be51bf7` |
 |---|---|---|
 | `hdr_needs_literal_bloom` | an rgba_backbuffer FBO of 2.0 read × 0.25: `hdr` + `bloom` false 64, `hdr` + user-bound bloom 64, `hdr` + `bloom` true 127 | 127 / 127 / 127 |
 | `texture_components_define_combos` | a 4-component sampler bound to a 1 × 1 .tex: flags 3 defines none, 0x800002 the 4th, 0xa00002 the 2nd and 4th | none defined |
@@ -2856,14 +2856,14 @@ copies (0x1812ed0a0 / 0x1812ed080) are read only by four V8 builtins.
 
 - Health (`scene-health.md`, 96 scenes): **89 clean / 7 degraded / 0 failed**, as before; no scene worse in class or
   errors, none newly blank (lit pixels within 50 % on all).
-- 3 s frames vs the `262d97b` run: 2511663284 25 % of pixels differ (RGBA8 targets, no HDR; its video frame also
+- 3 s frames vs the `be51bf7` run: 2511663284 25 % of pixels differ (RGBA8 targets, no HDR; its video frame also
   varies run to run), 3477054430 7 % (the mask's roughness + emission under its lights), 3516106265 2.5 % (the frame
   builder's frame), 3509243656 0 % (generic4 reads EMISSIVE_MAP only under LIGHTING / REFLECTION; why its frame is unchanged wasn't checked further); every
   other scene as before.
 - Shader sweep (4085 checks vs the leftovers'): 6 failing before, 6 still failing, 0 fixed, 0 newly failing.
 - Player tests (DEBUG, on this core): 743 passed, 0 failed, 3 ignored.
 
-### Attachment result: the whole attachment matrix, and what the last three leftovers decode to (fork patch 0101, pin `7b2517c`, 2026-11-05)
+### Attachment result: the whole attachment matrix, and what the last three leftovers decode to (fork patch 0101, pin `5de0663`, 2026-11-05)
 
 The four items the "Decode leftovers result" left open. The same wallpaper64.exe 2.8.485 (`all.c` / `all.asm`) and
 scenescript64.dll 2.8.485 (objdump). **Observed** = read in the binary; **Inferred** = ours, marked.
@@ -2890,11 +2890,11 @@ the whole matrix (getAttachmentMatrix / Origin / Angles). Rotations about x / y 
 
 The library: 3 scenes pin children to attachments — 3463520581 (58 children: hair, cloth, accessories),
 3414858021 (6), 3363252053 (1); 3233141951 has none. Their attached layers' canvas boxes in the health run (frames 1
-and 31, 124 layer-frames) are identical to the `f50bc82` run to the pixel: every library bone and MDAT matrix there is
+and 31, 124 layer-frames) are identical to the `4e2f3c8` run to the pixel: every library bone and MDAT matrix there is
 rotation + translation (unit scale), so the whole product draws what offset + z turn drew. The change matters for a
 puppet whose bones scale (an animated squash on a bone carrying a child) and for scripts reading
 getAttachmentMatrix; nothing in the library looks different. (Their 3 s frames differ from the earlier run by as much
-as two `f50bc82` runs differ from each other: 3414858021 50.5 % vs 50.6 %, the puppets' animation phase.)
+as two `4e2f3c8` runs differ from each other: 3414858021 50.5 % vs 50.6 %, the puppets' animation phase.)
 
 **SceneScript `angles` flag 4 (not located; one more use found).** **Observed**: descriptor flag 4 is the "radians
 inside, degrees to the script" mark, and `angles` is not its only user: a material constant's descriptor gets it too
@@ -2928,7 +2928,7 @@ last CP1 = its own end (fewer than 3 particles: both). So CP0 / CP1 are the neig
 Catmull-Rom uses. The only difference left is the tangent factor: WE's bezier inner points are start + 0.15 · (end −
 CP0) and end + 0.15 · (start − CP1); uniform Catmull-Rom is the same bezier with 1/6. The curve moves by at most
 3/8 · 0.0167 · |end − CP0| (about 0.6 px per 100 px of segment at a 90° bend). **Ported (fork patch 0102, pin
-`9683b9c`)**: `CParticle::renderRope` evaluates that bezier with 0.15 (`ropeBezier`) instead of the Catmull-Rom; the
+`25d6088`)**: `CParticle::renderRope` evaluates that bezier with 0.15 (`ropeBezier`) instead of the Catmull-Rom; the
 sub-points and CP0 / CP1 clamping are unchanged. The order list's sort key wasn't read (LWE: spawn order).
 
 **Fork test** (`host_api_test`, 117 → 118 passed): `rope_spline_tangent_factor` — the rig for deterministic rope
@@ -2936,11 +2936,11 @@ particles is one emitter per particle (sphererandom, distance 0, rate 0, `instan
 order, so the rope order is the emitter order; no velocity initializer, so they stay put). a (30, 244), b (−30, 20),
 c (30, 20), d (−30, 244): the b → c chord is off the 64 × 32 view and the segment bows 0.72 · f · 224 back across it
 (subdivision 4, the flat t 0.4..0.6 piece crosses x 32). Column 32: the 2 px rope's centre 4.0 px off the centre row
-(predicted 4.2); on `7b2517c` 7.0 (predicted 6.9).
+(predicted 4.2); on `5de0663` 7.0 (predicted 6.9).
 
 **Fork test** (`host_api_test`, 116 → 117 passed): `attachment_matrix_is_whole` — a 32 × 32 puppet whose attachment
 "tip" is the MDAT matrix scale 2; the 4 × 4 square pinned to it at "0 4 0" sits 8 px up and is 8 px wide (x 28..35,
-rows 4..11). On `f50bc82`: 4 px wide, 4 px up (rows 10..13).
+rows 4..11). On `4e2f3c8`: 4 px wide, 4 px up (rows 10..13).
 
 **Gates.**
 
@@ -2966,10 +2966,10 @@ Bhattacharyya + 0.20 (1 − Canny-edge F1, 2 px tolerance) + 0.30 local`, local 
 cells' (1 − SSIM + colour difference). The scene keeps its best pair. A ranked "look here first" list, not pass/fail;
 `scene_preview_notes.json` records the explained differences (classes in the report).
 
-**Calibration:** 3414858021 with the core before its head fix (157c111) scores **0.665** (ssim 0.55, edges 0.68, local
+**Calibration:** 3414858021 with the core before its head fix (40f2b85) scores **0.665** (ssim 0.55, edges 0.68, local
 0.97: the missing head and the bright band), after it **0.32** (its sway and rain); the refined crop search took the
 good scenes down further (1174926427 0.29 → 0.06: the coarse 5 % size steps mis-scaled the crop). On the first run
-(core f4aa7c5) the clean matches sit at 0.02–0.15, animated or edited ones 0.15–0.35, and every score above 0.39 was
+(core 127d63b) the clean matches sit at 0.02–0.15, animated or edited ones 0.15–0.35, and every score above 0.39 was
 a real difference: a bug, a 3D scene, another moment of a video, or other art.
 
 **Found and fixed:**
@@ -3013,14 +3013,14 @@ a real difference: a bug, a 3D scene, another moment of a video, or other art.
   default 0.73). But 3490034653 labels its 0.65 camera "Panorama" (shows more), which agrees with the decode. Left for
   an owner's WE capture of 3516174947 at the default.
 
-**Fork tests** (`host_api_test`): 120/120; both new ones fail on `9683b9c`.
+**Fork tests** (`host_api_test`): 120/120; both new ones fail on `25d6088`.
 
-| Test | What it checks | On `9683b9c` |
+| Test | What it checks | On `25d6088` |
 |---|---|---|
 | `puppet_cullmode_normal_draws` | two 4 × 4 MDLV0016 puppet squares with a `cullmode: normal` material in a 64 × 32 scene, one drawn straight into the scene and one through an effect (its composite): both white | both the clear colour (red 0, 0) |
 | `this_layer_is_the_running_script` | sq1's script shares a class keeping thisLayer / thisObject and a function returning thisLayer.name; sq2's init makes one and calls it, a timer it sets reads its own layer, sq1's update still sees sq1: both squares visible | sq2 hidden (the class and the function said sq1) |
 
-**The list worked down (pin `9b2b244`, 2026-11-05, run `/tmp/liascape-scene-preview-run3`, the release worker on the
+**The list worked down (pin `77b9df7`, 2026-11-05, run `/tmp/liascape-scene-preview-run3`, the release worker on the
 pinned core):** every scene above 0.115 was looked at (57 of 96); classes `ok` 25, `by-design` 16, `time` 7,
 `property` 3, `fixed` 3, `known` 2, `bug?` 1, and the 39 unexamined all score ≤ 0.115 (the calibrated clean band).
 No new render bug: each remaining difference is explained in `scene_preview_notes.json`. The ones that needed a test:
@@ -3040,11 +3040,11 @@ No new render bug: each remaining difference is explained in `scene_preview_note
 - The fixed ones after the fix: 3490034653 0.629 → 0.438 (her puppet animation and petals), 3363252053 0.515 → 0.431
   (sparkles and glow at another moment), 3163060610 0.257 → 0.255 (text colour as above).
 
-Gates on `9b2b244`: health (`/tmp/liascape-scene-health-preview1`) 89 clean / 7 degraded / 0 failed, no scene worse
+Gates on `77b9df7`: health (`/tmp/liascape-scene-health-preview1`) 89 clean / 7 degraded / 0 failed, no scene worse
 (loss, errors, problems); player tests DEBUG 741 passed, 3 failed, 3 ignored in the full suite — two timing tests pass
-alone, `mpv_source_teardown_never_skips_bus_cycles` fails alone too, and fails the same way on `8fefe58` (before this
+alone, `mpv_source_teardown_never_skips_bus_cycles` fails alone too, and fails the same way on `3b17f00` (before this
 pin): a machine-state flake of the mpv V→V recording, not this change.
-Shader sweep (4085 checks, release worker on `9b2b244`): 6 failed in 4 shaders, the known 6 — none new.
+Shader sweep (4085 checks, release worker on `77b9df7`): 6 failed in 4 shaders, the known 6 — none new.
 
 ### Cursor ripple result: the simulation steps at the scene's rate; a pointer that arrives is no move (fork patches 0105–0106, 2026-11-06)
 
@@ -3078,7 +3078,7 @@ because the slot is used, and the mask decodes and samples as expected).
   (`/mnt/Windows/.../wallpaper_engine/config.json`) has `fps` **240** for the owner's two main profiles, 15 for
   the others; the Linux library's copy says 30.
 
-**Measured.** The reference captures (lp-player e56dda7, `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`):
+**Measured.** The reference captures (lp-player f9da5c2, `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`):
 the same 1 s drag, |on − off| in the path's band — WE at 30 fps 5.6, WE at 120 fps 0.6, ours at 30 fps 3.7. Ours
 before the fix, smoke with a pointer path up and down the left side (mean |pointer − still| in the left third, 0–255;
 the centre / right differences in these runs are the camera parallax following the pointer, not water):
@@ -3121,11 +3121,11 @@ at 240, his wallpaper output at 240 Hz). WE's own default for a fresh install is
 Tests: host_api_test `simulation_steps_at_the_frame_rate` (rate 30 under a 240 Hz host: 31 steps in 1 s, each 1/30 s
 and 8 frames' move, none for a frame drawn again, a press between steps kept; rate 240 under a 30 Hz host: 8 steps a
 frame of 1/240 s and ⅛ of the move) and `pointer_jump_is_no_move` (a 32 px jump reads 0, a move after it counts; a
-simulation's step after a jump holds only the move since) — both fail on 9b2b244 (241 steps of 1/240 s; the jump read
-as a 255 move) and pass on b9fed39. Player: api `pointer_enter_is_a_jump_and_rate_is_the_demand`. The smoke gained
+simulation's step after a jump holds only the move since) — both fail on 77b9df7 (241 steps of 1/240 s; the jump read
+as a 255 move) and pass on 1273652. Player: api `pointer_enter_is_a_jump_and_rate_is_the_demand`. The smoke gained
 `--fps N` (frames per second of scene time), `--we-fps R` (the scene's rate) and a polyline `--pointer`.
 
-Gates on b9fed39: host_api_test 122/122; scene health 89 clean / 7 degraded / 0 failed, no scene's class or loss
+Gates on 1273652: host_api_test 122/122; scene health 89 clean / 7 degraded / 0 failed, no scene's class or loss
 changed; shader sweep 6 failed checks, the 6 known; player suite 745 passed, 0 failed, 3 ignored. A library scan for
 simulation effects (stock and packaged, the rule above) finds only 3184155462; `g_PointerPositionLast` is read only by
 cursorripple, so 0106 changes nothing else either.
@@ -3259,8 +3259,8 @@ two mode-7 layers at alpha 0.3: 128 → 143.6 where they differ, WE 142.9), 3309
 take the new draw (fog from 0 to 500 at density 1: nothing at 2–25 units). Applying the lit train's alpha on both
 draws had put its 0.3 frames at 0.09 (seat rms against WE 3.2–3.9); once, 1.6–2.2.
 Tests: api `fog_reaches_world_layers` (a white genericimage4 layer 10 units out, fog red 0 → 5: red; alpha 0.5
-under far fog: 127 127 191, once; on b9fed39 the layer stays white) and `blend_mode_layer_takes_its_colour_once`
-(colour 0.5 multiplied over red: 128 0 0; 64 0 0 on b9fed39).
+under far fog: 127 127 191, once; on 1273652 the layer stays white) and `blend_mode_layer_takes_its_colour_once`
+(colour 0.5 multiplied over red: 128 0 0; 64 0 0 on 1273652).
 
 **Not done / found:**
 - `input.cursorWorldPosition` in a 3D scene. 3477054430's head turns toward `cursorWorldPosition − its origin`

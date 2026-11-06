@@ -351,8 +351,8 @@ Two bug classes kept recurring; fix the class, not the instance:
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
       `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 92 ok, 1 static
-      by design, 3 load_failed (3D) of 96 with LWE `40eacc9`; it was 86 ok, 1 blank, 4 load_failed, 4 broken with
-      `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
+      by design, 3 load_failed (3D) of 96 with LWE `bab619b`; it was 86 ok, 1 blank, 4 load_failed, 4 broken with
+      `c902d06`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
   - [x] **Real-WE references (goal pictures)** — done 2026-11-06, `docs/player/spikes/we-proton.md`. The real
@@ -415,16 +415,16 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [x] **B4 Text renderer.** UTF-8, multi-line, alignment/limits, a fontconfig `systemfont_*` (text vanishes on
           NixOS today), drawn as an image so effects/parent/rotation/parallax apply (T1–T8, E34, G13, G30). 45
           scenes. L. **Done 2026-11-04** (fork patches 0048 text layers are image layers + 0049 text strings and
-          `"1 1 1"` colour properties + 0050 wrap/rows/spacing/script alignment, pin `e372e44`). Decoded: text
+          `"1 1 1"` colour properties + 0050 wrap/rows/spacing/script alignment, pin `6bc301c`). Decoded: text
           extends image, 300 dpi, WE's layout, placement and padding, the systemfont table. fontconfig finds
-          Arimo / Comic Neue / Inconsolata here. host_api_test 58/58 (5 new, all failing on c4eea29); 44 of 50 literal
+          Arimo / Comic Neue / Inconsolata here. host_api_test 58/58 (5 new, all failing on 5a365d4); 44 of 50 literal
           texts match the editor's saved height within 2 px. See the audit's "B4 result".
           - [ ] WE captures of two clock scenes (1884904087, 2134765860) for size and line layout (T10 is decoded;
                 this checks it).
           - [ ] Cursor hit tests now reach text layers (they are CImages); check 2325974975's buttons still behave.
     - [x] **B7 Blend modes / framebuffer.** Copy the scene FBO before sampling `_rt_FullFrameBuffer` (a feedback
           loop today), `clampuvs`, `copybackground` (E27, E28, E30, E31, E33). 28 scenes. M.
-          **Done 2026-11-04** (patch 0047, pin `c4eea29`; 0046 fixes B8's registerAudioBuffers scope check). All
+          **Done 2026-11-04** (patch 0047, pin `5a365d4`; 0046 fixes B8's registerAudioBuffers scope check). All
           decoded from wallpaper64.exe: copy before a pass samples its own target, mode 31 = additive, clampuvs
           (default true) on the composite FBOs, compose layers draw their subtree, `_a`/`_b` parity. See the
           audit's "B7 result".
@@ -432,9 +432,9 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [x] **B11 Particles, extended.** Child systems, the missing initializers/operators, control points, rope/trail
           combos (P2, P10, P15, P22–P35). 29 scenes. L; first read the operator interpreter from asm. **Done
           2026-11-04** (fork patches 0051 operators as WE's interpreter runs them + 0052 child systems + 0053 control
-          points, pin `2559b88`): P2, P10, P15, P22, P28, P31–P35. GH 0x140265800 decompiled in REA (no decompile
+          points, pin `a209070`): P2, P10, P15, P22, P28, P31–P35. GH 0x140265800 decompiled in REA (no decompile
           timeout); opcodes, record layouts and the forms of movement, the ramps, oscillate*, attract, vortex and
-          turbulence are in the audit's "B11 result". host_api_test 61/61 (3 new, failing on e372e44); corpus 93 ok
+          turbulence are in the audit's "B11 result". host_api_test 61/61 (3 new, failing on 6bc301c); corpus 93 ok
           on both cores, none newly blank; player tests 737/0/3.
           - [ ] WE captures of 3174556087 (rain splash children), 2288455459 (firefly trails) and an oscillating
                 scene to confirm the decoded forms against WE itself.
@@ -443,10 +443,10 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] `controlpointangle0-7`, vortex_v2 (case 0x10), P24 cone, P25/P26: 0 library users and unread —
                 listed in the audit's "Leftovers result".
     - [x] **B12 Puppet warp.** MDLV 0013–0023, skinning, layer mixing, attachments (G06–G09; PR #625 is closed,
-          unmerged). 14 scenes. L. **Done 2026-11-04** (fork patch 0054, pin `36ad6a0`): WE's MDL loader (GH
+          unmerged). 14 scenes. L. **Done 2026-11-04** (fork patch 0054, pin `1eb795e`): WE's MDL loader (GH
           0x1402873f0: the vertex layout from the mesh's format word, every MDLV ≤ 0023, MDLS/MDLA/MDAT by section),
           CPU skinning, the layer clock/weight/normal and additive mixing, attachments, and puppets without effects
-          drawn in place. All in the audit's "B12 result". host_api_test 62/62 (1 new, failing on 2559b88); corpus 93
+          drawn in place. All in the audit's "B12 result". host_api_test 62/62 (1 new, failing on a209070); corpus 93
           ok on both cores, none newly blank.
           - [ ] A WE capture of 3463520581 or 3233141951 to check poses and the attachment's (inferred) form.
           - [ ] Physics bones (none enabled in the library; WE's simulation is on an unread rigid-body helper family
@@ -456,24 +456,24 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] B14 builds its static MDL meshes on `Render/Objects/Puppet.{h,cpp}` (normals/tangents are parsed for
                 the layout but not kept yet).
     - [x] **B13 HDR bloom + FBO formats** (E35, E23). 5 scenes. M. **Done 2026-11-04** (fork patch 0055, pin
-          `c62d777`): a `general.hdr` scene renders into half float targets and blooms with WE's HDR chain
+          `0d66ae8`): a `general.hdr` scene renders into half float targets and blooms with WE's HDR chain
           (hdr_downsample_bloom → hdr_downsample levels → hdr_upsample(_cubic) back up → combine, decoded GH
           0x1401afbf0 / 0x1401b3b10 / 0x1401b42b0); effect FBOs take the format they name (rg88, r8, the f formats,
           rgba_backbuffer half float with HDR); WE's LDR bloom defaults 2 / 0.65. host_api_test 64/64 (2 new); corpus 93/96
           on both cores, none newly blank. Result: the audit's "B13 result" (§ 5). Left:
           - [ ] `combine_dhdr_upsample` (HDR displays) and `combine_video_hdr` (not ported).
     - [x] **B14 3D scenes.** Perspective camera, 3D image layers, MDL meshes + `generic4`, lights/fog (G20–G29, E13,
-          E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `157c111`, which
+          E14, E43). The 3 load_failed scenes below. L. **Done 2026-11-04** (fork patch 0056, pin `40f2b85`, which
           also carries B13's 0055): G24, G22, G25, G26 point/spot (E13), G28 (E14), `transparentsorting`, camera
           objects and the 3D shake; decoded addresses in the audit's "B14 result". host_api_test 68/68 (4 new,
-          failing on 36ad6a0); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
+          failing on 1eb795e); corpus 93 → 96 ok, none newly blank; player tests 737/0/3.
           - [ ] Left: directional shadow cascades, light clusters, volumetrics' SHADOW / COOKIE / fog / directional (point and spot volumetrics and shape objects: done in F2, 0086 and 0088); skinned/morphed models, PBR-mask component combos, REFLECTION; fog on image and
                 particle shaders; the 3D camera's parallax and zoom (WE's 3D projection doesn't read the zoom; its
                 other reader and the 3D parallax block weren't read — 0 3D scenes use either); E43 text `depthtest`
                 (no-op in 2D, not ported); customsortorder's reader; hit-testing world-placed layers; an
                 output-sized 3D target; WE captures of the three scenes.
     - [x] **3414858021 (owner report): head gone, cursor trail y-inverted.** **Done 2026-11-04** (fork patches
-          0057–0060, pin `b6e2878`): SceneScript `angles` are degrees (scripts turned the body 55°, the head and arm
+          0057–0060, pin `e814c25`): SceneScript `angles` are degrees (scripts turned the body 55°, the head and arm
           left the screen); a pointer-linked particle control point was y up in a y-down space (trail mirrored);
           the compose layer holding the head didn't compile (line continuation, a written varying, a vec4×vec2
           truncation, a stray `#endif` — all accepted now as WE does); a failed parent orphaned its children. The
@@ -490,7 +490,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           `src/player/tests/onmachine/scene_health.sh`): [`docs/player/reports/scene-health.md`](player/reports/scene-health.md)
           — every library scene's silent losses (layers/effects left out, shader/script/asset errors, unsupported
           features, off-canvas layers). First run: 75 clean, 21 degraded, 0 failed of 96; after the shader rules (0064):
-          79 clean, 17 degraded; after the coverage batch (0065–0070, pin `deeb4da`): 86 clean, 10 degraded, 0 failed —
+          79 clean, 17 degraded; after the coverage batch (0065–0070, pin `cbe4445`): 86 clean, 10 degraded, 0 failed —
           script errors 38 → 11, layers dropped 3 → 0, none worse. Batched by cause:
     - [ ] **Scene preview compare — every scene against its author's preview** (2026-11-05, runner
           `src/player/tests/onmachine/scene_preview_compare.sh`, notes `scene_preview_notes.json`):
@@ -506,15 +506,15 @@ Two bug classes kept recurring; fix the class, not the instance:
           types, pass options) with library / stock usage and sizes. Pick work from its "Future batches":
           - [x] **F1 shadows + light cookies — done 2026-11-04** (fork patch 0071): the shadow pass and atlas (spot and
                 point lights, the stock casters), spot cookies, tube and directional lights; result in the audit's "F1
-                result". No library scene uses them (synthetic check). host_api_test +4 (RED on `deeb4da`).
+                result". No library scene uses them (synthetic check). host_api_test +4 (RED on `cbe4445`).
                 - [ ] Left: directional cascades (`g_LFeature_Shadow*`), WE's light clusters, 2.8.485's PCSS (quality
                       4), the `shadows` quality as a setting (medium now), `lightconfig`. (Skinned/morphed casters: done in F4, 0078/0080.)
           - [x] **F3 blend shapes + bone alpha, F4 skinned / morphed models + createModelData — done 2026-11-04**
-                (fork patches 0078–0081, pin `1072720`): the casters' SKINNING / MORPHING combos compile (sweep: the
+                (fork patches 0078–0081, pin `00d7760`): the casters' SKINNING / MORPHING combos compile (sweep: the
                 10 caster checks pass), MDMP blend shapes with their MDLA weight tracks and bone alpha on puppets
                 (+ get/setBlendShapeWeight), skinned and morphed 3D models posed by their animation layers,
                 createModelData / IModelData / createLayer ({ model }). Result in the audit's "F3/F4 result".
-                host_api_test +4 (RED on 24adeff).
+                host_api_test +4 (RED on bdafdde).
                 - [ ] Left: bone physics (+ applyBonePhysicsImpulse, gravity/wind; IK done in F2), root motion /
                       `rootmotion`, MORPHING_MODIFIERS, IModelLayer's animation-layer API on models, `perspective`
                       model layers, MDLA v6's per-bone float track.
@@ -523,17 +523,17 @@ Two bug classes kept recurring; fix the class, not the instance:
                 `perspective` layers and perspective particles (35 scenes' systems now WE's size and depth), camera
                 paths + camerafade, `sortorder` in WE's transparent sort; 20 stock-only operators/initializers (WE's
                 form where decoded, else inferred and marked). Result in the audit's "F5/F6 result". host_api_test +6
-                (RED on `24adeff`).
+                (RED on `bdafdde`).
                 - [ ] Left: the `layerimage` emitter (CPU pixels of the layer), collisionmodel, the inferred F6 parts
                       (boids' forces, remap's function shapes, the initializers' runtime: an asm read of case 0x11 /
                       0x13 and the spawn interpreter GH 0x140260d80), vortex_v2, a camera object's own `path`/`queuemode`
                       (all empty in the library), text `depthtest`, customsortorder, the 3D zoom/parallax, WE captures
                       of the element previews (`assets/scenes/particleelementpreviews`).
           - [x] **F2 shape objects + volumetric lights, F3's puppet IK — done 2026-11-05** (fork patches 0086–0090,
-                pin `f4aa7c5`): the "VolumeLight" is WE's shape class (3319542538's light shafts now draw), point and
+                pin `127d63b`): the "VolumeLight" is WE's shape class (3319542538's light shafts now draw), point and
                 spot `castvolumetrics` with WE's volumetrics pass and shaders (synthetic check; 0 library users), puppet
                 IK chains (3042492564's arm follows its hand target; solver inferred). Result in the audit's "F2
-                result". host_api_test +3 (RED on `78128d1`).
+                result". host_api_test +3 (RED on `5e65da4`).
                 - [ ] Left: volumetrics with SHADOW / COOKIE / fog, directional volumetrics, the `volumetrics` quality
                       setting (medium); bone physics + applyBonePhysicsImpulse + gravity/wind (0 users); IK limits
                       (`ikce`, `ikrmin/max`); root motion; MORPHING_MODIFIERS.
@@ -596,8 +596,8 @@ Two bug classes kept recurring; fix the class, not the instance:
     destroyed at each teardown — the same race, Phase 2 § F7 residual), fixed by the async streams; the meter can't
     see them because its own capture sat in the same stalled cycle.
   - F5: `tests/api.rs` is flaky under the full suite. `scene_create_and_destroy_never_stall_the_loop` (destroy max busy
-    3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `ba86575` and 4 of 10 on Task 14's branch; alone it passes.
-    `scene_fps_change_is_live_same_pid` also failed once on `ba86575`. Not caused by Task 14.
+    3.25–3.56 ms against its 3 ms bound) failed 3 of 9 runs on `58eb5ec` and 4 of 10 on Task 14's branch; alone it passes.
+    `scene_fps_change_is_live_same_pid` also failed once on `58eb5ec`. Not caused by Task 14.
     **Settled 2026-11-02 ("Measure Loop Stalls Without Waiting For A Core", then "Free Imported Frames Off The Loop");
     one driver limit remains, excluded by name.** (1) The 3.25–3.56 ms readings were the loop thread waiting for a core, not loop work: the `loop`
     probe now has opt-in scheduler accounting (`{"account": true}`: per stretch the thread's CPU clock,

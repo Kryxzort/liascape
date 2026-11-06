@@ -22,7 +22,7 @@
   },
   "3354740764": {
     "class": "fonts",
-    "note": "fixed 2026-11-06 (fork d5f244a, 313e1d2): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 → 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) — the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180°, scaled 1.2 × 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (−14 to −32 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180°\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute."
+    "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 → 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) — the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180°, scaled 1.2 × 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (−14 to −32 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180°\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute."
   },
   "3276522107": {
     "class": "known",
@@ -70,11 +70,11 @@
   },
   "1726902114": {
     "class": "ok",
-    "note": "the light shafts hang from the top left as in WE since 313e1d2 (particle sprites were upside down). They are random in WE."
+    "note": "the light shafts hang from the top left as in WE since 317bb73 (particle sprites were upside down). They are random in WE."
   },
   "2561227934": {
     "class": "ok",
-    "note": "the light shafts stand as in WE since 313e1d2 (particle sprites were upside down); they are random in WE."
+    "note": "the light shafts stand as in WE since 317bb73 (particle sprites were upside down); they are random in WE."
   },
   "2134765860": {
     "class": "ok",

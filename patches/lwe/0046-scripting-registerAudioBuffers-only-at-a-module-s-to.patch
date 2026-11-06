@@ -1,4 +1,4 @@
-From 49cb616297b94feb4dc5d43b29babd4321c58fb5 Mon Sep 17 00:00:00 2001
+From e823b61839d6881489c976058ef18c3e11718423 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 05:19:11 +0530
 Subject: [PATCH 046/111] scripting: registerAudioBuffers only at a module's
@@ -6,7 +6,7 @@ Subject: [PATCH 046/111] scripting: registerAudioBuffers only at a module's
 
 engine.registerAudioBuffers threw "can only be called from global scope" only while no module ran, but
 callModule sets the running module for update()/init() too, so a call inside update() went through and
-the WE error never came (host_api_test audio_reaches_shaders_scripts_and_emitters failed on 592fdff).
+the WE error never came (host_api_test audio_reaches_shaders_scripts_and_emitters failed on f383c4a).
 The engine now tracks the module's evaluation itself.
 
 Origin: ours

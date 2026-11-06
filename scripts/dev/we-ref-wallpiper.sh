@@ -26,7 +26,7 @@
 #   --proton DIR   Proton build (default Steam's "Proton - Experimental", as the first set)
 #   --timeout S    first-picture limit per scene (default 60; the very first run also builds the prefix)
 #   --keep-item-blobs  keep the shader blobs a Workshop item ships (shaders/blobs*). Default: left out, so WE
-#                  compiles them with the Microsoft d3dcompiler_47 it ships, as the first set does since 80ae486
+#                  compiles them with the Microsoft d3dcompiler_47 it ships, as the first set does since 7401e56
 #   --wallpiper-fonts  upstream wallpiper's font handling: Proton's fonts, with arial/tahoma/times/cour redirected
 #                  to the host's fontconfig sans/serif/mono. Default: the Windows fonts (read-only, from the owner's
 #                  Windows drive) linked into OUR prefix, like the first set, and the redirect off

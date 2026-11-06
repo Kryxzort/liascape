@@ -1,4 +1,4 @@
-From 08865412f661d7d867023c93fabee35a6634bb32 Mon Sep 17 00:00:00 2001
+From a5f24fcfbd8d9ffa548bb42a3402551515ec196f Mon Sep 17 00:00:00 2001
 From: CoderNoveau <thomastpnguyen@gmail.com>
 Date: Wed, 28 Oct 2026 13:13:20 +1100
 Subject: [PATCH 010/111] fix: Wayland outputs were locked to half refresh (EGL

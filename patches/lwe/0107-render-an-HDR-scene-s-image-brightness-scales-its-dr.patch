@@ -1,4 +1,4 @@
-From d7bca1f96d2e6c66c73b3a06a44406b4061bd25a Mon Sep 17 00:00:00 2001
+From f2819bc838da07dbb16efe589537956775cd23ba Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 18:08:44 +0530
 Subject: [PATCH 107/111] render: an HDR scene's image brightness scales its

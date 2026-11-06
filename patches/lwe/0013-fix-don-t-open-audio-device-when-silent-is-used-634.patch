@@ -1,4 +1,4 @@
-From cc090fa8490d16f3f37379dd1f14175065b66c6a Mon Sep 17 00:00:00 2001
+From 986bd31b1d2765576fc8c431aea64160ca493fdd Mon Sep 17 00:00:00 2001
 From: ElXreno <elxreno@gmail.com>
 Date: Wed, 28 Oct 2026 05:36:19 +0300
 Subject: [PATCH 013/111] fix: don't open audio device when --silent is used

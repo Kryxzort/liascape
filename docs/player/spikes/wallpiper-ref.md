@@ -138,7 +138,7 @@ cd - && scripts/dev/we-ref-wallpiper.sh --root /tmp/claude-1000/wallpiper --setu
     but it is a different version.
 - **Workshop items** are reflink copies (free on this btrfs).
   - The shader blobs the item ships (`shaders/blobs*`) are left out, so WE compiles them with the Microsoft
-    `d3dcompiler_47` it ships in `bin\`. That is the same input as the first set since `80ae486`.
+    `d3dcompiler_47` it ships in `bin\`. That is the same input as the first set since `7401e56`.
   - `--keep-item-blobs` keeps them.
 - **steam-run hides `/tmp`.** It mounts a private tmpfs there, and wallpiper's layer and preload need the host's
   `/tmp` sockets. So the Proton wrapper runs a copy of steam-run's bwrap script with that one line changed to
@@ -194,7 +194,7 @@ python3 -I src/player/tests/onmachine/scene_we_crosscheck.py --first docs/player
 | VRAM (WE) | 440 MiB average, 1.0 GB max | about 470 MiB average |
 | one frame grab | 0.26–0.4 s (PNG encode in the portal) | about 0.14 s |
 
-## Cross-check (the trusted first set of `80ae486` vs wallpiper vs ours)
+## Cross-check (the trusted first set of `7401e56` vs wallpiper vs ours)
 
 The scores use the report's measure (0.30 ssim + 0.20 hist + 0.20 edges + 0.30 local at 256 px; 0 = identical),
 as the mean over 0.5 / 2 / 5 s. "Ours" is `liascape-scene-worker --lwe-smoke` at wallpiper's times (seed 7).

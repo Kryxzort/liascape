@@ -1,4 +1,4 @@
-From 1381aa30b6a63479673c1f2eebfed97ae5b6a5cf Mon Sep 17 00:00:00 2001
+From 67ae6cc36b91d2c1738e1bdfc1385bf9aa55a38a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 27 Oct 2026 20:52:34 +0530
 Subject: [PATCH 004/111] render: never render a project whose renderer failed

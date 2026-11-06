@@ -7,9 +7,9 @@
   "shot_width": 640,
   "core": "",
   "started": "2026-11-05T08:54:13+05:30",
-  "commit": "1cb88ba",
-  "lwe": "9b2b2443acfac241c48eea2e37f18cfab717eac1",
-  "pin": "9b2b2443acfa",
+  "commit": "7373be0",
+  "lwe": "77b9df7fbe21a8e7a9ed4697e8af16e0b5d53f27",
+  "pin": "77b9df7fbe21",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
  },
  "generated": "2026-11-05T09:13:09+0530",
@@ -486,7 +486,7 @@
     240
    ],
    "class": "fixed",
-   "note": "the character (\u4eba\u72691, a puppet whose material culls, cullmode normal) was culled whole: LWE's y-down puppet positions reached GL clockwise. Fixed in fork 0103 (pin 9b2b244): 0.629 before, 0.438 after; the rest is her puppet animation (the preview caught her arm raised) and the falling petals.",
+   "note": "the character (\u4eba\u72691, a puppet whose material culls, cullmode normal) was culled whole: LWE's y-down puppet positions reached GL clockwise. Fixed in fork 0103 (pin 77b9df7): 0.629 before, 0.438 after; the rest is her puppet animation (the preview caught her arm raised) and the falling petals.",
    "rank": 12
   },
   {
@@ -915,7 +915,7 @@
     360
    ],
    "class": "fixed",
-   "note": "calibration: 0.665 before the head fix (pin 157c111), 0.32 after; the rest is its sway and rain.",
+   "note": "calibration: 0.665 before the head fix (pin 40f2b85), 0.32 after; the rest is its sway and rain.",
    "rank": 23
   },
   {
@@ -1656,7 +1656,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 42
   },
   {
@@ -1695,7 +1695,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 43
   },
   {
@@ -1734,7 +1734,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 44
   },
   {
@@ -1773,7 +1773,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 45
   },
   {
@@ -1812,7 +1812,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 46
   },
   {
@@ -1851,7 +1851,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 47
   },
   {
@@ -1890,7 +1890,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 48
   },
   {
@@ -1929,7 +1929,7 @@
     358
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 49
   },
   {
@@ -1968,7 +1968,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 50
   },
   {
@@ -2007,7 +2007,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 51
   },
   {
@@ -2046,7 +2046,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 52
   },
   {
@@ -2085,7 +2085,7 @@
     251
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 53
   },
   {
@@ -2124,7 +2124,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 54
   },
   {
@@ -2163,7 +2163,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 55
   },
   {
@@ -2202,7 +2202,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 56
   },
   {
@@ -2241,7 +2241,7 @@
     360
    ],
    "class": "ok",
-   "note": "matches (looked at on the 9b2b244 run; clocks / days differ).",
+   "note": "matches (looked at on the 77b9df7 run; clocks / days differ).",
    "rank": 57
   },
   {

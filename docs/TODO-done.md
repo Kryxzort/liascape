@@ -22,7 +22,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in liascape-player.
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
-- [x] **LICENSE** for the repo — done in `a955654` (GPL-3.0, with `LICENSE.upstream-MIT` for the livepaper portions). Was: There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [x] **LICENSE** for the repo — done in `5a97418` (GPL-3.0, with `LICENSE.upstream-MIT` for the livepaper portions). Was: There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 - [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
@@ -328,7 +328,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         `SOUND_SEMANTICS` 2 is hashed into every fingerprint. **Open:** spatialization (WE pans a 2D scene's sound
         by the object's x when `spatialization` is set) not done; `startsilent` sounds never play (LWE's SceneScript
         has no sound methods — `CSound::play()` is the hook); a start opens the picked file on the render thread
-        (22 ms for a 40 MB WAV in a `scene.pkg`, every few minutes). The fork commit `45ed25c` is local only until
+        (22 ms for a 40 MB WAV in a `scene.pkg`, every few minutes). The fork commit `c3a7d68` is local only until
         the owner pushes `livepaper/next-v2` (this machine's store holds its source, so the flake builds here).
         **One-off (owner, no migration code):** the index's flat `loudnessState` isn't keyed by the fingerprint, so
         a stored measurement of the OLD sound is continued by the next play: stale for 8 of the 10 measured items
@@ -636,7 +636,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       — root cause: `/home/kryxzort/Projects` is a symlink to `/mnt/CachyOS/@home/kryxzort/Projects`, and
       MSBuild's IncrementalClean compares `obj/…/FileListAbsolute.txt` by path STRING — a build through one
       spelling deletes the other spelling's entries, i.e. its own fresh outputs. Every script now roots at
-      `pwd -P` and the test scripts run their backend from a verified snapshot of `bin/Debug` (d767c59).
+      `pwd -P` and the test scripts run their backend from a verified snapshot of `bin/Debug` (c961518).
 - Under "Speed storm leftovers":
   - [x] **Queue cap drops the NEWEST set** (`MaxQueueDepth`): for coalescible sets (`/preview`, a slider) the
         latest value is the one that matters — coalesce per target instead of refusing admission.
@@ -672,7 +672,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       — a throttled or late tick pushed several frames' force — and a pointer entering the output stroked a saturated
       line from where it left. Fork 0105 (`wp_project_set_frame_rate`: a simulation effect steps at the scene's rate,
       `ToWorker::Rate` = the outputs' demand, never the budget's cap) and 0106 (`wp_project_pointer_jump`, Wayland
-      `enter` → `Pointer {jump}`); pin b9fed39. Audit "Cursor ripple result". Guards host_api
+      `enter` → `Pointer {jump}`); pin 1273652. Audit "Cursor ripple result". Guards host_api
       `simulation_steps_at_the_frame_rate`, `pointer_jump_is_no_move`, api `pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - [x] **WE's frame limiter, decoded** (2026-11-06): FUN_14006dd90's `clamp(round(1000/fps)·0.5, 6, 100)` is the audio
       capture thread's `Sleep`, not the limiter. The render loop (FUN_140141520) sleeps to `fps` frames a second and
@@ -787,7 +787,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       wallpaper's level. Matched: the scene worker clamps its output to ±1 after the stream's own gain (WE's order, so a
       lower user gain or the normalization still leaves peaks whole). Audit "Leftovers result".
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
-  - [x] 3354740764's box and light shafts — done 2026-11-06 (fork `d5f244a`, `313e1d2`). The box: an
+  - [x] 3354740764's box and light shafts — done 2026-11-06 (fork `7797317`, `317bb73`). The box: an
         `alphatocoverage` layer with effects drew its last pass unblended; the mode is now its own, blended by
         alpha (WE's coverage at MSAA). The shafts: every particle sprite was drawn upside down (LWE's y-flipped
         particle space took WE's up as is), so asymmetric sprites — light shafts, here and in 1726902114 /
@@ -800,7 +800,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         amount each run (4 runs; the 3D agent measured 0.25–0.9 s on 3276522107 / 3509243656). Ours at 2 s is
         0.07 s before the fade starts, which made it look like a 2 s vs 5 s gap at the 0.5 / 2 / 5 s samples.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
-  - [x] **The 3D scenes** — done 2026-11-06 (fork `dc2f07e`, `f6802a0`, patches 0108–0109; gap audit "3D scenes
+  - [x] **The 3D scenes** — done 2026-11-06 (fork `867a5e7`, `5a42e7e`, patches 0108–0109; gap audit "3D scenes
         against WE"). 3276522107 isn't a lighting difference. Its lit train layer flashes on a 2 s alpha loop, and
         WE's scene clock is already 0.25–0.9 s along at its first frame (4 runs; seats match once aligned, rms ~2 of
         19). 3509243656's darkness was the FP16 swap chain capture; against the re-encoded reference only the same
@@ -840,13 +840,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - [x] **B1 Property scripts run.** quickjs-ng module namespace, not the Promise. Skip undefined returns,
         `init`, `thisLayer` per call. Load WE's `baseclasses.js` + jsmodules (S1–S7, S9, S33–S35, S38). 40 scenes,
         25 visibly broken today. M. **Done 2026-10-29:** fork patches 0019 (solid layers' uninitialised debug
-        switch) + 0020 + 0021, pin `e78d94d`; WE's JS read at run time from the user's assets (never copied). Also S8,
+        switch) + 0020 + 0021, pin `8902c4a`; WE's JS read at run time from the user's assets (never copied). Also S8,
         S22 done; S15, S24, S25, S29, S30 partly. Result + corpus delta: the audit's "B1 result" (§ 5).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches":
   - [x] **B2 Layer alpha/colour live + keyframe animations.** `g_Color4.w` = alpha, per-draw uniforms, a
         `c0..c2` bezier evaluator (E2, E3, G01, G02). ~50 scenes. M. **Done 2026-11-02:** fork patches 0022
         (live object uniforms, `g_Color4` = (colour, alpha)) + 0023 (keyframe animations, decoded from
-        wallpaper64.exe), pin `ccb545d`. Left: `timeofday` (0 users), shared `parent`/`children` timelines (done 2026-11-05,
+        wallpaper64.exe), pin `d4969e4`. Left: `timeofday` (0 users), shared `parent`/`children` timelines (done 2026-11-05,
         0095: a child runs on its parent's clock, 5 scenes), events and the
         SceneScript animation API (`getAnimation`, play/stop — B10), G05. Result + corpus delta: the audit's
         "B2 result" (§ 5).
@@ -855,20 +855,20 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         meaning, HSV `colorn`, sprite-sheet blend, live overrides (P1, P3–P8, P13, P14, P18, P19, P38). 61 scenes.
         M. **Done 2026-11-03:** fork patches 0024 (one scene RNG) + 0025 (initializers) + 0026 (prewarm, rate,
         count, live overrides, shared emitter timer — also P16, hide = reset) + 0027 (HSV `colorn`) + 0028
-        (`SPRITESHEETBLEND`), pin `4c75eae`. Smoke: particles at +1 s / +60 s went from 0.07–0.48 to 0.79–1.00 in
+        (`SPRITESHEETBLEND`), pin `93438d4`. Smoke: particles at +1 s / +60 s went from 0.07–0.48 to 0.79–1.00 in
         8 of 10 scenes (the other 2 have a `starttime` shorter than their lifetimes, as in WE). Corpus ok 93 as
         B2 (2 load timeouts under another run's load, ok alone). Left: `SPRITESHEETBLENDNPOT`, the WE captures
         of 1797172968/1155728109. Result: the audit's "B3 result" (§ 5).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "B4 Text renderer.":
   - [x] HarfBuzz shaping (ligatures, GPOS kerning; most of the width misses) and WE's own font fallback
-        chain — done 2026-11-05 (fork patch 0091, pin `262d97b`: WE's run split GH 0x1401da3c0, its 8-font chain
+        chain — done 2026-11-05 (fork patch 0091, pin `be51bf7`: WE's run split GH 0x1401da3c0, its 8-font chain
         0x1404c5030; 22 of 66 literal texts match the editor's saved size exactly, was 4). Left: T6/T7
         (background, outline, shadow, MSDF; 0 scenes); `anchor` for crop/letterbox (G32/C5).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches":
   - [x] **B5 Parallax + camera.** Delay smoothing (read as a bool → 14 of 25 frozen), a centred target,
         `g_ParallaxPosition`, `general.zoom`/fov, camera objects, shake (G10–G19, E1). 25 + 8 scenes. M. **Done
         2026-11-03:** fork patch 0029 (decoded camera update, per-object offset by the root's depth, zoom × the
-        active camera object's, shake), pin `d7a9f34`; the worker keeps the pointer centred until the host sends
+        active camera object's, shake), pin `9f64193`; the worker keeps the pointer centred until the host sends
         one. Headless pointer: 3289734539 moves against the pointer and returns. Corpus ok 93 as B3. Left: E6 (the
         effect projection matrix), the camera-object pan and paths, text parallax (B4), WE captures (3516174947's
         zoom 0.75 now shows borders, per the decoded formula). Result: the audit's "B5 result" (§ 5).
@@ -876,26 +876,26 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - [x] **B6 Hierarchy.** A hidden parent hides its children; particle/text parent transforms (G03, G04, P36,
         G31). 12 + 19 scenes. S. **Done 2026-11-03:** fork patch 0030 (decoded "effectively visible", particle
         systems resolved under their parents every frame, aligned layers turn about their origin; also: an image
-        hidden at load now shows when turned on), pin `c959e7a`. Corpus ok 93 as B5. Left: text parent transforms (B4), a
+        hidden at load now shows when turned on), pin `602de79`. Corpus ok 93 as B5. Left: text parent transforms (B4), a
         sound under a hidden parent, G05; WE captures of 3243449890 (its "simple" character variant, drawn before
         under a hidden group, is gone) and 3490034653 (parented light beams now show). Result: the audit's "B6
         result" (§ 5).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "B7 Blend modes / framebuffer.":
-  - [x] 3426575339, 3432876246, 3556794116 smoke blank on every core incl. 592fdff. **Not a regression**
-        (blank on 3eaac6e, cc6f1c9 and in B5's smoke too): their main layer is a video texture, libmpv
+  - [x] 3426575339, 3432876246, 3556794116 smoke blank on every core incl. f383c4a. **Not a regression**
+        (blank on d29b73c, 94cfc2e and in B5's smoke too): their main layer is a video texture, libmpv
         decodes it in real time, and the smoke ran 3 s of scene time in ~30 ms. The smoke now paces
         frames to the wall clock (`--unpaced` for the old run); all three render. The player was never
         affected. 3046119914 / 3432999904 ("black") were the same thing and render too. See the
         audit's "Blank-scene result".
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "B7 Blend modes / framebuffer.":
   - [x] Re-check B7's 2883756643 blend modes now that its video layer shows in the smoke. **Done 2026-11-04**
-        (paced, c4eea29 vs 592fdff, two runs each): the cores differ on 81–83 % of pixels (run-to-run 0.4–0.9 %),
+        (paced, 5a365d4 vs f383c4a, two runs each): the cores differ on 81–83 % of pixels (run-to-run 0.4–0.9 %),
         the frame is brighter (pixels over 200: 30.6 → 35.6 %), the bokeh adds instead of tinting and the
         rim light glows; no seams or black blocks. Still looks right; a WE capture stays the check.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches":
   - [x] **B8 Audio response.** f32 stereo input, WE's band mapping, separate Left/Right,
         `engine.registerAudioBuffers`, audio-driven emitters (A1–A5, E8, S17, P20, P21). 41 scenes. M.
-        **Done 2026-11-03 on the fork side** (patch 0045, pin `592fdff`): 22 of 39 loading scenes respond to a
+        **Done 2026-11-03 on the fork side** (patch 0045, pin `f383c4a`): 22 of 39 loading scenes respond to a
         synthetic tone; see the audit's "B8 result".
         - [x] Feed stereo — done 2026-11-05 (Leftovers batch, player side): SysMon mixes in stereo on the graph clock,
               each scene gets every frame in order (`Tick.input` = 48 kHz s16 stereo, protocol 5) and the worker
@@ -912,18 +912,18 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         **Done 2026-11-03** (all but E9, E11, E20, E38, E41): fork patches 0031 (engine uniforms) + 0032 (live,
         tinted bloom) + 0033 (annotation defaults; E18 is parity: WE skips malformed combos too) + 0034 (varyings:
         2189783622's foliagesway is back) + 0035 (textinput/combo values, the listing) + 0036 (usertexture →
-        its scenetexture property), pin `cc6f1c9`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found, also not via the RSSetViewports sites — 2026-11-05; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
+        its scenetexture property), pin `94cfc2e`. Corpus ok 93 as B6. Left: E9 (its +0x74 writer still not found, also not via the RSSetViewports sites — 2026-11-05; E11 done 2026-11-05 in 0100, E20 in 0075, E38 in 0067), loading a user-picked picture, 3414858021's vertex units that
         don't write `gl_Position`. Result: the audit's "B9 result" (§ 5).
-        **E41 done 2026-11-03** (fork patch 0037, pin `3eaac6e`): an effect's `visible` (user property or script)
+        **E41 done 2026-11-03** (fork patch 0037, pin `d29b73c`): an effect's `visible` (user property or script)
         turns it on/off live — built when it can be visible, the pass chain re-picked and retargeted on a change.
         Smoke: live flip = flip at load (0.00 % of pixels) on all 28 of the 33 scenes that load and draw; on
-        cc6f1c9 the live flip did nothing. Left: `getEffect()` and media events for effect scripts (B10), the
+        94cfc2e the live flip did nothing. Left: `getEffect()` and media events for effect scripts (B10), the
         black 3046119914/3432999904. Result: the audit's "E41 result" (§ 5).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches":
   - [x] **B10 SceneScript API.** Cursor events, media events (MPRIS), `applyUserProperties`/`userProperties`,
         ISoundLayer `play()` (unblocks `startsilent`), `localStorage`, layer writes, missing engine/scene members
         (S8, S10–S37). 1–28 scenes each. M–L; needs B1.
-        **Done 2026-11-03** (fork patches 0038–0044, pin `c60fd2e`): the layer/scene/engine API (getLayer by
+        **Done 2026-11-03** (fork patches 0038–0044, pin `fd2fc72`): the layer/scene/engine API (getLayer by
         index for every type, getEffect, getTextureAnimation, getAnimation, sounds' play/stop/pause, sortLayer,
         canvasSize, userProperties, applyUserProperties on change, text scripts on the real layer), media events
         in full with the worker reading MPRIS (`media.rs`; the playing player, else the first paused one; https
@@ -969,7 +969,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         2026-11-05: the additive scale is the position's rule (confirmed); the attachment is (bone matrix ·
         MDAT) · local (GH 0x14024b530).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "B12 Puppet warp.":
-  - [x] The whole attachment matrix — done 2026-11-05 (fork patch 0101, pin `7b2517c`): the animator's +0x30
+  - [x] The whole attachment matrix — done 2026-11-05 (fork patch 0101, pin `5de0663`): the animator's +0x30
         is the posed bone world (GH 0x140243600), and LWE now applies bone · MDAT whole (2D: offset, z turn and
         the axes' scale; worldMatrixOf and the script matrices: the whole matrix). No library scene changes
         (every library bone / MDAT is unit scale). Audit "Attachment result".
@@ -996,7 +996,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - [x] script `thisLayer.getTransformMatrix()` not a function (5 scenes; + the `.x of undefined` that follows
         it, 7) — a missing ILayer API. Done in the coverage batch (0065, below).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "Scene health report — pick fixes from it":
-  - [x] **Shaders WE accepts — done (2026-11-04, fork patches 0063–0064, pin `affeeba`)**: WE's own shader path
+  - [x] **Shaders WE accepts — done (2026-11-04, fork patches 0063–0064, pin `cbdf2fb`)**: WE's own shader path
         ported (includes in place, declarations hoisted as its cbuffers, fragment varyings typed by the vertex
         unit, its header macros) plus HLSL's conversions from glslang's errors; the earlier `auto_sway` / 左白巾
         vanish was the writable-varying copy filled only in the first of three `main`s. Cleared every shader
@@ -1024,13 +1024,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - [x] 3163060610's clock text colour: by design — the preview's is auto-picked from a playing track's
         cover; without media the script uses `m_text_color` (ours).
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "Scene preview compare — every scene against its author's preview":
-  - [x] every row above 0.115 looked at (57 / 96, pin 9b2b244): no new render bug; the 39 unexamined score
+  - [x] every row above 0.115 looked at (57 / 96, pin 77b9df7): no new render bug; the 39 unexamined score
         ≤ 0.115 (the clean band). See the audit's "The list worked down".
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "WE ↔ LWE gap audit → porting batches" → "Scene preview compare — every scene against its author's preview":
-  - [x] `mpv_source_teardown_never_skips_bus_cycles` fails alone on 8fefe58 and 1cb88ba alike (2026-11-05,
+  - [x] `mpv_source_teardown_never_skips_bus_cycles` fails alone on 3b17f00 and 7373be0 alike (2026-11-05,
         3 / 3 runs: a 64–256-sample exact-silence run as a V→V stream leaves) — re-check on a quiet machine.
-        **Done 2026-11-05: the test's own PipeWire, not the player.** Not a regression (680e4c9, the commit
-        that added it, fails 3 / 8 alternated with cc2466d's 0 / 8; 5 / 26 unfixed runs overall, quiet).
+        **Done 2026-11-05: the test's own PipeWire, not the player.** Not a regression (b94a111, the commit
+        that added it, fails 3 / 8 alternated with 847bba4's 0 / 8; 5 / 26 unfixed runs overall, quiet).
         `pw-profiler` on the private server: every lost cycle was its *driver* skipping a period (position
         +128, `Dummy-Driver` + bus playback xrun) — `tests/common/pw.rs`'s daemon had no `module-rt`, so
         its data thread ran SCHED_OTHER nice 5 at the 1.33 ms quantum `/etc/pipewire/client.conf.d/
@@ -1091,14 +1091,14 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Push `transitions-reveal`: `6f0433a` (cubic volume), `04533a8` (silence flicker) and the design + this TODO are
       not pushed. The `fork` remote is SSH and there's no key on this box; push via `gh auth git-credential` over HTTPS,
       or run `gh auth setup-git`.
-      — done: both landed on lp-player rebased (`8efdbe5`, `2a45f01`); closed 2026-11-06.
+      — done: both landed on lp-player rebased (`3e56063`, `ab8a40e`); closed 2026-11-06.
 - [x] A player setting for WE's post-processing tier (`ultra` = today's default, `enabled` = LWE's
       `WPENGINE_HDR=0`, `disabled` = no bloom, not in LWE). Ours has no quality setting that maps to WE's
       presets, so scenes render as WE at Ultra; the owner's two main Windows profiles are
       Ultra. Only the 4 `bloom` + `hdr` scenes differ between `ultra` and `enabled` (their bloom chain).
       — not needed (2026-11-06): the owner's Windows WE runs its main profile at Ultra = our default.
 - [x] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
-      — done 2026-11-06: the HDR look was DXVK showing WE's FP16 swap chain raw; re-encoded references match ours (`39abd2a`).
+      — done 2026-11-06: the HDR look was DXVK showing WE's FP16 swap chain raw; re-encoded references match ours (`fa67738`).
 - [x] The references are MSAA x8 — the owner's main Windows profile is x8 too (an earlier note said x2, read from the
       Linux library's stale config copy); nothing to recapture. Closed 2026-11-06.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)":

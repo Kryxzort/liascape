@@ -16,7 +16,7 @@
    "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/agent-a2b6f21a80f02ca3c/src/player/target/release/liascape-scene-worker"
   },
   "player_version": "0.1.0",
-  "lwe_rev": "40eacc9a278738ba3fce5d4f1b030e543b4ca2e0"
+  "lwe_rev": "bab619b15c4b771d8acb99e2b7b227c25fc9913d"
  },
  "summary": {
   "scenes": 96,

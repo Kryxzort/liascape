@@ -1,4 +1,4 @@
-From e1e7837e7436c41b20e07a225a428ca64597cbb0 Mon Sep 17 00:00:00 2001
+From 427c359ff869b4c7ea25cba20e0e5d5dec47d97a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 22:02:20 +0530
 Subject: [PATCH 083/111] render: camera paths, camerafade and the transparent

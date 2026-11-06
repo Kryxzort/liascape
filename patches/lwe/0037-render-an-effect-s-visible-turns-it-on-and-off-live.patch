@@ -1,4 +1,4 @@
-From 3eaac6ed1188a47840b583ac79ced91290a13acb Mon Sep 17 00:00:00 2001
+From d29b73c9c2287a32775986147dbc3c50ac7efa71 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 19:26:33 +0530
 Subject: [PATCH 037/111] render: an effect's visible turns it on and off live

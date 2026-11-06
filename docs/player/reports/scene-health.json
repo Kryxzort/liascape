@@ -6,12 +6,12 @@
   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/attach/src/player/target/release/liascape-scene-worker",
   "seconds": 3,
   "started": "2026-11-05T03:55:48+05:30",
-  "commit": "0351ef7+dirty",
-  "lwe": "f50bc8258688f972249992742b0a5c78e420a12c",
-  "pin": "f50bc8258688",
+  "commit": "e939838+dirty",
+  "lwe": "4e2f3c8d222d6133a4b7d8ed2546e535e29bf15d",
+  "pin": "4e2f3c8d222d",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
  },
- "commit": "8ffccd4",
+ "commit": "c782237",
  "summary": {
   "clean": 89,
   "degraded": 7,

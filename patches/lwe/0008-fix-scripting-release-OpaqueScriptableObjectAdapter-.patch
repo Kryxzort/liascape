@@ -1,4 +1,4 @@
-From f5fea6aff2335533701c6fe204ab2c7258f05fdf Mon Sep 17 00:00:00 2001
+From dcabc1a04e13574db14cd8a7ae15e926df7c3777 Mon Sep 17 00:00:00 2001
 From: David Mireles <davidmirelesll@outlook.com>
 Date: Tue, 27 Oct 2026 19:59:20 -0600
 Subject: [PATCH 008/111] fix(scripting): release OpaqueScriptableObjectAdapter

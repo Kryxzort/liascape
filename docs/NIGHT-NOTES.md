@@ -3,7 +3,7 @@
 Read this when the owner asks "anything I should know". Append during unattended runs; never ask questions then.
 
 ## 2026-10-28 evening (before the owner slept)
-- Pushed `0604307`: settings morph 720 ms open / 560 ms close (tune `SETTINGS_MORPH` in
+- Pushed `598a727`: settings morph 720 ms open / 560 ms close (tune `SETTINGS_MORPH` in
   `app/ui/src/components/morph.ts`); the card's sharp image + preview video load at the click again; **NVIDIA now
   defaults to hardware GPU** (ANGLE `gles-egl`) — `LP_SOFTGL=1 livepaper-ui` brings back the old software path if the
   window ever misbehaves.
@@ -11,31 +11,31 @@ Read this when the owner asks "anything I should know". Append during unattended
   (`docs/superpowers/plans/2026-10-28-liascape-rename.md`) → one-off migration of the owner's config/library (backup
   first) → branch cleanup → Phase 2 Task 14 (on-machine battery) → anything else worthwhile.
 - No redirect needed from the old repo name (owner).
-- Merged + pushed the rotation redesign (`13ee4d5`) and loudness refinement (merged locally, push after checks).
+- Merged + pushed the rotation redesign (`989ea5a`) and loudness refinement (merged locally, push after checks).
   Your rotation answer → a follow-up agent: 0 = off for min AND max (max off = a 10 h video plays to its end; min off =
   switch at every end), plus a **"Separate timing for scenes"** toggle with one "Switch scenes after" field (a scene
   never ends, so min/max make no sense for it). Your config migration will keep today's behaviour exactly: min 0,
   scenes switch after your 20 s.
-- Pushed the loudness refinement (`01a5d60`) and the player hygiene batch (`9a480c8`). The long-red
+- Pushed the loudness refinement (`aeb0dea`) and the player hygiene batch (`17d8fbe`). The long-red
   `transport_meets_the_spike_budget` is settled: the worker's work per frame is constant; the CPU % swung with the core
   type / clocks / memory contention. A soundless scene no longer runs an idle audio thread; screenshots no longer stall
   the player (810 ms → < 1 ms); a VRAM-stopped scene frees all but its shown buffer. **First fully green crate suite in
   both render modes in two days.**
 - LWE: upstream's new fixes landed on `main`, not `next-v2` (ours). An agent is porting the relevant ones onto your
   fork's `livepaper/next-v2` (fast-forward push only) and re-running the scene corpus.
-- Pushed the scene-timing follow-up (`1c1918a`): 0 = off for min/max, "Separate timing for scenes" + "Switch scenes
+- Pushed the scene-timing follow-up (`c4923c8`): 0 = off for min/max, "Separate timing for scenes" + "Switch scenes
   after". **Your rotation config is migrated** (backup: `~/livepaper-backup-20261028-2247`): your playlists with
   advance+wait (`dp`, `Full?`, the active one) → min off, max off, scenes after 20 s = exactly today's behaviour;
   `gg` keeps 3660 s as the maximum; the globals and `ds` stay plain timers. I stopped/started the dev backend unit for
   it (your wallpaper may have gone blank for a moment). Press Ctrl+R in the app before changing settings.
 - Found by the rotation agent: an fps cap (VideoFpsCap > 0) stopped still images from ever showing — an agent is fixing it.
-- **LWE fixes ported: scene corpus 86/96 → 92/96 ok** (`61b4d4c`, fork `livepaper/next-v2` fast-forwarded to
-  `40eacc9`). 8 of upstream main's 13 new commits ported (text `padding` as a string, the `"particle": null` crash on
+- **LWE fixes ported: scene corpus 86/96 → 92/96 ok** (`3cb7797`, fork `livepaper/next-v2` fast-forwarded to
+  `bab619b`). 8 of upstream main's 13 new commits ported (text `padding` as a string, the `"particle": null` crash on
   clock text — that was the "leaf particle" segfault —, a script leak, effect sizing, …), plus 3 small patches of our own
   (a wrong-typed JSON field no longer aborts the process, case-insensitive asset lookup fallback, an effect that can't
   compile is left out instead of blacking out its object). Still not ok: 3 3D scenes (LWE has no 3D) + 1 still image by
   design. The live player picks it up on its next upgrade (release rebuilt).
-- Pushed the fps-cap fix (`6e06b53`): an fps cap never reaches a still image any more (mpv's `fps` filter swallowed
+- Pushed the fps-cap fix (`e9eaf0f`): an fps cap never reaches a still image any more (mpv's `fps` filter swallowed
   the image's single frame). Found meanwhile: a race where re-opening the same scene right after a stop can seed it
   with the previous loudness measurement (loses a few seconds of measurement, intermittent IT check) — in TODO, after
   the rename.
@@ -71,7 +71,7 @@ Read this when the owner asks "anything I should know". Append during unattended
 - Your wallpaper was taken over for the runs (blank between them); `livepaper-watch` is started again at the end.
 
 ## 2026-10-29 morning
-- **Liascape merged + pushed** (`93cf2d4`); the GitHub repo is now `Kryxzort/liascape` (origin updated). Your data is
+- **Liascape merged + pushed** (`0686ed9`); the GitHub repo is now `Kryxzort/liascape` (origin updated). Your data is
   migrated to `~/.config/liascape` etc. (old dirs untouched; tar backup `~/livepaper-backup-20261029-0542.tar`); the dev
   units are now `liascape-vite` / `liascape-watch` (the old ones disabled). Verified on the new backend: 315 library
   items, 2 scene monitors, the 219-item "Full?" playlist, engine `liascape-player`, every feature healthy.
@@ -93,27 +93,27 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   rule per the recon first) → T7 → … ; second slot: the offline loudness estimator's backend wiring (TODO design).
   Auto-mute (T14): latency must be ≤ today's p50/p95 (no 100 ms slack), and NO default exclusions (rules feature
   may default-exclude notifications only).
-- **LWE B1 done** (`7528abf`, fork `e78d94d` pushed): property scripts run — init/update/applyUserProperties,
+- **LWE B1 done** (`40b7402`, fork `8902c4a` pushed): property scripts run — init/update/applyUserProperties,
   thisLayer/thisObject, scale/angles/visible drive the layer; WE's own JS classes load at run time from the user's
   WE install (nothing copied). Also fixed: solid layers vanishing at random (uninitialised config). Corpus 92 ok,
   0 blank/broken/timeout (2 former timeouts now ok). Port now PARKED (B2+ wait).
-- **Phase 3 Tasks 1–3 done** (`7dfda3f`, `3f57ca9`, `52caea7`): rotation rules, the `program` node, the rotation
+- **Phase 3 Tasks 1–3 done** (`35bbba6`, `2da2ea0`, `838a708`): rotation rules, the `program` node, the rotation
   engine inside the player (timer, end-of-video with min/max, scene timing, failure ladder). 28 program tests.
   Not wired to the backend yet (Task 7). Next: Tasks 4, 5, 5b (agent running).
-- **F6b fixed** (`b8be9bf`, `3c37047`, `5bf3c82`, `871f4bd`, `de263c7`): a wake updates only its own source,
+- **F6b fixed** (`93a4f8a`, `25808ab`, `8b95fcb`, `cce1154`, `e63cd00`): a wake updates only its own source,
   worker reads follow epoll, no wait on a signalled fence, no idle gain messages, schema built once. Syscalls per
   worker frame ~56 → ~29; headless excess instructions mid-fade 0.28 → 0.08–0.14 G/s. On your monitors: 2/2 under
   the 0.6 % bound (machine was busy — worth a quiet re-run: `scenes.sh workers`). Audio unchanged (onset harness).
 - **Started:** the loudness estimator wiring (import + Settings → Audio "Scene loudness" Estimate / Recalculate
   all / Cancel, per-property-combination loudness, live re-seed on a property change).
-- **Phase 3 Tasks 4, 5, 5b done** (`ffb8eb2`, `c95982a`, `876deae`): user next/prev/random + live playlist edits
+- **Phase 3 Tasks 4, 5, 5b done** (`4b2f440`, `2081e19`, `0aae1ef`): user next/prev/random + live playlist edits
   (re-arm, never reset the countdown), programs survive player restarts (`program.json`, snapshot), "hold until a
   monitor returns" (`while_parked`), and the playlist "Start over / Resume where it left off" (player side).
   65 program tests. **Next: Task 6** (pause when covered) — with the cover rule revised to "visible", not "focused".
 - **Fans (side request):** `/etc/nixos/fans.nix` adds the writable `nct6687d` driver + CoolerControl (uncommitted in
   /etc/nixos; the rebuild compiled the CachyOS kernel locally — same kernel). fan6 = the splitter with the rattling
   fan; nothing slowed (owner: "its quiet rn").
-- **Scene loudness estimator wired in** (`bfee7c6`, `4134f72`, `b21d494`, `c60561f`): estimates on import/sync/start
+- **Scene loudness estimator wired in** (`5a9248f`, `dc7ddb2`, `d27f408`, `5b274e6`): estimates on import/sync/start
   (96 scenes in 9.8 s warm, 323 s cold, 0 errors), Settings → Playback under "Normalize audio": "Scene loudness"
   Estimate / Recalculate all / Cancel, the card info shows "≈ … (estimated)" / "(measured, N min)". Loudness is now
   stored per audio configuration — toggling a sound property (tested live on 2951169110's orchestral switch)
@@ -121,7 +121,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   moved your 13 measured scenes to the new format (index backed up first). Adapter 281/0, UI matrix 780/0.
   ⚠ An older installed liascape (the NixOS one) writing the index would drop the new fields — reinstall/bump.
 - **Next:** Phase 3 Task 7 (the backend hands rotation to the player program) — running beside Task 6.
-- **Phase 3 Task 6 done** (`8ee525d`, `dc64641`): pause-when-covered in the player. "Covered" = a fullscreen /
+- **Phase 3 Task 6 done** (`438d140`, `55f41c9`): pause-when-covered in the player. "Covered" = a fullscreen /
   maximized window is VISIBLE on the monitor (Hyprland: the monitor's active or open special workspace; Sway:
   `visible`; other wlroots: foreign-toplevel; GNOME/KDE: unavailable, never pauses) — focus plays no part. Every
   monitor showing the wallpaper must be covered for 300 ms; release at once. Checked on your Hyprland: both
@@ -132,24 +132,24 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 
 ## 2026-10-31 night
 
-- **Phase 3 Task 7 done** (`db77cb1`, `670b12e`): rotation runs as the player's program `prog:main`. Your bar
+- **Phase 3 Task 7 done** (`9969e65`, `d51a016`): rotation runs as the player's program `prog:main`. Your bar
   playlist "Full?" is rotating through it (left running). Local scene 3276522107 never loads — the program skips it.
   Adapter IT 314/0, UI matrix 778/2 (both load-only, pass alone).
-- **Task 14 player side done** (`e62c9ea`, `288000b`, still behind `LIASCAPE_PLAYER_AUTOMUTE=1`): on an idle machine
+- **Task 14 player side done** (`8b2609b`, `0757e86`, still behind `LIASCAPE_PLAYER_AUTOMUTE=1`): on an idle machine
   p50 mute 32 ms vs today's 53, a new stream 36 vs 79; a set delay lands within ~3 ms (today 32–47 ms late).
   Open: a 341 ms p95 tail for a brand-new stream at quantum 1024 with all cores saturated (cause unknown); CPU
   criterion 9 — 5 streams cost 23–45 ms/s in the player + 14–30 in the `parec`s it starts (+33–74 in pipewire-pulse):
   **your call** whether the criterion counts the helpers. Not yet tried on your real session / a real browser.
-- **Task 8 done** (`810b2c1`): under liascape-player no timer/restart daemon, pid file, `pending_action.txt` or
+- **Task 8 done** (`e2e3db1`): under liascape-player no timer/restart daemon, pid file, `pending_action.txt` or
   `timed_state.json` is ever written; `liascape restore` starts the player with `--restore --session-start`.
   Adapter IT 345/0. Only tested through a headless stand-in — a real boot/restore on your session is still Task 12's
   owner-run step. Decisions: `play` while a single wallpaper shows does nothing; a restored paused rotation stays paused.
-- **Task 9 done** (`f98f398`): the player keeps an outbox of crashes / loudness / VRAM stops while the app is closed;
+- **Task 9 done** (`1cfa5fa`): the player keeps an outbox of crashes / loudness / VRAM stops while the app is closed;
   the backend stores them on its next start (37 ms after connecting). IT 353/0 merged.
-- **Task 10 done** (`7c14964`): Settings → "Pause when covered" (default: fullscreen or maximized), "When the playlist
+- **Task 10 done** (`f8b90d6`): Settings → "Pause when covered" (default: fullscreen or maximized), "When the playlist
   starts again" (Start over / Resume, also per playlist), Advanced → "Show expert options" with the expert row "When no
   monitor shows the wallpaper". "Resume from last on launch" removed. Matrix 780/0, IT 363/0.
-- **Task 11 done** (`d3752fd`): 47 new UI-matrix cells, full matrix 827/0. Fixed 3 real bugs it found: a max-play
+- **Task 11 done** (`d19d738`): 47 new UI-matrix cells, full matrix 827/0. Fixed 3 real bugs it found: a max-play
   switch could start under a pause (picture stayed on A while the UI said B); `previous` at the first item un-paused;
   Play on the playing playlist under Resume marked item 1. ⚠ One old fuzz sequence (playlist-bar drag + next on a
   2-item bar) fails on `lp-player` too — handed to Task 12 as optional.
@@ -161,7 +161,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   suspend, VT switch (report § 6).
 - **Task 13 done**, and the old fuzz failure is explained: the test's own (on a 2-item bar its "drag" was a click).
 - Your wallpaper is off: you stopped it at 20:11:46 yesterday (the backend logged it), so I did not restart it.
-- **Task 14, backend half merged, switch off** (`4b25588`): nothing changes for you until `AutoMuteParityPassed` is
+- **Task 14, backend half merged, switch off** (`7081e59`): nothing changes for you until `AutoMuteParityPassed` is
   flipped. Tests on a private PipeWire, not your session: IT 389/0 off and 398/0 on, settings 104/0, matrix `autoMute`
   21/0 both ways. Added a player verb, `automute.release`, because no prop could lift a mute while the stream plays.
   **Still yours:** the ten criteria on your session (a real browser, `mpv`, Spotify) and CPU criterion 9, which only
@@ -189,20 +189,20 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   within a minute — no restart, never broken, PASS 12/12. The machine suspended 3 times around 23:48.
 - **Health panel:** it now reports the player's PipeWire audio bus (down = a warning; audio then falls back to mpv's
   default device), and the playlist modal's Transitions field shows the same warning icon as Settings. IT 404/0.
-- **Scenes, batch B2 (scene-engine fork patches 0022–0023, pin `ccb545d`, pushed to your fork):** layer alpha/colour
+- **Scenes, batch B2 (scene-engine fork patches 0022–0023, pin `d4969e4`, pushed to your fork):** layer alpha/colour
   reach the shader live and keyframe animations play (179 animated values in 26 scenes). Corpus ok 92 → 93, nothing
   newly broken; e.g. Kimi's clouds now blend instead of drawing as opaque puffs. Your player runs it. B3 (particles)
   is in progress.
 - A 7 h headless soak (glibc free-heap question) runs until ~07:00.
 - **The PC crashed ~01:10** (not ours; the journal just stops). It killed the soak and two agents; both were redone.
   Soak answer from the 95 min it ran: glibc's free heap is flat now (was +4.1 MiB/min) — no change needed.
-- **Scenes, batch B3 (fork patches 0024–0028, pin `4c75eae`):** particle systems behave like WE — prewarmed to their
+- **Scenes, batch B3 (fork patches 0024–0028, pin `93438d4`):** particle systems behave like WE — prewarmed to their
   `starttime` (snow covers the screen at +1 s, not after a minute), one shared colour random, `count`/`rate` as WE
   means them, HSV tints, sprite-sheet cross-fades, live overrides. Corpus still 93 ok, nothing newly broken. Live.
 - **Scene switch under load fixed:** on a busy machine a heavy scene could take 13–28 s to load and the switch to
   it failed at 10 s. A scene that is still loading (its worker still getting CPU) is now waited for up to 50 s
   while the old wallpaper plays on; a stuck load still fails/restarts. What's playing isn't slowed. Live.
-- **Scenes, batch B5 (fork patch 0029, pin `d7a9f34`):** parallax follows the mouse the way WE does (delay
+- **Scenes, batch B5 (fork patch 0029, pin `9f64193`):** parallax follows the mouse the way WE does (delay
   smoothing — 14 of 25 parallax scenes were frozen), plus camera shake, `general.zoom` and camera-object zoom.
   Corpus unchanged (93 ok). **Please look at 3516174947** in WE vs here: its camera "Lens size" 0.75 now zooms
   its layers out (32 % black) per the decoded formula — a WE capture would settle whether that's right. Live.
@@ -210,12 +210,12 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   muted, settings restored) filled the backend's player queue twice. Cause: setting 315 items' speed overrides in a
   row queued one un-mergeable command each, and the 256th dropped one (could be the playing item's speed). They now
   batch into one pass; a cap hit logs what was pending. The stall breaker never tripped in 25 min (still open).
-- **Scenes, E41 (fork patch 0037, pin `3eaac6e`):** an effect switched by a wallpaper setting (or by its script)
+- **Scenes, E41 (fork patch 0037, pin `d29b73c`):** an effect switched by a wallpaper setting (or by its script)
   now turns on and off live, the way WE does. Before, it changed only after a reload. 33 scenes have such
   switches, e.g. Bunk's "lights on", Retro Room's pulse, the "ts" overlay of 3163060610. On the 28 of them that
   load and draw, flipping a setting live gives the same frame as setting it before load. Not done: script
   `getEffect()` and the media-event scripts (batch B10).
-- **Scenes, batch B10 (fork patches 0038–0044, pin `c60fd2e`):** wallpaper scripts now get most of Wallpaper
+- **Scenes, batch B10 (fork patches 0038–0044, pin `fd2fc72`):** wallpaper scripts now get most of Wallpaper
   Engine's API: clicks and hovers work (2325974975's "Mute/Time/Date/Hide/Bloom" buttons light up and "Hide" hides
   the text box), layers can be found by number, sounds can be played/paused from scripts, settings reach scripts
   when you change them, and scripts' saved data survives a restart (`~/.local/state/liascape/scene-storage`).
@@ -224,14 +224,14 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   to 183; most of what's left is audio-reactive scripts (batch B8). 3414858021's date text now moves off-screen
   because text layers don't follow their parent yet (batch B4).
 
-- **Scenes, batch B8 (fork patch 0045, pin `592fdff`):** audio-reactive wallpapers now use Wallpaper Engine's own
+- **Scenes, batch B8 (fork patch 0045, pin `f383c4a`):** audio-reactive wallpapers now use Wallpaper Engine's own
   spectrum (decoded from wallpaper64.exe): its bands, smoothing and auto-gain, `engine.registerAudioBuffers` for
   scripts, and particle emitters whose rate follows the music. With a synthetic tone, 22 of the 39 audio scenes that
   load visibly react (2542468435, 3029971128, 2890767643, 1556245028 the most). Left and right are still the same:
   the player feeds one mono mix; stereo is a TODO. The agent doing this hit the weekly usage limit mid-way; the
   rest was finished in the main session.
 
-- **Scenes, batch B7 (fork patches 0046–0047, pin `c4eea29`):** blend modes and compose layers now work the way
+- **Scenes, batch B7 (fork patches 0046–0047, pin `5a365d4`):** blend modes and compose layers now work the way
   Wallpaper Engine does them (decoded from wallpaper64.exe):
   - Layers that blend with the scene read a copy of it instead of the image they're drawing into.
   - "Add" (mode 31) is plain additive blending: 2883756643's bokeh and 3184155462 are brighter.
@@ -250,7 +250,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   render, and so do 3046119914 and 3432999904 (the two "black" ones). 93 of 96 scenes pass; the 3 left are the known
   3D scenes. Earlier test numbers for the 12 video scenes were taken with the video black.
 
-- **Scenes, batch B4 (fork patches 0048–0050, pin `e372e44`):** text in scenes now works the way Wallpaper Engine
+- **Scenes, batch B4 (fork patches 0048–0050, pin `6bc301c`):** text in scenes now works the way Wallpaper Engine
   does it (decoded from wallpaper64.exe).
   - Clocks, dates, song titles and labels are drawn as image layers. They take their effects (glow, shake, tint),
     follow their parent, turn, and move with parallax. 3414858021's date block is back on screen.
@@ -263,7 +263,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Compared with the sizes WE's editor saved, 44 of 50 texts match in height within 2 px.
   - Also re-checked B7's blend modes on 2883756643 now that its video shows: still right.
 
-- **Scenes, batch B11 (fork patches 0051–0053, pin `2559b88`):** particles now move the way Wallpaper Engine moves
+- **Scenes, batch B11 (fork patches 0051–0053, pin `a209070`):** particles now move the way Wallpaper Engine moves
   them (its particle operator code, decoded from wallpaper64.exe for the first time).
   - Fades, size and colour changes and flicker combine instead of overriding each other.
   - Drag, gravity, swirl (vortex), cursor attraction and turbulence use WE's formulas. Cursor attraction reaches
@@ -278,7 +278,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     of a couple of these scenes to check them against WE itself.
 
 
-- **Scenes, batch B12 (fork patch 0054, pin `36ad6a0`):** puppet characters (WE's "puppet warp") now move and fit
+- **Scenes, batch B12 (fork patch 0054, pin `1eb795e`):** puppet characters (WE's "puppet warp") now move and fit
   together the way Wallpaper Engine does it. The loader for WE's puppet files was decoded from wallpaper64.exe.
   - All 14 puppet scenes load their meshes now. Before, 7 used a file version LWE refused, so they showed the flat
     sheet of parts.
@@ -290,7 +290,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Not done yet (in TODO): a WE capture to check the poses against WE itself, and blend shapes, physics hair and
     bone fading, which a few scenes also use.
 
-- **Scenes, batch B13 (fork patch 0055, pin `c62d777`, which also carries B12's 0054):** scenes marked HDR now
+- **Scenes, batch B13 (fork patch 0055, pin `0d66ae8`, which also carries B12's 0054):** scenes marked HDR now
   render the way Wallpaper Engine does at its **Ultra** post-processing setting (decoded from wallpaper64.exe).
   - They draw into higher-precision buffers, so bright additive parts (sparks, snow, light) can go above white, and
     only those glow, through WE's own HDR bloom. Before, HDR scenes used the normal bloom with different settings:
@@ -302,7 +302,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - One assumption: WE only does this at Ultra post-processing. If you run WE below Ultra, it shows these scenes
     with the normal bloom. `WPENGINE_HDR=0` gives that look here. A WE capture of 3395587987 at Ultra is on your list.
 
-- **Scenes, batch B14 (fork patch 0056, pin `157c111`):** the 3 scenes that never loaded — Wallpaper Engine's 3D
+- **Scenes, batch B14 (fork patch 0056, pin `40f2b85`):** the 3 scenes that never loaded — Wallpaper Engine's 3D
   scenes — now load and play. LWE had no 3D at all.
   - 3276522107 (night metro car): looks like its preview — the inside of the car, the city passing in the windows,
     the girl on the right, rain and the camera sway.
@@ -331,7 +331,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   - Still yours: a battery re-run on the real session (`programs.sh dropout` with `P3_RECORD`) to see the
     23 zero runs gone on your outputs.
 
-- **3414858021 (the rainy-window girl) — your report, fixed (fork patches 0057–0060, pin `b6e2878`).** None of it
+- **3414858021 (the rainy-window girl) — your report, fixed (fork patches 0057–0060, pin `e814c25`).** None of it
   came from today's batches; it was broken from the start, as you said.
   - **The head:** the scene's "follow" scripts turn the body, head and arm by about a degree as the cursor moves.
     Wallpaper Engine's scripts work in degrees; LWE took them as radians, so the body turned 55° and the head (pinned
@@ -346,7 +346,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     vanish, so I left it off — in TODO); "WEDNESDAY" still touches the right edge.
   - Corpus 96/96 ok on both cores, none newly blank; host_api_test 71/71 (3 new, red before); player tests 740/0/3.
 
-- **Shaders now compile the way Wallpaper Engine's do (fork patches 0063–0064, pin `affeeba`).** I read how WE itself
+- **Shaders now compile the way Wallpaper Engine's do (fork patches 0063–0064, pin `cbdf2fb`).** I read how WE itself
   prepares its shaders (it turns them into Direct3D shaders and compiles them with Microsoft's compiler) and made LWE
   follow the same rules: include files land where the `#include` line is, the shader's declarations are visible to all
   of its code, the pixel stage sees the vertex stage's outputs with their real types, and Microsoft's looser rules
@@ -384,7 +384,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   triangle clock and the character, 3219908811 its cherry-blossom background and ring.
 ## 2026-11-04 night — F1: shadows and light cookies
 
-- **3D scenes can cast shadows now** (fork patch 0071, pin `4b85ae7`). A light with "cast shadow" and the models with
+- **3D scenes can cast shadows now** (fork patch 0071, pin `d338e97`). A light with "cast shadow" and the models with
   "cast shadow" are drawn into a shadow map, the same way WE does it. That covers spot lights, and point lights in all
   six directions. Spot lights can also project a light "cookie" texture (WE's default is a flashlight ring). Tube
   lights and directional lights now light models too; before, LWE ignored them.
@@ -450,7 +450,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Left: the `layerimage` emitter, `collisionmodel`, the inferred parts of F6, text `depthtest` (no effect in 2D),
   `customsortorder`, the 3D camera's zoom and parallax.
 
-## 2026-11-05 — WE coverage F2: shape objects, volumetric lights, puppet IK (fork 0086–0090, pin `f4aa7c5`)
+## 2026-11-05 — WE coverage F2: shape objects, volumetric lights, puppet IK (fork 0086–0090, pin `127d63b`)
 - **The "VolumeLight" in 3319542538 was a shape object** (WE's light-shafts quad), not a light. It now draws: pink
   light rays rising from the horizon right of the tree, added onto the scene as WE does. The health report no longer
   lists it as unsupported.
@@ -465,7 +465,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Health report 86 clean / 10 degraded / 0 failed (3319542538 lost its VolumeLight error, nothing else moved);
   shader sweep 6 failing, none new; player tests 740 passed.
 
-## 2026-11-05 — the scene-compatibility leftovers (fork 0091–0097, pin `262d97b`)
+## 2026-11-05 — the scene-compatibility leftovers (fork 0091–0097, pin `be51bf7`)
 - **Audio-reactive scenes see stereo now, and react far more.** The worker used to hand LWE a mono, 8-bit snapshot of
   the system audio each frame (Left = Right); it now passes every captured frame in order, in stereo. With a test tone
   37 of your 41 audio scenes react (22 before). 2290002190's audio-driven particles needed a second fix (scripts on a
@@ -485,7 +485,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Smoke of all 96 scenes: none newly blank. Shader sweep: the same 6 failing, none new. Player tests 743 passed.
 - Left / for you: a WE capture of 3414858021's "WEDNESDAY" (reaches the screen edge here) and of 3445973124 with music.
 
-## 2026-11-05 — the decode leftovers (fork 0098–0100, pin `f50bc82`)
+## 2026-11-05 — the decode leftovers (fork 0098–0100, pin `4e2f3c8`)
 - **HDR scenes follow WE's real switch.** WE renders a scene HDR only when its file turns on both `hdr` and
   `bloom` (and WE's post-processing is Ultra); found in its project loader. 2511663284 (HDR on, bloom off) is
   drawn the ordinary way now, as WE draws it. The other four HDR scenes are unchanged.
@@ -501,7 +501,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Health report 89 clean / 7 degraded / 0 failed (no scene worse, none newly blank); shader sweep the same 6
   failing, none new; player tests 743 passed.
 
-## 2026-11-05 — the last decode leftovers (fork 0101, pin `7b2517c`)
+## 2026-11-05 — the last decode leftovers (fork 0101, pin `5de0663`)
 - **Puppet attachments apply WE's whole matrix.** WE pins a child (3463520581's hair, cloth and accessories) with the
   bone's full matrix times the attachment's; LWE used only its position and turn. Read from WE's code which matrices
   those are (the posed bones, as LWE assumed) and ported the rest (a bone's scale now reaches the child). Nothing in
@@ -514,7 +514,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Health report 89 clean / 7 degraded / 0 failed (no scene changed); shader sweep the same 6 failing, none new;
   player tests 743 passed.
 
-## 2026-11-05 — rope curves bend as WE's (fork 0102, pin `9683b9c`)
+## 2026-11-05 — rope curves bend as WE's (fork 0102, pin `25d6088`)
 - **A rope's curve now uses WE's own tangent factor** (0.15 where LWE's Catmull-Rom had 1/6): a bent rope bows about
   10 % less, as in WE. Under a pixel for ordinary rope segments, so nothing in your 20 rope scenes looks different in
   the smoke frames beyond run-to-run particle noise. New test rig: a rope of particles at fixed spots (one emitter per
@@ -523,7 +523,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   sweep the same 6 failing checks, none new; player tests 743 passed.
 
 ## 2026-11-05 morning (scene preview compare, finished)
-- Pushed `lp-player` through the scene-preview work: LWE pin `9b2b244` (fork 0103 culling puppets draw — 3490034653's
+- Pushed `lp-player` through the scene-preview work: LWE pin `77b9df7` (fork 0103 culling puppets draw — 3490034653's
   and 3363252053's characters were invisible; 0104 `thisLayer` / `thisObject` are the running script — 3163060610's
   clocks stuck on "Loading..."). Live player rebuilt and restarted on it.
 - New report `docs/player/reports/scene-preview.md`: every scene scored against its author's preview. Everything above
@@ -540,7 +540,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   (no real-time module in the test config) while your system config asks every stream for a 64-sample quantum
   (1.3 ms). Whenever that thread woke 1.3 ms late, the whole test graph skipped one cycle. PipeWire's own profiler
   showed it on every gap: the server's driver skipped a period, while the player's streams were on time.
-- Not a regression: the commit that added the test (680e4c9) fails just as often (3 of 8) when alternated with
+- Not a regression: the commit that added the test (b94a111) fails just as often (3 of 8) when alternated with
   today's (0 of 8). It slipped through because it fails only about 1 run in 5 when the machine is quiet.
 - Fix: the test server now runs real-time, like your real PipeWire and like the on-machine harness (`scenes.sh`)
   already did. Before → after: quiet 5 failed of 26 runs → 0 of 20 (no gap at all); with the CPU saturated
@@ -557,7 +557,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   frame came late) every frame pushed several frames' worth. Also, when the mouse came onto the wallpaper from the
   other screen or from behind a window, ours drew one big stroke along the jump (WE follows the mouse everywhere, so it
   never jumps). The collision mask is right: in both, the water only moves at the sides, not over the girl.
-- **Fixed** (LWE pin `b9fed39`, fork patches 0105–0106): the water now steps at the scene's frame rate (your screen's
+- **Fixed** (LWE pin `1273652`, fork patches 0105–0106): the water now steps at the scene's frame rate (your screen's
   refresh, or `out:<c>.scene_fps` if you set one), whatever rate frames really arrive at — so it behaves like WE at
   that fps, fps dependence included (your call: a faithful port). A mouse arriving on the wallpaper no longer strokes.
   Before / after pictures: `/tmp/claude-1000/ripple/3184155462-ripple-before-after.png`.
@@ -636,11 +636,11 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   Re-run it on a quiet machine.
 
 ## 2026-11-06 — WE-reference fixes: 3354740764's dog and light shafts (3490034653's glow too); two "time" rows that are the capture's
-- **The dog's black box is gone** (fork `d5f244a, patch 0110`). The dog image uses WE's `alphatocoverage` blending and has effects
+- **The dog's black box is gone** (fork `7797317, patch 0110`). The dog image uses WE's `alphatocoverage` blending and has effects
   (clouds, blur, shake). With effects, the layer's blending moves to its last pass, and ours drew that pass without
   blending, so the dog's transparent surroundings came out as an opaque dark square. WE (both references) cuts it
   out. Only this scene uses `alphatocoverage`.
-- **Particle sprites were upside down in every scene** (fork `313e1d2, patch 0111`). Round sprites hid it; light shafts didn't:
+- **Particle sprites were upside down in every scene** (fork `317bb73, patch 0111`). Round sprites hid it; light shafts didn't:
   in 3354740764, 1726902114 and 2561227934 the shafts rose from the grass at a slant, where WE has them hanging from
   the top of the sky. Now they stand as in WE. If some other particle effect in your scenes looks different (flipped)
   from before, this is why — and it should now match Windows.
@@ -653,7 +653,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
     the fade starts — the 0.5 / 2 / 5 s samples made it look like 3 s.
   - The reference time base itself is in TODO (scenes with intros need a per-run clock estimate or some slack).
 - Scores (WE compare): 3354740764 0.545 → 0.523 (2 s: 0.342 → 0.294; the 0.5 s frame is the time base, the rest mostly Ultra post-processing), 2561227934 0.256 → 0.218, 1726902114 0.092 → 0.080, 3490034653 0.424 → 0.414; 2672425887 unchanged.
-- The regenerated report (whole corpus, fork head 313e1d2 with the other agents' HDR / fog / colour-blend fixes) has
+- The regenerated report (whole corpus, fork head 317bb73 with the other agents' HDR / fog / colour-blend fixes) has
   2134765860 at 0.46: it is a day/night scene on the wall clock, captured by WE at 16:56 and rendered by ours after
   18:00 (night). Same picture at the same hour; noted in the report.
 
@@ -694,7 +694,7 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   transparency twice. 2371103399's two see-through layers were too faint, and are now as in WE (its score 0.071 →
   0.013). Left: the kitty's head follows the mouse differently in a 3D scene (WE casts the mouse into the 3D world;
   in TODO).
-- Checks (fork `dc2f07e` + `f6802a0`, patches 0108–0109; already in the pin `313e1d2` the dog fix landed): LWE host
+- Checks (fork `867a5e7` + `5a42e7e`, patches 0108–0109; already in the pin `317bb73` the dog fix landed): LWE host
   tests 125 / 125 (2 new, both fail before the fix). Scene health 89 / 7 / 0 and the shader sweep's known 6 failures,
   both as before. Player suite: 734 passed and 18 failed at load 40–74 (supervisor, bus-cycle and transport timing),
   and all 18 passed when run alone. No player code changed.

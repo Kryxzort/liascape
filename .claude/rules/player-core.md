@@ -3833,7 +3833,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (`getTextureAnimation`, `getAnimation`, `size`), `registerAudioBuffers`, cursor/media events,
   `engine.userProperties`, `createLayer`, sound layers. `host_api_test`: `update_moves_the_property`,
   `init_runs_first_and_modules_load`, `undefined_leaves_the_property` (solid squares on a 64×32 scene, need
-  `LIASCAPE_WE_ASSETS_DIR`; RED on 45ed25c); `HOST_API_TEST_ONLY=<substring>` runs a subset.
+  `LIASCAPE_WE_ASSETS_DIR`; RED on c3a7d68); `HOST_API_TEST_ONLY=<substring>` runs a subset.
   **0022 (2026-11-02, batch B2): object alpha/colour live, `g_Color4` = (colour, alpha)** (audit E2, E3).
   `CPass::setupUniforms` binds `g_Brightness`/`g_UserAlpha`/`g_Alpha`/`g_Color`/`g_Color4`/`g_CompositeColor`
   by address (passing the `const T&` getters picked the by-value overloads: frozen at setup); `CImage` keeps
@@ -3849,7 +3849,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   value adds). Not done: `timeofday`, `options.parent`/`children`, `random`, events, the SceneScript animation
   API. `host_api_test`: `object_uniforms_are_live`, `keyframes_drive_alpha`, `keyframes_move_origin` (white
   squares — a colour string without a '.' is 0..255 — red channel = alpha × 255; the first ships its own
-  `g_Color4` shader in the scene folder; RED on e78d94d).
+  `g_Color4` shader in the scene folder; RED on 8902c4a).
   **0024–0028 (2026-11-03, batch B3): particle core semantics** (audit P1, P3–P8, P13, P14, P16, P18, P19, P38;
   "B3 result" in its § 5). **0024:** one particle RNG per scene (`CScene::getParticleRng`, WE's scene+0x1f08);
   `randomframe` = one draw from it (it was seeded by the slot address); `WPENGINE_PARTICLE_SEED` seeds it. **0025:**
@@ -3868,7 +3868,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `randomframe` (`SPRITESHEETBLENDNPOT` not done). `host_api_test`: `particle_count_rate_and_prewarm`,
   `particle_colorrandom_one_t`, `particle_colorn_hsv_shift`, `particle_hide_resets_and_overrides_live` (additive
   8/255 or 4/255 grey stacks at fixed points of a 64×32 scene, so the red channel counts particles; need
-  `LIASCAPE_WE_ASSETS_DIR`; all RED on ccb545d).
+  `LIASCAPE_WE_ASSETS_DIR`; all RED on d4969e4).
   **0029 (2026-11-03, batch B5): parallax and camera as in WE** (audit G10–G12, G14/E1, G15–G19; "B5 result" in its
   § 5; decoded: camera update GH 0x1401b8af0, render-loop offset GH 0x1401b9b50, shake GH 0x1401c7680, zoom in the
   tick GH 0x1401afbf0). `CScene::updateCamera` (each frame, before animations and scripts): the parallax target
@@ -3887,7 +3887,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   CText ignores the offset (B4). **The worker keeps LWE's pointer at the scene's centre until the host sends one**
   (`lwe::Scene::first_render`; `pointer: Option` in main.rs) — at (0,0) a parallax scene sat pulled to a corner.
   `host_api_test`: `parallax_follows_the_pointer`, `parallax_position_uniform`, `camera_zoom_and_shake` (8×8 squares
-  on a 64×32 scene, a fake `wp_mouse_input`; all RED on 4c75eae).
+  on a 64×32 scene, a fake `wp_mouse_input`; all RED on 93438d4).
   **0030 (2026-11-03, batch B6): the hierarchy as in WE** (audit G03, G04 particles, P36, G31; "B6 result" in its
   § 5; decoded: effectively visible GH 0x1401b50e0, image model matrix GH 0x1402277d0, alignment offset GH
   0x140230a80). `CScene::isEffectivelyVisible(object)` = its own `visible` AND every ancestor's (groups read
@@ -3900,7 +3900,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   system; world-space control points stay put); its own x/y angles stay its own. An aligned image turns and scales
   about its origin (`m_scenePivot`), not the shifted quad's centre. Not done: text parent transforms (CText, B4), a
   sound object under a hidden parent. `host_api_test`: `hidden_parent_hides_children`, `particle_follows_its_parent`,
-  `aligned_layer_turns_about_its_origin` (all RED on d7a9f34).
+  `aligned_layer_turns_about_its_origin` (all RED on 9f64193).
   **0031–0036 (2026-11-03, batch B9): small uniform, property and shader fixes** (audit "B9 result" in its § 5).
   **0031:** `g_Frametime` (`Context::frameTime`, the frame's dt), `g_PointerState` (`CScene::getPointerState`: xy 1
   while the left button of the host's `wp_mouse_input` is down, z 1 on the press frame), `g_Daytime` and
@@ -3917,7 +3917,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   non-system usertexture is its scenetexture property's value (at pass build; empty → the slot's fallback, no log).
   `host_api_test`: `engine_uniforms_are_fed`, `bloom_is_live_and_tinted`, `annotation_defaults_parse`,
   `fragment_gets_vertex_varyings`, `properties_list_as_written`, `usertexture_reads_its_property` (a solid layer with
-  its own `b9` shader; all RED on c959e7a, built against the new headers).
+  its own `b9` shader; all RED on 602de79, built against the new headers).
   **0037 (2026-11-03, E41): effect `visible` is live.** `CImage` builds every effect that can be visible
   (`effectCanBeVisible`: true now, bound to a property, or scripted), tags each pass with its effect
   (`m_passEffects`; base/tint/colour-blend passes nullptr) and keeps its built blending (`m_passBlending`).
@@ -3926,7 +3926,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   main/sub FBO reset, `setupPasses` over them). A script on an effect's `visible` is queued as
   `effect_<id>_<index>_visible_<object>`. A passthrough layer with no visible effect returns early. Hidden effects
   that can't compile now log "Leaving out effect" at load (they did nothing before either). `host_api_test`:
-  `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on cc6f1c9).
+  `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on 94cfc2e).
   `--lwe-smoke … --prop-at T name=value` without `--audio-dump` now sets the property `T` s into the frames and
   writes `lwe-smoke-before-<T>s.png` first.
   **0038–0044 (2026-11-03, batch B10): the SceneScript API.** `ScriptableObjectAdapter` keeps one JS object per
@@ -5268,9 +5268,9 @@ source. worker. scene.` gives `ready_ms` = `worker.spawned` → `source.ready`. 
 `--no-build`, `--bin`, `--assets`. **`--ab-legacy --legacy-output <out>`** runs the installed
 `linux-wallpaperengine --screen-root <out> --screenshot …` per scene — it draws on the real output,
 so it is **owner-run only**; the report then lists scenes that start there but not here.
-**The report's run (2026-10-28, LWE `40eacc9`, 96 scenes, 506 s):** 92 ok, 1 static (a still image + a sound
+**The report's run (2026-10-28, LWE `bab619b`, 96 scenes, 506 s):** 92 ok, 1 static (a still image + a sound
 — by design), 3 load_failed (3D/perspective scenes next-v2 can't parse), 0 blank/broken/crashed/timeout. The
-first run (LWE `c5c2cad`: 86 ok, 1 blank, 4 load_failed, 4 broken) found five LWE causes, every one reproducing
+first run (LWE `c902d06`: 86 ok, 1 blank, 4 load_failed, 4 broken) found five LWE causes, every one reproducing
 with `--lwe-smoke` (LWE's core alone); four are fixed by fork patches 0012/0014–0017 (§ "LWE core"), the 3D
 one is a Phase 6 item in `docs/TODO.md`. The runs also found three
 player fixes: the stopped worker's last stderr line (§ `WorkerHost` "Log tail"), the core handler

@@ -2,8 +2,8 @@
 
 ## Context
 
-- Status: audit 2026-11-04 on fork pin `42f301d` (patches 0001–0062); the SceneScript part implemented the same day
-  (fork patches 0065–0070 on pin `deeb4da`, after the shader agent's 0063–0064; see "Implemented"). This is the
+- Status: audit 2026-11-04 on fork pin `06cd48b` (patches 0001–0062); the SceneScript part implemented the same day
+  (fork patches 0065–0070 on pin `cbe4445`, after the shader agent's 0063–0064; see "Implemented"). This is the
   **master gap list**: the B1–B14 audit (`we-lwe-gap-audit.md`) went batch by batch from what the library visibly
   lost; this one goes item by item through what WE *supports*, so a gap is closed before a scene hits it.
 - Sources:
@@ -29,7 +29,7 @@
 
 ## Summary
 
-| Area | Items | Before (42f301d): impl / partial / missing / n/a | 0065–0070 (deeb4da) | 0071 F1, 0072–0077 | Now (0082–0085: F5, F6) |
+| Area | Items | Before (06cd48b): impl / partial / missing / n/a | 0065–0070 (cbe4445) | 0071 F1, 0072–0077 | Now (0082–0085: F5, F6) |
 |---|---|---|---|---|---|
 | SceneScript: every member, event, module export and global of the d.ts | 453 | 329 / 3 / 120 / 1 | 421 / 14 / 17 / 1 | **424 / 12 / 16 / 1** | **425 / 11 / 16 / 1** (IEffectLayer.perspective) |
 | Scene and object keys the library uses | 162 | 137 / 3 / 16 / 6 | 137 / 3 / 16 / 6 | **138 / 3 / 15 / 6** (F1: castshadow) | **140 / 4 / 12 / 6** (perspectiveoverridefov, perspective; camera `path`/`queuemode` partial: their files are empty) |
@@ -229,11 +229,11 @@ the health report (their runtime is in the operator interpreter, not read). Stoc
   scene with a video texture cleared black).
 - **0069 script: IScene's camera, initial configs and timelines; ICamera.** Plus IAnimation.rate (0070).
 
-Tests (host_api_test, each RED on 42f301d): `layer_transform_api`, `create_layer_builds_layers`,
+Tests (host_api_test, each RED on 06cd48b): `layer_transform_api`, `create_layer_builds_layers`,
 `script_strings_and_regexp`, `video_texture_api`, `animation_layer_api`, `particle_system_api`,
 `script_events_reach_scripts`, `blending_sets_combos`, `scene_camera_and_config_api`.
 
-Health (`scene-health.md`, 96 scenes) before → after, on pin `deeb4da` (which also carries the shader agent's
+Health (`scene-health.md`, 96 scenes) before → after, on pin `cbe4445` (which also carries the shader agent's
 0063–0064): 75 → 86 clean, 21 → 10 degraded, 0 failed; script errors 38 → 11 (all 11 fail in WE too: § 1), layers
 dropped 3 → 0, effects dropped 57 → 0 (the shader patches, not this batch), no scene worse. By eye (smoke 1 s/3 s):
 3243449890 now draws its triangle clock and the character; 3219908811 its cherry-blossom background and ring;
@@ -252,7 +252,7 @@ dropped 3 → 0, effects dropped 57 → 0 (the shader patches, not this batch), 
   - PerformLighting_V1 samples the shadows and the spot cookies and adds the tube and directional lights.
   - Decoded addresses, and what's inferred, are in the audit's "F1 result".
 - **No library scene uses it.** 3477054430's four spots have castshadow false. The check is a synthetic scene.
-- **Tests** (host_api_test; each RED on `deeb4da`): `shadow_casters_compile`, `shadow_occludes_a_lit_point`,
+- **Tests** (host_api_test; each RED on `cbe4445`): `shadow_casters_compile`, `shadow_occludes_a_lit_point`,
   `cookie_projects_its_texture`, `tube_and_directional_lights`.
 - **Shader sweep:** 47 → 16 failures, 0 new. The 10 caster checks left are SKINNING / MORPHING combos, which no static
   mesh sets (F4).
@@ -297,12 +297,12 @@ Each decoded from the same wallpaper64.exe 2.8.485 with `all.c` (`GH 0x…`) and
 Not done: CursorEvent.hitBox (the hit boxes' MDL layout: not in MDLE/MDMP; likely MDLS's unread rest — an asm read),
 ITextLayer writes re-laying the text (0 library writers), IEffectLayer.transformAttachmentToTexture.
 
-Tests (host_api_test, each RED on deeb4da): `sprite_orientation_as_we`, `alphawriting_masks_alpha`,
+Tests (host_api_test, each RED on cbe4445): `sprite_orientation_as_we`, `alphawriting_masks_alpha`,
 `effect_fbo_fit_and_swap`, `texture_format_combos_per_slot`, `resize_screen_reaches_scripts`,
 `puppet_animation_events`.
 
-Health (pin `24adeff`, with F1): 86 clean / 10 degraded / 0 failed, every scene's class, loss, errors, warnings and
-built objects the same as on `deeb4da` and on F1's `4b85ae7`. Shader sweep: 4085 checks, 16 failing (F1's), 0 newly
+Health (pin `bdafdde`, with F1): 86 clean / 10 degraded / 0 failed, every scene's class, loss, errors, warnings and
+built objects the same as on `cbe4445` and on F1's `d338e97`. Shader sweep: 4085 checks, 16 failing (F1's), 0 newly
 failing (47 → 47 on these patches alone). host_api_test 95/95; player tests 739 passed, 1 timing failure
 (`mpv_source_teardown_never_skips_bus_cycles`, passed alone).
 
@@ -332,7 +332,7 @@ what isn't is marked **Inferred**. The full write-up is the audit's "F3/F4 resul
 Not done: IK (3042492564's arm: one bone with `"ik":true`), bone physics and applyBonePhysicsImpulse (no library bone
 enables it), root motion, MORPHING_MODIFIERS, IModelLayer's animation-layer API, `autosort` / `index` (0 users).
 
-Tests (host_api_test, each RED on 24adeff): `skinned_casters_compile`, `puppet_blend_shapes_and_alpha`,
+Tests (host_api_test, each RED on bdafdde): `skinned_casters_compile`, `puppet_blend_shapes_and_alpha`,
 `model_skins_and_morphs`, `create_model_data_draws`.
 
 ## Implemented: F5 perspective layers and F6 the stock particle operators (fork patches 0082–0085, 2026-11-04)
@@ -349,7 +349,7 @@ Decoded addresses and what's inferred: the audit's "F5/F6 result".
   and reported), with remap's vector ranges and the operators' blend-in.
 
 No library scene changes except the perspective particles' size/depth (the four `perspective` layers are at z 0,
-unturned; no scene has camera paths). Tests (host_api_test, each RED on `24adeff`): `perspective_layers_in_2d`,
+unturned; no scene has camera paths). Tests (host_api_test, each RED on `bdafdde`): `perspective_layers_in_2d`,
 `camera_paths_and_fade`, `transparent_sort_takes_sortorder`, `particle_stock_motion_operators`,
 `particle_stock_collisions`, `particle_stock_initializers`.
 
@@ -387,7 +387,7 @@ Decoded addresses and what's inferred: the audit's "F2 result".
 Not done: bone physics and applyBonePhysicsImpulse / gravity / wind (0 library bones enable physics; WE's simulation
 sits on an unread rigid-body helper family), root motion, MORPHING_MODIFIERS.
 
-Tests (host_api_test, each RED on 78128d1): `shape_draws_its_effect_in_place`, `volumetric_lights_glow`,
+Tests (host_api_test, each RED on 5e65da4): `shape_draws_its_effect_in_place`, `volumetric_lights_glow`,
 `puppet_ik_reaches_its_target`.
 
 ## Implemented: the leftovers (fork patches 0091–0097 + the worker's stereo feed, 2026-11-05)
@@ -413,7 +413,7 @@ Decoded addresses and what's inferred: the audit's "Leftovers result".
 - `SPRITESHEETBLENDNPOT` (2 padded sheets, 3 scenes): not needed — LWE uploads those sheets at their image size, where
   the plain frame walk is WE's NPOT walk (tried; a comment in 0097).
 
-Tests (host_api_test, each RED on f4aa7c5): `text_shapes_with_harfbuzz`, `particle_world_space_stays`,
+Tests (host_api_test, each RED on 127d63b): `text_shapes_with_harfbuzz`, `particle_world_space_stays`,
 `unset_slots_are_not_missing`, `particle_override_scripts_run`, `animation_follows_its_parent`; player units
 `visual_mix_is_stereo_and_clock_aligned`, `ring_follows_the_clock`, `audio_input_keeps_both_channels`,
 `output_clips_at_full_scale_after_the_gain`. 0096–0097: no host test (a comment; 0097 checked by smoke pairs).

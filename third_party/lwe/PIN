@@ -3,7 +3,7 @@
   "owner": "Kryxzort",
   "name": "linux-wallpaperengine",
   "branch": "livepaper/next-v2",
-  "rev": "313e1d21cdc30622b0592e58fc1896cc5d53cbce",
+  "rev": "317bb739b4b57b265116e7c032a8152419dd5841",
   "upstream": "https://github.com/Almamu/linux-wallpaperengine",
   "upstream_branch": "next-v2",
   "base": "ddea3b493d2f4cca78a2e9547c4e61b92a14e0fc",

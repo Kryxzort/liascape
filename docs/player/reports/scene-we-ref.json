@@ -6,8 +6,8 @@
   "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/weref-next/src/player/target/release/liascape-scene-worker",
   "core": "",
   "started": "2026-11-06T21:20:55+05:30",
-  "commit": "35262a0+dirty",
-  "pin": "313e1d21cdc3",
+  "commit": "c7684be+dirty",
+  "pin": "317bb739b4b5",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
   "we": "2.8.485",
   "proton": "experimental-11.0-20261027b-x86_64",
@@ -151,7 +151,7 @@
     1080
    ],
    "class": "fonts",
-   "note": "fixed 2026-11-06 (fork d5f244a, 313e1d2): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 \u2192 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) \u2014 the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180\u00b0, scaled 1.2 \u00d7 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (\u221214 to \u221232 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180\u00b0\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute.",
+   "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 \u2192 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) \u2014 the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180\u00b0, scaled 1.2 \u00d7 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (\u221214 to \u221232 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180\u00b0\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute.",
    "trust": "FXC, system fonts: Windows' arial/comicsans/consolas, clock: Wine's",
    "dist": 0.32696310761682684,
    "ssim": 0.23716866970062256,
@@ -595,7 +595,7 @@
     1080
    ],
    "class": "ok",
-   "note": "the light shafts stand as in WE since 313e1d2 (particle sprites were upside down); they are random in WE.",
+   "note": "the light shafts stand as in WE since 317bb73 (particle sprites were upside down); they are random in WE.",
    "trust": "FXC, system fonts: Windows' comicsans",
    "dist": 0.21495481390581772,
    "ssim": 0.09273550907770793,
@@ -3034,7 +3034,7 @@
     1080
    ],
    "class": "ok",
-   "note": "the light shafts hang from the top left as in WE since 313e1d2 (particle sprites were upside down). They are random in WE.",
+   "note": "the light shafts hang from the top left as in WE since 317bb73 (particle sprites were upside down). They are random in WE.",
    "trust": "FXC",
    "dist": 0.04220690654847047,
    "ssim": 0.014321943124135336,
