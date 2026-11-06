@@ -1061,6 +1061,21 @@ Two bug classes kept recurring; fix the class, not the instance:
           the HDR scenes at Ultra (3019192537, 3395587987, maybe 3490034653): WE is much more contrasty and saturated,
           ours flat; 3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
           the intro timelines of 2672425887 / 3509243656.
+      - [x] 3354740764's box and light shafts — done 2026-11-06 (fork `e7e0cb0`, `6ab94fe`). The box: an
+            `alphatocoverage` layer with effects drew its last pass unblended; the mode is now its own, blended by
+            alpha (WE's coverage at MSAA). The shafts: every particle sprite was drawn upside down (LWE's y-flipped
+            particle space took WE's up as is), so asymmetric sprites — light shafts, here and in 1726902114 /
+            2561227934 — rose from the ground instead of hanging from the sky. Fork tests
+            `alphatocoverage_layer_with_effects`, `sprite_texture_stands_as_we`.
+      - [x] 3354740764 "black at 0.5 s" and 2672425887 "intro 3 s slower" — not ours: the capture's time base.
+            3354740764 opens with a black `fadeout` layer (0.6–1.6 s) WE draws too; the probe's t = 0 lands inside
+            it. 2672425887's demon fades in at 2.07–2.6 s in both; WE's clock is 0.2–1.1 s ahead of t = 0, a different
+            amount each run (4 runs; the 3D agent measured 0.25–0.9 s on 3276522107 / 3509243656). Ours at 2 s is
+            0.07 s before the fade starts, which made it look like a 2 s vs 5 s gap at the 0.5 / 2 / 5 s samples.
+    - [ ] The WE-reference time base: WE's scene clock is already 0.2–1.1 s along at the first frame the probe takes
+          (varying per run), and a scene that opens black pushes t = 0 into its own fade. Scenes with intros
+          ("time" class) need either a per-run clock estimate (fit a known keyframe / g_Time-driven layer) or a
+          ±1 s slack in the compare before their score means anything.
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than

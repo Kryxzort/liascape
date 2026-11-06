@@ -21,8 +21,8 @@
     "note": "ours is lighter in the shadows (less contrast) across the whole frame; perhaps the same family as the HDR scenes. The petals are random."
   },
   "3354740764": {
-    "class": "bug?",
-    "note": "ours draws the dog sprite on an opaque black box, adds diagonal yellow light shafts across the field that WE doesn't draw, and is still black at 0.5 s. Its system fonts (Arial / Comic Sans / Consolas) are the real ones in WE."
+    "class": "time",
+    "note": "fixed 2026-11-06 (fork e7e0cb0, 6ab94fe): the black box behind the dog (an `alphatocoverage` layer with effects drew its last pass unblended) and the light shafts (every particle sprite was drawn upside down: they rose from the field; WE's hang from the sky). Left: ours is black at 0.5 s because the scene opens with a black `fadeout` layer (opaque to 0.6 s, gone at 1.6 s) that WE draws too. The capture's t = 0 is WE's first non-flat frame, already inside that fade (its probe frames; wallpiper's 0.5 s frame is still dimmed), so WE's frames are about 1 s ahead of ours. The colour/contrast is WE's Ultra post-processing; the labels are the Windows fonts."
   },
   "3276522107": {
     "class": "known",
@@ -30,7 +30,7 @@
   },
   "2672425887": {
     "class": "time",
-    "note": "the demon face in the background has faded in by 2 s in WE but only by 5 s in ours: an intro timeline runs slower in ours."
+    "note": "not a slower timeline: the demon's alpha keyframes (frames 62–78 at 30 fps, 2.07–2.6 s) fade it in over the same 0.5 s in WE. WE's scene clock is ahead of the capture's t = 0 by a different amount each run (0.19, 0.79, 0.80 and 1.1 s in four fresh captures), so its 2 s frame catches the fade done or not. The capture's time base, not ours."
   },
   "3509243656": {
     "class": "time",
@@ -67,5 +67,13 @@
   "2542468435": {
     "class": "unexamined",
     "note": "colour (hist 0.51); not looked at closely."
+  },
+  "1726902114": {
+    "class": "ok",
+    "note": "the light shafts hang from the top left as in WE since 6ab94fe (particle sprites were upside down). They are random in WE."
+  },
+  "2561227934": {
+    "class": "ok",
+    "note": "the light shafts stand as in WE since 6ab94fe (particle sprites were upside down); they are random in WE."
   }
 }
