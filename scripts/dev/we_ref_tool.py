@@ -5,7 +5,7 @@
     we_ref_tool.py config <base config.json> <out> <file> [k=v ...]
                                                             -> WE's config.json with our render settings and the
                                                                user properties for <file> (a Windows path, Z:/…)
-    we_ref_tool.py stat <png>                               -> "max mean" of the grey image (black detection)
+    we_ref_tool.py stat <png>                               -> "max mean stddev" of the grey image (black / flat detection)
     we_ref_tool.py jpeg <png> <jpg> <width>                 -> a small JPEG copy (quality 85)
     we_ref_tool.py same <png a> <png b>                     -> "mean_abs_diff max_abs_diff" over RGB (0..255)
 
@@ -126,6 +126,10 @@ def cmd_config(base, out, wfile, kvs):
     g = u.setdefault("general", {})
     g.setdefault("user", {}).update(USER_SETTINGS)
     g["user"]["fps"] = int(os.environ.get("WE_REF_FPS", "30"))
+    for kv in os.environ.get("WE_REF_SETTINGS", "").splitlines():
+        if "=" in kv:
+            k, _, v = kv.partition("=")
+            g["user"][k] = parse_value(v)
     g["wallpaperconfig"] = {"layout": 0, "profile": None, "selectedwallpapers": {}}
     g["playlists"] = []
     props = {}
@@ -150,7 +154,7 @@ def grey_stats(path):
 
     im = Image.open(path).convert("L")
     st = ImageStat.Stat(im)
-    return im.getextrema()[1], st.mean[0]
+    return im.getextrema()[1], st.mean[0], st.stddev[0]
 
 
 def main(argv):
@@ -163,8 +167,8 @@ def main(argv):
     elif c == "config":
         cmd_config(argv[2], argv[3], argv[4], argv[5:])
     elif c == "stat":
-        mx, mean = grey_stats(argv[2])
-        print(mx, round(mean, 2))
+        mx, mean, sd = grey_stats(argv[2])
+        print(mx, round(mean, 2), round(sd, 2))
     elif c == "jpeg":
         from PIL import Image
 

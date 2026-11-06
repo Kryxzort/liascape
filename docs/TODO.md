@@ -21,7 +21,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
       Measured: first data 2020 ms → ~780 ms. The rest is the per-stream process spawn, fully fixed in liascape-player.
       — done 2026-10-25: re-measured on a synthetic silent stream in a private null sink
       (`scripts/measure-automute-latency.py`, 6 trials each): first byte 2023 ms → 65 ms, first 20 ms chunk → 76 ms.
-- [ ] **LICENSE** for the repo. There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
+- [x] **LICENSE** for the repo — done in `a955654` (GPL-3.0, with `LICENSE.upstream-MIT` for the livepaper portions). Was: There is none today. liascape-player will be GPL-3.0 (mpvpaper + LWE are GPL-3.0).
 - [x] **Phase 2 VT switch / suspend check** (needs you at the machine; the battery never suspends): the checklist in
       `docs/player/reports/phase2.md` § 8 — a scene on each output through a VT switch and a suspend/resume: it
       comes back within ~2 s (a GL context loss is one worker restart), never `source.broken`, sound fades back in.
@@ -76,7 +76,7 @@ Tick items off in the commit that does them. Design for the new player: `docs/su
 - [ ] Harden `AUDIO_SETTLE` in `liascape-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
       from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
 - [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in liascape-player.
-- [ ] Delete stale branches: `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
+- [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 - [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
       owner's call.
 
@@ -1039,6 +1039,21 @@ Two bug classes kept recurring; fix the class, not the instance:
       `c5c2cad`); rerun it after every LWE patch. Its findings, each one an
       LWE (fork) patch, none in the player — every one reproduces with `liascape-scene-worker --lwe-smoke`, i.e. LWE's
       core alone; the report has each one's log tail + backtrace:
+  - [x] **Real-WE references (goal pictures)** — done 2026-11-06, `docs/player/spikes/we-proton.md`. The real
+        Wallpaper Engine 2.8.485 runs headless under Proton Experimental (umu, own prefix, own config, in
+        `gamescope --backend headless`, no audio device, Steam not needed): `scripts/dev/we-ref-capture.sh <id>
+        [--times …] [--prop k=v] [--pointer X0,Y0:X1,Y1 --pointer-time A-B] [--fps N] [--desktop]`, `--batch` over
+        the Workshop folder. Every library scene has frames at 0.5 / 2 / 5 s in `docs/player/reports/we-ref/<id>/`;
+        `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
+        (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
+    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured).
+    - [ ] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
+          at 30); at a matched 30 fps ours is WE's strength. Check what frame rate / `g_Frametime` the player gives
+          scenes (the owner's Windows WE runs at 240 fps). Refs: `we-ref/3184155462/ripple-*`.
+    - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as
+          WE's default output, winepulse pointed at it, a track played into it (the spike's "Blockers").
+    - [ ] 3414858021's "WEDNESDAY": capture on a Wednesday (`we-ref-capture.sh 3414858021 --tag wednesday`);
+          libfaketime didn't reach Wine's clock.
   - [ ] **WE ↔ LWE gap audit → porting batches** (2026-10-29,
         `docs/player/spikes/we-lwe-gap-audit.md`). It has 185 rows: what WE 2.8.485 scenes do (decompiled, or from
         assets/docs) that the fork doesn't, each with the number of the owner's 96 scenes that use it. Port it in

@@ -21,7 +21,10 @@
 #                    before, still after — e.g. a 1 s drag then frames while a cursor ripple settles
 #   --fps N          WE's frame-rate limit and gamescope's refresh (default 30, the worker's pace). Frame-time-
 #                    dependent effects differ with it (cursorripple's force is ~ frametime: weaker at 240 fps)
+#   --we-setting k=v WE's own setting (config.json general.user, repeatable), e.g. videohardwareacceleration=false
 #   --desktop        render at the full 1920x1080 "desktop" (WE's cover fit) instead of the canvas's own aspect
+#   --tag NAME       a variant (other props / pointer / --desktop): PNGs into <out>/NAME/<id>, JPEGs into
+#                    <docs>/<id>/NAME — the compare's default refs stay the plain captures
 #   --repeat N       capture the scene N times (fresh starts) — the determinism check; runs land in r1…rN
 #   --batch          all scene items of ~/.local/share/Steam/steamapps/workshop/content/431960 (sorted by id)
 #   --only ID,ID…    with --batch: only these; --limit N: the first N; --skip-done: skip ids with a manifest
@@ -55,6 +58,7 @@ PROPS=()
 POINTER=
 PTIME=
 FPS=30
+WE_SETTINGS=()
 DESKTOP=0
 REPEAT=1
 BATCH=0
@@ -64,6 +68,7 @@ SKIP_DONE=0
 OUT=
 DOCS=$REPO/docs/player/reports/we-ref
 KEEP=0
+TAG=
 MODE=capture
 IDS=()
 
@@ -85,6 +90,7 @@ while (($#)); do
     --pointer) POINTER=$2; shift ;;
     --pointer-time) PTIME=$2; shift ;;
     --fps) FPS=$2; shift ;;
+    --we-setting) WE_SETTINGS+=("$2"); shift ;;
     --desktop) DESKTOP=1 ;;
     --repeat) REPEAT=$2; shift ;;
     --batch) BATCH=1 ;;
@@ -95,6 +101,7 @@ while (($#)); do
     --docs) DOCS=$2; shift ;;
     --proton) PROTON=$2; shift ;;
     --keep) KEEP=1 ;;
+    --tag) TAG=$2; shift ;;
     --setup) MODE=setup ;;
     --stop) MODE=stop ;;
     -h | --help) usage 0 ;;
@@ -172,7 +179,15 @@ stop_session() {
     [[ -n $GS_PID ]] || return 0
     local pids p n=0
     pids=$(descendants "$GS_PID")
+    # WE first (Wine ends a process on SIGTERM): umu then winds the prefix down and gamescope follows its child
+    # out; TERM to gamescope alone left it hanging until the KILL
+    for p in $pids; do [[ $(cat /proc/"$p"/comm 2>/dev/null) == wallpaper64.exe ]] && kill -TERM "$p" 2>/dev/null; done
+    while ((n < 40)) && kill -0 "$GS_PID" 2>/dev/null; do
+        sleep 0.2
+        n=$((n + 1))
+    done
     kill -TERM "$GS_PID" 2>/dev/null
+    n=0
     while ((n < 50)); do
         local alive=0
         for p in $GS_PID $pids; do kill -0 "$p" 2>/dev/null && alive=1; done
@@ -213,7 +228,11 @@ EOF
         export WINEPREFIX=$WR/pfx PROTONPATH=$PROTON UMU_RUNTIME_UPDATE=0
         export GAMEID=umu-liascape-we-ref # not 431960: Proton mustn't associate this run with Steam's WE
         export WINEDLLOVERRIDES="winepulse.drv=d;winealsa.drv=d" PULSE_SERVER=unix:/nonexistent
-        export PROTON_LOG=0 WINEDEBUG=-all DXVK_LOG_LEVEL=none
+        if [[ -n ${WE_REF_DEBUG:-} ]]; then # a Proton log (+seh, +loaddll …) into the session dir
+            export PROTON_LOG=1 PROTON_LOG_DIR=$SESSION
+        else
+            export PROTON_LOG=0 WINEDEBUG=-all DXVK_LOG_LEVEL=none
+        fi
         unset WAYLAND_DISPLAY
         exec setsid gamescope --backend headless -W "$w" -H "$h" -w "$w" -h "$h" -r "$FPS" -- "$SESSION/child.sh"
     ) >"$SESSION/gamescope.log" 2>&1 &
@@ -258,17 +277,24 @@ capture_one() { # id run_dir
     # open project.json: WE resolves its `file` (a first instance given scene.pkg looked for a loose scene.json)
     wfile="Z:${dir//\//\\}\\project.json"
     mkdir -p "$rd"
-    WE_REF_FPS=$FPS "${TOOL[@]}" config "$WR/config.base.json" "$WE/config.json" "Z:$dir/$file" "${PROPS[@]}" || return 1
+    WE_REF_FPS=$FPS WE_REF_SETTINGS="$(printf '%s\n' "${WE_SETTINGS[@]}")" "${TOOL[@]}" config "$WR/config.base.json" "$WE/config.json" "Z:$dir/$file" "${PROPS[@]}" || return 1
 
     local p0x= p0y= p1x= p1y= sx sy
     sx=$(awk -v a="$w" -v b="$cw" 'BEGIN{print a/b}')
     sy=$(awk -v a="$h" -v b="$ch" 'BEGIN{print a/b}')
-    if [[ -n $POINTER ]]; then
-        IFS=',:' read -r p0x p0y p1x p1y <<<"$POINTER"
-        p1x=${p1x:-$p0x} p1y=${p1y:-$p0y}
+    # no --pointer: the canvas centre, where the worker puts it (a corner would pull parallax off-centre).
+    # A parked pointer is reached by a 4 px move in the first 0.3 s: WE takes no pointer position until it sees a
+    # motion event after the scene loads (parallax scenes sat 15-140 px off without it; with it, 0.2 px).
+    local pointer=${POINTER:-$((cw / 2)),$((ch / 2))} ptime=$PTIME
+    IFS=',:' read -r p0x p0y p1x p1y <<<"$pointer"
+    if [[ -z $p1x ]]; then
+        p1x=$p0x p1y=$p0y p0x=$((p0x - 4)) p0y=$((p0y - 4))
+        pointer="$p0x,$p0y:$p1x,$p1y"
+        [[ -z $ptime ]] && ptime=0-0.3
     fi
 
-    local t_launch t_up t0 tlast
+    local t_launch t_up t0 tlast dumps0
+    dumps0=$(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) # WE's crash handler writes a minidump + a dialog
     t_launch=$(date +%s%3N)
     start_session "$w" "$h" "$wfile" || return 1
     [[ -n $p0x ]] && pointer_at "$(awk -v v="$p0x" -v s="$sx" 'BEGIN{print int(v*s)}')" "$(awk -v v="$p0y" -v s="$sy" 'BEGIN{print int(v*s)}')"
@@ -289,12 +315,14 @@ capture_one() { # id run_dir
             sleep 0.02
             sz=$(stat -c %s "$pd/p$k.png")
             if ((black == 0)); then
-                read -r mx _ < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0)
-                ((mx > 8)) && { ok=1; break 2; }
+                read -r mx _ sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
+                ((mx > 8)) && [[ ${sd%.*} -ge 3 ]] && { ok=1; break 2; }
                 black=$sz
             elif ((sz > black + black / 4 + 4096)); then
-                ok=1
-                break 2
+                # a picture, unless it is flat: Wine paints a new window's background (one colour) before WE's
+                # first present, and a loading scene shows black after it — that flash isn't t = 0
+                read -r mx _ sd < <("${TOOL[@]}" stat "$pd/p$k.png" 2>/dev/null || echo 0 0 0)
+                if [[ ${sd%.*} -ge 3 ]]; then ok=1; break 2; fi
             fi
             k=$((k + 1))
         done
@@ -310,7 +338,7 @@ capture_one() { # id run_dir
     local last mover= pa pb
     last=$(tr ',' '\n' <<<"$TIMES" | sort -g | tail -1)
     pa=0 pb=$last
-    [[ -n $PTIME ]] && IFS=- read -r pa pb <<<"$PTIME"
+    [[ -n $ptime ]] && IFS=- read -r pa pb <<<"$ptime"
     if [[ -n $p0x && ($p0x != "$p1x" || $p0y != "$p1y") ]]; then
         (
             while :; do
@@ -353,21 +381,23 @@ capture_one() { # id run_dir
     gpu_mib=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null |
         awk -F', *' -v ps=" $(descendants "$GS_PID" | tr '\n' ' ') $GS_PID " 'index(ps, " "$1" ") {s+=$2} END{print s+0}')
     tlast=$(($(date +%s%3N) - t_launch))
+    local crashed=false
+    (($(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) > dumps0)) && crashed=true
     ((KEEP)) || stop_session
     jq -n --arg id "$id" --arg kind "$kind" --argjson canvas "[$cw,$ch]" --argjson window "[$w,$h]" \
         --arg we "$(cut -d'|' -f2 "$WE/.source")" --arg proton "$(cat "$PROTON/version" 2>/dev/null)" \
         --argjson props "$(printf '%s\n' "${PROPS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" \
-        --arg pointer "$POINTER" --arg ptime "$PTIME" --argjson fps "$FPS" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
+        --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --argjson crashed "$crashed" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
         --argjson shots "[$(IFS=,; echo "${shots[*]}")]" --arg when "$(date -Iseconds)" \
-        '{id:$id, kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps,
-          first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, captured:$when,
+        '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, we_settings:$we_settings,
+          we_crashed:$crashed, first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, captured:$when,
           time_base:"seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"}' >"$rd/manifest.json"
-    log "$id: first frame after $((t_up))ms, done in ${tlast}ms → $rd"
+    log "$id: first frame after $((t_up))ms, done in ${tlast}ms → $rd$([[ $crashed == true ]] && echo " — WE CRASHED (its dialog is in the frames)")"
 }
 
 publish() { # id run_dir — small JPEGs + manifest into the docs tree
     [[ $DOCS == - ]] && return 0
-    local id=$1 rd=$2 d=$DOCS/$1 f
+    local id=$1 rd=$2 d=$DOCS/$1${TAG:+/$TAG} f
     mkdir -p "$d"
     for f in "$rd"/t*s.png; do
         [[ -f $f ]] && "${TOOL[@]}" jpeg "$f" "$d/$(basename "${f%.png}").jpg" 960
@@ -405,7 +435,8 @@ for id in "${IDS[@]}"; do
     if ((REPEAT > 1)); then
         for r in $(seq 1 "$REPEAT"); do capture_one "$id" "$OUT/$id/r$r" || fails=$((fails + 1)); done
     else
-        if capture_one "$id" "$OUT/$id"; then publish "$id" "$OUT/$id"; else fails=$((fails + 1)); fi
+        if [[ -n $TAG ]]; then rd=$OUT/$TAG/$id; else rd=$OUT/$id; fi
+        if capture_one "$id" "$rd"; then publish "$id" "$rd"; else fails=$((fails + 1)); fi
     fi
     log "[$n/${#IDS[@]}] $id"
 done
