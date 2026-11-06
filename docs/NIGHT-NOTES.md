@@ -629,3 +629,8 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   moment in each run.
 - Your Windows `config.json` says MSAA **x2**; the references use x8. That changes edges only, not colour, so they
   weren't recaptured.
+- Checks: LWE host tests 123 / 123 (1 new), scene health 89 / 7 / 0 (as before), shader sweep the known 6 failures.
+  Player suite 738 passed / 14 failed with other agents loading the machine (load 20–50). Run again alone, 13 passed.
+  `mpv_source_teardown_never_skips_bus_cycles` still failed 3 times at load 20–53. That test's own note says a
+  loaded debug run can lose a bus cycle, and nothing it runs changed here (no player code, only the scene core).
+  Re-run it on a quiet machine.
