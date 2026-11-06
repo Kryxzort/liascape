@@ -295,13 +295,17 @@ def render_md(out, a, first):
              f"GPU {run.get('gpu', '?')}; references: Wallpaper Engine {run.get('we', '?')} under {run.get('proton', '?')}, "
              "Ultra preset, MSAA x8, 30 fps, no audio device; {} scenes.".format(len(res)))
     L.append("- **How:** WE renders each scene in a window of the canvas's own aspect (<= 1920 x 1080) inside a "
-             "headless gamescope; frames at T s after its first frame with a picture (about ±0.15 s; ours at the shot's actual time). Ours: `liascape-scene-worker "
-             "--lwe-smoke --shots` at the same T (paced 30 fps, particle seed 7), same props / pointer path. Each pair "
+             "headless gamescope; frames requested T s after its first frame with a picture. Each frame's real scene time is "
+             "read from WE's own clock: the capture's private copy of the scene draws `g_Time` into a strip along the "
+             "bottom edge (we-proton.md \"The scene clock\"); the row label says it. Ours: `liascape-scene-worker "
+             "--lwe-smoke --shots` at that scene time (paced 30 fps, particle seed 7), same props / pointer path, at "
+             "the capture's wall time (libfaketime) and with the fonts WE drew with (the Windows install's, through a "
+             "private fontconfig file). The bottom 3 % (the strip) is left out of both. Each pair "
              "at 256 px wide: score = 0.30 ssim + 0.20 hist + 0.20 edges + 0.30 local (the preview compare's measures, "
              "no alignment needed); a scene's score is its mean over the times, `worst` its worst time.")
     L.append("- **Not render bugs by themselves:** WE's particles and random choices are unseeded (ours seed 7), a "
-             "clock / date shows the capture's wall time, WE's time base is about ±0.15 s (fast motion), and media-driven "
-             "layers have no media on either side.")
+             "frame-rate-dependent effect runs at 30 fps on both sides, and media-driven layers have no media on "
+             "either side.")
     L.append("- **Reference trust** (the `reference` column): `FXC` means WE compiled its shaders with Microsoft's "
              "compiler, as on Windows. WE loads the d3dcompiler_47 it ships (`bin\\d3dcompiler_47.dll`, Microsoft "
              "10.0.26100.7705) by path, and the Proton log shows it native, so Wine's own compiler was never used. "
@@ -309,13 +313,13 @@ def render_md(out, a, first):
              "of 63). Most shaders come from the shader cache that came with the Windows install (compiled there); "
              "`(n compiled)` counts the shaders WE compiled here. `system fonts: Windows' …` means "
              "the scene names Windows system fonts (`systemfont_arial` …) and WE drew them with the real ones, "
-             "linked into the prefix from the Windows install. Our renderer has to find those faces on Linux, so a "
-             "glyph difference there is a font, not a layout bug. `fonts: the scene's own` means the fonts are "
+             "linked into the prefix from the Windows install; ours gets the same faces in the compare (on a system "
+             "without them, a stand-in's metrics change the wrapping: 3354740764's notepad). `fonts: the scene's own` means the fonts are "
              "packed in the scene. `FP16 swap chain: re-encoded` means an HDR scene at Ultra: WE presents it through an FP16 (scRGB) swap chain, "
              "which Windows sRGB-encodes for an SDR display but DXVK on gamescope shows raw (too dark, too saturated), so "
              "the capture re-encodes the frames as Windows shows them (exact but for 8-bit banding in the darkest tones; "
              "docs/player/spikes/we-proton.md). `clock: Wine's` means the scene reads "
-             "the wall clock, so its time and date are the capture's, not ours. `video` means it has video textures; "
+             "the wall clock: ours is run at the capture's wall time. `video` means it has video textures; "
              "`video: crashed` means WE crashed on them under Proton. Differences in those classes are not our bugs "
              "until a Windows capture says so. Check by eye against Windows with "
              "`docs/player/reports/we-ref/compare/`.")

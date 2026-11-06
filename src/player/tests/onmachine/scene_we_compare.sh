@@ -155,7 +155,7 @@ run_all() {
     local faketime=
     if ((FAKE_CLOCK)); then
         faketime=$(nix build --no-link --print-out-paths --impure --expr \
-            "(builtins.getFlake \"path:$REPO\").inputs.nixpkgs.legacyPackages.\${builtins.currentSystem}.libfaketime" 2>/dev/null)/lib/libfaketime.so.1
+            "(builtins.getFlake \"path:$REPO\").inputs.nixpkgs.legacyPackages.\${builtins.currentSystem}.libfaketime" 2>/dev/null | grep -v -- '-man$' | head -1)/lib/libfaketime.so.1
         [[ -f $faketime ]] || { echo "scene_we: no libfaketime: ours runs on today's clock" >&2; faketime=; }
     fi
     local core_lib=

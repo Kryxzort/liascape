@@ -22,29 +22,41 @@
   "fonts": "windows",
   "clock": "Wine wall clock",
   "we_settings": [],
+  "gamescope_args": [],
   "we_crashed": false,
-  "first_frame_ms": 6637,
-  "wall_ms": 12178,
-  "we_gpu_mib": 700,
-  "rss_mib": 2416,
-  "cpu_s": 21.8,
+  "first_frame_ms": 6704,
+  "wall_ms": 12263,
+  "we_gpu_mib": 780,
+  "rss_mib": 1941,
+  "cpu_s": 23.1,
   "shots": [
     {
       "t": 0.5,
-      "late_ms": 6,
-      "t_actual": 0.506
+      "late_ms": 18,
+      "t_actual": 0.518,
+      "scene_time": 0.591
     },
     {
       "t": 2,
       "late_ms": 8,
-      "t_actual": 2.008
+      "t_actual": 2.008,
+      "scene_time": 2.096
     },
     {
       "t": 5,
-      "late_ms": 17,
-      "t_actual": 5.017
+      "late_ms": 15,
+      "t_actual": 5.015,
+      "scene_time": 5.093
     }
   ],
-  "captured": "2026-11-06T17:04:33+05:30",
-  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"
+  "burst": [],
+  "captured": "2026-11-06T20:35:51+05:30",
+  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame",
+  "scene_clock": {
+    "strip": 0.012,
+    "crop": 0.03,
+    "read": 3,
+    "of": 3,
+    "offset_median": 0.078
+  }
 }

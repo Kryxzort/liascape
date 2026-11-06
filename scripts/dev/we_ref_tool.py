@@ -341,13 +341,9 @@ def cmd_clock_inject(item, out):
     op = (scene.get("general") or {}).get("orthogonalprojection")
     if isinstance(op, dict) and op.get("width") and op.get("height"):
         w, h = op["width"], op["height"]
+    # (the shader ignores the layer's bounds; in a perspective scene these are what WE draws the strip with: moving
+    # them to the camera's centre lost 3509243656's strip and didn't bring back 3276522107's)
     origin, size = f"{w / 2} {h / 2} 0", f"{w} {h}"
-    if not (isinstance(op, dict) and op.get("width")):
-        # a perspective scene: the layer's bounds where the camera looks (the shader ignores them, but a layer out of
-        # the view is culled: 3276522107's camera sits near the world origin with farz 500)
-        cam = (scene.get("camera") or {}).get("center")
-        if isinstance(cam, str):
-            origin, size = cam, "1 1"
     ids = [o.get("id", 0) for o in scene.get("objects", []) if isinstance(o.get("id"), int)]
     scene.setdefault("objects", []).append({
         "id": max(ids + [0]) + 1, "name": CLOCK_NAME, "image": f"models/{CLOCK_NAME}.json",

@@ -79,8 +79,10 @@ drive's files.
    - The frame for T is requested at t0 + T (`gamescopectl screenshot <path>`, the next composited frame).
    - gamescope holds only one pending screenshot. A request made before the last PNG was written replaced it,
      and two frames went missing that way. So each request now waits for the previous file, up to 0.5 s.
-     `late_ms` / `t_actual` in the manifest record what that cost, and the compare renders ours at
-     `t_actual`.
+     `late_ms` / `t_actual` in the manifest record what that cost.
+   - **That t = 0 isn't WE's scene time** (§ "The scene clock"): WE's clock was already 0.1–1.1 s along at it, a
+     different amount every run. Since 2026-11-06 the scene shows its own clock in a strip along the bottom, each
+     frame's `scene_time` is read from it, and the compare renders ours at that time.
 7. **The pointer.** `xdotool mousemove` on gamescope's Xwayland: Wine sees it, and parallax follows. It is parked at
    the canvas centre, where the worker puts it, unless `--pointer X0,Y0[:X1,Y1]` is given (native scene px,
    y down, as the worker's). `--pointer-time A-B` limits the move to scene seconds A–B.
@@ -242,6 +244,59 @@ The reference was wrong, not our renderer.
   `brightness` when the renderer runs HDR (GH 0x1402321d0; fork patch "an HDR scene's image brightness scales its
   draw colour"), and its single layer has brightness 1.15 on a shader with no g_Brightness term (gap audit E42).
 - `--gamescope-arg` passes extra gamescope options (recorded in the manifest), for the next experiment of this kind.
+
+## The scene clock: each frame's real scene time
+
+WE's scene clock (the `g_Time` every shader sees, a SceneScript's `engine.runtime`, the timeline keyframes) is not at
+0 when the capture's t = 0 frame comes in. The first agents measured it from scenes with intros: 0.19–1.1 s ahead, a
+different amount every run (2672425887's demon fades in on frames 62–78 at 30 fps; its 2 s frame caught the fade done
+or not). So scenes with intros, fades and phases (the "time" rows of the report) differed for the capture's sake.
+
+**Nothing outside the frames tells it.** WE's `log.txt` stamps whole seconds; the probe sees black, Wine's flat window
+background, then a picture, and none of those is the clock's 0.
+
+**So the scene shows it.** `we-ref-capture.sh` opens a private copy of the item (`~/.cache/liascape/we-ref/ws-clock/<id>`:
+links to the Workshop files, never the folder itself) whose scene has one more layer, drawn last: a strip along the
+bottom edge, 1.2 % of the frame's height, 26 cells across. The first cell is lit, the last unlit, the 24 between are
+`floor(g_Time * 1000)` in binary, most significant first (`we_ref_tool.py` CLOCK, its own shader
+`liascape_clock.frag`). Its vertex shader writes clip space directly, so zoom, camera shake and parallax never move
+it. A lit cell is grey 0.5, under any HDR bloom threshold; the read takes the threshold halfway between the two guard
+cells, so a dimmed or re-encoded (FP16) frame still reads.
+
+- **The test scene first** (`~/.cache/liascape/we-ref/probe-scenes/timeprobe`, capture-only, with `--burst`: frames
+  back to back from t = 0). `g_Time` read from the strip and a SceneScript's `engine.runtime` (a layer's alpha =
+  `runtime % 10 / 10`) agreed to the ms in all 20 frames, and `g_Time − request time` held at 0.14–0.21 s over 4 s:
+  the clock runs at the wall clock's rate.
+- **Our worker** renders the test scene's strip at exactly the shot time (0.5, 1, 2, 4.2 s → 0.500, 1.000, 2.000,
+  4.200), so "ours at T" means `g_Time` = T.
+- **Real scenes**: 2672425887 read 0.09 s ahead in one run; 1155728109, 3354740764 0.39–0.40 s; 3019192537 0.90 s.
+- **The strip doesn't touch the picture.** Captures with and without it, mean |Δ| above the crop: 0.15 (the run-to-run
+  noise of 1155728109 is 0.16), and the band just above the strip differs no more than the top half.
+- **Where it can't be read:** a frame where the scene itself is black at the bottom (3509243656's intro fades in
+  from black, camera fade included) and 3276522107, whose post-processing layer letterboxes the frame over every
+  layer, ours too. Such a shot gets `scene_time_estimated`: its request time plus the median offset of the frames
+  that were read. A `"fullscreen": true` model for the strip left 3276522107 all black, and placing it at a perspective
+  camera's centre lost 3509243656's strip, so it stays a plain image layer with the canvas's bounds. The 3D
+  scenes 3276522107 and 3477054430 never read (their post-processing / overlays cover it); 3509243656 reads at 5 s
+  in some runs.
+- **The manifest**: `shots[].scene_time` (+ `scene_time_estimated`), `scene_clock` {strip, crop, read, of,
+  offset_median}. `--burst S` adds frames back to back with their scene times (`burst[]`, and the probe's frames
+  before t = 0). `--no-clock` captures the item itself.
+- **The compare** (`scene_we_compare.sh`) renders ours at each shot's `scene_time` (to the worker's 1/30 s frame)
+  and leaves the bottom 3 % (the strip and any bloom around it) out of both pictures. The side-by-sides label
+  each row with it.
+
+**The wall clock, too.** Wine's clock is the host's, so a clock text, a script's `Date` or a day/night scene shows the
+capture's hour. The compare now runs ours under libfaketime at WE's wall time when its scene clock read 0 (each PNG's
+mtime minus its `scene_time`, `we_ref_tool.py wall0`). 2134765860 (day/night, captured and rendered in the
+evening) went 0.46 → 0.005, and the clock texts show the capture's minute on both sides.
+
+**The fonts, too.** The capture gives WE the Windows install's fonts. The compare now gives ours the same faces through
+a private fontconfig file of its run (`--windows-fonts`, default `/mnt/Windows/Windows/Fonts` when mounted; nothing
+installed or copied). 3354740764's notepad then wraps exactly as WE's: its text is `systemfont_consolas` at 4 pt in a
+195.5 px box, and this system's stand-in, Inconsolata (0.50 em wide), fits 24 characters where Consolas (0.55 em)
+fits 21. That was the whole wrapping difference, not the layout (our layout with Consolas breaks every line where WE
+does).
 
 ## Findings for the renderer
 

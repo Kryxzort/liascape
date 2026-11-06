@@ -352,14 +352,28 @@ Two bug classes kept recurring; fix the class, not the instance:
         the Workshop folder. Every library scene has frames at 0.5 / 2 / 5 s in `docs/player/reports/we-ref/<id>/`;
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
-    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real differences:
-          3354740764 (a black box behind the dog sprite, extra light shafts); 3490034653 (a warm glow from its
-          `light_shafts_1` particles drawn upside down: fixed with 3354740764's in 313e1d2;
-          the rest is a few px of layer registration — camera shake / parallax phase).
-    - [ ] The WE-reference time base: WE's scene clock is already 0.2–1.1 s along at the first frame the probe takes
-          (varying per run), and a scene that opens black pushes t = 0 into its own fade. Scenes with intros
-          ("time" class) need either a per-run clock estimate (fit a known keyframe / g_Time-driven layer) or a
-          ±1 s slack in the compare before their score means anything.
+    - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). Since the scene clock
+          (2026-11-06) the "time" rows are gone; the top is 3D (3509243656, 3276522107: the 3D agent's), then
+          3354740764 (the clouds compose layer below), 3490034653 (registered to ~1 px; light-shaft haze, random),
+          and parallax scenes' 0.5 s frames (the late pointer, below).
+    - [ ] 3354740764's `Clouds` compose layer (id 58: angles z −π, scale 1.2 × 2.3, `perspective`, procedural_noise
+          with PERSPSWITCH and a UV quad, LAYERED from `_rt_imageLayerComposite_51_a`): ours darkens the bottom 30 % of
+          the grass (−14…−32 / 255) where WE's changes almost nothing. Proved by removing the layer from a private copy
+          in both (WE `captures/var/v3354-noclouds`, ours `ov-noclouds`): without it the grass matches. Look at how a
+          turned / scaled compose layer maps its effect UVs onto the screen (CImage passthrough copy + MVP;
+          `isPerspectiveLayer` skips compose layers: "no library scene turns one" — this one does).
+    - [ ] 3219908811's notice panel at 5 s: WE's still dim (fading in), ours fully in. With the scene clock both are
+          at the same scene time, so it is a real timing / alpha difference.
+    - [ ] The 0.5 s frames of parallax scenes (3233141951, 3219908811, 3363252053): WE's pointer arrives with the
+          capture's xdotool nudge after load and its parallax eases in from there; wallpiper (GetCursorPos hook) has
+          it from the first frame. Nudge earlier, or take the 0.5 s frame from wallpiper.
+    - [ ] The compare gives ours the Windows install's fonts (the faces WE drew with); the owner's player uses
+          fontconfig's, so 19 scenes naming `systemfont_*` draw with stand-ins (3354740764's Consolas → Inconsolata
+          wraps after 24 characters, not 21). Owner's call: a "Windows fonts folder" setting (auto-found on a
+          mounted Windows install) for the player.
+    - [ ] Minor, LWE: a layer colour written without a decimal point ("1 1 1") is read as 0–255 bytes (1/255 =
+          black; WE draws white). No library scene writes one (their layer colours are "1.00000 …"); found with a
+          hand-written test scene. And LWE fails to load a project folder whose files are symlinks (a farm).
     - [ ] 3184155462's cursor ripple vs the owner's Windows: WE's ripple force scales with the frame time (≈10× weaker
           at 120 fps than at 30); at a matched 30 fps ours is WE's strength. The owner's Windows WE (main profile,
           `/mnt/Windows/…/wallpaper_engine/config.json`) runs at **240 fps** (Ultra, MSAA x8; the Linux library's

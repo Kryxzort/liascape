@@ -1101,3 +1101,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       — done 2026-11-06: the HDR look was DXVK showing WE's FP16 swap chain raw; re-encoded references match ours (`39abd2a`).
 - [x] The references are MSAA x8 — the owner's main Windows profile is x8 too (an earlier note said x2, read from the
       Linux library's stale config copy); nothing to recapture. Closed 2026-11-06.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)":
+  - [x] The WE-reference time base — done 2026-11-06 (`we-proton.md` "The scene clock"). Each frame's real scene
+        time comes from WE itself: the capture opens a private copy of the scene with one more layer, a strip along
+        the bottom edge that draws `g_Time` (ms, 24 bits) in clip space; `we_ref_tool.py clock-read` decodes it into
+        each shot's `scene_time`. A capture-only test scene proved `g_Time` = `engine.runtime` = the frame's clock
+        and that it runs at wall-clock rate; our worker draws the same strip at exactly the shot time. The compare
+        renders ours at that time, crops the strip, runs ours at the capture's wall time (libfaketime) and with the
+        Windows fonts. Whole corpus recaptured: mean score 0.119 → 0.072; 3509243656 0.261 → 0.053, 2783122117 0.562 → 0.014, 3593587273 0.499
+        → 0.023, 2134765860 0.46 → 0.005, 2672425887 0.427 → 0.136, 3354740764 0.523 → 0.330, 3419466417 0.336 →
+        0.077, 3490034653 0.414 → 0.289. 3354740764's notepad wrapping was the font (Inconsolata for Consolas).

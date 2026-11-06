@@ -698,3 +698,27 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   tests 125 / 125 (2 new, both fail before the fix). Scene health 89 / 7 / 0 and the shader sweep's known 6 failures,
   both as before. Player suite: 734 passed and 18 failed at load 40–74 (supervisor, bus-cycle and transport timing),
   and all 18 passed when run alone. No player code changed.
+
+## 2026-11-06 — WE references: each frame's real scene time; the "time" rows are gone
+- **WE's own clock is in every reference now.** WE's scene clock was 0.1–1.1 s ahead of the capture's "t = 0", a
+  different amount every run, so intros, fades and animation phases looked like bugs. The capture now opens a private
+  copy of each scene (never the Workshop folder) with one extra layer: a thin strip along the bottom edge that shows
+  WE's own scene time in binary. Each frame's real time is read from it, and ours is rendered at exactly that time.
+  A test scene proved the strip, a script's `engine.runtime` and the frame agree to the ms. The strip is cut off
+  both pictures in the compare. (The "dark bar along the bottom" the 3D agent saw in the new captures is that strip.
+  Use the compare from this commit on, which crops it.)
+- Also in the compare: ours runs at the capture's wall time (clocks, dates, day/night), and with the Windows
+  install's fonts (the faces WE drew with; only a private fontconfig file of the run points at them).
+- **Whole library recaptured and re-ranked: mean score 0.119 → 0.072.** 3509243656 0.26 → 0.05, 2783122117 0.56 → 0.01, 3593587273 0.50 →
+  0.02, 2134765860 0.46 → 0.005, 2672425887 0.43 → 0.14, 3419466417 0.34 → 0.08, 3354740764 0.52 → 0.33.
+- **3354740764** (your Windows XP scene): the notepad wraps differently only because this system has no Consolas
+  (its stand-in is narrower); with Consolas ours wraps exactly like WE. The colour difference is two layers, found by
+  removing layers in both WE and ours: the clouds layer (turned 180°) darkens the bottom of the grass in ours, where
+  WE's barely shows; and ours' light shafts in the top right (random in WE). The background with all its effects
+  matches WE. The clouds layer is in TODO, not fixed yet.
+- **3490034653**: with the times aligned, the layers sit within about 1 px of WE's. What's left is a light-shaft haze
+  (random in WE), petals and the clock's minute.
+- **Your call (TODO):** the 19 scenes that name Windows fonts (Consolas, Comic Sans, Arial …) draw with Linux
+  stand-ins in your player, so text can wrap differently. A "Windows fonts folder" setting (found on your mounted
+  Windows drive) would fix that. Not built.
+- No renderer change in this round, so no LWE pin bump, player rebuild or restart.
