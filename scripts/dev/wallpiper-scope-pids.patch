@@ -1,0 +1,53 @@
+diff --git a/programs/wallpiperd/process.c b/programs/wallpiperd/process.c
+index ca3ae4e..5a7fdf4 100644
+--- a/programs/wallpiperd/process.c
++++ b/programs/wallpiperd/process.c
+@@ -97,6 +97,36 @@ static bool read_cmdline(int pid, char *out, size_t out_len) {
+   return true;
+ }
+ 
++static bool spawned_by_us(int pid) {
++  char path[64];
++  snprintf(path, sizeof(path), "/proc/%d/environ", pid);
++  FILE *f = fopen(path, "r");
++  if (!f) {
++    return false;
++  }
++  size_t cap = 262144;
++  char *env = malloc(cap);
++  if (!env) {
++    fclose(f);
++    return false;
++  }
++  size_t n = fread(env, 1, cap - 1, f);
++  fclose(f);
++  env[n] = '\0';
++  char needle[64];
++  int len = snprintf(needle, sizeof(needle), "WALLPIPER_GUARDIAN_PID=%d",
++                     (int)getpid());
++  for (size_t i = 0; i < n;) {
++    if (strncmp(env + i, needle, (size_t)len) == 0 && env[i + len] == '\0') {
++      free(env);
++      return true;
++    }
++    i += strlen(env + i) + 1;
++  }
++  free(env);
++  return false;
++}
++
+ static void scan_proc_pids(wp_pid_list_t *out,
+                            bool (*matches)(int pid, const void *ctx),
+                            const void *ctx) {
+@@ -114,6 +144,11 @@ static void scan_proc_pids(wp_pid_list_t *out,
+     if (end == entry->d_name || *end != '\0' || pid <= 0) {
+       continue;
+     }
++    /* liascape local patch: only processes this daemon started (they inherit
++     * WALLPIPER_GUARDIAN_PID=<our pid>), never another Wine/WE on the box. */
++    if (!spawned_by_us((int)pid)) {
++      continue;
++    }
+     if (matches((int)pid, ctx)) {
+       if (out->count < sizeof(out->pids) / sizeof(out->pids[0])) {
+         out->pids[out->count++] = (int)pid;
