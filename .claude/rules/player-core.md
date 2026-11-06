@@ -58,7 +58,8 @@ happen regardless of timing.
 - `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
 - `src/signal/` — Signals (Phase 3): `covered.rs` (the pure cover rules per source + the hold's
   debounce), `hypr.rs` / `sway.rs` (the IPC cover sources on `lia-cover`), `mod.rs` (the feed, source
-  choice, the runtime's `cover_tick`, the `cover` probe); `automute.rs` (the in-player auto-mute, on unless
+  choice, the runtime's `cover_tick`, the `cover` probe); `cursor.rs` (the desktop pointer, audit C6:
+  Hyprland `cursorpos` polled on `lia-cursor`, the `pointer` probe — § Scene worker → "The desktop pointer"); `automute.rs` (the in-player auto-mute, on unless
   `LIASCAPE_PLAYER_AUTOMUTE=0`: the rule, `automute_tick`, the `automute` probe) + `mpris.rs`
   (`lia-mpris`, zbus). § Signals.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
@@ -341,8 +342,9 @@ user's setting, default `maximized`; live; kept by the snapshot) and observed `c
 **Output props.** `name`/`width`/`height`/`refresh_hz` (read-only; kept current with
 `set_observed` on a mode change), `layer` = `background|bottom|top|overlay` (live, §
 Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland),
-`scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at, 0–480, default 30,
-0 = the refresh; live — § Scene worker → "The `scene` Source kind"). Observed `covered`
+`scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at — WE's `fps`: 0–480, default
+**15** (WE's own, 2026-11-06; was 30), **not capped by the refresh** (the scene ticks at it, the output
+presents at most at its refresh), 0 = the refresh; live — § Scene worker → "The `scene` Source kind"). Observed `covered`
 (`none|maximized|fullscreen|unavailable`) and `covered_by` (`{app_id, pid}` / `{}`) — the covered
 Signal (Phase 3 Task 6, § Signals).
 
@@ -2451,7 +2453,7 @@ note on stderr and exits 0 (or stdout closes).
 | `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in; the client's later requests wait for it) | `unsupported` (real clock), `timeout`, `busy` (64 queued) | `ctl step '{"ms":16}'` |
 | `outbox.read` | `{after?: u64, limit?: 500 (1–2000)}` (Phase 3 Task 9, § Outbox) | `{events: [{seq, t_wall, kind, fields}] (unacked, seq > after, oldest first), last_seq (the newest ever appended, 0 = none), dropped_before: u64\|null (entries past `after` were dropped by the bound: everything before this seq)}` | `bad_request` (`after`/`limit` not a non-negative integer, `limit` 0) | `ctl outbox.read '{"after":12,"limit":100}'` |
 | `outbox.ack` | `{seq}` — the backend stored every entry ≤ seq (a seq past the newest acks all) | `{}` (reads skip them at once; the file is compacted on `lia-snapshot`) | `bad_request` (no/bad `seq`) | `ctl outbox.ack '{"seq":14}'` |
-| `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
+| `headless.add_output` | `{name, width, height, hz? (60), x?, y?}` — `x, y`: its desktop position for the desktop pointer (default: right of the outputs before it, y 0; `--outputs` lays them out left to right) | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
 | `headless.pointer` | `{output, x, y, buttons? (0), entered? (false)}` — surface px from the top-left (Task 7); `entered` = the pointer came onto the output there (Wayland `enter`): the scene gets it as a jump, no stroke from where it left | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
 | `headless.cover` | `{output \| "*", state: none\|maximized\|fullscreen, app_id?, pid?}` — the fake cover source (Phase 3 Task 6, § Signals); read by the next tick | `{}` | `no_such_node`, `bad_request`, `unsupported` | `ctl headless.cover '{"output":"*","state":"fullscreen"}'` |
@@ -4011,8 +4013,8 @@ path: <item folder>, position?, paused?, speed?, preview?}}`. The transition rec
 hard-coded `kind == "video"` learned about `scene`.
 
 - **Schema.** `Source.kind` enum + `scene`; `Source.preview` (Str, the item's preview image —
-  stored on every kind, shown by Task 10's crash policy); `Output.scene_fps` (F64 0–480, default **30** = D5,
-  `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
+  stored on every kind, shown by Task 10's crash policy); `Output.scene_fps` (F64 0–480, default **15** = WE's
+  own default `fps` (2026-11-06; was 30 = D5), `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
   `out:<c>` whose `srcs:` holds `id` — shown there, or held there by a transition).
   `onset::kind_has_audio(kind)` = `video | scene` (`has_audio`, `audible`, the restore fade,
   the snapshot's `playing` and the periodic refresh all go through it).
@@ -4041,8 +4043,9 @@ hard-coded `kind == "video"` learned about `scene`.
   left without). `SourceHost::demand_computes` counts recomputes. **The worker is spawned at the first demand that names an
   output** (so the ring is exported at the right size from the start; a node created but not
   shown has no worker); `max_size` = the largest width and height over the outputs (the cover
-  size covers each), tick rate = max `eff_fps(scene_fps, refresh)` (`scene_fps` capped at the
-  refresh; 0 → the refresh; neither known → 30; Task 8 adds the GPU cap); a change of
+  size covers each), tick rate = max `scene_rate(scene_fps, refresh)` (**WE's `fps`, not capped at the
+  refresh** — below; 0 → the refresh; neither known → 15; Task 8 adds the GPU cap); each output's
+  presents of the scene's frames stay gated at `eff_fps(scene_fps, refresh)` (≤ its refresh, `redraw`); a change of
   `max_size` sends **`Resize`** (stats `resizes`); no output at all (every output unplugged —
   parked) changes nothing. `set_audio_route` re-routes scenes too (`ToWorker::Route`).
   `SourceHost::scene(id)`/`scene_mut(id)`, `workers_info()`; `Source::as_scene(_mut)`.
@@ -4259,6 +4262,38 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   `wp_project_set_frame_rate` (fork 0105): a simulation effect (cursorripple) steps at it
   whatever rate the ticks arrive at. Probe `workers`: `pointer_jumps`, `rate_sent`. API
   `pointer_enter_is_a_jump_and_rate_is_the_demand`.
+- **WE's frame limiter (2026-11-06, decoded from wallpaper64.exe 2.8.485).** The render loop
+  (FUN_140141520) sleeps each frame so that `fps` frames fill each second (`fps` = `general.user.fps`
+  at window +0x18c, read by FUN_1401461e0; a 1 s budget split over the frames left, `Sleep` in ms,
+  QueryPerformanceCounter; 0 = no limit) and presents with `IDXGISwapChain1::Present1(0,
+  DXGI_PRESENT_ALLOW_TEARING)` — no vsync wait — so a scene runs at `fps` even above the monitor's
+  refresh (DWM shows the newest frame each vblank). The UI slider is 10..`runtime.frequencymax`;
+  default 15 (the loader's value when unset; the first-run preset "medium"). (The `clamp(round(1000/fps)
+  ·0.5, 6, 100)` FUN_14006dd90 stores is the **audio capture thread's** `Sleep` between reads, not
+  the frame limiter.) Ours: `scene_rate` (above) = `scene_fps` uncapped → the tick rate and
+  `ToWorker::Rate`; default 15. API `scene_fps_is_wes_rate_above_the_refresh`.
+- **The desktop pointer (audit C6, 2026-11-06; `signal/cursor.rs`).** WE reads `GetCursorPos` every
+  frame over the whole desktop (other monitors and windows included) → `ScreenToClient` of the
+  wallpaper's window ÷ its size (outside 0..1 off it). Ours: on Hyprland, the `lia-cursor` thread
+  polls the read-only `cursorpos` request on `.socket.sock` (no Wayland protocol gives a client the
+  global pointer; socket2 has no cursor event) at the highest `demand_hz` of the unpaused scenes —
+  parked (no requests) when there is none; a reading is published only when it moved, so the
+  loop's check is one atomic load. `Runtime::pointer_events` → `desktop_pointer_forward`: the point
+  through each output's `OutputBackend::desktop_rect` (xdg-output logical position/size; headless:
+  `pos`) into its pixels (`cursor::desktop_to_output`), then the layer's fit **unclamped**
+  (`scene::pointer::to_source_uv_unclamped`: on the other monitor it lies off the scene); a scene
+  on several outputs takes the one the cursor is on, else its first by name. It runs on a new
+  reading, a button change, or every `cursor::REFRESH` (250 ms: places new scenes, re-derives the
+  rate). A scene's first position is a jump; nothing else is (no enter jumps while it reads). The
+  surface's samples then give only the buttons (OR over outputs; a press is seen only over the
+  bare desktop) and still set `out:<c>.pointer`. **Fallback:** no reading yet / a failed request
+  (no socket, Hyprland gone; retried every 2 s) / not Hyprland → the surface pointer as before,
+  its next sample a jump (`pointer.desktop_lost`). `LIASCAPE_PLAYER_POINTER_SOURCE` = `hyprland` |
+  `surface`; default Hyprland on Wayland when `HYPRLAND_INSTANCE_SIGNATURE` is set, surface
+  headless. Events `pointer.source`, `pointer.desktop`, `pointer.desktop_lost`; probe **`pointer`**
+  `{source, in_use, ok, reason, rate_hz, pos, polls, changes, fails, request_us_mean, forwards,
+  jumps}`. Cost (owner's machine, 240 Hz): see the audit's "C6 result". API
+  `desktop_pointer_from_a_fake_hyprland`; units in `signal::cursor`, `scene::pointer`.
 - **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
   `SysMon::start()` (thread `lia-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
   node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but

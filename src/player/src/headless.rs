@@ -111,6 +111,12 @@ pub trait OutputBackend {
     fn take_pointer(&mut self) -> Vec<PointerSample> {
         Vec::new()
     }
+    /// Output `name`'s place on the desktop, `[x, y, w, h]` in logical pixels (Wayland: its
+    /// xdg-output position and size — the space Hyprland's `cursorpos` is in): the desktop
+    /// pointer (`signal::cursor`) maps through it. `None` = unknown.
+    fn desktop_rect(&self, _name: &str) -> Option<[f64; 4]> {
+        None
+    }
     /// Phase 3 Task 6: the backend's own cover source (`crate::signal`) — wlr-foreign-toplevel
     /// on Wayland, `headless.cover` headless: its name, or why there is none.
     fn cover_source(&self) -> Result<&'static str, String> {
@@ -134,6 +140,9 @@ struct VOut {
     info: OutputInfo,
     tex: Tex,
     fbo: Fbo,
+    /// Its desktop position (logical = pixels): right of the outputs before it unless
+    /// `headless.add_output` placed it.
+    pos: (f64, f64),
 }
 
 /// Virtual outputs, each an offscreen RGBA8 texture + FBO.
@@ -240,7 +249,31 @@ impl Headless {
         let tex = gfx.tex(info.width, info.height);
         let fbo = gfx.fbo(&tex);
         self.changes.push(OutputChange::Added(info.clone()));
-        self.outs.push(VOut { info, tex, fbo });
+        let x = self
+            .outs
+            .iter()
+            .map(|o| o.pos.0 + o.info.width as f64)
+            .fold(0.0, f64::max);
+        self.outs.push(VOut {
+            info,
+            tex,
+            fbo,
+            pos: (x, 0.0),
+        });
+        Ok(())
+    }
+
+    /// Place output `name` on the desktop at `(x, y)` (logical = pixels; `headless.add_output`).
+    pub fn set_position(&mut self, name: &str, x: f64, y: f64) -> Result<(), ApiError> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(bad(format!("position ({x}, {y}) is not a position")));
+        }
+        let o = self
+            .outs
+            .iter_mut()
+            .find(|o| o.info.name == name)
+            .ok_or_else(|| bad(format!("no headless output {name:?}")))?;
+        o.pos = (x, y);
         Ok(())
     }
 
@@ -380,6 +413,11 @@ impl OutputBackend for Headless {
 
     fn take_pointer(&mut self) -> Vec<PointerSample> {
         std::mem::take(&mut self.pointer)
+    }
+
+    fn desktop_rect(&self, name: &str) -> Option<[f64; 4]> {
+        let o = self.outs.iter().find(|o| o.info.name == name)?;
+        Some([o.pos.0, o.pos.1, o.info.width as f64, o.info.height as f64])
     }
 
     fn cover_source(&self) -> Result<&'static str, String> {

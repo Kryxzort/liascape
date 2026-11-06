@@ -176,7 +176,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             // Phase 2 Task 8 (owner: "GPU budget = a setting, default auto-throttle"): `true`
             // = a scene whose worker starves its outputs is throttled stepwise and restored
             // (`scene::budget`); `false` = every scene ticks at exactly its outputs'
-            // `eff(scene_fps, refresh)` (a cap in force is lifted at once). Live.
+            // `scene_rate(scene_fps, refresh)` (a cap in force is lifted at once). Live.
             (
                 "scene_throttle",
                 def(PropType::Bool, false, PropValue::Bool(true)),
@@ -300,12 +300,15 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "pointer",
                 def(PropType::List3, true, PropValue::List(vec![0.0, 0.0, 0.0])),
             ),
-            // Phase 2 Task 5: the frame rate scene sources shown here are rendered at (D5:
-            // 30, LWE's default); 0 = this output's refresh. A scene shown on several
-            // outputs ticks at the highest of their `eff(scene_fps, refresh_hz)`.
+            // Phase 2 Task 5: the frame rate scene sources shown here are rendered at — WE's
+            // `fps` (2026-11-06): default 15 (WE's own; was 30, D5), and NOT capped by the
+            // refresh (WE's loop sleeps to `fps` and presents without vsync); 0 = this output's
+            // refresh. A scene shown on several outputs ticks at the highest of their
+            // `scene_rate(scene_fps, refresh_hz)`; each output presents its frames at most at
+            // `eff(scene_fps, refresh_hz)` (≤ its refresh).
             (
                 "scene_fps",
-                ranged(PropType::F64, (0.0, 480.0), "0–480", PropValue::F64(30.0)),
+                ranged(PropType::F64, (0.0, 480.0), "0–480", PropValue::F64(15.0)),
             ),
             // Phase 3 Task 6, the covered Signal (observed, `crate::signal`): how a window that is
             // on screen here covers this output — `unavailable` when this session has no
