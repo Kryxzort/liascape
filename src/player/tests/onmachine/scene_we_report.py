@@ -161,6 +161,10 @@ def trust_of(man, tr):
         out.append(f"system fonts: {src} {'/'.join(tr['sysfonts'])}")
     elif tr["text"]:
         out.append("fonts: the scene's own")
+    if man.get("swap_chain"):
+        # HDR at Ultra: WE's FP16 (scRGB) swap chain, shown raw by DXVK; the frames are re-encoded as Windows shows
+        # them (we_ref_tool.py SCRGB)
+        out.append("FP16 swap chain: re-encoded")
     if tr["clock"]:
         out.append("clock: Wine's")
     if tr["video"]:
@@ -283,7 +287,10 @@ def render_md(out, a, first):
              "the scene names Windows system fonts (`systemfont_arial` …) and WE drew them with the real ones, "
              "linked into the prefix from the Windows install. Our renderer has to find those faces on Linux, so a "
              "glyph difference there is a font, not a layout bug. `fonts: the scene's own` means the fonts are "
-             "packed in the scene. `clock: Wine's` means the scene reads "
+             "packed in the scene. `FP16 swap chain: re-encoded` means an HDR scene at Ultra: WE presents it through an FP16 (scRGB) swap chain, "
+             "which Windows sRGB-encodes for an SDR display but DXVK on gamescope shows raw (too dark, too saturated), so "
+             "the capture re-encodes the frames as Windows shows them (exact but for 8-bit banding in the darkest tones; "
+             "docs/player/spikes/we-proton.md). `clock: Wine's` means the scene reads "
              "the wall clock, so its time and date are the capture's, not ours. `video` means it has video textures; "
              "`video: crashed` means WE crashed on them under Proton. Differences in those classes are not our bugs "
              "until a Windows capture says so. Check by eye against Windows with "

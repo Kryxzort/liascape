@@ -12,7 +12,7 @@
   "we": "2.8.485",
   "proton": "experimental-11.0-20261027b-x86_64"
  },
- "generated": "2026-11-06T19:01:20+0530",
+ "generated": "2026-11-06T19:20:36+0530",
  "scenes": [
   {
    "id": "2783122117",
@@ -287,7 +287,7 @@
     1080
    ],
    "class": "time",
-   "note": "a day / night scene on the wall clock (SceneScript `timeOfDay`): WE was captured at 16:56 (day), ours renders at the compare run's local time \u2014 a run after about 18:00 draws night and scores ~0.46. Same picture at the same hour (0.006).",
+   "note": "A room whose daylight follows the wall clock: WE was captured by day, ours renders at the compare's own hour (evening here). Compare at the capture's hour.",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
    "dist": 0.4603347554800848,
    "ssim": 0.2346706986427307,
@@ -500,7 +500,7 @@
     804
    ],
    "class": "bug?",
-   "note": "ours is lighter in the shadows (less contrast) across the whole frame; perhaps the same family as the HDR scenes. The petals are random.",
+   "note": "Not the HDR family: an LDR scene with an 8-bit swap chain, and both WE sources agree. Ours drew a warm glow left of the girl that WE doesn't: its `light_shafts_1` particles upside down. Fixed with 3354740764's particle-sprite orientation (313e1d2). What remains is registration: the layers sit a few px apart from WE's (camera shake and parallax phase; WE's clock is 0.25\u20130.9 s along at its first frame) and the petals are random.",
    "trust": "FXC, fonts: the scene's own, clock: Wine's",
    "dist": 0.4140787172525529,
    "ssim": 0.38056763013203937,
@@ -784,8 +784,8 @@
     1080
    ],
    "class": "time",
-   "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\").",
-   "trust": "FXC, system fonts: Windows' arial, clock: Wine's",
+   "note": "WE is still fading its login-screen intro at 5 s; ours already shows the galaxy. The intro script's timing differs (3D; TODO \"LWE: 3D / perspective scenes\"). (Its frames are re-encoded from WE's FP16 swap chain, like the other HDR scenes.)",
+   "trust": "FXC, system fonts: Windows' arial, FP16 swap chain: re-encoded, clock: Wine's",
    "dist": 0.26051969108258166,
    "ssim": 0.07735910018285115,
    "hist": 0.28699904203107834,
@@ -1706,9 +1706,9 @@
     1920,
     1080
    ],
-   "class": "bug?",
-   "note": "HDR at Ultra: WE is far more saturated and contrasty (a deep orange and red sky, a near-black foreground, a lens-flare streak through the sun); ours is flat and washed out. Probably the Ultra post-processing (HDR bloom / tone mapping). The biggest real difference found.",
-   "trust": "FXC",
+   "class": "ok",
+   "note": "Was the worst (0.60): WE looked far darker and more saturated. That was the reference, not us. At Ultra WE presents an HDR scene through an FP16 (scRGB) swap chain holding lin () of the picture; Windows sRGB-encodes it for an SDR display, DXVK under Proton showed it raw. The frames are re-encoded now (we-proton.md \"The FP16 swap chain\"), and ours matches. The rest is camera shake (random).",
+   "trust": "FXC, FP16 swap chain: re-encoded",
    "dist": 0.12111369133830674,
    "ssim": 0.0407828688621521,
    "hist": 0.24773511540294826,
@@ -2345,9 +2345,9 @@
     1920,
     1080
    ],
-   "class": "bug?",
-   "note": "HDR at Ultra: in WE the girl's face and hair are deep, dark blue and the particles brighter; in ours they are a light, washed-out blue. The same family as 3019192537.",
-   "trust": "FXC",
+   "class": "ok",
+   "note": "Was 0.48 (WE a deep, dark blue): the FP16 swap-chain skew of 3019192537, fixed in the capture. Matches; the particles are random.",
+   "trust": "FXC, FP16 swap chain: re-encoded",
    "dist": 0.07947305366010086,
    "ssim": 0.049337307612101235,
    "hist": 0.048940920630967555,
@@ -4830,9 +4830,9 @@
     1920,
     1080
    ],
-   "class": "unexamined",
-   "note": "colour (hist 0.51); not looked at closely.",
-   "trust": "FXC (3 compiled)",
+   "class": "ok",
+   "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed.",
+   "trust": "FXC (3 compiled), FP16 swap chain: re-encoded",
    "dist": 0.02189072674824213,
    "ssim": 0.007743696371714274,
    "hist": 0.05695173281737998,

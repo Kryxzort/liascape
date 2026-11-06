@@ -180,8 +180,68 @@ The owner asked how we know Proton reproduces Windows. Class by class:
   - DXVK is conformant enough for WE's D3D11 that nothing has looked wrong. But it isn't Microsoft's D3D11, so
     precision corner cases (sRGB, blending of NaN or negative values) could differ.
   - The owner's check by eye against Windows (`docs/player/reports/we-ref/compare/`) is the final word.
-- **Settings:** our `config.json` is Ultra / MSAA x8, as on the owner's Windows. The frame rate is 30 instead of
+- **HDR scenes at Ultra: Proton shows them too dark. Fixed in the capture (2026-11-06).** See the next section.
+- **Settings:** our `config.json` is Ultra / MSAA x8. (The owner's Windows `config.json` turned out to say
+  `msaa` **x2**, `preset` / `postprocessing` ultra, `fps` 30. MSAA changes geometry edges only, not colour; the
+  references stay at x8 until a recapture is worth it.) The frame rate is 30 instead of
   their 240, and frame-time-dependent effects differ with it (the cursor ripple, § Findings).
+
+## The FP16 swap chain: why the HDR scenes looked darker under Proton
+
+The first references showed 3019192537 and 3395587987 far darker and more saturated than ours (a deep red sky and
+a near-black foreground; a deep blue face). The owner's Windows WE (Ultra, SDR BenQ panels) shows them like ours.
+The reference was wrong, not our renderer.
+
+**What WE does (decoded from wallpaper64.exe 2.8.485, `all.c`).**
+- With "postprocessing" at `ultra`, the project classifier (GH 0x14013f860) sets the renderer flag 0x2000 for a scene
+  whose `general` has `bloom` and `hdr` both literally `true` (gap audit 0098).
+- The renderer creates its flip-model swap chain with format **10, R16G16B16A16_FLOAT**, when that flag is set, else
+  0x1c R8G8B8A8_UNORM (GH 0x14015a0f0, the desc at `local_2a8`; GH 0x140141520 passes `(flags >> 13) & 1` in).
+  It never calls `SetColorSpace1`. The back buffer's render target view has no desc, so it is the buffer's own format.
+- The scene's last pass is `combine_hdr_upsample` (`combine_srgb` with bloom off), chosen in GH 0x1401afbf0. Both
+  write `lin ()` of the picture, the sRGB-to-linear curve, times g_RenderVar0.x, which is 1 on an SDR display (the
+  defaults at +0x228 of GH 0x140141520; only an HDR10 output sets it from the SDR white level, GH 0x14015a0f0).
+- On Windows an FP16 swap chain is scRGB (linear). For an SDR display, Windows clips it to 0..1 and sRGB-encodes it,
+  so the `lin ()` round-trips and the scene looks as composed. That is what the owner sees, and what ours draws
+  (LWE's `combine_hdr_upsample_linear` skips `lin ()` and writes the composed picture into an 8-bit target).
+
+**What Proton did.**
+- DXVK maps an FP16 swap chain to scRGB only if the Vulkan surface offers an HDR colour space
+  (`DxgiSwapChain::UpdateColorSpace` falls back to G22 otherwise). gamescope's headless surface offers only
+  `SRGB_NONLINEAR` (the Proton log: `Presenter: … VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`). Our
+  gamescope has no WSI layer (nixpkgs ships it separately), so `--hdr-debug-force-support` changed nothing.
+- So DXVK's blit treats the linear values as sRGB-encoded ones and copies them as they are. The frames show
+  `lin (picture)`. Measured: WE ≈ lin (ours) to a mean |Δ| of 2.7 / 255, where WE vs ours was 39 / 31.
+- Only these 4 of the 96 references were affected (2542468435, 3019192537, 3395587987, 3509243656: the only ones
+  with literal `bloom` and `hdr`). Every other scene uses an 8-bit swap chain and was presented exactly. 2511663284
+  has `hdr` but no bloom, so it is LDR in WE. 3490034653 is LDR (`hdr` false): its difference is something else.
+- MSAA x8 vs the owner's x2 doesn't touch colour.
+- **wallpiper doesn't escape it** (`wallpiper-ref.md`). Its Vulkan layer reads the Vulkan swap-chain image,
+  which is DXVK's blit output: the same raw linear values. So its Ultra frames match these to the third decimal,
+  and they are dark for the same reason. It is DXVK on any surface without an HDR colour space, not gamescope.
+- **The two post-processing tiers, checked against ours** (mean |Δ| / 255 at 2 s and 5 s, 480 × 270):
+
+  | | 3019192537 | 3395587987 |
+  |---|---|---|
+  | Ultra, raw (both sources) | 38–39 | 30–32 |
+  | Ultra, re-encoded (gamescope / wallpiper) vs ours (default, HDR chain) | 2.7–3.4 / 2.2–2.3 | 2.7–3.2 / 2.4–3.9 |
+  | wallpiper `postprocessing=enabled` vs ours (default) | 4.7–4.8 | 7.9–8.0 |
+  | wallpiper `postprocessing=enabled` vs ours with `WPENGINE_HDR=0` (LDR chain) | 0.5–0.6 | 0.5–0.8 |
+
+  So WE at Ultra, as Windows shows it, is ours by default (WE's HDR bloom chain, B13). WE at `enabled` is ours
+  with `WPENGINE_HDR=0` (the LDR chain). The tiers differ in bloom only. Neither is the dark picture.
+
+**The fix (in `we-ref-capture.sh`).**
+- For a scene that gets the FP16 swap chain, `we_ref_tool.py scrgb` sRGB-encodes each frame after the capture, which
+  is what Windows does to it. The raw frames stay in `<capture>/fp16-raw/`. The manifest gets `swap_chain`, and the
+  report's `reference` column says `FP16 swap chain: re-encoded`.
+- It's exact except for one loss. DXVK already wrote the linear values into 8 bits, so the darkest tones (below
+  about 13 / 255 sRGB) are banded.
+- The 4 scenes were recaptured with it. Corrected vs ours at 2 s, mean |Δ|: 3019192537 39.1 → 3.5,
+  3395587987 31.4 → 2.1. 2542468435 then still differed. That one was ours: WE multiplies an image's colour by its
+  `brightness` when the renderer runs HDR (GH 0x1402321d0; fork patch "an HDR scene's image brightness scales its
+  draw colour"), and its single layer has brightness 1.15 on a shader with no g_Brightness term (gap audit E42).
+- `--gamescope-arg` passes extra gamescope options (recorded in the manifest), for the next experiment of this kind.
 
 ## Findings for the renderer
 

@@ -5797,6 +5797,35 @@ static bool hdr_needs_literal_bloom () {
     return true;
 }
 
+// an image's `brightness` scales its draw colour (g_Color, g_Color4.rgb) when the renderer runs HDR, else not (WE's
+// GH 0x1402321d0: ctx colour = image colour × (flags & 0x2000 ? brightness : 1)). A layer drawing g_Color4.rgb with
+// colour 0.25 and brightness 2: 0.5 (127) in an HDR scene, 0.25 (64) in the same scene with hdr false. Unpatched: 64
+// in both (2542468435's 1.15 never showed: its genericimage2 VERSION 2 has no g_Brightness term)
+static bool hdr_brightness_scales_colour () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& general, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene (general,
+            b7_object (1, "hdrbright", 16, "8 8", ",\"color\":\"0.25 0.25 0.25\",\"brightness\":2"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "hdrbright", "gl_FragColor = vec4(g_Color4.rgb, 1.0);", "", true, "uniform vec4 g_Color4;\n");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 16);
+        return true;
+    };
+    std::array<unsigned char, 4> hdr {}, ldr {};
+    CHECK (run (std::string ("\"hdr\":true") + kB13Bloom0, hdr), "load/build of the HDR scene failed");
+    CHECK (run (std::string ("\"hdr\":false") + kB13Bloom0, ldr), "load/build of the LDR scene failed");
+    printf ("    colour 0.25, brightness 2: HDR %d (want 127), LDR %d (want 64)\n", hdr[0], ldr[0]);
+    CHECK (rgb_near (hdr, 127, 127, 127), "an HDR scene's brightness didn't scale the colour (%d %d %d)", hdr[0], hdr[1], hdr[2]);
+    CHECK (rgb_near (ldr, 64, 64, 64), "an LDR scene's brightness scaled the colour (%d %d %d)", ldr[0], ldr[1], ldr[2]);
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // B14: 3D scenes (docs/player/spikes/we-lwe-gap-audit.md G19–G29, E13, E14). wallpaper64.exe 2.8.485: the scene loader
 // GH 0x1401b6c60 (no orthogonalprojection = perspective), the perspective GH 0x1401b3f70, the object matrix
@@ -7042,6 +7071,7 @@ int main (int argc, char** argv) {
     run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
     run ("fbo_formats_as_written", fbo_formats_as_written);
     run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
+    run ("hdr_brightness_scales_colour", hdr_brightness_scales_colour);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);

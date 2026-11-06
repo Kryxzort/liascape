@@ -8,6 +8,8 @@
     we_ref_tool.py stat <png>                               -> "max mean stddev" of the grey image (black / flat detection)
     we_ref_tool.py jpeg <png> <jpg> <width>                 -> a small JPEG copy (quality 85)
     we_ref_tool.py same <png a> <png b>                     -> "mean_abs_diff max_abs_diff" over RGB (0..255)
+    we_ref_tool.py scrgb <scene dir> <run dir>              -> "scrgb N" (N frames re-encoded) or "sdr": an HDR scene's
+                                                               frames as Windows shows them (see SCRGB below)
 
 Scene canvas: scene.json's general.orthogonalprojection {width, height} (read from scene.pkg when packed);
 "auto" or a perspective-only scene gets 1920 x 1080. Nothing here touches the network or the Steam install.
@@ -149,6 +151,72 @@ def cmd_config(base, out, wfile, kvs):
         json.dump(c, f, indent="\t")
 
 
+# SCRGB. With the "postprocessing" setting at ultra, WE's project classifier (GH 0x14013f860) sets the renderer flag
+# 0x2000 for a scene whose general has `bloom` and `hdr` both literally true. With that flag the renderer creates its
+# flip-model swap chain as DXGI_FORMAT_R16G16B16A16_FLOAT (GH 0x14015a0f0: format 10, else 0x1c R8G8B8A8_UNORM;
+# GH 0x140141520 passes the flag) and never calls SetColorSpace1, and the scene's last pass, combine_hdr (or
+# combine_srgb with bloom off), writes lin () of the picture into it (g_RenderVar0.x = 1 on an SDR display,
+# GH 0x140141520's defaults at +0x228). Windows takes an FP16 swap chain as scRGB (linear) and, on an SDR display,
+# clips it to 0..1 and sRGB-encodes it: the linear write round-trips and the picture looks as composed. DXVK under
+# Proton keeps scRGB only when the Vulkan surface offers an HDR colour space; gamescope's headless surface offers
+# SRGB_NONLINEAR only (no gamescope WSI layer), so DxgiSwapChain::UpdateColorSpace falls back to G22 and the blit
+# copies the linear values into the 8-bit sRGB surface as they are: darker and more saturated. These frames get the
+# sRGB encode Windows would have applied (exact up to the 8-bit quantisation of the linear values: banding below
+# ~13/255 in the darks). The raw frames stay in <run dir>/fp16-raw/.
+SCRGB_NOTE = ("fp16 swap chain (Ultra + bloom + hdr): presented by DXVK as sRGB (linear values shown raw); "
+              "the frames are sRGB-encoded after capture, as Windows shows an FP16 (scRGB) swap chain on an SDR display")
+
+
+def scene_is_fp16(scene_dir):
+    _, scene, _ = load_scene_json(scene_dir)
+    g = (scene or {}).get("general") or {}
+    pp = USER_SETTINGS["postprocessing"]
+    for kv in os.environ.get("WE_REF_SETTINGS", "").splitlines():
+        k, _, v = kv.partition("=")
+        if k == "postprocessing":
+            pp = parse_value(v)
+    # literal JSON booleans only: a user-property object or a number never turns HDR on (GH 0x14013f170)
+    return g.get("bloom") is True and g.get("hdr") is True and pp in ("ultra", "displayhdr")
+
+
+def cmd_scrgb(scene_dir, rd):
+    import glob
+    import shutil
+
+    import numpy as np
+    from PIL import Image
+
+    if not scene_is_fp16(scene_dir):
+        print("sdr")
+        return
+    raw_dir = os.path.join(rd, "fp16-raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    lut = np.arange(256) / 255.0
+    lut = np.where(lut <= 0.0031308, lut * 12.92, 1.055 * np.power(lut, 1 / 2.4) - 0.055)
+    lut = np.clip(np.round(lut * 255), 0, 255).astype(np.uint8)
+    mf = os.path.join(rd, "manifest.json")
+    # a fresh capture's manifest has no swap_chain yet: its frames are raw (a re-run encodes from fp16-raw/ again)
+    fresh = not os.path.exists(mf) or "swap_chain" not in json.load(open(mf))
+    n = 0
+    for f in sorted(glob.glob(os.path.join(rd, "t*s.png"))):
+        raw = os.path.join(raw_dir, os.path.basename(f))
+        if fresh or not os.path.exists(raw):
+            shutil.copy2(f, raw)
+        im = Image.open(raw)
+        mode = im.mode
+        a = np.asarray(im.convert("RGBA") if mode == "RGBA" else im.convert("RGB")).copy()
+        a[..., :3] = lut[a[..., :3]]
+        Image.fromarray(a).save(f)
+        n += 1
+    if os.path.exists(mf):
+        m = json.load(open(mf))
+        m["swap_chain"] = {"format": "R16G16B16A16_FLOAT", "corrected": "srgb-encode", "raw": "fp16-raw/",
+                           "note": SCRGB_NOTE}
+        with open(mf, "w") as fh:
+            json.dump(m, fh, indent=2)
+    print("scrgb", n)
+
+
 def grey_stats(path):
     from PIL import Image, ImageStat
 
@@ -177,6 +245,8 @@ def main(argv):
         if im.width > w:
             im = im.resize((w, max(1, round(im.height * w / im.width))), Image.LANCZOS)
         im.save(argv[3], quality=85, optimize=True)
+    elif c == "scrgb":
+        cmd_scrgb(argv[2], argv[3])
     elif c == "same":
         import numpy as np
         from PIL import Image

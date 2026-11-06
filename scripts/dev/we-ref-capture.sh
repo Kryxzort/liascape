@@ -24,6 +24,7 @@
 #   --builtin-d3dcompiler  keep Wine's d3dcompiler_47 (default: Microsoft's, from /mnt/Windows, with a native
 #                    override — WE compiles its shaders at run time). Fonts: the Windows ones, linked into the prefix
 #   --we-setting k=v WE's own setting (config.json general.user, repeatable), e.g. videohardwareacceleration=false
+#   --gamescope-arg A  an extra gamescope option (repeatable), e.g. --gamescope-arg=--disable-color-management
 #   --desktop        render at the full 1920x1080 "desktop" (WE's cover fit) instead of the canvas's own aspect
 #   --tag NAME       a variant (other props / pointer / --desktop): PNGs into <out>/NAME/<id>, JPEGs into
 #                    <docs>/<id>/NAME — the compare's default refs stay the plain captures
@@ -63,6 +64,7 @@ FPS=30
 USE_WIN_D3DC=1
 USE_WIN_FONTS=1
 WE_SETTINGS=()
+GS_ARGS=()
 DESKTOP=0
 REPEAT=1
 BATCH=0
@@ -95,6 +97,8 @@ while (($#)); do
     --pointer-time) PTIME=$2; shift ;;
     --fps) FPS=$2; shift ;;
     --we-setting) WE_SETTINGS+=("$2"); shift ;;
+    --gamescope-arg) GS_ARGS+=("$2"); shift ;;
+    --gamescope-arg=*) GS_ARGS+=("${1#*=}") ;;
     --builtin-d3dcompiler) USE_WIN_D3DC=0 ;;
     --desktop) DESKTOP=1 ;;
     --repeat) REPEAT=$2; shift ;;
@@ -274,7 +278,7 @@ EOF
             export PROTON_LOG=0 WINEDEBUG=-all DXVK_LOG_LEVEL=none
         fi
         unset WAYLAND_DISPLAY
-        exec setsid gamescope --backend headless -W "$w" -H "$h" -w "$w" -h "$h" -r "$FPS" -- "$SESSION/child.sh"
+        exec setsid gamescope --backend headless -W "$w" -H "$h" -w "$w" -h "$h" -r "$FPS" "${GS_ARGS[@]}" -- "$SESSION/child.sh"
     ) >"$SESSION/gamescope.log" 2>&1 &
     GS_PID=$!
     wait_for 20000 gs_env || { log "gamescope never started (see $SESSION/gamescope.log)"; return 1; }
@@ -431,11 +435,16 @@ capture_one() { # id run_dir
     jq -n --arg id "$id" --arg kind "$kind" --argjson canvas "[$cw,$ch]" --argjson window "[$w,$h]" \
         --arg we "$(cut -d'|' -f2 "$WE/.source")" --arg proton "$(cat "$PROTON/version" 2>/dev/null)" \
         --argjson props "$(printf '%s\n' "${PROPS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" \
-        --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --arg d3dc "$D3DC" --argjson compiled "$compiled" --arg fonts "$FONTS" --argjson crashed "$crashed" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
+        --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --arg d3dc "$D3DC" --argjson compiled "$compiled" --arg fonts "$FONTS" --argjson crashed "$crashed" --argjson gamescope_args "$(printf '%s\n' "${GS_ARGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
         --argjson shots "[$(IFS=,; echo "${shots[*]}")]" --arg when "$(date -Iseconds)" \
-        '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, d3dcompiler:$d3dc, shaders_compiled:$compiled, fonts:$fonts, clock:"Wine wall clock", we_settings:$we_settings,
+        '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, d3dcompiler:$d3dc, shaders_compiled:$compiled, fonts:$fonts, clock:"Wine wall clock", we_settings:$we_settings, gamescope_args:$gamescope_args,
           we_crashed:$crashed, first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, captured:$when,
           time_base:"seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"}' >"$rd/manifest.json"
+    # an HDR scene at Ultra is presented through an FP16 swap chain, which DXVK on gamescope's sRGB-only surface shows
+    # raw (linear: too dark); re-encode its frames as Windows shows them (we_ref_tool.py SCRGB, docs/player/spikes/we-proton.md)
+    local sw
+    sw=$(WE_REF_SETTINGS="$(printf '%s\n' "${WE_SETTINGS[@]}")" "${TOOL[@]}" scrgb "$dir" "$rd") || log "$id: the FP16 swap-chain correction failed"
+    [[ $sw == scrgb* ]] && log "$id: FP16 swap chain (HDR at Ultra): frames sRGB-encoded as Windows shows them (raw: $rd/fp16-raw)"
     log "$id: first frame after $((t_up))ms, done in ${tlast}ms → $rd$([[ $crashed == true ]] && echo " — WE CRASHED (its dialog is in the frames)")"
 }
 
