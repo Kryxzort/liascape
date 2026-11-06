@@ -209,7 +209,15 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
+# A body that isn't JSON is a quoting slip in THIS script, never a backend fault: the backend answers 400 before the
+# route runs, `-f` + `>/dev/null` swallowed it, and the check after it waited for a switch nobody asked for (2026-11-06:
+# `post /apply "{"path":"$Bc"}"` sent {path:/tmp/…/b.mp4} — read as "/apply b after a library item never switched").
+# Loud, and nothing is sent: a FAIL on stderr (a `$(post …)` caller captures stdout, and its subshell's `fail` count
+# is lost — so each one is also logged and counted at the end).
+post() {
+  jq empty >/dev/null 2>&1 <<<"$2" || { echo "  FAIL post $1: the body isn't JSON (a quoting slip in the IT): $2" | tee -a "$T/post-not-json.log" >&2; return 2; }
+  curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"
+}
 # an import copies the clip + ffmpeg-extracts its thumbnail: seconds under load, past `post`'s 10 s
 lib_import() { curl -sf -m 60 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$1\",\"title\":\"$2\"}" "$U/library/import" | jq -r .videoPath; }
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
@@ -329,6 +337,26 @@ post /apply "{\"path\":\"$Bc\"}" >/dev/null
 waitfor $WAIT shows "$Bc" && ok "/apply b → cur b" || bad "/apply b → cur $(cur path), transitions $(ctl state | jq -c '[.transitions[].phase]')"
 ctl logs '{"kind_prefix":"transition.started"}' | jq -r '.events[-1] | "\(.effect_id) \(.method)"' | grep -q "fade full-live" && ok "a→b ran fade full-live" || bad "a→b effect: $(ctl logs '{"kind_prefix":"transition.started"}' | jq -c '.events[-1]')"
 curl -sf -m 5 "$U/current" | jq -e ".playing == true and .path == \"$Bc\" and (.position|type) == \"number\"" >/dev/null && ok "/current playing b + position" || bad "/current $(curl -sf -m 5 "$U/current")"
+# Two quick clicks: the second /apply right behind the first is never lost behind the first's switch (each /apply runs
+# under PlayerHelper's lock; a switch is a barrier in the adapter's queue, never coalesced). Judged by what was
+# SCHEDULED last, not only by `cur` (it may still name the target of an earlier switch).
+last_sched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r '.events[-1].path // empty'; }
+quick_ok() { shows "$1" && [ "$(last_sched)" = "$1" ]; }
+n0=$(nsch); post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$C\"}" >/dev/null
+waitfor $WAIT quick_ok "$C" && ok "two quick clicks (a, c) → c ($(( $(nsch) - n0 )) switches scheduled)" \
+  || bad "two quick clicks (a, c) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]')"
+# …and clicked while the player is stalled (2026-11-07): the adapter's worker found no answer (hello 1 s + the
+# supervisor wait 2 s, the breaker open) and DROPPED the switch — no log line, never retried; the stall breaker
+# closing (R81) re-applied settings only, so the screen stayed on the old wallpaper for good (a 13–34 s stall in the
+# owner's log = every click in it lost). Now a switch (or stop) lost to a stall is the backend's intent and is put on
+# screen once the player answers again — found by the adapter's own probe, with NO further request from here (the
+# `ctl` reads below go to the player, never the backend).
+CP=$(comp_pid); kill -STOP "$CP"; t0=$(ms_now)
+post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$Bc\"}" >/dev/null; tq=$(( $(ms_now) - t0 ))
+sleep_left=$(( 4500 - tq )); [ "$sleep_left" -gt 0 ] && sleep "$(python3 -c "print($sleep_left/1000)")"
+kill -CONT "$CP"
+waitfor 20000 quick_ok "$Bc" && ok "two clicks (a, b) on a player stalled 4.5 s → b once it answers again (both /apply answered in ${tq} ms)" \
+  || bad "clicks on a stalled player (a, b) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]'); log: $(grep -E "stall|not responding|switch" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -4 | tr '\n' ' ' | cut -c1-600)"
 
 echo "== live settings"
 fit1() { [ "$(ctl get '{"path":"lay:VIRTUAL-1:main.fit"}' | jq -r .value)" = fit ]; }
@@ -2494,5 +2522,6 @@ grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-pl
 
 echo "== adapter log (tail)"
 tail -n 8 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+nj=$(cat "$T/post-not-json.log" 2>/dev/null | wc -l); fail=$((fail + nj))   # post()'s body-not-JSON FAILs (above)
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

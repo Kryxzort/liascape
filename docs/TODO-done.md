@@ -63,6 +63,24 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
 ## liascape-player (after design approval)
+- [x] **A click while the player stalls is lost for good** (found 2026-11-07 chasing an adapter-IT failure: "/apply b
+      right after /apply <a library item> never switched", 15 s of nothing in the player's log). Two separate things:
+      **the IT failure itself was the IT's own quoting** — `post /apply "{"path":"$Bc"}"` sent `{path:/tmp/…/b.mp4}`, the
+      backend answered 400 before the route ran, and `curl -sf … >/dev/null` swallowed it (reproduced: HTTP 400, curl 22,
+      no `transition.scheduled`; the commit that replaced the line with `stop_now` blamed load). The IT's `post` now refuses
+      a body that isn't JSON with a FAIL (counted at the end even from a `$(post …)` subshell). **But reproducing it with a
+      stalled player found a real bug:** a switch the adapter's queue worker tried while the player didn't answer
+      (`Ready`: hello 1 s + the supervisor wait 2 s, the breaker open; or the `transition` request timing out) was
+      DROPPED — no log line, never retried; R81 re-applied settings only, so the screen kept the old wallpaper while the UI
+      named the new one. Owner-reachable: any click during one of the 13–34 s player stalls in the owner's log (two quick
+      clicks only matter if the first one's open stalls the player). Now the lost switch is the backend's `_intent`, a probe
+      pings the player every 500 ms (≤ 30 min), and the breaker closing queues `ReconcileAfterStall` (ReconcileShown's
+      check → a cut to it unless it shows or is incoming); a lost `stop` and a lost `destroy prog:main` (a single wallpaper
+      replacing a rotation) likewise. player-adapter.md § Reconnection "A switch the stall swallowed". Guard: adapter IT §
+      "apply / transition" "two clicks (a, b) on a player stalled 4.5 s → b once it answers again" — RED on the old backend
+      (c stayed, nothing scheduled), GREEN after; plus "two quick clicks (a, c) → c" (green both). Also: the backend
+      self-test had stopped before its protocol round-trip since the Settings rename (it wanted "Pause behind windows" in the
+      player's cover reason, which still said "Pause when covered") — the player's reason now names the new row.
 - [x] **Settings levels + a wording pass** (owner 2026-11-06: "simple/standard/advanced/expert … the forever final 4
       levels", "Simple" then renamed "Basic"; Standard the default): one saved `settingsLevel` (basic | standard | advanced |
       expert, `AppSettings.SettingsLevel`) replaces "Advanced settings" + "Show expert options" (the owner's both-on became
