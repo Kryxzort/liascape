@@ -582,3 +582,25 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   behaviour by itself.
 - Pushed and restarted the player (it came back with your scene; at the moment it is held paused because a window
   covers the screen, so it isn't asking Hyprland anything).
+
+## 2026-11-06 — the flake now has mpvpaper 1.9 (nixpkgs bumped 4 months)
+- **mpvpaper 1.9 is in** (the libmpv fence-leak fix, PR #132). Only the flake's `nixpkgs` moved (2026-07-11 →
+  2026-11-03, `1d06008`); nothing on your system changed. A side-by-side on a private headless screen (same synthetic
+  1080p60 loop, 4 min each): **1.8 grew ~19 MB a minute without stopping, 1.9 stayed flat.** Still to do: watch it
+  on your real desktop — if it stays flat, the legacy "restart mpvpaper every N s" default (600 s) can go to 0.
+- What else moved with it (the full list is in the commit message): Rust 1.96 → 1.99, gcc 15 → 16, glibc 2.42 → 2.44,
+  ffmpeg 8.1 → 9.0, harfbuzz 13 → 14, .NET SDK 10.0.301 → 10.0.403, Electron 42.5 → 42.11, cmake 4.1 → 4.4. Every
+  flake package, the dev shell, LWE's core (built + checked + its 122 host tests), the player suite, the adapter
+  integration test, the scene health report and the shader sweep came out the same as before (details below).
+- **Electron 42 is end-of-life**: nixpkgs now refuses it as "insecure", so the flake lets Electron 42 through by name
+  and nothing else. Moving to a newer Electron is your call (the app, the AppImage and the flake move together) — in TODO.
+- Results: player suite 742 passed / 3 failed / 3 ignored, and the 3 (PipeWire bus-cycle timing tests) passed 3 of 3
+  each when run alone. Adapter integration test: 404 / 0. The first run had 11 failures while Wallpaper Engine was
+  running for the reference captures at the same time (load ~12). One check really was stale: it still expected the
+  old 30 fps scene default instead of the new 15, fixed. Scene health 89 / 7 / 0, the same 7 degraded scenes with the
+  same losses. Two scenes timed out during the load and were clean when run alone. Shader sweep: the known 6 failures
+  in 4 shaders.
+- **Other agents' next builds pick up the new toolchain**: their first `cargo build` in each worktree recompiles
+  everything (new rustc), and the first `nix develop` downloads the new shell (~1 GB). The adapter test now runs on
+  `.NET 10.0.403` (`/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet`; battery.sh's
+  fallback updated).
