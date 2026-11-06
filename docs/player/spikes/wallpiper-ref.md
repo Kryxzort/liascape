@@ -38,8 +38,8 @@
 - **The cause is WE's own Ultra post-processing.** The same two scenes captured with `postprocessing=enabled`
   instead of `ultra` match ours: 0.067 and 0.157, against 0.59 and 0.51 at Ultra. If Windows looks like ours,
   WE on Windows is not running the Ultra post-processing path for those scenes.
-  - The owner's Windows `config.json` has five user profiles. `Kryxzort` and `second-profile` are at Ultra.
-    `other-1`, `other-2` and `old-profile` are at medium, with `postprocessing: enabled`.
+  - The owner's Windows `config.json` has five user profiles: the two main ones are at Ultra (240 fps, MSAA x8),
+    the other three at medium, with `postprocessing: enabled`. The owner uses a main one (Ultra).
   - The next thing to check: which profile the Windows session actually loads, or whether WE drops Ultra's HDR
     pass on that machine. That is owner-side.
 - **Video textures still crash.** All 7 video scenes tried crash. Every one of the 7 minidumps faults at

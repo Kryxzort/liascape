@@ -1084,12 +1084,10 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       — done: both landed on lp-player rebased (`8efdbe5`, `2a45f01`); closed 2026-11-06.
 - [x] A player setting for WE's post-processing tier (`ultra` = today's default, `enabled` = LWE's
       `WPENGINE_HDR=0`, `disabled` = no bloom, not in LWE). Ours has no quality setting that maps to WE's
-      presets, so scenes render as WE at Ultra; the owner's main Windows profiles (`Kryxzort`, `second-profile`) are
+      presets, so scenes render as WE at Ultra; the owner's two main Windows profiles are
       Ultra. Only the 4 `bloom` + `hdr` scenes differ between `ultra` and `enabled` (their bloom chain).
-      — not needed (2026-11-06): the owner's Windows WE runs the `Kryxzort` profile at Ultra = our default.
-- [x] 3184155462's cursor ripple: WE's own ripple force scales with the frame time (≈10× weaker at 120 fps than
-      at 30); at a matched 30 fps ours is WE's strength. Check what frame rate / `g_Frametime` the player gives
-      scenes (the owner's Windows WE runs at 240 fps). Refs: `we-ref/3184155462/ripple-*`.
-      — closed 2026-11-06: the owner's Windows WE runs scenes at 30 fps (`config.json`), where ours matches; our default scene fps is 15 (WE's default), so set 30 in Liascape to match their Windows.
+      — not needed (2026-11-06): the owner's Windows WE runs its main profile at Ultra = our default.
 - [x] WE capture of 3395587987 or 3019192537 at post-processing **Ultra** (owner).
       — done 2026-11-06: the HDR look was DXVK showing WE's FP16 swap chain raw; re-encoded references match ours (`39abd2a`).
+- [x] The references are MSAA x8 — the owner's main Windows profile is x8 too (an earlier note said x2, read from the
+      Linux library's stale config copy); nothing to recapture. Closed 2026-11-06.

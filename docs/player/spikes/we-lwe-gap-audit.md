@@ -3075,7 +3075,7 @@ because the slot is used, and the mask decodes and samples as expected).
   its use — a timer interval in ms, Inferred — and whether presenting is also bounded by the refresh are not decoded,
   Unknown; **decoded 2026-11-06**, "Frame limiter and desktop pointer result": it is the audio capture's sleep; the
   limiter is in the render loop and WE presents without vsync). WE's quality presets (ui/dist): low 10, medium 15, high 25, ultra 30 fps. The owner's Windows config
-  (`/mnt/Windows/.../wallpaper_engine/config.json`) has `fps` **240** for the main accounts (Kryxzort, second-profile), 15 for
+  (`/mnt/Windows/.../wallpaper_engine/config.json`) has `fps` **240** for the owner's two main profiles, 15 for
   the others; the Linux library's copy says 30.
 
 **Measured.** The reference captures (lp-player e56dda7, `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`):

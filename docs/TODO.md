@@ -361,8 +361,14 @@ Two bug classes kept recurring; fix the class, not the instance:
           (varying per run), and a scene that opens black pushes t = 0 into its own fade. Scenes with intros
           ("time" class) need either a per-run clock estimate (fit a known keyframe / g_Time-driven layer) or a
           ±1 s slack in the compare before their score means anything.
-      - [ ] The references are MSAA x8; the owner's Windows `config.json` says x2. Edges only, not colour:
-            recapture at x2 only if an edge difference ever matters.
+    - [ ] 3184155462's cursor ripple vs the owner's Windows: WE's ripple force scales with the frame time (≈10× weaker
+          at 120 fps than at 30); at a matched 30 fps ours is WE's strength. The owner's Windows WE (main profile,
+          `/mnt/Windows/…/wallpaper_engine/config.json`) runs at **240 fps** (Ultra, MSAA x8; the Linux library's
+          `config.json` copy is stale: 30 fps, x2 — don't read that one), so on Windows the ripple is very weak, while
+          ours runs scenes at 15 fps by default → much stronger, as the owner reported. Faithful behaviour is already
+          in (the effect follows the scene fps); to look like their Windows, Liascape's scene fps has to be 240 too
+          (GPU cost). Open: whether Liascape should offer WE's fps presets / a per-scene "match WE fps" option.
+          Refs: `we-ref/3184155462/ripple-*`.
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as

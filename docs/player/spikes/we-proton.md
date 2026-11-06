@@ -215,7 +215,7 @@ The reference was wrong, not our renderer.
 - Only these 4 of the 96 references were affected (2542468435, 3019192537, 3395587987, 3509243656: the only ones
   with literal `bloom` and `hdr`). Every other scene uses an 8-bit swap chain and was presented exactly. 2511663284
   has `hdr` but no bloom, so it is LDR in WE. 3490034653 is LDR (`hdr` false): its difference is something else.
-- MSAA x8 vs the owner's x2 doesn't touch colour.
+- MSAA x8 is the owner's main Windows profile's setting too.
 - **wallpiper doesn't escape it** (`wallpiper-ref.md`). Its Vulkan layer reads the Vulkan swap-chain image,
   which is DXVK's blit output: the same raw linear values. So its Ultra frames match these to the third decimal,
   and they are dark for the same reason. It is DXVK on any surface without an HDR colour space, not gamescope.
