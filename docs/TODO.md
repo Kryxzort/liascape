@@ -1064,7 +1064,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           the HDR scenes at Ultra (3019192537, 3395587987, maybe 3490034653): WE is much more contrasty and saturated,
           ours flat; 3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
           the intro timelines of 2672425887 / 3509243656.
-      - [x] 3354740764's box and light shafts — done 2026-11-06 (fork `e7e0cb0`, `6ab94fe`). The box: an
+      - [x] 3354740764's box and light shafts — done 2026-11-06 (fork `d5f244a`, `313e1d2`). The box: an
             `alphatocoverage` layer with effects drew its last pass unblended; the mode is now its own, blended by
             alpha (WE's coverage at MSAA). The shafts: every particle sprite was drawn upside down (LWE's y-flipped
             particle space took WE's up as is), so asymmetric sprites — light shafts, here and in 1726902114 /

@@ -1,0 +1,57 @@
+From 313e1d21cdc30622b0592e58fc1896cc5d53cbce Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 18:12:15 +0530
+Subject: [PATCH 111/111] render: a particle sprite stands as in WE, its
+ texture's first row at the top
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WE expands a sprite in the system's space (common_particles.h ComputeParticlePosition: v = 0 at
++up, `up` from the sprite's rotation and g_OrientationUp, GH 0x14024fd30), so a texture's first row is
+at the sprite's top. LWE's particle space is WE's with y flipped (M_lwe = Fy·M_we·Fy), so WE's up
+goes across as Fy·up = (0,−1,0) for the identity — but the orientation kept LWE's old (0,1,0): every
+sprite was drawn mirrored top to bottom, and a turned one tilted the other way. Round sprites hid it;
+light shafts (light_shafts_6, bright at its first row) didn't: 3354740764's and 1726902114's shafts
+were lit from below, tilted the wrong way and drifted to the lower right of the field, where WE (both
+references) has them hanging from the top of the sky.
+
+g_OrientationUp = Fy·up, as Right and Forward already were.
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md 3354740764 (light shafts WE doesn't draw there), 1726902114, 2561227934
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CParticle.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+index db2d870..b2ed030 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CParticle.cpp
+@@ -2539,9 +2539,11 @@ void CParticle::updateOrientation () {
+     //                perpendicular to F
+     //   upright (1): U = world y (bit 0) or the system's `axis` in the world; R = view forward × U; F = R × U
+     //   fixed (2):   F = `axis`, U = its in-plane up — as given (bit 0) or the system's own, in the world
+-    // LWE's particle space is WE's with y flipped (M_lwe = Fy·M_we·Fy, `updateMatrices`), and its sprites take
+-    // (1,0,0)/(0,1,0)/(0,0,1) for WE's identity: R and F go across with Fy, U with −Fy, so with no rotation every
+-    // mode is the identity LWE always drew
++    // LWE's particle space is WE's with y flipped (M_lwe = Fy·M_we·Fy, `updateMatrices`): R, U and F all go across
++    // with Fy, so WE's identity is (1,0,0)/(0,−1,0)/(0,0,1) here. The sprite's v = 0 (the texture's first row) is at
++    // +U (common_particles.h ComputeParticlePosition), so it sits at the top on screen, as in WE, and a sprite's
++    // own z rotation turns the way WE's does. (LWE drew U = (0,1,0): every sprite upside down, its rotation
++    // mirrored — 3354740764's and 1726902114's light shafts lit from below, tilted the other way)
+     if (m_particle.renderers.empty () || m_particle.renderers[0].name != "sprite") {
+ 	// the trail and rope renderers have parsers of their own (not read): LWE's identity, as before
+ 	m_orientationRight = glm::vec3 (1.0f, 0.0f, 0.0f);
+@@ -2592,7 +2594,7 @@ void CParticle::updateOrientation () {
+     right = unit (right, glm::vec3 (1.0f, 0.0f, 0.0f));
+ 
+     m_orientationRight = fy * right;
+-    m_orientationUp = -(fy * up);
++    m_orientationUp = fy * up;
+     m_orientationForward = fy * forward;
+ }
+ 

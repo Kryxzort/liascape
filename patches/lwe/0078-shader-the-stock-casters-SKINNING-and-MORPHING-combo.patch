@@ -1,7 +1,7 @@
 From bb85adbcccc38e9b952588b900a7126e1de42855 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 22:14:45 +0530
-Subject: [PATCH 078/106] shader: the stock casters' SKINNING and MORPHING
+Subject: [PATCH 078/111] shader: the stock casters' SKINNING and MORPHING
  combos compile
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
