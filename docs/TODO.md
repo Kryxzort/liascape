@@ -288,6 +288,19 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Next up (handoff 2026-10-26, weekly limit)
+- [ ] **Resume the two WE-port agents when the weekly limit resets** (owner 2026-11-07 00:20: "stop em for now, we'll
+      start them when my weekly resets"). Both stopped mid-round with the original brief
+      (`/tmp/…/scratchpad/weref-fix-brief.md` — copy it into the new session if /tmp was cleared):
+      - **weref-2d** (worktree `.claude/worktrees/weref-2d`): fork `livepaper/next-v2` is at **92c1ada** with its patches
+        0112–0114, 0117 — 3354740764's clouds (a `dependencies` layer draws through its composite, 0.327 → 0.218),
+        3163060610's constant scripts' thisObject (0.119 → 0.059), "1 1 1" = white, symlinked project folders. Its pin
+        commit `f86c1ce` ("Pin LWE 92c1ada") is on the branch but **untested and unmerged**: run the chain (lwe.sh build
+        check test, player tests, health, sweep, the WE compare), merge, push, restart. Left from its list: 3219908811's
+        notice panel, then down the ranked report.
+      - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, 141 uncommitted files — recaptures and notes): its fork
+        work (patches 0115–0116, incl. `input.cursorWorldPosition` in 3D scenes) is already in 92c1ada; it was bumping the
+        pin. Commit its worktree state, test, merge after weref-2d's pin. Left: the clock strip for 3276522107 / 3477054430,
+        genericimage4 on 2D blend layers' last draw.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
