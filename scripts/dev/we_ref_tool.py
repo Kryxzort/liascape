@@ -10,6 +10,11 @@
     we_ref_tool.py same <png a> <png b>                     -> "mean_abs_diff max_abs_diff" over RGB (0..255)
     we_ref_tool.py scrgb <scene dir> <run dir>              -> "scrgb N" (N frames re-encoded) or "sdr": an HDR scene's
                                                                frames as Windows shows them (see SCRGB below)
+    we_ref_tool.py clock-inject <item dir> <out dir>        -> a private copy of the item whose scene draws WE's own
+                                                               scene clock into a strip along the bottom (see CLOCK)
+    we_ref_tool.py clock-read <png>...                      -> "<scene seconds>|- <png>" per frame (the strip decoded)
+    we_ref_tool.py clock-manifest <run dir>                 -> each shot's / burst frame's scene_time into its manifest
+    we_ref_tool.py wall0 <run dir>                          -> WE's wall time (epoch s) when its scene clock read 0
 
 Scene canvas: scene.json's general.orthogonalprojection {width, height} (read from scene.pkg when packed);
 "auto" or a perspective-only scene gets 1920 x 1080. Nothing here touches the network or the Steam install.
@@ -217,6 +222,224 @@ def cmd_scrgb(scene_dir, rd):
     print("scrgb", n)
 
 
+# CLOCK. WE's scene clock isn't the capture's t = 0: at the first frame with a picture it is already 0.15-1.1 s along,
+# a different amount every run (the scene's loading). Nothing outside the frames shows it (log.txt has 1 s stamps), so
+# the scene shows it itself: the capture opens a private copy of the item (never the Workshop folder) whose scene.json
+# has one more layer, drawn last, a strip along the bottom edge of the frame: 26 cells across, a guard cell lit, then
+# floor(g_Time * 1000) as 24 bits MSB first, then an unlit guard. Its vertex shader places it in clip space, so camera,
+# zoom, shake and parallax never move it. g_Time is the clock everything in the scene runs on: a capture-only test
+# scene (we-proton.md "The scene clock") read g_Time, a SceneScript's engine.runtime and the frame side by side and they
+# agreed to the ms. The compare crops the strip (and a margin for bloom) off both pictures.
+CLOCK_STRIP = 0.012  # of the frame height (13 px of 1080)
+CLOCK_CROP = 0.03    # what the compare leaves out at the bottom: the strip and any bloom around it
+CLOCK_LIT = 0.5      # a lit cell: grey, under any bloom threshold of an HDR scene and dim for an LDR one
+CLOCK_NAME = "liascape_clock"
+CLOCK_VERT = """attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+	v_TexCoord = a_TexCoord;
+	gl_Position = vec4(a_TexCoord.x * 2.0 - 1.0, -1.0 + %(strip).4f * 2.0 * (1.0 - a_TexCoord.y), 0.0, 1.0);
+}
+"""
+CLOCK_FRAG = """// liascape we-ref capture only: WE's scene clock g_Time (ms) as 24 bits, MSB first, between a lit and an unlit cell
+uniform sampler2D g_Texture0; // {"hidden":true}
+uniform float g_Time;
+varying vec2 v_TexCoord;
+void main() {
+	float N = floor(g_Time * 1000.0);
+	float cell = floor(v_TexCoord.x * 26.0);
+	float bit = 0.0;
+	if (cell < 0.5) {
+		bit = 1.0;
+	} else if (cell < 24.5) {
+		bit = mod(floor(N / exp2(24.0 - cell)), 2.0);
+	}
+	gl_FragColor = vec4(bit * %(lit).3f, bit * %(lit).3f, bit * %(lit).3f, 1.0);
+}
+"""
+
+
+def write_pkg(path, version, files):
+    """files: [(name, bytes)] -> a scene.pkg (the layout read_pkg_entry reads)"""
+    def sb(v):
+        b = v.encode("utf-8")
+        return struct.pack("<I", len(b)) + b
+    head = sb(version) + struct.pack("<I", len(files))
+    off = 0
+    for n, data in files:
+        head += sb(n) + struct.pack("<II", off, len(data))
+        off += len(data)
+    with open(path, "wb") as f:
+        f.write(head)
+        for _, data in files:
+            f.write(data)
+
+
+def read_pkg(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    off = 0
+
+    def u32():
+        nonlocal off
+        (v,) = struct.unpack_from("<I", data, off)
+        off += 4
+        return v
+
+    def s():
+        nonlocal off
+        n = u32()
+        v = data[off : off + n]
+        off += n
+        return v.decode("utf-8", "replace")
+
+    version = s()
+    entries = [(s(), u32(), u32()) for _ in range(u32())]
+    return version, [(n, data[off + o : off + o + ln]) for n, o, ln in entries]
+
+
+def cmd_clock_inject(item, out):
+    """out: a directory of links to the item's files (its shader blobs left out, so WE compiles them here) with the
+    scene (scene.pkg's scene.json, or a loose scene.json) carrying the clock layer. Re-run: the scene is rewritten,
+    links that exist are kept (and WE's compiled blobs with them)."""
+
+    proj = json.load(open(os.path.join(item, "project.json"), encoding="utf-8-sig"))
+    f = proj.get("file") or "scene.json"
+    sname = "scene.json" if f.endswith(".pkg") else f
+    pkg = os.path.join(item, "scene.pkg")
+    packed = os.path.exists(pkg) and not os.path.exists(os.path.join(item, sname))
+    os.makedirs(out, exist_ok=True)
+    for root, dirs, files in os.walk(item):
+        rel = os.path.relpath(root, item)
+        dirs[:] = [d for d in dirs if not (rel == "shaders" and d.startswith("blobs"))]
+        os.makedirs(os.path.join(out, rel), exist_ok=True)
+        for fn in files:
+            if rel == "." and fn in (sname, "scene.pkg"):
+                continue
+            dst = os.path.join(out, rel, fn)
+            if not os.path.lexists(dst):
+                os.symlink(os.path.join(root, fn), dst)
+    extra = {
+        # (not "fullscreen": true — that left 3276522107 all black; its plain layer is drawn under the scene's
+        # post-processing letterbox, so that scene's clock goes unread)
+        f"models/{CLOCK_NAME}.json": json.dumps({"material": f"materials/{CLOCK_NAME}.json"}).encode(),
+        f"materials/{CLOCK_NAME}.json": json.dumps({"passes": [{
+            "blending": "translucent", "cullmode": "nocull", "depthtest": "disabled", "depthwrite": "disabled",
+            "shader": CLOCK_NAME, "textures": ["util/white"]}]}).encode(),
+        f"shaders/{CLOCK_NAME}.vert": (CLOCK_VERT % {"strip": CLOCK_STRIP}).encode(),
+        f"shaders/{CLOCK_NAME}.frag": (CLOCK_FRAG % {"lit": CLOCK_LIT}).encode(),
+    }
+    if packed:
+        version, files = read_pkg(pkg)
+        raw = dict(files).get(sname) or dict(files)["scene.json"]
+    else:
+        version, files = None, []
+        raw = open(os.path.join(item, sname), "rb").read()
+    scene = json.loads(raw.decode("utf-8-sig"))
+    w, h = 1920, 1080
+    op = (scene.get("general") or {}).get("orthogonalprojection")
+    if isinstance(op, dict) and op.get("width") and op.get("height"):
+        w, h = op["width"], op["height"]
+    origin, size = f"{w / 2} {h / 2} 0", f"{w} {h}"
+    if not (isinstance(op, dict) and op.get("width")):
+        # a perspective scene: the layer's bounds where the camera looks (the shader ignores them, but a layer out of
+        # the view is culled: 3276522107's camera sits near the world origin with farz 500)
+        cam = (scene.get("camera") or {}).get("center")
+        if isinstance(cam, str):
+            origin, size = cam, "1 1"
+    ids = [o.get("id", 0) for o in scene.get("objects", []) if isinstance(o.get("id"), int)]
+    scene.setdefault("objects", []).append({
+        "id": max(ids + [0]) + 1, "name": CLOCK_NAME, "image": f"models/{CLOCK_NAME}.json",
+        "origin": origin, "size": size, "scale": "1 1 1", "angles": "0 0 0",
+        "parallaxDepth": "0 0", "visible": True, "castshadow": False})
+    new = json.dumps(scene, ensure_ascii=False, indent="\t").encode("utf-8")
+    if packed:
+        names = {n for n, _ in files}
+        files = [(n, new if n == sname or (n == "scene.json" and sname not in names) else d) for n, d in files]
+        files += [(n, d) for n, d in extra.items() if n not in names]
+        write_pkg(os.path.join(out, "scene.pkg"), version, files)
+    else:
+        with open(os.path.join(out, sname), "wb") as fh:
+            fh.write(new)
+        for n, d in extra.items():
+            os.makedirs(os.path.dirname(os.path.join(out, n)), exist_ok=True)
+            with open(os.path.join(out, n), "wb") as fh:
+                fh.write(d)
+    print(out)
+
+
+def clock_read(path):
+    """the strip's scene time in s, or None (no strip, or a cell between levels: a frame mid-blend)"""
+    import numpy as np
+    from PIL import Image
+
+    a = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
+    H, W = a.shape
+    if H < 100 or W < 260:  # gamescope's placeholder before the first frame (1 x 1)
+        return None
+    sh = CLOCK_STRIP * H
+    band = a[int(H - sh * 0.75) : max(int(H - sh * 0.25), int(H - sh * 0.75) + 1)].mean(0)
+    cells = [float(band[int((c + 0.3) / 26 * W) : int((c + 0.7) / 26 * W)].mean()) for c in range(26)]
+    lit, dark = cells[0], cells[25]
+    if not lit - dark >= 40:
+        return None
+    mid, tol = (lit + dark) / 2, (lit - dark) * 0.3
+    n = 0
+    for v in cells[1:25]:
+        if abs(v - mid) < tol:
+            return None
+        n = n * 2 + (1 if v > mid else 0)
+    return n / 1000.0
+
+
+def cmd_clock_manifest(rd):
+    mf = os.path.join(rd, "manifest.json")
+    m = json.load(open(mf))
+    n = 0
+    for s in m.get("shots", []):
+        t = clock_read(os.path.join(rd, "t%gs.png" % float(s["t"])))
+        s["scene_time"] = t
+        n += t is not None
+    for b in m.get("burst", []):
+        p = os.path.join(rd, b["file"])
+        b["scene_time"] = clock_read(p) if os.path.exists(p) and os.path.getsize(p) else None
+    # a frame whose strip is unreadable (a scene fading in from black, 3509243656's intro; a strip under the scene's
+    # own letterbox): WE's clock runs at the wall clock's rate (the test scene: the request-to-clock offset held to
+    # ±0.03 s over 4 s), so it gets the request time plus the median offset of the frames that were read
+    offs = sorted(float(x["scene_time"]) - float(x.get("t_actual", x["t"]))
+                  for x in m.get("shots", []) + m.get("burst", []) if x.get("scene_time") is not None and "t_actual" in x)
+    offs += sorted(float(b["scene_time"]) - float(b["t"]) for b in m.get("burst", []) if b.get("scene_time") is not None)
+    off = sorted(offs)[len(offs) // 2] if offs else None
+    for s in m.get("shots", []):
+        s.pop("scene_time_estimated", None)
+        if s["scene_time"] is None and off is not None:
+            s["scene_time"] = round(float(s.get("t_actual", s["t"])) + off, 3)
+            s["scene_time_estimated"] = True
+    m["scene_clock"] = {"strip": CLOCK_STRIP, "crop": CLOCK_CROP, "read": n, "of": len(m.get("shots", [])),
+                        "offset_median": None if off is None else round(off, 3)}
+    with open(mf, "w") as fh:
+        json.dump(m, fh, indent=2)
+    print(n, len(m.get("shots", [])))
+
+
+def cmd_wall0(rd):
+    """WE's wall time (epoch s) when its scene clock read 0: each frame's PNG was written ~0.1 s after the frame its
+    strip read (a re-encoded frame's raw copy in fp16-raw/ keeps the capture's mtime); the median over the shots.
+    The compare runs ours at it (libfaketime): Wine's clock is the host's."""
+    m = json.load(open(os.path.join(rd, "manifest.json")))
+    w = []
+    for s in m.get("shots", []):
+        f = "t%gs.png" % float(s["t"])
+        p = os.path.join(rd, "fp16-raw", f)
+        p = p if os.path.exists(p) else os.path.join(rd, f)
+        st = s.get("scene_time")
+        st = float(st) if st is not None else float(s.get("t_actual", s["t"]))
+        if os.path.exists(p):
+            w.append(os.path.getmtime(p) - 0.1 - st)
+    print(round(sorted(w)[len(w) // 2]) if w else "")
+
+
 def grey_stats(path):
     from PIL import Image, ImageStat
 
@@ -247,6 +470,16 @@ def main(argv):
         im.save(argv[3], quality=85, optimize=True)
     elif c == "scrgb":
         cmd_scrgb(argv[2], argv[3])
+    elif c == "clock-inject":
+        cmd_clock_inject(argv[2], argv[3])
+    elif c == "clock-read":
+        for p in argv[2:]:
+            t = clock_read(p)
+            print("-" if t is None else "%.3f" % t, p)
+    elif c == "clock-manifest":
+        cmd_clock_manifest(argv[2])
+    elif c == "wall0":
+        cmd_wall0(argv[2])
     elif c == "same":
         import numpy as np
         from PIL import Image

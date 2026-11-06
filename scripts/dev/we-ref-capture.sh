@@ -13,6 +13,11 @@
 # Options:
 #   --times T,T…     scene times of the frames, seconds after WE's first non-black frame (default 0.5,2,5)
 #   --seconds N      shorthand for --times N
+#   --burst S        also frames back to back (~7 a second) from t = 0 to S s, into burst/ (+ the probe's frames
+#                    before t = 0 into probe/), each with its request time and scene time in the manifest
+#   --no-clock       open the item itself: no scene-clock strip (default: a private copy of the scene draws WE's own
+#                    scene clock into a strip along the bottom, and each frame's scene_time goes into the manifest;
+#                    the compare renders ours at that time and leaves the strip out)
 #   --prop k=v       user property (repeatable); written into WE's config.json before WE starts (WE ignores
 #                    `-control applyProperties` on a window without its UI, so every scene is a fresh start)
 #   --pointer X,Y | X0,Y0:X1,Y1   the cursor (native scene px, y down, like the worker's --pointer): parked at
@@ -57,6 +62,8 @@ WE_LINUX=/@steam/SteamLibrary/steamapps/common/wallpaper_engine
 PROTON="/@steam/SteamLibrary/steamapps/common/Proton - Experimental"
 UMU=$HOME/.local/share/lutris/runtime/umu/umu-run
 TIMES=0.5,2,5
+BURST=0
+CLOCK=1
 PROPS=()
 POINTER=
 PTIME=
@@ -92,6 +99,8 @@ while (($#)); do
     case $1 in
     --times) TIMES=$2; shift ;;
     --seconds) TIMES=$2; shift ;;
+    --burst) BURST=$2; shift ;;
+    --no-clock) CLOCK=0 ;;
     --prop) PROPS+=("$2"); shift ;;
     --pointer) POINTER=$2; shift ;;
     --pointer-time) PTIME=$2; shift ;;
@@ -295,8 +304,11 @@ pointer_at() { # x y (window px)
 }
 
 # ------------------------------------------------------------------ one scene
-capture_one() { # id run_dir
-    local id=$1 rd=$2 dir=$WORKSHOP/$1 cw ch kind w h file wfile
+capture_one() { # id|private project dir, run_dir
+    local id=$1 rd=$2 dir=$WORKSHOP/$1 cw ch kind w h file wfile local=0
+    if [[ $id == /* ]]; then # a capture-only project of our own (under $WR, never the Workshop): no farm needed
+        dir=$id id=$(basename "$id") local=1
+    fi
     [[ -f $dir/project.json ]] || { log "$id: no project.json"; return 1; }
     read -r cw ch kind < <("${TOOL[@]}" canvas "$dir") || { log "$id: can't read the canvas"; return 1; }
     if ((DESKTOP)); then
@@ -308,6 +320,7 @@ capture_one() { # id run_dir
     # Workshop folder is never written. The Workshop's own blobs are left out — they were compiled by whatever WE
     # ran there (under Proton: Wine's d3dcompiler); WE compiles them afresh with the compiler set up below.
     local farm=$WR/ws/$id f
+    ((local)) && farm=$dir
     if [[ ! -f $farm/project.json ]]; then
         mkdir -p "$farm/shaders"
         (cd "$dir" && find . -path './shaders/blobs*' -prune -o -type d -print) | while IFS= read -r f; do mkdir -p "$farm/$f"; done
@@ -315,6 +328,13 @@ capture_one() { # id run_dir
         [[ -f $farm/project.json ]] || { log "$id: can't build $farm"; return 1; }
     fi
     dir=$farm
+    # WE's scene clock: the scene draws it into a strip at the bottom (we_ref_tool.py CLOCK), read back per frame
+    if ((CLOCK)) && ((!local)) && [[ $kind != video && $kind != web ]]; then
+        "${TOOL[@]}" clock-inject "$WORKSHOP/$id" "$WR/ws-clock/$id" >/dev/null || { log "$id: can't build the clock copy"; return 1; }
+        dir=$WR/ws-clock/$id
+        # the shaders WE already compiled for the plain farm (its own output, Microsoft's compiler): no recompile
+        for f in "$farm"/shaders/blobs*; do [[ -d $f && ! -e $dir/shaders/$(basename "$f") ]] && cp -r "$f" "$dir/shaders/"; done
+    fi
     file=$(jq -r '.file // "scene.json"' "$dir/project.json")
     # open project.json: WE resolves its `file` (a first instance given scene.pkg looked for a loose scene.json)
     wfile="Z:${dir//\//\\}\\project.json"
@@ -339,14 +359,14 @@ capture_one() { # id run_dir
     dumps0=$(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) # WE's crash handler writes a minidump + a dialog
     # shaders WE had to compile itself (not in the Windows install's cache): real .dxs files in the farms
     local blobs0
-    blobs0=$(find "$WE/assets" "$WR/ws/$id" -type f -name '*.dxs' 2>/dev/null | wc -l)
+    blobs0=$(find "$WE/assets" "$dir" -type f -name '*.dxs' 2>/dev/null | wc -l)
     t_launch=$(date +%s%3N)
     start_session "$w" "$h" "$wfile" || return 1
     [[ -n $p0x ]] && pointer_at "$(awk -v v="$p0x" -v s="$sx" 'BEGIN{print int(v*s)}')" "$(awk -v v="$p0y" -v s="$sy" 'BEGIN{print int(v*s)}')"
     # the first non-black frame: requests kept 2 deep (gamescope writes one PNG per ~140 ms, in order, each from
     # the next composited frame), each stamped at request. Black frames all encode to the same size, so a file
     # clearly bigger than the first black one has a picture (python only looks at the first, to know it's black).
-    local i=0 k=0 f mx mean sd t_req=() ok=0 black=0 sz deadline=$(($(date +%s%3N) + 45000))
+    local i=0 k=0 f mx mean sd t_req=() ok=0 black=0 sz deadline=$(($(date +%s%3N) + 90000))
     local pd=$WR/probe # reused: files truncated, never deleted (gamescope overwrites them)
     mkdir -p "$pd"
     for f in "$pd"/*.png "$rd"/t*s.png; do [[ -f $f ]] && : >"$f"; done
@@ -375,7 +395,7 @@ capture_one() { # id run_dir
         ((i - k >= 2)) && (($(date +%s%3N) - t_req[k] > 3000)) && k=$((k + 1)) # a dropped request
         sleep 0.02
     done
-    ((ok)) || { log "$id: no picture within 45 s"; stop_session; return 1; }
+    ((ok)) || { log "$id: no picture within 90 s"; stop_session; return 1; }
     i=$k
     t0=${t_req[i]}
     t_up=$((t0 - t_launch))
@@ -398,7 +418,27 @@ capture_one() { # id run_dir
         ) &
         mover=$!
     fi
-    local T tag at shots=() gpu_mib prev=
+    local T tag at shots=() gpu_mib prev= bursts=() bi=0 bt
+    if [[ $BURST != 0 ]]; then # frames back to back from t = 0 (each waits for the last file: ~7 a second)
+        mkdir -p "$rd/burst"
+        for f in "$rd"/burst/b*.png; do [[ -f $f ]] && : >"$f"; done
+        # the probe's frames before t = 0 too (request times relative to t = 0)
+        mkdir -p "$rd/probe"
+        for ((bi = 0; bi <= i; bi++)); do
+            [[ -s $pd/p$bi.png ]] && cp "$pd/p$bi.png" "$rd/probe/p$(printf %03d "$bi").png" &&
+                bursts+=("$(jq -n --arg f "probe/p$(printf %03d "$bi").png" --argjson t "$((t_req[bi] - t0))" '{file:$f, t:($t/1000)}')")
+        done
+        bi=0
+        while :; do
+            bt=$(date +%s%3N)
+            (($(awk -v e="$((bt - t0))" -v b="$BURST" 'BEGIN{print (e >= b*1000)}'))) && break
+            f=$rd/burst/b$(printf %03d "$bi").png
+            shot "$f"
+            wait_for 600 test -s "$f"
+            bursts+=("$(jq -n --arg f "burst/b$(printf %03d "$bi").png" --argjson t "$((bt - t0))" '{file:$f, t:($t/1000)}')")
+            bi=$((bi + 1))
+        done
+    fi
     for T in $(tr ',' '\n' <<<"$TIMES" | sort -g); do
         at=$(awk -v t0="$t0" -v T="$T" 'BEGIN{printf "%d", t0 + T*1000}')
         while (($(date +%s%3N) < at)); do sleep 0.01; done
@@ -428,7 +468,7 @@ capture_one() { # id run_dir
         awk -F', *' -v ps=" $(descendants "$GS_PID" | tr '\n' ' ') $GS_PID " 'index(ps, " "$1" ") {s+=$2} END{print s+0}')
     tlast=$(($(date +%s%3N) - t_launch))
     local compiled
-    compiled=$(($(find "$WE/assets" "$WR/ws/$id" -type f -name '*.dxs' 2>/dev/null | wc -l) - blobs0))
+    compiled=$(($(find "$WE/assets" "$dir" -type f -name '*.dxs' 2>/dev/null | wc -l) - blobs0))
     local crashed=false
     (($(find "$WE" -maxdepth 1 -name '*.mdmp' | wc -l) > dumps0)) && crashed=true
     ((KEEP)) || stop_session
@@ -436,15 +476,20 @@ capture_one() { # id run_dir
         --arg we "$(cut -d'|' -f2 "$WE/.source")" --arg proton "$(cat "$PROTON/version" 2>/dev/null)" \
         --argjson props "$(printf '%s\n' "${PROPS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" \
         --arg tag "$TAG" --arg pointer "$pointer" --arg ptime "$ptime" --argjson fps "$FPS" --arg d3dc "$D3DC" --argjson compiled "$compiled" --arg fonts "$FONTS" --argjson crashed "$crashed" --argjson gamescope_args "$(printf '%s\n' "${GS_ARGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson we_settings "$(printf '%s\n' "${WE_SETTINGS[@]}" | jq -R -s 'split("\n") | map(select(length>0))')" --argjson up_ms "$t_up" --argjson wall_ms "$tlast" --argjson gpu_mib "${gpu_mib:-0}" --argjson rss_mib "${rss_mib:-0}" --argjson cpu_s "${cpu_s:-0}" \
-        --argjson shots "[$(IFS=,; echo "${shots[*]}")]" --arg when "$(date -Iseconds)" \
+        --argjson shots "[$(IFS=,; echo "${shots[*]}")]" --argjson burst "[$(IFS=,; echo "${bursts[*]}")]" --arg when "$(date -Iseconds)" \
         '{id:$id, tag:$tag, desktop:('"$DESKTOP"' == 1), kind:$kind, canvas:$canvas, window:$window, we:$we, proton:$proton, props:$props, pointer:$pointer, pointer_time:$ptime, fps:$fps, d3dcompiler:$d3dc, shaders_compiled:$compiled, fonts:$fonts, clock:"Wine wall clock", we_settings:$we_settings, gamescope_args:$gamescope_args,
-          we_crashed:$crashed, first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, captured:$when,
+          we_crashed:$crashed, first_frame_ms:$up_ms, wall_ms:$wall_ms, we_gpu_mib:$gpu_mib, rss_mib:$rss_mib, cpu_s:$cpu_s, shots:$shots, burst:$burst, captured:$when,
           time_base:"seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame"}' >"$rd/manifest.json"
     # an HDR scene at Ultra is presented through an FP16 swap chain, which DXVK on gamescope's sRGB-only surface shows
     # raw (linear: too dark); re-encode its frames as Windows shows them (we_ref_tool.py SCRGB, docs/player/spikes/we-proton.md)
     local sw
     sw=$(WE_REF_SETTINGS="$(printf '%s\n' "${WE_SETTINGS[@]}")" "${TOOL[@]}" scrgb "$dir" "$rd") || log "$id: the FP16 swap-chain correction failed"
     [[ $sw == scrgb* ]] && log "$id: FP16 swap chain (HDR at Ultra): frames sRGB-encoded as Windows shows them (raw: $rd/fp16-raw)"
+    if ((CLOCK)); then # (a private project built from a clock copy carries the strip too)
+        local nread
+        nread=$("${TOOL[@]}" clock-manifest "$rd") || log "$id: reading the scene clock failed"
+        log "$id: scene clock read in ${nread% *} of ${nread#* } frames"
+    fi
     log "$id: first frame after $((t_up))ms, done in ${tlast}ms → $rd$([[ $crashed == true ]] && echo " — WE CRASHED (its dialog is in the frames)")"
 }
 
@@ -485,12 +530,20 @@ fi
 n=0 fails=0
 for id in "${IDS[@]}"; do
     n=$((n + 1))
-    [[ $id =~ ^[0-9]+$ ]] || { log "skipping $id: not a workshop id"; continue; }
+    src=$id
+    if [[ $id == /* ]]; then # a capture-only project of our own: only under $WR/probe-scenes (private)
+        src=$(realpath -m -- "$id")
+        [[ $src == "$(realpath -m -- "$WR")"/probe-scenes/* && -f $src/project.json ]] || { log "skipping $id: a project path must be under $WR/probe-scenes"; continue; }
+        id=$(basename "$src")
+    elif ! [[ $id =~ ^[0-9]+$ ]]; then
+        log "skipping $id: not a workshop id"
+        continue
+    fi
     if ((REPEAT > 1)); then
-        for r in $(seq 1 "$REPEAT"); do capture_one "$id" "$OUT/$id/r$r" || fails=$((fails + 1)); done
+        for r in $(seq 1 "$REPEAT"); do capture_one "$src" "$OUT/$id/r$r" || fails=$((fails + 1)); done
     else
         if [[ -n $TAG ]]; then rd=$OUT/$TAG/$id; else rd=$OUT/$id; fi
-        if capture_one "$id" "$rd"; then publish "$id" "$rd"; else fails=$((fails + 1)); fi
+        if capture_one "$src" "$rd"; then publish "$id" "$rd"; else fails=$((fails + 1)); fi
     fi
     log "[$n/${#IDS[@]}] $id"
 done

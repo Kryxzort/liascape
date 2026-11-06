@@ -24,6 +24,11 @@
 #   --report-dir DIR   default <repo>/docs/player/reports ("-" = the results dir only)
 #   --sbs-dir DIR      default <repo>/docs/player/reports/we-ref/sbs ("-" = none)
 #   --assets DIR, --bin DIR, --core DIR, --no-build, --reuse DIR   as scene_preview_compare.sh
+#   --windows-fonts DIR  ours draws text with these fonts too (default: the Windows install's Windows/Fonts when
+#                      mounted, the faces WE drew with; "-" = this system's fonts). Only a private fontconfig file
+#                      of the run points at it; nothing is installed or copied
+#   --no-fake-clock    ours on today's wall clock (default: libfaketime puts ours at the capture's wall time, the
+#                      moment WE's scene clock read 0, so a clock / date / day-night scene shows WE's hour)
 set -u -o pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -44,6 +49,8 @@ ASSETS=
 BIN=
 BUILD=1
 REUSE=
+WINFONTS=/mnt/Windows/Windows/Fonts
+FAKE_CLOCK=1
 
 die() {
     echo "scene_we: $*" >&2
@@ -70,6 +77,8 @@ while (($#)); do
     --bin) BIN=$2; shift ;;
     --no-build) BUILD=0 ;;
     --reuse) REUSE=$2; shift ;;
+    --windows-fonts) WINFONTS=$2; shift ;;
+    --no-fake-clock) FAKE_CLOCK=0 ;;
     -h | --help) usage 0 ;;
     *) echo "unknown option $1" >&2; usage 2 ;;
     esac
@@ -131,6 +140,24 @@ run_all() {
     export PULSE_SERVER=unix:$priv/run/no-pulse DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
     unset WAYLAND_DISPLAY DISPLAY WPENGINE_HEALTH
     export WPENGINE_PARTICLE_SEED=7
+    # the fonts WE drew with (the capture links the Windows install's into its prefix): a scene that names
+    # systemfont_consolas then wraps its text as WE does (3354740764's notepad: Inconsolata is 0.50 em wide where
+    # Consolas is 0.55), so a text difference left in the ranking is layout, not metrics
+    local fonts_used=system
+    if [[ $WINFONTS != - && -d $WINFONTS ]]; then
+        printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' '<fontconfig>' \
+            '  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>' "  <dir>$WINFONTS</dir>" \
+            "  <cachedir>$priv/fc-cache</cachedir>" '</fontconfig>' >"$priv/fonts.conf"
+        export FONTCONFIG_FILE=$priv/fonts.conf
+        fonts_used=$WINFONTS
+    fi
+    # the capture's wall time for ours (clock text, Date in scripts, day/night): libfaketime, real time otherwise
+    local faketime=
+    if ((FAKE_CLOCK)); then
+        faketime=$(nix build --no-link --print-out-paths --impure --expr \
+            "(builtins.getFlake \"path:$REPO\").inputs.nixpkgs.legacyPackages.\${builtins.currentSystem}.libfaketime" 2>/dev/null)/lib/libfaketime.so.1
+        [[ -f $faketime ]] || { echo "scene_we: no libfaketime: ours runs on today's clock" >&2; faketime=; }
+    fi
     local core_lib=
     if [[ -n $CORE ]]; then
         core_lib=$(realpath -- "$CORE") || die "no such core dir: $CORE"
@@ -142,7 +169,8 @@ run_all() {
         --arg pin "$(jq -r .rev "$REPO/third_party/lwe/PIN" 2>/dev/null | cut -c1-12)" \
         --arg gpu "$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -1)" \
         --arg we "$(jq -r .we "$m0")" --arg proton "$(jq -r .proton "$m0" | awk '{print $2}')" \
-        '{dir:$dir, refs:$refs, assets:$assets, worker:$worker, core:$core, started:$started, commit:$commit, pin:$pin, gpu:$gpu, we:$we, proton:$proton}' \
+        --arg fonts "$fonts_used" --argjson fake_clock "$([[ -n $faketime ]] && echo true || echo false)" \
+        '{dir:$dir, refs:$refs, assets:$assets, worker:$worker, core:$core, started:$started, commit:$commit, pin:$pin, gpu:$gpu, we:$we, proton:$proton, fonts:$fonts, fake_clock:$fake_clock}' \
         >"$RESULTS/run.json"
 
     local n=0 t_start=$SECONDS id out t0 code m shots width args
@@ -151,7 +179,8 @@ run_all() {
         m=$REFS/$id/manifest.json
         out=$RESULTS/scenes/$id
         mkdir -p "$out"
-        shots=$(jq -r '[.shots[] | (.t_actual // .t) | . * 10 | round / 10 | tostring] | unique | join(",")' "$m")
+        # WE's own scene time for each frame when the capture read it (the clock strip), else the request time
+        shots=$(jq -r '[.shots[] | if .scene_time != null then (.scene_time * 1000 | round / 1000) else ((.t_actual // .t) * 10 | round / 10) end | tostring] | unique | join(",")' "$m")
         width=$(jq -r '.window[0]' "$m")
         args=(--shots "$shots" --shot-width "$width")
         while IFS= read -r p; do [[ -n $p ]] && args+=(--prop "$p"); done < <(jq -r '.props[]?' "$m")
@@ -162,8 +191,16 @@ run_all() {
             pt=$(jq -r '.pointer_time // ""' "$m")
             [[ -n $pt ]] && args+=(--pointer-time "$pt")
         fi
+        # WE's wall time when its scene clock read 0: a frame's PNG was written ~0.1 s after the frame its strip
+        # read (scene_time); a re-encoded frame's raw copy keeps the capture's mtime
+        local ft_env=()
+        if [[ -n $faketime ]]; then
+            local wall0
+            wall0=$(python3 -I "$REPO/scripts/dev/we_ref_tool.py" wall0 "$REFS/$id")
+            [[ -n $wall0 ]] && ft_env=(LD_PRELOAD="$faketime" FAKETIME="@$(date -d "@$wall0" '+%Y-%m-%d %H:%M:%S')" FAKETIME_DONT_FAKE_MONOTONIC=1)
+        fi
         t0=$(date +%s%3N)
-        LIASCAPE_SCENE_STORAGE_DIR=$out/storage LD_LIBRARY_PATH=$core_lib prlimit --core=1:1 \
+        env "${ft_env[@]}" LIASCAPE_SCENE_STORAGE_DIR=$out/storage LD_LIBRARY_PATH=$core_lib prlimit --core=1:1 \
             timeout -k 10 "$TIMEOUT" "$worker" --lwe-smoke "$DIR/$id" --assets "$ASSETS" --out "$out" \
             --seconds 1 "${args[@]}" >"$out/smoke.json" 2>"$out/stderr.log"
         code=$?

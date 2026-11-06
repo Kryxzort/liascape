@@ -83,6 +83,22 @@ def measures(a, b):
     return m
 
 
+FPS = 30  # the worker's pace (scene_we_compare.sh): a shot at T is frame max(1, round(T * 30))
+
+
+def scene_time(x):
+    """the scene time ours is rendered at for a manifest shot: WE's clock when read, else the request time"""
+    st = x.get("scene_time")
+    return float(st) if st is not None else float(x.get("t_actual", x["t"]))
+
+
+def ours_key(x):
+    st = x.get("scene_time")
+    if st is None:
+        return round(float(x.get("t_actual", x["t"])), 1)
+    return round(max(1, round(float(st) * FPS)) / FPS, 1)  # the worker's frame for it, named to 0.1 s
+
+
 def our_shots(d):
     out = {}
     for t, p in spr.shot_times(d):
@@ -112,7 +128,7 @@ def sbs(rows, h=200):
         D = Image.fromarray((np.clip(np.abs(a - bb) * 4, 0, 1) * 255).astype(np.uint8)).resize((w, h), Image.LANCZOS)
         row = Image.new("RGB", (3 * w + 8, h + 16), (30, 30, 30))
         d = ImageDraw.Draw(row)
-        d.text((4, 2), f"WE  t={t:g}s", fill=(255, 255, 0))
+        d.text((4, 2), f"WE  t={t:g}s" if isinstance(t, (int, float)) else f"WE  {t}", fill=(255, 255, 0))
         d.text((w + 8, 2), "ours", fill=(255, 255, 0))
         d.text((2 * w + 12, 2), "|diff| x4", fill=(255, 255, 0))
         row.paste(A, (0, 16))
@@ -197,8 +213,11 @@ def main():
             continue
         ours = our_shots(os.path.join(scenes, sid))
         refs = ref_shots(os.path.join(a.refs, sid))
-        # WE's frame for T was taken late_ms after T: ours is rendered at that actual time (to 0.1 s)
-        actual = {round(float(x["t"]), 1): round(float(x.get("t_actual", x["t"])), 1) for x in man.get("shots", [])}
+        # ours is rendered at WE's own scene time for the frame: read from the clock strip the scene drew
+        # (we_ref_tool.py CLOCK) when the capture has it, else the request time (late_ms after T; ±0.15 s and the
+        # scene's load: WE's clock was 0.1-1.1 s off a capture's t = 0)
+        actual = {round(float(x["t"]), 1): ours_key(x) for x in man.get("shots", [])}
+        crop = float((man.get("scene_clock") or {}).get("crop", 0.0))
         ex = read_json(os.path.join(scenes, sid, "exit.json"), {})
         pairs = []
         rows = []
@@ -207,12 +226,17 @@ def main():
             if ta not in ours:
                 continue
             we, us = load(refs[t]), load(ours[ta])
+            if crop:  # the clock strip (and any bloom around it) along WE's bottom edge: off both
+                we, us = we[: round(we.shape[0] * (1 - crop))], us[: round(us.shape[0] * (1 - crop))]
             pa, pb = fit_pair(we, us)
             m = measures(pa, pb)
             m["t"] = t
             m["t_ours"] = ta
+            sx = next((x for x in man.get("shots", []) if round(float(x["t"]), 1) == t), {})
+            if sx.get("scene_time") is not None:
+                m["we_scene_time"] = float(sx["scene_time"])
             pairs.append(m)
-            rows.append((t, we, us))
+            rows.append((f"t={t:g}s, scene {m['we_scene_time']:.2f}s" if "we_scene_time" in m else t, we, us))
         # a WE reference that isn't one: WE crashed (its dialog is in the frames: Proton's mfmediaengine and video
         # textures) or every frame is black
         black = bool(rows) and all(float(w.max()) < 8 / 255 for _, w, _ in rows)
