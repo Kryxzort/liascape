@@ -829,7 +829,7 @@ fps_now() { all_fps "$1" && near "$(ctl probe '{"name":"workers"}' | jq -r --arg
 setting ".SceneMonitors = ($OUTS | to_entries | map({Name: .value, Fps: 45, IsPrimary: (.key == 0)}))"
 waitfor $WAIT fps_now 45 && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneMonitors fps 45 on $OUTS → each out:<c>.scene_fps 45 live, the worker ticks at 45, same pid" || bad "SceneMonitors fps → out:$O1 $(out_fps "$O1"), worker $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | {fps_target, pid}')"
 setting '.SceneMonitors = []'
-waitfor $WAIT fps_now 30 && ok "SceneMonitors emptied → back to the default 30" || bad "SceneMonitors [] → out:$O1 $(out_fps "$O1")"
+waitfor $WAIT fps_now 15 && ok "SceneMonitors emptied → back to the default 15 (LiascapePlayerMedia.DefaultSceneFps)" || bad "SceneMonitors [] → out:$O1 $(out_fps "$O1")"
 
 # /library/volume on the playing scene moves that source only — mid-fade (6 s) to another scene, both live
 setting '.GlobalTransitionDurationMs = 6000'
