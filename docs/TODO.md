@@ -1063,7 +1063,8 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real differences:
           3354740764 (a black box behind the dog sprite, extra light shafts); 3276522107 (3D lighting);
           the intro timelines of 2672425887 / 3509243656; 3490034653 (a warm glow from its `light_shafts_1`
-          particles that WE doesn't draw: recheck after 3354740764's light-shaft fix).
+          particles drawn upside down: the particle-sprite orientation fix for 3354740764 removes it, tried locally;
+          the rest is a few px of layer registration — camera shake / parallax phase).
       - [x] The "HDR at Ultra" look (3019192537, 3395587987; also 2542468435, 3509243656) — done 2026-11-06: the
             **references** were wrong, not ours. At Ultra WE presents those scenes through an FP16 (scRGB) swap
             chain holding lin () of the picture (decoded, GH 0x14015a0f0 / 0x140141520 / 0x1401afbf0). Windows

@@ -18,7 +18,7 @@
   },
   "3490034653": {
     "class": "bug?",
-    "note": "Not the HDR family: an LDR scene with an 8-bit swap chain, and both WE sources agree. Ours draws a warm glow left of the girl that WE doesn't: the `light_shafts_1` particles in the compose layers 930/712 (the same preset as 3354740764's extra light shafts; the sprite orientation fix there may cover it). Her eyes' state differs (iris effect, timing). The petals are random."
+    "note": "Not the HDR family: an LDR scene with an 8-bit swap chain, and both WE sources agree. Ours drew a warm glow left of the girl that WE doesn't: its `light_shafts_1` particles upside down. The particle-sprite orientation fix (3354740764's) removes it; tried locally, 0.424 → 0.414. What remains is registration: the layers sit a few px apart from WE's (camera shake and parallax phase; WE's clock is 0.25–0.9 s along at its first frame) and the petals are random."
   },
   "3354740764": {
     "class": "bug?",
@@ -67,5 +67,9 @@
   "2542468435": {
     "class": "ok",
     "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed."
+  },
+  "2134765860": {
+    "class": "time",
+    "note": "A room whose daylight follows the wall clock: WE was captured by day, ours renders at the compare's own hour (evening here). Compare at the capture's hour."
   }
 }

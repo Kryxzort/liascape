@@ -623,7 +623,9 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **One real bug of ours, fixed:** at Ultra, WE multiplies a layer's colour by its `brightness` in these HDR scenes.
   2542468435's layer is set 15 % brighter and ours never showed it. Scores (0 = identical): 3019192537
   0.60 → 0.12, 3395587987 0.48 → 0.08, 2542468435 0.48 → 0.02.
-- 3490034653 is something else: a warm glow from its light-shaft particles that WE doesn't draw, the same preset
-  as 3354740764's extra light shafts (another agent's fix). It is rechecked after that fix.
+- 3490034653 is something else: a warm glow from its light-shaft particles that WE doesn't draw. They were drawn
+  upside down, the same bug as 3354740764's extra light shafts. Another agent's fix for that one removes the glow
+  here too (tried locally). What is left are small position differences: the camera sway is at a different
+  moment in each run.
 - Your Windows `config.json` says MSAA **x2**; the references use x8. That changes edges only, not colour, so they
   weren't recaptured.
