@@ -116,7 +116,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 // or steam tokens). Used for the per-setting reset icon + "Clear settings". workshopFolder is
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
+  loop: true, noAudio: true, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
   globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
@@ -128,8 +128,8 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",
-  // Phase 3 Task 10: pause when covered, the playlist start, the Expert tier (+ its first setting)
-  pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", showExpertOptions: false, rotateWhileParked: true,
+  // Phase 3 Task 10: pause when covered, the playlist start, while parked
+  pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,
 };
 
 // `wallpaper-changed` events seen so far (setPlaying). A Play's reply can come before or after the event of what it started.

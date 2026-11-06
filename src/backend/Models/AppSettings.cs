@@ -57,7 +57,11 @@ public class AppSettings
     public bool AutoPlayVideoThumbs { get; set; } = false;   // UI: video-only library/playlist thumbnails play without a hover (on screen, capped — components/autoplay.ts)
     public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
-    public bool AdvancedSettings { get; set; } = false;      // UI: reveal power-user settings rows
+    // UI: how much of Settings shows — basic | standard (default) | advanced | expert (web-ui.md § "Settings levels"). Hidden
+    // rows keep their values and stay live; nothing here reads it. Replaced AdvancedSettings + ShowExpertOptions (2026-11-06).
+    public string SettingsLevel { get => _settingsLevel; set => _settingsLevel = Level(value); }
+    private string _settingsLevel = "standard";
+    public static string Level(string? v) => v?.Trim().ToLowerInvariant() switch { "basic" => "basic", "advanced" => "advanced", "expert" => "expert", _ => "standard" };
     public bool LiveWallpaperBehindAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
@@ -107,11 +111,8 @@ public class AppSettings
     private string _pauseWhenCovered = "maximized";
     public string PauseWhenCovered { get => _pauseWhenCovered; set => _pauseWhenCovered = CoverMode(value); }
     public static string CoverMode(string? v) => v?.Trim().ToLowerInvariant() switch { "off" => "off", "fullscreen" => "fullscreen", _ => "maximized" };
-    // Expert tier (designer call 12, Settings → Advanced "Show expert options"): a UI tier for settings most users should
-    // never touch. Hidden rows keep their values and stay live; RotateWhileParked is the first one (O2) — "When no monitor
-    // shows the wallpaper": true = keep rotating invisibly (default, today's behaviour), false = hold both clocks until a
-    // monitor returns (`prog:main.while_parked` rotate | hold).
-    public bool ShowExpertOptions { get; set; } = false;
+    // RotateWhileParked (O2, an Expert-level row) — "When no monitor shows the wallpaper": true = keep rotating invisibly
+    // (default, today's behaviour), false = hold both clocks until a monitor returns (`prog:main.while_parked` rotate | hold).
     public bool RotateWhileParked { get; set; } = true;
 
     // Global transition fallbacks (used when a playlist's OverrideGlobalSettings is off). See

@@ -844,7 +844,7 @@ public static class PlayerHelper
                 {
                     var s = SettingsService.Load();
                     if (!s.AllowScenes)
-                        throw new InvalidOperationException("Enable \"Allow scene support\" in Settings to play scenes");
+                        throw new InvalidOperationException("Turn on \"Play scenes\" in Settings to play scenes");
                     if (!IsLweAvailable())
                         throw new InvalidOperationException("linux-wallpaperengine not found in PATH — install it to use scenes");
                 }
@@ -4012,8 +4012,8 @@ public static class PlayerHelper
     }
 
     private static string NoPlayableMessage() => PlayerEngine.IsLiascapePlayer
-        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Allow scene support\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted"
-        : "No playable wallpaper in the library — every item is a scene, and scenes need \"Allow scene support\" + linux-wallpaperengine";
+        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Play scenes\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted"
+        : "No playable wallpaper in the library — every item is a scene, and scenes need \"Play scenes\" + linux-wallpaperengine";
 
     // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which` / the
     // player's capability) instead of once per scene item; the crash mark is one index read per scene.

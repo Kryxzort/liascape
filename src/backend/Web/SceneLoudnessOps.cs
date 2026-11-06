@@ -15,7 +15,7 @@ namespace Liascape.Web;
 // (SceneLoudnessPlanner), never on a request thread, never touching playback. Fed by an import (a WE local import,
 // a Workshop download, the auto-add sync + `/library/sync` — every library scene still without an estimate, so a
 // half-downloaded one is retried by the next sync), the startup pass (what has no estimate for its current
-// configuration), and Settings → Audio → "Scene loudness" (`POST /library/scene-loudness/estimate {paths?, force?}`).
+// configuration), and Settings → Sound → "Pre-measure scenes" (`POST /library/scene-loudness/estimate {paths?, force?}`).
 // Cancel-safe: a scene's result is written to its index entry atomically (`SetMeta`) only when its child succeeded;
 // cancel kills the running child and drops the queue. Progress → WS `scene-loudness-progress {done, total,
 // currentId, finished?, cancelled?}`; each stored scene → WS `library-item-changed {path, loudness…}`.

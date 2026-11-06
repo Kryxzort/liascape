@@ -504,7 +504,7 @@ public static class ServerHost
             SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
             return Results.Json(new { added });
         });
-        // a scene's offline loudness estimate (Settings → Audio → "Scene loudness"; web-backend.md § Scene loudness):
+        // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; web-backend.md § Scene loudness):
         // queue {paths?: [...] (none = every scene), force?: recalculate what's already estimated} → {queued}
         app.MapPost("/library/scene-loudness/estimate", (SceneLoudnessReq? r) =>
             Results.Json(new { queued = SceneLoudnessOps.Enqueue(r?.Paths is { Count: > 0 } p ? p : null, r?.Force == true, "request") }));

@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useStore } from "../store";
 
-// Settings → Appearance → "Autoplay video thumbnails": a library card / playlist-bar item whose only preview is its
+// Settings → Look & feel → "Play video previews": a library card / playlist-bar item whose only preview is its
 // VIDEO (no gif/webp asset — MotionThumb's hover fallback) plays that video without a hover. The same <video> layer
 // the hover uses; what keeps it cheap on a big library:
 //   - only an item ON SCREEN asks for a slot (an IntersectionObserver on its box — scrolled away = released),

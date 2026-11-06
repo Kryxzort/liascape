@@ -13,7 +13,7 @@ export type LiascapeEvent =
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)
   | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote">> }
-  // the background scene-loudness queue (Settings → Audio → "Scene loudness", imports): shaped like unsub-progress
+  // the background scene-loudness queue (Settings → Sound → "Pre-measure scenes", imports): shaped like unsub-progress
   | { type: "scene-loudness-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; cancelled?: boolean } }
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }
