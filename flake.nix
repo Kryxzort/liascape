@@ -7,7 +7,15 @@
     { self, nixpkgs }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      pkgs = import nixpkgs {
+        inherit system;
+        # Electron 42 is EOL upstream, so nixpkgs marks electron_42 insecure ("Electron version … is EOL").
+        # We keep the 42.x pin (see `liascape` below, app/shell/package.json, the AppImage) until all three
+        # move to a newer major together; this lets only electron 42.x through, nothing else insecure.
+        config.allowInsecurePredicate =
+          p:
+          nixpkgs.lib.getName p == "electron" && nixpkgs.lib.versions.major (nixpkgs.lib.getVersion p) == "42";
+      };
       inherit (pkgs) lib;
 
       version = "0.1.0";
