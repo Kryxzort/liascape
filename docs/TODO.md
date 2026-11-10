@@ -6,13 +6,27 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 ## Waiting on owner
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
 - [ ] 3414858021's "WEDNESDAY": on a Wednesday run `scripts/dev/we-ref-capture.sh 3414858021 --tag wednesday`.
-- [ ] Soak mpvpaper 1.9 on the real desktop (item under "Legacy player" below).
-- [ ] Battery reruns: `programs.sh dropout` with `P3_RECORD` (Phase 3 findings, below).
-- [ ] Decide: UI-matrix randomized runs (optional) and offering the LWE patches upstream.
+- [ ] Decide: UI-matrix randomized runs (optional).
+
+## Night runs (owner 2026-11-10: "run the soaks or battery yourself while im sleeping")
+- [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
+      test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
+      recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
+- [ ] Soak mpvpaper 1.9 on the real desktop (item under "Legacy player" below): watch VRAM (`nvidia-smi`) over hours.
+- Start when the owner says they're going to sleep; report in the morning.
+
+## Upstream PRs (owner 2026-11-10: in free time, once the project is done)
+- [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.
+      Drafts only: opening them publishes under the owner's name, so the owner approves each before it's sent.
 - [ ] Optional: auto-mute flapped 6× in 16 s on 2026-11-06 (Spotify + a notification, 500 ms unmute delay) — a longer
       unmute delay stops it.
-- [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
-      report) — keep for later or drop.
+
+## Switch-over bar (queued, owner 2026-11-10)
+- [ ] Resume the switch-over check (design §11: liascape-player becomes the default and the legacy path goes only when
+      the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
+      `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
+      checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
+      fill the report; owner-only rows go to "Waiting on owner".
 
 ## UI — owner's Todoist, clarified 2026-11-10
 - [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
