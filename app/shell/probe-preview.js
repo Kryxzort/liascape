@@ -40,21 +40,21 @@ app.whenReady().then(async () => {
   await js(`(() => { const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
     it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); })()`);
   await wait(300);
-  await js(`[...document.querySelectorAll('.pl-ctx button')].find(b => b.textContent === "Settings (volume / speed)")?.click()`);
+  await js(`[...document.querySelectorAll('.pl-ctx button')].find(b => b.textContent === "Settings")?.click()`); // → the item sidebar
   await wait(900);
-  const sliders = await js(`document.querySelectorAll('.lib-settings input[type=range]').length`);
-  if (!sliders) { console.log("PROBE_PREVIEW FAIL: settings modal didn't open"); app.exit(1); return; }
+  const sliders = await js(`document.querySelectorAll('.side-panel [data-side-row] input[type=range]').length`);
+  if (!sliders) { console.log("PROBE_PREVIEW FAIL: the item sidebar didn't open"); app.exit(1); return; }
   await js(`window.__sent = []`);
   // drag: a few input events like a real slider (React's onChange listens to `input`)
   await js(`(async () => {
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    const [vol, spd] = document.querySelectorAll('.lib-settings input[type=range]');
+    const [vol, spd] = document.querySelectorAll('.side-panel [data-side-row] input[type=range]');
     for (const v of [40, 35, 30]) { set.call(vol, String(v)); vol.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 120)); }
     if (spd) for (const v of [1.5, 1.6]) { set.call(spd, String(v)); spd.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 120)); }
   })()`);
   await wait(700);
   const sent = await js(`window.__sent.slice()`);
-  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
 
   const previews = sent.filter((s) => s.path === "/preview");
   const persisted = sent.filter((s) => s.path === "/library/volume" || s.path === "/library/speed");

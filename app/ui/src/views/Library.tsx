@@ -1,6 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
+import { SidePanel, SelectionNote } from "../components/SidePanel";
+import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { LibrarySide } from "../components/LibrarySide";
+import { useMotion } from "../components/motion";
+import { gridCols, gridOwnsKey, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
@@ -37,7 +42,12 @@ export const Library = memo(function Library() {
   const removeManyFromPlaylist = useStore((s) => s.removeManyFromPlaylist);
   const deleteFromSource = useStore((s) => s.deleteFromSource);
   const openExternal = useStore((s) => s.openExternal);
-  const openCardSettings = useStore((s) => s.openCardSettings);
+  const libFocus = useStore((s) => s.libFocus);
+  const focusLib = useStore((s) => s.focusLib);
+  const keepCurrent = useStore((s) => s.keepCurrent);
+  const gVol = useStore((s) => (s.settings?.volume as number) ?? 100);
+  const gSpd = useStore((s) => (s.settings?.speed as number) ?? 1);
+  const motion = useMotion();
   const setStatus = useStore((s) => s.setStatus);
   const refreshPlayingStatus = useStore((s) => s.refreshPlayingStatus);
   const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
@@ -92,18 +102,36 @@ export const Library = memo(function Library() {
     } else toggleInPlaylist(it.videoPath);
   };
 
-  // Ctrl+A select-all (filtered), Delete deletes selection, Escape clears — never while typing.
+  // the focus moves (keyboard, the playlist bar's Settings): its card into view
+  const focus = (path: string | null, reveal = false) => { focusLib(path); if (path && reveal) revealCard(`lib-${path}`); };
+  // the focused item went away (trashed, the library reloaded without it): the sidebar closes
+  useEffect(() => { if (libFocus && items.length && !byPath[libFocus]) focusLib(null); }, [libFocus, byPath]); // eslint-disable-line
+
+  // Ctrl+A select-all (filtered), Delete deletes selection — never while typing. The grid's keys (hooks/gridKeys.ts):
+  // arrows move the focus (the sidebar follows), Enter plays the focused card, Escape closes the sidebar + clears the selection.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(filtered.map((i) => i.videoPath))); }
-      else if (e.key === "Delete" && sel.size && !typing()) doTrash([...sel].map((p) => byPath[p]).filter(Boolean));
-      else if (e.key === "Escape" && sel.size) setSel(new Set());
+      if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(filtered.map((i) => i.videoPath))); return; }
+      if (e.key === "Delete" && sel.size && !typing()) { doTrash([...sel].map((p) => byPath[p]).filter(Boolean)); return; }
+      if (!gridOwnsKey(e)) return;
+      if (e.key === "Escape") { if (libFocus || sel.size) { focusLib(null); setSel(new Set()); } return; }
+      if (e.key === "Enter") { if (libFocus && byPath[libFocus]) { e.preventDefault(); applyItem(libFocus); } return; }
+      const ids = filtered.map((i) => i.videoPath);
+      const from = libFocus ? ids.indexOf(libFocus) : -1;
+      let j = stepIndex(from, e.key, gridCols(scrollRef.current), ids.length);
+      if (j == null) return; // not an arrow
+      // nothing focused yet: the first arrow focuses the playing card (else the first one)
+      if (from < 0 && playingPath && ids.includes(playingPath)) j = ids.indexOf(playingPath);
+      e.preventDefault();
+      focus(ids[j], true);
     };
     addEventListener("keydown", h);
     return () => removeEventListener("keydown", h);
   }); // eslint-disable-line
 
+  // a click focuses the card (the sidebar shows it) — a plain click also applies it, as before (and as WE does)
   const onCardClick = (it: LibraryItem, e: React.MouseEvent) => {
+    focusLib(it.videoPath);
     if (e.shiftKey && anchor.current) {
       const ids = filtered.map((x) => x.videoPath);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(it.videoPath);
@@ -120,15 +148,21 @@ export const Library = memo(function Library() {
     if (sel.size && (t.classList.contains("scroll") || t.classList.contains("grid"))) setSel(new Set());
   };
 
+  // the sidebar: the focused item (kept for its exit slide after the focus clears)
+  const shown = useLinger(libFocus, SIDE_CLOSE_MS, motion);
+  const sideItem = shown.value ? byPath[shown.value] ?? null : null;
+
   if (items.length === 0) return <div className="center-msg">Library is empty — download wallpapers from Browse.</div>;
 
   return (
+    <>
     <div className="scroll lib-scroll" ref={scrollRef} onClick={onBgClick}>
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}
             playing={it.videoPath === playingPath}
             selected={sel.has(it.videoPath)}
+            focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
             showDeleteFromSource={!!it.workshopId && !autoImport}
             autoPlayGifs={autoPlayGifs}
@@ -137,9 +171,29 @@ export const Library = memo(function Library() {
             onToggle={() => doToggle(it)}
             onDeleteSource={() => deleteFromSource(targetsFor(it).filter((i) => i.workshopId))}
             onReveal={() => openExternal({ path: it.videoPath, reveal: true, isScene: it.isScene, workshopId: it.workshopId, copiedSceneDir: it.copiedSceneDir })}
-            onSettings={() => openCardSettings(it, targetsFor(it), `lib-${it.videoPath}`)} />
+            onSettings={() => focusLib(it.videoPath)}
+            onContextFocus={() => { if (useStore.getState().libFocus) focusLib(it.videoPath); }} />
         ))}
       </div>
     </div>
+    {sideItem && (() => {
+      const targets = targetsFor(sideItem);
+      return (
+        <SidePanel kind="library" id={sideItem.videoPath} closing={shown.closing} title={sideItem.title}
+          sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
+          <LibrarySide item={sideItem} targets={targets}
+            playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}
+            inPlaylist={playlist.includes(sideItem.videoPath)}
+            showDeleteFromSource={!!sideItem.workshopId && !autoImport}
+            globalVolume={gVol} globalSpeed={gSpd}
+            onPlay={() => applyItem(sideItem.videoPath)}
+            onToggle={() => doToggle(sideItem)}
+            onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
+            onTrash={() => { focusLib(null); doTrash(targets); }}
+            onDeleteSource={() => { focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }} />
+        </SidePanel>
+      );
+    })()}
+    </>
   );
 });

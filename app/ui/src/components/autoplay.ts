@@ -25,9 +25,9 @@ function release(e: Entry) {
 }
 
 // true while this element holds a slot. `eligible`: the item has a video preview and nothing else already plays it
-// (not lifted/dragged/with its settings open).
+// (not being dragged).
 export function useAutoplayVideo(ref: RefObject<Element | null>, eligible: boolean): boolean {
-  const on = useStore((s) => !!s.settings?.autoPlayVideoThumbs && s.appActive && !s.cardSettingsItem);
+  const on = useStore((s) => !!s.settings?.autoPlayVideoThumbs && s.appActive);
   const [visible, setVisible] = useState(false);
   const [has, setHas] = useState(false);
   const want = on && eligible;

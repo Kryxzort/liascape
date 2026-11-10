@@ -6,24 +6,33 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 ## Waiting on owner
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
 - [ ] 3414858021's "WEDNESDAY": on a Wednesday run `scripts/dev/we-ref-capture.sh 3414858021 --tag wednesday`.
-- [ ] Soak mpvpaper 1.9 on the real desktop (item under "Legacy player" below).
-- [ ] Battery reruns: `programs.sh dropout` with `P3_RECORD` (Phase 3 findings, below).
-- [ ] Decide: UI-matrix randomized runs (optional) and offering the LWE patches upstream.
+- [ ] Decide: UI-matrix randomized runs (optional).
+
+## Night runs (owner 2026-11-10: "run the soaks or battery yourself while im sleeping")
+- [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
+      test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
+      recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
+- [ ] Soak mpvpaper 1.9 on the real desktop (item under "Legacy player" below): watch VRAM (`nvidia-smi`) over hours.
+- Start when the owner says they're going to sleep; report in the morning.
+
+## Upstream PRs (owner 2026-11-10: in free time, once the project is done)
+- [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.
+      Drafts only: opening them publishes under the owner's name, so the owner approves each before it's sent.
 - [ ] Optional: auto-mute flapped 6× in 16 s on 2026-11-06 (Spotify + a notification, 500 ms unmute delay) — a longer
       unmute delay stops it.
-- [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
-      report) — keep for later or drop.
+
+## Switch-over bar (queued, owner 2026-11-10)
+- [ ] Resume the switch-over check (design §11: liascape-player becomes the default and the legacy path goes only when
+      the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
+      `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
+      checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
+      fill the report; owner-only rows go to "Waiting on owner".
 
 ## UI — owner's Todoist, clarified 2026-11-10
-- [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
-      when the settings grow" fix): focusing a card opens a sidebar holding everything the right-click menu has
-      (Settings, Open in file manager, Delete, Delete from source). Same in the Browse tab.
-- [ ] **Morph replays while settings are open**: with a wallpaper's settings open, the morph animation plays again
-      every 1–2 min instead of staying still (probably a periodic refresh re-mounting the view).
-- [ ] Morph: a little faster still; the morph glitch when a property changes.
-- [ ] Scene timing fallback: with the scene-specific timing options off, use the general minimum or maximum, whichever
-      is on; the minimum if both are on.
-- [ ] Scroll to the playing wallpaper on app open, in both the playlist bar and the main grid.
+- [ ] Matrix `playlistMark:shufflePlay:resume` is flaky by design: under "Resume" every Play can land on k1 and the cell
+      FAILs its own "proved nothing" guard ("every shuffled Play started on k1") — 1 of 4 runs on the pre-sidebar UI
+      (c87376bb), 2 of 4 after it (2026-11-11; the cell never opens the sidebar). Make its first pick deterministic (seed
+      the program's shuffle, or start the session on k3 before the rounds) so it always proves something.
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

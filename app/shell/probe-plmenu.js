@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
   if (!n) { console.log("PROBE_PLMENU SKIP: no playlist items"); app.exit(0); return; }
 
   const results = {};
-  for (const target of ["Settings (volume / speed)", "Open in file manager", "__backdrop__"]) {
+  for (const target of ["Settings", "Open in file manager", "__backdrop__"]) {
     await js(`window.__sent = []; (() => {
       const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
       it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));
@@ -56,8 +56,8 @@ app.whenReady().then(async () => {
     })()`);
     await new Promise((r) => setTimeout(r, 400));
     results[target] = await js(`window.__sent.slice()`);
-    // close whatever opened (settings modal) before the next round
-    await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    // close whatever opened (the item sidebar) before the next round
+    await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     await new Promise((r) => setTimeout(r, 400));
   }
   const bad = Object.entries(results).filter(([, v]) => v.length);

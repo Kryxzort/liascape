@@ -15,7 +15,7 @@
 #
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
 #                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
-#                                  probe-morph.js = the settings-modal morph probe, same hermetic stack)
+#                                  probe-sidebar.js = the item sidebar probe, same hermetic stack)
 #                                  [--changed [<rev>]]
 #   --changed: only the cells the change can affect (scripts/matrix-cells-for.sh maps changed files → cells;
 #   no rev = the uncommitted change, <rev> = everything since it). Central files mean the full matrix, docs

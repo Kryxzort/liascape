@@ -18,13 +18,14 @@ import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./Motion
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
+import { revealCard } from "../hooks/gridKeys";
 
 function PlItem({ path, item, index, playing }: { path: string; item?: LibraryItem; index: number; playing: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
   const openExternal = useStore((s) => s.openExternal);
-  const openCardSettings = useStore((s) => s.openCardSettings);
+  const focusLib = useStore((s) => s.focusLib);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
@@ -42,28 +43,32 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const onLeave = () => { setHover(false); setGlow(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } };
   // The portal'd menu is this item's React child, so going from it to elsewhere fires no leave here: closing off the item is the leave.
   const closeMenu = (e: React.MouseEvent) => { if (menu && !pointerOver(menu.el, e)) onLeave(); setMenu(null); };
-  // COOL: this playlist bar item's settings modal morphed out of it (pl- ≠ the library card's lib- for the same
-  // wallpaper) → lifted out (hidden) until the modal morphs back in; the modal plays the preview meanwhile
-  const lifted = useStore((s) => s.cardSettingsMorphId === `pl-${path}`);
+  useEffect(() => {
+    if (!menu) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(null); onLeave(); } };
+    addEventListener("keydown", h);
+    return () => removeEventListener("keydown", h);
+  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
   // an open menu holds the preview, as on a library card
-  const active = !!item && !lifted && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
+  const active = !!item && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
   // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
   const boxRef = useRef<HTMLDivElement | null>(null);
-  const autoVideo = useAutoplayVideo(boxRef, !!item && !lifted && !isDragging && hasVideoPreview(item));
+  const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
+    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
+      onTransitionEnd={(e) => { if (hover && e.target === e.currentTarget && e.propertyName === "transform") place(e.currentTarget); }} /* the glow follows the eased dock lift */
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {glow && glows && !playing && !isDragging && !lifted && createPortal(
+      {glow && glows && !playing && !isDragging && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
@@ -75,7 +80,8 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
           {/* portal'd: the playlist bar's backdrop-filter would otherwise trap position:fixed */}
           <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={closeMenu}>
             <button onClick={() => removeFromPlaylist(path)}>Remove from playlist</button>
-            <button onClick={() => openCardSettings(item, [item], `pl-${path}`)}>Settings (volume / speed)</button>
+            {/* the item's settings live in the Library sidebar: focus it there (the grid scrolls its card into view) */}
+            <button onClick={() => { focusLib(path); revealCard(`lib-${path}`); }}>Settings</button>
             <button onClick={() => openExternal({ path: item.videoPath, reveal: true, isScene: item.isScene, workshopId: item.workshopId, copiedSceneDir: item.copiedSceneDir })}>Open in file manager</button>
           </div>
         </div>, document.body)}

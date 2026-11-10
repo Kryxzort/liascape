@@ -203,9 +203,14 @@ const PAGE = `window.__mx = {
   row(label) { return [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === label); },
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
-  modalRange(i) { return document.querySelectorAll(".lib-settings input[type=range]")[i]; },
-  modalReset(i) { return [...document.querySelectorAll(".lib-settings .srow")].filter((r) => r.querySelector("input[type=range]"))[i]?.querySelector("button"); },
-  closeModal() { const b = [...document.querySelectorAll(".modal-backdrop")].pop(); this.click(b, "modal backdrop"); },
+  // the item sidebar (WE-style, 2026-11-10 — it replaced the per-card settings modal): focus a card without applying it
+  // (the right-click menu's "Settings"), its volume (0) / speed (1) sliders and resets, its close
+  side() { return document.querySelector(".side-panel:not(.closing)"); },
+  async openSide(t) { await this.cardMenu(t, "Settings"); await this.sleep(250);
+    if (this.side()?.querySelector(".side-head h2")?.textContent.trim() !== t) throw new Error("no sidebar for " + t); },
+  modalRange(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] input[type=range]'); },
+  modalReset(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] button'); },
+  closeModal() { this.click(this.side()?.querySelector("[data-side-close]"), "sidebar close"); },
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
   playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.title) }; },
 }; true`;
@@ -422,7 +427,7 @@ const C = {};
 for (const t of itemTargets) {
   C[`itemVol:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 37, "volume slider");`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.setValue(m.modalRange(0), 37, "volume slider");`);
     await sleep(170); c.during = await snapshot();
     await sleep(500); await ui(`m.closeModal();`);
   }, check(c) {
@@ -434,7 +439,7 @@ for (const t of itemTargets) {
   } };
   C[`itemSpd:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(1), 1.7, "speed slider");`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.setValue(m.modalRange(1), 1.7, "speed slider");`);
     await sleep(170); c.during = await snapshot();
     await sleep(500); await ui(`m.closeModal();`);
   }, check(c) {
@@ -447,7 +452,7 @@ for (const t of itemTargets) {
   C[`itemVolReset:${t}`] = { async pre(c) { c.target = pick(c, t); if (c.target) await post("/library/volume", { path: c.target, intValue: 30 }); },
     async run(c) {
       if (!c.target) return c.skip = "no target";
-      await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.click(m.modalReset(0), "volume reset");`);
+      await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.click(m.modalReset(0), "volume reset");`);
       await sleep(600); await ui(`m.closeModal();`);
     }, check(c) {
       const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -457,7 +462,7 @@ for (const t of itemTargets) {
     c.target = pick(c, t);
     const inPlaylistBar = await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`);
     if (!c.target || !inPlaylistBar) return c.skip = "target not in the playlist bar";
-    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
+    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
     await sleep(700); await ui(`m.closeModal();`);
   }, check(c) {
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -471,7 +476,7 @@ const effectiveOf = (c, p, field, global) => (c.before.lib || []).find((i) => i.
 for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6], ["Vol", 0, "volumeOverride", 80, 20]]) for (const t of ["shown", "other"]) {
   C[`item${kind}Drag:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500);`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500);`);
     c.samples = []; let on = true;
     const sampler = (async () => { while (on) { try { c.samples.push({ t: Date.now(), st: await ctl.call("state") }); } catch {} await sleep(40); } })();
     await ui(`await m.drag(m.modalRange(${idx}), ${from}, ${to}, 40, 40, "slider");`);
@@ -855,7 +860,7 @@ for (const a of ["volume-up", "volume-down"]) {
 C["cli:volume-up:modalOpen"] = { states: ["single", "playlist"],
   async pre(c) { await post("/library/volume", { path: c.shown, intValue: 30 }); },
   async run(c) {
-    const open = `await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600);`;
+    const open = `await m.openSide(${JSON.stringify(TITLE(c.shown))}); await m.sleep(600);`;
     await ui(`${open}`); c.cli = await cli("volume-up"); await sleep(600);
     c.shownValue = await ui(`return m.modalRange(0)?.value;`);
     await ui(`m.closeModal();`); await sleep(900);
@@ -1151,7 +1156,7 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.2
   if (kind === "Vol" && t === "shown") continue;
   C[`seq:item${kind}Drag+next:${t}`] = { states: t === "shown" ? ["single", ...PL_STATES] : PL_STATES, switch: true, async run(c) {
       c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-      await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(${idx}), ${from}, ${to}, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
+      await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); await m.drag(m.modalRange(${idx}), ${from}, ${to}, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
       await sleep(900);
       await cliStep(c, "next");
     }, check(c) {
@@ -1197,7 +1202,7 @@ C["seq:next+prev"] = { states: PL_STATES, switch: true, async run(c) { await cli
 // reopening/closing it again sends nothing stale
 C["seq:previewDrag+reopen"] = { states: ["single", "playlist", "effect"], async run(c) {
     c.target = c.shown;
-    const open = `await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(600);`;
+    const open = `await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(600);`;
     await ui(`${open} await m.drag(m.modalRange(1), 1.0, 1.8, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
     await sleep(1000);
     c.reqAt = await js(`window.__mxReq.length`);
@@ -1431,7 +1436,7 @@ C["selToggle:remove"] = { states: PL_STATES, rearms: true, async run(c) {
 // the settings modal opened from a selected card edits every selected item: both live sides (A and B / the pending B)
 C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
     c.targets = [c.shown, c.other];
-    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600); m.setValue(m.modalRange(0), 33, "volume");`);
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.openSide(${JSON.stringify(TITLE(c.shown))}); await m.sleep(600); m.setValue(m.modalRange(0), 33, "volume");`);
     await sleep(170); c.during = await snapshot(); await sleep(600); await ui(`m.closeModal();`); await sleep(500);
   }, check(c) {
     const v = [];
@@ -1448,14 +1453,14 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
 // value doesn't step — and after the release the slider shows no keyboard-focus ring either
 C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c) {
     c.targets = [K[2], K[3]];
-    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(K[2]))}, "Settings (volume / speed)"); await m.sleep(1400);`); // landed (the open flies 900 ms): a real press hit-tests
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.openSide(${JSON.stringify(TITLE(K[2]))}); await m.sleep(1400);`); // landed (the open flies 900 ms): a real press hit-tests
     const r = await ui(`const s = m.modalRange(0); if (!s) throw new Error("no volume slider"); const b = s.getBoundingClientRect(); return { x: Math.round(b.x + b.width * 0.3), y: Math.round(b.y + b.height / 2), w: Math.round(b.width) };`);
     const send = (e) => win.webContents.sendInputEvent(e);
     send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(60);
     send({ type: "mouseDown", x: r.x, y: r.y, button: "left", clickCount: 1 }); await sleep(80);
     send({ type: "mouseMove", x: r.x + 20, y: r.y, button: "left", modifiers: ["leftButtonDown"] }); await sleep(120);
     const look = `const s = m.modalRange(0); const cs = s ? getComputedStyle(s) : null;
-      return { open: !!document.querySelector(".lib-settings"), value: s?.value, focusVisible: !!s?.matches(":focus-visible"),
+      return { open: !!document.querySelector(".side-panel:not(.closing)"), value: s?.value, focusVisible: !!s?.matches(":focus-visible"),
         outline: cs ? cs.outlineStyle + " " + cs.outlineWidth : null, filter: cs?.filter ?? null };`;
     c.held0 = await ui(look);
     for (const k of ["f", "F", "Delete", "Escape", "Right"]) {
@@ -1464,7 +1469,7 @@ C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c
     c.held = await ui(look);
     send({ type: "mouseUp", x: r.x + 20, y: r.y, button: "left", clickCount: 1 }); await sleep(300);
     c.released = await ui(look);
-    await ui(`if (document.querySelector(".modal-backdrop")) m.closeModal();`); await sleep(900);
+    await ui(`if (m.side()) m.closeModal();`); await sleep(900);
   }, check(c) {
     const v = [];
     if (!c.held.open || !c.released.open) v.push("the modal closed while the slider was held (Escape went through)");
@@ -1563,10 +1568,10 @@ C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async
 // value is saved and stays live — closing must flush, never drop or revert it
 for (const t of ["shown", "other"]) C[`itemVolDragEsc:${t}`] = { states: ["single", "effect", "pending"], async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(600);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(600);
       await m.drag(m.modalRange(0), 80, 30, 10, 30, "volume"); ${key("Escape")}`);
     await sleep(1200);
-    c.open = await ui(`return !!document.querySelector(".lib-settings");`);
+    c.open = await ui(`return !!document.querySelector(".side-panel:not(.closing)");`);
   }, check(c) {
     const v = [];
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -1789,7 +1794,7 @@ const GLOW_JS = String.raw`window.__glow = {
 true`;
 // each measure: the element (an expression), what to read, and whether the mouse has to be over it
 const GLOW_SPECS = [
-  { name: "active tab", tab: "Library", el: `document.querySelector(".tab.active")`, read: "boxShadow" },
+  { name: "active tab", tab: "Library", el: `document.querySelector(".tabs .tab-pill")`, read: "boxShadow" }, // the sliding pill under the active tab carries its fill + glow
   { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
   { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
   { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
@@ -1852,33 +1857,30 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Smooth window animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
-// settings modal). On: the panel flies (a transform animation, `data-morph` set) out of its source, which is lifted
-// (hidden) meanwhile. Off: no flight at all, nothing lifted — the panel fades in where it is, and closing (backdrop or
-// Escape, even mid-open) fades it out and unmounts it; no animation left running, no box that moves after it appeared.
-const MORPH_SAMPLE = String.raw`(() => { const p = document.querySelector(".morph-panel"); if (!p) return null;
-  const run = document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target && (p === a.effect.target || p.contains(a.effect.target)));
+// "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx — it replaced the card → modal flight,
+// 2026-11-10), opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
+// in (transform + opacity animations only, nothing else animated), and closes (its close button, or Escape) by sliding out.
+// Off: nothing animates — it's there at once and gone at once (≤ 100 ms) — also after a page reload; back on: it slides.
+const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-panel"); if (!p) return null;
+  const run = p.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && !a.effect?.target?.matches?.("img, video"));
+  const props = [...new Set(run.flatMap((a) => (a.effect.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((x) => !["offset", "easing", "composite", "computedOffset"].includes(x)))))];
   const b = p.getBoundingClientRect(), cs = getComputedStyle(p);
-  return { flying: !!p.dataset.morph, anims: run.length,
-    flights: run.filter((a) => a.effect.getKeyframes().some((k) => k.transform && k.transform !== "none")).length,
-    lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length, opacity: +cs.opacity, hidden: cs.visibility === "hidden",
-    rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
-async function morphOpen(c, via, { full = false, esc = false } = {}) {
+  return { anims: run.length, props, opacity: +cs.opacity, rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
+async function sideOpen(c, via, { full = false, esc = false } = {}) {
   const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
-  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings (volume / speed)");` : `await m.cardMenu(${JSON.stringify(t)}, "Settings (volume / speed)");`;
+  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings");`
+    : `m.ctx(m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"), "card"); await m.sleep(150); m.click(m.byText(".lib-ctx button", "Settings"), "Settings");`;
   const r = {};
-  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(${esc ? 40 : 60});`); // Escape: mid-open
-  r.early = await js(MORPH_SAMPLE);
+  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(60);`);
+  r.early = await js(SIDE_SAMPLE);
   if (full) {
-    await sleep(400); r.mid = await js(MORPH_SAMPLE);
-    await sleep(750); r.late = await js(MORPH_SAMPLE);
+    await sleep(400); r.mid = await js(SIDE_SAMPLE);
+    await sleep(750); r.late = await js(SIDE_SAMPLE);
   }
-  // close (a backdrop click, or Escape): time until the modal is gone and nothing is left lifted / running
   const close = esc ? `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));` : `m.closeModal();`;
-  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".modal-backdrop")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
+  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".side-panel")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
   await sleep(250);
-  r.after = await ui(`return { backdrops: document.querySelectorAll(".modal-backdrop").length, lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length,
-    running: document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target?.closest?.(".modal-backdrop")).length };`);
+  r.after = await ui(`return { panels: document.querySelectorAll(".side-panel").length, focused: document.querySelectorAll(".card.focused").length };`);
   return r;
 }
 C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
@@ -1888,36 +1890,33 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     if (!c.cardItem) return c.skip = "no non-playing item in the playlist bar";
     const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Smooth window animations"), ${b}, "Smooth window animations"); await m.sleep(400);`);
       return waitFor(async () => (await getSettings()).morphs === b, 4000, 100); };
-    c.onCard = await morphOpen(c, "card", { full: true }); c.onBar = await morphOpen(c, "bar");
+    c.onCard = await sideOpen(c, "card", { full: true }); c.onBar = await sideOpen(c, "bar"); c.onEsc = await sideOpen(c, "card", { esc: true });
     c.savedOff = await flip(false);
-    c.offCard = await morphOpen(c, "card", { full: true }); c.offBar = await morphOpen(c, "bar", { full: true }); c.offEsc = await morphOpen(c, "card", { esc: true });
+    c.offCard = await sideOpen(c, "card", { full: true }); c.offBar = await sideOpen(c, "bar", { full: true }); c.offEsc = await sideOpen(c, "card", { esc: true });
     await loadUi(); await sleep(400);
-    c.reloaded = await morphOpen(c, "card");
+    c.reloaded = await sideOpen(c, "card");
     c.savedOn = await flip(true);
-    c.back = await morphOpen(c, "card");
+    c.back = await sideOpen(c, "card");
   }, check(c) {
-    const v = [];
-    for (const [n, r] of [["card", c.onCard], ["playlist-bar item", c.onBar]]) {
-      if (!r.early?.flying || !r.early.flights || !r.early.lifted) v.push(`morphs on (the default), ${n}: no flight at +60 ms ${JSON.stringify(r.early)}`);
-      if (r.closeMs < 0 || r.after.backdrops || r.after.lifted) v.push(`morphs on, ${n}: the modal didn't close cleanly ${JSON.stringify([r.closeMs, r.after])}`);
-    }
-    if (!c.savedOff) v.push("turning Morph animations off wasn't saved (morphs !== false)");
-    const off = (n, r) => {
-      for (const k of ["early", "mid", "late"]) {
-        const x = r[k]; if (!x) continue;
-        if (x.flying || x.flights) v.push(`morphs off, ${n}: a flight at ${k} ${JSON.stringify(x)}`);
-        if (x.lifted) v.push(`morphs off, ${n}: the source is lifted (hidden) at ${k}`);
-      }
-      if (r.mid && (r.mid.anims || r.mid.hidden || r.mid.opacity < 1)) v.push(`morphs off, ${n}: not settled at +460 ms ${JSON.stringify(r.mid)}`);
-      if (r.mid && r.late && JSON.stringify(r.mid.rect) !== JSON.stringify(r.late.rect)) v.push(`morphs off, ${n}: the panel moved after it appeared ${JSON.stringify(r.mid.rect)} → ${JSON.stringify(r.late.rect)}`);
-      if (r.closeMs < 0 || r.closeMs > 450) v.push(`morphs off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
-      if (r.after.backdrops || r.after.lifted || r.after.running) v.push(`morphs off, ${n}: left behind after closing ${JSON.stringify(r.after)}`);
+    const v = [], J = JSON.stringify;
+    const on = (n, r) => {
+      if (!r.early?.anims) v.push(`animations on, ${n}: the sidebar didn't slide in (+60 ms ${J(r.early)})`);
+      const bad = (r.early?.props ?? []).filter((x) => !["transform", "opacity", "translate"].includes(x));
+      if (bad.length) v.push(`animations on, ${n}: it animates ${bad.join(", ")} (transform / opacity only)`);
+      if (r.closeMs < 0 || r.after.panels || r.after.focused) v.push(`animations on, ${n}: it didn't close cleanly ${J([r.closeMs, r.after])}`);
     };
-    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape mid-open", c.offEsc);
-    off("card, page reloaded", c.reloaded);
-    if (!c.savedOn) v.push("turning Morph animations back on wasn't saved");
-    if (!c.back.early?.flying || !c.back.early.flights) v.push(`morphs back on: no flight at +60 ms ${JSON.stringify(c.back.early)}`);
-    if (c.back.closeMs < 0 || c.back.after.backdrops || c.back.after.lifted) v.push(`morphs back on: the modal didn't close cleanly ${JSON.stringify([c.back.closeMs, c.back.after])}`);
+    on("card", c.onCard); on("playlist-bar item", c.onBar); on("card, Escape", c.onEsc); on("back on", c.back);
+    if (c.onCard.mid?.anims) v.push(`animations on: still animating at +460 ms ${J(c.onCard.mid)}`);
+    if (!c.savedOff) v.push("turning Smooth window animations off wasn't saved (morphs !== false)");
+    const off = (n, r) => {
+      for (const k of ["early", "mid", "late"]) { const x = r[k]; if (x?.anims) v.push(`animations off, ${n}: it animates at ${k} ${J(x)}`); }
+      if (!r.early) v.push(`animations off, ${n}: not there at +60 ms`);
+      if (r.mid && r.late && J(r.mid.rect) !== J(r.late.rect)) v.push(`animations off, ${n}: the panel moved after it appeared ${J(r.mid.rect)} → ${J(r.late.rect)}`);
+      if (r.closeMs < 0 || r.closeMs > 100) v.push(`animations off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      if (r.after.panels) v.push(`animations off, ${n}: left behind after closing ${J(r.after)}`);
+    };
+    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape", c.offEsc); off("card, page reloaded", c.reloaded);
+    if (!c.savedOn) v.push("turning Smooth window animations back on wasn't saved");
     return v;
   } };
 
@@ -1943,9 +1942,9 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     c.away = await settle((r) => r.cards === 0, 4000);
     await ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(200);`);
     c.back = await settle((r) => r.total >= 4, 4000);
-    // a settings modal open: nothing plays behind it; closed again: it resumes
-    await ui(`await m.cardMenu("k2", "Settings (volume / speed)"); await m.sleep(900);`);
-    c.modal = await settle((r) => r.total === 0, 3000);
+    // the item sidebar open: the grid stays in view beside it, so its previews keep playing (the old modal covered them)
+    await ui(`await m.openSide("k2"); await m.sleep(900);`);
+    c.modal = await settle((r) => r.total >= 4, 3000);
     await ui(`m.closeModal(); await m.sleep(900);`);
     c.closed = await settle((r) => r.total >= 4, 4000);
     await loadUi(); await sleep(600);
@@ -1962,8 +1961,8 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     if (c.on.gifCard) v.push("on: the gif item (k1) got a video/animated layer — it follows the GIF setting");
     if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
     if (c.back.total < 4) v.push(`on, cards back on screen: only ${c.back.total} videos ${J(c.back)}`);
-    if (c.modal.total) v.push(`on, a settings modal open: ${c.modal.total} videos still mounted behind it`);
-    if (c.closed.total < 4) v.push(`on, modal closed: only ${c.closed.total} videos ${J(c.closed)}`);
+    if (c.modal.total < 4) v.push(`on, the item sidebar open: only ${c.modal.total} videos (the grid beside it stays live) ${J(c.modal)}`);
+    if (c.closed.total < 4) v.push(`on, sidebar closed: only ${c.closed.total} videos ${J(c.closed)}`);
     if (c.reloaded.total < 4) v.push(`on, page reloaded: only ${c.reloaded.total} videos ${J(c.reloaded)}`);
     if (c.offAgain.total) v.push(`turned off again: ${c.offAgain.total} videos still mounted`);
     return v;
@@ -2264,7 +2263,7 @@ C["seq3:trash+undo+next"] = { states: ["playlist", "pending"], switch: true, asy
 C["seq3:pause+itemVolDrag+resume"] = { states: ["single", "playlist", "effect"], async run(c) {
     c.target = c.shown;
     await cliStep(c, "toggle-pause"); await sleep(300);
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(0), 80, 25, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); await m.drag(m.modalRange(0), 80, 25, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
     await sleep(900); c.whilePaused = await ctl.call("state");
     await cliStep(c, "toggle-pause");
   }, check(c) {
@@ -2500,7 +2499,7 @@ C["volume:scene"] = { states: ["scene"], async run(c) {
 // scene's speed scales its animation and its pitch-kept sound under liascape-player (owner decision), so the slider shows
 for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["itemSpd", 1, 1.7, "speedOverride"]]) {
   C[`${k}:scene`] = { states: ["scene"], async run(c) {
-      await ui(`await m.cardMenu("s1", "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
+      await ui(`await m.openSide("s1"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
       await waitWorker(SC[0], (w) => (k === "itemVol" ? near(w.audio?.gain_db, VolumeDb(val), 0.1) : near(w.audio?.speed, val, 0.001)), 4000);
       await sleep(500); await ui(`m.closeModal();`);
     }, check(c) {
@@ -2944,7 +2943,7 @@ const waitPixel = (p, want, ms = 6000) => waitFor(async () => (await scPixel(p))
 const liveSp = (st, p) => { const id = srcIdsOf(st, p)[0]; return id ? st.graph[id].scene_props : undefined; };
 const spColor = (sp) => (Array.isArray(sp?.color) ? sp.color.map((x) => Math.round(x)) : sp?.color);
 const spIndex = () => readScIndex()[SC_KEY(SC[0])]?.sceneProps ?? null;
-const openSpModal = `await m.cardMenu("s1", "Settings (volume / speed)"); for (let i = 0; i < 50 && !document.querySelector("[data-scene-prop=color]"); i++) await m.sleep(100);`;
+const openSpModal = `await m.openSide("s1"); for (let i = 0; i < 50 && !document.querySelector("[data-scene-prop=color]"); i++) await m.sleep(100);`;
 const spSet = (name, value) => post("/library/scene-props", { path: SC[0], name, value });
 // set in the modal → live on the playing scene (same worker) → persisted; the bool hides its dependant at once
 C["sceneProp:set"] = { states: ["scene"], async run(c) {

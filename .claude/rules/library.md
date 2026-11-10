@@ -85,7 +85,7 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
 
-A scene's `project.json` → `general.properties` (colours, sliders, toggles, combos, text) — the card settings modal's
+A scene's `project.json` → `general.properties` (colours, sliders, toggles, combos, text) — the Library sidebar's
 "Scene properties" (web-ui.md). **Overrides live per item in `LibMeta.SceneProps`** (`name → value`, absent = every
 property at the scene's own default), in **WE's own encoding**: bool `true/false`, slider a number, colour `"r g b"`
 (0–1 floats), combo the option's key (a string; a numeric option value as LWE keys it — `std::to_string(int)`), text
