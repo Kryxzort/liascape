@@ -1,7 +1,7 @@
 From 92c1ada97636ca6f462890a43c0cdd72b02b5f10 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 23:34:49 +0530
-Subject: [PATCH 117/122] scripting: a shader constant's script has the
+Subject: [PATCH 117/126] scripting: a shader constant's script has the
  effect's material as thisObject
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -2144,6 +2144,58 @@ static bool puppet_effects_run_on_its_image () {
     return true;
 }
 
+// a puppet's uvs are its image's, not its padded texture's (3463520581's face: an 852 x 726 image in an 896 x 768
+// texture; WE's posed face sat 28, 16 px from ours, its eye and nose under the front hair). A 4 x 4 image in an 8 x 8
+// texture: the image's left half red, its right half green, the padding blue; the puppet's 4 px square at (32, 16)
+// has uv (0.75, 0.5) at every vertex, the image's right half: green. Unpatched (the uv taken on the texture): its
+// texel 6, the blue padding
+static bool puppet_uvs_are_the_images () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"padded\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16, 0.75f, 0.5f);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }));
+    // TEXV0005 / TEXB0003 ARGB8888: texture 8 x 8, image 4 x 4, no interpolation, clamped
+    MdlWriter t;
+    t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
+    t.u32 (0).u32 (1 | 2).u32 (8).u32 (8).u32 (4).u32 (4).u32 (0);
+    t.out += std::string ("TEXB0003", 8) + '\0';
+    t.u32 (1).u32 (0xffffffff);
+    t.u32 (1).u32 (8).u32 (8).u32 (0).u32 (8 * 8 * 4).u32 (8 * 8 * 4);
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            const bool image = x < 4 && y < 4;
+            t.u8 (image && x < 2 ? 255 : 0).u8 (image && x >= 2 ? 255 : 0).u8 (image ? 0 : 255).u8 (255);
+        }
+    }
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/materials/padded.tex", t.out);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "materials/padded.tex", "models/pa.json", "models/pa.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char square[4] = {};
+    read_pixel (rig.fbo, 32, 16, square);
+    printf ("    the square %d %d %d (want the image's right half, green; the padding is blue)\n", square[0], square[1],
+            square[2]);
+    CHECK (square[1] > 200 && square[0] < 40 && square[2] < 40, "the puppet's uv wasn't taken on its image (%d %d %d)",
+           square[0], square[1], square[2]);
+    return true;
+}
+
 // the attachment matrix whole (GH 0x14024b530: local ← (bone · MDAT) · local): a 32 x 32 puppet at (32, 16) on a
 // 64 x 32 scene whose attachment "tip" is the MDAT matrix scale 2 on the bone (bind pose); a black 4 x 4 square pinned
 // to it at "0 4 0" sits 2 · 4 = 8 px up and is 8 px wide: x 28..35, rows 4..11. Unpatched: only the attachment's
@@ -3586,6 +3638,46 @@ static std::string b7_object (int id, const std::string& model, int x, const std
          + ".json\",\"size\":\"" + size + "\",\"origin\":\"" + std::to_string (x) + " 16 0\"" + extra + "}";
 }
 
+// a constant whose uniform the vertex and fragment shaders declare with different types in opposite #if branches
+// takes the declaration the pass compiles (stock clouds: `uniform vec2 g_CloudSpeeds` in the vertex shader under
+// PERSPECTIVE 0, `vec4` in the fragment shader under PERSPECTIVE 1; 2290002190 runs PERSPECTIVE 1). The vertex one,
+// found first, was uploaded as a vec2 into the vec4: GL refused it, the speed stayed 0 and WE's moving clouds stood
+// still. A solid layer whose material compiles the fragment branch draws its `spd` (0.5 0.25 0.75 1) as its colour:
+// 128 64 191. Unpatched: 0 0 0
+static bool constant_takes_the_compiled_declaration () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"bloom\":false",
+        "{\"id\":1,\"name\":\"o1\",\"image\":\"models/spd.json\",\"size\":\"64 32\",\"origin\":\"32 16 0\"}");
+    for (const char* sub : { "/shaders", "/materials", "/models" }) {
+        mkdir ((dir + sub).c_str (), 0755);
+    }
+    write_file (dir + "/shaders/spd.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "#if FRAGSPEED == 0\nuniform vec2 g_Speed; // {\"material\":\"spd\",\"default\":\"0.1 0.1\"}\n#endif\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n"
+                "#if FRAGSPEED == 0\n\tv_TexCoord += g_Speed;\n#endif\n}\n");
+    write_file (dir + "/shaders/spd.frag",
+                "// [COMBO] {\"material\":\"fs\",\"combo\":\"FRAGSPEED\",\"default\":0}\nvarying vec2 v_TexCoord;\n"
+                "#if FRAGSPEED == 1\nuniform vec4 g_Speed; // {\"material\":\"spd\",\"default\":\"0 0 0 0\"}\n#endif\n"
+                "void main() {\n#if FRAGSPEED == 1\n\tgl_FragColor = vec4(g_Speed.xyz, 1.0);\n#else\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n#endif\n}\n");
+    write_file (dir + "/materials/spd.json",
+                "{\"passes\":[{\"shader\":\"spd\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                "\"blending\":\"normal\",\"combos\":{\"FRAGSPEED\":1},\"constantshadervalues\":{\"spd\":\"0.5 0.25 0.75 1\"}}]}\n");
+    write_file (dir + "/models/spd.json", "{\"material\":\"materials/spd.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.extra = { "shaders/spd.vert", "shaders/spd.frag", "materials/spd.json", "models/spd.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char px[4] = {};
+    read_pixel (rig.fbo, 32, 16, px);
+    printf ("    the layer %d %d %d (want the constant 128 64 191)\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], 128, 4) && near (px[1], 64, 4) && near (px[2], 191, 4),
+           "the constant didn't reach the declaration the pass compiles (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
+
 static std::array<unsigned char, 4> pixel_at (const ScriptRig& rig, int x) {
     std::array<unsigned char, 4> px {};
     read_pixel (rig.fbo, x, 16, px.data ());
@@ -3594,6 +3686,35 @@ static std::array<unsigned char, 4> pixel_at (const ScriptRig& rig, int x) {
 
 static bool rgb_near (const std::array<unsigned char, 4>& px, int r, int g, int b) {
     return near (px[0], r, 3) && near (px[1], g, 3) && near (px[2], b, 3);
+}
+
+// a full-screen layer covers the screen whatever the camera's zoom: WE draws it over the whole target (3042492564's
+// `localcontrast` layer under its camera's zoom 0.73: in WE its strength changes pixels across the whole frame; ours
+// drew its output into the zoomed 73 % rectangle, a copy of the whole frame shrunk into it). A 64 x 32 scene at
+// general.zoom 0.5 with a full-screen layer whose effect writes red: red in the corner. Unpatched: only the zoomed
+// middle (x 16..47, rows 8..23) is red, the corner keeps the blue clear
+static bool fullscreen_layer_ignores_zoom () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":0.5",
+        "{\"id\":1,\"name\":\"fs\",\"image\":\"models/util/fullscreenlayer.json\",\"copybackground\":true,"
+        "\"effects\":[{\"id\":2,\"name\":\"red\",\"file\":\"effects/red/effect.json\",\"visible\":true}]}");
+    ScriptRig rig;
+    rig.extra = b7_effect (dir, "red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    unsigned char corner[4] = {}, middle[4] = {};
+    read_pixel (rig.fbo, 2, 2, corner);
+    read_pixel (rig.fbo, 32, 16, middle);
+    printf ("    corner %d %d %d, middle %d %d %d (want red both)\n", corner[0], corner[1], corner[2], middle[0], middle[1],
+            middle[2]);
+    CHECK (middle[0] > 200 && middle[2] < 40, "the full-screen layer's effect didn't draw (%d %d %d)", middle[0], middle[1], middle[2]);
+    CHECK (corner[0] > 200 && corner[2] < 40, "the full-screen layer took the camera's zoom (corner %d %d %d)", corner[0],
+           corner[1], corner[2]);
+    return true;
 }
 
 // a layer's composite FBOs clamp unless `clampuvs` is false (WE's default is true): an effect sampling past the
@@ -5575,6 +5696,47 @@ static bool one_text (const std::string& object, InkBox& box, int w = 256, int h
     }
     rig.step ();
     box = ink_box (rig);
+    return true;
+}
+
+// a text layer with effects draws its glyphs into its picture as WE's font pass does: translucently, with the layer's
+// alpha, into the cleared picture, so the picture holds colour × coverage·alpha and alpha (coverage·alpha)², and the
+// effects' output is drawn with that alpha (3042492564's clock, alpha 0.75 and a pulse: in WE its brightest pixels
+// sit at 0.36 of the way from the sea to the text's colour, α³ · the pulse's 0.84; ours 0.63, α · 0.84, and alpha 1
+// or no effects match WE). White "H"s at alpha 0.5 on the 0 0 0.5 clear, the left one through a copy effect: its
+// stem's red 255 · 0.5³ = 32. Unpatched: 128, as the right one without effects (which WE draws at 128 too)
+static bool text_alpha_through_effects_is_wes () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = sized_scene (
+        text_object (1, "H", "\"pointsize\":10,\"origin\":\"64 64 0\",\"alpha\":0.5,"
+                             "\"effects\":[{\"id\":5,\"name\":\"copy\",\"file\":\"effects/copy/effect.json\",\"visible\":true}]") + ","
+            + text_object (2, "H", "\"pointsize\":10,\"origin\":\"192 64 0\",\"alpha\":0.5"),
+        256, 128);
+    ScriptRig rig;
+    rig.width = 256;
+    rig.height = 128;
+    rig.extra = b7_effect (dir, "copy", "gl_FragColor = texSample2D(g_Texture0, v_TexCoord);");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    auto brightest = [&] (int from, int to) {
+        int best = 0;
+        for (int y = 0; y < rig.height; y++) {
+            for (int x = from; x < to; x++) {
+                unsigned char px[4] = {};
+                read_pixel (rig.fbo, x, y, px);
+                best = std::max (best, static_cast<int> (px[0]));
+            }
+        }
+        return best;
+    };
+    const int through = brightest (0, 128), direct = brightest (128, 256);
+    printf ("    brightest red through the effect %d (want 255 · 0.5³ = 32), without effects %d (want 128)\n", through, direct);
+    CHECK (direct > 118 && direct < 138, "the text without effects isn't at its alpha (red %d)", direct);
+    CHECK (through > 24 && through < 42, "the text through an effect isn't WE's alpha³ (red %d)", through);
     return true;
 }
 
@@ -7570,6 +7732,10 @@ int main (int argc, char** argv) {
     run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
     run ("attachment_matrix_is_whole", attachment_matrix_is_whole);
     run ("puppet_effects_run_on_its_image", puppet_effects_run_on_its_image);
+    run ("puppet_uvs_are_the_images", puppet_uvs_are_the_images);
+    run ("fullscreen_layer_ignores_zoom", fullscreen_layer_ignores_zoom);
+    run ("text_alpha_through_effects_is_wes", text_alpha_through_effects_is_wes);
+    run ("constant_takes_the_compiled_declaration", constant_takes_the_compiled_declaration);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);

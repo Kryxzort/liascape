@@ -1,7 +1,7 @@
 From 0aa7db4740de5a57d6a7b05f9373f39da67d77f4 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Mon, 2 Nov 2026 23:53:09 +0530
-Subject: [PATCH 022/122] render: object alpha and colour reach the shader
+Subject: [PATCH 022/126] render: object alpha and colour reach the shader
  live; g_Color4 is (colour, alpha)
 
 Two divergences from Wallpaper Engine in the per-object uniforms:
