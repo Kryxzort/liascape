@@ -152,3 +152,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0118-render-a-puppet-s-effects-run-on-its-image-its-mater.patch` | render: a puppet's effects run on its image, its material draws the mesh last | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0119-render-transparentsorting-draws-WE-s-two-passes-the-.patch` | render: transparentsorting draws WE's two passes, the opaque objects first | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0120-input-a-3D-scene-s-world-placed-layers-are-hit-by-th.patch` | input: a 3D scene's world-placed layers are hit by the cursor's ray | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0121-render-a-sorted-3D-scene-runs-its-text-scripts-in-th.patch` | render: a sorted 3D scene runs its text scripts in the scene's object order | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0122-render-a-world-placed-layer-s-effects-draw-into-the-.patch` | render: a world-placed layer's effects draw into the world depth tested | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

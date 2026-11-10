@@ -6298,6 +6298,101 @@ static bool transparent_sort_draws_opaque_first () {
     return true;
 }
 
+// a sorted 3D scene (transparentsorting) runs its text scripts in the scene's object order, not in the sorted draw
+// order. Text `a` is listed first but nearer the eye (drawn after `b`); it sets shared.n. Text `b`, listed second and
+// far out (drawn first), records shared.n the first time it runs. A white layer shows when `b` saw 1. Unpatched (the
+// script ran as the text drew): `b` ran first and read undefined (3509243656's `userset`: "cannot read property
+// 'toExponential' of undefined" on its first frame)
+static bool sorted_scene_runs_text_scripts_in_object_order () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string a = "export function update(value) {\n  shared.n = (shared.n || 0) + 1;\n  return 'a';\n}";
+    const std::string b = "export function update(value) {\n  if (!shared.bRan) {\n    shared.bRan = true;\n    shared.first = shared.n;\n  }\n  return 'b';\n}";
+    const std::string show = "export function update(value) {\n  return shared.first === 1;\n}";
+    const std::string dir = world_scene (
+        ",\"transparentsorting\":true",
+        "{\"id\":1,\"name\":\"a\",\"origin\":\"0 0 5\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+        "\"text\":{\"value\":\"x\",\"script\":\"" + json_escaped (a) + "\"}},"
+        "{\"id\":2,\"name\":\"b\",\"origin\":\"0 0 -40\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+        "\"text\":{\"value\":\"x\",\"script\":\"" + json_escaped (b) + "\"}},"
+        "{\"id\":3,\"name\":\"w\",\"image\":\"models/toimg.json\",\"size\":\"200 200\",\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\","
+        + scripted ("visible", "false", show) + "}");
+    mkdir ((dir + "/models").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/models/toimg.json", "{\"material\":\"materials/toimg.json\"}\n");
+    write_file (dir + "/materials/toimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"normal\",\"cullmode\":\"nocull\","
+                                               "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = { "models/toimg.json", "materials/toimg.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    const auto px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+    printf ("    centre %d %d %d (want white: `b` saw a's first update; the clear 0 0 128: b ran first)\n", px[0], px[1], px[2]);
+    CHECK (px[0] > 240 && px[1] > 240 && px[2] > 240, "the far text's script ran before the one listed first");
+    return true;
+}
+
+// a layer placed in a 3D world draws its effects' output into the world with its material's depth test and write
+// (an effect's material has both off: it draws into an FBO). A red opaque model quad at z 0 writes depth; a white
+// translucent image 5 units behind it (depth tested) with a copy effect is drawn after it (transparentsorting): the
+// red stays in front. Unpatched: the effect's last draw ignored the depth and the white covered the red
+// (3509243656's star spikes over the star spheres: the stars came out at a third of WE's brightness)
+static bool world_layer_effect_draw_is_depth_tested () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (bool effect, std::array<unsigned char, 4>& px) {
+        const std::string fx = effect ? ",\"effects\":[{\"id\":9,\"name\":\"copy\",\"file\":\"effects/copy/effect.json\"}]" : "";
+        const std::string dir = world_scene (",\"transparentsorting\":true",
+                                             "{\"id\":1,\"name\":\"back\",\"image\":\"models/dtimg.json\",\"size\":\"200 200\","
+                                             "\"origin\":\"0 0 -5\",\"scale\":\"0.01 0.01 0.01\"" + fx + "},"
+                                             "{\"id\":2,\"name\":\"front\",\"model\":\"models/dtfront.mdl\",\"origin\":\"0 0 0\"}");
+        for (const char* sub : { "/models", "/materials", "/shaders", "/effects", "/effects/copy" }) {
+            mkdir ((dir + sub).c_str (), 0755);
+        }
+        write_file (dir + "/models/dtimg.json", "{\"material\":\"materials/dtimg.json\"}\n");
+        write_file (dir + "/materials/dtimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                   "\"depthtest\":\"enabled\",\"depthwrite\":\"disabled\",\"textures\":[\"util/white\"]}]}\n");
+        write_file (dir + "/models/dtfront.mdl", b14_mdl ("materials/dtfront.json", 0.0f, 2.0f));
+        write_file (dir + "/materials/dtfront.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"depthtest\":\"enabled\","
+                                                     "\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"],\"combos\":{\"LIGHTING\":0,\"FOG\":0},"
+                                                     "\"constantshadervalues\":{\"color\":\"1.0 0.0 0.0\"}}]}\n");
+        write_file (dir + "/shaders/copy.vert",
+                    "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                    "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+        write_file (dir + "/shaders/copy.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                                "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n}\n");
+        write_file (dir + "/materials/copy.json", "{\"passes\":[{\"shader\":\"copy\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                  "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+        write_file (dir + "/effects/copy/effect.json", "{\"name\":\"copy\",\"passes\":[{\"material\":\"materials/copy.json\"}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/dtimg.json", "materials/dtimg.json", "models/dtfront.mdl", "materials/dtfront.json",
+                      "shaders/copy.vert", "shaders/copy.frag", "materials/copy.json", "effects/copy/effect.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> plain {}, effected {};
+    CHECK (centre (false, plain), "load failed (no effect)");
+    CHECK (centre (true, effected), "load failed (copy effect)");
+    printf ("    the image behind the red quad: without an effect %d %d %d, through a copy effect %d %d %d (want red both)\n", plain[0],
+            plain[1], plain[2], effected[0], effected[1], effected[2]);
+    CHECK (plain[0] > 240 && plain[1] < 16, "the image without an effect covered the nearer quad");
+    CHECK (effected[0] > 240 && effected[1] < 16, "the effect's last draw ignored the depth test and covered the nearer quad");
+    return true;
+}
+
 // a 3D scene's layers are hit-tested in the world (GH 0x1401afbf0 → GH 0x1401cb5d0 / 0x1401cafc0): the cursor's ray
 // against the layer's quad, the local position (u · w, (1 − v) · h). A 2 x 2 unit layer (200 px, scale 0.01) 10 units
 // out, hidden; its cursorEnter shows it when the local position is its centre (100, 100). The pointer at the screen's
@@ -7525,6 +7620,8 @@ int main (int argc, char** argv) {
     run ("cursor_world_position_casts_into_3d", cursor_world_position_casts_into_3d);
     run ("transparent_sort_draws_opaque_first", transparent_sort_draws_opaque_first);
     run ("cursor_hits_world_layers", cursor_hits_world_layers);
+    run ("sorted_scene_runs_text_scripts_in_object_order", sorted_scene_runs_text_scripts_in_object_order);
+    run ("world_layer_effect_draw_is_depth_tested", world_layer_effect_draw_is_depth_tested);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
     return g_failures ? 1 : 0;
 }

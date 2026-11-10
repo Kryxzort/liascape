@@ -1,7 +1,7 @@
 From 12bf25deceed7863cd00936b137e5b585e6f6d50 Mon Sep 17 00:00:00 2001
 From: Rain <71408779+Jarod-Rain@users.noreply.github.com>
 Date: Tue, 27 Oct 2026 22:01:09 -0400
-Subject: [PATCH 009/120] fix: use resolved object size for effect FBO creation
+Subject: [PATCH 009/122] fix: use resolved object size for effect FBO creation
  (#613)
 
 (cherry picked from commit bbd59c01c6852f5cf7560cbfce428bb064a58629)

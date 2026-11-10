@@ -1,7 +1,7 @@
 From 25d6088f88c335ea93e99a64772884578cbcc88b Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 04:39:45 +0530
-Subject: [PATCH 102/120] render: a rope segment is WE's bezier, inner points
+Subject: [PATCH 102/122] render: a rope segment is WE's bezier, inner points
  0.15 along the neighbours' chord
 
 WE's rope buffer (GH 0x140255e50) writes per segment b -> c the neighbours a and d as CP0 / CP1

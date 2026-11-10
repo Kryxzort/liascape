@@ -1253,3 +1253,23 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         WE never shows the plain strip layer in a perspective scene, so there it is the last effect of the scene's
         full-screen layer (dimmer in an HDR scene, under its bloom). All three read every frame; 3276522107 left the
         top of the ranking (0.524 → 0.134).
+  - [x] 3509243656's star spikes and planet rings — done 2026-11-10 (fork 09c9bd4, 2bd528c, patches 0119–0120):
+        transparentsorting draws WE's two passes (the opaque objects first, so the sky box no longer covers the
+        `sa3` spikes), and a world-placed layer is hit by the cursor's ray (the `OL` rings fade in). Host tests
+        `transparent_sort_draws_opaque_first`, `cursor_hits_world_layers`.
+  - [x] 3509243656: WE's glow around a star "twice as wide" — done 2026-11-11 (fork 65ec574, patch 0122): not the
+        HDR bloom chain. The stars themselves were at a third of WE's brightness: the `sa3` spikes (translucent, depth
+        tested, a `pulse` effect) sit at each star's centre, and an effect's last draw took the effect material's depth
+        test (off), so the pulse's output covered the star sphere. A world-placed layer's last effect draw now takes
+        the layer material's depth test and write (as WE's fogged-layer passthrough does). On the seeded private copy
+        without bloom: WE's star core 185 159 128, ours 112 91 87, ours with the spikes' effect removed 183 156 131,
+        now 183 151 115; with bloom the core's mean 188 150 118 (WE), 143 93 74 → 187 130 102. Host test
+        `world_layer_effect_draw_is_depth_tested` (RED before).
+  - [x] A sorted 3D scene's text scripts ran in the sorted draw order — done 2026-11-10 (fork 4c34ba8, patch 0121):
+        0119 put every text in the translucent list, so 3509243656's `userset` ran before `time` on the first frame
+        (`toExponential` of undefined: the scene degraded in the health report). Under transparentsorting the text
+        scripts run first in the scene's object order. Host test `sorted_scene_runs_text_scripts_in_object_order`.
+  - [x] 3509243656's reference "misread clock" — closed 2026-11-11: it wasn't a misread. The 2026-11-06 23:23
+        capture's three frames read 4.084 / 4.083 / 4.082 s past their request times and show the opened scene at
+        "0.5 s", where every other run (`captures/clk2`, `det/v3509-det`) is still black: that run's first picture came
+        4 s late. Recaptured 2026-11-11 00:13 (clock read 3 of 3, offset 0.12 s: 0.61 / 2.13 / 5.13 s).

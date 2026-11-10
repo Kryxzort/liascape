@@ -1,7 +1,7 @@
 From 143822be7c9e02d92d26e7bbc3d7d67e36698ffb Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:33:56 +0530
-Subject: [PATCH 072/120] particle: sprite orientation (screen / upright /
+Subject: [PATCH 072/122] particle: sprite orientation (screen / upright /
  fixed, axis, flags)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

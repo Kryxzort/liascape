@@ -1,0 +1,126 @@
+From 65ec57400cded152334dbcb23aed86d53099b0f3 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 00:10:56 +0530
+Subject: [PATCH 122/122] render: a world-placed layer's effects draw into the
+ world depth tested
+
+A layer with effects draws its material into an FBO, then its effects, and the last effect's pass draws the result
+into the scene. That pass took the effect material's depth test and write, which are off (an effect's material draws
+into an FBO). In a 3D scene the layer's output then covered everything nearer. The last draw now takes the layer
+material's depth test and write, like WE's own last draw of a fogged layer (GH 0x140230ec0, the effectpassthrough_4
+pass that carries them) and like the material drawn without effects.
+
+3509243656's star spikes (`sa3`: translucent, depth tested, a `pulse` effect) sit at each star's centre. In WE the star
+sphere hides their middle; ours drew the pulse's output over the sphere, and the stars came out at a third of WE's
+brightness, so their bloom halo looked half as wide. Measured on a private copy with seeded Math.random, without
+bloom: WE's star core 185 159 128, ours 112 91 87, ours with the spikes' effect taken off 183 156 131, ours now
+183 151 115; with bloom the core's mean is 188 150 118 in WE, 143 93 74 before, 187 130 102 now. 2D scenes are
+unchanged (only a world-placed layer's last draw takes the material's depth modes).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3509243656: the star glow; ~/.cache/liascape/we-ref/captures/det/v3509-det*)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 14 +++++++++++++-
+ .../Render/Objects/Effects/CPass.cpp               | 13 +++++++++++--
+ .../WallpaperEngine/Render/Objects/Effects/CPass.h |  7 +++++++
+ 3 files changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 126e941..d5f0c35 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1413,8 +1413,9 @@ void CImage::updateActivePasses () {
+ 	    this->m_visibleEffects += visible ? 1 : 0;
+ 	}
+ 
+-	// every pass back to the blending it was built with
++	// every pass back to the blending it was built with, and to its material's depth test and write
+ 	this->m_passes[i]->setBlendingMode (this->m_passBlending[i]);
++	this->m_passes[i]->setDepthModes (std::nullopt, std::nullopt);
+ 
+ 	if (visible) {
+ 	    this->m_activePasses.push_back (this->m_passes[i]);
+@@ -1472,6 +1473,17 @@ void CImage::updateActivePasses () {
+ 
+ 	last->setBlendingMode (first->getBlendingMode ());
+ 	first->setBlendingMode (BlendingMode_Normal);
++
++	// a layer placed in a 3D world draws its effects' output into the world with the layer material's depth test
++	// and write, as the material would itself (an effect's material has both disabled: it draws into an FBO). As
++	// WE's own last draw of a fogged layer takes them (GH 0x140230ec0, the passthrough above); measured on
++	// 3509243656, whose star spikes (`sa3`: translucent, depth tested, a pulse effect) sit at each star's centre: in
++	// WE the star sphere hides the spikes' middle (its core 185 159 128 without bloom, a private seeded copy); ours
++	// drew the pulse's output over the sphere (112 91 87), and with the effect taken off (the material's own depth
++	// test) 183 156 131
++	if (this->isWorldPlaced ()) {
++	    last->setDepthModes (first->getDepthtest (), first->getDepthwrite ());
++	}
+     }
+ 
+     // a shape's last pass draws additively (GH 0x1402176a0 calls the shape's vtable +0x108, GH 0x1402866d0, which sets
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 9e5c87d..8362f8b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -193,7 +193,7 @@ void CPass::setupRenderFramebuffer () const {
+ 	    break;
+     }
+ 
+-    switch (this->m_pass.depthtest) {
++    switch (this->getDepthtest ()) {
+ 	case DepthtestMode_Enabled:
+ 	    glEnable (GL_DEPTH_TEST);
+ 	    glDepthFunc (GL_LEQUAL);
+@@ -215,7 +215,7 @@ void CPass::setupRenderFramebuffer () const {
+ 	    break;
+     }
+ 
+-    switch (this->m_pass.depthwrite) {
++    switch (this->getDepthwrite ()) {
+ 	case DepthwriteMode_Enabled:
+ 	    glDepthMask (true);
+ 	    break;
+@@ -660,6 +660,15 @@ void CPass::setBlendingMode (BlendingMode blendingmode) { this->m_blendingmode =
+ 
+ BlendingMode CPass::getBlendingMode () const { return this->m_blendingmode; }
+ 
++void CPass::setDepthModes (std::optional<DepthtestMode> depthtest, std::optional<DepthwriteMode> depthwrite) {
++    this->m_depthtestOverride = depthtest;
++    this->m_depthwriteOverride = depthwrite;
++}
++
++DepthtestMode CPass::getDepthtest () const { return this->m_depthtestOverride.value_or (this->m_pass.depthtest); }
++
++DepthwriteMode CPass::getDepthwrite () const { return this->m_depthwriteOverride.value_or (this->m_pass.depthwrite); }
++
+ void CPass::setTexCoord (GLuint texcoord) { this->a_TexCoord = texcoord; }
+ 
+ void CPass::setPosition (GLuint position) { this->a_Position = position; }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 9b7b26a..b9c72c7 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -55,6 +55,11 @@ public:
+     void setViewProjectionMatrix (const glm::mat4* viewProjection);
+     void setBlendingMode (BlendingMode blendingmode);
+     [[nodiscard]] BlendingMode getBlendingMode () const;
++    /** The depth test and write this pass draws with instead of its material's (a world-placed layer's last effect
++     *  draw takes the layer material's); nullopt = the material's */
++    void setDepthModes (std::optional<DepthtestMode> depthtest, std::optional<DepthwriteMode> depthwrite);
++    [[nodiscard]] DepthtestMode getDepthtest () const;
++    [[nodiscard]] DepthwriteMode getDepthwrite () const;
+     [[nodiscard]] std::shared_ptr<const CFBO> resolveFBO (const std::string& name) const;
+     /** A usertexture's texture: the value of the scenetexture property it names (none picked: nullopt), else itself */
+     [[nodiscard]] std::optional<std::string> userTextureName (const std::string& name) const;
+@@ -197,6 +202,8 @@ private:
+     CRenderable& m_renderable;
+     std::shared_ptr<const FBOProvider> m_fboProvider;
+     const MaterialPass& m_pass;
++    std::optional<DepthtestMode> m_depthtestOverride;
++    std::optional<DepthwriteMode> m_depthwriteOverride;
+     const TextureMap& m_binds;
+     const ImageEffectPassOverride& m_override;
+     std::optional<std::reference_wrapper<std::string>> m_target;

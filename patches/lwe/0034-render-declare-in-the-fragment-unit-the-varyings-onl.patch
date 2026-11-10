@@ -1,7 +1,7 @@
 From f7aabad95c8893c641558dceb1b03d296f479e37 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:32:29 +0530
-Subject: [PATCH 034/120] render: declare in the fragment unit the varyings
+Subject: [PATCH 034/122] render: declare in the fragment unit the varyings
  only its vertex declares
 
 A fragment unit that reads a varying declared only in its vertex unit

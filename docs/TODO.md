@@ -303,19 +303,6 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Next up (handoff 2026-10-26, weekly limit)
-- [ ] **Resume the two WE-port agents when the weekly limit resets** (owner 2026-11-07 00:20: "stop em for now, we'll
-      start them when my weekly resets"). Both stopped mid-round with the original brief
-      (`/tmp/…/scratchpad/weref-fix-brief.md` — copy it into the new session if /tmp was cleared):
-      - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, branch `weref-3d2`, committed, lp-player 22707809 merged
-        in; **stopped 2026-11-10 at 24 GB free on /home**, the brief's 25 GB floor): the clock strip, genericimage4 and
-        the kitty head are done (TODO-done). New, in the fork (pushed, `livepaper/next-v2` **2bd528c**, on top of the
-        2D agent's `7bbd6de` puppet patch): transparentsorting's two passes (opaque objects first: 3509243656's star
-        spikes under its sky box) and the 3D cursor hit test (its planet rings) — patches 0119–0120; the branch pins
-        2bd528c (nix_hash set, patches/CREDITS regenerated). Done on it: host tests 132 / 132, player tests 756 / 756.
-        **Left before merging:** scene health (baseline 89 / 7 / 0), shader sweep (6 known), the whole-corpus WE
-        compare (commit the regenerated report + sbs; 3509243656's note), the merge into lp-player (+ the 2D agent's
-        pin if it lands first: re-pin onto the fork tip), push, release build, player restart; then the 3509243656
-        bloom item below. Needs disk: a debug + release target is ~8 GB.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
@@ -414,8 +401,6 @@ Two bug classes kept recurring; fix the class, not the instance:
           colour blend mode removed, or its quarter buffers renamed — so not the strength, mask, blend or an FBO name
           clash. Next: what its combine pass reads as `previous` (index 2) and `_rt_QuarterCompoBuffer1` there. Also the
           clock text glows in ours (crisp in WE) and reads a minute later (the fake clock's rounding).
-    - [ ] 3509243656's reference: the 2026-11-06 23:23 recapture reads WE's clock at 4.6 / 6.1 / 9.1 s (its intro
-          fade covers the strip), so it reads 0.243 (0.053 before) on the same renderer. Recapture (3D agent's scene).
     - [ ] A compose (passthrough) layer named in another object's `dependencies` (3243449890's 16613, read by four
           clipping masks) keeps LWE's handling; WE sets flag 0x1010 on it too (the 2D round ported it for image and
           text layers only). 3243449890 has no WE reference yet.
@@ -440,10 +425,6 @@ Two bug classes kept recurring; fix the class, not the instance:
     - [ ] A 3D scene's CursorEvent `worldPosition` (ours: scene pixels) and WE's type-5 hit branch (GH 0x1401b5600).
           The hit test itself is WE's since 2026-11-10 (the cursor's ray against the layer's quad; 3509243656's planet
           rings). Gap audit "3D scenes against WE, part 3".
-    - [ ] 3509243656: WE's glow around a star is about twice as wide as ours (with and without its `sa3` spike
-          layers, both WE runs agree): its HDR bloom at iterations 6 / scatter 2 / feather 0.88 (the HDR scenes that
-          match use 8 / 1.619 / 0.1). Compare the chain's levels on a private copy (`captures/det/v3509-det*`,
-          `scripts/dev/we_ref_variant.py`: seeded `Math.random`). Gap audit "… part 3".
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as

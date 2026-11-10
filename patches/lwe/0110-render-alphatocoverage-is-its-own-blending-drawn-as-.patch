@@ -1,7 +1,7 @@
 From 7797317fcea4c989fa85e9d537c2db732f72204a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 18:12:15 +0530
-Subject: [PATCH 110/120] render: alphatocoverage is its own blending, drawn as
+Subject: [PATCH 110/122] render: alphatocoverage is its own blending, drawn as
  WE draws it at MSAA
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

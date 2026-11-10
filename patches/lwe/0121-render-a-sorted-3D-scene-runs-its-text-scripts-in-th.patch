@@ -1,0 +1,106 @@
+From 4c34ba8550a5f34edde6b01b672251eed1bf3142 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 22:42:26 +0530
+Subject: [PATCH 121/122] render: a sorted 3D scene runs its text scripts in
+ the scene's object order
+
+A text layer's script runs as the layer draws. Since transparentsorting draws WE's two passes (0119), every text is in
+the translucent list, sorted far to near, so its script ran in that order instead of the scene's. 3509243656's
+`userset` text (listed late, far out) then ran before its `time` text (listed early, near) on the first frame and read
+shared.xntime before `time` had set it: "TypeError: cannot read property 'toExponential' of undefined", a degraded
+scene in the health report. Under transparentsorting the text scripts now run first, in the scene's object order, and
+each text draws what its script returned. Inferred: WE runs a text's script in its update, not in the renderer's
+sorted passes (not traced in wallpaper64.exe); a scene without the sort is unchanged.
+
+Origin: ours
+Why: docs/player/reports/scene-health.md (3509243656 degraded by the 0119 pin: a first-frame script error)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ .../WallpaperEngine/Render/Objects/CText.cpp     | 12 ++++++++++++
+ src/core/WallpaperEngine/Render/Objects/CText.h  |  6 ++++++
+ .../WallpaperEngine/Render/Wallpapers/CScene.cpp | 16 ++++++++++++++++
+ 3 files changed, 34 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.cpp b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+index 7248527..2cd12d2 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CText.cpp
+@@ -159,7 +159,19 @@ void CText::initScriptLayer () {
+     }
+ }
+ 
++void CText::tickScript () {
++    if (this->m_layerHandle != Scripting::kInvalidLayerHandle) {
++	this->m_tickedText.reset ();
++	this->m_tickedText = this->currentText ();
++    }
++}
++
+ std::string CText::currentText () {
++    if (this->m_tickedText.has_value ()) {
++	std::string text = std::move (*this->m_tickedText);
++	this->m_tickedText.reset ();
++	return text;
++    }
+     if (this->m_layerHandle != Scripting::kInvalidLayerHandle) {
+ 	auto& se = this->getScene ().getScriptEngine ();
+ 	se.tickLayer (
+diff --git a/src/core/WallpaperEngine/Render/Objects/CText.h b/src/core/WallpaperEngine/Render/Objects/CText.h
+index 1505693..e21bcbf 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CText.h
++++ b/src/core/WallpaperEngine/Render/Objects/CText.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <optional>
+ #include <string>
+ #include <vector>
+ 
+@@ -41,6 +42,9 @@ public:
+     [[nodiscard]] const std::string& getVerticalAlign () const;
+     void setHorizontalAlign (const std::string& value);
+     void setVerticalAlign (const std::string& value);
++    /** Runs the layer's text script now (a sorted 3D scene runs its scripts in the scene's object order before it
++     *  draws in the sorted order); the text is what render () then shows */
++    void tickScript ();
+ 
+ private:
+     /** Lays the text out again when it, its size or its layout settings changed; true when it did */
+@@ -65,6 +69,8 @@ private:
+ 	glm::vec3 colour = glm::vec3 (-1.0f);
+     } m_laidOut;
+     Scripting::ScriptLayerHandle m_layerHandle = Scripting::kInvalidLayerHandle;
++    /** The text tickScript () got this frame, taken by the next render () */
++    std::optional<std::string> m_tickedText;
+     bool m_hasFont = false;
+     std::string m_horizontalAlign;
+     std::string m_verticalAlign;
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index d9c854c..9f2749c 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -799,6 +799,22 @@ void CScene::renderFrame () {
+     glClearColor (clearColor.r, clearColor.g, clearColor.b, 1.0f);
+     glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+ 
++    // a text layer's script runs as it renders. Under transparentsorting the draw order isn't the scene's: the text
++    // scripts run first, in the scene's object order (3509243656's `userset` reads shared.xntime, which its `time`
++    // layer sets: listed first, drawn later). Inferred: WE runs a text's script in its update, not in the renderer's
++    // sorted passes
++    if (this->m_camera->isPerspective () && this->getScene ().transparentSorting) {
++	const std::vector<CObject*> objects = this->m_objectsByRenderOrder;
++	for (auto* cur : objects) {
++	    if (!this->m_destroyed.empty () && std::ranges::find (this->m_destroyed, cur) != this->m_destroyed.end ()) {
++		continue;
++	    }
++	    if (cur->is<Objects::CText> ()) {
++		cur->as<Objects::CText> ()->tickScript ();
++	    }
++	}
++    }
++
+     // a copy: a text layer's script runs as it renders, and may create, destroy or sort layers
+     const std::vector<DrawEntry> order = this->drawOrder ();
+     for (const auto& [cur, pass] : order) {

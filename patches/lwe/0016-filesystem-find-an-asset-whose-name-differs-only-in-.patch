@@ -1,7 +1,7 @@
 From b63f1ec89b7b80460ee8879c7772cb65077e9811 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 28 Oct 2026 22:13:43 +0530
-Subject: [PATCH 016/120] filesystem: find an asset whose name differs only in
+Subject: [PATCH 016/122] filesystem: find an asset whose name differs only in
  case
 
 Wallpaper Engine runs on Windows, whose filesystem ignores case, so
