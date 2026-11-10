@@ -722,3 +722,44 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   stand-ins in your player, so text can wrap differently. A "Windows fonts folder" setting (found on your mounted
   Windows drive) would fix that. Not built.
 - No renderer change in this round, so no LWE pin bump, player rebuild or restart.
+
+## 2026-11-06 night — a broken audio filter no longer silences a video; the scene "warble" not reproduced
+- **Your silent wallpaper (21:35) can't happen again, whatever the filter.** The cause: with the normalization target
+  at 0, the loudness filter got a value ffmpeg refuses; mpv accepted the setting (it knows the filter) and only
+  failed when building it — and then played the video with **no audio at all**. The target is already kept in range
+  since this evening; now the player also survives any filter mpv can't build: it drops it, plays the sound
+  un-normalized, logs a warning (the player's `source.rejected`, and a line in the backend's log "player refused af
+  on …"), and the `sources` probe shows `af_refused` with ffmpeg's own reason. New player tests (they fail without the
+  fix with exactly your symptom: no audio output, track deselected) + adapter IT checks with a target of 0 written
+  straight into a private settings.json.
+- **"Loud quiet loud quiet" when a scene fades out: not found on our side yet.** 39 transitions recorded on a
+  private PipeWire at your quantum (64), real-time, two outputs at 144/240 Hz, with your own pairs from today's log
+  (Lofi Girl → MIKU_MK2, the skeletons → 壁纸循环, Chainsaw Man → EP05, Street Japan → Miku Miku, 流萤 → Lofi Girl,
+  Evernight → Madara) plus synthetic ones, many effects, all three methods, A at 0.8×/1×/1.25×, and the player
+  frozen mid-fade. Each one recorded the scene's own stream: it is the scene's sound file × the fade to within
+  ~0.4 dB (p95). The dips I first took for a warble (Chainsaw Man) are in the song itself. So the scene's audio
+  path, the time stretch, the gain ramps and a stalled player are ruled out. Not covered: your EasyEffects chain on
+  the HDB 630, and multi-second player stalls (your log has 13–34 s ones today). **Ask:** next time, note the time and
+  whether it's the old wallpaper's sound or the new one's — most of today's scenes that faded out had no sound at
+  all, so it may be the incoming video. The recording tools are in `src/player/tests/onmachine/transition_audio/`.
+
+## 2026-11-07 — a click while the player stalls is no longer lost
+- **The adapter-IT failure "/apply b right after a library item never switched" was the test's own typo**, not the
+  player: one line sent `{path:/tmp/…/b.mp4}` (unquoted JSON); the backend refused it (HTTP 400) and the test hid the
+  error. Reproduced exactly; the test now fails loudly on any request body that isn't JSON.
+- **Chasing it found a real bug you could hit:** a wallpaper you picked while the player was stalled (it froze for
+  13–34 s a few times in your log yesterday) was silently dropped — when the player came back, the screen kept the old
+  wallpaper while the app showed the new one, until you clicked again. Now the backend remembers the pick, keeps
+  asking the player every half second, and puts it on screen (a cut) as soon as the player answers; clicking twice
+  during the stall shows the newer one, once. A Stop, or picking a single wallpaper over a running playlist, during a
+  stall is caught up the same way. New IT check: two clicks while the player is frozen 4.5 s → the second one shows
+  (fails on the old backend: the old wallpaper stayed).
+- Two quick clicks with the player responsive were always fine (both queued in order, the newer wins).
+- Side fix: the backend self-test had quietly stopped before its main part since the Settings rename (it expected
+  the player's "can't pause behind windows" warning to use the new row name) — the player's warning now says "Pause
+  behind windows", and the full self-test passes again.
+- Adapter IT, this branch vs unchanged lp-player, after the reboot (machine quiet): **413 pass / 1 fail** vs **411 / 1**
+  (the branch has the 2 new checks). The one failure is the same in both — the playlist-restart section's precondition
+  "the new backend answered after p1's first loop ended" (a timing precondition, pre-existing). A first branch run had
+  4 more (20 × /random non-200, two scene-loudness timing checks); none came back on the rerun, so load flakes — the
+  /random check now prints the HTTP codes it got if it fails again.

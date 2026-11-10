@@ -904,7 +904,9 @@ public sealed class LiascapePlayerClient
     // `scene.loudness` — a scene's loudness learned on first play (→ LiascapePlayerMedia.OnSceneLoudness: stored in
     // the index, normalization applied live). Once per scene play at most.
     // Phase 3 Task 7: `program.` — the player's rotation (LiascapePlayerProgram's mirror; `program.current` → the UI)
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "program."];
+    // `source.rejected` — a value the player's source refused (rare; e.g. an `af` mpv couldn't build: it plays
+    // without it, TODO "A rejected `af` silences the video") → logged here, so the backend's log says why.
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "program.", "source.rejected"];
     public event Action<string, JsonElement>? Event;
     // Phase 3 Task 9: an entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
     // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in

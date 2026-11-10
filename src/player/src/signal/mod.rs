@@ -324,7 +324,7 @@ impl CoverRt {
         };
         let reason = match ok {
             Some(false) => Some(format!(
-                "no window-state source here ({}) — \"Pause when covered\" can't act",
+                "no window-state source here ({}) — \"Pause behind windows\" can't act",
                 self.reason.as_deref().unwrap_or("unknown")
             )),
             _ => None,

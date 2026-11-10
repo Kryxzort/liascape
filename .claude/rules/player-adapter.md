@@ -92,7 +92,8 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   for the socket — RED before: 635 ms, two timeouts, the breaker open, "busy", "no player"). `EnsureRunning` never spawns a second
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged) — and
   **R81** catches up: the breaker closing fires `LiascapePlayerClient.Recovered` → `LiascapePlayerMedia.OnRecovered`
-  → `ReapplyAll()` (below), so a dropped set isn't lost for good.
+  → `ReapplyAll()` (below), so a dropped set isn't lost for good — and a dropped **switch or stop** is put on screen
+  then too (§ Reconnection, "A switch the stall swallowed").
 - **Every queued command's own `Call` uses `LiascapePlayerClient.QuickMs`** (item 6) — a queued property set
   (or a `transition`'s `fit` pre-assertion, or a per-item `set`) is never worth the 2000 ms default; a
   backlog behind a stalled player then drains in ≤ 300 ms per item instead of up to 2000 ms. `Switch`'s
@@ -813,6 +814,21 @@ backend, `ctl`; `_requesting` covers our own event beating its reply). **An arme
 process: the player's snapshot saves it as A where it plays (player-core.md § Snapshot), and `DoVideoEndWait` on
 `failed:player restarted` **re-arms** it for A's end (it used to back off 1 s and switch NOW — A cut short; with the
 old snapshot rule B showed at once, then again).
+
+**A switch the stall swallowed (2026-11-07).** The queue's worker meeting a stalled player (`Ready` gets no answer —
+`hello` 1 s + the supervisor wait 2 s, the breaker open — or the `transition` request times out) used to DROP an
+align:now switch: no log line, never retried, and R81 re-applied settings only — the screen kept the old wallpaper for
+good while every UI named the new one (each click in a 13–34 s stall lost; found reproducing an IT flake that was
+really a quoting slip in the IT). Now (`Lost` → `LostToStall`) it is `_intent` all the same, logged ("switch to X
+(…): liascape-player is not responding — it runs once the player answers again"), `LostSwitches` counts it, and a probe
+(`ProbeUntilAnswered`: a QuickMs `hello` every 500 ms, ≤ 30 min — nothing else may call the player for minutes with
+the UI closed) ends the stall's silence: the answer closes the breaker → `OnRecovered` queues `ReconcileAfterStall`
+(essential, first) = `ReconcileShown`'s check — the intent shown or incoming (a timed-out request can still reach the
+player once it runs) → nothing, else a cut to it. A lost `stop` (its QuickMs call failed with the breaker open) the
+same way. A newer click while still stalled only moves `_intent`: the newest shows, once. An **aligned** switch is not
+handled here: its caller hears "unreachable" and retries itself (A plays meanwhile). Guard: adapter IT § "apply /
+transition" "two clicks (a, b) on a player stalled 4.5 s → b once it answers again" (RED before: c stayed, nothing
+scheduled, transitions []).
 
 ## Event flow
 `Switch` → `transition` reply `{corr, to}` → `LastCorr`. The event thread records each corr's terminal

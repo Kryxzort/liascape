@@ -209,7 +209,15 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
+# A body that isn't JSON is a quoting slip in THIS script, never a backend fault: the backend answers 400 before the
+# route runs, `-f` + `>/dev/null` swallowed it, and the check after it waited for a switch nobody asked for (2026-11-06:
+# `post /apply "{"path":"$Bc"}"` sent {path:/tmp/…/b.mp4} — read as "/apply b after a library item never switched").
+# Loud, and nothing is sent: a FAIL on stderr (a `$(post …)` caller captures stdout, and its subshell's `fail` count
+# is lost — so each one is also logged and counted at the end).
+post() {
+  jq empty >/dev/null 2>&1 <<<"$2" || { echo "  FAIL post $1: the body isn't JSON (a quoting slip in the IT): $2" | tee -a "$T/post-not-json.log" >&2; return 2; }
+  curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"
+}
 # an import copies the clip + ffmpeg-extracts its thumbnail: seconds under load, past `post`'s 10 s
 lib_import() { curl -sf -m 60 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$1\",\"title\":\"$2\"}" "$U/library/import" | jq -r .videoPath; }
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
@@ -329,6 +337,26 @@ post /apply "{\"path\":\"$Bc\"}" >/dev/null
 waitfor $WAIT shows "$Bc" && ok "/apply b → cur b" || bad "/apply b → cur $(cur path), transitions $(ctl state | jq -c '[.transitions[].phase]')"
 ctl logs '{"kind_prefix":"transition.started"}' | jq -r '.events[-1] | "\(.effect_id) \(.method)"' | grep -q "fade full-live" && ok "a→b ran fade full-live" || bad "a→b effect: $(ctl logs '{"kind_prefix":"transition.started"}' | jq -c '.events[-1]')"
 curl -sf -m 5 "$U/current" | jq -e ".playing == true and .path == \"$Bc\" and (.position|type) == \"number\"" >/dev/null && ok "/current playing b + position" || bad "/current $(curl -sf -m 5 "$U/current")"
+# Two quick clicks: the second /apply right behind the first is never lost behind the first's switch (each /apply runs
+# under PlayerHelper's lock; a switch is a barrier in the adapter's queue, never coalesced). Judged by what was
+# SCHEDULED last, not only by `cur` (it may still name the target of an earlier switch).
+last_sched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r '.events[-1].path // empty'; }
+quick_ok() { shows "$1" && [ "$(last_sched)" = "$1" ]; }
+n0=$(nsch); post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$C\"}" >/dev/null
+waitfor $WAIT quick_ok "$C" && ok "two quick clicks (a, c) → c ($(( $(nsch) - n0 )) switches scheduled)" \
+  || bad "two quick clicks (a, c) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]')"
+# …and clicked while the player is stalled (2026-11-07): the adapter's worker found no answer (hello 1 s + the
+# supervisor wait 2 s, the breaker open) and DROPPED the switch — no log line, never retried; the stall breaker
+# closing (R81) re-applied settings only, so the screen stayed on the old wallpaper for good (a 13–34 s stall in the
+# owner's log = every click in it lost). Now a switch (or stop) lost to a stall is the backend's intent and is put on
+# screen once the player answers again — found by the adapter's own probe, with NO further request from here (the
+# `ctl` reads below go to the player, never the backend).
+CP=$(comp_pid); kill -STOP "$CP"; t0=$(ms_now)
+post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$Bc\"}" >/dev/null; tq=$(( $(ms_now) - t0 ))
+sleep_left=$(( 4500 - tq )); [ "$sleep_left" -gt 0 ] && sleep "$(python3 -c "print($sleep_left/1000)")"
+kill -CONT "$CP"
+waitfor 20000 quick_ok "$Bc" && ok "two clicks (a, b) on a player stalled 4.5 s → b once it answers again (both /apply answered in ${tq} ms)" \
+  || bad "clicks on a stalled player (a, b) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]'); log: $(grep -E "stall|not responding|switch" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -4 | tr '\n' ' ' | cut -c1-600)"
 
 echo "== live settings"
 fit1() { [ "$(ctl get '{"path":"lay:VIRTUAL-1:main.fit"}' | jq -r .value)" = fit ]; }
@@ -350,6 +378,48 @@ post /pause '{}' >/dev/null; waitfor $WAIT paused_is false && ok "/pause again �
 g55=$(dB 55); g20=$(dB 20)
 post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
+
+echo "== normalization: an out-of-range target in settings.json is clamped; an af mpv can't build plays without it, never silent"
+# TODO "A rejected `af` silences the video" (owner 2026-11-06): a target of 0 LUFS built a loudnorm ffmpeg refuses
+# (I takes −70…−5) and mpv then played the video with NO audio. The backend clamps a stored target; the player survives any
+# af mpv can't build (falls back to its chain without it, re-selects the audio track, reports `source.rejected`).
+sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
+src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
+af_has() { cur af | grep -q -- "$1"; }
+refused_seen() { ctl logs '{"kind_prefix":"source.rejected","limit":1000}' | jq -e --arg id "$1" '[.events[] | select(.id==$id and .prop=="af")] | length >= 1' >/dev/null; }
+ao_up() { src_probe "$1" | jq -e '.ao == "null"' >/dev/null; }
+sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'   # written straight into the file (the UI can't send 0 any more)
+NC=$(lib_import "$C" "norm cee")   # a library item: its loudness is measured and stored on first play
+post /apply "{\"path\":\"$NC\"}" >/dev/null
+waitfor $WAIT shows "$NC" || bad "/apply norm cee → cur $(cur path)"
+# its loudness is measured on first need; once it lands the backend re-applies: its af becomes a loudnorm
+waitfor 30000 af_has loudnorm && af_has 'I=-5:' && ok "target 0 in settings.json → loudnorm clamped to I=-5 ($(cur af | cut -c1-40)…)" \
+  || bad "target 0: its af = $(cur af)"
+SIDC=$(srcIdForPath "$NC")
+waitfor $WAIT ao_up "$SIDC" && src_probe "$SIDC" | jq -e '.refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
+  || bad "clamped loudnorm: $(src_probe "$SIDC")"
+# any af mpv can't build, set on the live source: refused (source.rejected, the backend's log), audio output still up.
+# (The backend's next settings pass may put its own af back meanwhile — that clears `af_refused`; the event stays.)
+ctl set "{\"path\":\"$SIDC.af\",\"value\":\"loudnorm=I=0:TP=-1.5:LRA=11\"}" >/dev/null
+waitfor $WAIT refused_seen "$SIDC" && waitfor $WAIT ao_up "$SIDC" \
+  && ok "an unbuildable af on the live source → source.rejected, audio output still up ($(src_probe "$SIDC" | cut -c1-160))" \
+  || bad "unbuildable af live: $(src_probe "$SIDC"), rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
+waitfor $WAIT grep -q "player refused af on $SIDC" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…and the backend's log says so" || bad "backend log has no 'player refused af on $SIDC'"
+# a NEW source opened with it (the owner's case: mpv deselected the track at its audio init → no audio at all)
+ctl create "$(jq -nc --arg p "$C" '{kind:"source", props:{path:$p, loop:true, af:"loudnorm=I=0:TP=-1.5:LRA=11"}}')" > "$T/afc.json"
+SIDX=$(jq -r .id "$T/afc.json")
+waitfor $WAIT refused_seen "$SIDX" && waitfor $WAIT ao_up "$SIDX" \
+  && ok "a new source opened with it: source.rejected, audio output up ($(src_probe "$SIDX" | cut -c1-120))" \
+  || bad "new source with an unbuildable af: $(src_probe "$SIDX")"
+ctl destroy "{\"id\":\"$SIDX\"}" >/dev/null 2>&1
+sf_raw '.NormalizeAudio = false | .NormalizeTargetLufs = -14'
+setting '.NormalizeAudio = false'; waitfor $WAIT cur_is af "" || bad "normalization off → af $(cur af)"
+# leave the library without this item (an all-scene library check further down counts on it), nothing shown
+stop_now
+curl -sf -m 5 "$U/library" | jq -c --arg p "$NC" '[.[] | select(.videoPath==$p)][0]' > "$T/nc.json"
+post /library/delete "$(cat "$T/nc.json")" >/dev/null
+curl -sf -m 5 "$U/library" | jq -e --arg p "$NC" '[.[] | select(.videoPath==$p)] | length == 0' >/dev/null || bad "norm cee still in the library"
 
 echo "== timed playlist: advance-on-end, no minimum play time (2 s clips → advance on end)"
 # A rotation's rate is counted on the PLAYER's clock: the handoffs (after index $1) whose t_mono_ms lies
@@ -753,15 +823,15 @@ post /apply "{\"path\":\"$SV1\"}" >/dev/null
 waitfor $WAIT shows "$SV1" && ok "/apply sv1 (library/single-wallpaper mode) → cur sv1" || bad "/apply sv1 → cur $(cur path)"
 
 step_many() {   # $1 = /next|/prev|/random, $2 = iteration count
-  local route=$1 n=$2 allok=1 sceneHit=0 i p code
+  local route=$1 n=$2 allok=1 sceneHit=0 i p code codes=""
   for i in $(seq 1 "$n"); do
     code=$(postcode "$route")
-    [ "$code" = 200 ] || allok=0
+    [ "$code" = 200 ] || { allok=0; codes="$codes #$i:$code"; }
     sleep 0.5
     p=$(cur path)
     { [ "$p" = "$SS1" ] || [ "$p" = "$SS2" ]; } && sceneHit=1
   done
-  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response"
+  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response:$codes (000 = no answer within 10 s)"
   [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — TryStepLibrary/ApplyRandom didn't skip it"
 }
 step_many /next 20
@@ -2452,5 +2522,6 @@ grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-pl
 
 echo "== adapter log (tail)"
 tail -n 8 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+nj=$(cat "$T/post-not-json.log" 2>/dev/null | wc -l); fail=$((fail + nj))   # post()'s body-not-JSON FAILs (above)
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

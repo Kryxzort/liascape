@@ -1150,7 +1150,8 @@ impl SourceHost {
                         Level::Warn,
                         "source.rejected",
                         None,
-                        json!({ "id": id, "prop": prop, "reason": reason }),
+                        json!({ "id": id, "prop": prop, "reason": reason,
+                                "path": h.src.read("path").map(|p| p.to_json()) }),
                     ),
                     _ => {}
                 }
