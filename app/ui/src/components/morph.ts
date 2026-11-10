@@ -122,18 +122,27 @@ export const PREVIEW_MORPH: MorphTiming = {
   close: { duration: 340, bezier: [0.45, 0, 0.2, 1] },
 };
 // COOL: TUNE HERE — the per-card settings modal's flight (owner 2026-10-28: 430 ms "snap" → 620 ms "still too
-// snappy"): slow and soft, one symmetric ease-in-out (sine-like: 25 % of the time → 15 % of the travel, the
+// snappy"; 900/700 "too slow now, a bit faster" → 720/560; 2026-11-10 "a little faster" → 620/480): soft, one symmetric ease-in-out (sine-like: 25 % of the time → 15 % of the travel, the
 // middle fastest, the landing as gentle as the take-off) both ways, the close a little quicker than the open.
 // Things that wait for the open to land (the duration row, the scene properties, the video preview, App's
 // frozen gifs) key off these numbers; probe-morph.js asserts the flight times around them.
 const SOFT: Bezier = [0.37, 0, 0.63, 1];
 export const SETTINGS_MORPH: MorphTiming = {
-  open: { duration: 720, bezier: SOFT },
-  close: { duration: 560, bezier: SOFT },
+  open: { duration: 620, bezier: SOFT },
+  close: { duration: 480, bezier: SOFT },
 };
 // Settings → Look & feel → "Smooth window animations" OFF: the modal appears / leaves with a plain fade in place (no flight, its
 // source stays put). Driven by timers of this length, never by an animation's end event.
 export const PLAIN_FADE_MS = 150;
+// the media box's width at the picture's aspect: the panel's width, capped so the picture is at most 62 % of the window's
+// height AND leaves ~300 px for the body (a short tiled window: the modal fits, the body scrolls) — floor 120 px
+export const mediaWidth = (aspect: number) => `min(100%, calc(max(120px, min(62vh, 100vh - 300px)) * ${aspect}))`;
+// the OS / desktop's "reduce motion" (prefers-reduced-motion): every motion the "Smooth window animations" toggle
+// governs (the morphs, the tab slide, the playlist bar's dock lift) behaves as if that toggle were off
+export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+export const reducedMotion = () => typeof matchMedia === "function" && matchMedia(REDUCED_MOTION_QUERY).matches;
+// the morph toggle AND the OS preference — read outside React (the store's openCardSettings); components use useMotion()
+export const motionOn = (settings: { morphs?: unknown } | null | undefined) => settings?.morphs !== false && !reducedMotion();
 // how long a modal's open takes to land — what the things that wait for it (the duration row, the scene properties) wait
 export const openMs = (morphs: boolean, t: MorphTiming = SETTINGS_MORPH) => (morphs ? t.open.duration : PLAIN_FADE_MS);
 export const closeMs = (morphs: boolean, t: MorphTiming = SETTINGS_MORPH) => (morphs ? t.close.duration : PLAIN_FADE_MS);

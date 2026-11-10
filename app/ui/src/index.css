@@ -46,33 +46,49 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 /* ---- app shell ---- */
 .app { display: flex; flex-direction: column; height: 100vh; position: relative; }
+/* any tiled size (owner 2026-11-10): the top bar wraps onto a second row when its controls don't fit (tabs + pills
+   first, then the status / search / sort row) instead of pushing them off the window; nothing in it is fixed-width
+   beyond the tabs. The status has a 0 basis (min 140 px): it fills whatever a row leaves and truncates. */
 .topbar {
-  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px;
   background: color-mix(in srgb, var(--bg-crust) var(--tr), transparent); /* translucent chrome (--tr) */
   border-bottom: 1px solid var(--surface0);
   z-index: 5;
 }
-.tabs { display: flex; gap: 4px; }
-/* Glowing accent pill active tab. */
+/* COOL: the tabs are equal-width columns so the active pill (`.tab-pill`, App.tsx) moves on transform alone —
+   translateX by its own width + the gap per tab (--tab-i = the active tab's index); no width/left animation. */
+.tabs { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; flex-shrink: 0; }
+.tab-pill { position: absolute; top: 0; bottom: 0; left: 0; width: calc((100% - 8px) / 3); border-radius: 8px;
+  background: var(--accent); box-shadow: var(--glow-sm); pointer-events: none;
+  transform: translateX(calc(var(--tab-i, 0) * (100% + 4px)));
+  transition: transform .32s cubic-bezier(.3, .8, .25, 1); }
+.tabs:has(.tab.active:hover) .tab-pill { box-shadow: var(--glow); }
+/* Glowing accent pill active tab (its accent fill is the sliding .tab-pill under it). */
 .tab {
-  padding: 6px 14px; border-radius: 8px; color: var(--subtext); font-weight: 600;
+  position: relative; padding: 6px 14px; border-radius: 8px; color: var(--subtext); font-weight: 600; white-space: nowrap;
   transition: color .15s, background .15s, box-shadow .2s;
 }
-.tab:hover { color: var(--text); background: var(--surface0); box-shadow: var(--glow-sm); }
-.tab.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
-.tab.active:hover { box-shadow: var(--glow); }
+.tab:hover:not(.active) { color: var(--text); background: var(--surface0); box-shadow: var(--glow-sm); }
+.tab.active { color: var(--accent-fg); }
+/* the page of the tab switched to slides in from the side it sits on (no fill: the transform is gone once it lands,
+   so the page's position:fixed children — the Settings backdrop — stay viewport-fixed) */
+.app[data-tab-dir="r"] > .scroll { animation: tab-in-r .28s cubic-bezier(.25, .8, .25, 1); }
+.app[data-tab-dir="l"] > .scroll { animation: tab-in-l .28s cubic-bezier(.25, .8, .25, 1); }
+@keyframes tab-in-r { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes tab-in-l { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
 
 .spacer { flex: 1; }
+/* the search field takes 240 px when there's room and gives way down to 120 (owner 2026-11-10: "the search bar resizes") */
 .search {
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
-  border-radius: 8px; padding: 7px 12px; min-width: 240px; outline: none;
+  border-radius: 8px; padding: 7px 12px; flex: 0 1 240px; width: 240px; min-width: 120px; outline: none;
   transition: border-color .15s, box-shadow .2s;
 }
 .search:hover, .search:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
 
-/* don't shrink → pills keep their natural one-row width (no ugly forced wrap); the status (flex:1000,
-   min-width:0) takes the squeeze and truncates only when there's genuinely no horizontal room. */
-.pills { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+/* pills keep their natural one-row width while their row has room (the top bar wraps first); only a pill row wider
+   than the whole window wraps inside itself. The status (flex: 1000 1 0, min-width 140) takes the squeeze. */
+.pills { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
 .pill {
   padding: 6px 12px; border-radius: 999px; color: var(--subtext); font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: all .15s, box-shadow .2s;
@@ -178,7 +194,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .btn.danger.solid:hover { box-shadow: 0 0 16px -2px var(--danger); }
 /* grow into all free topbar space (anchored right, expands left) so it truncates only when there's
    genuinely no room. High flex-grow beats the .spacer so the status claims the gap. */
-.status { color: var(--subtext); font-size: 13px; flex: 1000 1 auto; min-width: 0; text-align: right;
+.status { color: var(--subtext); font-size: 13px; flex: 1000 1 0; min-width: min(140px, 100%); text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes glow-pulse-k { 0%,100% { box-shadow: 0 0 0 1px var(--accent); } 50% { box-shadow: var(--glow); } }
 .glow-pulse { animation: glow-pulse-k 1.6s ease-in-out infinite; } /* COOL: undo button calls attention */
@@ -300,11 +316,17 @@ body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim {
 .playlist-bar-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 /* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
    escapes the row's clip. Side margins cancel .playlist-bar's 12px padding so items sit flush left/right. */
-.playlist-bar-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; margin: 0 -12px; }
+/* padding-top 6 / margin-top -4: room for the dock lift (the row clips vertically) at the same height as before */
+.playlist-bar-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 6px 0 2px; margin: -4px -12px 0; }
 .pl-item { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
   overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
-  transition: box-shadow .2s, transform .12s; }
-.pl-item:hover:not(.playing) { transform: translateY(-2px); } /* glow is the fixed .pl-hover-glow layer (escapes the row clip) */
+  transition: box-shadow .2s, transform .18s cubic-bezier(.3, .8, .3, 1); }
+/* COOL: dock-style hover (owner 2026-11-10) — the hovered item lifts most, its neighbours a little, the next ones a
+   touch; transform only (`:has()` reaches the items before it). The glow is the fixed .pl-hover-glow layer (escapes
+   the row clip). A playing item keeps its place (its green ring), as before, and a hover on it lifts no neighbour. */
+.pl-item:hover:not(.playing) { transform: translateY(-4px); }
+.pl-item:not(.playing):hover + .pl-item:not(.playing), .pl-item:not(.playing):has(+ .pl-item:not(.playing):hover) { transform: translateY(-2px); }
+.pl-item:not(.playing):hover + .pl-item + .pl-item:not(.playing), .pl-item:not(.playing):has(+ .pl-item + .pl-item:not(.playing):hover) { transform: translateY(-0.75px); }
 /* absolutely fill the box (like the animated layer) — an in-flow img leaves a 1px sub-pixel gap that
    the dark bg shows through at the top, worsened by the hover lift. */
 .pl-item .thumb { position: absolute; inset: 0; }
@@ -389,6 +411,12 @@ body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim {
 .morph-panel[data-morph] .morph-clip > .modal-body { will-change: transform; }
 .modal-img.natural { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; }
 .modal-body { padding: 18px 20px 20px; max-height: 62vh; overflow-y: auto; }
+/* a morph modal fits any window (owner 2026-11-10, tiled sizes): the panel is at most the window's height less a margin,
+   the picture keeps its size (mediaWidth caps it) and the body gives way and scrolls */
+.modal.morph-panel { display: flex; flex-direction: column; max-height: calc(100vh - 24px); }
+.modal.morph-panel > .modal-stage, .modal.morph-panel > .lib-stage { flex: none; }
+.modal.morph-panel > .morph-clip { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.modal.morph-panel > .morph-clip > .modal-body { min-height: 0; }
 .modal-body h2 { margin: 0 0 8px; font-size: 20px; }
 .meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--subtext); font-size: 13px; align-items: center; }
 .desc { color: var(--subtext); font-size: 13px; max-height: 120px; overflow: auto; margin: 12px 0; white-space: pre-wrap; }
@@ -718,3 +746,26 @@ input[type=range]:focus-visible { outline: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, web-ui.md § "Settings levels") */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* ---- "Smooth window animations" OFF or prefers-reduced-motion (<html class="no-motion">, App.tsx) ----
+   The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
+   neighbours stay put. (The morphs read useMotion() in useMorph.) */
+:root.no-motion .tab-pill { transition: none; }
+:root.no-motion .app > .scroll { animation: none; }
+:root.no-motion .pl-item { transition: box-shadow .2s; }
+:root.no-motion .pl-item:hover:not(.playing) { transform: translateY(-2px); }
+:root.no-motion .playlist-bar-row .pl-item:not(.playing):not(:hover):not(.dragging) { transform: none; } /* beats the :has() rules */
+
+/* ---- narrow windows (owner 2026-11-10: "any tiled size") ---- */
+/* below 760 px the source pills join the top bar's own rows (each wraps on its own, the search fills a row's end)
+   instead of a pill block that spans the width */
+@media (max-width: 760px) {
+  .topbar > .pills:not(.level-pills) { display: contents; }
+}
+@media (max-width: 640px) {
+  .topbar { padding: 8px 10px; gap: 6px 8px; }
+  .tab { padding: 6px 10px; }
+  .pill { padding: 5px 10px; }
+  .search { flex: 1 1 140px; width: auto; }
+  .btn.ico { white-space: nowrap; }
+}

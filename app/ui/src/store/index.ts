@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { captureSource, type MorphSource } from "../components/morph";
+import { captureSource, motionOn, type MorphSource } from "../components/morph";
 import {
   api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter,
 } from "../api/client";
@@ -147,6 +147,7 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
   get().refreshPlayingStatus(); // persistent now-playing line
 }
 
+let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
   browseFilter: { ...DEFAULT_FILTER, ...LS.get<Partial<WorkshopFilter>>("browseFilter", {}) }, browseSort: LS.get("browseSort", 0),
@@ -185,23 +186,31 @@ export const useStore = create<State>((set, get) => ({
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
+  // API: every Browse list read carries the generation it started in (`browseGen`): a source switch / search / refresh
+  // starts a new one, and a reply from an older one is dropped — a slow online source's page used to land AFTER the
+  // source the user switched to and replace (or extend) its list, under the new source's pill (seen 2026-11-10 in the
+  // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
     const { activeSource, query } = get();
     const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const gen = ++browseGen;
     set({ loading: true, page: 1 });
     try {
       const list = await api.browse(activeSource, 1, query || undefined, filter);
+      if (gen !== browseGen) return;
       set({ wallpapers: list, hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
-    } finally { set({ loading: false }); }
+    } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async loadMore() {
     const { activeSource, query, page, loading, hasMore, wallpapers } = get();
     if (loading || !hasMore) return;
     const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const gen = browseGen;
     set({ loading: true });
     try {
       const next = page + 1;
       const list = await api.browse(activeSource, next, query || undefined, filter);
+      if (gen !== browseGen) return; // a reload started meanwhile: this page belongs to the old list
       // Dedup by pageUrl — "Most Popular" et al. shift between requests, so pages overlap
       // pages overlap; appending dupes = duplicate React keys → reorder/jump. Keep existing order, add
       // only fresh items at the bottom, and stop when a page yields nothing new.
@@ -209,7 +218,7 @@ export const useStore = create<State>((set, get) => ({
       const fresh = list.filter((w) => !existing.has(w.pageUrl));
       if (fresh.length === 0) { set({ page: next, hasMore: false }); return; }
       set({ wallpapers: [...wallpapers, ...fresh], page: next, hasMore: list.length > 0 });
-    } finally { set({ loading: false }); }
+    } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async download(source, w, apply) {
     const ctrl = new AbortController(); dlCtrls[w.pageUrl] = ctrl;
@@ -380,7 +389,7 @@ export const useStore = create<State>((set, get) => ({
 
   openCardSettings(item, siblings, morphId) {
     // "Morph animations" off: nothing to lift (hide) — the surface stays; the picture's aspect / video time are still read from it
-    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: get().settings?.morphs === false ? null : morphId ?? null, cardSettingsSource: captureSource(morphId ?? null) });
+    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: motionOn(get().settings) ? morphId ?? null : null, cardSettingsSource: captureSource(morphId ?? null) });
   },
   closeCardSettings() { set({ cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null }); get().loadLibrary(); },
 

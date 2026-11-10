@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Monitor, Star, Heart, Eye, HardDrive, User, X, ExternalLink, Copy, Download, PlayCircle } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type Wallpaper } from "../api/client";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { captureSource } from "./morph";
+import { captureSource, mediaWidth } from "./morph";
 import { useMorph } from "./useMorph";
 
 const fmt = (n: number | null) => (n == null ? null : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -31,7 +31,7 @@ export function PreviewModal({
   if (pageUrl && srcAspect?.url !== pageUrl) setSrcAspect({ url: pageUrl, aspect: captureSource(`br-${pageUrl}`).aspect });
   const known = (srcAspect?.url === pageUrl ? srcAspect?.aspect : null) ?? (loaded?.url === pageUrl ? loaded?.aspect : null) ?? null;
   const aspect = known ?? 16 / 9;
-  const { panelRef, mediaRef, bodyRef, requestClose, landed } = useMorph({ open: w, ready: known != null, morphId: pageUrl ? `br-${pageUrl}` : null, aspect, onClose });
+  const { panelRef, mediaRef, bodyRef, requestClose, landed } = useMorph({ open: w ? w.pageUrl || w : null, ready: known != null, morphId: pageUrl ? `br-${pageUrl}` : null, aspect, onClose });
 
   useEffect(() => {
     if (!w) return;
@@ -54,7 +54,7 @@ export function PreviewModal({
       <div className="modal morph-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
         <div className="modal-stage">
           <div className="morph-media" data-morph-media ref={mediaRef}
-            style={{ aspectRatio: String(aspect), width: `min(100%, calc(62vh * ${aspect}))` }}>
+            style={{ aspectRatio: String(aspect), width: mediaWidth(aspect) }}>
             <div className="morph-pic" data-morph-pic>
             <img src={baseSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth) setLoaded({ url: w.pageUrl, aspect: i.naturalWidth / i.naturalHeight }); }} />

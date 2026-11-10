@@ -10,6 +10,7 @@ import { PlaylistBar } from "./components/PlaylistBar";
 import { PreviewModal } from "./components/PreviewModal";
 import { CardSettingsModal } from "./components/CardSettingsModal";
 import { SETTINGS_MORPH, closeMs } from "./components/morph";
+import { useMotion } from "./components/useMorph";
 import type { Wallpaper } from "./api/client";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
@@ -26,12 +27,19 @@ const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ d
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
 
 type Tab = "browse" | "library" | "settings";
+const TAB_ORDER: Tab[] = ["browse", "library", "settings"];
 const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
 const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
 
 export default function App() {
   const s = useStore();
-  const [tab, setTab] = useState<Tab>("library");
+  const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
+  const [tab, setTabNow] = useState<Tab>("library");
+  // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
+  // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → none). No direction until
+  // the first switch, so the app's first page doesn't slide in.
+  const [tabDir, setTabDir] = useState<"l" | "r" | null>(null);
+  const setTab = (t: Tab) => { if (t !== tab) setTabDir(TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(tab) ? "r" : "l"); setTabNow(t); };
   const [preview, setPreview] = useState<Wallpaper | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -106,9 +114,9 @@ export default function App() {
   // mid-morph-back → jank.
   useEffect(() => {
     if (s.cardSettingsItem || preview) { document.body.classList.add("modal-open"); return; }
-    const t = setTimeout(() => document.body.classList.remove("modal-open"), closeMs(s.settings?.morphs !== false, SETTINGS_MORPH) + 40);
+    const t = setTimeout(() => document.body.classList.remove("modal-open"), closeMs(motion, SETTINGS_MORPH) + 40);
     return () => clearTimeout(t);
-  }, [s.cardSettingsItem, preview, s.settings?.morphs]);
+  }, [s.cardSettingsItem, preview, motion]);
 
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
@@ -128,6 +136,9 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
   }, [s.settings?.glows]);
+  // COOL: "Smooth window animations" off, or the OS asks for reduced motion → :root.no-motion: the tab slide and the
+  // playlist bar's dock lift don't animate (index.css); the morphs read useMotion() themselves
+  useEffect(() => { document.documentElement.classList.toggle("no-motion", !motion); }, [motion]);
 
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,12 +152,13 @@ export default function App() {
   const gSpd = (s.settings?.speed as number) ?? 1;
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
-    <div className="app">
+    <div className="app" data-tab-dir={tabDir ?? undefined}>
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
       {(tab === "settings" || bgAllTabs) && <WallpaperBg />}
       <div className="topbar">
-        <div className="tabs">
-          {(["browse", "library", "settings"] as Tab[]).map((t) => (
+        <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(tab) } as React.CSSProperties}>
+          <span className="tab-pill" aria-hidden />
+          {TAB_ORDER.map((t) => (
             <button key={t} className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>

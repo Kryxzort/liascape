@@ -67,12 +67,12 @@ for f in $FILES; do
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS|travel:" "$f" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
-    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f" ;;
+    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-morph.js — the morph probe)" ;;
     app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx)
       echo "  $f → nothing here — run scripts/test-ui-matrix.sh --probe probe-morph.js (the morph probe)" >&2 ;;
-    app/shell/probe-morph.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
+    app/shell/probe-morph.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must

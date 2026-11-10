@@ -1,6 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../store";
-import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PLAIN_FADE_MS, PREVIEW_MORPH, restPose, sourceEl, sourcePose, type Flight, type MorphTiming, type Pose, type Rest } from "./morph";
+import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PLAIN_FADE_MS, PREVIEW_MORPH, REDUCED_MOTION_QUERY, reducedMotion, restPose, sourceEl, sourcePose, type Flight, type MorphTiming, type Pose, type Rest } from "./morph";
+
+// Settings → "Smooth window animations" (`morphs`) and the OS's prefers-reduced-motion, live (a change to either re-renders)
+const subscribeReduced = (cb: () => void) => { if (typeof matchMedia !== "function") return () => {}; const q = matchMedia(REDUCED_MOTION_QUERY); q.addEventListener("change", cb); return () => q.removeEventListener("change", cb); };
+export function useMotion(): boolean {
+  const morphs = useStore((s) => s.settings?.morphs !== false);
+  const reduced = useSyncExternalStore(subscribeReduced, reducedMotion);
+  return morphs && !reduced;
+}
 
 // COOL: a modal that morphs out of the surface carrying `data-morph-id={morphId}` and back into it
 // (components/morph.ts has the geometry and why it's transform-only). Wire the returned refs: `panelRef` on
@@ -10,13 +18,17 @@ import { bezier, boxOf, cssEase, flightFrames, lerpPose, onScreen, PLAIN_FADE_MS
 // with `requestClose` (Escape is wired). `open` = what's open (a new value → a new flight); `ready` = the
 // picture's aspect is known (the flight waits for it, ≤ 300 ms, panel hidden — a box re-laid out mid-flight
 // jumps); `landed` turns true once its open flight finished (mount heavy layers after it — a decode
-// mid-flight hitches the animation, worst in the software-rendered UI). `timing` = the flight durations +
-// easings (morph.ts: the Browse preview's by default, SETTINGS_MORPH slower). Settings → "Morph animations" off: no
+// mid-flight hitches the animation, worst in the software-rendered UI). `open` is an IDENTITY (the item's path, the
+// page URL), never an object a refresh can replace: a new value is a new open — a store refresh that handed a new copy of
+// the same item (`library-item-changed`, every loudness report of a playing scene) replayed the whole flight (owner
+// 2026-11-10: "the morph animation plays again and again every like 1-2 minutes"). `timing` = the flight durations +
+// easings (morph.ts: the Browse preview's by default, SETTINGS_MORPH slower). Settings → "Smooth window animations" off
+// (or the OS's reduced motion — useMotion): no
 // flight and no source to fly out of — the panel fades in where it is and fades out on close, both on PLAIN_FADE_MS
 // timers (the fade is only the look: `landed` / the unmount never wait for its end event).
 export function useMorph({ open, ready, morphId, aspect, onClose, timing = PREVIEW_MORPH }: { open: unknown; ready: boolean; morphId: string | null; aspect: number; onClose: () => void; timing?: MorphTiming }) {
   const { open: OPEN, close: CLOSE } = timing;
-  const morphs = useStore((s) => s.settings?.morphs !== false);
+  const morphs = useMotion();
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);

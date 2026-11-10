@@ -780,3 +780,20 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Browse shows "In library"** (green, top-right) on items you already have — Workshop and the Wallpaper Engine local tab.
 - Checks: UI matrix 832 + 6 load flakes that pass alone (+ 6 new cells, each RED on the old UI/player), player crate
   756/756 (1 audio-bus timing test passed alone), adapter IT 415/0, backend self-test PASS.
+
+## 2026-11-10 night — your Todoist UI polish batch
+- **The morph that replayed every minute or two is fixed.** It wasn't a timer: whenever the backend reported something new
+  about the open wallpaper — a playing scene's loudness measurement (about once a minute), the re-plan after you change a
+  scene property, a volume keybind — the settings window took the updated copy for a new window and flew in again. It now
+  knows it's the same wallpaper and stays still (the volume / loudness lines still update). Same fix covers "the morph bug
+  when changing properties".
+- **Morph a little faster:** 620 ms open / 480 ms close (was 720 / 560), same soft curve. If your desktop asks for
+  reduced motion, the app now treats it like "Smooth window animations" off.
+- **Playlist bar hover is dock-style:** the hovered item rises a bit more, its neighbours a little.
+- **Tabs slide:** the accent pill glides to the new tab and the page slides in from that side. Both stay still with
+  "Smooth window animations" off.
+- **Small / odd window sizes:** the top bar wraps onto a second row instead of pushing the search and the source buttons
+  off the window (it did from ~1100 px wide down on Browse); the search field shrinks; the settings window fits short
+  windows (its lower part scrolls). Checked at nine sizes from 480×720 to 2400×520.
+- Found on the way: switching Browse sources while an online one was still loading could show the old source's list
+  under the new tab. Fixed.

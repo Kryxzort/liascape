@@ -46,10 +46,14 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     Settings corner pools / section edges, the Stop/danger glows, the keyboard-focus slider glow → an outline). The playlist bar's
     portal'd `.pl-hover-glow` isn't rendered. State that isn't glow stays (green playing ring, selected outline, accent borders).
     **A new glow = a `var(--glow*)` shadow, or add its override to that block.** Matrix `appear:glows` reads computed styles.
-  - **Morph animations** (`morphs`, default on): off = `useMorph` skips the flight — the panel fades in/out in place on
-    `PLAIN_FADE_MS` timers (never an animation's end event; `landed` and the unmount don't wait for it), `openCardSettings` stores
-    no `cardSettingsMorphId` and Browse's `Card` isn't `.lifted` (the source stays visible). Waits keyed to the flight length use
-    `openMs()/closeMs()` (morph.ts). Other framer-motion modal enter/exit fades are not morphs and stay. Matrix `appear:morphs`.
+  - **Morph animations** (`morphs`, default on; the row reads "Smooth window animations"): off = `useMorph` skips the flight — the
+    panel fades in/out in place on `PLAIN_FADE_MS` timers (never an animation's end event; `landed` and the unmount don't wait for
+    it), `openCardSettings` stores no `cardSettingsMorphId` and Browse's `Card` isn't `.lifted` (the source stays visible). Waits
+    keyed to the flight length use `openMs()/closeMs()` (morph.ts). Other framer-motion modal enter/exit fades are not morphs and
+    stay. Matrix `appear:morphs`. **The OS's `prefers-reduced-motion: reduce` counts as off** (2026-11-10): read it through
+    `useMotion()` (useMorph.ts — the toggle AND the media query, live) in components, `motionOn(settings)` (morph.ts) outside
+    React; never `settings.morphs` directly. The same switch drives `<html class="no-motion">` (App.tsx), under which
+    index.css stops the tab slide and the playlist bar's dock lift (below).
   - **Autoplay video thumbnails** (`autoPlayVideoThumbs`, default off): `components/autoplay.ts` `useAutoplayVideo` — a library
     card / playlist-bar item with only a video preview (`hasVideoPreview`: no gif/webp, not a scene) mounts MotionThumb's hover
     `<video>` without a hover. Only on-screen items (IntersectionObserver), at most `AUTOPLAY_VIDEO_CAP` = 4 at once across cards +
@@ -148,6 +152,38 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   → the topbar status (its `message`) + the store's `keepCurrent` (also `/current.keep` on every resync; a Play /
   play-from clears it) → the status line's ", looping this one (loop-current)". player-adapter.md § Rotation.
 
+- **Tab slide** (owner todo 2026-11-10): `.tabs` is a grid of equal columns with one `.tab-pill` (the accent fill + glow) under the
+  buttons, moved by `transform: translateX(calc(var(--tab-i) * (100% + 4px)))` (`--tab-i` = the active tab's index, App.tsx)
+  with a 320 ms ease-out transition; the page switched to slides in from its side (`.app[data-tab-dir="l"|"r"] > .scroll`,
+  `tab-in-l|r`: 28 px + opacity, 280 ms, **no fill** — a transform left on `.scroll` would trap the Settings backdrop's
+  `position: fixed`). No direction until the first switch (the first page doesn't slide in). `:root.no-motion` → the pill jumps,
+  the page appears. Guard: `--probe probe-layout.js` `tabs:slide` / `:off` / `:reduced` (the pill's per-frame x, the page's
+  animated properties = transform + opacity only; RED on the old UI: no pill).
+- **Dock-style playlist bar hover** (owner todo 2026-11-10): the hovered `.pl-item` lifts 4 px, its neighbours 2 px, the next ones
+  0.75 px — CSS only (`+` for the ones after it, `:has(+ …)` for the ones before), transform with a 180 ms ease-out. A playing item
+  neither lifts nor lifts its neighbours (its green ring). The row has `padding-top: 6px; margin-top: -4px` (it clips vertically:
+  room for the lift, same height as before); the portal'd `.pl-hover-glow` re-reads the item's box on its `transitionend`.
+  `:root.no-motion` → the hovered item alone, 2 px, no easing; `:root.no-glow` → no glow layer, the lift stays. Guard:
+  `probe-layout.js` `dock:hover` / `:off` (computed `translateY` of the items).
+- **Any window size** (owner todo 2026-11-10, "responsive at any tiled size"): the `.topbar` is `flex-wrap: wrap` (a second row
+  instead of controls past the window's edge); `.status` = `flex: 1000 1 0; min-width: min(140px, 100%)` (fills a row's end,
+  truncates, never forces a wrap by its text); `.search` = `flex: 0 1 240px; min-width: 120px` (≤ 640 px: `1 1 140px`, fills its
+  row); `.pills` shrink/wrap inside themselves; ≤ 760 px the source pills are `display: contents` (each pill wraps on its own
+  and the search fills a row's end; the Settings level pills stay a block); ≤ 640 px tighter paddings. Morph modals fit any
+  height: `.modal.morph-panel` is a column capped at `100vh - 24px`, the body (`.morph-clip` → `.modal-body`, `min-height: 0`)
+  gives way and scrolls, and the media box's width is `mediaWidth(aspect)` (morph.ts: the picture ≤ 62vh AND ≤ 100vh − 300 px,
+  floor 120 px — one place for both modals). Guard: `scripts/test-ui-matrix.sh --probe probe-layout.js` with
+  `LIASCAPE_MATRIX_SCREEN=2560x1440` — nine sizes from 480×720 and 560×430 up to 2400×520 and 1600×400 × Browse / Library /
+  Settings (no top-bar control past the window or over another, the bar ≤ 35 % of the height, the search ≥ 110 px, no
+  sideways page scroll, cards inside the grid) + the card settings modal at each size (inside the window, Close reachable);
+  screenshots `layout-<tab>-<w>x<h>.png`. RED on the old UI: 15 of 36 resize cells (Browse's pills + search past the right
+  edge from 1100 px down, Library's sort from 640, Settings' level pills at 480–560; the modal taller than the window at
+  ≤ 600 px high).
+- **A Browse list reply belongs to its generation** (`store` `browseGen`, 2026-11-10): `reload()` starts a new one (source switch,
+  search, sort, filters, refresh) and both `reload` and `loadMore` drop a reply from an older one (and leave `loading` to the
+  newer request). Before, a slow online source still loading when the user switched let its late page replace the new
+  source's list — MotionBgs' cards under the "Wallpaper Engine (Local)" pill (probe-morph's Browse cells caught it).
+
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
   `LiveWallpaperBehindAllTabs` advanced setting. A **single persistent `<video>`** (no crossfade — `src` swap is
@@ -245,14 +281,26 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   quarter; rAF pacing vs the page's idle frame (median ≤ 1.25×, ≤ 15 % of frames > 2×); the preview animates; a close
   mid-open lands on the card).
   **Timing — TUNE in `morph.ts` `SETTINGS_MORPH`** (owner "slow down morph" → 620 ms "still too snappy", 2026-10-28):
-  open 720 ms / close 560 ms (owner: 900/700 "too slow now, a bit faster"), both `SOFT` = `cubic-bezier(0.37, 0, 0.63, 1)` (symmetric, sine-like: 25 % of the time →
+  open 620 ms / close 480 ms (owner: 900/700 "too slow now, a bit faster" → 720/560; 2026-11-10 "a little faster still" →
+  620/480, measured 600 / 466 ms of movement, 20–22 % of the travel in the first quarter), both `SOFT` = `cubic-bezier(0.37, 0, 0.63, 1)` (symmetric, sine-like: 25 % of the time →
   ~15 % of the travel; measured 18–19 % on screen). The 620 ms curve `(0.3, 0.7, 0.2, 1)` still did 67–76 % of its
   travel in the first quarter — that front-load, not the length, read as the snap. The Browse preview keeps
   `PREVIEW_MORPH` (430 / 340 ms, not asked for). The duration row, the scene properties (`open.duration + 40`) and App's
   `modal-open` gif freeze key off these numbers; the matrix's `keys:sliderHeld` waits 1400 ms for the landing (a real
-  press hit-tests). No reduced-motion branch (the app has none; noted, not added). probe-morph asserts the settings
-  flights move 620–840 / 470–680 ms and the Browse one ≤ 520 ms (RED on the 620 ms UI: 8
-  cells — 532–567 / 461–485 ms, 67–76 % in the first quarter).
+  press hit-tests). Reduced motion: `useMotion()` (above — the plain fade). probe-morph asserts the settings flights move
+  530–720 / 400–580 ms and the Browse one ≤ 520 ms (the 2026-10-28 RED on the front-loaded 620 ms UI: 8 cells — 532–567 /
+  461–485 ms, 67–76 % in the first quarter — the quarter check, not the length, is what catches that curve).
+  **`open` is an identity, never an object** (2026-11-10, owner: "the morph animation plays again and again every like 1-2
+  minutes instead of it staying still on the settings page" + "the morph bug when changing properties"): `useMorph` starts a
+  flight whenever `open` changes, and `CardSettingsModal` passed the store's `cardSettingsItem` — which
+  `itemChangedByBackend` replaces with a new copy on every `library-item-changed`: a playing scene's loudness report (about
+  once a minute while it plays), the re-plan after a scene property change, a volume keybind. Each one replayed the whole
+  flight from the card. Now `open` = `item.videoPath` (Browse: the page URL), and the modal's own per-open effects (the
+  duration fetch, the trailer reset) key on the path too; the fields still re-read from the new copy (the volume a keybind
+  moved, the loudness line). The coming sidebar must follow the same rule. Guard: probe-morph `lib k1 stays still on
+  library-item-changed` (k1 plays, VolumeKeyTarget "item", two `/volume` keybinds through the real backend while its settings
+  are open: the picture must not move a pixel and the slider must follow; RED on the old UI: the picture left its place in
+  86/133 frames).
   **PERF (measured 2026-10-28, `/tmp`-scratch probe on the matrix stack, 1920×1080 Xvfb, `--disable-gpu
   --enable-unsafe-swiftshader` = main.js's NVIDIA branch, Chromium tracing):** the owner's UI is software-composited, so
   every animated pixel is CPU work. Before: the ghost's left/top/width/height/border-radius (+ its 60 px shadow) and the

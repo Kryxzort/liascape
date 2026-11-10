@@ -62,6 +62,37 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       settings.json that still has it loads (unknown keys are ignored) and the next save drops it.
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
+## UI — owner's Todoist, clarified 2026-11-10
+- [x] **Owner's Todoist batch, UI polish (2026-11-10)** — checked against the history first (the morph speed-ups
+  `598a7274` / `8e1f4c4e` / `37270cff`, the toggles `c7f3a86a` / `b00a292f`, autoplay video thumbs `33d9888d`, right-click
+  keeps the preview `0ddd97d0`, the travel / badge / loop-current batch `ce936170` stay as they are):
+  - "When I open a wallpaper's settings the morph plays again every 1–2 minutes": **fixed now.** Cause: `useMorph` starts
+    a flight whenever its `open` value changes, and the card settings modal passed the store's `cardSettingsItem` object;
+    every WS `library-item-changed` (a playing scene's loudness report — about once a minute —, the re-plan after a scene
+    property change, a volume keybind) replaces it with a new copy → the whole flight replayed from the card. `open` is now
+    the item's path (the Browse preview: its page URL), and the modal's per-open effects (duration fetch, trailer reset)
+    key on the path. Guard: probe-morph `lib k1 stays still on library-item-changed` (two real `/volume` keybinds on the
+    playing k1 with its settings open; RED on the old UI: the picture left its place in 86/133 frames; GREEN: 0, the
+    slider follows 80 → 70).
+  - "Fix the morph bug when changing properties": **the same cause, fixed with it** — a property change re-plans the
+    scene, which broadcasts `library-item-changed`. Volume / speed drags only patch the grid's copy (no replay there).
+  - "Morph a little faster": **done** — `SETTINGS_MORPH` 720 / 560 → 620 / 480 ms, same symmetric curve (measured 600 /
+    466 ms of movement, 20–22 % of the travel in the first quarter); probe-morph bounds 530–720 / 400–580. The OS's
+    prefers-reduced-motion now counts as "Smooth window animations" off (`useMotion()` / `motionOn()`).
+  - "Playlist hover lifts the neighbours a little (dock)": **new** — hovered 4 px, neighbours 2 px, next 0.75 px, CSS
+    transform only; animations off / reduced motion → the old single 2 px lift. probe-layout `dock:hover` / `:off`
+    (RED on the old UI: neighbours 0).
+  - "Tab switching slides": **new** — a sliding accent pill under the tabs + the page slides/fades in from its side
+    (transform + opacity); off / reduced motion → jumps. probe-layout `tabs:slide` / `:off` / `:reduced` (RED: no pill).
+  - "Responsive layout at any tiled size": **new** — the top bar wraps instead of running off the window, the search
+    gives way to 120 px, the source pills join the rows below 760 px, morph modals fit any height (the body scrolls).
+    probe-layout: 9 sizes (480×720 … 2400×520, 1600×400) × 3 tabs + the modal = 36 cells; RED on the old UI 15/36
+    (Browse's search past the edge from 1100 px down, the modal taller than the window at ≤ 600 px high), GREEN 36/36.
+  - Found on the way, **fixed now**: switching Browse sources while a slow (online) source still loaded let its late reply
+    replace the new source's list (MotionBgs' cards under the "Wallpaper Engine (Local)" pill — it made probe-morph's
+    Browse cells flaky). `reload` / `loadMore` now drop a reply from an older generation (`browseGen`).
+  - Dropped by the owner: "scene config pops in" (the coming sidebar replaces that view).
+
 ## liascape-player (after design approval)
 - [x] **Owner's Todoist batch, behaviour (2026-11-10)** — six items checked against the history first:
   - "Clicking Play on the playlist puts the green border on the 1st item though shuffle plays another — make the border

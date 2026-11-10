@@ -3,7 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
 import { openMs } from "./morph";
-import { useStore } from "../store";
+import { useMotion } from "./useMorph";
 
 // "Scene properties" in the card settings modal: a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
@@ -31,7 +31,7 @@ export function ScenePropsEditor({ path }: { path: string }) {
   const prevRef = useRef<{ pending: Record<string, unknown>; last: number; tm: number | null }>({ pending: {}, last: 0, tm: null });
   const persistRef = useRef<Record<string, { tm: number; fn: () => void }>>({});
   const alive = useRef(true);
-  const morphs = useStore((s) => s.settings?.morphs !== false);
+  const morphs = useMotion();
 
   useEffect(() => {
     alive.current = true; // a new item remounts (key={path} in the modal): its state starts empty

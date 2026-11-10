@@ -57,6 +57,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
     <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${lifted ? " lifted" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
+      onTransitionEnd={(e) => { if (hover && e.target === e.currentTarget && e.propertyName === "transform") place(e.currentTarget); }} /* the glow follows the eased dock lift */
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}

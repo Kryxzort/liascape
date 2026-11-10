@@ -3,8 +3,8 @@ import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield, Audi
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { SETTINGS_MORPH, openMs, type MorphSource } from "./morph";
-import { useMorph } from "./useMorph";
+import { SETTINGS_MORPH, mediaWidth, openMs, type MorphSource } from "./morph";
+import { useMorph, useMotion } from "./useMorph";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -46,7 +46,7 @@ export function CardSettingsModal({
   const [dur, setDur] = useState("");
   const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
-  const morphs = useStore((s) => s.settings?.morphs !== false);
+  const morphs = useMotion();
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // drag tuning: live-preview the desktop throttled (cheap IPC), persist once after the drag settles.
@@ -63,7 +63,10 @@ export function CardSettingsModal({
     setWl(item.isWhitelisted);
   }, [item, globalVolume, globalSpeed]);
 
-  useEffect(() => { setYtPlaying(false); }, [item]);
+  // keyed by the item's PATH, not the object: `library-item-changed` (a loudness report while it plays, a property's
+  // re-plan, a volume keybind) hands the store a new copy of the same item — that is no new open
+  const openPath = item?.videoPath ?? null;
+  useEffect(() => { setYtPlaying(false); }, [openPath]);
   useEffect(() => {
     setDur("");
     if (!item || item.isScene) return;
@@ -71,7 +74,7 @@ export function CardSettingsModal({
     // defer past the open-morph (a re-render mid-flight can re-lay the panel out)
     const t = setTimeout(() => { api.duration(item.videoPath).then((r) => alive && setDur(fmtDur(r.seconds))).catch(() => {}); }, openMs(morphs) + 40);
     return () => { alive = false; clearTimeout(t); };
-  }, [item]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [openPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- the morph (components/useMorph.ts) -----------------------------------------------------------
   // the picture's own aspect: the card's still knows it at the click; else 16:9 until the image loads
@@ -80,7 +83,7 @@ export function CardSettingsModal({
   const aspect = source?.aspect ?? loadedAspect ?? 16 / 9;
   const [fullFor, setFullFor] = useState<string | null>(null); // the sharp layer shows once IT loaded
   const [vidOn, setVidOn] = useState<string | null>(null); // the video layer shows once IT plays
-  const { panelRef, mediaRef, bodyRef, requestClose } = useMorph({ open: item, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
+  const { panelRef, mediaRef, bodyRef, requestClose } = useMorph({ open: openPath, ready: (source?.aspect ?? loadedAspect) != null, morphId, aspect, onClose, timing: SETTINGS_MORPH });
 
   if (!item) return null;
   const p = item.videoPath;
@@ -156,7 +159,7 @@ export function CardSettingsModal({
       <div className="modal lib-settings morph-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
         <div className="lib-stage">
           <div className="morph-media" data-morph-media ref={mediaRef}
-            style={{ aspectRatio: String(aspect), width: `min(100%, calc(62vh * ${aspect}))` }}>
+            style={{ aspectRatio: String(aspect), width: mediaWidth(aspect) }}>
             <div className="morph-pic" data-morph-pic>
             {baseSrc && <img src={baseSrc} alt=""
               onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && !loadedAspect) setLoaded({ path: item.videoPath, aspect: i.naturalWidth / i.naturalHeight }); }} />}

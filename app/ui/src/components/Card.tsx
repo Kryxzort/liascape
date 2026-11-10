@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
-import { useStore } from "../store";
+import { useMotion } from "./useMorph";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions: hover → download icon (click downloads + applies); left/right-click →
@@ -16,7 +16,7 @@ export const Card = memo(function Card({
   onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
-  const morphs = useStore((s) => s.settings?.morphs !== false); // off: the card isn't lifted out for the preview (nothing flies)
+  const morphs = useMotion(); // off: the card isn't lifted out for the preview (nothing flies)
   // COOL: the open preview morphed out of this card → it's lifted out (hidden) until the preview morphs
   // back in (components/useMorph.ts); the preview plays the gif meanwhile
   const active = !previewing && (hover || (autoPlayGifs && !!w.animatedThumbnailUrl));

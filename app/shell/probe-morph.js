@@ -175,9 +175,9 @@ function pacing(samples, idle, what) {
   return v;
 }
 // the settings modal's morph runs slow + soft on purpose (owner: "slow down morph" — 430 ms read as a snap,
-// 620 ms "still too snappy"; morph.ts SETTINGS_MORPH = 900 / 700 ms, a symmetric ease-in-out); the Browse
-// preview keeps its own pace (another modal, not asked for)
-const SLOW_OPEN_MS = 620, SLOW_OPEN_MAX = 840, SLOW_CLOSE_MS = 470, SLOW_CLOSE_MAX = 680, BR_MAX_MS = 520, QUARTER_MAX = 0.3;
+// 620 ms "still too snappy" on a front-loaded curve; morph.ts SETTINGS_MORPH = 620 / 480 ms since 2026-11-10 "a little
+// faster", a symmetric ease-in-out); the Browse preview keeps its own pace (another modal, not asked for)
+const SLOW_OPEN_MS = 530, SLOW_OPEN_MAX = 720, SLOW_CLOSE_MS = 400, SLOW_CLOSE_MAX = 580, BR_MAX_MS = 520, QUARTER_MAX = 0.3;
 let IDLE_FRAME = 16.7;
 
 async function shots(surface, t) {
@@ -258,6 +258,33 @@ app.whenReady().then(async () => {
       });
       await sleep(400);
     }
+    // owner 2026-11-10: "when i open a wallpaper's setting, the morph animation plays again and again every like 1-2
+    // minutes instead of it staying still" + "morph bug when changing properties". The backend's `library-item-changed`
+    // (a scene's loudness report while it plays, its re-plan after a property change, a volume keybind) replaced the
+    // store's `cardSettingsItem` with a new object, and useMorph took the new object for a new open → the whole flight
+    // again. Driven here through the real backend path: k1 plays, VolumeKeyTarget "item", two `/volume` keybinds while
+    // its settings are open — the media box must not move, the panel must stay shown, the volume row must follow.
+    await cell("lib k1 stays still on library-item-changed", async () => {
+      const s0 = (await http("GET", "/settings")).json;
+      await post("/settings", { ...s0, volumeKeyTarget: "item" });
+      await post("/apply", { path: K[0] });
+      await sleep(1500);
+      await page(`const src = m.source("lib", "k1"); m.ctx(src); await m.sleep(250); m.byText(".lib-ctx button", "Settings (volume / speed)").click();`);
+      await sleep(1500); // landed
+      const r = await page(`const before = m.vis(m.media()).vis;
+        const vol0 = document.querySelector(".modal-backdrop input[type=range]")?.value;
+        const samples = await m.sample(2200, () => { fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: -5 }) });
+          setTimeout(() => fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: -5 }) }), 900); });
+        return { before, samples, vol0, vol1: document.querySelector(".modal-backdrop input[type=range]")?.value };`);
+      const v = [];
+      const moved = r.samples.filter((x) => !x.vis || !edgesNear(x.vis, r.before, 0.5));
+      if (moved.length) v.push(`the modal's picture left its place in ${moved.length}/${r.samples.length} frames after a library-item-changed (first ${fmt(moved[0].vis)} vs ${fmt(r.before)}) — the morph replayed`);
+      if (r.vol0 === r.vol1) v.push(`the volume slider didn't follow the keybinds (${r.vol0} → ${r.vol1})`);
+      console.log(`        volume ${r.vol0} → ${r.vol1}, ${moved.length} moved frames`);
+      await page(`m.byText(".modal-backdrop .modal-actions button", "Close").click();`); await sleep(900);
+      await post("/settings", { ...(await http("GET", "/settings")).json, volumeKeyTarget: s0.volumeKeyTarget ?? "auto" });
+      return v;
+    });
     // closed while still flying open (a quick Escape): it turns around where it is — no jump to the end
     // pose and back — and lands on the source
     await cell("lib k1 close mid-open", async () => {
@@ -284,6 +311,7 @@ app.whenReady().then(async () => {
     const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
     await page(`m.byText(".tab", "Browse").click(); await m.sleep(500); m.byText(".pill", ${JSON.stringify(weName)}).click();`);
     for (let i = 0; i < 80; i++) { if (await page(`return !!m.card("we1");`)) break; await sleep(150); }
+    if (!await page(`return !!m.card("we1");`)) { fs.writeFileSync(path.join(OUT, "br-no-card.png"), (await win.webContents.capturePage()).toPNG()); throw new Error(`the Browse "${weName}" source shows no we1 card (screenshot br-no-card.png)`); }
     // you right-click a card you can see: wait for its picture (the still, or the gif over a lazy still)
     let shown = false;
     for (let i = 0; i < 50 && !shown; i++) { shown = await page(`return [...m.card("we1").querySelectorAll(".thumb-wrap img.thumb")].some((i) => i.naturalWidth > 0);`); if (!shown) await sleep(100); }
