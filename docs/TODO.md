@@ -29,6 +29,10 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       fill the report; owner-only rows go to "Waiting on owner".
 
 ## UI — owner's Todoist, clarified 2026-11-10
+- [ ] Matrix `playlistMark:shufflePlay:resume` is flaky by design: under "Resume" every Play can land on k1 and the cell
+      FAILs its own "proved nothing" guard ("every shuffled Play started on k1") — 1 of 4 runs on the pre-sidebar UI
+      (c87376bb), 2 of 4 after it (2026-11-11; the cell never opens the sidebar). Make its first pick deterministic (seed
+      the program's shuffle, or start the session on k3 before the rounds) so it always proves something.
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

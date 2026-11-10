@@ -86,7 +86,9 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - Tests: new `probe-sidebar.js` 16 cells — RED on the old UI 15/16 (the 16th, double-click downloads, held already: a click
     downloaded then), GREEN 16/16; probe-layout `resize:side:*` 9 sizes RED 9/9 → GREEN; `probe-morph.js` retired; the matrix
     cells that opened the modal open the sidebar (`m.openSide`), `appear:morphs` checks the sidebar's motion,
-    `appear:videoThumbs` expects the grid's previews to keep playing beside it. Screenshots before / after in the night notes.
+    `appear:videoThumbs` expects the grid's previews to keep playing beside it. Full matrix 837 pass / 1 fail / 29 skip
+    (the 1: `playlistMark:shufflePlay:resume`'s own "proved nothing" guard — flaky on the old UI too, in TODO); the first
+    full run caught the right-click version reflowing the grid under its menu (`hoverPreview:rightClick:card`), fixed.
 - [x] **Owner's Todoist batch, UI polish (2026-11-10)** — checked against the history first (the morph speed-ups
   `598a7274` / `8e1f4c4e` / `37270cff`, the toggles `c7f3a86a` / `b00a292f`, autoplay video thumbs `33d9888d`, right-click
   keeps the preview `0ddd97d0`, the travel / badge / loop-current batch `ce936170` stay as they are):
