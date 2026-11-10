@@ -1,7 +1,7 @@
 From 5a365d4163f77b68ee3949e1839f23bafeccbb36 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 05:19:30 +0530
-Subject: [PATCH 047/117] render: blend modes, compose layers and composite
+Subject: [PATCH 047/118] render: blend modes, compose layers and composite
  FBOs the way Wallpaper Engine does
 
 Decoded from wallpaper64.exe 2.8.485 (GH = the headless Ghidra decompile):

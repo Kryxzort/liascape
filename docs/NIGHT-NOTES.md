@@ -763,3 +763,22 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   "the new backend answered after p1's first loop ended" (a timing precondition, pre-existing). A first branch run had
   4 more (20 × /random non-200, two scene-loudness timing checks); none came back on the rerun, so load flakes — the
   /random check now prints the HTTP codes it got if it fails again.
+
+## 2026-11-10 — the 2D WE-port round resumed
+- **Landed the stopped round's pin** (LWE `92c1ada`: 3354740764's clouds, 3163060610's big cloud, "1 1 1" = white,
+  symlinked folders) after the full check on top of today's lp-player: pushed `0126290`, your player restarted on it.
+- **3013489778 (the pink-haired girl): she pulses now, as on Windows.** On a puppet layer (a picture rigged with
+  bones), WE runs the layer's effects on the flat picture first and only then bends it with the bones; ours bent it
+  first and ran the effects on the bent picture. Her pulse effect has a mask, so on ours it looked in the wrong places
+  (and missed her). Proved in WE itself with private copies whose mask was swapped for a left-to-right (then
+  top-to-bottom) ramp: each bit of the posed girl reads the mask where that bit sits in the flat picture. Score
+  0.125 → 0.003 (essentially identical). Other puppet scenes moved a little or not at all (3463520581 0.101 → 0.084,
+  3233141951 0.274 → 0.261), none got worse. LWE fork `7bbd6de` (patch 0118).
+- **Not ours / random:** 2951169110's greeting (picked at random), 3478602089's warm glow (random light shafts),
+  3219908811's notice panel (fades in exactly like WE's). 3509243656 reads worse only because its reference was
+  recaptured with a misread clock (the 3D agent's scene; recapture it).
+- **Open, written up in TODO:** 3463520581 — Kirito's face disappears under his front hair in ours (only where that
+  hair layer overlaps it; not yet understood). 3042492564 — a faint lighter rectangle over the sea from its
+  full-screen "local contrast" layer, and its clock text glows.
+- Checks on the final pin: LWE host tests 130 / 130, player suite 754 pass (one timing flake passed alone), scene
+  health 89 clean / 7 degraded / 0 failed, shader sweep the same 6 known failures, WE compare mean 0.175 → 0.173.

@@ -306,15 +306,10 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] **Resume the two WE-port agents when the weekly limit resets** (owner 2026-11-07 00:20: "stop em for now, we'll
       start them when my weekly resets"). Both stopped mid-round with the original brief
       (`/tmp/…/scratchpad/weref-fix-brief.md` — copy it into the new session if /tmp was cleared):
-      - **weref-2d** (worktree `.claude/worktrees/weref-2d`): fork `livepaper/next-v2` is at **92c1ada** with its patches
-        0112–0114, 0117 — 3354740764's clouds (a `dependencies` layer draws through its composite, 0.327 → 0.218),
-        3163060610's constant scripts' thisObject (0.119 → 0.059), "1 1 1" = white, symlinked project folders. Its pin
-        commit `f86c1ce` ("Pin LWE 92c1ada") is on the branch but **untested and unmerged**: run the chain (lwe.sh build
-        check test, player tests, health, sweep, the WE compare), merge, push, restart. Left from its list: 3219908811's
-        notice panel, then down the ranked report.
       - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, 141 uncommitted files — recaptures and notes): its fork
         work (patches 0115–0116, incl. `input.cursorWorldPosition` in 3D scenes) is already in 92c1ada; it was bumping the
-        pin. Commit its worktree state, test, merge after weref-2d's pin. Left: the clock strip for 3276522107 / 3477054430,
+        pin. Commit its worktree state, test, merge after weref-2d's pin (landed 2026-11-10: the fork is at **7bbd6de**,
+        0118 — rebase onto it). Left: the clock strip for 3276522107 / 3477054430,
         genericimage4 on 2D blend layers' last draw.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
@@ -401,15 +396,21 @@ Two bug classes kept recurring; fix the class, not the instance:
           (2026-11-06) the "time" rows are gone. Since the 2D round (2026-11-06 night, pin `92c1ada`) the top is 3D
           (3276522107: the 3D agent's), then the parallax scenes' 0.5 s frames (the late pointer, below), random
           particles / shafts (3490034653, 3478602089, 2561227934, 3363252053, 2511663284), random text (2951169110)
-          and the open one below (3013489778). Explained so far: each ranked scene's note (`scene_we_notes.json`).
-    - [ ] 3013489778's girl doesn't pulse in ours (open). Her time `pulse` effect (puppet layer 161, visualizer = 1)
-          has an opacity mask painted for layer 18 (`masks/pulse_mask_00240ba8`, 1589 x 1275 = half of 18's 3179 x
-          2551) and reused on 161 (4380 x 2998). Ours samples the mask's soft spots (≤ 0.35) and the girl barely
-          changes; WE pulses her evenly (with the tints set black, WE darkens the whole girl by 27 %, ours ~0). WE
-          variants in `captures/var/v3013-*`: without the time pulse WE's girl is steady at ours' brightness, without
-          the audio pulse it still pulses. Decode how WE maps an opacity mask whose size isn't the layer's (the
-          mask UV in pulse.vert is `a_TexCoord · g_Texture2Resolution.zw / .xy`), or whether a puppet's effect
-          passes see other texcoords.
+          and the open ones below (3463520581; 3013489778 fixed 2026-11-10, fork 0118). Explained so far: each ranked scene's note (`scene_we_notes.json`).
+    - [ ] 3463520581: Kirito's face (puppet 126 on puppet 34's `Attachment`) is hidden in ours where WE shows it.
+          With the front-hair layer 102 (a plain image, also on `Attachment`) visible, the front of the face is gone
+          and the sky shows through; each alone draws as in WE. In ours (private copies): 102 at alpha 0, 102 without
+          its `attachment`, a solid stand-in of 102's size, or 102 moved off the face → the face is whole: where 102's
+          textured quad overlaps it, its eye, nose and mouth go and the sky behind shows. 102's and 126's effects make no
+          difference. WE variants `captures/var/v3463-k102`, `-k4` (no clock: the clocked copies didn't open in WE).
+    - [ ] 3042492564 (0.101 at every time): ours shows a lighter rounded rectangle (x 660–1660, y 146–924 of 1920)
+          over the sea and sky that WE doesn't. It is the full-screen `localcontrast` layer 583 (id 586 effect; hidden →
+          gone, its effect removed → gone), but it stays with the combine's strength set to 0 or 3, its mask removed, its
+          colour blend mode removed, or its quarter buffers renamed — so not the strength, mask, blend or an FBO name
+          clash. Next: what its combine pass reads as `previous` (index 2) and `_rt_QuarterCompoBuffer1` there. Also the
+          clock text glows in ours (crisp in WE) and reads a minute later (the fake clock's rounding).
+    - [ ] 3509243656's reference: the 2026-11-06 23:23 recapture reads WE's clock at 4.6 / 6.1 / 9.1 s (its intro
+          fade covers the strip), so it reads 0.243 (0.053 before) on the same renderer. Recapture (3D agent's scene).
     - [ ] A compose (passthrough) layer named in another object's `dependencies` (3243449890's 16613, read by four
           clipping masks) keeps LWE's handling; WE sets flag 0x1010 on it too (the 2D round ported it for image and
           text layers only). 3243449890 has no WE reference yet.

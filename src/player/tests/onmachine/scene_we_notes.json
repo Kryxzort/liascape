@@ -34,7 +34,7 @@
   },
   "3509243656": {
     "class": "ok",
-    "note": "a 3D scene whose intro is an engine.runtime fade from black: the clock strip sits under it, so its 5 s frame reads WE's clock and the earlier ones get that offset (WE's clock was 0.3–0.75 s ahead of t = 0). At WE's scene time it is 0.053 (was 0.261): the intro's timing was the capture's time base. Some runs read no frame at all (then only the request time)."
+    "note": "a 3D scene whose intro is an engine.runtime fade from black: the clock strip sits under it, so its 5 s frame reads WE's clock and the earlier ones get that offset (WE's clock was 0.3–0.75 s ahead of t = 0). At WE's scene time it is 0.053 (was 0.261): the intro's timing was the capture's time base. Some runs read no frame at all (then only the request time). The 2026-11-06 23:23 recapture read WE's clock at 4.6 / 6.1 / 9.1 s (0.053 → 0.243 on the same renderer): a misread under the fade, recapture it."
   },
   "2783122117": {
     "class": "ok",
@@ -97,8 +97,8 @@
     "note": "the warm diagonal glow is its `light_shafts_1` system (sphererandom emitter, starttime 15, huge orange sprites): WE's runs differ by as much as ours does — the frame's mean is 188 in the reference run, 160 and 163 in two more (`captures/3478602089/r1`, `r2`), ours 184. Random in WE."
   },
   "3013489778": {
-    "class": "open",
-    "note": "the girl (puppet layer 161) pulses in WE and not in ours. WE variants (`captures/var/v3013-*`): without its time `pulse` effect (visualizer = 1) the girl is steady at ours' brightness (121 / 57 / 123), without the audio one it still pulses (149 → 131 → 150). The pulse has an opacity mask (`masks/pulse_mask_00240ba8`, 1589 x 1275: painted for layer 18, half of its 3179 x 2551, reused on 161 at 4380 x 2998); ours reads the mask's soft spots (≤ 0.35) and barely changes the girl, WE applies the pulse evenly over the whole girl (with black tints: −27 % everywhere, ours ~0). How WE samples a mask whose size isn't the layer's is the open question (TODO)."
+    "class": "ok",
+    "note": "fixed 2026-11-10 (fork 0118, 7bbd6de): 0.125 → 0.003. The girl (puppet layer 161) didn't pulse: WE runs a puppet's effects on its image (texture space) and draws the mesh last, ours ran them on the posed layer. Measured with private copies whose pulse mask is a ramp in u, then v (`captures/var/v3013-rampx`, `-rampy`): each posed pixel samples its part's place in the 4380 × 2998 atlas (the face u 0.31–0.40, constant per part), where ours sampled the layer's smooth position and fell between the mask's blobs (painted for layer 18, reused on 161)."
   },
   "3163060610": {
     "class": "ok",
@@ -107,5 +107,13 @@
   "2511663284": {
     "class": "random",
     "note": "fireflies and rain: random particles in WE."
+  },
+  "3463520581": {
+    "class": "open",
+    "note": "Kirito's face (puppet 126, attached to puppet 34's `Attachment`) is hidden in ours where WE shows it: with the front-hair layer 102 (a plain image, also on `Attachment`) visible, the front of the face is gone and the sky shows through; alone, each draws as in WE. Private copies in ours: 102 at alpha 0, or 102 without its `attachment`, or a solid stand-in of 102's size or 102 moved off the face → the face is whole (so it is where 102's textured quad overlaps the face: its eye, nose and mouth go, the sky behind shows); 102's effects (opacity mask, waterwaves) and 126's effects make no difference. WE variants `captures/var/v3463-k102`, `-k4` (request time only: the clocked copies didn't open). 0.101 → 0.084 with 0118. TODO."
+  },
+  "3042492564": {
+    "class": "open",
+    "note": "ours shows a lighter rounded rectangle over the sea and sky (x 660–1660, y 146–924) from the full-screen `localcontrast` layer 583: hiding it or its effect removes it; its strength (0 or 3), mask, blend mode or FBO names don't. The clock text glows in ours, crisp in WE. TODO."
   }
 }
