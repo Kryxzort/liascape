@@ -14,6 +14,21 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
       report) — keep for later or drop.
 
+## UI — owner's Todoist, clarified 2026-11-10
+- [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
+      when the settings grow" fix): focusing a card opens a sidebar holding everything the right-click menu has
+      (Settings, Open in file manager, Delete, Delete from source). Same in the Browse tab.
+- [ ] **Morph replays while settings are open**: with a wallpaper's settings open, the morph animation plays again
+      every 1–2 min instead of staying still (probably a periodic refresh re-mounting the view).
+- [ ] Morph: a little faster still; the morph glitch when a property changes.
+- [ ] Scene timing fallback: with the scene-specific timing options off, use the general minimum or maximum, whichever
+      is on; the minimum if both are on.
+- [ ] Scroll to the playing wallpaper on app open, in both the playlist bar and the main grid.
+- [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
+      research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
+      Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
+      triggers/actions can't express (the escape hatch, not just one more action type).
+
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
