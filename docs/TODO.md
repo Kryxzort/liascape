@@ -11,8 +11,13 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] Decide: UI-matrix randomized runs (optional) and offering the LWE patches upstream.
 - [ ] Optional: auto-mute flapped 6× in 16 s on 2026-11-06 (Spotify + a notification, 500 ms unmute delay) — a longer
       unmute delay stops it.
-- [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
-      report) — keep for later or drop.
+
+## Switch-over bar (queued, owner 2026-11-10)
+- [ ] Resume the switch-over check (design §11: liascape-player becomes the default and the legacy path goes only when
+      the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
+      `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
+      checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
+      fill the report; owner-only rows go to "Waiting on owner".
 
 ## UI — owner's Todoist, clarified 2026-11-10
 - [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
