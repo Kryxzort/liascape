@@ -859,3 +859,31 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Checks on the final pin (LWE `65ec574`): LWE host tests 135 / 135 (the two newest fail without their fix), player
   tests 756 / 756, scene health 89 clean / 7 degraded / 0 failed (the baseline), shader sweep the same 6 known
   failures. Your player was restarted on it.
+
+## 2026-11-11 night — 2D scenes against WE: Kirito's face, 3042492564's rectangle and clock, WEDNESDAY, still clouds
+- **3463520581 (Asuna and Kirito): Kirito's face is whole again.** It was never his front hair. His face is a "puppet"
+  picture (cut into pieces and posed), and its picture file is padded out to a bigger size than the picture itself.
+  The pieces' positions in the picture were read as positions in the padded file, so every piece drew a slice of the
+  picture from slightly up and to the left: the eye, nose and mouth slid under the hair and the sky showed where the
+  face should be. Proved in WE with private copies at rest (no animation, no effects): our face sat 28, 16 px off
+  WE's, now on it. Score 0.084 → 0.017 (lower = closer to WE). Other puppet scenes moved too: 3490034653 0.293 → 0.218, no puppet scene got worse.
+- **3042492564 (the girl and the shooting star): the lighter rectangle over the sea is gone and the clock no longer
+  glows.**
+  - The rectangle: the scene's camera zooms out (0.73), and a full-screen "local contrast" layer went through that
+    zoom, so it drew a shrunken copy of the whole picture into a 73 % box. WE draws full-screen layers over the whole
+    screen whatever the camera does (checked in WE with the effect turned up and turned off).
+  - The clock: in WE, a text with effects is drawn into its own picture first in a way that applies its transparency
+    three times over (the clock's 75 % → about 42 %), and its glow effect then has much less to work with. Ours
+    applied it once, so the clock was brighter and the glow spread wide. Measured in WE on the clock alone.
+  - Left: a faint dark edge around the clock's letters from the glow effect (WE has none); the clock reads a minute
+    later in ours (the fake clock's rounding). Score 0.101 → 0.057.
+- **3414858021 (the rainy-window girl): "WEDNESDAY" matches.** Compared against tonight's Wednesday capture with ours
+  set to the same date and time: the date block sits in the same place in the same font and size, and WE also cuts
+  it off at the right edge ("WEDNESDA"). Nothing to fix.
+- **2290002190 (Gojo): the cloud shadows move again.** The stock "clouds" effect declares its speed setting twice,
+  with two shapes, in two halves of the shader. Ours sent the speed to the wrong one, the graphics driver refused it,
+  and the clouds stood still (WE's drift across the picture). Same fix for 2683776412 and your Windows XP scene
+  3354740764's clouds. Score 0.102 → 0.008.
+- Whole library re-ranked: mean 0.171 → 0.168 (1884904087 reads worse only because its greeting line is picked at random). Checks: LWE host tests 139 / 139 (each new test fails without its fix);
+  player suite 756 / 756 (one CPU-timing test failed under load and passed alone); scene health 89 clean / 7 degraded / 0 failed (the baseline); shader sweep the same 6 known failures. LWE pin `5cb69c7` (fork patches 0123–0126). The release
+  build is ready; I did not restart your player or backend (you stopped them for the mpvpaper soak).
