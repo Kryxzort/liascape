@@ -5,7 +5,8 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 
 ## Waiting on owner
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
-- [ ] 3414858021's "WEDNESDAY": on a Wednesday run `scripts/dev/we-ref-capture.sh 3414858021 --tag wednesday`.
+- [x] 3414858021's "WEDNESDAY": captured 2026-11-11 01:38 IST (`--tag wednesday`, clock read 3/3) →
+      `~/.cache/liascape/we-ref/captures/wednesday/3414858021`; next WE-port round: compare ours against it.
 - [ ] Decide: UI-matrix randomized runs (optional).
 
 ## Night runs (owner 2026-11-10: "run the soaks or battery yourself while im sleeping")
