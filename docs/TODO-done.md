@@ -890,6 +890,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         amount each run (4 runs; the 3D agent measured 0.25–0.9 s on 3276522107 / 3509243656). Ours at 2 s is
         0.07 s before the fade starts, which made it look like a 2 s vs 5 s gap at the 0.5 / 2 / 5 s samples.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3013489778's girl doesn't pulse — done 2026-11-10 (fork `7bbd6de`, patch 0118): 0.125 → 0.003. WE runs a
+        puppet's effects on its image, in texture space, and its material (genericimage4, the only pass that skins)
+        draws the mesh last from their output; ours drew the posed mesh first and ran the effects on that. Measured
+        in WE with private copies whose pulse mask is a ramp in u, then v (`captures/var/v3013-rampx`, `-rampy`):
+        every posed pixel samples its part's place in the 4380 × 2998 atlas (the face u 0.31–0.40, constant per part,
+        jumping between hair strands); ours after: within 0.01 of WE's. Fork test `puppet_effects_run_on_its_image`.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
   - [x] **The 3D scenes** — done 2026-11-06 (fork `867a5e7`, `5a42e7e`, patches 0108–0109; gap audit "3D scenes
         against WE"). 3276522107 isn't a lighting difference. Its lit train layer flashes on a 2 s alpha loop, and
         WE's scene clock is already 0.25–0.9 s along at its first frame (4 runs; seats match once aligned, rms ~2 of
