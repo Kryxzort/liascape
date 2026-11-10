@@ -1883,7 +1883,7 @@ struct MdlWriter {
 
 // a 4 x 4 square centred on the mesh's origin, every vertex on bone 0. MDLV0016 has format 0x1800009 (position,
 // blend indices, weights, uv: 52 B) and 16-bit indices; MDLV0023 here 0x180000f (+ normal, tangent: 80 B) and 32-bit
-static std::string puppet_mesh (int version) {
+static std::string puppet_mesh (int version, float u = 0.5f, float v = 0.5f) {
     const bool v23 = version == 23;
     const uint32_t format = v23 ? 0x180000f : 0x1800009;
     MdlWriter w;
@@ -1903,7 +1903,7 @@ static std::string puppet_mesh (int version) {
             verts.f32 (0).f32 (0).f32 (1).f32 (1).f32 (0).f32 (0).f32 (1);
         }
         verts.u32 (0).u32 (0).u32 (0).u32 (0).f32 (1).f32 (0).f32 (0).f32 (0);
-        verts.f32 (0.5f).f32 (0.5f);
+        verts.f32 (u).f32 (v);
     }
     w.u32 (static_cast<uint32_t> (verts.out.size ()));
     w.out += verts.out;
@@ -2091,6 +2091,56 @@ static bool puppet_cullmode_normal_draws () {
     CHECK (direct[0] > 200, "the culling puppet drawn into the scene is missing (red %d)", direct[0]);
     CHECK (composed[0] > 200, "the culling puppet drawn through an effect is missing (red %d)", composed[0]);
     CHECK (outside[0] < 40, "something drew between the puppets (red %d)", outside[0]);
+    return true;
+}
+
+// a puppet's effects run on its image, in texture space, and its material draws the mesh last from their output
+// (3013489778: a pulse's opacity mask on puppet layer 161 is sampled at each part's place in the atlas, measured in
+// WE with the mask replaced by u and v ramps). A 32 x 32 puppet at (32, 16) on a 64 x 32 scene: its 4 px square sits
+// on the layer's centre but every vertex has uv (0.1, 0.5); the effect writes its own uv.x as red, times the input's
+// alpha. On the image the square reads the effect at u 0.1: red ≈ 26. Unpatched (the effect ran on the posed layer,
+// after the mesh): the square's layer position, u ≈ 0.5, red ≈ 128
+static bool puppet_effects_run_on_its_image () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16, 0.1f, 0.5f);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }));
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}],"
+          "\"effects\":[{\"id\":9,\"name\":\"uvx\",\"file\":\"effects/uvx/effect.json\"}]}";
+    const std::string dir = script_scene (objects);
+    for (const char* sub : { "/materials", "/models", "/shaders", "/effects", "/effects/uvx" }) {
+        mkdir ((dir + sub).c_str (), 0755);
+    }
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    write_file (dir + "/shaders/uvx.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/uvx.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                           "\tgl_FragColor = vec4(v_TexCoord.x, 0.0, 0.0, 1.0) * texSample2D(g_Texture0, v_TexCoord).a;\n}\n");
+    write_file (dir + "/materials/uvx.json", "{\"passes\":[{\"shader\":\"uvx\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                             "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/uvx/effect.json", "{\"name\":\"uvx\",\"passes\":[{\"material\":\"materials/uvx.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl", "effects/uvx/effect.json",
+                  "shaders/uvx.vert", "shaders/uvx.frag", "materials/uvx.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char square[4] = {}, beside[4] = {};
+    read_pixel (rig.fbo, 32, 16, square);
+    read_pixel (rig.fbo, 24, 16, beside);
+    printf ("    the square's red %d (its uv.x 0.1 = 26; its layer position 0.5 = 128), beside it %d\n", square[0], beside[0]);
+    CHECK (square[0] > 14 && square[0] < 40, "the effect didn't run on the puppet's image (red %d, want ~26)", square[0]);
+    CHECK (beside[0] < 10, "something drew beside the square (red %d)", beside[0]);
     return true;
 }
 
@@ -7276,6 +7326,7 @@ int main (int argc, char** argv) {
     run ("texture_components_define_combos", texture_components_define_combos);
     run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
     run ("attachment_matrix_is_whole", attachment_matrix_is_whole);
+    run ("puppet_effects_run_on_its_image", puppet_effects_run_on_its_image);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);

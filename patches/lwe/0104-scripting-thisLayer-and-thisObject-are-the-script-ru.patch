@@ -1,7 +1,7 @@
 From 77b9df7fbe21a8e7a9ed4697e8af16e0b5d53f27 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 08:03:16 +0530
-Subject: [PATCH 104/117] scripting: thisLayer and thisObject are the script
+Subject: [PATCH 104/118] scripting: thisLayer and thisObject are the script
  running now
 
 WE defines both as accessors on the global (scenescript64.dll: getters 0x1810d5fd0 and

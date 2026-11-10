@@ -1,7 +1,7 @@
 From 5777ef42de2eed40b208931a5c33e095f53c7d30 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 27 Oct 2026 20:36:44 +0530
-Subject: [PATCH 001/117] build: accept WPBUILD_VERSION_OVERRIDE when there is
+Subject: [PATCH 001/118] build: accept WPBUILD_VERSION_OVERRIDE when there is
  no git tag
 
 The project version comes from `git describe --tags`, and configure stops

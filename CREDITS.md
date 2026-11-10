@@ -149,3 +149,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0115-scripting-a-model-s-scale-angles-and-visible-scripts.patch` | scripting: a model's scale, angles and visible scripts run | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0116-scripting-in-a-3D-scene-input.cursorWorldPosition-is.patch` | scripting: in a 3D scene input.cursorWorldPosition is the cursor cast to the far plane | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0117-scripting-a-shader-constant-s-script-has-the-effect-.patch` | scripting: a shader constant's script has the effect's material as thisObject | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0118-render-a-puppet-s-effects-run-on-its-image-its-mater.patch` | render: a puppet's effects run on its image, its material draws the mesh last | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
