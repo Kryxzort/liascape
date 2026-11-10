@@ -1,7 +1,7 @@
 From bddc991568456a78016b6ecdf2dc2dc064780966 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 20:13:44 +0530
-Subject: [PATCH 038/117] scripting: layers, effects, sounds and the scene as
+Subject: [PATCH 038/120] scripting: layers, effects, sounds and the scene as
  SceneScript has them
 
 Scripts reach every layer the way Wallpaper Engine documents the API:

@@ -5994,7 +5994,8 @@ static bool layer_tilts_and_moves_in_depth () {
 }
 
 // a minimal MDLV0016 file: one mesh, format 0xf (position, normal, tangent, texcoord), a 4 x 4 quad at z 0 facing +z
-static std::string b14_mdl (const std::string& material) {
+// (or a 2·half square at depth z in the model's space)
+static std::string b14_mdl (const std::string& material, float z = 0.0f, float half = 2.0f) {
     std::string out;
     auto u32 = [&out] (uint32_t v) { out.append (reinterpret_cast<const char*> (&v), 4); };
     auto f32 = [&out] (float v) { out.append (reinterpret_cast<const char*> (&v), 4); };
@@ -6005,13 +6006,13 @@ static std::string b14_mdl (const std::string& material) {
     out += material + '\0';
     u32 (0);   // flags: 16-bit indices
     u32 (0xf); // the mesh's format
-    const float corners[4][2] = { { -2, -2 }, { 2, -2 }, { 2, 2 }, { -2, 2 } };
+    const float corners[4][2] = { { -half, -half }, { half, -half }, { half, half }, { -half, half } };
     u32 (4 * 48);
     for (const auto& c : corners) {
-        f32 (c[0]); f32 (c[1]); f32 (0.0f);              // position
-        f32 (0.0f); f32 (0.0f); f32 (1.0f);              // normal
-        f32 (1.0f); f32 (0.0f); f32 (0.0f); f32 (1.0f);  // tangent
-        f32 ((c[0] + 2) / 4); f32 ((2 - c[1]) / 4);      // texcoord
+        f32 (c[0]); f32 (c[1]); f32 (z);                                // position
+        f32 (0.0f); f32 (0.0f); f32 (1.0f);                             // normal
+        f32 (1.0f); f32 (0.0f); f32 (0.0f); f32 (1.0f);                 // tangent
+        f32 ((c[0] + half) / (2 * half)); f32 ((half - c[1]) / (2 * half)); // texcoord
     }
     const uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
     u32 (sizeof (indices));
@@ -6150,6 +6151,147 @@ static bool fog_reaches_world_layers () {
     CHECK (clear[0] > 240 && clear[1] > 240 && clear[2] > 240, "the layer isn't white without fog");
     CHECK (fogged[0] > 240 && fogged[1] < 16 && fogged[2] < 16, "the fog didn't turn the far layer red");
     CHECK (near (half[0], 128, 4) && near (half[1], 128, 4) && near (half[2], 191, 4), "the layer's alpha didn't apply once");
+    return true;
+}
+
+// in a 3D scene input.cursorWorldPosition is the cursor cast to the far plane: wallpaper64's getter (GH 0x1401bcb00)
+// unprojects (x, 1 − y, 0.5) through the view and a reversed-depth projection (GH 0x14009afd0 swaps nearz / farz),
+// the point on the cursor's ray at the view depth farz. A 4 x 4 quad model 10 units out, farz 1000: its visible script
+// hides it when the cursor is on the far plane (z −990) and right of x 100; its scale script shrinks it (a model's
+// scale / angles / visible scripts run). Unpatched: the quad stays whole and shown
+static bool cursor_world_position_casts_into_3d () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string hide = "export function update(value) {\n"
+                             "  const c = input.cursorWorldPosition;\n"
+                             "  return !(Math.abs(c.z + 990) < 1 && c.x > 100 && Math.abs(c.y) < 1);\n}";
+    auto frame = [&hide] (double x, const std::string& more, std::array<unsigned char, 4>& centre, std::array<unsigned char, 4>& side) {
+        const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\","
+                                                     + scripted ("visible", "true", hide) + more + "}");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = b14_model (dir, "\"LIGHTING\":0,\"FOG\":0");
+        g_mouseX = x;
+        g_mouseY = kH3 / 2.0;
+        g_buttonDown = false;
+        rig.mouse = &g_clicker;
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        side = pixel_xy (rig, kW3 / 2 + 150, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> mid {}, midSide {}, right {}, rightSide {}, small {}, smallSide {};
+    CHECK (frame (kW3 / 2.0, "", mid, midSide), "load failed (pointer at the centre)");
+    CHECK (frame (kW3 * 0.9, "", right, rightSide), "load failed (pointer at the right)");
+    CHECK (frame (kW3 / 2.0, "," + scripted ("scale", "\"1 1 1\"", "export function update(value) {\n  return new Vec3(0.1, 0.1, 0.1);\n}"),
+                  small, smallSide),
+           "load failed (scale script)");
+    printf ("    pointer centre: centre %d %d %d, +150 px %d %d %d (want white, white); pointer right: centre %d %d %d (want the clear "
+            "0 0 128); scale script 0.1: centre %d %d %d, +150 px %d %d %d (want white, clear)\n",
+            mid[0], mid[1], mid[2], midSide[0], midSide[1], midSide[2], right[0], right[1], right[2], small[0], small[1], small[2],
+            smallSide[0], smallSide[1], smallSide[2]);
+    CHECK (mid[0] > 240 && midSide[0] > 240, "the quad isn't shown with the pointer at the centre");
+    CHECK (right[0] < 16 && right[2] > 100,
+           "the far-right cursor on the far plane didn't hide the model (cursorWorldPosition not cast, or the model's visible script "
+           "didn't run)");
+    CHECK (small[0] > 240 && smallSide[0] < 16, "the model's scale script didn't shrink it");
+    return true;
+}
+
+// transparentsorting in a 3D scene draws in WE's two passes (GH 0x1401b9b50): first the opaque objects in the render
+// order (flag 0x200: a model, an image whose material blending is normal or alphatocoverage), then the translucent
+// ones (flag 0x100: a translucent image, particles, text) sorted far to near by their origins. A white translucent
+// image without depth writes, its origin 30 units out, listed first; a red opaque model whose origin is 10 units out
+// but whose mesh lies 60 units out (a sky box): WE draws the model, then the image over it. Unpatched (one sort of
+// every world object by its origin): the image first, then the far mesh over it — the image was gone (3509243656's
+// star spikes under its sky box)
+static bool transparent_sort_draws_opaque_first () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (const std::string& general, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene (general, "{\"id\":1,\"name\":\"t\",\"image\":\"models/tsimg.json\",\"size\":\"200 200\","
+                                                      "\"origin\":\"0 0 -20\",\"scale\":\"0.01 0.01 0.01\"},"
+                                                      "{\"id\":2,\"name\":\"sky\",\"model\":\"models/tssky.mdl\",\"origin\":\"0 0 0\"}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/tsimg.json", "{\"material\":\"materials/tsimg.json\"}\n");
+        write_file (dir + "/materials/tsimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                   "\"depthtest\":\"enabled\",\"depthwrite\":\"disabled\",\"textures\":[\"util/white\"]}]}\n");
+        write_file (dir + "/models/tssky.mdl", b14_mdl ("materials/tssky.json", -50.0f, 40.0f));
+        write_file (dir + "/materials/tssky.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                   "\"combos\":{\"LIGHTING\":0,\"FOG\":0},\"constantshadervalues\":{\"color\":\"1.0 0.0 0.0\"}}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/tsimg.json", "materials/tsimg.json", "models/tssky.mdl", "materials/tssky.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> sorted {}, unsorted {};
+    CHECK (centre (",\"transparentsorting\":true", sorted), "load failed (transparentsorting)");
+    CHECK (centre ("", unsorted), "load failed (no transparentsorting)");
+    printf ("    transparentsorting: centre %d %d %d (want white: the sky, then the image); without it (file order) %d %d %d (want red)\n",
+            sorted[0], sorted[1], sorted[2], unsorted[0], unsorted[1], unsorted[2]);
+    CHECK (sorted[0] > 240 && sorted[1] > 240 && sorted[2] > 240, "the translucent image isn't drawn after the opaque sky");
+    CHECK (unsorted[0] > 240 && unsorted[1] < 16 && unsorted[2] < 16, "without transparentsorting the sky drawn after it should cover the image");
+    return true;
+}
+
+// a 3D scene's layers are hit-tested in the world (GH 0x1401afbf0 → GH 0x1401cb5d0 / 0x1401cafc0): the cursor's ray
+// against the layer's quad, the local position (u · w, (1 − v) · h). A 2 x 2 unit layer (200 px, scale 0.01) 10 units
+// out, hidden; its cursorEnter shows it when the local position is its centre (100, 100). The pointer at the screen's
+// centre hits it (shown: white); at the far right it misses (the clear 0 0 128). Unpatched: a world-placed layer was
+// never hit (3509243656's planet markers never showed)
+static bool cursor_hits_world_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script = "export function cursorEnter(e) {\n"
+                               "  shared.hit = Math.abs(e.localPosition.x - 100) < 4 && Math.abs(e.localPosition.y - 100) < 4;\n}\n"
+                               "export function update(value) {\n  return shared.hit === true;\n}";
+    auto centre = [&script] (double x, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"t\",\"image\":\"models/hitimg.json\",\"size\":\"200 200\","
+                                                 "\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\"," + scripted ("visible", "false", script) + "}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/hitimg.json", "{\"material\":\"materials/hitimg.json\"}\n");
+        write_file (dir + "/materials/hitimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                    "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/hitimg.json", "materials/hitimg.json" };
+        g_mouseX = x;
+        g_mouseY = kH3 / 2.0;
+        g_buttonDown = false;
+        rig.mouse = &g_clicker;
+        if (!rig.open (dir)) {
+            return false;
+        }
+        for (int i = 0; i < 3; i++) {
+            rig.step ();
+        }
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> hit {}, miss {};
+    CHECK (centre (kW3 / 2.0, hit), "load failed (pointer at the centre)");
+    CHECK (centre (kW3 * 0.9, miss), "load failed (pointer at the right)");
+    printf ("    pointer on the layer: centre %d %d %d (want white); pointer off it: %d %d %d (want the clear 0 0 128)\n", hit[0], hit[1],
+            hit[2], miss[0], miss[1], miss[2]);
+    CHECK (hit[0] > 240 && hit[1] > 240 && hit[2] > 240, "the cursor over the world layer didn't enter it at its centre");
+    CHECK (miss[0] < 16 && miss[2] > 100, "the cursor off the world layer entered it");
     return true;
 }
 
@@ -6780,7 +6922,8 @@ static bool camera_paths_and_fade () {
 }
 
 // a 3D scene's transparentsorting key (GH 0x1401b6660, comparator GH 0x1401cc550): sortorder ascending, then
-// farthest first along the view. Unpatched: sortorder wasn't read (the distance alone ordered the run)
+// farthest first along the view. Unpatched: sortorder wasn't read (the distance alone ordered the run). The key orders
+// WE's translucent list only (flag 0x100: here translucent layers); opaque ones draw in the render order before them
 static bool transparent_sort_takes_sortorder () {
     if (!script_tests_can_run ()) {
         return true;
@@ -6797,6 +6940,11 @@ static bool transparent_sort_takes_sortorder () {
         rig.extra = b7_layer (dir, "b15red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
         const auto green = b7_layer (dir, "b15green", "gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);");
         rig.extra.insert (rig.extra.end (), green.begin (), green.end ());
+        for (const char* name : { "b15red", "b15green" }) {
+            write_file (dir + "/materials/" + name + ".json",
+                        "{\"passes\":[{\"shader\":\"" + std::string (name) + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                        "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+        }
         if (!rig.open (dir)) {
             return false;
         }
@@ -7323,6 +7471,9 @@ int main (int argc, char** argv) {
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
     run ("object_colour_and_linked_folder", object_colour_and_linked_folder);
     run ("constant_script_this_object_is_the_material", constant_script_this_object_is_the_material);
+    run ("cursor_world_position_casts_into_3d", cursor_world_position_casts_into_3d);
+    run ("transparent_sort_draws_opaque_first", transparent_sort_draws_opaque_first);
+    run ("cursor_hits_world_layers", cursor_hits_world_layers);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
     return g_failures ? 1 : 0;
 }

@@ -1,7 +1,7 @@
 From 9d4085ca9fe42fe32159af21ca40c444ec7a1c8c Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 23:24:22 +0530
-Subject: [PATCH 116/117] scripting: in a 3D scene input.cursorWorldPosition is
+Subject: [PATCH 116/120] scripting: in a 3D scene input.cursorWorldPosition is
  the cursor cast to the far plane
 
 scenescript64's getter calls the host's vtable +0xa8 with flag 0: wallpaper64 GH 0x1401bcb00,

@@ -34,7 +34,7 @@
   },
   "3509243656": {
     "class": "random",
-    "note": "a 3D \"three-body\" simulation: its planets' paths and the civilisation texts come from Math.random in scripts, so they differ from WE's every run. Its intro fades in from black: since 2026-11-06 the clock strip is the post-processing layer's last effect (lit 0.22, under its HDR bloom) and every frame reads, even mid-intro (the 0.5 s frame was at WE's 4.6 s). Its galaxy band sits lower in WE's first frame: a slider eases toward input.cursorWorldPosition / 8000, and WE has no pointer until the capture's nudge after load (the late pointer of the parallax scenes)."
+    "note": "a 3D \"three-body\" simulation: its planets' paths and the civilisation texts come from Math.random in scripts, so they differ from WE's every run. A private copy with seeded Math.random (scripts/dev/we_ref_variant.py, captures/det/v3509-det) puts WE's planets and ours in the same places, and showed two real differences, fixed 2026-11-10 (fork 09c9bd4, 2bd528c): the star spikes (`sa3`) were drawn before the sky box and covered by it (WE's transparentsorting draws every opaque object first, then the translucent ones sorted), and the planet rings (`OL`) never showed (a world-placed layer was never hit by the cursor; WE casts the cursor's ray against the layer's quad). Left: WE's glow around a star is about twice as wide (its HDR bloom at 6 iterations / scatter 2 / feather 0.88), and the galaxy band's height in the first frames (a slider eases toward input.cursorWorldPosition; WE has no pointer until the capture's nudge). The clock strip is the post-processing layer's last effect (lit 0.22, under its HDR bloom), so every frame reads."
   },
   "2783122117": {
     "class": "ok",

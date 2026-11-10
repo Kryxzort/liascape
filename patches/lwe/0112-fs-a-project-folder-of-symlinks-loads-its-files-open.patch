@@ -1,7 +1,7 @@
 From 984737bb28ad2be6042ddc6ae418413ea7b79342 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 23:02:33 +0530
-Subject: [PATCH 112/117] fs: a project folder of symlinks loads, its files
+Subject: [PATCH 112/120] fs: a project folder of symlinks loads, its files
  open where they point
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

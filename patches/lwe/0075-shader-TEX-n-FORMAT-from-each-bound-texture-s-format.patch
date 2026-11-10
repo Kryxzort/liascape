@@ -1,7 +1,7 @@
 From 6f7298266cd26673c133956646aeca9ac56e2969 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:46:56 +0530
-Subject: [PATCH 075/117] shader: TEX<n>FORMAT from each bound texture's format
+Subject: [PATCH 075/120] shader: TEX<n>FORMAT from each bound texture's format
 
 WE defines TEX<n>FORMAT for every sampler slot 0..9 whose annotation has `formatcombo`, to the
 format of the texture bound there or, with none, of the sampler's default (GH 0x1401d2a20:

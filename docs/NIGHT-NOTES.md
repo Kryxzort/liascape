@@ -780,3 +780,22 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - **Browse shows "In library"** (green, top-right) on items you already have — Workshop and the Wallpaper Engine local tab.
 - Checks: UI matrix 832 + 6 load flakes that pass alone (+ 6 new cells, each RED on the old UI/player), player crate
   756/756 (1 audio-bus timing test passed alone), adapter IT 415/0, backend self-test PASS.
+
+## 2026-11-10 — the 3D scenes: the kitty's head, the clock in 3D, 3509243656's stars and planet rings
+- **3477054430 (kitty on a rooftop): the head now turns with the mouse like in WE** (checked again on the current
+  LWE): it never ran its turning script, and in a 3D scene the mouse position is a point far out in the world, not a
+  screen pixel. Against WE's captures with the mouse at the left and at the right the head matches.
+- **The reference clock now reads in all three 3D scenes** (it was hidden under their post-processing), so their
+  comparisons are at WE's real scene time; 3276522107 left the top of the ranking (0.524 → 0.134).
+- **3509243656 (the "three-body" space HUD): two real differences, fixed in LWE.** Its planets are placed at random,
+  so to compare it with WE I made a private copy where the randomness is the same on both sides. Then WE showed a
+  star-shaped spike around each star and a ring with a label around the planet under the mouse; ours showed neither.
+  - The spikes: WE draws everything solid first and the see-through things after, back to front. LWE sorted
+    everything together, so the starry sky box was drawn after the spikes and covered them.
+  - The rings: they fade in while the mouse is over an invisible circle around a planet. LWE never tested the mouse
+    against anything placed in a 3D world; now it casts the mouse's ray into the world as WE does.
+  - Left: WE's soft glow around each star is about twice as wide as ours (the scene's bloom settings), in TODO.
+- **Stopped early: the disk.** /home went down to 24 GB free during the player tests (the brief's floor is 25 GB),
+  so the scene health check, the shader sweep, the whole-library comparison, the merge, the push, the release build
+  and the player restart are **not done** — the work is committed on the `weref-3d2` branch and pushed to the LWE fork
+  only. Checks so far: LWE host tests 132 / 132 (3 new), player tests 756 / 756. Your running player is unchanged.

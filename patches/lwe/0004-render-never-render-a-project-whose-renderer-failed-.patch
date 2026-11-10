@@ -1,7 +1,7 @@
 From 67ae6cc36b91d2c1738e1bdfc1385bf9aa55a38a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 27 Oct 2026 20:52:34 +0530
-Subject: [PATCH 004/117] render: never render a project whose renderer failed
+Subject: [PATCH 004/120] render: never render a project whose renderer failed
  to build
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

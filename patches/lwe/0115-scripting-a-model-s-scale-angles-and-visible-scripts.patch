@@ -1,7 +1,7 @@
 From 409a94f3297d27ab900f2ff51fe1392e6e683442 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 23:24:22 +0530
-Subject: [PATCH 115/117] scripting: a model's scale, angles and visible
+Subject: [PATCH 115/120] scripting: a model's scale, angles and visible
  scripts run
 
 A model object (MDL mesh) registered only its origin with the script engine, so a script on its

@@ -312,10 +312,16 @@ Two bug classes kept recurring; fix the class, not the instance:
         commit `f86c1ce` ("Pin LWE 92c1ada") is on the branch but **untested and unmerged**: run the chain (lwe.sh build
         check test, player tests, health, sweep, the WE compare), merge, push, restart. Left from its list: 3219908811's
         notice panel, then down the ranked report.
-      - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, 141 uncommitted files — recaptures and notes): its fork
-        work (patches 0115–0116, incl. `input.cursorWorldPosition` in 3D scenes) is already in 92c1ada; it was bumping the
-        pin. Commit its worktree state, test, merge after weref-2d's pin. Left: the clock strip for 3276522107 / 3477054430,
-        genericimage4 on 2D blend layers' last draw.
+      - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, branch `weref-3d2`, committed, lp-player 22707809 merged
+        in; **stopped 2026-11-10 at 24 GB free on /home**, the brief's 25 GB floor): the clock strip, genericimage4 and
+        the kitty head are done (TODO-done). New, in the fork (pushed, `livepaper/next-v2` **2bd528c**, on top of the
+        2D agent's `7bbd6de` puppet patch): transparentsorting's two passes (opaque objects first: 3509243656's star
+        spikes under its sky box) and the 3D cursor hit test (its planet rings) — patches 0119–0120; the branch pins
+        2bd528c (nix_hash set, patches/CREDITS regenerated). Done on it: host tests 132 / 132, player tests 756 / 756.
+        **Left before merging:** scene health (baseline 89 / 7 / 0), shader sweep (6 known), the whole-corpus WE
+        compare (commit the regenerated report + sbs; 3509243656's note), the merge into lp-player (+ the 2D agent's
+        pin if it lands first: re-pin onto the fork tip), push, release build, player restart; then the 3509243656
+        bloom item below. Needs disk: a debug + release target is ~8 GB.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
@@ -431,8 +437,13 @@ Two bug classes kept recurring; fix the class, not the instance:
           Refs: `we-ref/3184155462/ripple-*`.
     - [ ] A 2D layer of a WE flag-0x100 image (unknown meaning) gets no last draw in ours (the genericimage3 /
           genericimage4 half of this item is closed: the same pixels for every library layer, TODO-done).
-    - [ ] A 3D scene's CursorEvent `worldPosition` and hit test: ours tests solid layers in scene pixels; WE's 3D
-          hit test wasn't read (no library 3D scene needs it yet). Gap audit "3D scenes against WE, part 2".
+    - [ ] A 3D scene's CursorEvent `worldPosition` (ours: scene pixels) and WE's type-5 hit branch (GH 0x1401b5600).
+          The hit test itself is WE's since 2026-11-10 (the cursor's ray against the layer's quad; 3509243656's planet
+          rings). Gap audit "3D scenes against WE, part 3".
+    - [ ] 3509243656: WE's glow around a star is about twice as wide as ours (with and without its `sa3` spike
+          layers, both WE runs agree): its HDR bloom at iterations 6 / scatter 2 / feather 0.88 (the HDR scenes that
+          match use 8 / 1.619 / 0.1). Compare the chain's levels on a private copy (`captures/det/v3509-det*`,
+          `scripts/dev/we_ref_variant.py`: seeded `Math.random`). Gap audit "… part 3".
     - [ ] Video-texture scenes (13) crash WE under Proton (`mfmediaengine`): a reference for them needs Windows'
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as

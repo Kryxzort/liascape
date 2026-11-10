@@ -3331,3 +3331,52 @@ genericimage3 until a scene needs it (Inferred from the shaders and the scene da
   a whole texture a second (`scroll` speedx ±1, under motion blur), so that is under half a frame of time, and ours
   renders on the 1/30 s grid (scene 2.263 s → frame 68, 2.267 s). The god rays through the windows match. Not a
   renderer difference.
+
+### 3D scenes against WE, part 3: the transparent sort's two passes, the 3D hit test (2026-11-10)
+
+**How it was found.** 3509243656's planets come from `Math.random` in its scene scripts, so no two runs (WE's or
+ours) agree. A private copy whose scripts' `Math.random ()` is a seeded generator per script (`scripts/dev/we_ref_variant.py`;
+`~/.cache/liascape/we-ref/probe-scenes/v3509-det`, captured with `we-ref-capture.sh <dir>` into
+`captures/det/v3509-det`) puts WE's planets and ours in the same places. Then two differences were plain: WE draws
+a star spike and a glow around each star (the `sa3` layers, "Stellar Spike") and a ring with a label around a planet
+near the cursor (`OL` layers); ours drew neither. Variants without `sa3`, without bloom, `sa3` alone, then ours-only
+variants (no effect, a fixed origin, scaled up) narrowed it: `sa3` drew nothing with its `pulse` effect and a black
+square (its depth) without it.
+
+**The transparent sort (Observed, ported; fork 09c9bd4).** WE's scene render (GH 0x1401b9b50), when (scene flags &
+0x1008) == 0x1000 (`transparentsorting` in a 3D scene):
+- first every object of the render order (0x158, or the dependency-hoisted 0x210) whose flags & 0x202 == 0x200, in
+  that order, with the renderer's pass byte (+0x1414) at 1;
+- then the translucent list (0x170) sorted by GH 0x1401b6660 (sortorder ascending, then the depth key descending;
+  −∞ for flag 0x400 = a full-screen or project layer), pass byte 2; then 0.
+- The flags (object +0x120, default 0x4201 from GH 0x14020b5d0; the list from GH 0x1401be650: flag 0x100 → 0x170):
+  an image keeps 0x200 when its material's blending is normal (0) or alphatocoverage (3) and it isn't passthrough,
+  else 0x100 and not 0x200 (GH 0x140225660; blending names GH 0x140182410); particles and text are 0x100 only; a model
+  keeps 0x200 and ORs 0xa00 per opaque material, 0x100 per other one (GH 0x14024b830), and its draw takes only the
+  meshes of the current pass (GH 0x140249320 reads +0x1414: 1 opaque materials, 2 the others, 0 all).
+- LWE sorted every run of world-placed objects by origin depth as one list (0082). In 3509243656 that put `sa3`
+  (translucent, its pulse effect's last draw writes no depth, origin far out) before the sky box model (opaque, its
+  origin at the centre, its mesh far behind everything), and the sky box covered it; its full-screen
+  post-processing layers stayed at their file position, before the texts, instead of drawing last.
+- Test: `transparent_sort_draws_opaque_first` (a translucent image without depth writes 30 units out, listed first,
+  and an opaque model whose origin is 10 units out but whose mesh is 60: white with transparentsorting, red without);
+  `transparent_sort_takes_sortorder` now sorts translucent layers (the key orders the translucent list only).
+
+**The 3D hit test (Observed, ported; fork 2bd528c).** WE's cursor hit test (GH 0x1401afbf0) walks the objects from
+the last (in a 3D scene a copy sorted by GH 0x1401b6660); a solid image or text layer is tested by GH 0x1401cb5d0:
+a full-screen one (0x304 & 2) returns the cursor in screen pixels; otherwise its quad in the world (the world
+matrix's x and y columns times ±w/2, ±h/2, plus the translation) against the cursor's ray with GH 0x1401cafc0, a
+ray–parallelogram test from the corner (−w/2, −h/2): a hit has u, v in 0 … 1 and t ≥ 0, local position (u · w,
+(1 − v) · h). LWE skipped world-placed layers. 3509243656's `OL` rings fade in (alpha script) while `shared.cret1`
+is 1, which the hidden solid layer around each planet sets on cursorEnter and clears on cursorLeave. Ours casts the
+ray through the frame's camera (near plane to far plane), as `input.cursorWorldPosition` does. Test
+`cursor_hits_world_layers`. Not done: the CursorEvent's `worldPosition` in 3D (ours stays scene pixels), WE's type-5
+branch (GH 0x1401b5600, unread), the parallax offset WE adds for flag 0x80 layers.
+
+**Also:** `cursor_world_position_casts_into_3d` (part 2's test) is in `patches/lwe/tests/host_api_test.cpp` now; it
+had been lost from the uncommitted worktree.
+
+**Left in 3509243656 (both WE runs agree, ours differs):** WE's glow around a star is wider (a soft halo ~50 px
+across at 1080 p where ours is ~25), with and without the `sa3` layers: the HDR bloom chain's spread at its
+iterations 6 / scatter 2 / feather 0.88 (the other HDR scenes use 8 / 1.619 / 0.1 and match), not read yet. The
+galaxy band's height at the first frames is the late pointer (part 2).
