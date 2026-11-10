@@ -29,10 +29,6 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       fill the report; owner-only rows go to "Waiting on owner".
 
 ## UI — owner's Todoist, clarified 2026-11-10
-- [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
-      when the settings grow" fix): focusing a card opens a sidebar holding everything the right-click menu has
-      (Settings, Open in file manager, Delete, Delete from source). Same in the Browse tab. If it morphs: `useMorph`'s
-      `open` must be the item's path, not the item object (web-ui.md — the 2026-11-10 "morph replays" bug).
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

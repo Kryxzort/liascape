@@ -2,10 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
-import { openMs } from "./morph";
-import { useMotion } from "./useMorph";
+import { scenePropsCache as cache } from "./scenePropsCache";
 
-// "Scene properties" in the card settings modal: a WE scene's own options (project.json general.properties —
+// "Scene properties" in the item sidebar (LibrarySide): a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
 // Same drag contract as the volume/speed sliders (web-ui.md): every change → the local value at once +
 // a throttled live preview (~90 ms, /library/scene-props/preview — nothing saved) + a debounced persist
@@ -25,20 +24,23 @@ function fmtNum(p: SceneProp, v: unknown) {
   return n.toFixed(Math.min(4, p.precision ?? 2)).replace(/\.?0+$/, "") || "0";
 }
 
-export function ScenePropsEditor({ path }: { path: string }) {
-  const [data, setData] = useState<ScenePropsResp | null>(null);
+// `onReady` fires once the first answer is in (or the read failed): the sidebar holds its body until then
+export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: () => void }) {
+  const [data, setDataRaw] = useState<ScenePropsResp | null>(() => cache.get(path) ?? null);
+  const setData = (r: ScenePropsResp) => { cache.set(path, r); setDataRaw(r); };
   const [local, setLocal] = useState<Record<string, unknown>>({});
   const prevRef = useRef<{ pending: Record<string, unknown>; last: number; tm: number | null }>({ pending: {}, last: 0, tm: null });
   const persistRef = useRef<Record<string, { tm: number; fn: () => void }>>({});
   const alive = useRef(true);
-  const morphs = useMotion();
+  const readyRef = useRef(onReady);
+  useEffect(() => { readyRef.current = onReady; });
 
   useEffect(() => {
-    alive.current = true; // a new item remounts (key={path} in the modal): its state starts empty
-    // defer past the open-morph (its re-render mid-flight jumps the panel — like the duration row)
-    const t = setTimeout(() => { api.sceneProps(path).then((r) => alive.current && setData(r)).catch(() => {}); }, openMs(morphs) + 40);
+    alive.current = true; // a new item remounts (key={path} in the sidebar): its state starts from the cache
+    if (cache.has(path)) readyRef.current?.();
+    api.sceneProps(path).then((r) => { if (alive.current) setData(r); }).catch(() => {}).finally(() => { if (alive.current) readyRef.current?.(); });
     return () => {
-      alive.current = false; clearTimeout(t);
+      alive.current = false;
       for (const d of Object.values(persistRef.current)) { clearTimeout(d.tm); d.fn(); }
       persistRef.current = {};
     };

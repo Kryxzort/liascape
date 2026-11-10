@@ -63,6 +63,30 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
 ## UI — owner's Todoist, clarified 2026-11-10
+- [x] **Wallpaper Engine-style sidebar** (owner 2026-11-10: "instead of a settings menu when clicking right click and
+  settings, it should open a sidebar when you focus a card and thats what has all the 4 options from the right click menu.
+  same for the browse tab") — done 2026-11-10 (spec `docs/superpowers/specs/2026-11-10-we-sidebar-design.md`, plan
+  `docs/superpowers/plans/2026-11-10-we-sidebar.md`; web-ui.md § "Item sidebar"). Checked against the history first: nothing
+  sidebar-like existed; the morph-replay fix (`1bccff26`, `open` = the item's path) is kept as the sidebar's identity rule.
+  - Library: focusing a card (a click — which still applies it —, Ctrl/Shift-click, the arrow keys, the
+    right-click menu's "Settings", the playlist bar's "Settings") opens a docked right-hand sidebar with everything the settings modal had (volume, speed,
+    scene properties, the loudness line, the whitelist, the trailer, Steam) plus the right-click menu's Open in file manager /
+    Delete / Delete from source, Play and the playlist toggle. The right-click menu stays; its Settings opens the sidebar
+    (it doesn't open on the right-click itself: the docked sidebar re-fits the grid and slid the card out from under the
+    menu — the matrix's `hoverPreview:rightClick:card` caught that first version).
+  - Browse: a click / right-click opens the Browse sidebar (the preview modal's picture, numbers, description, trailer, Steam,
+    Copy ID) with Download & Apply / Download, the download's progress + Cancel, and the In-library info (+ Show in Library,
+    Apply for the library copy). Downloading moved off the plain click: double-click, Enter, the card's hover download button.
+  - Any size: docked ≥ 900 px (the grid and the playlist bar end at it), an overlay with a scrim below; its own scroll.
+    Motion: slide in / cross-fade / slide out (transform + opacity), none with "Smooth window animations" off or reduced
+    motion. The card → modal morph is gone with the modals.
+  - Settings levels apply to its rows (Speed / loudness / Workshop ID at Standard; shown anyway when the item has its own value).
+  - **"Scene config pops in when the settings grow" — closed by this:** the body shows once, with the scene's properties in
+    it (cached per scene; ≤ 450 ms wait), measured at ~70 ms; nothing appears above what's shown.
+  - Tests: new `probe-sidebar.js` 16 cells — RED on the old UI 15/16 (the 16th, double-click downloads, held already: a click
+    downloaded then), GREEN 16/16; probe-layout `resize:side:*` 9 sizes RED 9/9 → GREEN; `probe-morph.js` retired; the matrix
+    cells that opened the modal open the sidebar (`m.openSide`), `appear:morphs` checks the sidebar's motion,
+    `appear:videoThumbs` expects the grid's previews to keep playing beside it. Screenshots before / after in the night notes.
 - [x] **Owner's Todoist batch, UI polish (2026-11-10)** — checked against the history first (the morph speed-ups
   `598a7274` / `8e1f4c4e` / `37270cff`, the toggles `c7f3a86a` / `b00a292f`, autoplay video thumbs `33d9888d`, right-click
   keeps the preview `0ddd97d0`, the travel / badge / loop-current batch `ce936170` stay as they are):

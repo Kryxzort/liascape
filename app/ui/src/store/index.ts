@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { captureSource, motionOn, type MorphSource } from "../components/morph";
 import {
   api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter,
 } from "../api/client";
@@ -51,10 +50,10 @@ interface State {
   // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   status: string; error: string | null;
-  // per-wallpaper settings modal (lifted so library cards AND the playlist bar can open it)
-  cardSettingsItem: LibraryItem | null; cardSettingsSiblings: LibraryItem[];
-  cardSettingsMorphId: string | null; // the surface the modal morphs FROM/back to (`data-morph-id`: lib-… or pl-…) — hidden while open
-  cardSettingsSource: MorphSource | null; // that surface's picture state at the click (components/morph.ts)
+  // the item sidebar (WE-style, 2026-11-10 — replaced the per-card settings modal): the focused Library item's path / Browse
+  // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
+  // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
+  libFocus: string | null; browseFocus: string | null;
   // PERF/FREEZE: false when the window is hidden OR unfocused (you fullscreened another app over it).
   // On X11 an occluded window often never fires visibilitychange, so Chromium keeps decoding all the
   // autoplay gifs for hours → ThreadPool decode backlog saturates → main thread stalls (futex_wait) →
@@ -94,7 +93,7 @@ interface State {
   setUnsub(u: State["unsub"]): void;
   setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
-  openCardSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeCardSettings(): void;
+  focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
   refreshPlayingStatus(): void;
@@ -155,7 +154,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
-  cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null, appActive: true,
+  libFocus: null, browseFocus: null, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -179,7 +178,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // ---- browse ----
-  setSource(i) { set({ activeSource: i }); LS.set("activeSource", i); get().reload(); },
+  setSource(i) { set({ activeSource: i, browseFocus: null }); LS.set("activeSource", i); get().reload(); },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
   // update the filter instantly (UI is snappy) but DEBOUNCE the network reload — rapid chip toggles
@@ -262,11 +261,11 @@ export const useStore = create<State>((set, get) => ({
   // reflect a change instantly without waiting for a full library reload.
   patchLibraryItem(path, partial) { set((s) => ({ libraryItems: s.libraryItems.map((i) => i.videoPath === path ? { ...i, ...partial } : i) })); },
   // API: `library-item-changed` — the backend changed an item itself (a volume keybind on a wallpaper with its
-  // own volume, `VolumeKeyTarget`): the grid's copy AND an open settings modal's (it re-inits from cardSettingsItem),
-  // else the modal shows — and its next slider save restores — the old value
+  // own volume, `VolumeKeyTarget`): the grid's copy — the sidebar reads it from there (else it would show — and its next
+  // slider save restore — the old value)
   itemChangedByBackend(path, partial) {
     const p = (i: LibraryItem) => (i.videoPath === path ? { ...i, ...partial } : i);
-    set((s) => ({ libraryItems: s.libraryItems.map(p), cardSettingsItem: s.cardSettingsItem && p(s.cardSettingsItem), cardSettingsSiblings: s.cardSettingsSiblings.map(p) }));
+    set((s) => ({ libraryItems: s.libraryItems.map(p) }));
   },
   async applyItem(path) {
     await api.apply(path); set({ playingPath: path });
@@ -387,11 +386,9 @@ export const useStore = create<State>((set, get) => ({
 
   openExternal(body) { api.open(body).catch(() => {}); },
 
-  openCardSettings(item, siblings, morphId) {
-    // "Morph animations" off: nothing to lift (hide) — the surface stays; the picture's aspect / video time are still read from it
-    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: motionOn(get().settings) ? morphId ?? null : null, cardSettingsSource: captureSource(morphId ?? null) });
-  },
-  closeCardSettings() { set({ cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null }); get().loadLibrary(); },
+  // closing re-reads the library (the modal did too: what its edits saved, whatever the optimistic patches missed)
+  focusLib(path) { const was = get().libFocus; set({ libFocus: path }); if (was && !path) get().loadLibrary().catch(() => {}); },
+  focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); },
 
   // ---- shared ----
   applyTheme(name) {

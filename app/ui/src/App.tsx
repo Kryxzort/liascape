@@ -7,19 +7,15 @@ import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
 import { PlaylistBar } from "./components/PlaylistBar";
-import { PreviewModal } from "./components/PreviewModal";
-import { CardSettingsModal } from "./components/CardSettingsModal";
-import { SETTINGS_MORPH, closeMs } from "./components/morph";
-import { useMotion } from "./components/useMorph";
-import type { Wallpaper } from "./api/client";
+import { useMotion } from "./components/motion";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { Select } from "./components/Select";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
-// small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The morph modals
-// (Preview/LibrarySettings) stay eager — a lazy Suspense gap would break the first card→modal morph.
+// small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
+// views import them).
 const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings })));
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
@@ -40,8 +36,17 @@ export default function App() {
   // the first switch, so the app's first page doesn't slide in.
   const [tabDir, setTabDir] = useState<"l" | "r" | null>(null);
   const setTab = (t: Tab) => { if (t !== tab) setTabDir(TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(tab) ? "r" : "l"); setTabNow(t); };
-  const [preview, setPreview] = useState<Wallpaper | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  // the item sidebar starts under the top bar, whose height changes as it wraps (any window size): --topbar-h on .app
+  const appRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tb = topbarRef.current, a = appRef.current;
+    if (!tb || !a) return;
+    const ro = new ResizeObserver(() => a.style.setProperty("--topbar-h", `${tb.getBoundingClientRect().bottom - a.getBoundingClientRect().top}px`));
+    ro.observe(tb);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)
@@ -90,8 +95,6 @@ export default function App() {
   }, []); // eslint-disable-line
   useEvents(onEvent, onReconnect);
 
-  // (Escape closes the preview from inside it — morphing back into its card, components/useMorph.ts)
-
   // FREEZE FIX: pause all gif animation when the window is hidden OR loses focus (you fullscreen
   // another app over it). On X11 an occluded window keeps reporting visible, so without this the
   // autoplay gifs decode forever in the background → ThreadPool backlog → eventual main-thread wedge.
@@ -107,16 +110,6 @@ export default function App() {
       (v) => useStore.setState({ appActive: v }));
     return () => { for (const ev of ["visibilitychange", "focus", "blur"] as const) removeEventListener(ev, sync, true); };
   }, []);
-
-  // PERF: while a modal is open, freeze the (invisible, behind the opaque backdrop) card gif overlays
-  // via CSS — pure-waste animation that janks the morph. Class toggle = no 300-card re-render.
-  // Keep frozen through the close-morph too (the slower settings one covers the preview's) or the gifs resume
-  // mid-morph-back → jank.
-  useEffect(() => {
-    if (s.cardSettingsItem || preview) { document.body.classList.add("modal-open"); return; }
-    const t = setTimeout(() => document.body.classList.remove("modal-open"), closeMs(motion, SETTINGS_MORPH) + 40);
-    return () => clearTimeout(t);
-  }, [s.cardSettingsItem, preview, motion]);
 
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
@@ -148,14 +141,12 @@ export default function App() {
   };
 
   const src = s.sources[s.activeSource];
-  const gVol = (s.settings?.volume as number) ?? 100;
-  const gSpd = (s.settings?.speed as number) ?? 1;
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
-    <div className="app" data-tab-dir={tabDir ?? undefined}>
+    <div className="app" ref={appRef} data-tab-dir={tabDir ?? undefined}>
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
       {(tab === "settings" || bgAllTabs) && <WallpaperBg />}
-      <div className="topbar">
+      <div className="topbar" ref={topbarRef}>
         <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(tab) } as React.CSSProperties}>
           <span className="tab-pill" aria-hidden />
           {TAB_ORDER.map((t) => (
@@ -217,19 +208,14 @@ export default function App() {
 
       {s.loading && <div className="loadbar" />}
 
-      {/* one LayoutGroup spanning the cards AND the modal → card↔preview morph works both ways */}
+      {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>
-        {tab === "browse" && <Browse onPreview={setPreview} previewUrl={preview?.pageUrl ?? null} />}
+        {tab === "browse" && <Browse onShowInLibrary={(p) => { s.focusLib(p); setTab("library"); }} />}
         {tab === "library" && <Library />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
 
         {tab === "library" && <PlaylistBar />}
 
-        <PreviewModal w={preview} source={s.activeSource} onClose={() => setPreview(null)}
-          onDownload={(w) => s.download(s.activeSource, w, true)} />
-        {/* lifted: library cards AND playlistBar items open it; it morphs out of / back into them (components/morph.ts) */}
-        <CardSettingsModal item={s.cardSettingsItem} siblings={s.cardSettingsSiblings} morphId={s.cardSettingsMorphId} source={s.cardSettingsSource}
-          globalVolume={gVol} globalSpeed={gSpd} onClose={s.closeCardSettings} />
       </LayoutGroup>
       <Suspense fallback={null}>
         <SteamModal />

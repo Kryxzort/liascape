@@ -4,7 +4,8 @@
 //                         overlaps another top-bar control, the top bar stays a band (≤ 35 % of the height), the search
 //                         field keeps a usable width, the page never scrolls sideways, the grid's cards fit its width.
 //                         Screenshot per cell: <LIASCAPE_OUT>/layout-<tab>-<w>x<h>.png
-//   resize:modal:<w>x<h>  the per-card settings modal fits the window (its panel inside, its actions reachable)
+//   resize:side:<w>x<h>   the item sidebar fits the window (inside it, close + actions reachable); ≥ 900 px it docks (the grid
+//                         ends at its left edge, no card under it), narrower it floats over the page with a scrim
 //   dock:hover[:off]      hovering a playlist bar item lifts it most (4 px) and its two neighbours a little (transform
 //                         only); "Smooth window animations" off → only the hovered one (2 px, as before), no neighbours,
 //                         no easing
@@ -128,21 +129,35 @@ app.whenReady().then(async () => {
           return v;
         });
       }
-      await cell(`resize:modal:${w}x${h}`, async () => {
+      await cell(`resize:side:${w}x${h}`, async () => {
         await tab("Library");
+        // focus the first card without applying it (its right-click menu's Settings)
         await page(`const c = document.querySelector(".card.lib .thumb-wrap"); const r = c.getBoundingClientRect();
           c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); await m.sleep(250);
-          m.byText(".lib-ctx button", "Settings (volume / speed)").click();`);
-        await sleep(1300);
-        const r = await page(`const p = document.querySelector(".modal-backdrop .modal"); if (!p) return null; const b = m.rect(p);
-          const close = m.byText(".modal-backdrop .modal-actions button", "Close"); close?.scrollIntoView({ block: "nearest" });
-          const cb = close ? m.rect(close) : null; return { b, cb };`);
+          m.byText(".lib-ctx button", "Settings")?.click();`);
+        await sleep(700);
+        const r = await page(`const p = document.querySelector(".side-panel"); if (!p) return null; const b = m.rect(p);
+          const close = p.querySelector("[data-side-close]"); const cb = close ? m.rect(close) : null;
+          const del = m.byText(".side-panel button", "Delete"); del?.scrollIntoView({ block: "nearest" }); const db = del ? m.rect(del) : null;
+          const sc = document.querySelector(".scroll"); const sb = sc ? m.rect(sc) : null;
+          const cards = [...document.querySelectorAll(".card.lib")].slice(0, 40).map((c) => c.getBoundingClientRect()).filter((x) => x.width > 0);
+          return { b, cb, db, sb, under: cards.filter((x) => x.right > b.x + 1 && x.bottom > b.y && x.top < b.b).length,
+            scrim: document.elementFromPoint(Math.max(2, b.x / 2), b.y + 20)?.classList.contains("side-scrim") ?? false,
+            doc: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, W: visualViewport?.width ?? innerWidth, H: visualViewport?.height ?? innerHeight };`);
         const v = [];
-        if (!r) return ["no modal"];
-        if (r.b.x < -0.5 || r.b.y < -0.5 || r.b.r > w + 0.5 || r.b.b > h + 0.5) v.push(`the modal (${r.b.x.toFixed(0)},${r.b.y.toFixed(0)} ${r.b.w.toFixed(0)}×${r.b.h.toFixed(0)}) doesn't fit the ${w}×${h} window`);
-        if (!r.cb || r.cb.b > h + 0.5 || r.cb.y < 0) v.push(`its Close button is out of reach`);
-        await shot(`layout-modal-${w}x${h}`);
-        await page(`m.byText(".modal-backdrop .modal-actions button", "Close")?.click();`); await sleep(900);
+        if (!r) return ["no sidebar"];
+        // against the page's own viewport: the window manager-less Xvfb window lands a few px off the asked size
+        const W = r.W, H = r.H;
+        if (r.b.x < -0.5 || r.b.y < -0.5 || r.b.r > W + 1 || r.b.b > H + 1) v.push(`the sidebar (${r.b.x.toFixed(1)},${r.b.y.toFixed(1)} ${r.b.w.toFixed(1)}×${r.b.h.toFixed(1)}) doesn't fit the ${W.toFixed(1)}×${H.toFixed(1)} window`);
+        if (!r.cb || r.cb.b > H + 0.5 || r.cb.y < 0 || r.cb.r > W + 0.5) v.push("its close button is out of reach");
+        if (!r.db || r.db.b > H + 0.5 || r.db.y < r.b.y - 0.5) v.push("its Delete button can't be scrolled into view");
+        if (r.doc) v.push("the page scrolls sideways with the sidebar open");
+        if (W >= 900) {
+          if (r.under) v.push(`docked, but ${r.under} cards sit under the sidebar`);
+          if (r.sb && r.sb.r > r.b.x + 1) v.push(`docked, but the grid runs under the sidebar (grid right ${r.sb.r.toFixed(0)} > ${r.b.x.toFixed(0)})`);
+        } else if (!r.scrim) v.push("narrow window: the page beside the overlay sidebar isn't under its scrim (a click there must close it)");
+        await shot(`layout-side-${w}x${h}`);
+        await page(`document.querySelector(".side-panel [data-side-close]")?.click();`); await sleep(600);
         return v;
       });
     }

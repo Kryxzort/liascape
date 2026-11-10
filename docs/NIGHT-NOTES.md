@@ -815,3 +815,18 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   windows (its lower part scrolls). Checked at nine sizes from 480×720 to 2400×520.
 - Found on the way: switching Browse sources while an online one was still loading could show the old source's list
   under the new tab. Fixed.
+## 2026-11-10 night — the Wallpaper Engine-style sidebar
+- **Library:** focusing a card now opens a sidebar on the right instead of the right-click → Settings window. It holds
+  everything that window had (volume, speed, scene properties, the loudness line, trailer, Steam) plus the right-click
+  menu's Open in file manager / Delete / Delete from source, a Play button and the playlist toggle. A click still plays
+  the wallpaper (like WE) and shows it in the sidebar; right-click → Settings shows it without playing it (as before, but
+  now in the sidebar); the playlist bar's "Settings" opens it too. Arrow keys move between cards, Enter plays,
+  Escape closes.
+- **Browse:** a click now shows the wallpaper in the sidebar (bigger preview, details, Download & Apply / Download) instead
+  of downloading at once. To download in one go: double-click, Enter, or the small download button that appears in the
+  card's corner on hover. Items you already have say "In your library" there, with Show in Library and Apply.
+- Wide windows: the sidebar sits beside the grid (the grid gets narrower); below 900 px it floats over the page.
+  "Smooth window animations" off / reduced motion: it just appears. The fly-out-of-the-card animation is gone with the
+  windows it belonged to — say if you want the card's picture to fly into the sidebar instead.
+- Settings levels apply to it: at Basic, Speed / the loudness line / the Workshop ID are hidden (unless that wallpaper has
+  its own speed). Scene properties no longer pop in: the sidebar shows them together with the rest.

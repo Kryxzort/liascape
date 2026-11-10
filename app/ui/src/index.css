@@ -131,12 +131,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   opacity: 0; transform: translateY(100%); transition: opacity .15s, transform .15s; box-shadow: var(--glow);
 }
 .thumb-wrap:hover .dl { opacity: 1; transform: translateY(0); }
-/* Browse hover download overlay — clean accent→dark scrim; the glyph does a leap → 360° flip →
-   squash-land loop (transform-only, composited). pointer-events:none → click hits .thumb-wrap. */
-/* hover download affordance = the download icon as a thin glowing accent OUTLINE (stroke only) */
-.dl-ico { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
-  opacity: 0; transition: opacity .2s ease; }
-.thumb-wrap:hover .dl-ico { opacity: 1; }
+/* Browse hover download button = the download icon as a thin glowing accent OUTLINE (stroke only), breathing; bottom-right
+   where the Library card's trash sits (a click on the card opens the sidebar since 2026-11-10 — it used to be a whole-card
+   overlay meaning "click downloads") */
+.dl-btn { position: absolute; right: 4px; bottom: 48px; width: 40px; height: 40px; padding: 0; border-radius: 8px;
+  display: grid; place-items: center; background: none; opacity: 0; transition: opacity .15s ease; }
+.thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
+.dl-btn:hover .dl-glyph { opacity: 1; }
 .dl-glyph { color: var(--accent); width: 88%; height: 88%; fill: none; opacity: .7; transform-origin: center;
   animation: dl-glow 2.6s cubic-bezier(.37, 0, .63, 1) infinite; }
 /* opacity + glow + a ~5px size breath, all synced */
@@ -205,6 +206,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* small cards: shrink + reposition the trash, toggle, title bar and chips so they're not oversized */
 @container (max-width: 150px) {
   .del { width: 24px; height: 24px; bottom: 30px; right: 4px; }
+  .dl-btn { width: 28px; height: 28px; bottom: 28px; right: 2px; }
   .del svg { width: 15px; height: 15px; }
   .pl-toggle { width: 16px; height: 16px; top: 4px; right: 4px; }
   .warn { bottom: 30px; left: 4px; }
@@ -240,12 +242,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* COOL: animated preview layer (gif/webp <img> or hover <video>) over the static thumb.
    transition (not keyframe) so the browse opacity-toggle fades without remount → no gif restart. */
 .thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
-/* PERF: while a modal is open, the grid sits behind an opaque backdrop — freeze its (invisible) gif
-   overlays so they stop decoding/compositing and don't jank the morph. Pure CSS = no re-render. */
-body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim { display: none; }
-/* COOL: the surface a settings modal morphed out of (card / playlistBar item) — lifted out until it morphs back */
-.thumb-wrap.lifted, .pl-item.lifted { visibility: hidden; }
 .card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
+/* the card the item sidebar shows (keyboard / click focus): a light ring off the card — WE's selected tile; distinct from the
+   selection's accent outline */
+.card.focused { outline: 2px solid color-mix(in srgb, var(--text) 85%, transparent); outline-offset: 3px; }
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
   display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
   border-radius: 12px; padding: 10px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); }
@@ -365,16 +365,12 @@ body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim {
    Layers (.layer) are absolute inset:0 so they fill this natural-aspect base box. */
 .modal-img { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; border-radius: 14px; max-height: 62vh; }
 /* YouTube trailer overlay — fills the stage, centers a 16:9 player (the video's own aspect) */
-.lib-stage { position: relative; width: 100%; } /* width:100% → morph target matches the card box (like .modal-stage) */
 .yt-stage { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: #000; border-radius: 14px; overflow: hidden; }
 .yt-frame { width: 100%; aspect-ratio: 16 / 9; max-height: 100%; border: 0; display: block; }
 .yt-close { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 8px;
   display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; transition: background .15s, box-shadow .2s; }
 .yt-close:hover { background: var(--danger); box-shadow: var(--glow-sm); }
-/* library Settings modal: image-led + narrower so the thumbnail (often square) fills the width
-   instead of floating centered with empty side gaps. Image shows at its OWN aspect, uncropped. */
-.modal.lib-settings { width: min(460px, 92vw); }
-/* the card settings modal's "Scene properties" (components/ScenePropsEditor.tsx) */
+/* the Library sidebar's "Scene properties" (components/ScenePropsEditor.tsx) */
 .scene-props { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--surface0); }
 .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .sp-title { font-size: 14px; font-weight: 600; }
@@ -384,39 +380,8 @@ body.modal-open .scroll .thumb.anim, body.modal-open .playlist-bar .thumb.anim {
 .sp-num { min-width: 3ch; text-align: right; }
 .sp-color { width: 38px; height: 24px; padding: 0; border: 1px solid var(--surface1); border-radius: 6px; background: none; cursor: pointer; }
 .sp-textin { width: 160px; }
-/* COOL + PERF: the card → modal morph (components/morph.ts, useMorph.ts) flies on transform only — the owner's
-   NVIDIA box composites the UI in software, where animating a box's size / radius / shadow / clip-path re-rasters
-   it every frame. The panel's chrome (background, border, shadow) is its ::before — its own layer, rastered once,
-   scaled card → panel; the panel itself draws nothing (its border stays, transparent, so the layout is the same). */
-.modal.morph-panel { position: relative; z-index: 1; background: none; border-color: transparent; box-shadow: none; }
-.modal.morph-panel::before { content: ""; position: absolute; inset: -1px; z-index: -1; pointer-events: none;
-  background: color-mix(in srgb, var(--bg-mantle) var(--tr), transparent);
-  border: 1px solid var(--surface1); border-radius: 16px; box-shadow: 0 24px 60px rgba(0,0,0,.6), var(--glow);
-  transform-origin: 0 0; will-change: transform; }
-/* the media: an outer crop box (rounded, clipped; scaled non-uniformly onto the crop) + [data-morph-pic], the
-   picture layers counter-scaled to one uniform scale. z-index: above the body, which stacks like a positioned
-   element while its opacity animates */
-.morph-media { position: relative; z-index: 2; margin: 0 auto; border-radius: 14px; overflow: hidden; transform-origin: 0 0;
-  will-change: transform; }
-/* its own background + will-change: Chromium won't run a transform animation on the compositor for an element
-   that paints nothing itself (compositeFailed "no visible change") — it ran on the main thread, a commit a frame */
-.morph-pic { position: absolute; inset: 0; transform-origin: 0 0; background: var(--bg-crust); will-change: transform; }
-.morph-pic > img, .morph-pic > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.morph-pic > .mm-full, .morph-pic > video.mm-anim { opacity: 0; transition: opacity .25s ease; }
-.morph-pic > .mm-full.on, .morph-pic > video.mm-anim.on { opacity: 1; }
-/* the body's clip (grows with the chrome) + the body counter-scaled inside it: clipped + layers only in flight */
-.morph-clip { position: relative; transform-origin: 0 0; }
-.morph-clip > .modal-body { transform-origin: 0 0; }
-.morph-panel[data-morph] .morph-clip { overflow: hidden; will-change: transform, opacity; }
-.morph-panel[data-morph] .morph-clip > .modal-body { will-change: transform; }
 .modal-img.natural { width: 100%; height: auto; aspect-ratio: auto; object-fit: contain; display: block; }
 .modal-body { padding: 18px 20px 20px; max-height: 62vh; overflow-y: auto; }
-/* a morph modal fits any window (owner 2026-11-10, tiled sizes): the panel is at most the window's height less a margin,
-   the picture keeps its size (mediaWidth caps it) and the body gives way and scrolls */
-.modal.morph-panel { display: flex; flex-direction: column; max-height: calc(100vh - 24px); }
-.modal.morph-panel > .modal-stage, .modal.morph-panel > .lib-stage { flex: none; }
-.modal.morph-panel > .morph-clip { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.modal.morph-panel > .morph-clip > .modal-body { min-height: 0; }
 .modal-body h2 { margin: 0 0 8px; font-size: 20px; }
 .meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--subtext); font-size: 13px; align-items: center; }
 .desc { color: var(--subtext); font-size: 13px; max-height: 120px; overflow: auto; margin: 12px 0; white-space: pre-wrap; }
@@ -749,12 +714,71 @@ input[type=range]:focus-visible { outline: none; }
 
 /* ---- "Smooth window animations" OFF or prefers-reduced-motion (<html class="no-motion">, App.tsx) ----
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
-   neighbours stay put. (The morphs read useMotion() in useMorph.) */
+   neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill { transition: none; }
+:root.no-motion .side-panel, :root.no-motion .side-content, :root.no-motion .side-scrim { animation: none; }
+:root.no-motion .side-body { transition: none; }
 :root.no-motion .app > .scroll { animation: none; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .pl-item:hover:not(.playing) { transform: translateY(-2px); }
 :root.no-motion .playlist-bar-row .pl-item:not(.playing):not(:hover):not(.dragging) { transform: none; } /* beats the :has() rules */
+
+/* ---- the item sidebar (WE-style, 2026-11-10 — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
+   An <aside> beside the page under the top bar (--topbar-h, measured by App), docked from 900 px (the grid and the playlist
+   bar end at its edge — the grid re-fits its columns), floating over the page below that with a scrim. It scrolls on its
+   own; the head (title + close) stays. Slide in / out + a content cross-fade: transform + opacity only. */
+.app { --side-w: clamp(300px, 26vw, 400px); --side-media-h: min(38vh, 320px); }
+.side-panel { position: absolute; top: var(--topbar-h, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border-left: 1px solid var(--surface1);
+  box-shadow: -12px 0 30px rgba(0,0,0,.35), var(--glow-sm);
+  animation: side-in .22s cubic-bezier(.25, .8, .25, 1); }
+.side-panel.closing { animation: side-out .16s ease-in forwards; pointer-events: none; }
+@keyframes side-in { from { transform: translateX(24px); opacity: 0; } }
+@keyframes side-out { to { transform: translateX(24px); opacity: 0; } }
+.side-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: flex-start; gap: 8px; padding: 12px 10px 10px 16px;
+  background: color-mix(in srgb, var(--bg-mantle) 94%, transparent); }
+.side-head-text { flex: 1; min-width: 0; }
+.side-head h2 { margin: 2px 0 0; font-size: 17px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.side-sub { display: block; margin-top: 3px; }
+.side-close { flex: none; }
+.side-content { padding: 0 16px 18px; animation: side-swap .14s ease-out; }
+@keyframes side-swap { from { opacity: 0; } }
+.side-stage { position: relative; display: flex; justify-content: center; margin: 2px 0 12px; }
+.side-media { position: relative; max-width: 100%; border-radius: 12px; overflow: hidden; background: var(--bg-crust);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.side-media > img, .side-media > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.side-media > .sm-full, .side-media > video.sm-anim { opacity: 0; transition: opacity .25s ease; }
+.side-media > .sm-full.on, .side-media > video.sm-anim.on { opacity: 1; }
+/* held invisible until its asynchronous sections are in (LibrarySide READY_CAP_MS): no section pops in under the user */
+.side-body { transition: opacity .14s ease-out; }
+.side-body.wait { opacity: 0; transition: none; }
+.side-state { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.side-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 3px 9px;
+  border-radius: 999px; background: var(--surface0); color: var(--subtext); }
+.side-chip.playing { background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); }
+.side-chip.inlib { background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
+.side-chip.danger { background: var(--danger-bg); color: var(--danger); }
+.side-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 12px; }
+.side-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.side-actions.primary > .btn { flex: 1 1 auto; justify-content: center; }
+.side-actions .btn:disabled { opacity: .6; cursor: default; transform: none; }
+.side-pl .pl-toggle-svg { width: 16px; height: 16px; color: var(--accent); }
+.side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
+.side-dl .dl-bar { flex: 1; width: auto; }
+.side-wl { display: flex; margin: 4px 0 8px; }
+.side-scrim { display: none; }
+@media (min-width: 900px) {
+  .app:has(> .side-panel:not(.closing)) > .scroll { margin-right: var(--side-w); }
+  .app:has(> .side-panel:not(.closing)) > .playlist-bar { right: var(--side-w); }
+}
+@media (max-width: 899.98px) {
+  .app { --side-w: min(360px, 100vw); }
+  .side-scrim { display: block; position: absolute; inset: var(--topbar-h, 56px) 0 0 0; z-index: 39; background: rgba(0,0,0,.4);
+    animation: side-swap .2s ease-out; }
+  .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
+}
 
 /* ---- narrow windows (owner 2026-11-10: "any tiled size") ---- */
 /* below 760 px the source pills join the top bar's own rows (each wraps on its own, the search fills a row's end)

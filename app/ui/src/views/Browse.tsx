@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Card } from "../components/Card";
 import { WorkshopFilterBar } from "../components/WorkshopFilterBar";
+import { SidePanel } from "../components/SidePanel";
+import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { BrowseSide } from "../components/BrowseSide";
+import { useMotion } from "../components/motion";
+import { gridCols, gridOwnsKey, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
@@ -21,6 +26,9 @@ export function libraryKeys(items: LibraryItem[]): Set<string> {
 }
 export const inLibrary = (keys: Set<string>, w: Wallpaper) =>
   (!!w.workshopId && keys.has("ws:" + w.workshopId)) || keys.has("url:" + w.pageUrl);
+// the library's copy of a Browse item (same rule as inLibrary) — the sidebar's Apply / Show in Library
+export const libraryCopy = (items: LibraryItem[], w: Wallpaper) =>
+  items.find((i) => (!!w.workshopId && i.workshopId === w.workshopId) || [i.pageUrl, i.sourceId, i.videoPath].includes(w.pageUrl)) ?? null;
 
 // WE-local browse sort menu (client-side over the single loaded page).
 function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
@@ -37,7 +45,7 @@ function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
   }
 }
 
-export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) => void; previewUrl: string | null }) {
+export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) => void }) {
   const wallpapers = useStore((s) => s.wallpapers);
   const loadMore = useStore((s) => s.loadMore);
   const playingPath = useStore((s) => s.playingPath);
@@ -49,6 +57,10 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
   const activeSource = useStore((s) => s.activeSource);
   const isWorkshop = useStore((s) => s.isWorkshop());
   const browseSort = useStore((s) => s.browseSort);
+  const browseFocus = useStore((s) => s.browseFocus);
+  const focusBrowse = useStore((s) => s.focusBrowse);
+  const applyItem = useStore((s) => s.applyItem);
+  const motion = useMotion();
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const sorted = useMemo(() => sortBrowse(wallpapers, browseSort), [wallpapers, browseSort]);
@@ -72,24 +84,41 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
     return () => io.disconnect();
   }, [loadMore, hasMore, wallpapers.length]);
 
-  // Ctrl+A select-all, Escape clears.
+  // the focused item (a search / sort / filter reload may drop it for a moment: the sidebar keeps the last copy it had)
+  const found = browseFocus ? sorted.find((w) => w.pageUrl === browseFocus) ?? null : null;
+  const [kept, setKept] = useState<Wallpaper | null>(null);
+  if (found && found !== kept) setKept(found); // follow during render
+  const focusedW = found ?? (kept && kept.pageUrl === browseFocus ? kept : null);
+  const dlApply = (w: Wallpaper) => { const lib = libraryCopy(libItems, w); if (lib) applyItem(lib.videoPath); else download(activeSource, w, true); };
+
+  // Ctrl+A select-all; the grid's keys (hooks/gridKeys.ts): arrows move the focus, Enter downloads & applies the focused
+  // card (its library copy if it has one), Escape closes the sidebar + clears the selection.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(sorted.map((w) => w.pageUrl))); }
-      else if (e.key === "Escape" && sel.size) setSel(new Set());
+      if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(sorted.map((w) => w.pageUrl))); return; }
+      if (!gridOwnsKey(e)) return;
+      if (e.key === "Escape") { if (browseFocus || sel.size) { focusBrowse(null); setSel(new Set()); } return; }
+      if (e.key === "Enter") { if (focusedW && downloads[focusedW.pageUrl] === undefined) { e.preventDefault(); dlApply(focusedW); } return; }
+      const ids = sorted.map((w) => w.pageUrl);
+      const j = stepIndex(browseFocus ? ids.indexOf(browseFocus) : -1, e.key, gridCols(scrollRef.current), ids.length);
+      if (j == null) return;
+      e.preventDefault();
+      focusBrowse(ids[j]); revealCard(`br-${ids[j]}`);
     };
     addEventListener("keydown", h);
     return () => removeEventListener("keydown", h);
   }); // eslint-disable-line
 
+  // a click focuses (the sidebar shows it) — it no longer downloads: double-click, Enter or a download button does
   const onCardClick = (e: React.MouseEvent, w: Wallpaper) => {
+    focusBrowse(w.pageUrl);
     if (e.shiftKey && anchor.current) {
       const ids = sorted.map((x) => x.pageUrl);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(w.pageUrl);
       if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(new Set(ids.slice(lo, hi + 1))); }
     } else if (e.ctrlKey || e.metaKey) {
       const n = new Set(sel); n.has(w.pageUrl) ? n.delete(w.pageUrl) : n.add(w.pageUrl); setSel(n); anchor.current = w.pageUrl;
-    } else { anchor.current = w.pageUrl; download(activeSource, w, true); } // plain left-click → download & apply
+    } else { anchor.current = w.pageUrl; if (sel.size) setSel(new Set()); }
   };
 
   const bulkDownload = () => {
@@ -103,21 +132,23 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
     if (sel.size && (t.classList.contains("scroll") || t.classList.contains("grid"))) setSel(new Set());
   };
 
+  const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
+  const sideW = shown.value && kept?.pageUrl === shown.value ? kept : null;
+
   return (
+    <>
     <div className="scroll" ref={scrollRef} onClick={onBgClick}>
       {isWorkshop && <WorkshopFilterBar />}
-      {/* no LayoutGroup: layoutId is global, and scoping it here breaks the card→PreviewModal morph
-          (the modal renders in App, outside this subtree). */}
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
-              selected={sel.has(w.pageUrl)} inLibrary={inLibrary(libKeys, w)}
+              selected={sel.has(w.pageUrl)} focused={w.pageUrl === browseFocus} inLibrary={inLibrary(libKeys, w)}
               progress={downloads[w.pageUrl]}
               autoPlayGifs={autoPlayGifs}
-              previewing={w.pageUrl === previewUrl}
               onCancel={(x) => cancelDownload(x.pageUrl)}
               onClick={onCardClick}
-              onContext={(x) => onPreview(x)} /* right-click → settings / more-info modal */
+              onDownload={dlApply}
+              onContext={(x) => focusBrowse(x.pageUrl)} /* right-click → the sidebar too */
               onMiddle={(x) => x.pageUrl.startsWith("http") /* middle-click → open source page/location */
                 ? openExternal({ url: x.pageUrl })
                 : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId })} />
@@ -141,5 +172,15 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
         </div>
       )}
     </div>
+    {sideW && (
+      <SidePanel kind="browse" id={sideW.pageUrl} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
+        <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}
+          onDownload={(apply) => download(activeSource, sideW, apply)} onCancel={() => cancelDownload(sideW.pageUrl)}
+          onApplyLib={(p) => applyItem(p)} onShowInLibrary={onShowInLibrary}
+          onOpenSource={() => sideW.pageUrl.startsWith("http") ? openExternal({ url: sideW.pageUrl })
+            : openExternal({ path: sideW.pageUrl, reveal: true, isScene: sideW.isScene, workshopId: sideW.workshopId })} />
+      </SidePanel>
+    )}
+    </>
   );
 }

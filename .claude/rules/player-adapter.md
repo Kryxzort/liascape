@@ -537,7 +537,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Create props** (`SourceProps`): `kind: "scene"`, `preview` = the item's preview image
   (`LibraryService.PreviewImageOf`: `preview.jpg|png|jpeg`, else `preview.gif|webp`) — what the player shows
   while no worker frame exists (Task 10), and `scene_props` (below).
-- **Scene user properties (the card settings modal's editor; library.md § "Scene properties").** `scene_props` is one more
+- **Scene user properties (the Library sidebar's editor; library.md § "Scene properties").** `scene_props` is one more
   per-source value of the resolver (`Desired`, scene paths only): `SceneProperties.PlayerMap(path, its index
   overrides, a drag's transient values)` — so a new source opens with them (`SourceProps`; the worker applies them
   after the load, before the first frame) and every Fresh pass (`/settings`, R81's reapply after a player restart)
@@ -563,7 +563,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Broken scenes (D6 + the owner's call).** The player logs `source.broken {id, path, scene_id, reason,
   signal|code, restarts, record}` once when a scene's worker crashed past its budget (3 restarts in 60 s;
   player-core.md § Scene worker → Errors). `LiascapePlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
-  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the card settings modal's "Scene
+  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the Library sidebar's "Scene
   crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
   (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
   flight) the rotation **advances at once**: a timer rotation (advance-on-end off) → `_timedRemainingMs = 0` + the

@@ -1,25 +1,21 @@
 import { memo, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
-import { useMotion } from "./useMorph";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
-// title overlay. Interactions: hover → download icon (click downloads + applies); left/right-click →
-// preview/more-info modal; middle-click → open the source page/location.
+// title overlay. Interactions (WE-style sidebar, 2026-11-10): click / right-click → focus (the Browse sidebar shows it:
+// the preview, the numbers, Download & Apply); double-click → download & apply; the hover download button (bottom-right,
+// where the Library card's trash sits) → download & apply; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
 export const Card = memo(function Card({
-  w, playing, selected, inLibrary, progress, autoPlayGifs, previewing, onClick, onContext, onMiddle, onCancel,
+  w, playing, selected, focused, inLibrary, progress, autoPlayGifs, onClick, onContext, onMiddle, onCancel, onDownload,
 }: {
-  w: Wallpaper; playing: boolean; selected: boolean; inLibrary: boolean; progress: number | undefined; autoPlayGifs: boolean;
-  previewing: boolean;
+  w: Wallpaper; playing: boolean; selected: boolean; focused: boolean; inLibrary: boolean; progress: number | undefined; autoPlayGifs: boolean;
   onClick: (e: React.MouseEvent, w: Wallpaper) => void;
-  onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void;
+  onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void; onDownload: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
-  const morphs = useMotion(); // off: the card isn't lifted out for the preview (nothing flies)
-  // COOL: the open preview morphed out of this card → it's lifted out (hidden) until the preview morphs
-  // back in (components/useMorph.ts); the preview plays the gif meanwhile
-  const active = !previewing && (hover || (autoPlayGifs && !!w.animatedThumbnailUrl));
+  const active = hover || (autoPlayGifs && !!w.animatedThumbnailUrl);
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
   useEffect(() => { if (active) setMounted(true); }, [active]);
@@ -32,14 +28,15 @@ export const Card = memo(function Card({
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
   const downloading = progress !== undefined;
   return (
-    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}`}>
-      <div className={`thumb-wrap${previewing && morphs ? " lifted" : ""}`} data-morph-id={`br-${w.pageUrl}`}
+    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}`}>
+      <div className="thumb-wrap" data-morph-id={`br-${w.pageUrl}`}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onClick={(e) => onClick(e, w)}
+        onDoubleClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey) onDownload(w); }}
         onContextMenu={(e) => { e.preventDefault(); onContext(w); }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // stop middle-click autoscroll
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onMiddle(w); } }}
-        title="Click: download & apply · Right-click: info · Middle-click: open source">
+        title="Click: details · Double-click: download & apply · Middle-click: open source">
         <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
         {gifSrc && mounted && (
           // backgroundImage = the static frame → the gif's loop-gap shows the thumbnail, not black flicker
@@ -49,15 +46,17 @@ export const Card = memo(function Card({
         {w.isScene && <span className="badge">SCENE</span>}
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library title="Already in your library"><Check size={11} strokeWidth={3} />In library</span>}
-        {/* hover affordance: the OUTLINE of a SOLID download glyph — we stroke a filled silhouette with
-            no fill, so it traces the shape's inner+outer contour (hollow). pointer-events:none. */}
+        {/* hover download button (bottom-right, the Library card's trash spot): the OUTLINE of a SOLID download glyph — we
+            stroke a filled silhouette with no fill, so it traces the shape's inner+outer contour (hollow), breathing + glowing.
+            It was a whole-card overlay while a click downloaded; a click now opens the sidebar. */}
         {!downloading && (
-          <div className="dl-ico" aria-hidden>
-            <svg className="dl-glyph" viewBox="0 0 24 24" fill="none">
+          <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
+            onDoubleClick={(e) => e.stopPropagation()}>
+            <svg className="dl-glyph" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path d="M19 9h-4V3H9v6H5l7 7 7-7z"
                 stroke="currentColor" strokeWidth="0.85" strokeLinejoin="round" strokeLinecap="round" />
             </svg>
-          </div>
+          </button>
         )}
         {downloading && (
           <div className="dl-overlay">

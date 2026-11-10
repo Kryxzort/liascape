@@ -27,7 +27,7 @@ LIB='itemVol|itemSpd|playlistBarVol|trash|sel[A-Z]|cardToggle|cardApply|race:ind
 PL='pl[A-Z]|playlistBar|race:playlist|shuffle|cardToggle'
 SET='set:|g[A-Z]|globalDrag|appear|noop|race:settings|cli:volume|autoMute|normalize'
 AUTOMUTE='autoMute|mute'
-MODAL='itemVol|itemSpd|playlistBarVol|selVol|previewDrag|globalDrag'
+MODAL='itemVol|itemSpd|playlistBarVol|selVol|previewDrag|globalDrag|cli:volume-up:modalOpen'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'
 # the scene cells (Phase 2 Task 12): every control on a scene, the scene switches, the GPU / VRAM settings
 SCENE='[sS]cene|vram|next:[sv]→[sv]'
@@ -59,20 +59,20 @@ for f in $FILES; do
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
-    # the scene properties editor: its parser/values/conditions and the modal section (cells sceneProp:*)
-    src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx) add "$SCENE|$MODAL" "$f" ;;
-    app/ui/src/components/CardSettingsModal.tsx) add "$MODAL|sceneProp" "$f" ;;
+    # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
+    src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
+    # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
+    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts)
+      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe)" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr|travel:|global:sceneTiming|playlist:sceneTiming" "$f" ;;
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx) add "$CARD|$KEYS|travel:" "$f" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover)" ;;
-    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-morph.js — the morph probe)" ;;
-    app/ui/src/components/morph.ts|app/ui/src/components/useMorph.ts|app/ui/src/components/PreviewModal.tsx)
-      echo "  $f → nothing here — run scripts/test-ui-matrix.sh --probe probe-morph.js (the morph probe)" >&2 ;;
-    app/shell/probe-morph.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
+    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx)
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe)" ;;
+    app/shell/probe-sidebar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must
