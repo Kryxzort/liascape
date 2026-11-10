@@ -11,7 +11,7 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
       test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
       recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
-- [ ] Soak mpvpaper 1.9 on the real desktop (item under "Legacy player" below): watch VRAM (`nvidia-smi`) over hours.
+- [x] Soak mpvpaper 1.9 on the real desktop: run 2026-11-11 01:42–04:42 (verdict under "Legacy player" below).
 - Start when the owner says they're going to sleep; report in the morning.
 
 ## Upstream PRs (owner 2026-11-10: in free time, once the project is done)
@@ -49,9 +49,16 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       nixpkgs` → `1d06008` (2026-11-03); the review is the commit message. Headless soak (a private headless sway,
       synthetic 1080p60 loop, 4 min each): 1.8 grows linearly ~19 MB/min (553 → 626 MB), 1.9 is flat (664 → 668 MB,
       no growth after 90 s).
-      - [ ] Soak 1.9 on the real desktop (Owner's `RestartMpvpaperEverySeconds` is **0**; 1.8 reached 1.66 GB RSS in
-            42 min). If flat there too, the restart daemon's default (600 s, `AppSettings.RestartMpvpaperEverySeconds`)
-            can go to 0.
+      - [x] Soak 1.9 on the real desktop (Owner's `RestartMpvpaperEverySeconds` is **0**; 1.8 reached 1.66 GB RSS in
+            42 min). Run 2026-11-11 01:42–04:42, 180 min, both monitors, workshop 2546567838 `Walk.mp4` (4K60,
+            nvdec, `no-audio loop`), sampled each minute (`.mpvpaper-wrapp` RSS + `nvidia-smi` per-process memory).
+            **GPU memory flat**: 1143 MB from minute 8 to 178 (1125 at the end), so the 1.8 GPU-side leak is fixed.
+            **RSS still grows**: 281 MB (0) → 243 (30) → 345 (80) → 413 (120) → 451 (140) → 489 (170) → 511 (180).
+            Growth is steady, in ~16–20 MB steps every ~10–20 min (~1.7 MB/min, ~100 MB/h), with no plateau by
+            minute 180; it is not the 8-min loop (steps don't line up with it). ~11× slower than 1.8 (~19 MB/min),
+            but not flat, so the restart default (600 s) **stays**. Open: find the RSS growth (mpv demuxer/hwdec
+            pool? try `demuxer-max-bytes`, `hwdec=no` A/B, a 1080p file) before relaxing it; a 1 h restart would
+            cap it at ~100 MB.
       - [ ] Electron 42 is EOL: nixpkgs marks `electron_42` insecure, so the flake lets electron 42.x only through
             (`allowInsecurePredicate`). Move the flake, `app/shell/package.json` (+ its `allowScripts` key) and the
             AppImage to a supported major together (43 in nixpkgs now); check the NVIDIA GPU-process crash-loop first.
