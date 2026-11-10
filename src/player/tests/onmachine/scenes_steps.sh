@@ -302,6 +302,12 @@ step_dropout() {
                 drop_cell SSreal "$hz" "$m" now "$half" "$kimi" S "$s1" S
             done
         fi
+        # The seam probe (design §11): no frame of this serve's switches composed with a hole.
+        local fr
+        fr=$(ctl probe '{"name":"frames"}')
+        check "seams $hz Hz (every switch above)" "$(jq -r '[.outputs[] | "\(.name) \(.totals.seam_frames // "n/a") frames"] | join(", ")' <<<"$fr")" \
+            "0 frames composed with a hole" "$(jq -r 'if ([.outputs[].totals.seam_frames // 1] | add) == 0 then 1 else 0 end' <<<"$fr")" \
+            "$(jq -c '[.outputs[] | {name, seam_frames: .totals.seam_frames, seam_runs: .totals.seam_runs, last_seam}]' <<<"$fr")"
         serve_down
     done
     # Summary per (hz, label, dir, method, align).

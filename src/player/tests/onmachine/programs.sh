@@ -3,7 +3,8 @@
 # Task 12): programs (rotation inside the player) and the cover Signal on the REAL outputs (DP-1 143.98 Hz,
 # DP-2 239.76 Hz). The report is docs/player/reports/phase3.md. Also reachable as `battery.sh programs <step…>`.
 #
-#   bash src/player/tests/onmachine/programs.sh dropout     # step 1: dropout across program switches (4 cells × 3 methods)
+#   bash src/player/tests/onmachine/programs.sh dropout     # step 1: dropout across program switches (5 cells × 3 methods;
+#                                                            `manual` = the user's next/prev/random, + next mid-effect)
 #   bash src/player/tests/onmachine/programs.sh appclosed   # step 2: the app closed, a 1 h rotation + CLI keybinds
 #   bash src/player/tests/onmachine/programs.sh crash       # step 3: 5 × SIGSEGV mid-rotation + restore × start mode
 #   bash src/player/tests/onmachine/programs.sh cover       # step 4: pause when covered (kitty, mpv), one output, default
@@ -19,6 +20,9 @@
 # default src/backend/bin/Debug/net10.0/liascape-backend.dll), --switches N (dropout, default 50 per cell),
 # --cells LIST / --methods LIST (dropout subsets, comma-separated), --app-minutes N (default 60),
 # --soak-minutes N (default 120). DOTNET=<path> if `dotnet` is not on PATH (it is inside `nix develop`).
+# --headless WxH@HZ[,…] (bare-serve steps only: dropout, soak): the player draws on HEADLESS outputs instead of the
+# real session (no Wayland, no Hyprland IPC; the private PipeWire as always) — the switch-over checklist's runs that
+# need no owner (docs/player/reports/switch-over.md), e.g. `--headless 1920x1080@144,1920x1080@240`.
 #
 # Each step writes <results>/<step>.json ({checks: [{name, value, bound, pass}], notes, pass}) and a log;
 # every number is computed from the player's own event file (`<state>/liascape/liascape-player/events*.jsonl`)
@@ -61,10 +65,11 @@ RESULTS=
 BINDIR=$CRATE/target/release
 DLL=$REPO/src/backend/bin/Debug/net10.0/liascape-backend.dll
 SWITCHES=50
-CELLS=timer,onend,onendmax,scenes
+CELLS=timer,onend,onendmax,scenes,manual
 METHODS=full-live,reveal,frozen
 APP_MIN=60
 SOAK_MIN=120
+HEADLESS=
 SUSPEND_S=60
 VT_S=15
 while (($#)); do
@@ -79,11 +84,15 @@ while (($#)); do
         --methods) METHODS=$2; shift ;;
         --app-minutes) APP_MIN=$2; shift ;;
         --soak-minutes) SOAK_MIN=$2; shift ;;
+        --headless) HEADLESS=$2; shift ;;
         -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
     shift
 done
+if [[ -n $HEADLESS ]]; then
+    for s in "${STEPS[@]}"; do [[ $s == dropout || $s == soak ]] || { echo "--headless: only the dropout and soak steps run headless (not $s)" >&2; exit 2; }; done
+fi
 ((${#STEPS[@]})) || { echo "name a step (dropout|appclosed|crash|cover|nomonitor|soak|suspend|vt|sceneaway|all)" >&2; exit 2; }
 BIN=$BINDIR/liascape-player
 WBIN=$BINDIR/liascape-scene-worker
@@ -202,20 +211,26 @@ wait_socket() { # ≤ $1 s for the player socket + hello
     done
     return 1
 }
-serve_up() { # a bare `serve` on the real session; extra args go to serve
+serve_up() { # a bare `serve` on the real session (or headless outputs: --headless); extra args go to serve
     serve_down
-    others_mapped && die "another liascape-player surface is mapped (quit the owner's player, stop liascape-watch)"
+    local session=(WAYLAND_DISPLAY="$WL" HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG") hl=()
+    if [[ -n $HEADLESS ]]; then
+        session=(-u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE)
+        hl=(--headless --outputs "$HEADLESS")
+    else
+        others_mapped && die "another liascape-player surface is mapped (quit the owner's player, stop liascape-watch)"
+    fi
     SERVE_N=$((${SERVE_N:-0} + 1))
     RT=$SCRATCH/run$SERVE_N
     PSTATE=$SCRATCH/state$SERVE_N
     PCACHE=$SCRATCH/cache
-    link_hypr "$RT"
+    if [[ -n $HEADLESS ]]; then mkdir -p -m 700 "$RT"; else link_hypr "$RT"; fi
     mkdir -p "$PSTATE" "$PCACHE"
     pw_start
-    prlimit --core=1:1 env -u LD_LIBRARY_PATH -u PULSE_SERVER WAYLAND_DISPLAY="$WL" HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" \
+    prlimit --core=1:1 env -u LD_LIBRARY_PATH -u PULSE_SERVER "${session[@]}" \
         XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$PCACHE" PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" \
         LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
-        "$BIN" serve --log-level info "$@" >>"$RESULTS/serve-$STEP.log" 2>&1 &
+        "$BIN" serve --log-level info "${hl[@]}" "$@" >>"$RESULTS/serve-$STEP.log" 2>&1 &
     SERVE_PID=$!
     wait_socket 15 || die "serve never answered (log $RESULTS/serve-$STEP.log)"
     PLAYER_PID=$(ctl hello | jq -r .pid)

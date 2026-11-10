@@ -88,6 +88,7 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
         "$(pyb "$(jq -r .scheduled <<<"$c") - $(jq -r .done <<<"$c") - $(jq -r '.outcomes["cancelled:superseded"] // 0' <<<"$c") <= 1")"
     check "$n drops" "$(jq -r .drops <<<"$c")" "0" "$(pyb "$(jq -r .drops <<<"$c") == 0")"
     check "$n micro_gaps" "$(jq -r .micro_gaps <<<"$c")" "0" "$(pyb "$(jq -r .micro_gaps <<<"$c") == 0")"
+    check "$n seams" "$(jq -r '"\(.seams) runs, \(.seam_frames) frames"' <<<"$c")" "0" "$(pyb "$(jq -r .seams <<<"$c") == 0")"
     note "$n: analysed $(jq -r .analysed <<<"$c")/$(jq -r .done <<<"$c"), skipped $(jq -c .skipped <<<"$c"), dirs $(jq -c .dirs <<<"$c"), reasons $(jq -c .reasons <<<"$c"), unmeasured $(jq -r .unmeasured <<<"$c"), fit_insufficient $(jq -r .fit_insufficient <<<"$c")"
     if [[ $method == full-live && $(jq -r .align_end_n <<<"$c") -gt 0 ]]; then
         local m
@@ -98,6 +99,39 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
         check "$n handoff vs the end of A's last frame" "$lo … $hi ms (n $(jq -r .handoff_vs_a_ended_n <<<"$c"))" \
             "$HANDOFF_CUT_MS … +$HANDOFF_HOLD_MS ms (never cut, held ≤ one output frame)" "$(pyb "$lo >= $HANDOFF_CUT_MS and $hi <= $HANDOFF_HOLD_MS")"
     fi
+}
+# The user's own switches (switch-over checklist, design §10 "manual next/prev, random, next pressed mid-transition"):
+# a program that never switches by itself (a 1 h timer) driven by program.next / prev / random, and every 5th switch a
+# second next 0.4 s into the effect (it supersedes the first mid-transition). Same detector + seam checks as a cell.
+dropout_manual_cell() { # <method> <items json>
+    local method=$1 items=$2 t0 t1 c i act acts=(program.next program.prev program.random program.next)
+    serve_ready_for_cell
+    t0=$(now)
+    prog_create "$(jq -nc --argjson it "$items" --arg m "$method" --argjson t "{$FADE}" \
+        '{items:$it, mode:"timer", interval_ms:3600000, transition:($t + {method:$m})}')"
+    sleep 4
+    say "cell manual × $method: $SWITCHES user switches (~$((SWITCHES * 4)) s)"
+    for ((i = 0; i < SWITCHES; i++)); do
+        act=${acts[$((i % 4))]}
+        ctl "$act" '{"id":"prog:main"}' >/dev/null || note "manual × $method: $act failed at $i"
+        if ((i % 5 == 4)); then
+            sleep 0.4
+            ctl program.next '{"id":"prog:main"}' >/dev/null || note "manual × $method: the mid-effect next failed at $i"
+        fi
+        sleep 3.6
+    done
+    t1=$(now)
+    ctl destroy '{"id":"prog:main"}' >/dev/null
+    sleep 6
+    c=$(report dropout "$(evdir)" "$t0" "$t1" manual "$method" "$RESULTS/dropout-records.jsonl")
+    echo "$c" >>"$RESULTS/dropout-cells.jsonl"
+    local n="manual × $method"
+    check "$n commits" "$(jq -r .commits <<<"$c")" "≥ $SWITCHES" "$(pyb "$(jq -r .commits <<<"$c") >= $SWITCHES")" "$c"
+    check "$n none failed" "$(jq -c .outcomes <<<"$c")" "no failed / none" "$(jq -r 'if ((.outcomes.failed // 0) + (.outcomes.none // 0)) <= 1 then 1 else 0 end' <<<"$c")"
+    check "$n drops" "$(jq -r .drops <<<"$c")" "0" "$(pyb "$(jq -r .drops <<<"$c") == 0")"
+    check "$n micro_gaps" "$(jq -r .micro_gaps <<<"$c")" "0" "$(pyb "$(jq -r .micro_gaps <<<"$c") == 0")"
+    check "$n seams" "$(jq -r '"\(.seams) runs, \(.seam_frames) frames"' <<<"$c")" "0" "$(pyb "$(jq -r .seams <<<"$c") == 0")"
+    note "$n: analysed $(jq -r .analysed <<<"$c")/$(jq -r .done <<<"$c"), skipped $(jq -c .skipped <<<"$c"), dirs $(jq -c .dirs <<<"$c"), reasons $(jq -c .reasons <<<"$c"), unmeasured $(jq -r .unmeasured <<<"$c"), fit_insufficient $(jq -r .fit_insufficient <<<"$c")"
 }
 serve_ready_for_cell() { kill -0 "${SERVE_PID:-0}" 2>/dev/null || serve_up ${P3_SERVE_ARGS---debug}; }
 step_dropout() {
@@ -122,6 +156,7 @@ step_dropout() {
                 timer) dropout_cell timer "$method" "{\"items\":$(items_json "$t1" "$t2" "$t3"),\"mode\":\"timer\",\"interval_ms\":6000}" 6 ;;
                 onend) dropout_cell onend "$method" "{\"items\":$(items_json "$e1" "$e2" "$e3"),\"mode\":\"on_end\",\"interval_ms\":0}" 4 ;;
                 onendmax) dropout_cell onendmax "$method" "{\"items\":$(items_json "$m1" "$m2" "$m3"),\"mode\":\"on_end\",\"interval_ms\":0,\"max_ms\":3000}" 4 ;;
+                manual) dropout_manual_cell "$method" "[$(scene_item "$SC_KIMI"),{\"path\":\"$t1\"},$(scene_item "$SC_EMILIA"),{\"path\":\"$t2\"},{\"path\":\"$(mk_png manual-still 'color=c=teal:size=1920x1080')\"},{\"path\":\"$t3\"}]" ;;
                 scenes) dropout_cell scenes "$method" "{\"items\":[$(scene_item "$SC_KIMI"),{\"path\":\"$e1\"},$(scene_item "$SC_EMILIA"),{\"path\":\"$e2\"}],\"mode\":\"on_end\",\"interval_ms\":0,\"separate_scenes\":true,\"scenes_after_ms\":6000}" 6 ;;
                 *) die "unknown cell $cell" ;;
             esac
@@ -487,6 +522,9 @@ EOF
     want=$(python3 -c "print(int(($t1-$t0)//31))")
     check "the rotation kept going" "$(jq -r .currents <<<"$s") commits, $(jq -r .failed <<<"$s") failed, $(jq -r .program_failed <<<"$s") program.failed, $(jq -r .player_started <<<"$s") restarts" "≥ $want, 0, 0, 0" \
         "$(pyb "$(jq -r .currents <<<"$s") >= $want and $(jq -r '.failed + .program_failed + .player_started' <<<"$s") == 0")"
+    local seams
+    seams=$(report events "$(evdir)" "$t0" "$t1" output.seam | jq '[.[] | select(.kind == "output.seam")] | length')
+    check "seams (frames composed with a hole)" "$seams runs" "0" "$(pyb "${seams:-1} == 0")"
     serve_down
     step_end
 }

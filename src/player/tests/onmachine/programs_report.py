@@ -171,8 +171,13 @@ def dropout(d, t0, t1, cell, method, recs_path):
     # F3: `source.ended` fires as A's last frame is presented; the handoff is due one clip frame
     # (30 fps) after it — this is the distance from that due instant (signed: + = held, − = cut).
     dl = [r["handoff_vs_a_ended_ms"] - 1000.0 / 30.0 for r in done if r["handoff_vs_a_ended_ms"] is not None]
+    # The seam probe (design §11): runs of composed frames with a hole, any output, in the window.
+    seams = [e for e in win if e["kind"] == "output.seam"]
+    seam_frames = sum(e.get("frames", 0) for e in ev if e["kind"] == "output.seam_end" and e["_w"] <= t1 + 1)
     return {
         "cell": cell, "method": method, "scheduled": len(recs), "done": len(done), "commits": len(cur),
+        "seams": len(seams), "seam_frames": seam_frames,
+        "seam_missing": sorted({str(e.get("missing")) for e in seams})[:5],
         "reasons": hist([e.get("reason") for e in cur]),
         "outcomes": hist([r["outcome"] for r in recs]),
         "dirs": hist([r["dir"] for r in done]),

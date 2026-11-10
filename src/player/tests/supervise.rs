@@ -433,10 +433,14 @@ fn crash_restores() {
     assert_eq!(h2["restart"]["signal"], json!(libc::SIGSEGV), "{h2}");
 
     let mut c = sup.client();
-    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
-        sources(st)
-            .iter()
-            .any(|(_, n)| n["path"] == s(&clip) && n["ready"] == json!(true))
+    // The position the restore started at: the first `time_pos` the restored source reports
+    // (it can play on for seconds before `ready` under load — a 4 s clip would wrap past it,
+    // so the position is read here, not at `ready`). Load-proof waits (switch-over checklist,
+    // 2026-11-05): the restart's LATENCY is the budget asserted above; these only converge.
+    let st = wait_state(&mut c, Duration::from_secs(20), |st| {
+        sources(st).iter().any(|(_, n)| {
+            n["path"] == s(&clip) && n["time_pos"].as_f64().is_some_and(|t| t > 0.0)
+        })
     });
     let (nid, node) = sources(&st)
         .into_iter()
@@ -445,6 +449,10 @@ fn crash_restores() {
     let pos = node["time_pos"].as_f64().unwrap();
     println!("restored {nid}: time_pos {pos:.3} s (saved position ≥ 2.0)");
     assert!(pos >= 2.0, "position {pos} < 2.0: {node}");
+    let st = wait_state(&mut c, Duration::from_secs(20), |st| {
+        st["graph"][&nid]["ready"] == json!(true)
+    });
+    let node = st["graph"][&nid].clone();
     assert_eq!(node["paused"], json!(false));
     assert_eq!(node["loop"], json!(true));
     for conn in ["VIRTUAL-1", "VIRTUAL-2"] {

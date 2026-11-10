@@ -267,9 +267,16 @@ fn killed_worker_keeps_last_frame() {
 /// worker's frames' acquire fences don't signal, so the compositor latches none, releases
 /// none, and soon holds all three slots; the worker then can't render the next tick and waits
 /// for a `Release`. That is the GPU, not a hung worker: it must not be killed. Synthetic
-/// `gpu_stall: [500, 1500]` = for 1.5 s from 0.5 s after the start every frame's fence is held
-/// back (a stand-in signalled at the end) — 5 × the 300 ms hang timeout. After it the
-/// frames flow again from the same worker, never restarted.
+/// `gpu_stall: [500, 2000]` = for 2 s from 0.5 s after the worker's start every frame's fence
+/// is held back (a stand-in signalled at the end) — > 3 × the 600 ms hang timeout. After it
+/// the frames flow again from the same worker, never restarted.
+///
+/// Load-proof (2026-11-05, switch-over checklist): the latch series is recorded from the
+/// open, not from "10 frames latched" — under a loaded suite the worker's start-up took long
+/// enough that the stall (timed from the worker's start) had begun before the old window
+/// opened, so part of its gap fell outside the measurement. The gap is any ≥ 1.6 s pause
+/// after a first latch (never the start-up), and the timeout is 600 ms (was 300: a CPU-starved
+/// normal frame could pass for a hang).
 #[test]
 fn gpu_stall_that_starves_the_worker_is_not_a_hang() {
     let _g = gpu_lock();
@@ -277,43 +284,49 @@ fn gpu_stall_that_starves_the_worker_is_not_a_hang() {
         return;
     };
     let sp = SyntheticSpec {
-        gpu_stall: Some([500, 1500]),
+        gpu_stall: Some([500, 2000]),
         ..spec(Pattern::FrameIndex)
     };
     let mut src = open_with(&gfx, "gpu-stall", &sp, |o| {
-        o.hang_timeout = Duration::from_millis(300);
+        o.hang_timeout = Duration::from_millis(600);
     });
-    assert!(run(&gfx, &mut src, Duration::from_secs(10), |s, _| s
-        .stats()
-        .latched
-        >= 10));
-    let pid = src.pid().expect("a worker");
-    // (time, latched) at every change, over the stall and 1.5 s past it.
+    // (time, latched) at every change, from the open until frames flowed ≥ 1 s past the stall.
     let t0 = Instant::now();
     let mut series = vec![(Duration::ZERO, src.stats().latched)];
-    run(&gfx, &mut src, Duration::from_millis(3500), |s, _| {
+    let stall_gap = |series: &[(Duration, u64)]| {
+        series
+            .windows(2)
+            .filter(|w| w[0].1 > 0) // a pause after the first latch, never the start-up
+            .map(|w| (w[1].0 - w[0].0, w[1].0, w[1].1))
+            .max_by_key(|g| g.0)
+    };
+    let mut first_pid = None;
+    run(&gfx, &mut src, Duration::from_secs(20), |s, _| {
         let l = s.stats().latched;
+        if l > 0 && first_pid.is_none() {
+            first_pid = s.pid();
+        }
         if series.last().is_some_and(|x| x.1 != l) {
             series.push((t0.elapsed(), l));
         }
-        false
+        stall_gap(&series).is_some_and(|(gap, at, l0)| {
+            gap >= Duration::from_millis(1600)
+                && t0.elapsed() >= at + Duration::from_secs(1)
+                && l >= l0 + 30
+        })
     });
-    let gap = series
-        .windows(2)
-        .map(|w| w[1].0 - w[0].0)
-        .max()
-        .unwrap_or_default();
+    let pid = first_pid.expect("a worker that latched a frame");
     let st = src.stats();
-    println!("longest latch gap {gap:?}, stats {st:?}");
+    let (gap, at, l0) = stall_gap(&series).unwrap_or_default();
+    println!("longest latch gap {gap:?} ending at {at:?}, stats {st:?}");
     assert_eq!(st.restarts, 0, "no restart: the worker was starved, not hung ({st:?})");
     assert!(
-        gap >= Duration::from_millis(1200),
+        gap >= Duration::from_millis(1600),
         "the stall held every frame back (longest gap between latches {gap:?})"
     );
     assert_eq!(src.pid(), Some(pid), "the same worker");
-    let last = series.last().unwrap();
     assert!(
-        last.0 >= Duration::from_millis(2500) && st.latched >= series[0].1 + 100,
+        st.latched >= l0 + 30,
         "frames flowed again after the stall: {:?}",
         &series[series.len().saturating_sub(3)..]
     );

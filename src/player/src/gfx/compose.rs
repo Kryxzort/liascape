@@ -441,6 +441,9 @@ struct Intermediates {
 pub struct Composer {
     blit: BlitProgram,
     intermediates: HashMap<(u32, u32), Intermediates>,
+    /// The seam probe's input: what the last [`Composer::compose_output`] call had to draw
+    /// as transparent although the layer pointed at it (see [`Composer::last_missing`]).
+    missing: Vec<String>,
 }
 
 impl Composer {
@@ -449,6 +452,7 @@ impl Composer {
         Ok(Composer {
             blit: BlitProgram::new(gfx)?,
             intermediates: HashMap::new(),
+            missing: Vec::new(),
         })
     }
 
@@ -466,6 +470,19 @@ impl Composer {
                 result: (result, result_fbo),
             }
         });
+    }
+
+    /// **The seam probe's input** (§11 "zero visible seams by the seam probe"): the nodes the
+    /// last [`compose_output`](Self::compose_output) call drew as transparent although the
+    /// output's visible main layer (`opacity > 0`) pointed at them — a plain source or
+    /// either side of an effect with no texture (R19), or a dangling `content`. Empty for
+    /// an empty `content` (nothing asked for) and for every frame where each referenced
+    /// source had a texture. By the recipes a shown source always has one (B is shown only
+    /// once it's `Ready`; a crashed scene holds its frame), so anything here is a frame the
+    /// viewer saw a hole in — counted per output by the runtime (`frames` probe
+    /// `totals.seam_frames`, event `output.seam`).
+    pub fn last_missing(&self) -> &[String] {
+        &self.missing
     }
 
     /// Draws `output_id`'s main layer (`lay:<connector>:main`) into `target` (cleared to
@@ -517,6 +534,7 @@ impl Composer {
         textures: &dyn Fn(&str) -> Option<&'t Tex>,
         target: &Fbo,
     ) -> Result<(), String> {
+        self.missing.clear();
         let (ow, oh) = output_dims(graph, output_id)?;
         clear_transparent(gfx, target.id, ow, oh);
 
@@ -548,7 +566,13 @@ impl Composer {
                 target,
                 textures,
             ),
-            Err(e) if e.code == "no_such_node" => Ok(()), // dangling content: stays transparent
+            Err(e) if e.code == "no_such_node" => {
+                // Dangling content: stays transparent — a seam if the layer is visible.
+                if opacity > 0.0 {
+                    self.missing.push(content);
+                }
+                Ok(())
+            }
             Err(e) if e.code == "no_such_prop" => {
                 // A Source (or at least: something with no `effect_id` — the schema gives
                 // `Layer.content` no other legal kind to point at). `tex` is a raw
@@ -558,6 +582,8 @@ impl Composer {
                 if let Some(tex) = textures(&content) {
                     let uv = fit_rect((tex.w, tex.h), (ow, oh), fit, viewport);
                     draw_rect(gfx, &self.blit, tex, uv, opacity, target.id, true);
+                } else if opacity > 0.0 {
+                    self.missing.push(content);
                 }
                 Ok(())
             }
@@ -595,10 +621,18 @@ impl Composer {
             (inter.from.1.id, inter.to.1.id, inter.result.1.id)
         };
 
+        let (from_tex, to_tex) = (textures(&from_id), textures(&to_id));
+        if opacity > 0.0 {
+            for (id, tex) in [(&from_id, from_tex.is_some()), (&to_id, to_tex.is_some())] {
+                if !tex && !id.is_empty() {
+                    self.missing.push(id.clone());
+                }
+            }
+        }
         render_side(
             gfx,
             &self.blit,
-            textures(&from_id),
+            from_tex,
             fit,
             viewport,
             (ow, oh),
@@ -607,7 +641,7 @@ impl Composer {
         render_side(
             gfx,
             &self.blit,
-            textures(&to_id),
+            to_tex,
             fit,
             viewport,
             (ow, oh),

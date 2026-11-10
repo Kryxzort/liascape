@@ -385,6 +385,73 @@ fn missing_source_texture_is_transparent() {
     );
 }
 
+/// The seam probe's input (`Composer::last_missing`, design §11): every node a visible
+/// main layer pointed at but drew transparent — a plain source or either effect side with
+/// no texture, a dangling `content` — and nothing for a whole frame, an empty layer or an
+/// invisible (`opacity 0`) one. Reset on every call.
+#[test]
+fn last_missing_names_every_hole_in_a_visible_layer() {
+    let Some((gfx, mut cat)) = setup() else {
+        return;
+    };
+    let mut composer = Composer::new(&gfx).expect("Composer::new");
+    let mut g = Graph::new();
+    make_output(&mut g, "out:DP-1", 32, 32);
+    make_source(&mut g, "src1");
+    make_source(&mut g, "src2");
+    let target_tex = gfx.tex(32, 32);
+    let target_fbo = gfx.fbo(&target_tex);
+    let a = gfx.tex(32, 32);
+    clear_to(&gfx, &a, [1.0, 0.0, 0.0, 1.0]);
+    let mut registry: HashMap<String, Tex> = HashMap::new();
+    registry.insert("src1".to_string(), a);
+    let textures = |id: &str| registry.get(id);
+    let mut compose = |g: &Graph, composer: &mut Composer| {
+        composer
+            .compose_output(&gfx, g, &mut cat, "out:DP-1", &textures, &target_fbo)
+            .expect("compose_output");
+        composer.last_missing().to_vec()
+    };
+
+    // Empty content: nothing asked for, no seam.
+    assert!(compose(&g, &mut composer).is_empty());
+    // A source with a texture: whole.
+    g.set(&p("lay:DP-1:main.content"), PropValue::Str("src1".into()))
+        .unwrap();
+    assert!(compose(&g, &mut composer).is_empty());
+    // A source without one: a hole.
+    g.set(&p("lay:DP-1:main.content"), PropValue::Str("src2".into()))
+        .unwrap();
+    assert_eq!(compose(&g, &mut composer), vec!["src2".to_string()]);
+    // …unless the layer itself is invisible.
+    g.set(&p("lay:DP-1:main.opacity"), PropValue::F64(0.0))
+        .unwrap();
+    assert!(compose(&g, &mut composer).is_empty());
+    g.set(&p("lay:DP-1:main.opacity"), PropValue::F64(1.0))
+        .unwrap();
+    // An effect whose `to` has no texture: that side.
+    let mut fx_props = Map::new();
+    fx_props.insert("effect_id".to_string(), json!("fade"));
+    fx_props.insert("from".to_string(), json!("src1"));
+    fx_props.insert("to".to_string(), json!("src2"));
+    fx_props.insert("progress".to_string(), json!(0.5));
+    let fx = g
+        .create(NodeKind::Effect, None, fx_props)
+        .expect("create effect");
+    g.set(&p("lay:DP-1:main.content"), PropValue::Str(fx.clone()))
+        .unwrap();
+    assert_eq!(compose(&g, &mut composer), vec!["src2".to_string()]);
+    // Both sides whole: no hole (and the previous call's list is gone).
+    g.set(&p(&format!("{fx}.to")), PropValue::Str("src1".into()))
+        .unwrap();
+    assert!(compose(&g, &mut composer).is_empty());
+    // A dangling content (its node destroyed): the id.
+    g.set(&p("lay:DP-1:main.content"), PropValue::Str("src2".into()))
+        .unwrap();
+    g.destroy("src2").expect("destroy");
+    assert_eq!(compose(&g, &mut composer), vec!["src2".to_string()]);
+}
+
 /// Reuses `tests/effects_all.rs`'s `fade_midpoint` expectation, now driven entirely
 /// through the graph: an Effect node (`effect_id = "fade"`, `from`/`to` two colour
 /// sources, `progress = 0.5`) set as a layer's `content` must blend to the same midpoint

@@ -2723,7 +2723,24 @@ between presents made back to back (the second drawn on the first one's callback
 in between) → mean/p50/p95/max/count + `missed` (> 1.5 refresh periods); `all` = every
 interval + `fps`; `idle`, `frame_pending`, totals (`presents`, `callbacks`, `missed`,
 `idle_gaps`). Measured on the owner's machine (`outputs.sh`, release build, background
-layer, the owner's windows covering it):
+layer, the owner's windows covering it) — table below.
+
+**The seam probe** (design §11 "zero visible seams by the seam probe"; 2026-11-05, switch-over
+checklist `docs/player/reports/switch-over.md`): `Composer::last_missing()` names what the last
+`compose_output` drew transparent although the output's VISIBLE main layer (`opacity > 0`)
+pointed at it — a plain source or either effect side with no texture (R19), or a dangling
+`content`; an empty layer / `opacity 0` is never a seam. The runtime (`note_composed`, both
+render paths) counts it per output: `frames` probe `totals.seam_frames` / `seam_runs` +
+`last_seam` (never cleared by `reset`), each run logged once — `output.seam {output, missing}`
+(warn) and `output.seam_end {output, frames}` (info) at the next whole frame. By the recipes
+nothing shown ever lacks a texture (B is shown only once `Ready`, a crashed scene holds its
+frame), so any count is a hole the viewer saw; only a raw `set lay:*.content` of a source that
+isn't ready yet makes one on purpose. Guards: `tests/compose.rs::last_missing_names_every_hole_in_a_visible_layer`,
+`probe::frames` unit `seam_runs_count_frames_and_edges`, `tests/api.rs::switches_never_compose_a_hole`
+(the first show, video / scene / image / colour into each other × every method, a 12-switch
+storm superseding mid-effect: 0 seam frames; the control — a raw `set` before `Ready` — counts
+and logs). Batteries: `programs.sh dropout` (per cell `seams`), `soak`, `scenes.sh dropout`
+(per serve `seams`).
 
 | source (two runs) | DP-1 (143.981 Hz) paced mean / p95 / max | DP-2 (239.76 Hz) paced mean / p95 / max |
 |---|---|---|

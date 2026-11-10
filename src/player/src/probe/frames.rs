@@ -15,6 +15,12 @@
 //! and the `missed` total after reading (like `loop`'s reset). Failed presents (Task 16):
 //! `totals.present_failed`, `last_present_error`, and `retry_in_ms` while the backend backs
 //! off (`crate::wl::present_backoff`).
+//!
+//! **The seam probe** (design §11 "zero visible seams"): `totals.seam_frames` / `seam_runs`
+//! count composed frames where the visible main layer pointed at a source that had no
+//! texture (drawn transparent, R19) — see [`FrameStats::on_composed`]; `last_seam` names
+//! what was missing. Never cleared by `reset`. Each run is also an `output.seam` event
+//! (warn) and `output.seam_end {frames}` (info).
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -61,6 +67,27 @@ pub struct FrameStats {
     /// Presents that returned an error, and the last error (Task 16, review item c).
     pub present_failed: u64,
     pub last_present_error: Option<String>,
+    /// The seam probe (§11): composed frames with a hole — a source the visible main layer
+    /// pointed at drew as transparent (`gfx::compose::Composer::last_missing`). Never reset
+    /// by `reset` (a battery reads the totals before and after a run).
+    pub seam_frames: u64,
+    /// Runs of consecutive seam frames (each logged once as `output.seam`).
+    pub seam_runs: u64,
+    /// Frames in the run in progress (0 = none).
+    seam_run: u64,
+    /// What the latest seam frame missed.
+    pub last_seam: Option<Vec<String>>,
+}
+
+/// What a composed frame did to the seam count (see [`FrameStats::on_composed`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SeamEdge {
+    /// No change: no seam, or a run continuing.
+    None,
+    /// A seam run started with this frame (log it).
+    Started,
+    /// The run of this many frames ended with this (clean) frame.
+    Ended(u64),
 }
 
 impl FrameStats {
@@ -78,6 +105,10 @@ impl FrameStats {
             idle_gaps: 0,
             present_failed: 0,
             last_present_error: None,
+            seam_frames: 0,
+            seam_runs: 0,
+            seam_run: 0,
+            last_seam: None,
         };
         s.set_refresh(refresh_mhz);
         s
@@ -115,6 +146,24 @@ impl FrameStats {
         self.last_present = Some(at);
         self.idle = false;
         self.prune(at);
+    }
+
+    /// A frame was composed; `missing` = what it drew as transparent although the layer
+    /// pointed at it (empty = a whole frame).
+    pub fn on_composed(&mut self, missing: &[String]) -> SeamEdge {
+        if missing.is_empty() {
+            let run = std::mem::take(&mut self.seam_run);
+            return if run > 0 { SeamEdge::Ended(run) } else { SeamEdge::None };
+        }
+        self.seam_frames += 1;
+        self.seam_run += 1;
+        self.last_seam = Some(missing.to_vec());
+        if self.seam_run == 1 {
+            self.seam_runs += 1;
+            SeamEdge::Started
+        } else {
+            SeamEdge::None
+        }
     }
 
     /// A present failed with `error` (the backend backs off; see `frames` `retry_in_ms`).
@@ -284,7 +333,10 @@ pub fn frames(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
                 "missed": st.missed_total,
                 "idle_gaps": st.idle_gaps,
                 "present_failed": st.present_failed,
+                "seam_frames": st.seam_frames,
+                "seam_runs": st.seam_runs,
             },
+            "last_seam": st.last_seam,
             "last_present_error": st.last_present_error,
             "retry_in_ms": fs.as_ref().and_then(|f| f.retry_in_ms),
         }));
@@ -325,6 +377,26 @@ mod tests {
             s.on_present(t);
         }
         t
+    }
+
+    /// The seam probe's count: a run of frames with a hole is counted frame by frame, started
+    /// once and ended at the next whole frame; `reset` keeps it.
+    #[test]
+    fn seam_runs_count_frames_and_edges() {
+        let t0 = Instant::now();
+        let mut s = FrameStats::new(60_000, t0);
+        let hole = vec!["src2".to_string()];
+        assert_eq!(s.on_composed(&[]), SeamEdge::None);
+        assert_eq!(s.on_composed(&hole), SeamEdge::Started);
+        assert_eq!(s.on_composed(&hole), SeamEdge::None);
+        assert_eq!(s.on_composed(&hole), SeamEdge::None);
+        assert_eq!(s.on_composed(&[]), SeamEdge::Ended(3));
+        assert_eq!(s.on_composed(&[]), SeamEdge::None);
+        assert_eq!(s.on_composed(&hole), SeamEdge::Started);
+        s.reset(t0);
+        assert_eq!(s.on_composed(&[]), SeamEdge::Ended(1));
+        assert_eq!((s.seam_frames, s.seam_runs), (4, 2));
+        assert_eq!(s.last_seam, Some(hole));
     }
 
     #[test]

@@ -10675,3 +10675,129 @@ fn live_events_carry_outbox_seq() {
     assert_eq!(entry["kind"], json!("source.broken"));
     assert_eq!(entry["fields"]["record"], ev["record"], "{entry}");
 }
+
+// ---------------------------------------------------------------- the seam probe (design §11)
+
+/// Every output's `frames` totals (`seam_frames`, `seam_runs`, `last_seam`).
+fn seam_totals(c: &mut Client) -> Vec<(String, u64, Value)> {
+    let f = c.ok("probe", json!({"name": "frames"}));
+    f["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| {
+            (
+                o["name"].as_str().unwrap().to_string(),
+                o["totals"]["seam_frames"].as_u64().unwrap_or_else(|| panic!("{o}")),
+                o["last_seam"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// A `transition` to `to` (fade), waited to `transition.done`; any other end fails the test.
+fn seam_switch(c: &mut Client, to: &Value, method: &str, ms: u32, wait: bool) -> String {
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": to, "effect_id": "fade", "duration_ms": ms,
+               "method": method, "align": "now"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    if !wait {
+        return corr;
+    }
+    let t = Instant::now();
+    loop {
+        let logs = c.ok("logs", json!({"corr": corr}));
+        let evs = logs["events"].as_array().unwrap();
+        if evs.iter().any(|e| e["kind"] == "transition.done") {
+            return corr;
+        }
+        assert!(
+            !evs.iter().any(|e| e["kind"] == "transition.failed"),
+            "{method} → {to}: {logs}"
+        );
+        assert!(
+            t.elapsed() < Duration::from_secs(30),
+            "{method} → {to}: no transition.done: {logs}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// **The seam probe** (design §11 "zero visible seams by the seam probe"; `probe::frames`):
+/// every switch the recipe makes — the first show from an empty output, each source kind
+/// (video, image, colour, scene) into each other under every method, and a storm of
+/// switches superseding each other mid-effect — composes no frame with a hole (a source
+/// the visible layer points at drawn transparent). The control at the end proves the probe
+/// sees one: a source shown raw through `set` before it's `Ready` counts seam frames and
+/// logs `output.seam` naming it.
+#[test]
+fn switches_never_compose_a_hole() {
+    let Some(srv) = scene_serve(&["--clock", "real"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let red = ensure_clip("api_red_3s", RED_3S);
+    let fi = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let img = common::solid_png("api-seam-green", [0, 255, 0]);
+    let sc = common::synthetic_scene("api-seam-scene", &synth(Pattern::FrameIndex));
+    let kinds = [
+        json!({"path": s(&red), "loop": true}),
+        json!({"kind": "scene", "path": s(&sc)}),
+        json!({"path": s(&img)}),
+        json!({"path": s(&fi), "loop": true}),
+        json!({"kind": "color", "color": [0, 0, 255]}),
+    ];
+    // The first show: an empty output → A (what the backend's first apply is).
+    seam_switch(&mut c, &kinds[0], "full-live", 200, true);
+    for method in ["full-live", "reveal", "frozen"] {
+        for to in kinds.iter().skip(1).chain(std::iter::once(&kinds[0])) {
+            seam_switch(&mut c, to, method, 250, true);
+        }
+    }
+    // A storm: each switch supersedes the previous one mid-effect.
+    for i in 0..12 {
+        let to = &kinds[i % kinds.len()];
+        seam_switch(&mut c, to, ["full-live", "reveal", "frozen"][i % 3], 300, false);
+        std::thread::sleep(Duration::from_millis(70 + 20 * (i as u64 % 3)));
+    }
+    let last = seam_switch(&mut c, &kinds[3], "full-live", 200, true);
+    std::thread::sleep(Duration::from_millis(300));
+    let totals = seam_totals(&mut c);
+    assert_eq!(totals.len(), 2, "{totals:?}");
+    let seams = c.ok("logs", json!({"kind_prefix": "output.seam"}));
+    for (name, n, what) in &totals {
+        assert_eq!(*n, 0, "{name}: {n} seam frames, last {what}; {seams} (last switch {last})");
+    }
+
+    // Control: a source shown raw (`set`, not a transition) before its first frame.
+    let slow = create_src(&mut c, json!({"path": s(&red), "loop": true}));
+    show_all(&mut c, &slow);
+    let t = Instant::now();
+    while seam_totals(&mut c).iter().any(|x| x.1 == 0) {
+        assert!(t.elapsed() < Duration::from_secs(5), "no seam counted: {:?}", seam_totals(&mut c));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for (name, _, what) in seam_totals(&mut c) {
+        assert_eq!(what, json!([slow]), "{name}");
+    }
+    let t = Instant::now();
+    loop {
+        let logs = c.ok("logs", json!({"kind_prefix": "output.seam"}));
+        let evs = logs["events"].as_array().unwrap();
+        let started = evs.iter().filter(|e| e["kind"] == "output.seam").count();
+        let ended = evs.iter().filter(|e| e["kind"] == "output.seam_end").count();
+        if started == 2 && ended == 2 {
+            assert!(
+                evs.iter()
+                    .filter(|e| e["kind"] == "output.seam")
+                    .all(|e| e["missing"] == json!([slow])),
+                "{logs}"
+            );
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(5), "{logs}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

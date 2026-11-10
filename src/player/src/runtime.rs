@@ -2421,14 +2421,23 @@ impl Runtime {
                 continue;
             };
             let id = format!("out:{}", o.name);
-            if let Err(e) = self.composer.compose_output(
+            let composed = self.composer.compose_output(
                 &self.gfx,
                 &self.graph,
                 &mut self.cat,
                 &id,
                 &textures,
                 fbo,
-            ) {
+            );
+            if composed.is_ok() {
+                note_composed(
+                    &mut self.frames,
+                    &o.name,
+                    o.refresh_mhz,
+                    self.composer.last_missing(),
+                );
+            }
+            if let Err(e) = composed {
                 let key = format!("compose.failed {id} {e}");
                 warn_limited(
                     &mut self.warned,
@@ -2494,14 +2503,23 @@ impl Runtime {
                 };
                 let host = &self.host;
                 let textures = |sid: &str| host.texture(sid);
-                if let Err(e) = self.composer.compose_output(
+                let composed = self.composer.compose_output(
                     &self.gfx,
                     &self.graph,
                     &mut self.cat,
                     &id,
                     &textures,
                     fbo,
-                ) {
+                );
+                if composed.is_ok() {
+                    note_composed(
+                        &mut self.frames,
+                        &o.name,
+                        o.refresh_mhz,
+                        self.composer.last_missing(),
+                    );
+                }
+                if let Err(e) = composed {
                     warn_limited(
                         &mut self.warned,
                         format!("compose.failed {id} {e}"),
@@ -4608,6 +4626,39 @@ impl Runtime {
 
 /// Emit a warning at most once per [`WARN_EVERY`] per `key` (e.g. node + reason); the
 /// next one carries `suppressed`: how many were swallowed meanwhile.
+
+/// The seam probe (design §11; `probe::frames` module doc): count a composed frame of
+/// `output` that drew `missing` as transparent, and log each run of such frames once —
+/// `output.seam {output, missing}` (warn) when it starts, `output.seam_end {output, frames}`
+/// (info) at the next whole frame.
+fn note_composed(
+    frames: &mut BTreeMap<String, FrameStats>,
+    output: &str,
+    refresh_mhz: u32,
+    missing: &[String],
+) {
+    let st = frames
+        .entry(output.to_string())
+        .or_insert_with(|| FrameStats::new(refresh_mhz, Instant::now()));
+    match st.on_composed(missing) {
+        crate::probe::frames::SeamEdge::None => {}
+        crate::probe::frames::SeamEdge::Started => log::event(
+            "compose",
+            Level::Warn,
+            "output.seam",
+            None,
+            json!({ "output": format!("out:{output}"), "missing": missing }),
+        ),
+        crate::probe::frames::SeamEdge::Ended(n) => log::event(
+            "compose",
+            Level::Info,
+            "output.seam_end",
+            None,
+            json!({ "output": format!("out:{output}"), "frames": n }),
+        ),
+    }
+}
+
 fn warn_limited(
     warned: &mut BTreeMap<String, (Instant, u64)>,
     key: String,

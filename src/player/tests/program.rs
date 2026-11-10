@@ -1386,11 +1386,17 @@ fn wait_real(
 ) {
     let t = Instant::now();
     while !pred(c) {
-        assert!(
-            t.elapsed() < limit,
-            "{what}: not within {limit:?}: {:?}",
-            c.named("program.current")
-        );
+        if t.elapsed() >= limit {
+            // Everything a stalled rotation needs to be read from (2026-11-05: once, under a
+            // loaded suite, `vram_hold_freezes_the_rotation` saw no switch after the release
+            // and only `program.current` was printed — not reproduced alone or under stress).
+            let vram = c.ok("logs", json!({"kind_prefix": "vram.", "limit": 50}));
+            let prog = c.ok("probe", json!({"name": "programs"}));
+            panic!(
+                "{what}: not within {limit:?}: {:?}\nvram events: {vram}\nprograms: {prog}",
+                c.named("program.current")
+            );
+        }
         std::thread::sleep(Duration::from_millis(50));
         c.ok("state", json!({}));
     }
@@ -2544,7 +2550,9 @@ fn program_json_written_only_on_config_change() {
     let w1 = c.ok("probe", json!({"name": "snapshot"}))["writes"]
         .as_u64()
         .unwrap();
-    assert!(w1 >= w0 + 4, "the snapshot refreshes while a video plays: {w0} → {w1}");
+    // ≥ 2 refreshes in 10 s (every 2 s → 5 when quiet; each write is fsync'ed, so a disk busy
+    // with other writers stretches the cadence — 2 → 4 under a loaded suite, 2026-11-05).
+    assert!(w1 >= w0 + 2, "the snapshot refreshes while a video plays: {w0} → {w1}");
     assert_eq!(
         std::fs::metadata(&file).unwrap().modified().unwrap(),
         m0,
