@@ -24,7 +24,8 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] Scene timing fallback: with the scene-specific timing options off, use the general minimum or maximum, whichever
       is on; the minimum if both are on.
 - [ ] Scroll to the playing wallpaper on app open, in both the playlist bar and the main grid.
-- [ ] Scripting for advanced users, as part of a macro feature (not designed yet).
+- [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
+      research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
 
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
