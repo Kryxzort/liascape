@@ -832,21 +832,30 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   its own speed). Scene properties no longer pop in: the sidebar shows them together with the rest.
 
 
-## 2026-11-10 — the 3D scenes: the kitty's head, the clock in 3D, 3509243656's stars and planet rings
-- **3477054430 (kitty on a rooftop): the head now turns with the mouse like in WE** (checked again on the current
-  LWE): it never ran its turning script, and in a 3D scene the mouse position is a point far out in the world, not a
-  screen pixel. Against WE's captures with the mouse at the left and at the right the head matches.
+## 2026-11-10 / 11 — the 3D scenes: the kitty's head, the clock in 3D, 3509243656's stars, rings and glow
+- **3477054430 (kitty on a rooftop): the head now turns with the mouse like in WE.** It never ran its turning script,
+  and in a 3D scene the mouse position is a point far out in the world, not a screen pixel. Against WE's captures with
+  the mouse at the left and at the right the head matches.
 - **The reference clock now reads in all three 3D scenes** (it was hidden under their post-processing), so their
-  comparisons are at WE's real scene time; 3276522107 left the top of the ranking (0.524 → 0.134).
-- **3509243656 (the "three-body" space HUD): two real differences, fixed in LWE.** Its planets are placed at random,
-  so to compare it with WE I made a private copy where the randomness is the same on both sides. Then WE showed a
-  star-shaped spike around each star and a ring with a label around the planet under the mouse; ours showed neither.
-  - The spikes: WE draws everything solid first and the see-through things after, back to front. LWE sorted
-    everything together, so the starry sky box was drawn after the spikes and covered them.
-  - The rings: they fade in while the mouse is over an invisible circle around a planet. LWE never tested the mouse
-    against anything placed in a 3D world; now it casts the mouse's ray into the world as WE does.
-  - Left: WE's soft glow around each star is about twice as wide as ours (the scene's bloom settings), in TODO.
-- **Stopped early: the disk.** /home went down to 24 GB free during the player tests (the brief's floor is 25 GB),
-  so the scene health check, the shader sweep, the whole-library comparison, the merge, the push, the release build
-  and the player restart are **not done** — the work is committed on the `weref-3d2` branch and pushed to the LWE fork
-  only. Checks so far: LWE host tests 132 / 132 (3 new), player tests 756 / 756. Your running player is unchanged.
+  comparisons are at WE's real scene time.
+- **3509243656 (the "three-body" space HUD): four real differences, fixed in LWE.** Its planets are placed at random,
+  so to compare it with WE I made a private copy where the randomness is the same on both sides.
+  - The star spikes: WE draws everything solid first and the see-through things after. LWE sorted them all
+    together, so the starry sky box was drawn after the spikes and covered them.
+  - The planet rings: they fade in while the mouse is over an invisible circle around a planet. LWE never tested the
+    mouse against anything placed in a 3D world; now it casts the mouse's ray into the world as WE does.
+  - The stars were a third as bright as WE's, which is why their glow looked half as wide (it wasn't the glow
+    settings). The spike picture at each star's centre has an effect on it, and the effect's output was drawn over
+    the star instead of behind its surface. Now the star core is 183 151 115 against WE's 185 159 128 (was 112 91 87).
+  - Found on the way: after the sorting fix, one text's script ran before the one it reads from on the first frame
+    (a script error, which put the scene in the health report's "degraded" list). Texts' scripts run in the scene's
+    own order again.
+- **Its reference wasn't a misread clock** (the 2D round's guess): that capture's first picture came 4 s late, so its
+  "0.5 s" frame really was at WE's 4.6 s. Recaptured: the frames are at 0.61 / 2.13 / 5.13 s now.
+- **Scores** (lower = closer to WE): 3509243656 0.239 → 0.060 (most of that is the new reference: its first two frames
+  are the black login intro on both sides; at 5 s the planets sit in other random places). 3477054430 0.028 (same).
+  3276522107 0.122 → 0.134, which only looks like a change: its 0.5 s frame wasn't scored before; at 2 s and 5 s it
+  moved 0.105 → 0.107 and 0.138 → 0.141. Library mean 0.1727 → 0.1711.
+- Checks on the final pin (LWE `65ec574`): LWE host tests 135 / 135 (the two newest fail without their fix), player
+  tests 756 / 756, scene health 89 clean / 7 degraded / 0 failed (the baseline), shader sweep the same 6 known
+  failures. Your player was restarted on it.
