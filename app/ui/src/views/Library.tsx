@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
+import { useTravelToPlaying } from "../hooks/travelToPlaying";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
@@ -48,6 +49,8 @@ export const Library = memo(function Library() {
   const scrollRef = useRef<HTMLDivElement>(null);
   useSmoothScroll(scrollRef);
   useGridFit(scrollRef);
+  // app open / the first Library visit with something playing: the playing card in view (once per session)
+  useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
 
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();

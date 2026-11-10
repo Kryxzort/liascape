@@ -7,6 +7,8 @@ export type LiascapeEvent =
   | { type: "scene-crashed"; payload: { path: string } }
   | { type: "scene-vram-stopped"; payload: { path: string; usedMib: number; limitMib: number; message: string } }
   | { type: "timed-stopped"; payload: null }
+  // `liascape loop-current` toggled "keep playing this one" (the rotation holds what plays)
+  | { type: "loop-current"; payload: { keep: boolean; path: string | null; message: string } }
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }
   | { type: "library-synced"; payload: { count: number } }

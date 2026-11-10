@@ -160,6 +160,8 @@ pub struct ProgramStatus {
     pub last_effect: Option<String>,
     /// Items marked broken (a broken scene): passed over from then on.
     pub broken: Vec<String>,
+    /// `keep`: the rotation holds the current item (it loops).
+    pub keep: bool,
 }
 
 /// A program's configuration, read from its node's settable props.
@@ -183,6 +185,8 @@ pub struct ProgCfg {
     pub key: String,
     /// `start_mode: resume` ("When the playlist starts again": resume where it left off).
     pub start_resume: bool,
+    /// `keep` ("keep playing this one"): no rotation rule fires; the current item loops.
+    pub keep: bool,
 }
 
 impl ProgCfg {
@@ -223,6 +227,7 @@ impl ProgCfg {
             hold_parked: s("while_parked") == "hold",
             key: s("key"),
             start_resume: s("start_mode") == "resume",
+            keep: matches!(props.get("keep"), Some(PropValue::Bool(true))),
         })
     }
 
@@ -793,6 +798,7 @@ impl Prog {
             failures: self.failures,
             last_effect: self.last_effect.clone(),
             broken: self.broken.iter().cloned().collect(),
+            keep: self.cfg.keep,
         }
     }
 
@@ -946,7 +952,7 @@ impl Prog {
         }
         if self.cur_src.is_some() {
             self.played_ms += dt;
-            if !self.cfg.on_end {
+            if !self.cfg.on_end && !self.cfg.keep {
                 let speed = self
                     .cur_src
                     .as_deref()
@@ -991,7 +997,16 @@ impl Prog {
         // under `rotate` (no sooner than PARKED_MIN_PLAY_MS apart) and stop under `hold`
         let in_flight_now = self.pending.as_ref().is_some_and(|p| p.align == Align::Now);
         let parked_wait = parked && (frozen || self.played_ms < PARKED_MIN_PLAY_MS);
-        if !in_flight_now && !foreign_busy && !parked_wait && self.cur_src.is_some() {
+        if self.cfg.keep {
+            // "keep playing this one": no rule moves it; a video loops (a short clip would otherwise end and stand)
+            if let Some(cur) = self.cur_src.clone()
+                && play_kind(g, &cur) == PlayKind::Video
+                && !matches!(g.get(&PropPath(format!("{cur}.loop"))), Ok(PropValue::Bool(true)))
+                && self.pending.is_none()
+            {
+                let _ = g.set(&PropPath(format!("{cur}.loop")), PropValue::Bool(true));
+            }
+        } else if !in_flight_now && !foreign_busy && !parked_wait && self.cur_src.is_some() {
             let can_rotate = self.can_rotate();
             let played = self.played_ms.max(0.0) as u64;
             if !self.cfg.on_end {
@@ -1533,6 +1548,17 @@ impl Programs {
                         p.remaining_ms.max(0.0) as u64,
                         p.cfg.interval_ms,
                     ) as f64;
+                }
+                if !old.keep && p.cfg.keep {
+                    // kept: an armed end switch goes (A loops on — the tick keeps its loop on)
+                    p.cancel_armed(id, "keep", &mut acts);
+                    p.rearm = None;
+                    p.held = false;
+                } else if old.keep && !p.cfg.keep {
+                    // lifted: the rotation starts over from now for this item — its play time and the timer in full
+                    // (a long keep never trips the maximum the instant it ends)
+                    p.played_ms = 0.0;
+                    p.remaining_ms = p.cfg.interval_ms as f64;
                 }
                 if old.on_end && !p.cfg.on_end {
                     // on_end → timer: no end to wait for; the countdown starts in full

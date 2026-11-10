@@ -41,7 +41,17 @@ public static class ActionForward
             var r = http.PostAsJsonAsync($"{url}/action", new { name = action }).GetAwaiter().GetResult();
             if (sw.ElapsedMilliseconds > 1000) // a keybind should feel instant — say where the time went
                 Console.Error.WriteLine($"liascape {action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
-            if (r.IsSuccessStatusCode) return true;
+            if (r.IsSuccessStatusCode)
+            {
+                // what the action has to say (loop-current) → `message` with code 0: the CLI prints it
+                try
+                {
+                    using var ok = JsonDocument.Parse(r.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+                    if (ok.RootElement.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String) message = m.GetString();
+                }
+                catch { }
+                return true;
+            }
             code = 1;
             try
             {

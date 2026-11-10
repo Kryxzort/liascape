@@ -35,8 +35,9 @@ pub struct ItemRule {
 }
 
 /// `PlayerHelper.ItemPlayRule` — the whole table: video `(min, max)`; separate scene timing
-/// on → scene / image `(after or NEVER, 0)`; off → scene `(min or NEVER, max)`, image
-/// `(min, max)`.
+/// on → scene / image `(after or NEVER, 0)`; off → scene `(min, 0)` or, with no minimum,
+/// `(NEVER, max)`,
+/// image `(min, max)`.
 pub fn item_rule(
     kind: PlayKind,
     min_ms: u64,
@@ -54,7 +55,12 @@ pub fn item_rule(
             },
             0,
         ),
-        PlayKind::Scene => (if min_ms > 0 { min_ms } else { NEVER_MS }, max_ms),
+        // a scene never ends: the one limit that is set moves it; both set → the minimum (owner
+        // 2026-11-10: "use either maximum or minimum if other one's off, minimum if both on" —
+        // the maximum no longer cuts it short of a longer minimum); neither → it stays
+        // (min 0 → the maximum moves it, as a cap; neither → it stays)
+        PlayKind::Scene if min_ms > 0 => (min_ms, 0),
+        PlayKind::Scene => (NEVER_MS, max_ms),
         PlayKind::Image => (min_ms, max_ms),
     };
     ItemRule { min_ms, max_ms }
@@ -147,15 +153,22 @@ mod tests {
             item_rule(PlayKind::Image, 5000, 9000, true, 0),
             r(NEVER_MS, 0)
         );
-        // separate off: scene (min or NEVER, max), image (min, max)
+        // separate off: scene (min, 0) or (NEVER, max), image (min, max)
         assert_eq!(
             item_rule(PlayKind::Scene, 0, 9000, false, 3000),
             r(NEVER_MS, 9000)
         );
+        // owner 2026-11-10 ("use either maximum or minimum if other one's off, minimum if both
+        // on"): a scene uses the one set; both set → the minimum, even when the maximum is shorter
         assert_eq!(
             item_rule(PlayKind::Scene, 5000, 9000, false, 3000),
-            r(5000, 9000)
+            r(5000, 0)
         );
+        assert_eq!(
+            item_rule(PlayKind::Scene, 9000, 5000, false, 3000),
+            r(9000, 0)
+        );
+        assert_eq!(item_rule(PlayKind::Scene, 0, 0, false, 3000), r(NEVER_MS, 0));
         assert_eq!(item_rule(PlayKind::Image, 0, 9000, false, 3000), r(0, 9000));
         assert_eq!(item_rule(PlayKind::Image, 5000, 0, false, 3000), r(5000, 0));
     }

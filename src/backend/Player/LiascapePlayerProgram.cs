@@ -324,6 +324,7 @@ public static class LiascapePlayerProgram
             else
             {
                 foreach (var (prop, value) in props) SetProp(client, prop, value, throwOnError: prop == "items");
+                SetProp(client, "keep", false); // a Play starts the rotation: "keep playing this one" ends
             }
             lock (_lock) { _sentItems = J(props.First(x => x.prop == "items").value); _sentDefaults = J(spec.Defaults); _known = true; _gen = client.Generation; }
             if (unpause)
@@ -416,6 +417,34 @@ public static class LiascapePlayerProgram
         }
         catch (LiascapePlayerException) { }
         return false;
+    }
+
+    // ---- keep ("keep playing this one" — `liascape loop-current`, owner 2026-11-10) -----------------------------
+    // The program's `keep` prop: no rotation away from the current item (it loops) until lifted. It lives in the player
+    // (program.json — a player restart keeps it; a backend restart never touches it: Props/Reapply don't carry it); a
+    // Play of a playlist (LoadNow) lifts it. Toggled ESSENTIAL (ordered after any switch queued before the keybind) and
+    // waited for: null = no rotation to hold (no prog:main) or no answer, else the new value.
+    public static bool? ToggleKeep()
+    {
+        if (!PlayerEngine.IsLiascapePlayer) return null;
+        var t = LiascapePlayerMedia.QueueEssential<bool?>(() =>
+        {
+            var client = C;
+            if (!client.SocketExists) return null;
+            if (Get(client, "keep") is not { } have) return null; // no_such_node (no rotation) or no answer
+            bool want = have.ValueKind != JsonValueKind.True;
+            if (!SetProp(client, "keep", want)) return null;
+            LiascapePlayerClient.Log($"program: keep {(want ? "on — the rotation holds" : "off — the rotation resumes")} ({Path.GetFileName(CurrentPath ?? "")})");
+            return want;
+        });
+        return t.Wait(5000) ? t.Result : null;
+    }
+
+    // `prog:main.keep` now (false: off, or no rotation). A quick read for /current.
+    public static bool Kept()
+    {
+        if (!PlayerEngine.IsLiascapePlayer || !C.SocketExists || !IsActive) return false;
+        return Get(C, "keep") is { ValueKind: JsonValueKind.True };
     }
 
     // ---- user switches (thin verbs; essential — a keybind's intent) -------------------------------------------

@@ -63,6 +63,41 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
 ## liascape-player (after design approval)
+- [x] **Owner's Todoist batch, behaviour (2026-11-10)** — six items checked against the history first:
+  - "Clicking Play on the playlist puts the green border on the 1st item though shuffle plays another — make the border
+    reflect the genuine current": **already fixed** in `958b6be4` "Mark The Playlist Item That Really Plays" (2026-11-02:
+    the store no longer guesses; `wallpaper-changed` / `/current` say). Re-checked on today's lp-player under Shuffle with
+    both start modes: matrix `playlistMark:shufflePlay` green, new `playlistMark:shufflePlay:resume` (the same 12 rounds
+    under "Resume where it left off") green. Nothing changed.
+  - "It probably shouldn't do a transition when no wallpaper was playing before": **already fixed** in `5908d185` "Skip The
+    Effect When Nothing Was Playing" (2026-11-02: `Transitions::start` drops the effect when no requested output shows
+    anything — a cut, for every client and the program; legacy already did). Re-checked: matrix `fromNothing:noEffect`
+    (a card from nothing, Play after a Stop → cuts; over a playing one → the effect) green. Decision recorded: a plain
+    cut, not a fade from black.
+  - "Make scene use either maximum or minimum if the other one's off, minimum if both on": **mostly already the rule**
+    (the 2026-10-28 rotation redesign `cd3a0fe9` + "0 = off" / separate scene timing): with "Separate timing for scenes"
+    off a scene switched at its minimum, else at its maximum, else stayed — except both set with the maximum SHORTER than
+    the minimum, where the maximum still cut it first (the video rule "a cap beats the minimum"). Now a scene with a
+    minimum ignores the maximum (`item_rule` / `ItemPlayRule`: `(min, 0)`, else `(NEVER, max)`); videos and still images
+    unchanged; per-playlist the same (the rule reads the effective limits). The hints say it plainly (`ROT_HINT.sceneRule`
+    on Settings' "Separate timing for scenes" row and a line in the playlist modal while it's off). Tests: `rule.rs`
+    `item_rule_table` (RED: `(5000, 9000)` for both set), self-test `ItemPlayRule`, adapter IT "min 6 s + max 3 s on a
+    scene" + "a playlist's min 5 s + max 2 s", matrix `global:sceneTiming` / `playlist:sceneTiming` (RED on the old UI: no
+    scene rule in either hint).
+  - "Travel to running wallpaper on app open": **new** — `hooks/travelToPlaying.ts`: the first time a session's Library
+    grid / playlist bar shows the playing item it jumps there (mid-view), once per session (web-ui.md). Matrix
+    `travel:appOpen` (RED on the old UI: grid and bar at scroll 0 with the playing item out of view).
+  - "Keybind toggle to infinite loop current wallpaper": **new** — `liascape loop-current` toggles the player program's
+    `keep` (no rotation away from what plays, it loops; again → rotate on, the item's clocks start over); kept by the
+    player across a backend or player restart, works with the app closed (the CLI goes straight to the player), a Play
+    lifts it, a single wallpaper says it already stays. Listed in Settings → Keyboard shortcuts; the topbar says
+    "Looping <title> …" / "Rotation resumed", the status line ", looping this one". Tests: `tests/program.rs`
+    `keep_holds_the_current_item_and_loops_it`, `keep_stops_the_timer_and_resets_it_when_lifted` (RED: unknown prop),
+    matrix `cli:loopCurrent` (on / off / app closed / backend restart / Play lifts it). player-adapter.md § Rotation,
+    player-core.md § Programs.
+  - "Mark the wallpapers already downloaded in Wallpaper Engine local tab of Browse": **new** — Browse cards carry an
+    "In library" badge when the library holds the item (by Workshop id for Workshop + WE-local, else the page URL).
+    Matrix `browse:inLibrary` (RED on the old UI: no badge).
 - [x] **A click while the player stalls is lost for good** (found 2026-11-07 chasing an adapter-IT failure: "/apply b
       right after /apply <a library item> never switched", 15 s of nothing in the player's log). Two separate things:
       **the IT failure itself was the IT's own quoting** — `post /apply "{"path":"$Bc"}"` sent `{path:/tmp/…/b.mp4}`, the

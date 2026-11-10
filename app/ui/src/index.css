@@ -135,6 +135,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   padding: 3px 7px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, black);
   color: var(--accent-fg); box-shadow: var(--glow-sm);
 }
+/* Browse: already in the library — the success colour, not the accent (it isn't a state of the card, it's a fact) */
+.badge.inlib { left: auto; right: 8px; gap: 3px; align-items: center;
+  background: color-mix(in srgb, var(--success) 82%, black); color: #fff; box-shadow: none; }
 .res {
   position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700;
   padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff;
@@ -192,6 +195,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   .lib-title { height: 26px; padding: 2px 4px; }
   .lib-title span { font-size: 9px; line-height: 1.2; }
   .badge { font-size: 8px; padding: 2px 5px; top: 5px; left: 5px; }
+  .badge.inlib { left: auto; right: 5px; }
   .res { font-size: 8px; padding: 2px 5px; top: 5px; right: 5px; }
 }
 .card.crashed { outline: 2px solid var(--danger); }

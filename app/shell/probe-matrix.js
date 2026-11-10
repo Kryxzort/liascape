@@ -605,8 +605,10 @@ C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: fal
 // the playlist bar's border is on what plays, not on item 1: Shuffle's first pick is the player's, known to the UI by the
 // `wallpaper-changed` event, which can beat the POST's own reply (a slow reply here makes that the case every time) or come
 // after it. Rounds from nothing and over a playing shuffled session; each Play over one must leave what played (first ≠ last).
-C["playlistMark:shufflePlay"] = { states: ["idle"], switch: true, exp: { paused: false },
-  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, order: 1 }), name: null }); },
+// …under both "When the playlist starts again" choices (resume: a Play from nothing comes back on the item it was on)
+for (const [cell, start] of [["playlistMark:shufflePlay", "start_over"], ["playlistMark:shufflePlay:resume", "resume"]])
+C[cell] = { states: ["idle"], switch: true, exp: { paused: false },
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, order: 1, playlistStart: start }), name: null }); },
   async run(c) {
     c.rounds = [];
     const slow = (re) => `const f = window.__mxF = window.__mxF || window.fetch; window.fetch = ${re ? `async (u, o) => { const r = await f(u, o); if (${re}.test(String(u))) await new Promise((d) => setTimeout(d, 400)); return r; }` : "f"};`;
@@ -627,6 +629,80 @@ C["playlistMark:shufflePlay"] = { states: ["idle"], switch: true, exp: { paused:
     for (const r of c.rounds) if (JSON.stringify(r.marks) !== JSON.stringify([r.cur])) v.push(`Play (${r.how}, from ${r.from}): ${r.cur} plays, the bar marks ${JSON.stringify(r.marks)}`);
     for (const r of c.rounds) { const odd = r.seen.filter((t) => t !== r.cur && t !== r.prev); if (odd.length) v.push(`Play (${r.how}, from ${r.prev ?? "nothing"}, to ${r.cur}): the bar marked ${JSON.stringify(odd)} on the way`); }
     if (c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
+    return v;
+  } };
+// "travel to running wallpaper on app open" (owner todo 2026-11-10): a small window (the grid and the playlist bar overflow),
+// the item LAST in both plays, the page reloads (= the app opens): the playing card sits inside the Library's scroll view
+// and the playing bar item inside the bar's row, without a wheel or a click. RED on the old UI: both stayed at 0.
+C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
+    const lib = (await http("GET", "/library")).json || [];
+    const s0 = await getSettings();
+    try {
+      // large cards in a small window: a column or two, so the last video card sits below the fold
+      await post("/settings", { ...s0, cardSize: "Large" });
+      // title Z→A: the scenes first, so the last video (k1) is the grid's last card
+      c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
+      win.setContentSize(480, 400); await sleep(300); await loadUi(); await sleep(400);
+      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
+      const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene); // the scenes are off here (s3 crashes)
+      const last = vids[vids.length - 1]?.videoPath;
+      // the scenes pad the bar (they're skipped while scene support is off) so its row overflows too
+      const bar = [...lib.filter((i) => i.videoPath !== last).map((i) => i.videoPath), last];
+      c.last = TITLE(last);
+      await post("/playlist/state", { videoPaths: bar, settings: PS(), name: null });
+      await post("/playlist/play-from", { paths: bar, startIndex: bar.length - 1, settings: PS() });
+      await waitSettled(10000, last); await sleep(300);
+      await loadUi();
+      const look = `(() => { const at = (sc, el, ax) => { if (!sc || !el) return null; const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
+          const off = ax === "y" ? r.top - s.top + sc.scrollTop : r.left - s.left + sc.scrollLeft, len = ax === "y" ? s.height : s.width, size = ax === "y" ? r.height : r.width;
+          const a = ax === "y" ? r.top - s.top : r.left - s.left;
+          return { inView: a >= -1 && a + size <= len + 1, hiddenAtZero: off + size > len + 1, scroll: Math.round(ax === "y" ? sc.scrollTop : sc.scrollLeft) }; };
+        return { grid: at(document.querySelector(".lib-scroll"), document.querySelector(".lib-scroll .card.playing"), "y"),
+                 bar: at(document.querySelector(".playlist-bar-row"), document.querySelector(".pl-item.playing"), "x") }; })()`;
+      await waitFor(async () => { const r = (c.r = await js(look)); return r.grid?.inView && r.bar?.inView; }, 2500, 100);
+      c.r = await js(look);
+    } finally {
+      await js(c.sort0 == null ? `localStorage.removeItem("liascape.libSort"); true` : `localStorage.setItem("liascape.libSort", ${JSON.stringify(c.sort0)}); true`);
+      await post("/settings", { ...(await getSettings()), cardSize: s0.cardSize }); win.setContentSize(1400, 900); await sleep(300); await loadUi(); }
+  }, check(c) {
+    const v = [];
+    for (const k of ["grid", "bar"]) {
+      const r = c.r?.[k];
+      if (!r) { v.push(`${k}: no playing element (${c.last} should play)`); continue; }
+      if (!r.hiddenAtZero) v.push(`${k}: ${c.last} fits at scroll 0 — the cell proved nothing (window too big?)`);
+      if (!r.inView) v.push(`${k}: on app open the playing ${c.last} is out of view (scroll ${r.scroll})`);
+    }
+    return v;
+  } };
+// "mark the wallpapers already downloaded in Browse" (owner todo 2026-11-10): a local Wallpaper Engine folder with two video
+// items — "900000001" (the Workshop id of the library's s1: the same item, whatever its type there) and "9002" (not in the
+// library) — Browse → that source: the first card says "In library", the second doesn't. RED on the old UI: no badge.
+C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const ws = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-inlib");
+    for (const [id, title] of [["900000001", "weIn"], ["9002", "weOut"]]) {
+      const d = path.join(ws, id); fs.mkdirSync(d, { recursive: true });
+      fs.copyFileSync(K[0], path.join(d, "v.mp4"));
+      fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title, type: "video", file: "v.mp4" }));
+    }
+    const s0 = await getSettings();
+    c.libHasS1 = ((await http("GET", "/library")).json || []).some((i) => i.workshopId === "900000001");
+    try {
+      await post("/settings", { ...s0, workshopFolder: ws, autoAddWeWallpapersToLibrary: false });
+      const srcs = (await http("GET", "/sources")).json || [];
+      const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
+      await ui(`m.tab("Browse"); await m.sleep(500); m.click(m.byText(".pill", ${JSON.stringify(weName)}), "source pill");`);
+      await waitFor(() => ui(`return !!m.card("weIn") && !!m.card("weOut");`), 8000, 150);
+      c.badges = await ui(`return Object.fromEntries(["weIn", "weOut"].map((t) => [t, m.card(t)?.querySelector("[data-in-library]")?.textContent?.trim() ?? null]));`);
+    } finally {
+      await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
+      await ui(`m.tab("Library"); await m.sleep(400);`);
+    }
+  }, check(c) {
+    const v = [];
+    if (!c.libHasS1) v.push("the library has no item with Workshop id 900000001 (s1) — the fixture is off");
+    if (!c.badges) return [...v, "Browse showed no weIn / weOut cards"];
+    if (c.badges.weIn !== "In library") v.push(`weIn (in the library as s1): badge ${JSON.stringify(c.badges.weIn)}, expected "In library"`);
+    if (c.badges.weOut != null) v.push(`weOut (not in the library): badge ${JSON.stringify(c.badges.weOut)}, expected none`);
     return v;
   } };
 // a right click on a card or bar item whose hover preview plays: the same <video> keeps playing under the menu (the menu's
@@ -2667,6 +2743,8 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     // the seconds field; 4 s
     await ui(plOpen); c.lab0 = await js(plLabels);
     await ui(`m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); await m.sleep(400);`); c.lab1 = await js(plLabels);
+    await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), false, "separate off"); await m.sleep(300);`);
+    c.rule1 = await ui(`return document.querySelector(".pl-modal [data-scene-rule]")?.textContent ?? "";`);
     await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), true, "separate"); await m.sleep(300);
       ${sceneSecsTo4(`document.querySelectorAll(".pl-modal .hms")[2]`)} ${plClose}`);
     c.tChange = Date.now();
@@ -2679,6 +2757,7 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
     if (c.saved?.switchWhenVideoEnds !== true) v.push(`playlist switchWhenVideoEnds ${c.saved?.switchWhenVideoEnds}, expected true`);
     if (c.lab0?.some((l) => /separate timing|switch scenes after/i.test(l))) v.push(`scene timing shown with "Switch when video ends" off: ${JSON.stringify(c.lab0)}`);
+    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.rule1 ?? "")) v.push(`the playlist modal (scene timing off) doesn't state the scene rule: ${JSON.stringify(c.rule1)}`);
     if (!c.lab1?.includes("Separate timing for scenes") || !c.lab1?.includes("SWITCH SCENES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes" + "SWITCH SCENES AFTER"`);
     return v;
   } };
@@ -2686,6 +2765,7 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     // the globals: advance on, no limits, toggle off → s1 stays; the toggle row shows, the seconds row doesn't; on → it
     // does; 4 s
     await ui(settingsTab(`await m.sleep(200);`)); c.rows0 = await js(rowLabels);
+    c.hint0 = await ui(`return m.row("Separate timing for scenes")?.querySelector(".shint")?.textContent ?? "";`);
     await ui(`m.setCheck(m.input("Separate timing for scenes"), true, "separate"); await m.sleep(500);`); c.rows1 = await js(rowLabels);
     await ui(sceneSecsTo4(`m.row("Switch scenes after")`));
     c.tChange = Date.now();
@@ -2695,6 +2775,8 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 0 }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
+    // the scene rule said plainly while the toggle is off (owner 2026-11-10: the one set, the minimum if both are)
+    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.hint0 ?? "")) v.push(`"Separate timing for scenes" (off) hint doesn't state the scene rule: ${JSON.stringify(c.hint0)}`);
     if (!c.rows0?.includes("Separate timing for scenes") || c.rows0?.includes("Switch scenes after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes after"`);
     if (!c.rows1?.includes("Switch scenes after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes after"`);
     return v;
@@ -3402,6 +3484,61 @@ C["cli:next:backendDown"] = { states: ["playlist"], switch: true, async run(c) {
     if (!c.landed) v.push(`two keybinds with no backend: prog:main is on ${TITLE(c.progDown?.path)}, expected ${TITLE(c.want)} (two items on)`);
     for (const e of c.evs) if (e.event === "transition.scheduled" && !String(e.origin).startsWith("program:")) v.push(`a switch from ${e.origin} to ${TITLE(e.path)} with no backend`);
     if (c.after.cur?.path !== c.want) v.push(`the new backend says ${TITLE(c.after.cur?.path)} plays, expected ${TITLE(c.want)}`);
+    return v;
+  } };
+
+// `liascape loop-current` (owner todo 2026-11-10, "keybind toggle to infinite loop current wallpaper"): a 3 s timed playlist;
+// the keybind → prog:main.keep, no switch for 7 s, the topbar says so, /current.keep; again → the rotation resumes (a switch
+// within ~4.5 s); with the backend stopped (the app closed) the CLI toggles it on the player itself and the new backend
+// reports it; a Play of the playlist lifts it.
+C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
+    const ps = (await http("GET", "/playlist/state")).json;
+    await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: ps.name });
+    await sleep(400);
+    c.on = await cliStep(c, "loop-current"); c.tOn = Date.now();
+    c.keep1 = await pget("prog:main.keep"); c.cur1 = await curPath();
+    c.status1 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
+    c.curKeep = (await http("GET", "/current")).json?.keep;
+    await sleep(7000);
+    c.switchesKept = events.filter((e) => e._t >= c.tOn && e.event === "transition.scheduled").length;
+    { const st = await ctl.call("state"); const lay = Object.entries(st.graph).find(([id]) => id.startsWith("lay:") && id.endsWith(":main"))?.[1];
+      c.loop = lay?.content ? st.graph[lay.content]?.loop : undefined; }
+    c.off = await cliStep(c, "loop-current"); c.tOff = Date.now();
+    c.keep2 = await pget("prog:main.keep");
+    c.status2 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
+    c.resumed = await waitFor(() => events.some((e) => e._t >= c.tOff && e.event === "transition.scheduled"), 5500, 100);
+    await waitSettled(8000);
+    // the app closed: the one-shot CLI reaches the player itself; the next backend reads it from there
+    await win.loadURL("about:blank");
+    await stopBackend(3000); c.down = !procAlive(backendPid);
+    c.closed = await cli("loop-current");
+    c.keep3 = await pget("prog:main.keep");
+    c.up = await startBackend(); await loadUi(); await sleep(500);
+    c.curKeep3 = (await http("GET", "/current")).json?.keep;
+    // the now-playing line (it comes back after any timed status the page's startup shows)
+    await waitFor(async () => /looping this one/.test(c.status3 = await ui(`return document.querySelector(".topbar .status")?.textContent ?? "";`)), 9000, 200);
+    // a Play lifts it
+    await ui(`m.click(document.querySelector(".play-btn"), "Play");`); await sleep(800); await waitSettled(8000);
+    c.keep4 = await pget("prog:main.keep");
+    await post("/playlist/state", { videoPaths: ps.videoPaths, settings: ps.settings, name: ps.name });
+  }, check(c) {
+    const v = [];
+    if (c.on?.code !== 0 || !/Looping .* the playlist stays on it/.test(c.on?.out ?? "")) v.push(`loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
+    if (c.keep1 !== true) v.push(`prog:main.keep after loop-current: ${c.keep1}, expected true`);
+    if (c.curKeep !== true) v.push(`/current.keep ${c.curKeep}, expected true`);
+    if (!/^Looping /.test(c.status1 ?? "")) v.push(`topbar after loop-current: ${JSON.stringify(c.status1)}`);
+    if (c.switchesKept) v.push(`${c.switchesKept} switch(es) within 7 s under the keep (3 s interval) — it must stay on ${TITLE(c.cur1)}`);
+    if (c.loop !== true) v.push(`the kept video's loop ${c.loop}, expected true`);
+    if (c.off?.code !== 0 || !/Rotation resumed/.test(c.off?.out ?? "")) v.push(`loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
+    if (c.keep2 !== false) v.push(`prog:main.keep after the 2nd loop-current: ${c.keep2}, expected false`);
+    if (!/^Rotation resumed/.test(c.status2 ?? "")) v.push(`topbar after the 2nd loop-current: ${JSON.stringify(c.status2)}`);
+    if (!c.resumed) v.push("no switch within 5.5 s of lifting the keep (3 s interval)");
+    if (!c.down) v.push("the backend didn't stop (the fixture failed)");
+    if (c.closed?.code !== 0 || c.keep3 !== true) v.push(`loop-current with the app closed: exit ${c.closed?.code} (${JSON.stringify(c.closed?.out)}), prog:main.keep ${c.keep3}`);
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (c.curKeep3 !== true) v.push(`the new backend's /current.keep ${c.curKeep3}, expected true (the player kept it)`);
+    if (!/looping this one/.test(c.status3 ?? "")) v.push(`the reopened page's status line doesn't say it loops: ${JSON.stringify(c.status3)}`);
+    if (c.keep4 !== false) v.push(`prog:main.keep after a Play: ${c.keep4}, expected false (a Play starts the rotation)`);
     return v;
   } };
 

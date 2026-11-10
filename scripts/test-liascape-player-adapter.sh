@@ -953,6 +953,20 @@ post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/
 swr=none; waitfor 15000 sw_seen "$m0" "$A"
 between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s on a scene: advanced 3 s in (+$(sw_field 1) ms, align $(sw_field 3))" || bad "max 3 s × scene: $swr (want align now at +2.3…3.9 s)"
 setting '.GlobalMaxPlaySeconds = 0'; stop_now
+# both set → the minimum (owner 2026-11-10: "use either maximum or minimum if other one's off, minimum if both on"), even
+# with a shorter maximum: min 6 s + max 3 s → the scene plays its 6 s (it used to be cut at the 3 s maximum)
+setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 3'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 5300 6900 && [ "$(sw_field 3)" = now ] && ok "min 6 s + max 3 s on a scene: it played the minimum (+$(sw_field 1) ms, align $(sw_field 3))" || bad "min 6 + max 3 × scene: $swr (want align now at +5.3…6.9 s — the minimum, not the maximum)"
+setting '.GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0'; stop_now
+# …a playlist's own limits (its override) the same: min 5 s + max 2 s → 5 s
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"SwitchWhenVideoEnds\":true,\"IntervalSeconds\":5,\"MaxPlaySeconds\":2,\"SeparateSceneTiming\":false}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 4300 5900 && [ "$(sw_field 3)" = now ] && ok "a playlist's min 5 s + max 2 s on a scene: the minimum (+$(sw_field 1) ms)" || bad "playlist min 5 + max 2 × scene: $swr (want align now at +4.3…5.9 s)"
+stop_now
 
 echo "-- separate timing for scenes: ON → a scene switches after its own time (0 = off), the minimum / maximum don't apply to it; videos keep theirs"
 setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 3'

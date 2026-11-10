@@ -6,7 +6,21 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
-import type { Wallpaper } from "../api/client";
+import type { LibraryItem, Wallpaper } from "../api/client";
+
+// "Mark the wallpapers already downloaded" (owner todo 2026-11-10): what of a Browse list the library already holds — by
+// its Workshop id (Workshop + the WE-local folder: the same item under either source), else by the page it came from
+// (moewalls / motionbgs / desktophut downloads keep it as `pageUrl`; `sourceId` is the source URL too).
+export function libraryKeys(items: LibraryItem[]): Set<string> {
+  const k = new Set<string>();
+  for (const i of items) {
+    if (i.workshopId) k.add("ws:" + i.workshopId);
+    for (const u of [i.pageUrl, i.sourceId, i.videoPath]) if (u) k.add("url:" + u);
+  }
+  return k;
+}
+export const inLibrary = (keys: Set<string>, w: Wallpaper) =>
+  (!!w.workshopId && keys.has("ws:" + w.workshopId)) || keys.has("url:" + w.pageUrl);
 
 // WE-local browse sort menu (client-side over the single loaded page).
 function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
@@ -38,6 +52,9 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const sorted = useMemo(() => sortBrowse(wallpapers, browseSort), [wallpapers, browseSort]);
+  // PERF: one Set per library change; each memo'd card gets a boolean, so only a card whose mark flips re-renders
+  const libItems = useStore((s) => s.libraryItems);
+  const libKeys = useMemo(() => libraryKeys(libItems), [libItems]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -94,7 +111,7 @@ export function Browse({ onPreview, previewUrl }: { onPreview: (w: Wallpaper) =>
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
-              selected={sel.has(w.pageUrl)}
+              selected={sel.has(w.pageUrl)} inLibrary={inLibrary(libKeys, w)}
               progress={downloads[w.pageUrl]}
               autoPlayGifs={autoPlayGifs}
               previewing={w.pageUrl === previewUrl}

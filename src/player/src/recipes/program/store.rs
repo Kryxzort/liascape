@@ -19,7 +19,7 @@ pub const VERSION: u32 = 1;
 
 /// A program node's settable props, as `program.json` keeps them (`outputs` is fixed at
 /// create; the observed ones are not kept).
-pub const SETTABLE: [&str; 14] = [
+pub const SETTABLE: [&str; 15] = [
     "outputs",
     "items",
     "defaults",
@@ -34,6 +34,7 @@ pub const SETTABLE: [&str; 14] = [
     "while_parked",
     "key",
     "start_mode",
+    "keep",
 ];
 
 /// `program.json`.

@@ -418,14 +418,21 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     (align:now, its transition), the same moment a still image moves on. No minimum → the maximum moves it; neither →
     it plays until a user switch (the Settings hint says so). Judgement call: "minimum then the next end" with no end
     to wait for = the minimum; holding a scene to the maximum instead would make the minimum meaningless for scenes.
+    **Both set → the minimum, even when the maximum is shorter** (owner 2026-11-10: "make scene use either maximum or
+    minimum if other one's off, minimum if both on"): a scene's rule is `(min, 0)` with a minimum, `(NeverMs, max)`
+    without — it used to be `(min, max)`, so a maximum below the minimum cut it first. Videos keep "a cap beats the
+    minimum"; still images keep `(min, max)`. Hints: `ROT_HINT.minScenes` / `maxScenes` / `sceneRule` (Settings' "Separate
+    timing for scenes" row and a line in the playlist modal while it's off). Tests: `rule.rs::item_rule_table`, self-test
+    `ItemPlayRule`, adapter IT "min 6 s + max 3 s on a scene" / "a playlist's min 5 s + max 2 s", matrix
+    `global:sceneTiming` / `playlist:sceneTiming` (the hint text).
     `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone, and a playlist play under
     advance-on-end (`AppOps.PlayPlaylist`) always goes through `ApplyTimedPlaylist`, minimum 0 included (it used to
     take `ApplyPlaylist` there, where ONE item — a trash leaving one survivor — became a plain non-timed launch an Undo
     could never re-arm; matrix `pending × selTrashUndo:shown+other`, `seq:trash×2+undo×2`, `seq3:playlistBarRemove+…`).
   - **Maximum**: once the playing item played that long the rotation advances **now** with its transition, even
     mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
-    the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
-    max fires; documented, not enforced).
+    the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** for a video / still
+    image (max < min → the max fires; documented, not enforced) — not for a scene (above: its minimum wins).
   - **0 = off, strictly, for both** (global + playlist): minimum 0 → a video switches at its first end however short
     (a 1 s clip at 1 s); maximum 0 → never cut — a 10 h video plays to its end. IT § "0 = off for both limits".
   - **"Separate timing for scenes"** (`GlobalSeparateSceneTiming` / `PlaylistSettings.SeparateSceneTiming`, the row
@@ -448,6 +455,17 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     not expect), **separate timing ON, scenes after 1800** — a video plays to its end, a scene / image switches after
     30 min (with the toggle off and both 0 a scene would never move and an image would flash by). Only a file without
     the keys sees them: the one-off migration writes them for every combo.
+- **"Keep playing this one"** (`liascape loop-current`, owner todo 2026-11-10; `AppOps.LoopCurrent` →
+  `LiascapePlayerProgram.ToggleKeep`): toggles the player program's `keep` (player-core.md § Programs) — no rotation away
+  from the current item (it loops) until run again. Essential on the media queue and waited for (≤ 5 s): it reads
+  `prog:main.keep` and sets the opposite. It lives in the player only: `program.json` keeps it across a player restart, a
+  backend restart never touches it (`Props` / `Reapply` don't carry it), and with the app closed the one-shot CLI toggles it
+  straight on the player (`RunAction` locally). A Play / play-from of a playlist (`LoadNow`) sets it false — starting the
+  playlist is starting the rotation; a next / previous / random keeps it (the new item is held). No program (a single
+  wallpaper) → "no playlist is rotating — <title> already stays on screen" (exit 1, nothing changes); legacy → "needs the
+  liascape-player engine". The answer: `/action` → `{ok, message}` (ActionForward prints it on stdout, exit 0), WS
+  `loop-current {keep, path, message}` (the UI's topbar status + its status line's ", looping this one"), `/current.keep`
+  (`Kept()`). Matrix `cli:loopCurrent`.
 - **Removed**: "Wait for video to end after interval" (`GlobalWaitForVideoEnd` / `PlaylistWaitForVideoEnd` /
   `PlaylistSettings.WaitForVideoEnd` / `LastSession.WaitForVideoEnd` / `TimedState.WaitForVideoEnd`, `_waitForVideoEnd`
   and its tick branches) and the separate `GlobalMinPlaySeconds` / `PlaylistSettings.MinPlaySeconds` (merged into the
