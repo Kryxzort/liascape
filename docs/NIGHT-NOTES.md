@@ -887,3 +887,19 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
 - Whole library re-ranked: mean 0.171 → 0.168 (1884904087 reads worse only because its greeting line is picked at random). Checks: LWE host tests 139 / 139 (each new test fails without its fix);
   player suite 756 / 756 (one CPU-timing test failed under load and passed alone); scene health 89 clean / 7 degraded / 0 failed (the baseline); shader sweep the same 6 known failures. LWE pin `5cb69c7` (fork patches 0123–0126). The release
   build is ready; I did not restart your player or backend (you stopped them for the mpvpaper soak).
+
+## 2026-11-11 early morning — the switch-over check, stopped at the disk line
+- **Stopped early on purpose: `/home` fell under 25 GB free** (24.7 GB after building the merged branch's tests). Deleting
+  files frees nothing here (snapshots), so I stopped instead of building more. Nothing is merged or pushed; your
+  player kept running the whole time (I never stopped it). The work is on the local branch `switchover`.
+- **The battery's scene "late handoff" is not a bug in the switch.** The wide Kimi scene now takes about 2.5 s to load
+  (it took 0.7–1.1 s a week ago, before most of the Wallpaper Engine port); the test gives it about 2 s. When the next
+  wallpaper isn't ready in time, the old video holds its last frame until it is and then fades — that's how it was
+  designed. Counted properly: the 13 switches where the scene was ready on time hand off within one frame; the 12
+  late ones start their fade within 4 ms of the scene being ready. The test now tells the two apart.
+- **The one "drop" in the reveal cell is the detector misreading a video that had already ended** (only happened
+  where the start waited 88 ms for Kimi). A fix is written but not built yet (disk).
+- **The small "micro-gaps" in the frozen cells are not something you'd hear differently.** A separate recording shows
+  the flagged switches start their sound exactly like the ~200 unflagged ones. Whether the bar should count these is
+  your call.
+- Worth looking at later: Kimi loading 0.7 s → 2.5 s is a real slowdown from the port.

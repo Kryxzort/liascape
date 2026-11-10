@@ -121,6 +121,7 @@ def dropout(d, t0, t1, cell, method, recs_path):
             by_corr.setdefault(c, []).append(e)
     sch = [e for e in win if e["kind"] == "transition.scheduled" and str(e.get("origin", "")).startswith("program:")]
     ended = [e for e in ev if e["kind"] == "source.ended"]
+    readies = [e for e in ev if e["kind"] == "source.ready"]
     cur = [e for e in win if e["kind"] == "program.current" and e.get("reason") != "play"]
     first_play = next((e.get("corr") for e in win if e["kind"] == "program.current" and e.get("reason") == "play"), None)
     recs = []
@@ -135,14 +136,36 @@ def dropout(d, t0, t1, cell, method, recs_path):
         rep = (pd or {}).get("report")
         a = ((st or {}).get("a") or [{}])[0] if st else {}
         b = (st or {}).get("b") or {}
-        d_pred = d_ended = None
+        d_pred = d_ended = b_late = b_wait = None
         if st and ho and s.get("align") == "end" and a.get("duration"):
             speed = a.get("speed") or 1.0
-            pred = st["start_ms"] + (a["duration"] - (a.get("position") or 0.0)) * 1000.0 / speed
-            d_pred = ho["at_ms"] - pred
             en = [e for e in ended if e.get("id") == a.get("id") and st["_w"] - 1 <= e["_w"] <= ho["_w"] + 2]
             if en:
                 d_ended = (ho["_w"] - en[0]["_w"]) * 1000.0
+            # A late B (designed: player-core.md § Align — "if it's already past at the first
+            # evaluation (A shorter than D, or B late) it starts at once and A holds its last
+            # frame for the difference"): B's `source.ready` (log clock → player clock through the
+            # started event's own pair) after the effect's planned start (A's end − D). Such a
+            # switch is not a handoff-precision sample; it is checked against its own design:
+            # started as B became ready (`b_wait`), ended D later.
+            rd = next((e for e in readies if e.get("id") == b.get("id") and s["_w"] - 0.01 <= e["_w"] <= st["_w"] + 0.01), None)
+            dur = s.get("duration_ms") or 0
+            if rd and "t_mono_ms" in st:
+                off = st["t_mono_ms"] - st["at_ms"]
+                b_ready_at = rd["t_mono_ms"] - off
+                a_end = (en[0]["t_mono_ms"] - off + 1000.0 / 30.0) if en else None
+                if a_end is None:
+                    a_end = st["start_ms"] + (a["duration"] - (a.get("position") or 0.0)) * 1000.0 / speed
+                # full-live ENDS at A's end (planned start = end − D); reveal/frozen START there
+                planned = a_end - dur if s.get("method", method) == "full-live" else a_end
+                if b_ready_at > planned + 10.0:
+                    b_late = b_ready_at - planned
+                    b_wait = st["start_ms"] - b_ready_at
+            if b_late is None:
+                pred = st["start_ms"] + (a["duration"] - (a.get("position") or 0.0)) * 1000.0 / speed
+                d_pred = ho["at_ms"] - pred
+            else:
+                d_ended = None
         recs.append({
             "cell": cell, "method": method, "corr": corr, "align": s.get("align"), "effect": s.get("effect_id"),
             "dir": f"{kind_of(a.get('path'))}→{kind_of(b.get('path') or s.get('path'))}",
@@ -157,6 +180,8 @@ def dropout(d, t0, t1, cell, method, recs_path):
             "drop_list": rep["drops"] if rep else [], "gap_list": rep["micro_gaps"] if rep else [],
             "handoff_vs_a_end_pred_ms": round(d_pred, 2) if d_pred is not None else None,
             "handoff_vs_a_ended_ms": round(d_ended, 2) if d_ended is not None else None,
+            "b_late_ms": round(b_late, 1) if b_late is not None else None,
+            "b_late_start_after_ready_ms": round(b_wait, 1) if b_wait is not None else None,
             "a_path": a.get("path"), "b_path": b.get("path") or s.get("path"),
         })
     with open(recs_path, "a") as f:
@@ -171,6 +196,7 @@ def dropout(d, t0, t1, cell, method, recs_path):
     # F3: `source.ended` fires as A's last frame is presented; the handoff is due one clip frame
     # (30 fps) after it — this is the distance from that due instant (signed: + = held, − = cut).
     dl = [r["handoff_vs_a_ended_ms"] - 1000.0 / 30.0 for r in done if r["handoff_vs_a_ended_ms"] is not None]
+    late = [r for r in done if r.get("b_late_ms") is not None]
     # The seam probe (design §11): runs of composed frames with a hole, any output, in the window.
     seams = [e for e in win if e["kind"] == "output.seam"]
     seam_frames = sum(e.get("frames", 0) for e in ev if e["kind"] == "output.seam_end" and e["_w"] <= t1 + 1)
@@ -196,6 +222,10 @@ def dropout(d, t0, t1, cell, method, recs_path):
         "handoff_vs_a_ended_p95_ms": round(pctl(de, 0.95), 2) if de else None,
         "handoff_vs_a_last_frame_min_ms": round(min(dl), 2) if dl else None,
         "handoff_vs_a_last_frame_max_ms": round(max(dl), 2) if dl else None,
+        "b_late_n": len(late),
+        "b_late_max_ms": round(max(r["b_late_ms"] for r in late), 1) if late else None,
+        "b_late_start_after_ready_max_ms": round(max(r["b_late_start_after_ready_ms"] for r in late), 1) if late else None,
+        "b_late_start_after_ready_min_ms": round(min(r["b_late_start_after_ready_ms"] for r in late), 1) if late else None,
     }
 
 

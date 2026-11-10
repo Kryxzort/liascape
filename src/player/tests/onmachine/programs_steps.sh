@@ -8,6 +8,7 @@ FRAME_MS=33.4 # one frame of the 30 fps clips (the report's `pred` column: from 
 # held at most one output frame (DP-1 144 Hz: 6.9 ms, + the `Ended` poll's slack) and never cut (−3 ms).
 HANDOFF_HOLD_MS=10
 HANDOFF_CUT_MS=-3
+B_LATE_START_MS=20 # a late B's effect starts at the tick that sees it ready (+ that tick's slack)
 
 # ------------------------------------------------------------------ small helpers
 items_json() { jq -nc '[$ARGS.positional[] | {path: .}]' --args "$@"; }
@@ -98,6 +99,16 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
         lo=$(jq -r .handoff_vs_a_last_frame_min_ms <<<"$c"); hi=$(jq -r .handoff_vs_a_last_frame_max_ms <<<"$c")
         check "$n handoff vs the end of A's last frame" "$lo … $hi ms (n $(jq -r .handoff_vs_a_ended_n <<<"$c"))" \
             "$HANDOFF_CUT_MS … +$HANDOFF_HOLD_MS ms (never cut, held ≤ one output frame)" "$(pyb "$lo >= $HANDOFF_CUT_MS and $hi <= $HANDOFF_HOLD_MS")"
+    fi
+    # A B not ready by the planned start (2026-11-11: the 3840×1080 Kimi scene takes ~2.5 s to build, the scenes
+    # cell gives it ~2 s) is not a precision sample: by design (player-core.md § Align) its effect starts as B
+    # becomes ready and A holds its last frame for the difference — checked as that.
+    if [[ $method == full-live && $(jq -r '.b_late_n // 0' <<<"$c") -gt 0 ]]; then
+        local wlo whi
+        wlo=$(jq -r .b_late_start_after_ready_min_ms <<<"$c"); whi=$(jq -r .b_late_start_after_ready_max_ms <<<"$c")
+        check "$n late B: the effect starts as B becomes ready" \
+            "$(jq -r .b_late_n <<<"$c") late (≤ $(jq -r .b_late_max_ms <<<"$c") ms), started $wlo … $whi ms after B's ready" \
+            "0 … $B_LATE_START_MS ms" "$(pyb "$wlo >= -1 and $whi <= $B_LATE_START_MS")"
     fi
 }
 # The user's own switches (switch-over checklist, design §10 "manual next/prev, random, next pressed mid-transition"):

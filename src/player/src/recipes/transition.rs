@@ -377,8 +377,9 @@ enum Outcome {
 pub struct Transitions {
     active: Vec<Tr>,
     graves: Vec<Grave>,
-    /// Sources currently holding their end (`Ended` seen, not re-armed) → time_pos then.
-    ended: BTreeMap<String, f64>,
+    /// Sources currently holding their end (`Ended` seen, not re-armed) → time_pos then,
+    /// and the instant it came (the dropout probe's A snapshot, `begin_running`).
+    ended: BTreeMap<String, (f64, Duration)>,
     outbox: Vec<TransitionEvent>,
     prev_now: Duration,
     /// I6 (final review): `restore_a`'s un-pause-then-ramp-in onsets (a snap-back, a
@@ -917,13 +918,13 @@ impl Transitions {
             match ev {
                 SourceEvent::Ended => {
                     let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
-                    self.ended.insert(id.clone(), tp);
+                    self.ended.insert(id.clone(), (tp, now));
                 }
                 SourceEvent::Ready => {
                     self.ended.remove(id);
                 }
                 SourceEvent::Position(t) => {
-                    if self.ended.get(id).is_some_and(|e| *t + 1e-3 < *e) {
+                    if self.ended.get(id).is_some_and(|e| *t + 1e-3 < e.0) {
                         self.ended.remove(id);
                     }
                 }
@@ -932,7 +933,7 @@ impl Transitions {
                 SourceEvent::Error { .. } => {
                     if self.active.iter().any(|t| t.lead_a() == Some(id.as_str())) {
                         let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
-                        self.ended.insert(id.clone(), tp);
+                        self.ended.insert(id.clone(), (tp, now));
                     }
                 }
                 SourceEvent::Rejected { .. } => {}
@@ -1679,7 +1680,23 @@ impl Transitions {
             .sides
             .iter()
             .filter_map(|s| s.a.clone())
-            .map(|a| snapshot_source(g, &a))
+            .map(|a| {
+                let mut snap = snapshot_source(g, &a);
+                // An A that ended a while ago (the start waited for a late B — reveal/frozen
+                // start at A's end, full-live as soon as B is ready) still reports the
+                // time_pos of its last frame, which the dropout probe would read as "A is
+                // there now" and expect its last moments of sound inside the pre-roll: a
+                // false drop (Phase 3 battery 2026-11-11, `scenes × reveal` tr-754, the
+                // start 88 ms after `Ended`). Its sound ended one clip frame after `Ended`
+                // (F3); past that, advance the snapshot by the time it has been over.
+                if let Some(&(_, at)) = self.ended.get(&a) {
+                    let over = secs(now.saturating_sub(at)) - frame_s(tr, g);
+                    if over > 0.0 {
+                        snap.position += over * snap.speed;
+                    }
+                }
+                snap
+            })
             .collect();
         let b_snapshot = snapshot_source(g, &b);
         self.emit(
@@ -2973,6 +2990,48 @@ mod tests {
         );
         h.tick(16, &[]);
         assert!(h.has(&t, "transition.started"));
+    }
+
+    /// The dropout probe's A snapshot (`transition.started.a[].position`): an A that ended
+    /// well before the start (a late B) is snapshotted past its end by the time it has been
+    /// over beyond one clip frame — not at its last frame's stale time_pos, which made the
+    /// probe expect A's last sound inside the pre-roll (battery 2026-11-11, tr-754: a false
+    /// 20 ms drop). An on-time start (≤ one frame after `Ended`) keeps the plain time_pos.
+    #[test]
+    fn started_snapshot_of_a_long_ended_a_is_past_its_end() {
+        fn a_pos(h: &H, t: &CorrId) -> f64 {
+            h.events
+                .iter()
+                .find_map(|e| match &e.kind {
+                    TransitionEventKind::Started { a, .. } if &e.corr == t => Some(a[0].position),
+                    _ => None,
+                })
+                .expect("started")
+        }
+        for (b_late_ms, want) in [(0u64, 9.967), (200, 9.967 + 0.2 + 0.016 - 1.0 / 30.0)] {
+            let mut h = H::new(&["V1"]);
+            let a = h.video(&["V1"], 10.0, 9.9);
+            let t = h.start(req("/b.mkv", "reveal", "end", Some("fade")));
+            let b = h.b_of(&t);
+            h.observe(&a, "time_pos", PropValue::F64(9.967));
+            if b_late_ms == 0 {
+                h.observe(&b, "ready", PropValue::Bool(true));
+                h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+            }
+            h.tick(16, &[(a.clone(), SourceEvent::Ended)]);
+            if b_late_ms > 0 {
+                h.tick(b_late_ms, &[]);
+                assert!(!h.has(&t, "transition.started"), "waits for B");
+                h.observe(&b, "ready", PropValue::Bool(true));
+                h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+            }
+            h.tick(16, &[]);
+            let p = a_pos(&h, &t);
+            assert!(
+                (p - want).abs() < 0.02,
+                "B late {b_late_ms} ms: A snapshotted at {p:.3}, want {want:.3}"
+            );
+        }
     }
 
     /// Item 7: after a natural reveal handoff the held (paused) A is destroyed in the same

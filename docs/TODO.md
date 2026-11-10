@@ -26,6 +26,32 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
       checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
       fill the report; owner-only rows go to "Waiting on owner".
+      **2026-11-11 05:00, resumed and STOPPED at the disk line** (`/home` under 25 GB free after the merge's debug
+      build): `switchover` has lp-player (abdd0c60) merged in cleanly — player debug tests 759 / 759 on that merge
+      (before the snapshot fix below); the report's rows are not filled yet. Found on
+      tonight's battery (`results/phase3-20261111T004919`, events kept in the trash, `lp3.7fwI6k`):
+      - `scenes × full-live` handoff 971 ms = **not a handoff bug: B (the 3840×1080 Kimi scene) was late.** It builds
+        in ~2.5 s now (warm, `--lwe-smoke` build_ms 2.35–2.78 s on every pin since 7bbd6de; the 11-03 pin cc6f1c9
+        took 0.86–1.13 s, 10-28's 40eacc9 0.69 s), the cell gives it ~2 s (4 s clip − 1 s previous effect − 1 s
+        effect). A late B starts at once and A holds its last frame for the difference — by design (player-core.md §
+        Align). Re-analysed with the fixed report: 13 on-time switches, handoff vs A's end ≤ 32.64 ms, vs A's last
+        frame +0.7…+3.48 ms (PASS); 12 late B's (≤ 999 ms late) each started 0.0–3.9 ms after B's ready.
+        `programs_report.py` now classifies late B's (`b_late_*`) and `programs_steps.sh` checks them as designed.
+      - `scenes × reveal` drop (tr-754) = **a detector artefact**: the only end-aligned start more than 40 ms after A's
+        `Ended` (88 ms: it waited for Kimi) — the dropout probe read the ended A's stale `time_pos` and expected its
+        last sound inside the pre-roll. Fix written, NOT built or tested (disk): `begin_running` advances an ended A's
+        `transition.started` snapshot past its end (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
+      - frozen micro-gaps (onendmax 4, scenes 5; all at B's onset after the effect's silence, 2–5 ms): the sink
+        recording shows the flagged onsets entering their 30 ms ramp no later than the unflagged ones (onendmax:
+        flagged −22.6/−20.6 dB in the first 0.5 ms vs unflagged median −18.1, 26 of 33 louder; scenes S→V −15.9/−15.8
+        vs median −15.1). Every frozen B onset enters a few ms into its ramp (its audio reaches the bus after the ramp
+        started); the detector flags the ones where that exceeds its single-lag fit. Not an audible difference from
+        the other ~200 frozen onsets — the bar's "zero micro-gaps" for frozen is the owner's call (or a per-onset lag).
+      - Perf finding: Kimi's build 0.7 s → 2.5 s across the WE port (11-03 → 11-10) — worth a profile.
+      - First on-machine seam-probe reading (the owner's player, restarted 04:49 on this branch's release build): 4 seam
+        frames per output at startup (`output.seam {missing: [src1]}` at 0.3 s, ended 0.67 s) — the restore shows its
+        source before it has a texture. Nothing was on screen before it (start-up, not a switch), but the probe counts it:
+        decide whether a restore's first show should wait for `Ready` like a switch's B, or the probe ignore start-up.
 
 ## UI — owner's Todoist, clarified 2026-11-10
 - [ ] Matrix `playlistMark:shufflePlay:resume` is flaky by design: under "Resume" every Play can land on k1 and the cell
