@@ -18,7 +18,7 @@
   },
   "3490034653": {
     "class": "random",
-    "note": "Since the scene clock (0.414 → 0.289) the layers register to WE's within ~1 px (phase correlation over the trees, the background and the girl; the camera shake is a function of g_Time and now in phase). What is left: a lighter haze over the girl and the trees in ours (its three `light_shafts_1` systems inside compose layers; random in WE), the petals (random) and the clock text on her hair (the capture's minute)."
+    "note": "0.293 → 0.218 with the 2026-11-11 fixes (its puppets' textures are padded: the parts sampled their pictures off by uv · padding before). Since the scene clock (0.414 → 0.289) the layers register to WE's within ~1 px (phase correlation over the trees, the background and the girl; the camera shake is a function of g_Time and now in phase). What is left: a lighter haze over the girl and the trees in ours (its three `light_shafts_1` systems inside compose layers; random in WE), the petals (random) and the clock text on her hair (the capture's minute)."
   },
   "3354740764": {
     "class": "pointer",
@@ -62,7 +62,7 @@
   },
   "3414858021": {
     "class": "ok",
-    "note": "matches once WE sees the pointer. It says FRIDAY: WEDNESDAY needs a Wednesday run. The rain is random."
+    "note": "matches once WE sees the pointer. The Wednesday reference (`captures/wednesday`, 2026-11-11) and ours on that date agree: \"WEDNESDA\" runs off the right edge in WE too, the date block's place, font and size are the same. The rain and the light beam are random."
   },
   "2542468435": {
     "class": "ok",
@@ -109,11 +109,23 @@
     "note": "fireflies and rain: random particles in WE."
   },
   "3463520581": {
-    "class": "open",
-    "note": "Kirito's face (puppet 126, attached to puppet 34's `Attachment`) is hidden in ours where WE shows it: with the front-hair layer 102 (a plain image, also on `Attachment`) visible, the front of the face is gone and the sky shows through; alone, each draws as in WE. Private copies in ours: 102 at alpha 0, or 102 without its `attachment`, or a solid stand-in of 102's size or 102 moved off the face → the face is whole (so it is where 102's textured quad overlaps the face: its eye, nose and mouth go, the sky behind shows); 102's effects (opacity mask, waterwaves) and 126's effects make no difference. WE variants `captures/var/v3463-k102`, `-k4` (request time only: the clocked copies didn't open). 0.101 → 0.084 with 0118. TODO."
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork, a puppet's uvs are its image's): Kirito's face (puppet 126, an 852 x 726 image in an 896 x 768 texture) took its mesh's uvs as the texture's, so every piece of the face drew its content 28, 16 px up-left — eye, nose and mouth under the front hair, the sky where the face should be. Proved on private copies at rest without effects (`captures/var/v3463-s*`): the face alone sat 14, 8 px (at 1920) from WE's, now 0, 0. 0.084 → 0.017."
   },
   "3042492564": {
-    "class": "open",
-    "note": "ours shows a lighter rounded rectangle over the sea and sky (x 660–1660, y 146–924) from the full-screen `localcontrast` layer 583: hiding it or its effect removes it; its strength (0 or 3), mask, blend mode or FBO names don't. The clock text glows in ours, crisp in WE. TODO."
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork): the lighter rectangle was the full-screen `localcontrast` layer 583 drawn through the camera object's zoom 0.73 — its output (the frame shrunk) landed in the zoomed 73 % rectangle; WE draws a full-screen layer over the whole screen (`captures/var/v3042-bg*`: at strength 3 WE changes pixels across the frame, at 0 none). The clock's glow: WE's font pass draws a text layer with effects into its picture translucently, so the layer's alpha 0.75 reaches the screen cubed (0.36 of the way to the text's colour with the pulse, ours drew 0.63; `captures/var/v3042-t*`). Left: a faint dark rim from the clock's `shine` rays; the clock reads a minute later (the fake clock's rounding). 0.101 → 0.057."
+  },
+  "2290002190": {
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork, a constant takes the declaration its pass compiles): its cloud shadows (stock `clouds`, PERSPECTIVE 1) stood still in ours — the vertex shader's vec2 `g_CloudSpeeds` was uploaded into the fragment shader's vec4 and GL refused it. Mean |WE − ours| at 0.5 / 2 / 5 s 5.5 / 9.8 / 15.1 → 2.2 / 2.3 / 2.3. 0.102 → 0.008."
+  },
+  "2683776412": {
+    "class": "ok",
+    "note": "its clouds (stock `clouds`, PERSPECTIVE 1) stood still before 2026-11-11 (the speed constant uploaded into the wrong declaration): 0.026 → 0.014."
+  },
+  "1884904087": {
+    "class": "random",
+    "note": "the greeting under the clock is picked at random (WE: \"Have a nice evening, YOURNAME!\", ours on 2026-11-11 \"Hi YOURNAME, how has your day been?\"); the rest matches (0.006 when the picks agreed)."
   }
 }

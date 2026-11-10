@@ -5,8 +5,6 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 
 ## Waiting on owner
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
-- [x] 3414858021's "WEDNESDAY": captured 2026-11-11 01:38 IST (`--tag wednesday`, clock read 3/3) →
-      `~/.cache/liascape/we-ref/captures/wednesday/3414858021`; next WE-port round: compare ours against it.
 - [ ] Decide: UI-matrix randomized runs (optional).
 
 ## Night runs (owner 2026-11-10: "run the soaks or battery yourself while im sleeping")
@@ -398,19 +396,10 @@ Two bug classes kept recurring; fix the class, not the instance:
           (2026-11-06) the "time" rows are gone. Since the 2D round (2026-11-06 night, pin `92c1ada`) the top is 3D
           (3276522107: the 3D agent's), then the parallax scenes' 0.5 s frames (the late pointer, below), random
           particles / shafts (3490034653, 3478602089, 2561227934, 3363252053, 2511663284), random text (2951169110)
-          and the open ones below (3463520581; 3013489778 fixed 2026-11-10, fork 0118). Explained so far: each ranked scene's note (`scene_we_notes.json`).
-    - [ ] 3463520581: Kirito's face (puppet 126 on puppet 34's `Attachment`) is hidden in ours where WE shows it.
-          With the front-hair layer 102 (a plain image, also on `Attachment`) visible, the front of the face is gone
-          and the sky shows through; each alone draws as in WE. In ours (private copies): 102 at alpha 0, 102 without
-          its `attachment`, a solid stand-in of 102's size, or 102 moved off the face → the face is whole: where 102's
-          textured quad overlaps it, its eye, nose and mouth go and the sky behind shows. 102's and 126's effects make no
-          difference. WE variants `captures/var/v3463-k102`, `-k4` (no clock: the clocked copies didn't open in WE).
-    - [ ] 3042492564 (0.101 at every time): ours shows a lighter rounded rectangle (x 660–1660, y 146–924 of 1920)
-          over the sea and sky that WE doesn't. It is the full-screen `localcontrast` layer 583 (id 586 effect; hidden →
-          gone, its effect removed → gone), but it stays with the combine's strength set to 0 or 3, its mask removed, its
-          colour blend mode removed, or its quarter buffers renamed — so not the strength, mask, blend or an FBO name
-          clash. Next: what its combine pass reads as `previous` (index 2) and `_rt_QuarterCompoBuffer1` there. Also the
-          clock text glows in ours (crisp in WE) and reads a minute later (the fake clock's rounding).
+          and the open ones below (3463520581 and 3042492564 fixed 2026-11-11, fork 0123–0125; 3013489778 fixed 2026-11-10, fork 0118). Explained so far: each ranked scene's note (`scene_we_notes.json`).
+    - [ ] 3042492564's clock (left after the 2026-11-11 fix): a faint dark rim where its `shine` rays raise the alpha
+          outside the glyphs; WE shows none. The text's picture is premultiplied as WE's font pass leaves it (that part
+          is measured), so how WE's shine combine keeps the rim light is open (its `BlendGlow` with the rays' alpha).
     - [ ] A compose (passthrough) layer named in another object's `dependencies` (3243449890's 16613, read by four
           clipping masks) keeps LWE's handling; WE sets flag 0x1010 on it too (the 2D round ported it for image and
           text layers only). 3243449890 has no WE reference yet.
@@ -439,8 +428,6 @@ Two bug classes kept recurring; fix the class, not the instance:
           own Media Foundation in the prefix (from the owner's install) or a Windows capture.
     - [ ] Music-reactive references (3445973124 "with music"): a private PipeWire instance with a null sink as
           WE's default output, winepulse pointed at it, a track played into it (the spike's "Blockers").
-    - [ ] 3414858021's "WEDNESDAY": capture on a Wednesday (`we-ref-capture.sh 3414858021 --tag wednesday`);
-          libfaketime didn't reach Wine's clock.
   - [ ] **WE ↔ LWE gap audit → porting batches** (2026-10-29,
         `docs/player/spikes/we-lwe-gap-audit.md`). It has 185 rows: what WE 2.8.485 scenes do (decompiled, or from
         assets/docs) that the fork doesn't, each with the number of the owner's 96 scenes that use it. Port it in
@@ -517,7 +504,8 @@ Two bug classes kept recurring; fix the class, not the instance:
           - [ ] `auto_sway` (3235948233, 3414858021's hair/cloth sway): `M_PI` from `common.h` used above where LWE
                 pastes includes; hoisting the include's `#define`s builds it but the left cloth then vanishes — read
                 the effect before enabling it.
-          - [ ] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — check in WE.
+          - [x] 3414858021's "WEDNESDAY" reaches the right edge (group x = user `x8` 0.967 × canvas) — WE's does too
+                (the Wednesday capture, 2026-11-11).
           - [ ] Flag 4's reader (2026-11-05, audit "Attachment result"): not in the exe nor found in scenescript64.dll;
                 flag 4 also marks shader constants annotated `"conversion":"rad2deg"` (GH 0x140192430), which a script
                 would see in degrees in WE and radians in LWE — 0 library scenes script or bind one.

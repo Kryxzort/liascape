@@ -947,6 +947,36 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         amount each run (4 runs; the 3D agent measured 0.25–0.9 s on 3276522107 / 3509243656). Ours at 2 s is
         0.07 s before the fade starts, which made it look like a 2 s vs 5 s gap at the 0.5 / 2 / 5 s samples.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3463520581: Kirito's face hidden under his front hair — done 2026-11-11 (fork `e6211c0`, patch 0123):
+        0.084 → 0.017. Not the hair layer at all: the face is a puppet whose 852 × 726 image sits in an 896 × 768 texture,
+        and a puppet mesh's uvs are the image's (0–1 over its width and height); ours took them as the texture's, so
+        each piece drew its content uv · (texture − image) off, 28, 16 px up-left — the eye, nose and mouth under the
+        hair, the sky where the face should be. The earlier "102 at alpha 0 / moved off → whole" only uncovered the
+        shifted face. Proved on private copies at rest without effects (`captures/var/v3463-s*`): the face alone sat
+        14, 8 px (at 1920) from WE's, now 0, 0 (the hair and body matched before). The mesh covers every painted
+        texel with image uvs, 99.5 % with texture uvs. Fork test `puppet_uvs_are_the_images`.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3042492564's lighter rectangle and glowing clock — done 2026-11-11 (fork `2c423e8`, `bf7deb2`, patches
+        0124–0125): 0.101 → 0.057. The rectangle: the full-screen `localcontrast` layer drew its last pass through the
+        camera object's zoom 0.73, so its output (the frame, shrunk) landed in the zoomed 73 % rectangle; WE draws a
+        full-screen layer over the whole screen (private copies `captures/var/v3042-bg*`: at strength 3 WE changes
+        pixels across the frame, at 0 none). The glow: WE's font pass draws a text layer that has effects into its
+        picture translucently, so its alpha reaches the screen cubed — the clock (alpha 0.75, a pulse keeping 0.84)
+        at 0.36 of the way to its colour in WE, 0.63 in ours (`captures/var/v3042-t*`; alpha 1 or no effects matched
+        already). Fork tests `fullscreen_layer_ignores_zoom`, `text_alpha_through_effects_is_wes`. Left (TODO): a
+        faint dark rim from the clock's `shine` rays.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3414858021's "WEDNESDAY" — checked 2026-11-11 against the Wednesday capture (`captures/wednesday`, ours
+        on that date through the compare's fake clock): the date block's place, font and size match and WE's
+        "WEDNESDA" runs off the right edge too. Nothing to fix; the rest is rain and the pointer.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 2290002190's cloud shadows stood still — done 2026-11-11 (fork `5cb69c7`, patch 0126): 0.102 → 0.008. The stock
+        clouds shader declares `g_CloudSpeeds` as a vec2 in its vertex shader (PERSPECTIVE 0) and a vec4 in its
+        fragment shader (PERSPECTIVE 1); ours uploaded the vertex one into the program's vec4, GL refused it and the
+        speed stayed 0. A pass now takes the declaration whose type the linked program has. Also 2683776412 and
+        3354740764 (PERSPECTIVE 1 clouds). Mean |WE − ours| at 5 s 15.1 → 2.3. Fork test
+        `constant_takes_the_compiled_declaration`.
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
   - [x] 3013489778's girl doesn't pulse — done 2026-11-10 (fork `7bbd6de`, patch 0118): 0.125 → 0.003. WE runs a
         puppet's effects on its image, in texture space, and its material (genericimage4, the only pass that skins)
         draws the mesh last from their output; ours drew the posed mesh first and ran the effects on that. Measured
