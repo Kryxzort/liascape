@@ -14,6 +14,21 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
       report) — keep for later or drop.
 
+## UI — owner's Todoist, clarified 2026-11-10
+- [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
+      when the settings grow" fix): focusing a card opens a sidebar holding everything the right-click menu has
+      (Settings, Open in file manager, Delete, Delete from source). Same in the Browse tab.
+- [ ] **Morph replays while settings are open**: with a wallpaper's settings open, the morph animation plays again
+      every 1–2 min instead of staying still (probably a periodic refresh re-mounting the view).
+- [ ] Morph: a little faster still; the morph glitch when a property changes.
+- [ ] Scene timing fallback: with the scene-specific timing options off, use the general minimum or maximum, whichever
+      is on; the minimum if both are on.
+- [ ] Scroll to the playing wallpaper on app open, in both the playlist bar and the main grid.
+- [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
+      research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
+      Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
+      triggers/actions can't express (the escape hatch, not just one more action type).
+
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
@@ -288,24 +303,44 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Next up (handoff 2026-10-26, weekly limit)
-- [ ] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
-      setting the normalization target to 0): Settings let the target go −100…0 LUFS, but ffmpeg's `loudnorm` takes
-      `I` in −70…−5 only, so `LoudnormAf` built a filter mpv rejected, and mpv then ran the video with **no audio at
-      all** (`sources[].mpv_current_ao` null, no mpv stream on `liascape-player-bus`), not just un-normalized. A player
-      restart (with the target back at −14) brought it back. Fixed the input: the UI bounds the target to −70…−5 and
-      `LibraryService.LoudnormAf` clamps a stored value (2026-11-06). Left: the player should survive any bad `af`
-      — on mpv refusing it, fall back to `""` (sound un-normalized), log a warning and report it (no silent
-      no-AO state); add an IT check with an out-of-range target. (The bus bounce at 20:33 in the same evidence,
-      `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`, was unrelated —
-      audio worked after it.)
+- [ ] **Resume the two WE-port agents when the weekly limit resets** (owner 2026-11-07 00:20: "stop em for now, we'll
+      start them when my weekly resets"). Both stopped mid-round with the original brief
+      (`/tmp/…/scratchpad/weref-fix-brief.md` — copy it into the new session if /tmp was cleared):
+      - **weref-2d** (worktree `.claude/worktrees/weref-2d`): fork `livepaper/next-v2` is at **92c1ada** with its patches
+        0112–0114, 0117 — 3354740764's clouds (a `dependencies` layer draws through its composite, 0.327 → 0.218),
+        3163060610's constant scripts' thisObject (0.119 → 0.059), "1 1 1" = white, symlinked project folders. Its pin
+        commit `f86c1ce` ("Pin LWE 92c1ada") is on the branch but **untested and unmerged**: run the chain (lwe.sh build
+        check test, player tests, health, sweep, the WE compare), merge, push, restart. Left from its list: 3219908811's
+        notice panel, then down the ranked report.
+      - **weref-3d2** (worktree `.claude/worktrees/weref-3d2`, 141 uncommitted files — recaptures and notes): its fork
+        work (patches 0115–0116, incl. `input.cursorWorldPosition` in 3D scenes) is already in 92c1ada; it was bumping the
+        pin. Commit its worktree state, test, merge after weref-2d's pin. Left: the clock strip for 3276522107 / 3477054430,
+        genericimage4 on 2D blend layers' last draw.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
-      loud quiet", "like audio in reverse or some ghost". Suspects: the worker's WSOLA stretch (`stretch.rs`) engaging
-      when an effect or `compress_to` changes A's speed (non-periodic sound through 20 ms Hann segments → phasey/reversed
-      grains and amplitude pumping), a crossfade gain ramp fighting the auto-mute's mute/unmute bursts (Spotify + a
-      notification flapped it 6× in 16 s on 2026-11-06), or a comb/phase effect from A and B carrying the same sound.
-      Reproduce on the private PipeWire (record the bus during scene→video and scene→scene transitions across effects
-      and speeds) before fixing.
+      loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
+      on a private PipeWire at the owner's quantum (64, real-time) with a private headless player (two outputs at
+      144/240 Hz): scene→video, scene→scene (incl. both with sound), scene→synthetic; fade, rotateTransition,
+      parametric_glitch, static_wipe, splitSlideOutVertical, DirectionalScaled, GlitchDisplace, VerticalClose,
+      TilesWave, randomNoisex, angular, x_axis_translation; full-live, reveal, frozen; A at 0.8×/1×/1.25× (WSOLA on);
+      the compositor SIGSTOPped 4–8× mid-fade (the owner's 13–34 s `worker.host_stalled` gaps, in small); and the
+      owner's own pairs from their 2026-11-06 log (Workshop copies: 3432999904→MIKU_MK2, 2783122117→壁纸循环,
+      2672425887→EP05_01m, 1864677589→Miku Miku, 3243449890→3432999904, 3593587273→3419466417). Each trial recorded
+      the sink AND A's own stream (`pw-record` on `liascape-player-scene.<id>`). **A's stream is the scene's own sound
+      × the equal-power fade, to the dB:** decoding the scene's sound file and aligning it, A − source − cos-fade
+      stays within p95 0.18–0.44 dB, max ≤ 1.03 dB over the fade (13 trials whose scene has one sound file and
+      aligned; the compositor-stall one 1.63 / 2.97 dB — the fade held while stopped, as designed). The "loud quiet"
+      dips seen in 2672425887's fade are in the music itself: the source has them at the same ms.
+      A synthetic tone A under heavy real B scenes: no phase jump or hole on the sink. The debug dropout detector:
+      fit ok, 0 drops on all. Ruled out with that: the WSOLA stretch (owner's A speeds were all 1.0, nothing in a
+      transition changes a speed — `compress_to` only rescales progress/gain), the worker's gain path, gate and
+      clip, a stalled loop, the auto-mute (by-pid ownership of worker streams), scene loudness reports. Not covered:
+      the owner's real output chain (EasyEffects convolver + EQ on the HDB 630, quantum 64 set by another client),
+      a real compositor stall of seconds. Tools for the next try (or the owner's own machine):
+      `src/player/tests/onmachine/transition_audio/` (`rig.sh up`, `record.py`, `srccmp.py`, `afade.py`,
+      `sine.py`). Next step: when it happens, note the time and whether A's sound or B's is the one warbling (most
+      of the owner's 2026-11-06 scene A's had no sound at all — 3042492564, 2638125030, 3419466417, 3104056709 —
+      so the warble may be B's video fading in).
 - [ ] Randomized matrix sequences (5–20 random controls, the oracle after each) — optional, owner to decide.
 
 - [ ] **Matrix shard hung in `scene × sceneProp:restart`** (2026-10-28, the `--changed liascape-player --jobs 2` run for the
@@ -363,27 +398,29 @@ Two bug classes kept recurring; fix the class, not the instance:
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
     - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). Since the scene clock
-          (2026-11-06) the "time" rows are gone; the top is 3D (3509243656, 3276522107: the 3D agent's), then
-          3354740764 (the clouds compose layer below), 3490034653 (registered to ~1 px; light-shaft haze, random),
-          and parallax scenes' 0.5 s frames (the late pointer, below).
-    - [ ] 3354740764's `Clouds` compose layer (id 58: angles z −π, scale 1.2 × 2.3, `perspective`, procedural_noise
-          with PERSPSWITCH and a UV quad, LAYERED from `_rt_imageLayerComposite_51_a`): ours darkens the bottom 30 % of
-          the grass (−14…−32 / 255) where WE's changes almost nothing. Proved by removing the layer from a private copy
-          in both (WE `captures/var/v3354-noclouds`, ours `ov-noclouds`): without it the grass matches. Look at how a
-          turned / scaled compose layer maps its effect UVs onto the screen (CImage passthrough copy + MVP;
-          `isPerspectiveLayer` skips compose layers: "no library scene turns one" — this one does).
-    - [ ] 3219908811's notice panel at 5 s: WE's still dim (fading in), ours fully in. With the scene clock both are
-          at the same scene time, so it is a real timing / alpha difference.
-    - [ ] The 0.5 s frames of parallax scenes (3233141951, 3219908811, 3363252053): WE's pointer arrives with the
-          capture's xdotool nudge after load and its parallax eases in from there; wallpiper (GetCursorPos hook) has
-          it from the first frame. Nudge earlier, or take the 0.5 s frame from wallpiper.
+          (2026-11-06) the "time" rows are gone. Since the 2D round (2026-11-06 night, pin `92c1ada`) the top is 3D
+          (3276522107: the 3D agent's), then the parallax scenes' 0.5 s frames (the late pointer, below), random
+          particles / shafts (3490034653, 3478602089, 2561227934, 3363252053, 2511663284), random text (2951169110)
+          and the open one below (3013489778). Explained so far: each ranked scene's note (`scene_we_notes.json`).
+    - [ ] 3013489778's girl doesn't pulse in ours (open). Her time `pulse` effect (puppet layer 161, visualizer = 1)
+          has an opacity mask painted for layer 18 (`masks/pulse_mask_00240ba8`, 1589 x 1275 = half of 18's 3179 x
+          2551) and reused on 161 (4380 x 2998). Ours samples the mask's soft spots (≤ 0.35) and the girl barely
+          changes; WE pulses her evenly (with the tints set black, WE darkens the whole girl by 27 %, ours ~0). WE
+          variants in `captures/var/v3013-*`: without the time pulse WE's girl is steady at ours' brightness, without
+          the audio pulse it still pulses. Decode how WE maps an opacity mask whose size isn't the layer's (the
+          mask UV in pulse.vert is `a_TexCoord · g_Texture2Resolution.zw / .xy`), or whether a puppet's effect
+          passes see other texcoords.
+    - [ ] A compose (passthrough) layer named in another object's `dependencies` (3243449890's 16613, read by four
+          clipping masks) keeps LWE's handling; WE sets flag 0x1010 on it too (the 2D round ported it for image and
+          text layers only). 3243449890 has no WE reference yet.
+    - [ ] The 0.5 s frames of parallax scenes (3233141951, 3219908811, 3363252053, 3354740764, 2951169110,
+          3289734539): WE's pointer arrives with the capture's xdotool nudge after load and its parallax eases in
+          from there; wallpiper (GetCursorPos hook) has it from the first frame. Nudge earlier, or take the 0.5 s
+          frame from wallpiper.
     - [ ] The compare gives ours the Windows install's fonts (the faces WE drew with); the owner's player uses
           fontconfig's, so 19 scenes naming `systemfont_*` draw with stand-ins (3354740764's Consolas → Inconsolata
           wraps after 24 characters, not 21). Owner's call: a "Windows fonts folder" setting (auto-found on a
           mounted Windows install) for the player.
-    - [ ] Minor, LWE: a layer colour written without a decimal point ("1 1 1") is read as 0–255 bytes (1/255 =
-          black; WE draws white). No library scene writes one (their layer colours are "1.00000 …"); found with a
-          hand-written test scene. And LWE fails to load a project folder whose files are symlinks (a farm).
     - [ ] 3184155462's cursor ripple vs the owner's Windows: WE's ripple force scales with the frame time (≈10× weaker
           at 120 fps than at 30); at a matched 30 fps ours is WE's strength. The owner's Windows WE (main profile,
           `/mnt/Windows/…/wallpaper_engine/config.json`) runs at **240 fps** (Ultra, MSAA x8; the Linux library's

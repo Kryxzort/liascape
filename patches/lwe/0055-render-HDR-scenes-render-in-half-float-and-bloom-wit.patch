@@ -1,7 +1,7 @@
 From 0d66ae8c5e0814da5962d673ea394c648f5d152d Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 10:28:27 +0530
-Subject: [PATCH 055/111] render: HDR scenes render in half float and bloom
+Subject: [PATCH 055/117] render: HDR scenes render in half float and bloom
  with WE's HDR chain; FBOs take their format
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

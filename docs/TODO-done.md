@@ -63,6 +63,61 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
 ## liascape-player (after design approval)
+- [x] **Owner's Todoist batch, behaviour (2026-11-10)** — six items checked against the history first:
+  - "Clicking Play on the playlist puts the green border on the 1st item though shuffle plays another — make the border
+    reflect the genuine current": **already fixed** in `958b6be4` "Mark The Playlist Item That Really Plays" (2026-11-02:
+    the store no longer guesses; `wallpaper-changed` / `/current` say). Re-checked on today's lp-player under Shuffle with
+    both start modes: matrix `playlistMark:shufflePlay` green, new `playlistMark:shufflePlay:resume` (the same 12 rounds
+    under "Resume where it left off") green. Nothing changed.
+  - "It probably shouldn't do a transition when no wallpaper was playing before": **already fixed** in `5908d185` "Skip The
+    Effect When Nothing Was Playing" (2026-11-02: `Transitions::start` drops the effect when no requested output shows
+    anything — a cut, for every client and the program; legacy already did). Re-checked: matrix `fromNothing:noEffect`
+    (a card from nothing, Play after a Stop → cuts; over a playing one → the effect) green. Decision recorded: a plain
+    cut, not a fade from black.
+  - "Make scene use either maximum or minimum if the other one's off, minimum if both on": **mostly already the rule**
+    (the 2026-10-28 rotation redesign `cd3a0fe9` + "0 = off" / separate scene timing): with "Separate timing for scenes"
+    off a scene switched at its minimum, else at its maximum, else stayed — except both set with the maximum SHORTER than
+    the minimum, where the maximum still cut it first (the video rule "a cap beats the minimum"). Now a scene with a
+    minimum ignores the maximum (`item_rule` / `ItemPlayRule`: `(min, 0)`, else `(NEVER, max)`); videos and still images
+    unchanged; per-playlist the same (the rule reads the effective limits). The hints say it plainly (`ROT_HINT.sceneRule`
+    on Settings' "Separate timing for scenes" row and a line in the playlist modal while it's off). Tests: `rule.rs`
+    `item_rule_table` (RED: `(5000, 9000)` for both set), self-test `ItemPlayRule`, adapter IT "min 6 s + max 3 s on a
+    scene" + "a playlist's min 5 s + max 2 s", matrix `global:sceneTiming` / `playlist:sceneTiming` (RED on the old UI: no
+    scene rule in either hint).
+  - "Travel to running wallpaper on app open": **new** — `hooks/travelToPlaying.ts`: the first time a session's Library
+    grid / playlist bar shows the playing item it jumps there (mid-view), once per session (web-ui.md). Matrix
+    `travel:appOpen` (RED on the old UI: grid and bar at scroll 0 with the playing item out of view).
+  - "Keybind toggle to infinite loop current wallpaper": **new** — `liascape loop-current` toggles the player program's
+    `keep` (no rotation away from what plays, it loops; again → rotate on, the item's clocks start over); kept by the
+    player across a backend or player restart, works with the app closed (the CLI goes straight to the player), a Play
+    lifts it, a single wallpaper says it already stays. Listed in Settings → Keyboard shortcuts; the topbar says
+    "Looping <title> …" / "Rotation resumed", the status line ", looping this one". Tests: `tests/program.rs`
+    `keep_holds_the_current_item_and_loops_it`, `keep_stops_the_timer_and_resets_it_when_lifted` (RED: unknown prop),
+    matrix `cli:loopCurrent` (on / off / app closed / backend restart / Play lifts it). player-adapter.md § Rotation,
+    player-core.md § Programs.
+  - "Mark the wallpapers already downloaded in Wallpaper Engine local tab of Browse": **new** — Browse cards carry an
+    "In library" badge when the library holds the item (by Workshop id for Workshop + WE-local, else the page URL).
+    Matrix `browse:inLibrary` (RED on the old UI: no badge).
+- [x] **A click while the player stalls is lost for good** (found 2026-11-07 chasing an adapter-IT failure: "/apply b
+      right after /apply <a library item> never switched", 15 s of nothing in the player's log). Two separate things:
+      **the IT failure itself was the IT's own quoting** — `post /apply "{"path":"$Bc"}"` sent `{path:/tmp/…/b.mp4}`, the
+      backend answered 400 before the route ran, and `curl -sf … >/dev/null` swallowed it (reproduced: HTTP 400, curl 22,
+      no `transition.scheduled`; the commit that replaced the line with `stop_now` blamed load). The IT's `post` now refuses
+      a body that isn't JSON with a FAIL (counted at the end even from a `$(post …)` subshell). **But reproducing it with a
+      stalled player found a real bug:** a switch the adapter's queue worker tried while the player didn't answer
+      (`Ready`: hello 1 s + the supervisor wait 2 s, the breaker open; or the `transition` request timing out) was
+      DROPPED — no log line, never retried; R81 re-applied settings only, so the screen kept the old wallpaper while the UI
+      named the new one. Owner-reachable: any click during one of the 13–34 s player stalls in the owner's log (two quick
+      clicks only matter if the first one's open stalls the player). Now the lost switch is the backend's `_intent`, a probe
+      pings the player every 500 ms (≤ 30 min), and the breaker closing queues `ReconcileAfterStall` (ReconcileShown's
+      check → a cut to it unless it shows or is incoming); a lost `stop` and a lost `destroy prog:main` (a single wallpaper
+      replacing a rotation) likewise. player-adapter.md § Reconnection "A switch the stall swallowed". Guard: adapter IT §
+      "apply / transition" "two clicks (a, b) on a player stalled 4.5 s → b once it answers again" — RED on the old backend
+      (c stayed, nothing scheduled), GREEN after; plus "two quick clicks (a, c) → c" (green both). Also: the backend
+      self-test had stopped before its protocol round-trip since the Settings rename (it wanted "Pause behind windows" in the
+      player's cover reason, which still said "Pause when covered") — the player's reason now names the new row.
+      Adapter IT after the reboot: branch 413/1, unchanged lp-player 411/1 — the same pre-existing failure in both (the
+      playlist-restart precondition "the new backend answered after p1's first loop ended").
 - [x] **Settings levels + a wording pass** (owner 2026-11-06: "simple/standard/advanced/expert … the forever final 4
       levels", "Simple" then renamed "Basic"; Standard the default): one saved `settingsLevel` (basic | standard | advanced |
       expert, `AppSettings.SettingsLevel`) replaces "Advanced settings" + "Show expert options" (the owner's both-on became
@@ -784,6 +839,29 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
       incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
+- [x] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
+      setting the normalization target to 0): Settings let the target go −100…0 LUFS, but ffmpeg's `loudnorm` takes
+      `I` in −70…−5 only, so `LoudnormAf` built a filter mpv rejected, and mpv then ran the video with **no audio at
+      all** (`sources[].mpv_current_ao` null, no mpv stream on `liascape-player-bus`), not just un-normalized. A player
+      restart (with the target back at −14) brought it back. Fixed the input: the UI bounds the target to −70…−5 and
+      `LibraryService.LoudnormAf` clamps a stored value (2026-11-06). Left: the player should survive any bad `af`
+      — on mpv refusing it, fall back to `""` (sound un-normalized), log a warning and report it (no silent
+      no-AO state); add an IT check with an out-of-range target. (The bus bounce at 20:33 in the same evidence,
+      `/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/silent-2137/`, was unrelated —
+      audio worked after it.)
+      — done 2026-11-06 night: the player survives any `af` mpv can't build. Root cause (reproduced on mpv 0.41): a
+      filter mpv knows with an argument ffmpeg refuses passes mpv's option check, so the `af` set succeeds and only
+      building the chain fails ("Audio filter initialized failed!"); at a file's audio init mpv then deselects the
+      track ("Audio: no audio": `aid` reads `no`, `current-ao` unset) — the owner's silent video; on a live change it
+      keeps the old chain but the bad value stays its `af` for the next rebuild (a re-route after a bus bounce). The
+      mpv source now catches that log line, falls back to its chain without the user's filters (sound un-normalized),
+      re-selects the track (`aid` no → auto: a plain `auto` is a no-op then) and reports a `Rejected` `af` with
+      ffmpeg's reason → `source.rejected` (+ the path), `af_refused` in the `sources` probe, subscribed and logged by
+      the backend ("player refused af on src…"). `read("af")` keeps the requested value and the same value again
+      sends nothing (no rebuild per settings pass). Tests: `tests/sources.rs` `unbuildable_af_at_open_falls_back_with_audio`
+      / `…_live_…` (RED without the fallback: ao None, aid "no"); adapter IT section "normalization: …" (a target of
+      0 written into settings.json → loudnorm I=-5; an unbuildable af on the live source and on a new one → audio up,
+      refused, logged by player and backend).
 
 ## Follow-up projects (each gets its own brainstorm)
 - [x] **In-player auto-mute rework** — un-parked 2026-10-29 as Phase 3's optional last Task 14 (only if a strict
@@ -1123,6 +1201,35 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         Windows fonts. Whole corpus recaptured: mean score 0.119 → 0.072; 3509243656 0.261 → 0.053, 2783122117 0.562 → 0.014, 3593587273 0.499
         → 0.023, 2134765860 0.46 → 0.005, 2672425887 0.427 → 0.136, 3354740764 0.523 → 0.330, 3419466417 0.336 →
         0.077, 3490034653 0.414 → 0.289. 3354740764's notepad wrapping was the font (Inconsolata for Consolas).
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3354740764's `Clouds` compose layer — done 2026-11-06 night (fork `ca97141`, patch 0114). Not the turn,
+        the scale or `perspective`: the clouds' procedural_noise (LAYERED) reads `_rt_imageLayerComposite_51_a`,
+        the white 4 x 4 solid layer 51 they name in `dependencies`. WE's scene load sets image flags 0x1010 on
+        every image / text object named in a `dependencies` list (GH 0x1401b7xxx), so it draws through its
+        composite (base off screen, then a last draw) and the composite holds its picture; ours drew 51 straight to
+        the screen and the clouds read an empty composite, which lowered the Worley noise's alpha a quarter: dark
+        clouds over the bottom of the grass. Proved with private copies in WE and ours (clouds recoloured red,
+        layer 51 black, the slot empty, `dependencies` removed). 0.327 → 0.218. Fork test: the existing suite
+        (128 / 128); the variant scenes in `~/.cache/liascape/we-ref/probe-scenes/v3354-clred*`.
+  - [x] 3219908811's notice panel at 5 s — not a difference. A WE burst with its scene clock (frames every ~0.35 s,
+        `captures/notice-burst`) fades the panel in over 3.4–4.2 s and holds from ~6 s exactly as ours does (the
+        panel region within 2 / 255 at every frame; alpha keyframes 100 → 130 → 279 at 30 fps). The 5 s "dim"
+        was its text and edges (6 / 255).
+  - [x] LWE: a colour written "1 1 1" read as 0–255 bytes — done 2026-11-06 night (fork `09b8200`, patch 0113).
+        WE's vec3 field parser (GH 0x1401d0bc0, image / text / light `color`, clear and ambient colours): atof per
+        space-separated component, missing ones 0, a JSON number is all three; whole numbers are not special. A
+        particle `colorrandom` keeps the byte reading (WE divides an instanceoverride `color` by 255 into
+        `colorn`). Fork test `object_colour_and_linked_folder`; `create_layer_builds_layers` now creates a black
+        layer (its `Vec3(1, 1, 1)` is white, as in WE).
+  - [x] LWE: a project folder whose files are symlinks failed to load — done 2026-11-06 night (fork `984737b`,
+        patch 0112). The directory adapter resolved each file and refused it as outside the folder; the check is
+        now on the path's name (no `..` out of the folder), the file opens through its links. Same fork test.
+  - [x] 3163060610's big cloud missing — done 2026-11-06 night (fork `92c1ada`, patch 0117). A script on an
+        effect's shader constant ran with thisObject = the layer; the cloud's waterripple `scale` script does
+        `thisObject.scale = c_de_scale + 0.1`, so ours scaled the cloud layer to 0.22 (health bbox 383 x 332 of 1743 x
+        1508) where WE keeps it whole. thisObject is now the effect's material: an accessor per constant (all 32
+        constant scripts in the library set their own constant that way), getAnimation () as before. 0.119 →
+        0.059. Fork test `constant_script_this_object_is_the_material`.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)":
   - [x] `input.cursorWorldPosition` in a 3D scene — done 2026-11-06 (fork 409a94f + 9d4085c; gap audit "3D scenes
         against WE, part 2"). WE's getter (wallpaper64 GH 0x1401bcb00) unprojects (x, 1 − y, 0.5) through the frame's

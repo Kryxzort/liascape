@@ -388,6 +388,14 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneLoudness", () => { if (SceneLoudnessOf(e) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State); });
             return;
         }
+        if (kind == "source.rejected")
+        {
+            // a value a source refused (it keeps playing; e.g. an `af` mpv couldn't build → it plays without it,
+            // un-normalized) — no source changed, only worth a line in the log
+            var rp = Str(e, "path");
+            LiascapePlayerClient.Log($"player refused {Str(e, "prop")} on {Str(e, "id")} ({(rp.Length > 0 ? Path.GetFileName(rp) : "?")}): {Str(e, "reason")}");
+            return;
+        }
         // every subscribed kind (LiascapePlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         if (kind == "source.broken")
@@ -564,7 +572,9 @@ public static class LiascapePlayerMedia
     // live transition to it (requested since the restart), or it shown on any layer / parked → nothing.
     // Else a cut to it (or a stop, after our own stop). Any transition settings would do — what matters
     // is that the screen and the backend agree again.
-    private static void ReconcileShown()
+    private static void ReconcileShown() => ReconcileShown("restarted");
+
+    private static void ReconcileShown(string why)
     {
         var intent = _intent;
         var client = C;
@@ -577,13 +587,14 @@ public static class LiascapePlayerMedia
         if (intent.Path == null)
         {
             if (shown.Count == 0) return;
-            LiascapePlayerClient.Log($"liascape-player restarted showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
+            LiascapePlayerClient.Log($"liascape-player {why} showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
             Stop();
             return;
         }
         if (shown.Contains(intent.Path)) return;
-        LiascapePlayerClient.Log($"liascape-player restarted showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
-            + $" (its snapshot was behind) — the backend last switched to {Path.GetFileName(intent.Path)}: switching back (cut)");
+        LiascapePlayerClient.Log($"liascape-player {why} showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
+            + (why == "restarted" ? " (its snapshot was behind)" : "")
+            + $" — the backend last switched to {Path.GetFileName(intent.Path)}: switching {(why == "restarted" ? "back" : "to it")} (cut)");
         Interlocked.Increment(ref _reconciles);
         Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
     }
@@ -599,8 +610,70 @@ public static class LiascapePlayerMedia
     private static void OnRecovered()
     {
         LiascapePlayerClient.Log("liascape-player answered again after a stall — re-applying settings (R81)");
+        if (_lostToStall) QueueEssential(ReconcileAfterStall); // first: a lost click is what the user waits for
         ReapplyAll();
         LiascapePlayerProgram.Reapply();
+    }
+
+    // ---- a switch / stop the stall swallowed (2026-11-07) -------------------------------------------------
+    // The queue's worker meets a stalled player (SIGSTOPped, a 13–34 s loop stall in the owner's log, a machine at
+    // load 90): `Ready` finds no answer (hello 1 s + the supervisor wait 2 s, the breaker opens) or the `transition`
+    // request times out — and the switch was DROPPED: no log line, never retried. R81 above re-applied settings
+    // only, so the screen kept the old wallpaper for good while the UI named the new one (every click in a stall
+    // lost; the adapter IT's "two clicks on a stalled player"). Now such a switch is the backend's intent all the
+    // same (`_intent`, what a restart puts back too) and `_lostToStall` is set; a probe pings the player until it
+    // answers (nothing else may call it for minutes: the UI closed, no rotation), and the breaker closing queues
+    // `ReconcileAfterStall` — `ReconcileShown`'s check: the intent shown or incoming (the timed-out request may have
+    // reached the player after all) → nothing; else a switch to it (a stop after our stop). A newer click while
+    // still stalled only moves `_intent`: the newest one shows, once.
+    private static volatile bool _lostToStall;
+    private static int _probing; // 1 = ProbeUntilAnswered runs
+    private const int LostProbeEveryMs = 500;
+    private static readonly TimeSpan LostProbeFor = TimeSpan.FromMinutes(30);
+
+    private static int _lostSwitches;
+    // switches / stops a stall swallowed (put back once the player answers) — self-test/IT evidence
+    public static int LostSwitches => Volatile.Read(ref _lostSwitches);
+
+    internal static void LostToStall(string what)
+    {
+        Interlocked.Increment(ref _lostSwitches);
+        _lostToStall = true;
+        LiascapePlayerClient.Log($"{what}: liascape-player is not responding — it runs once the player answers again");
+        if (Interlocked.Exchange(ref _probing, 1) == 0) _ = Task.Run(ProbeUntilAnswered);
+    }
+
+    private static async Task ProbeUntilAnswered()
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            while (_lostToStall && sw.Elapsed < LostProbeFor)
+            {
+                await Task.Delay(LostProbeEveryMs).ConfigureAwait(false);
+                var client = C;
+                if (!_lostToStall || !client.SocketExists) continue; // gone: the next switch starts one (EnsureRunning)
+                // an answer closes the breaker → Recovered → OnRecovered (a new pid → Restarted → OnRestarted: the same
+                // reconcile); while it is open this fails fast without reaching the player. Answered with the breaker
+                // already closed (another call closed it first, or a restart reconciled) → queued here; one runs, the
+                // rest find the flag cleared.
+                try { client.Call("hello", null, LiascapePlayerClient.QuickMs); }
+                catch (LiascapePlayerException) { continue; }
+                if (_lostToStall) _ = QueueEssential(ReconcileAfterStall);
+                break;
+            }
+            if (_lostToStall) LiascapePlayerClient.Log($"liascape-player still not answering after {LostProbeFor.TotalMinutes:0} min — the next switch tries again");
+        }
+        finally { Interlocked.Exchange(ref _probing, 0); }
+        if (_lostToStall && Interlocked.Exchange(ref _probing, 1) == 0) _ = Task.Run(ProbeUntilAnswered); // lost again meanwhile
+    }
+
+    private static void ReconcileAfterStall()
+    {
+        if (!_lostToStall) return;
+        _lostToStall = false; // a switch below that is lost again sets it again
+        LiascapePlayerProgram.RetryLostDestroy(); // a single wallpaper replaced a rotation in the stall: end it first
+        ReconcileShown("answered again after a stall");
     }
 
     private static int _reapplyCount;
@@ -930,7 +1003,11 @@ public static class LiascapePlayerMedia
 
     private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
     {
-        if (Ready(s) is not { } client) return null;
+        if (Ready(s) is not { } client)
+        {
+            if (C.IsStalled) Lost(path, alignEnd, "not answering");
+            return null;
+        }
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
@@ -956,8 +1033,22 @@ public static class LiascapePlayerMedia
             try { return Requested(client.Call("transition", req), path, alignEnd); }
             catch (LiascapePlayerException e2) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
         }
+        catch (LiascapePlayerException e) when (e.Code == "timeout")
+        {
+            Lost(path, alignEnd, e.Message);
+            return null;
+        }
         catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
         finally { _requesting = null; }
+    }
+
+    // A switch the stall swallowed (above, `LostToStall`). An aligned one is not: its caller (DoVideoEndWait / the
+    // rotation's fallback) hears "unreachable" and retries on its own; A still shows meanwhile, as it should.
+    private static void Lost(string path, bool alignEnd, string why)
+    {
+        if (alignEnd) { LiascapePlayerClient.Log($"aligned switch to {Path.GetFileName(path)} not requested — {why}"); return; }
+        _intent = new Intent(path, null);
+        LostToStall($"switch to {Path.GetFileName(path)} ({why})");
     }
 
     private static string? Requested(JsonElement res, string path, bool alignEnd)
@@ -1108,7 +1199,8 @@ public static class LiascapePlayerMedia
         var client = C;
         _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
         _alignedCorrs.Clear();
-        if (client.SocketExists) client.TryCall("stop", null, LiascapePlayerClient.QuickMs); // item 6
+        if (client.SocketExists && client.TryCall("stop", null, LiascapePlayerClient.QuickMs) == null && client.IsStalled) // item 6
+            LostToStall("stop");
         InvalidateSources();
     }
 

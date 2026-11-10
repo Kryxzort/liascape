@@ -53,7 +53,8 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
   `liascape-player` straight to the player — a playlist's next/previous/random are its program's verbs):
   `next`, `previous`, `random`, `play`, `stop`, `toggle-play`, `toggle-pause`, `toggle-mute`,
   `volume up` / `volume down` (±5, clamped 0–100, persisted; a multi-word command is its words joined by `-`, so
-  `volume-up` works too).
+  `volume-up` works too), `loop-current` (liascape-player: toggles "keep playing this one" — the playlist stops rotating
+  and the current wallpaper loops, until run again; kept by the player across restarts — player-adapter.md § Rotation).
 - `ctl <verb> ['<json>']` — the running player's control socket (`liascape-player ctl`: `state`, `logs`, `probe`, …).
 - `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`.
 - `monitor-daemon` *(internal, **legacy engine only**)* — `AudioMonitor` with the app closed; spawned detached when the app

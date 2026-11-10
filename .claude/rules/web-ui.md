@@ -126,7 +126,27 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **The UI never guesses which playlist item plays** (`markPlayingAfterPlay`): the bar's border and the card's mark come from
   `wallpaper-changed` (the player's `program.current`, at B's start: until then the old item stays marked) and, for the Play
   that switches nothing, `/current` — dropped if an event landed meanwhile, which is newer. It used to set item 1 after the
-  POST: wrong under Shuffle until the event, and for good when the event beat the reply. Guard: matrix `playlistMark:shufflePlay`.
+  POST: wrong under Shuffle until the event, and for good when the event beat the reply. Guard: matrix `playlistMark:shufflePlay`
+  (+ `:resume` — the same rounds under "Resume where it left off", 2026-11-10 re-check of the owner's report: green).
+
+- **Travel to the playing wallpaper** (owner todo 2026-11-10, "travel to running wallpaper on app open";
+  `hooks/travelToPlaying.ts` `useTravelToPlaying(ref, key, axis, selector, playingPath, count)`): the first time in an app
+  session that the Library grid (`.card.playing`) / the playlist bar's row (`.pl-item.playing`) shows the playing item —
+  the app opening on Library, or the first Library visit with something playing — its scroll container jumps (no glide)
+  so the item sits mid-view, re-aimed over 3 more frames (the `content-visibility` cards near it take their real size).
+  Once per session per list (a module `Set`): a later tab visit or a switch never moves the user's scroll; a wheel / a
+  pointer-down first stops it; nothing playing or the item filtered out → the next chance tries again. Guard: matrix
+  `travel:appOpen` (a 560×430 window, the item last in both plays, a reload; RED on the old UI: both at scroll 0).
+- **"In library" on Browse cards** (owner todo 2026-11-10, "mark the wallpapers already downloaded"): `Browse.tsx`
+  `libraryKeys(libraryItems)` (one Set per library change: `ws:<workshopId>` and `url:<pageUrl | sourceId | videoPath>`)
+  → each memo'd `Card` gets a boolean `inLibrary` (`ws:` match for Workshop and WE-local — the same item under either
+  source —, else the page URL for moewalls / motionbgs / desktophut) → a `.badge.inlib` (`data-in-library`, a lucide
+  Check + "In library", the success colour, top-right — the SCENE badge's opposite corner). It follows downloads / trash
+  live (the library slice). Guard: matrix `browse:inLibrary` (a WE-local folder whose "900000001" is s1's Workshop id;
+  RED on the old UI: no badge).
+- **`loop-current` in the UI**: Settings → Keyboard shortcuts lists `liascape loop-current` (with a hint); WS `loop-current`
+  → the topbar status (its `message`) + the store's `keepCurrent` (also `/current.keep` on every resync; a Play /
+  play-from clears it) → the status line's ", looping this one (loop-current)". player-adapter.md § Rotation.
 
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
@@ -382,7 +402,9 @@ hints in its `ROT_HINT` (each says what its 0 does). Under the two fields (only 
 **"Separate timing for scenes"** (`globalSeparateSceneTiming`, default on; the modal: a checkbox in its override block)
 and, only while that's on, **"Switch scenes after"** (`globalSwitchScenesAfterSeconds`, default 1800; modal SWITCH
 SCENES AFTER) — a scene / still image switches after it, 0 = off (it stays), and the min / max hints drop their scene
-clause (`minScenes` / `maxScenes`). The status line reads "N wallpapers, on video end, at least X, at most Y, scenes
+clause (`minScenes` / `maxScenes`). While it's off the scene rule is said in one plain line (`ROT_HINT.sceneRule`: "Scenes:
+they switch at the minimum — or at the maximum if the minimum is off. Both off: a scene stays until you switch."): the
+toggle row's hint in Settings, a `.shint` `[data-scene-rule]` under it in the playlist modal (owner 2026-11-10). The status line reads "N wallpapers, on video end, at least X, at most Y, scenes
 after Z" (", scenes stay" for 0). Semantics: `player-adapter.md` § Rotation. Matrix cells drive the seconds field
 (`input[aria-label="Minimum play time seconds"]`) with `setValue` (+ a `focusout`); `playlist:sceneTiming` /
 `global:sceneTiming` the toggle + "Switch scenes after".

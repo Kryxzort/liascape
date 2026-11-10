@@ -906,6 +906,130 @@ fn rejected_property_is_a_rejected_event() {
     );
 }
 
+/// mpv's audio output is up and audio is really decoding into it (the null AO).
+fn audio_out_up(s: &MpvSource) -> bool {
+    s.mpv_get_string("current-ao").as_deref() == Some("null")
+        && s.mpv_get_string("audio-out-params/samplerate").is_some()
+        && s.mpv_get_f64("audio-pts").is_some()
+}
+
+/// A loudnorm ffmpeg refuses (`I` outside −70…−5) — mpv knows the filter, so the `af` set
+/// itself succeeds; only building the chain fails.
+const BAD_LOUDNORM: &str = "loudnorm=I=0:TP=-1.5:LRA=11";
+
+/// TODO "A rejected `af` silences the video" (owner 2026-11-06): a source opened with an
+/// `af` mpv can't build played NO audio at all (mpv deselected the track: `current-ao`
+/// unset). Now it falls back to the chain without it: audio flows, one `Rejected` `af`
+/// names ffmpeg's own reason (no `Error`: the source is fine), `read("af")` keeps the value
+/// asked for, the `sources` probe's `af_refused` says why, the same value again is a no-op,
+/// and a good value clears it.
+#[test]
+fn unbuildable_af_at_open_falls_back_with_audio() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_src(
+        &gfx,
+        path_str(&clip),
+        &opts(json!({"loop": true, "af": BAD_LOUDNORM})),
+    )
+    .expect("open: the af's shape is valid");
+    let wake = Some(src.wake_fd());
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(5), |e, s| {
+        !rejections(e).is_empty() && audio_out_up(s) && s.requests_in_flight() == 0
+    });
+    assert!(
+        ok,
+        "no fallback with audio (ao {:?}, aid {:?}): {evs:?}",
+        src.mpv_get_string("current-ao"),
+        src.mpv_get_string("aid")
+    );
+    assert!(
+        errors(&evs).is_empty(),
+        "a refused af is not an Error: {evs:?}"
+    );
+    let rej = rejections(&evs);
+    assert_eq!(rej.len(), 1, "one Rejected: {rej:?}");
+    assert!(
+        rej[0].starts_with("af: ") && rej[0].contains("loudnorm") && rej[0].contains("'I'"),
+        "names the af and ffmpeg's reason: {}",
+        rej[0]
+    );
+    assert_eq!(src.read("af"), Some(PropValue::Str(BAD_LOUDNORM.into())));
+    let refused = src.af_refused().expect("af_refused");
+    assert_eq!(refused.af, BAD_LOUDNORM);
+    assert!(refused.reason.contains("out of range"), "{refused:?}");
+    let mpv_af = src.mpv_get_string("af").unwrap_or_default();
+    assert!(
+        !mpv_af.contains("loudnorm") && mpv_af.contains("scaletempo2"),
+        "mpv runs the fallback chain: {mpv_af}"
+    );
+
+    // The same value again (the backend's next settings pass): nothing sent, nothing new.
+    src.apply("af", &PropValue::Str(BAD_LOUDNORM.into()))
+        .expect("same value");
+    assert_eq!(
+        src.requests_in_flight(),
+        0,
+        "nothing sent for the refused value"
+    );
+    let (evs, _) = pump(&gfx, &mut src, wake, Duration::from_millis(600), |_, _| {
+        false
+    });
+    assert!(rejections(&evs).is_empty(), "no second refusal: {evs:?}");
+    assert!(audio_out_up(&src), "audio still up");
+
+    // A value mpv can build replaces it and clears the refusal.
+    src.apply("af", &PropValue::Str("lavfi=[anull]".into()))
+        .expect("good af");
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
+        s.requests_in_flight() == 0 && audio_out_up(s)
+    });
+    assert!(ok, "good af never settled: {evs:?}");
+    assert!(rejections(&evs).is_empty(), "{evs:?}");
+    assert!(src.af_refused().is_none());
+    assert!(
+        src.mpv_get_string("af")
+            .unwrap_or_default()
+            .contains("anull")
+    );
+}
+
+/// The same refusal on a LIVE change: mpv keeps its old chain then, but the unbuildable
+/// value stays its `af` (the next audio rebuild — a re-route after a bus bounce — would go
+/// silent). The source drops it the same way and the audio keeps flowing, also through a
+/// re-route.
+#[test]
+fn unbuildable_af_live_falls_back_with_audio() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let clip = ensure_clip("solid_red_2s", RED_2S);
+    let mut src = open_ready(&gfx, path_str(&clip), json!({"loop": true}));
+    let wake = Some(src.wake_fd());
+    let (_, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |_, s| {
+        audio_out_up(s)
+    });
+    assert!(ok, "audio up before the change");
+    src.apply("af", &PropValue::Str(BAD_LOUDNORM.into()))
+        .expect("shape is valid");
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(5), |e, s| {
+        !rejections(e).is_empty() && s.requests_in_flight() == 0 && audio_out_up(s)
+    });
+    assert!(ok, "no fallback with audio: {evs:?}");
+    assert!(errors(&evs).is_empty(), "{evs:?}");
+    assert!(src.af_refused().is_some());
+    assert!(
+        !src.mpv_get_string("af")
+            .unwrap_or_default()
+            .contains("loudnorm"),
+        "the unbuildable value is gone from mpv's af"
+    );
+    // A re-route rebuilds the whole audio chain: it must come back up.
+    src.set_audio_route(None, 0.0).expect("re-route");
+    let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(5), |_, s| {
+        s.requests_in_flight() == 0 && audio_out_up(s)
+    });
+    assert!(ok, "audio gone after a re-route: {evs:?}");
+}
+
 /// Fix round 1 (#3a): a path change before the first pump — only the NEW file may ever
 /// produce `Ready`, exactly once, and the texture at that moment is the new file's.
 #[test]

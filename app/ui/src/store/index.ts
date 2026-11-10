@@ -48,6 +48,8 @@ interface State {
   sceneLoudness: { done: number; total: number; currentId: string } | null;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
+  // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
+  keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   status: string; error: string | null;
   // per-wallpaper settings modal (lifted so library cards AND the playlist bar can open it)
   cardSettingsItem: LibraryItem | null; cardSettingsSiblings: LibraryItem[];
@@ -151,7 +153,7 @@ export const useStore = create<State>((set, get) => ({
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
-  themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
+  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
   cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -301,6 +303,7 @@ export const useStore = create<State>((set, get) => ({
     const seen = playingEvents;
     const r = await api.playPlaylist(playlist, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }   // error/interval messages
+    set({ keepCurrent: false }); // a Play starts the rotation: loop-current's keep ends (LiascapePlayerProgram.LoadNow)
     await markPlayingAfterPlay(get, set, seen);
   },
   async playFrom(index) {
@@ -308,6 +311,7 @@ export const useStore = create<State>((set, get) => ({
     const seen = playingEvents;
     const r = await api.playFrom(playlist, index, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }
+    set({ keepCurrent: false });
     await markPlayingAfterPlay(get, set, seen);
   },
   setPlaylistSettings(p) {
@@ -388,6 +392,7 @@ export const useStore = create<State>((set, get) => ({
     const s = { ...(get().settings ?? {}), theme: name };
     set({ settings: s }); api.saveSettings(s).catch(() => {});
   },
+  setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
   setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
   // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
@@ -431,6 +436,7 @@ function buildPlayingStatus(get: () => State): string {
         + (sepScenes ? (scenesAfter > 0 ? `, scenes after ${fmtInterval(scenesAfter)}` : ", scenes stay") : "")
       : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
     if (shuffle) desc += " (shuffled)";
+    if (st.keepCurrent) desc += ", looping this one (loop-current)";
     if (cur) desc += ` → ${cur}`;
     parts.push(desc);
   } else if (cur) {
@@ -483,7 +489,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) p.playingPath = cur.v?.path ?? null;
+  if (cur) { p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
   if (lib) p.libraryItems = lib.v;
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;

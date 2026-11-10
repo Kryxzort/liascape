@@ -1,7 +1,7 @@
 From eee9b4fadfa09e15729d6d846c512b896aa6f1ea Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:32:29 +0530
-Subject: [PATCH 033/111] render: read uniform annotation defaults as written
+Subject: [PATCH 033/117] render: read uniform annotation defaults as written
 
 A uniform's annotation `default` written as a string for a float
 ("0.1") went through std::stoi, so it was 0 (Simple_Audio_Bars' spacing,

@@ -1,7 +1,7 @@
 From 93438d42db1ccfddca5e6ba3c6a7758f14817806 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 01:06:33 +0530
-Subject: [PATCH 028/111] render: sprite-sheet particles cross-fade their
+Subject: [PATCH 028/117] render: sprite-sheet particles cross-fade their
  frames
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

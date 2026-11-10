@@ -203,8 +203,9 @@ public static class LiascapePlayerSelfTest
                  (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
                  (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
                  (PlayerHelper.PlayKind.Image, 0, 0, true, 0, (N, 0)),           // …0 = off → it stays
-                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 9000)),
-                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → only the maximum moves it
+                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (owner 2026-11-10)
+                 (PlayerHelper.PlayKind.Scene, 9000, 4000, false, 3000, (9000, 0)),  // …even when the maximum is shorter
+                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → the maximum moves it
                  (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
                  (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 3000, (3000, 0)),
                  (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 0, (N, 0)) })
@@ -254,7 +255,7 @@ public static class LiascapePlayerSelfTest
     private static void FeatureHealthAssertions(List<string> fails)
     {
         using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null},"bus":{"ok":true,"reason":null,"state":"up"}}""");
-        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause when covered\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
+        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause behind windows\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
         var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");

@@ -21,8 +21,8 @@
     "note": "Since the scene clock (0.414 → 0.289) the layers register to WE's within ~1 px (phase correlation over the trees, the background and the girl; the camera shake is a function of g_Time and now in phase). What is left: a lighter haze over the girl and the trees in ours (its three `light_shafts_1` systems inside compose layers; random in WE), the petals (random) and the clock text on her hair (the capture's minute)."
   },
   "3354740764": {
-    "class": "fonts",
-    "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 → 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) — the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180°, scaled 1.2 × 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (−14 to −32 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180°\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute."
+    "class": "pointer",
+    "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts; (ca97141) the `Clouds` compose layer: 0.327 → 0.218 (2 s 0.088, 5 s 0.097). Its procedural_noise (LAYERED) reads `_rt_imageLayerComposite_51_a`, a white 4 x 4 solid layer the clouds name in `dependencies`; WE draws a dependency through its composite (image flag 0x1010, scene load GH 0x1401b7xxx), ours drew it straight to the screen and the clouds read an empty composite, so their dark Worley noise covered the bottom of the grass. Proved with private copies in WE and ours (clouds recoloured red: one patch in both; layer 51 black, the slot empty, `dependencies` removed). The 0.5 s frame is parallax easing in from WE's late pointer (scene 2.17 s; camera shake and parallax). Left: ours' light shafts (`shine`) in the top right of the sky (random in WE, which showed none in these runs) and the clock's minute. The notepad wraps as WE's once ours has Consolas (the compare gives ours the Windows fonts)."
   },
   "3276522107": {
     "class": "random",
@@ -54,7 +54,7 @@
   },
   "3219908811": {
     "class": "pointer",
-    "note": "the 2 s and 5 s frames match since the scene clock (was 0.374), but for the notice panel at 5 s: WE's is still dim (fading in) where ours is fully in — look here next. The 0.5 s frame (scene 1.26 s) is parallax easing in from WE's late pointer and darker in WE. The petals are random."
+    "note": "the 2 s and 5 s frames match since the scene clock (was 0.374). The notice panel is not late: a WE burst (frames every ~0.35 s with its clock, captures/notice-burst) fades it in over 3.4–4.2 s and holds from ~6 s exactly as ours does (panel region within 2 / 255 of ours at every frame; the alpha keyframes 100–130–279 at 30 fps); its 5 s difference is the panel's text and edges (6 / 255). The 0.5 s frame (scene 1.26 s) is parallax easing in from WE's late pointer. The petals are random."
   },
   "3363252053": {
     "class": "random",
@@ -83,5 +83,29 @@
   "3477054430": {
     "class": "ok",
     "note": "the kitty's head turns as in WE (2026-11-06, fork 409a94f + 9d4085c): its angles script never ran (a model registered only its origin), and input.cursorWorldPosition in a 3D scene is the cursor cast to the far plane (WE's unProject at NDC z 0 through its reversed-depth projection), not scene pixels. With the pointer at the left / right (we-ref/3477054430/ptrL-3d, ptrR-3d) the head region went 5.1 → 0.7 and 4.3 → 0.8 / 255 off WE; scores 0.040 → 0.025, 0.029 → 0.022. The moon takes the scene's fog (0108). The 0.5 s frame's head is still easing in from WE's late pointer."
+  },
+  "2951169110": {
+    "class": "random",
+    "note": "the greeting text picks one of five lines with Math.random() per time of day (WE: \"Good evening\", wallpiper: \"How has your day been?\", ours \"Welcome back home\"). The 0.5 s frame is parallax easing in from WE's late pointer (wallpiper's first frame differs the same way)."
+  },
+  "3289734539": {
+    "class": "pointer",
+    "note": "the 0.5 s frame (scene 1.3 s) is parallax easing in from WE's late pointer: wallpiper's 0.5 s frame differs from this capture the same way; the 2 s and 5 s frames match but for random particles."
+  },
+  "3478602089": {
+    "class": "random",
+    "note": "the warm diagonal glow is its `light_shafts_1` system (sphererandom emitter, starttime 15, huge orange sprites): WE's runs differ by as much as ours does — the frame's mean is 188 in the reference run, 160 and 163 in two more (`captures/3478602089/r1`, `r2`), ours 184. Random in WE."
+  },
+  "3013489778": {
+    "class": "open",
+    "note": "the girl (puppet layer 161) pulses in WE and not in ours. WE variants (`captures/var/v3013-*`): without its time `pulse` effect (visualizer = 1) the girl is steady at ours' brightness (121 / 57 / 123), without the audio one it still pulses (149 → 131 → 150). The pulse has an opacity mask (`masks/pulse_mask_00240ba8`, 1589 x 1275: painted for layer 18, half of its 3179 x 2551, reused on 161 at 4380 x 2998); ours reads the mask's soft spots (≤ 0.35) and barely changes the girl, WE applies the pulse evenly over the whole girl (with black tints: −27 % everywhere, ours ~0). How WE samples a mask whose size isn't the layer's is the open question (TODO)."
+  },
+  "3163060610": {
+    "class": "ok",
+    "note": "fixed 2026-11-06 night (fork 92c1ada): the big cloud behind the window (`主要云`, id 784) was missing. Its waterripple `scale` constant has a script `thisObject.scale = c_de_scale + 0.1` (0.22); WE's thisObject there is the effect's material (its constants), ours was the layer, which shrank to 0.22 of its size. 0.119 → 0.059 (2 s and 5 s 0.002). The 0.5 s frame is its \"Loading\" text and parallax easing in from WE's late pointer."
+  },
+  "2511663284": {
+    "class": "random",
+    "note": "fireflies and rain: random particles in WE."
   }
 }

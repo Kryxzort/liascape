@@ -255,7 +255,11 @@ export const Settings = memo(function Settings() {
   };
 
   const actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-    "next", "previous", "random", "volume-up", "volume-down"];
+    "next", "previous", "random", "volume-up", "volume-down", "loop-current"];
+  // what a shortcut does, where the name doesn't say it
+  const actionHint: Record<string, string> = {
+    "loop-current": "keep playing the current wallpaper — the playlist stops rotating and it loops; run it again to rotate on (liascape-player)",
+  };
 
   // Global transition config (the fallback used when a playlist doesn't override). The picker speaks
   // the per-playlist field names, so adapt to/from the global* keys.
@@ -329,7 +333,7 @@ export const Settings = memo(function Settings() {
             <PlayTimeInput label="Minimum play time" zeroText="off" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
           <Row label="Maximum play time" hint={ROT_HINT.max + (sepScenes ? "" : ROT_HINT.maxScenes)} rk="globalMaxPlaySeconds">
             <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 0)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
-          <Row label="Separate timing for scenes" hint={ROT_HINT.separate} rk="globalSeparateSceneTiming">
+          <Row label="Separate timing for scenes" hint={sepScenes ? ROT_HINT.separate : `${ROT_HINT.sceneRule} ${ROT_HINT.separateOff}`} rk="globalSeparateSceneTiming">
             <input type="checkbox" checked={sepScenes} onChange={(e) => set("globalSeparateSceneTiming", e.target.checked)} /></Row>
           {sepScenes && <Row label="Switch scenes after" hint={ROT_HINT.scenesAfter} rk="globalSwitchScenesAfterSeconds">
             <PlayTimeInput label="Switch scenes after" zeroText="off" value={g("globalSwitchScenesAfterSeconds", 1800)} onChange={(v) => set("globalSwitchScenesAfterSeconds", v)} /></Row>}
@@ -512,7 +516,7 @@ export const Settings = memo(function Settings() {
       <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />} lv="standard">
         <Help>Bind these commands to keys in your compositor's config.</Help>
         {actions.map((a) => (
-          <Row key={a} label={a}>
+          <Row key={a} label={a} hint={actionHint[a]}>
             <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
             <button className="mini" onClick={() => navigator.clipboard?.writeText(`liascape ${a.replace("volume-", "volume ")}`)}>copy</button>
           </Row>
