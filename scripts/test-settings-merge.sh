@@ -10,7 +10,7 @@
 # Speed / NoAudio / VideoScale on the playing wallpaper, override ?? global, a running rotation's
 # interval, the engine switch. Also: a settings.json that still carries LweSilent loads.
 # Phase 3 Task 10: PauseWhenCovered (default maximized) / GlobalPlaylistStart (start_over) / RotateWhileParked (true) /
-# ShowExpertOptions (false) — the defaults on a file without the keys, partial bodies keep them, bad values are
+# SettingsLevel ("standard") — the defaults on a file without the keys, partial bodies keep them, bad values are
 # normalized, an old file's ResumeFromLast loads and is gone from GET and the next save, each is live on the player
 # (`player.pause_when_covered`, `prog:main.start_mode` / `.while_parked`, the current play untouched), and a playlist's
 # own PlaylistStart beats the global one only with its override on.
@@ -138,9 +138,9 @@ snap s0
 
 # Phase 3 Task 10: a file without the new keys loads their defaults; the folded-in ResumeFromLast (designer call 13) is
 # an unknown key now — no migration, gone from GET and from the next save
-[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' s0)" = '["maximized","start_over",true,false]' ] \
-  && ok "a file without the Task 10 keys: pauseWhenCovered maximized, globalPlaylistStart start_over, rotateWhileParked true, showExpertOptions false" \
-  || bad "Task 10 defaults after loading an old file: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' s0)"
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' s0)" = '["maximized","start_over",true,"standard"]' ] \
+  && ok "a file without the Task 10 keys: pauseWhenCovered maximized, globalPlaylistStart start_over, rotateWhileParked true, settingsLevel standard" \
+  || bad "Task 10 defaults after loading an old file: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' s0)"
 [ "$(f 'has("resumeFromLast")' s0)" = false ] && ok "GET /settings has no resumeFromLast (the old file's key is an unknown one)" || bad "GET /settings still has resumeFromLast"
 
 echo "== a partial body changes only its own fields (nothing playing)"
@@ -155,8 +155,8 @@ c=$(changed s0 s1 '["theme"]')
 [ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
   && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"
 [ "$(disk 'has("ResumeFromLast")')" = false ] && ok "the save dropped ResumeFromLast from settings.json" || bad "settings.json still has ResumeFromLast after a save"
-[ "$(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .ShowExpertOptions] == ["maximized","start_over",true,false]')" = true ] \
-  && ok "…and wrote the Task 10 keys with their defaults" || bad "settings.json after the save: $(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .ShowExpertOptions]' | tr -d '\n ')"
+[ "$(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel] == ["maximized","start_over",true,"standard"]')" = true ] \
+  && ok "…and wrote the Task 10 keys with their defaults" || bad "settings.json after the save: $(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel]' | tr -d '\n ')"
 if [ "$(engine)" != liascape-player ]; then
   bad "the partial body switched the engine to $(engine) — stopping here (every check below plays on liascape-player)"
   echo "RESULT pass=$pass fail=$fail"; exit 1
@@ -184,24 +184,29 @@ same s5 s6 '["volume"]' "{NoSuchSetting, LweSilent, Volume}"
 
 echo "== Phase 3 Task 10: the cover / playlist start / parked / expert settings — partial bodies keep them, bad values are normalized"
 snap t0
-post /settings '{"PauseWhenCovered":"fullscreen","GlobalPlaylistStart":"resume","RotateWhileParked":false,"ShowExpertOptions":true}' >/dev/null; snap t1
-[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t1)" = '["fullscreen","resume",false,true]' ] \
-  && ok "the four keys set by one partial body (PascalCase)" || bad "Task 10 keys after a partial body: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t1)"
-same t0 t1 '["pauseWhenCovered","globalPlaylistStart","rotateWhileParked","showExpertOptions"]' "{PauseWhenCovered, GlobalPlaylistStart, RotateWhileParked, ShowExpertOptions}"
+post /settings '{"PauseWhenCovered":"fullscreen","GlobalPlaylistStart":"resume","RotateWhileParked":false,"SettingsLevel":"expert"}' >/dev/null; snap t1
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' t1)" = '["fullscreen","resume",false,"expert"]' ] \
+  && ok "the four keys set by one partial body (PascalCase)" || bad "Task 10 keys after a partial body: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' t1)"
+same t0 t1 '["pauseWhenCovered","globalPlaylistStart","rotateWhileParked","settingsLevel"]' "{PauseWhenCovered, GlobalPlaylistStart, RotateWhileParked, SettingsLevel}"
 post /settings '{"theme":"Nord"}' >/dev/null; snap t2
-[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t2)" = '["fullscreen","resume",false,true]' ] \
-  && ok "an unrelated partial body keeps them" || bad "an unrelated partial body changed them: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .showExpertOptions]' t2)"
+[ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' t2)" = '["fullscreen","resume",false,"expert"]' ] \
+  && ok "an unrelated partial body keeps them" || bad "an unrelated partial body changed them: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' t2)"
 for pair in 'PauseWhenCovered:OFF:off' 'pauseWhenCovered:Maximized:maximized' 'pauseWhenCovered:bogus:maximized' 'pauseWhenCovered::maximized'; do
   IFS=: read -r k v want <<< "$pair"
   post /settings "{\"$k\":\"$v\"}" >/dev/null; snap t3
   [ "$(f .pauseWhenCovered t3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .pauseWhenCovered t3), want $want"
+done
+for pair in 'SettingsLevel:EXPERT:expert' 'settingsLevel:Basic:basic' 'settingsLevel:nonsense:standard' 'settingsLevel::standard'; do
+  IFS=: read -r k v want <<< "$pair"
+  post /settings "{\"$k\":\"$v\"}" >/dev/null; snap t3
+  [ "$(f .settingsLevel t3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .settingsLevel t3), want $want"
 done
 for pair in 'GlobalPlaylistStart:RESUME:resume' 'globalPlaylistStart:nonsense:start_over' 'globalPlaylistStart::start_over'; do
   IFS=: read -r k v want <<< "$pair"
   post /settings "{\"$k\":\"$v\"}" >/dev/null; snap t3
   [ "$(f .globalPlaylistStart t3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .globalPlaylistStart t3), want $want"
 done
-post /settings '{"PauseWhenCovered":"maximized","GlobalPlaylistStart":"start_over","RotateWhileParked":true,"ShowExpertOptions":false,"Theme":"Nord"}' >/dev/null; snap t4
+post /settings '{"PauseWhenCovered":"maximized","GlobalPlaylistStart":"start_over","RotateWhileParked":true,"SettingsLevel":"standard","Theme":"Nord"}' >/dev/null; snap t4
 same t0 t4 '["theme"]' "the Task 10 keys back to their defaults"
 
 echo "== UI toggles: defaults on a file without the keys, partial bodies set / keep them, in either key spelling"

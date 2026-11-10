@@ -844,7 +844,7 @@ public static class PlayerHelper
                 {
                     var s = SettingsService.Load();
                     if (!s.AllowScenes)
-                        throw new InvalidOperationException("Enable \"Allow scene support\" in Settings to play scenes");
+                        throw new InvalidOperationException("Turn on \"Play scenes\" in Settings to play scenes");
                     if (!IsLweAvailable())
                         throw new InvalidOperationException("linux-wallpaperengine not found in PATH — install it to use scenes");
                 }
@@ -1299,7 +1299,8 @@ public static class PlayerHelper
     //   for an item that never ends (a still image, a scene) reaching it IS its end. NeverMs = it stays until a user
     //   switch (or the maximum, where one applies).
     // - MaxMs: the cap, even mid-video (0 = none → a 10 h video plays to its end).
-    // Separate timing OFF (the old rules): a scene's end = the minimum (none → only the maximum moves it); a still image
+    // Separate timing OFF: a scene uses whichever limit is set as its end, the minimum when both are (owner 2026-11-10 —
+    // a shorter maximum no longer cuts it first); neither → it stays until a user switch. A still image
     // shows for the minimum (0 → it flashes by). ON: a scene AND a still image switch after "Switch scenes after"
     // (0 → they stay) and the minimum / maximum don't apply to them — they have no end, so "at least … then at the next
     // end" / "at most" mean nothing there; one number says it. A video is never touched by the scene timing.
@@ -1310,7 +1311,7 @@ public static class PlayerHelper
     public static (long MinMs, long MaxMs) ItemPlayRule(PlayKind kind, long minMs, long maxMs, bool separateScenes, long scenesAfterMs) =>
         kind == PlayKind.Video ? (Math.Max(0, minMs), Math.Max(0, maxMs))
         : separateScenes ? (scenesAfterMs > 0 ? scenesAfterMs : NeverMs, 0)
-        : kind == PlayKind.Scene ? (minMs > 0 ? minMs : NeverMs, Math.Max(0, maxMs))
+        : kind == PlayKind.Scene ? (minMs > 0 ? (minMs, 0L) : (NeverMs, Math.Max(0, maxMs))) // the one set; both → the minimum
         : (Math.Max(0, minMs), Math.Max(0, maxMs));
 
     // the playing item's rule (callers hold _lock)
@@ -4012,8 +4013,8 @@ public static class PlayerHelper
     }
 
     private static string NoPlayableMessage() => PlayerEngine.IsLiascapePlayer
-        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Allow scene support\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted"
-        : "No playable wallpaper in the library — every item is a scene, and scenes need \"Allow scene support\" + linux-wallpaperengine";
+        ? "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Play scenes\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted"
+        : "No playable wallpaper in the library — every item is a scene, and scenes need \"Play scenes\" + linux-wallpaperengine";
 
     // Same rule for a whole-library scan: resolve ScenesPlayable once (a settings load + a `which` / the
     // player's capability) instead of once per scene item; the crash mark is one index read per scene.
@@ -4357,8 +4358,8 @@ public static class PlayerHelper
         TrySendCommand("set", "af", NormalizeAf(path) ?? "");
     }
 
-    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync — or, for a scene under
-    // liascape-player, the player's own `scene.loudness` learned on first play): with normalization on, the item may be
+    // A background loudness measurement just landed (LibraryService.EnsureLoudnessAsync; a scene's `scene.loudness`
+    // goes through LiascapePlayerMedia.OnSceneLoudness instead — set once per play): with normalization on, the item may be
     // playing right now — unmeasured when it started (or when normalization was switched on), so it ran without
     // the filter / `gain.normalize` and nothing applied it once measured (until its next switch).
     public static void OnLoudnessMeasured(string path)

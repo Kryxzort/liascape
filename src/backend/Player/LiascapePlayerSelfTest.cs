@@ -203,8 +203,9 @@ public static class LiascapePlayerSelfTest
                  (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
                  (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
                  (PlayerHelper.PlayKind.Image, 0, 0, true, 0, (N, 0)),           // …0 = off → it stays
-                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 9000)),
-                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → only the maximum moves it
+                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (owner 2026-11-10)
+                 (PlayerHelper.PlayKind.Scene, 9000, 4000, false, 3000, (9000, 0)),  // …even when the maximum is shorter
+                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → the maximum moves it
                  (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
                  (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 3000, (3000, 0)),
                  (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 0, (N, 0)) })
@@ -254,7 +255,7 @@ public static class LiascapePlayerSelfTest
     private static void FeatureHealthAssertions(List<string> fails)
     {
         using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null},"bus":{"ok":true,"reason":null,"state":"up"}}""");
-        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause when covered\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
+        using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause behind windows\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
         var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
@@ -270,7 +271,7 @@ public static class LiascapePlayerSelfTest
         Want("transitions", false, "no catalogue", "globalTransitionEnabled");
         Want("vram", false, "VRAM", "limitVramPerScene");
         Want("hwdec-interop", null, null, "hwDec");
-        Want("cover", false, "Pause when covered", "pauseWhenCovered");
+        Want("cover", false, "Pause behind windows", "pauseWhenCovered");
         // the audio bus: down → a warning with the reason (affects no setting row: the summary only); unknown with no answer
         if (F(none, "audio-bus").ok != false || !(F(none, "audio-bus").reason ?? "").Contains("default device") || F(none, "audio-bus").affects.Length != 0)
             fails.Add($"health: audio-bus with the bus down: ok={F(none, "audio-bus").ok} ({F(none, "audio-bus").reason}), affects [{string.Join(",", F(none, "audio-bus").affects)}]");
@@ -534,6 +535,41 @@ public static class LiascapePlayerSelfTest
         m.SceneLoudness["L"].Estimate!.Confidence = "low";
         m.SceneLoudness["L"].Estimate!.Notes = ["two versions of one song play at once"];
         if (LibraryService.SceneLoudnessInfoOf(m).Note != "two versions of one song play at once") fails.Add("a low estimate's first note is the card's note");
+
+        // Set once per play (owner 2026-11-06): WindowReached = the report that completes the CURRENT configuration's first
+        // window (before: no live measurement or a partial) — the one moment a live source's gain.normalize moves; every
+        // later report only changes the next play's value
+        m = new LibMeta();
+        MergeEst("W", Est(-20, -10), (true, true), "W's estimate");
+        void Reached(string? key, double lufs, double secs, bool complete, bool want, string what)
+        {
+            var got = LibraryService.MergeSceneLoudnessReport(m, key, lufs, -10, secs, complete, St((int)(secs * 10)));
+            if (got.WindowReached != want) fails.Add($"WindowReached({what}) = {got.WindowReached}, want {want} ({got})");
+        }
+        Reached(null, -24, 30, false, false, "a partial (switched away early)");
+        Reached(null, -24, 60, true, true, "the window completed over a partial");
+        Reached(null, -26, 120, true, false, "a further window: refines the next play's value only");
+        Reached(null, -26, 130, true, false, "the end of the play");
+        MergeEst("X", Est(-18, -8), (true, true), "another configuration (a property commit)");
+        Reached("W", -27, 190, true, false, "W's late report after the switch to X (not current)");
+        Reached("X", -19, 60, true, true, "X's own window: X's play sets its normalization once");
+        m = new LibMeta();
+        Reached(null, -22, 60, true, true, "a scene never estimated: its first window");
+
+        // PinNormalize: a live source keeps the gain.normalize it plays with; only a landing / a property commit's new
+        // configuration (repin) or the user's normalization settings move it to the index's value
+        var s14 = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };
+        var p0 = LiascapePlayerMedia.PinNormalize(null, "/s", 3.0, 5.0, s14, repin: false);
+        if (p0.Db != 3.0) fails.Add($"first sight pins what the source runs: {p0.Db}, want 3");
+        if (LiascapePlayerMedia.PinNormalize(null, "/s", null, 5.0, s14, repin: false).Db != 5.0) fails.Add("first sight without a running value: the index's");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 7.5, s14, repin: false) is not { Db: 3.0 } kept || !ReferenceEquals(kept, p0))
+            fails.Add("the index moved (a refinement): the play keeps its value");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 7.5, s14, repin: true).Db != 7.5) fails.Add("a window landing re-pins to the index");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, -2.0, new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -23 }, repin: false).Db != -2.0)
+            fails.Add("a target change re-pins to the index");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/s", 3.0, 0.0, new AppSettings { NormalizeAudio = false, NormalizeTargetLufs = -14 }, repin: false).Db != 0.0)
+            fails.Add("normalization off re-pins (0)");
+        if (LiascapePlayerMedia.PinNormalize(p0, "/other", 1.0, 9.0, s14, repin: false).Db != 1.0) fails.Add("a reused source id on another path: what it runs");
 
         // SceneNormalizeDb: target − I, never boosting the sample peak past −1.5 dBFS, clamped −60…+24; 0 when off / unlearned
         var on = new AppSettings { NormalizeAudio = true, NormalizeTargetLufs = -14 };
@@ -1089,8 +1125,8 @@ public static class LiascapePlayerSelfTest
                 if (Math.Abs(Fps() - 45) > 1e-6) fails.Add($"ApplySceneFps(VIRTUAL-1 45) → out:VIRTUAL-1.scene_fps {Fps()}, want 45");
                 LiascapePlayerMedia.ApplySceneFps([new SceneMonitor { Name = "VIRTUAL-1", Fps = 45 }], []);
                 LiascapePlayerMedia.Drain().Wait(2000);
-                if (Math.Abs(Fps() - 30) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 30");
-                else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 30 when removed");
+                if (Math.Abs(Fps() - 15) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 15");
+                else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 15 when removed");
                 // Task 8: the GPU / VRAM settings → the player props, live, diffed
                 string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
                 var g0 = new AppSettings();

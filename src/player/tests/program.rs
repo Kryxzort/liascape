@@ -2903,3 +2903,56 @@ fn start_setting_change_never_jumps_the_current_play() {
     let r = verb(&mut c, "play", json!({"from": "start"}));
     assert_eq!(r["path"], json!(items[0]), "an explicit start still starts over: {r}");
 }
+
+// ---------------------------------------------------------------- keep (owner 2026-11-10: "keybind toggle to infinite loop
+// current wallpaper" — `liascape loop-current`)
+
+#[test]
+fn keep_holds_the_current_item_and_loops_it() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    // on_end, no limits: a 2 s clip would switch at its end (armed at once)
+    let items = [clip("ka", 2.0), clip("kb", 2.0), clip("kc", 2.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "on_end", "interval_ms": 0}));
+    assert_eq!(c.get("prog:main.keep"), json!(false), "off by default");
+    c.ok("program.play", json!({"id": "prog:main"}));
+    wait_armed(&mut c, 1);
+    // keep on while armed: the armed end switch is cancelled, A loops, nothing switches over 3 of its loops
+    c.ok("set", json!({"path": "prog:main.keep", "value": true}));
+    step_for(&mut c, 50, 6500);
+    assert_eq!(currents(&c).len(), 1, "kept: no switch {:?}", currents(&c));
+    assert_eq!(c.get("cur:VIRTUAL-1.loop"), json!(true), "the kept item loops");
+    assert_eq!(prog(&mut c)["keep"], json!(true));
+    assert_eq!(c.get("prog:main.path"), json!(items[0]));
+    // a user switch still moves; the keep holds the new item
+    verb(&mut c, "next", json!({}));
+    step_until(&mut c, 16, 2000, "next", n_currents(2));
+    step_for(&mut c, 50, 5000);
+    assert_eq!(currents(&c).len(), 2, "kept after a user switch too");
+    // off: the rotation resumes from the item's next end
+    c.ok("set", json!({"path": "prog:main.keep", "value": false}));
+    step_until(&mut c, 16, 4500, "the rotation back", n_currents(3));
+    assert_eq!(currents(&c)[2]["reason"], "end");
+}
+
+#[test]
+fn keep_stops_the_timer_and_resets_it_when_lifted() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    let items = [clip("kta", 4.0), clip("ktb", 4.0)];
+    let items: Vec<&str> = items.iter().map(String::as_str).collect();
+    program(&mut c, &items, json!({"mode": "timer", "interval_ms": 1500, "keep": true}));
+    c.ok("program.play", json!({"id": "prog:main"}));
+    step_until(&mut c, 16, 1000, "play", n_currents(1));
+    step_for(&mut c, 50, 5000);
+    assert_eq!(currents(&c).len(), 1, "kept from create: the timer never fires");
+    assert_eq!(c.get("cur:VIRTUAL-1.loop"), json!(true), "the kept clip loops");
+    c.ok("set", json!({"path": "prog:main.keep", "value": false}));
+    // a full interval from the lift, not at once (the countdown stood at 0 under the keep)
+    step_for(&mut c, 50, 1200);
+    assert_eq!(currents(&c).len(), 1, "the timer restarts in full when the keep is lifted");
+    step_until(&mut c, 16, 1500, "the timer back", n_currents(2));
+    let cur = currents(&c);
+    assert_eq!(cur[1]["reason"], "timer");
+}

@@ -849,16 +849,17 @@ static std::string script_scene (const std::string& objects) {
     return d;
 }
 
-// one solid 8x8 square; `props` is the rest of the object's JSON members (each scripted property's object)
+// one solid 8x8 square, nearly black (1/255); `props` is the rest of the object's JSON members (each scripted
+// property's object)
 static std::string square (int id, const std::string& props) {
     return "{\"id\":" + std::to_string (id) + ",\"name\":\"sq" + std::to_string (id)
-         + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\"," + props + "}";
+         + "\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"0.00392 0.00392 0.00392\"," + props + "}";
 }
 
 // the same square in white (B2 reads its red channel as alpha × 255)
 static std::string white_square (int id, const std::string& props) {
     std::string sq = square (id, props);
-    const std::string from = "\"color\":\"1 1 1\"";
+    const std::string from = "\"color\":\"0.00392 0.00392 0.00392\"";
     sq.replace (sq.find (from), from.size (), "\"color\":\"1.0 1.0 1.0\"");
     return sq;
 }
@@ -1108,7 +1109,8 @@ static bool undefined_leaves_the_property () {
 
 // the red channel at column x of the centre row
 static int red_at (const ScriptRig& rig, int x) {
-    // (the squares are white: "1.0 1.0 1.0" — a colour without a '.' is 0..255, so "1 1 1" is nearly black)
+    // (the squares are white: "1.0 1.0 1.0"; square ()'s are 1/255, nearly black — what the "1 1 1" these tests were
+    // written with drew before LWE read an object colour as WE does, object_colour_and_linked_folder)
     unsigned char px[4] = { 0, 0, 0, 0 };
     read_pixel (rig.fbo, x, 16, px);
     return px[0];
@@ -1881,7 +1883,7 @@ struct MdlWriter {
 
 // a 4 x 4 square centred on the mesh's origin, every vertex on bone 0. MDLV0016 has format 0x1800009 (position,
 // blend indices, weights, uv: 52 B) and 16-bit indices; MDLV0023 here 0x180000f (+ normal, tangent: 80 B) and 32-bit
-static std::string puppet_mesh (int version) {
+static std::string puppet_mesh (int version, float u = 0.5f, float v = 0.5f) {
     const bool v23 = version == 23;
     const uint32_t format = v23 ? 0x180000f : 0x1800009;
     MdlWriter w;
@@ -1901,7 +1903,7 @@ static std::string puppet_mesh (int version) {
             verts.f32 (0).f32 (0).f32 (1).f32 (1).f32 (0).f32 (0).f32 (1);
         }
         verts.u32 (0).u32 (0).u32 (0).u32 (0).f32 (1).f32 (0).f32 (0).f32 (0);
-        verts.f32 (0.5f).f32 (0.5f);
+        verts.f32 (u).f32 (v);
     }
     w.u32 (static_cast<uint32_t> (verts.out.size ()));
     w.out += verts.out;
@@ -1987,7 +1989,7 @@ static bool puppet_warp_as_we () {
           "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"48 16 0\",\"size\":\"32 32\","
           "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false},"
           "{\"id\":12,\"animation\":2,\"blend\":0.5,\"additive\":true}]},"
-          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"0.00392 0.00392 0.00392\","
           "\"origin\":\"0 8 0\",\"parent\":2,\"attachment\":\"tip\"}";
     const std::string dir = script_scene (objects);
     mkdir ((dir + "/materials").c_str (), 0755);
@@ -2092,6 +2094,108 @@ static bool puppet_cullmode_normal_draws () {
     return true;
 }
 
+// a puppet's effects run on its image, in texture space, and its material draws the mesh last from their output
+// (3013489778: a pulse's opacity mask on puppet layer 161 is sampled at each part's place in the atlas, measured in
+// WE with the mask replaced by u and v ramps). A 32 x 32 puppet at (32, 16) on a 64 x 32 scene: its 4 px square sits
+// on the layer's centre but every vertex has uv (0.1, 0.5); the effect writes its own uv.x as red, times the input's
+// alpha. On the image the square reads the effect at u 0.1: red ≈ 26. Unpatched (the effect ran on the posed layer,
+// after the mesh): the square's layer position, u ≈ 0.5, red ≈ 128
+static bool puppet_effects_run_on_its_image () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16, 0.1f, 0.5f);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }));
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}],"
+          "\"effects\":[{\"id\":9,\"name\":\"uvx\",\"file\":\"effects/uvx/effect.json\"}]}";
+    const std::string dir = script_scene (objects);
+    for (const char* sub : { "/materials", "/models", "/shaders", "/effects", "/effects/uvx" }) {
+        mkdir ((dir + sub).c_str (), 0755);
+    }
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    write_file (dir + "/shaders/uvx.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/uvx.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                           "\tgl_FragColor = vec4(v_TexCoord.x, 0.0, 0.0, 1.0) * texSample2D(g_Texture0, v_TexCoord).a;\n}\n");
+    write_file (dir + "/materials/uvx.json", "{\"passes\":[{\"shader\":\"uvx\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                             "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/uvx/effect.json", "{\"name\":\"uvx\",\"passes\":[{\"material\":\"materials/uvx.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "models/pa.json", "models/pa.mdl", "effects/uvx/effect.json",
+                  "shaders/uvx.vert", "shaders/uvx.frag", "materials/uvx.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char square[4] = {}, beside[4] = {};
+    read_pixel (rig.fbo, 32, 16, square);
+    read_pixel (rig.fbo, 24, 16, beside);
+    printf ("    the square's red %d (its uv.x 0.1 = 26; its layer position 0.5 = 128), beside it %d\n", square[0], beside[0]);
+    CHECK (square[0] > 14 && square[0] < 40, "the effect didn't run on the puppet's image (red %d, want ~26)", square[0]);
+    CHECK (beside[0] < 10, "something drew beside the square (red %d)", beside[0]);
+    return true;
+}
+
+// a puppet's uvs are its image's, not its padded texture's (3463520581's face: an 852 x 726 image in an 896 x 768
+// texture; WE's posed face sat 28, 16 px from ours, its eye and nose under the front hair). A 4 x 4 image in an 8 x 8
+// texture: the image's left half red, its right half green, the padding blue; the puppet's 4 px square at (32, 16)
+// has uv (0.75, 0.5) at every vertex, the image's right half: green. Unpatched (the uv taken on the texture): its
+// texel 6, the blue padding
+static bool puppet_uvs_are_the_images () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string material = "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"translucent\",\"depthtest\":"
+                                 "\"disabled\",\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"padded\"]}]}\n";
+    MdlWriter a;
+    a.out = puppet_mesh (16, 0.75f, 0.5f);
+    a.section ("MDLS0001", puppet_skeleton (1)).section ("MDLA0001", puppet_animations (1, { { 7, 0.0f } }));
+    // TEXV0005 / TEXB0003 ARGB8888: texture 8 x 8, image 4 x 4, no interpolation, clamped
+    MdlWriter t;
+    t.out = std::string ("TEXV0005", 8) + '\0' + std::string ("TEXI0001", 8) + '\0';
+    t.u32 (0).u32 (1 | 2).u32 (8).u32 (8).u32 (4).u32 (4).u32 (0);
+    t.out += std::string ("TEXB0003", 8) + '\0';
+    t.u32 (1).u32 (0xffffffff);
+    t.u32 (1).u32 (8).u32 (8).u32 (0).u32 (8 * 8 * 4).u32 (8 * 8 * 4);
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            const bool image = x < 4 && y < 4;
+            t.u8 (image && x < 2 ? 255 : 0).u8 (image && x >= 2 ? 255 : 0).u8 (image ? 0 : 255).u8 (255);
+        }
+    }
+    const std::string objects
+        = "{\"id\":1,\"name\":\"a\",\"image\":\"models/pa.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
+          "\"animationlayers\":[{\"id\":10,\"animation\":7,\"rate\":1,\"blend\":1,\"visible\":true}]}";
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/puppet.json", material);
+    write_file (dir + "/materials/padded.tex", t.out);
+    write_file (dir + "/models/pa.json", "{\"material\":\"materials/puppet.json\",\"puppet\":\"models/pa.mdl\"}\n");
+    write_file (dir + "/models/pa.mdl", a.out);
+    ScriptRig rig;
+    rig.extra = { "materials/puppet.json", "materials/padded.tex", "models/pa.json", "models/pa.mdl" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 4; i++) {
+        rig.step ();
+    }
+    unsigned char square[4] = {};
+    read_pixel (rig.fbo, 32, 16, square);
+    printf ("    the square %d %d %d (want the image's right half, green; the padding is blue)\n", square[0], square[1],
+            square[2]);
+    CHECK (square[1] > 200 && square[0] < 40 && square[2] < 40, "the puppet's uv wasn't taken on its image (%d %d %d)",
+           square[0], square[1], square[2]);
+    return true;
+}
+
 // the attachment matrix whole (GH 0x14024b530: local ← (bone · MDAT) · local): a 32 x 32 puppet at (32, 16) on a
 // 64 x 32 scene whose attachment "tip" is the MDAT matrix scale 2 on the bone (bind pose); a black 4 x 4 square pinned
 // to it at "0 4 0" sits 2 · 4 = 8 px up and is 8 px wide: x 28..35, rows 4..11. Unpatched: only the attachment's
@@ -2114,7 +2218,7 @@ static bool attachment_matrix_is_whole () {
     const std::string objects
         = "{\"id\":2,\"name\":\"b\",\"image\":\"models/pb.json\",\"origin\":\"32 16 0\",\"size\":\"32 32\","
           "\"animationlayers\":[{\"id\":11,\"animation\":1,\"blend\":1,\"additive\":false}]},"
-          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"1 1 1\","
+          "{\"id\":3,\"name\":\"c\",\"image\":\"models/util/solidlayer.json\",\"size\":\"4 4\",\"color\":\"0.00392 0.00392 0.00392\","
           "\"origin\":\"0 4 0\",\"parent\":2,\"attachment\":\"tip\"}";
     const std::string dir = script_scene (objects);
     mkdir ((dir + "/materials").c_str (), 0755);
@@ -2564,6 +2668,82 @@ static bool hidden_parent_hides_children () {
     CHECK (shown == want, "showing the group live: want %s", want.c_str ());
     return true;
 }
+
+// a sprite's texture stands as in WE: its v = 0 row at +up (common_particles.h ComputeParticlePosition), up on the
+// screen, and its own z rotation turns it the way WE's does. A sprite draws red where v < 0.5, green below; a white
+// sprite near the top-right corner marks the screen's top in the read-back. Sprite 1 is upright, sprite 2 is turned
+// by +π/2 (WE: up = (sin, cos) → (1, 0), its red half to the right on the screen: the rotation's sense). Unpatched
+// (U = (0,1,0) in LWE's y-down particle space) every sprite was mirrored top to bottom: the upright one's red half
+// at the bottom (3354740764's light shafts lit from below)
+static bool sprite_texture_stands_as_we () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    auto sys = [&] (const char* rotation) {
+        return std::string ("{\"material\":\"materials/uvp.json\",\"maxcount\":1")
+             + ",\"emitter\":[{\"name\":\"sphererandom\",\"origin\":\"0 0 0\",\"directions\":\"1 1 0\",\"distancemin\":0,"
+               "\"distancemax\":0,\"rate\":0,\"instantaneous\":1}],"
+             + "\"initializer\":[{\"name\":\"sizerandom\",\"min\":20,\"max\":20}," + white + "," + life
+             + ",{\"name\":\"rotationrandom\",\"min\":\"0 0 " + rotation + "\",\"max\":\"0 0 " + rotation + "\"}]}\n";
+    };
+    // the marker: a plain white sprite (util/white) near the top-right corner
+    std::string mark = sys ("0");
+    mark.replace (mark.find ("materials/uvp.json"), 18, "materials/opaque.json");
+    std::vector<std::string> files;
+    const std::string dir = particle_scene (
+        particle_object (1, "up.json", 16, 16) + "," + particle_object (2, "turned.json", 44, 16) + ","
+            + particle_object (3, "mark.json", 60, 28),
+        "0 0 0", { { "up.json", sys ("0") }, { "turned.json", sys ("1.5707964") }, { "mark.json", mark } }, files);
+    mkdir ((dir + "/shaders").c_str (), 0755);
+    write_file (dir + "/shaders/uvp.vert",
+                "#include \"common_particles.h\"\nattribute vec3 a_Position;\nattribute vec4 a_TexCoordVec4;\n"
+                "attribute vec4 a_Color;\nattribute vec2 a_TexCoordC2;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                "\tvec3 right, up;\n\tComputeParticleTangents(vec3(a_TexCoordC2.xy, a_TexCoordVec4.z), right, up);\n"
+                "\tvec3 position = ComputeParticlePosition(a_TexCoordVec4.xy, 1.0, vec4(a_Position, a_TexCoordVec4.w), right, up);\n"
+                "\tgl_Position = mul(vec4(position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoordVec4.xy;\n}\n");
+    write_file (dir + "/shaders/uvp.frag", "varying vec2 v_TexCoord;\nvoid main() {\n"
+                                           "\tgl_FragColor = v_TexCoord.y < 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : vec4(0.0, 1.0, 0.0, 1.0);\n}\n");
+    write_file (dir + "/materials/uvp.json", "{\"passes\":[{\"shader\":\"uvp\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                                             "\"blending\":\"translucent\",\"cullmode\":\"nocull\",\"textures\":[\"util/white\"]}]}\n");
+    files.insert (files.end (), { "shaders/uvp.vert", "shaders/uvp.frag", "materials/uvp.json" });
+    ScriptRig rig;
+    CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    // the marker sprite at WE's y 28 (near the top): which read-back row is the screen's top
+    unsigned char px[4] = {};
+    if (getenv ("HOST_API_TEST_DUMP")) {
+        for (int y = 31; y >= 0; y--) {
+            std::string line;
+            for (int x = 0; x < 64; x++) {
+                read_pixel (rig.fbo, x, y, px);
+                line += px[0] > 200 && px[1] > 200 ? 'W' : px[0] > 200 ? 'R' : px[1] > 200 ? 'G' : px[2] > 100 ? 'b' : '.';
+            }
+            printf ("    %2d %s\n", y, line.c_str ());
+        }
+    }
+    read_pixel (rig.fbo, 60, 28, px);
+    const bool topIsHighRow = px[0] > 200 && px[1] > 200;
+    const int above = topIsHighRow ? 18 : 13, below = topIsHighRow ? 13 : 18;
+    auto red = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[0] > 200 && px[1] < 60;
+    };
+    auto green = [&] (int x, int y) {
+        read_pixel (rig.fbo, x, y, px);
+        return px[1] > 200 && px[0] < 60;
+    };
+    printf ("    upright sprite: above red %d green %d, below red %d green %d; turned π/2: right red %d, left red %d "
+            "(screen top = read-back row %s)\n", red (16, above), green (16, above), red (16, below), green (16, below),
+            red (46, 16), red (41, 16), topIsHighRow ? "31" : "0");
+    CHECK (red (16, above) && green (16, below), "the upright sprite's v = 0 half isn't at the top");
+    CHECK (red (46, 16) && green (41, 16), "the sprite turned by +π/2 doesn't have its v = 0 half on the right");
+    return true;
+}
+
 
 // a particle system's origin is in its parent's space: a rotated, scaled group places it, a moving image parent
 // carries it along, and a hidden group hides it (unpatched: its own origin in the scene, frozen at setup)
@@ -3173,6 +3353,189 @@ static bool unset_slots_are_not_missing () {
     return true;
 }
 
+// a simulation effect as cursorripple is built (apply_force → simulate_force → combine): `simstep` reads B (last
+// frame's state) into A, adding 1/255 to red per run, and writes this run's g_Frametime·15 to green and its pointer
+// move ·16 to blue; `simcopy` copies A to B; `simshow` draws B. Returns the files it wrote
+static std::vector<std::string> simulation_effect (const std::string& dir) {
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/simclock").c_str (), 0755);
+    const std::string vert = "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+                             "varying vec2 v_TexCoord;\nvoid main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+                             "\tv_TexCoord = a_TexCoord;\n}\n";
+    const std::string copy = "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+                             "void main() {\n\tgl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);\n}\n";
+    std::vector<std::string> files;
+    for (const char* name : { "simstep", "simcopy", "simshow" }) {
+        const std::string n = name;
+        write_file (dir + "/shaders/" + n + ".vert", vert);
+        write_file (dir + "/shaders/" + n + ".frag",
+                    n != "simstep" ? copy
+                                   : "uniform sampler2D g_Texture0;\nuniform float g_Frametime;\nuniform vec2 g_PointerPosition;\n"
+                                     "uniform vec2 g_PointerPositionLast;\nuniform vec4 g_PointerState;\nvarying vec2 v_TexCoord;\n"
+                                     "void main() {\n\tvec4 s = texSample2D(g_Texture0, v_TexCoord);\n"
+                                     "\tgl_FragColor = vec4(s.r + 1.0 / 255.0 + g_PointerState.z * (64.0 / 255.0), g_Frametime * 15.0,\n"
+                                     "\t\tlength(g_PointerPosition - g_PointerPositionLast) * 16.0, 1.0);\n}\n");
+        write_file (dir + "/materials/" + n + ".json", "{\"passes\":[{\"shader\":\"" + n + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                       "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+        files.insert (files.end (), { "shaders/" + n + ".vert", "shaders/" + n + ".frag", "materials/" + n + ".json" });
+    }
+    write_file (dir + "/effects/simclock/effect.json",
+                "{\"name\":\"simclock\",\"passes\":["
+                "{\"material\":\"materials/simstep.json\",\"target\":\"_rt_SimA\",\"bind\":[{\"name\":\"_rt_SimB\",\"index\":0}]},"
+                "{\"material\":\"materials/simcopy.json\",\"target\":\"_rt_SimB\",\"bind\":[{\"name\":\"_rt_SimA\",\"index\":0}]},"
+                "{\"material\":\"materials/simshow.json\",\"bind\":[{\"name\":\"_rt_SimB\",\"index\":0}]}],"
+                "\"fbos\":[{\"name\":\"_rt_SimA\",\"scale\":1,\"format\":\"rgba8888\"},{\"name\":\"_rt_SimB\",\"scale\":1,\"format\":\"rgba8888\"}]}\n");
+    files.push_back ("effects/simclock/effect.json");
+    return files;
+}
+
+// a simulation effect (cursorripple's shape: its passes carry state in the effect's own FBOs from frame to frame and
+// never read the layer) steps at the frame rate the host means to draw at (wp_project_set_frame_rate, WE's fps
+// setting), whatever rate its frames arrive at — its passes count per frame (a force per frame from the pointer's move
+// that frame times the frame's time, a decay floor of 1/255 per frame), so in WE the water's strength depends on the
+// fps, and 3184155462 drawn late or throttled pushed several frames' force at once. Early frames don't step, a late
+// frame runs several steps, each with 1/rate s and its share of the pointer's move; a press between steps reaches the
+// next; a frame drawn again at the same time doesn't step; the drawing pass runs every frame. (unpatched: the
+// simulation ran once per frame drawn, with that frame's time and move)
+static bool simulation_steps_at_the_frame_rate () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"sim\",\"file\":\"effects/simclock/effect.json\"}]}";
+    auto open = [&object] (ScriptRig& rig, float hz) {
+        const std::string dir = script_scene (object);
+        b9_layer (dir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+        rig.extra = simulation_effect (dir);
+        rig.mouse = &g_clicker;
+        rig.loaded = [hz] (wp_project* p) { wp_project_set_frame_rate (p, hz); };
+        g_buttonDown = false;
+        g_mouseX = 8.0;
+        g_mouseY = 16.0;
+        return rig.open (dir);
+    };
+    auto frame = [] (ScriptRig& rig, float dt, double move) {
+        g_now += dt;
+        g_mouseX += move;
+        wp_render_update_time (rig.ctx);
+        wp_render_frame (rig.p);
+    };
+
+    // WE at 30 fps, the host at 240 Hz: 1 s, the pointer moving 0.25 px per frame (1/256 of the 64 px scene)
+    ScriptRig fast;
+    CHECK (open (fast, 30.0f), "load/build failed");
+    for (int i = 0; i < 240; i++) {
+        frame (fast, 1.0f / 240.0f, 0.25);
+    }
+    const auto second = b9_pixel (fast);
+    // the same time drawn again: no step
+    frame (fast, 0.0f, 0.0);
+    const auto again = b9_pixel (fast);
+    // a press held for one frame between steps reaches the next step (WE's g_PointerState.z)
+    g_buttonDown = true;
+    frame (fast, 1.0f / 240.0f, 0.25);
+    g_buttonDown = false;
+    for (int i = 0; i < 7; i++) {
+        frame (fast, 1.0f / 240.0f, 0.25);
+    }
+    const auto pressed = b9_pixel (fast);
+    printf ("    WE 30 fps, host 240 Hz, 1 s: steps r=%d (30 + the first frames'), frametime g=%d (1/30 → 127), move b=%d (8 frames' → 127);"
+            " drawn again r=%d; a press between steps r=%d (+64 +1)\n",
+            second[0], second[1], second[2], again[0], pressed[0]);
+    CHECK (second[0] >= 28 && second[0] <= 36, "the simulation didn't step 30 times in 1 s (r=%d)", second[0]);
+    CHECK (near (second[1], 0.5 * 255, 4), "a step's g_Frametime isn't 1/30 s (g=%d)", second[1]);
+    CHECK (near (second[2], 0.5 * 255, 4), "a step's pointer move isn't the move since the last step (b=%d)", second[2]);
+    CHECK (again[0] == second[0], "a frame drawn at the same time stepped (r %d → %d)", second[0], again[0]);
+    CHECK (pressed[0] >= second[0] + 64 && pressed[0] <= second[0] + 66, "the press between steps was lost (r %d → %d)", second[0],
+           pressed[0]);
+
+    // WE at 240 fps, the host at 30 Hz (a throttled scene): 0.5 s, the pointer moving 2 px per frame
+    ScriptRig slow;
+    CHECK (open (slow, 240.0f), "load/build failed");
+    for (int i = 0; i < 15; i++) {
+        frame (slow, 1.0f / 30.0f, 2.0);
+    }
+    const auto late = b9_pixel (slow);
+    printf ("    WE 240 fps, host 30 Hz, 0.5 s: steps r=%d (120 + the first frames'), frametime g=%d (1/240 → 16), move b=%d (1/8 frame's → 16)\n",
+            late[0], late[1], late[2]);
+    CHECK (late[0] >= 115 && late[0] <= 130, "a late frame didn't run 8 steps (r=%d after 15 frames)", late[0]);
+    CHECK (near (late[1], 255.0 / 16.0, 3), "a step's g_Frametime isn't 1/240 s (g=%d)", late[1]);
+    CHECK (near (late[2], 255.0 / 16.0, 3), "a step's pointer move isn't 1/8 of the frame's (b=%d)", late[2]);
+    return true;
+}
+
+// a pointer jump (wp_project_pointer_jump: it entered the output or came back from behind a window — WE, polling the
+// cursor on the whole desktop, never sees one) is no move: the frame that reads the new position has
+// g_PointerPositionLast = g_PointerPosition, and a simulation's next step starts where the pointer landed. A move
+// after it counts again. (unpatched: no such call; the jump was a move of 48 px in one frame — 3184155462's water
+// stroked a saturated line across the screen when the pointer came onto the wallpaper)
+static bool pointer_jump_is_no_move () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene (b9_object (1, 16));
+    b9_layer (dir, "uniform vec2 g_PointerPosition;\nuniform vec2 g_PointerPositionLast;\n",
+              "gl_FragColor = vec4(length(g_PointerPosition - g_PointerPositionLast) * 4.0, 0.0, 0.0, 1.0);");
+    ScriptRig rig;
+    rig.mouse = &g_clicker;
+    g_buttonDown = false;
+    g_mouseX = 8.0;
+    g_mouseY = 16.0;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    g_mouseX = 24.0;
+    rig.step ();
+    const auto moved = b9_pixel (rig);
+    g_mouseX = 56.0;
+    wp_project_pointer_jump (rig.p);
+    rig.step ();
+    const auto jumped = b9_pixel (rig);
+    g_mouseX = 40.0;
+    rig.step ();
+    const auto after = b9_pixel (rig);
+    printf ("    a 16 px move r=%d (1/4 → 255·1), a 32 px jump r=%d (0), a 16 px move after r=%d\n", moved[0], jumped[0], after[0]);
+    CHECK (moved[0] > 250, "a move isn't a move (r=%d)", moved[0]);
+    CHECK (jumped[0] < 3, "the jump was a move (r=%d)", jumped[0]);
+    CHECK (after[0] > 250, "a move after the jump isn't a move (r=%d)", after[0]);
+
+    // a simulation stepping at 30 fps under a 240 Hz host: a jump between its steps isn't in the next step's move
+    std::string object = b9_object (1, 16);
+    object.pop_back ();
+    object += ",\"effects\":[{\"id\":2,\"name\":\"sim\",\"file\":\"effects/simclock/effect.json\"}]}";
+    const std::string sdir = script_scene (object);
+    b9_layer (sdir, "", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    ScriptRig sim;
+    sim.extra = simulation_effect (sdir);
+    sim.mouse = &g_clicker;
+    sim.loaded = [] (wp_project* p) { wp_project_set_frame_rate (p, 30.0f); };
+    g_mouseX = 8.0;
+    CHECK (sim.open (sdir), "load/build of %s failed", sdir.c_str ());
+    auto frame = [&sim] () {
+        g_now += 1.0f / 240.0f;
+        wp_render_update_time (sim.ctx);
+        wp_render_frame (sim.p);
+    };
+    for (int i = 0; i < 16; i++) {
+        frame ();
+    }
+    // 4 frames into a step: jump 40 px, then move 2 px before the step
+    for (int i = 0; i < 4; i++) {
+        frame ();
+    }
+    g_mouseX = 48.0;
+    wp_project_pointer_jump (sim.p);
+    frame ();
+    g_mouseX = 50.0;
+    for (int i = 0; i < 3; i++) {
+        frame ();
+    }
+    const auto step = b9_pixel (sim);
+    printf ("    the step after a 40 px jump and a 2 px move: b=%d (2/64·16 → 127)\n", step[2]);
+    CHECK (near (step[2], 0.5 * 255, 4), "the step's move holds the jump (b=%d)", step[2]);
+    return true;
+}
+
 // an effect pass of the E41 test: the previous output with channel `ch` raised to 1
 static void e41_effect (const std::string& dir, const std::string& name, const char* ch) {
     mkdir ((dir + "/effects").c_str (), 0755);
@@ -3275,6 +3638,46 @@ static std::string b7_object (int id, const std::string& model, int x, const std
          + ".json\",\"size\":\"" + size + "\",\"origin\":\"" + std::to_string (x) + " 16 0\"" + extra + "}";
 }
 
+// a constant whose uniform the vertex and fragment shaders declare with different types in opposite #if branches
+// takes the declaration the pass compiles (stock clouds: `uniform vec2 g_CloudSpeeds` in the vertex shader under
+// PERSPECTIVE 0, `vec4` in the fragment shader under PERSPECTIVE 1; 2290002190 runs PERSPECTIVE 1). The vertex one,
+// found first, was uploaded as a vec2 into the vec4: GL refused it, the speed stayed 0 and WE's moving clouds stood
+// still. A solid layer whose material compiles the fragment branch draws its `spd` (0.5 0.25 0.75 1) as its colour:
+// 128 64 191. Unpatched: 0 0 0
+static bool constant_takes_the_compiled_declaration () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"bloom\":false",
+        "{\"id\":1,\"name\":\"o1\",\"image\":\"models/spd.json\",\"size\":\"64 32\",\"origin\":\"32 16 0\"}");
+    for (const char* sub : { "/shaders", "/materials", "/models" }) {
+        mkdir ((dir + sub).c_str (), 0755);
+    }
+    write_file (dir + "/shaders/spd.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "#if FRAGSPEED == 0\nuniform vec2 g_Speed; // {\"material\":\"spd\",\"default\":\"0.1 0.1\"}\n#endif\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n"
+                "#if FRAGSPEED == 0\n\tv_TexCoord += g_Speed;\n#endif\n}\n");
+    write_file (dir + "/shaders/spd.frag",
+                "// [COMBO] {\"material\":\"fs\",\"combo\":\"FRAGSPEED\",\"default\":0}\nvarying vec2 v_TexCoord;\n"
+                "#if FRAGSPEED == 1\nuniform vec4 g_Speed; // {\"material\":\"spd\",\"default\":\"0 0 0 0\"}\n#endif\n"
+                "void main() {\n#if FRAGSPEED == 1\n\tgl_FragColor = vec4(g_Speed.xyz, 1.0);\n#else\n\tgl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n#endif\n}\n");
+    write_file (dir + "/materials/spd.json",
+                "{\"passes\":[{\"shader\":\"spd\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                "\"blending\":\"normal\",\"combos\":{\"FRAGSPEED\":1},\"constantshadervalues\":{\"spd\":\"0.5 0.25 0.75 1\"}}]}\n");
+    write_file (dir + "/models/spd.json", "{\"material\":\"materials/spd.json\",\"solidlayer\":true}\n");
+    ScriptRig rig;
+    rig.extra = { "shaders/spd.vert", "shaders/spd.frag", "materials/spd.json", "models/spd.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char px[4] = {};
+    read_pixel (rig.fbo, 32, 16, px);
+    printf ("    the layer %d %d %d (want the constant 128 64 191)\n", px[0], px[1], px[2]);
+    CHECK (near (px[0], 128, 4) && near (px[1], 64, 4) && near (px[2], 191, 4),
+           "the constant didn't reach the declaration the pass compiles (%d %d %d)", px[0], px[1], px[2]);
+    return true;
+}
+
 static std::array<unsigned char, 4> pixel_at (const ScriptRig& rig, int x) {
     std::array<unsigned char, 4> px {};
     read_pixel (rig.fbo, x, 16, px.data ());
@@ -3283,6 +3686,35 @@ static std::array<unsigned char, 4> pixel_at (const ScriptRig& rig, int x) {
 
 static bool rgb_near (const std::array<unsigned char, 4>& px, int r, int g, int b) {
     return near (px[0], r, 3) && near (px[1], g, 3) && near (px[2], b, 3);
+}
+
+// a full-screen layer covers the screen whatever the camera's zoom: WE draws it over the whole target (3042492564's
+// `localcontrast` layer under its camera's zoom 0.73: in WE its strength changes pixels across the whole frame; ours
+// drew its output into the zoomed 73 % rectangle, a copy of the whole frame shrunk into it). A 64 x 32 scene at
+// general.zoom 0.5 with a full-screen layer whose effect writes red: red in the corner. Unpatched: only the zoomed
+// middle (x 16..47, rows 8..23) is red, the corner keeps the blue clear
+static bool fullscreen_layer_ignores_zoom () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":0.5",
+        "{\"id\":1,\"name\":\"fs\",\"image\":\"models/util/fullscreenlayer.json\",\"copybackground\":true,"
+        "\"effects\":[{\"id\":2,\"name\":\"red\",\"file\":\"effects/red/effect.json\",\"visible\":true}]}");
+    ScriptRig rig;
+    rig.extra = b7_effect (dir, "red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    unsigned char corner[4] = {}, middle[4] = {};
+    read_pixel (rig.fbo, 2, 2, corner);
+    read_pixel (rig.fbo, 32, 16, middle);
+    printf ("    corner %d %d %d, middle %d %d %d (want red both)\n", corner[0], corner[1], corner[2], middle[0], middle[1],
+            middle[2]);
+    CHECK (middle[0] > 200 && middle[2] < 40, "the full-screen layer's effect didn't draw (%d %d %d)", middle[0], middle[1], middle[2]);
+    CHECK (corner[0] > 200 && corner[2] < 40, "the full-screen layer took the camera's zoom (corner %d %d %d)", corner[0],
+           corner[1], corner[2]);
+    return true;
 }
 
 // a layer's composite FBOs clamp unless `clampuvs` is false (WE's default is true): an effect sampling past the
@@ -3431,6 +3863,28 @@ static bool color_blend_modes_read_the_scene () {
     CHECK (rgb_near (add, 255, 128, 0), "mode 31 didn't add (%d %d %d)", add[0], add[1], add[2]);
     CHECK (rgb_near (mul, 128, 0, 0), "mode 2 didn't multiply the scene (%d %d %d)", mul[0], mul[1], mul[2]);
     CHECK (rgb_near (bg, 255, 0, 0), "the background isn't red (%d %d %d)", bg[0], bg[1], bg[2]);
+    return true;
+}
+
+// a colour-blend layer takes its colour once: WE draws its base with the context colour 1 and sets the layer's colour
+// for the BLENDMODE draw only (GH 0x140214b50, 0x1402321d0). A white layer of colour 0.5 multiplied (mode 2) over red
+// is 128 0 0; both draws taking g_Color4 made it 64 0 0 (2371103399's 0.3 layers were 128 where WE has 143)
+static bool blend_mode_layer_takes_its_colour_once () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1",
+        b7_object (1, "b7red", 32, "64 32") + "," + b7_object (2, "b7col", 16, "8 8", ",\"colorBlendMode\":2,\"color\":\"0.5 0.5 0.5\""));
+    ScriptRig rig;
+    rig.extra = b7_layer (dir, "b7red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
+    const auto col = b7_layer (dir, "b7col", "gl_FragColor = g_Color4;", "", true, "uniform vec4 g_Color4;\n");
+    rig.extra.insert (rig.extra.end (), col.begin (), col.end ());
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    rig.step ();
+    const auto px = pixel_at (rig, 16);
+    printf ("    red × colour 0.5 (mode 2) → %d %d %d (want 128 0 0; 64 0 0 when both draws take the colour)\n", px[0], px[1], px[2]);
+    CHECK (rgb_near (px, 128, 0, 0), "the layer's colour didn't apply once (%d %d %d)", px[0], px[1], px[2]);
     return true;
 }
 
@@ -3926,7 +4380,8 @@ static bool create_layer_builds_layers () {
         "export let __workshopId = '77';\n"
         "let made, bar, ok;\n"
         "export function init(value) {\n" + js_checks (
-        "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(1, 1, 1),"
+        // (black, to show on the blue row: the configuration's colour arrives as "x y z", read as WE reads a colour)
+        "made = thisScene.createLayer({ image: 'models/util/solidlayer.json', size: new Vec2(8, 8), color: new Vec3(0, 0, 0),"
         " origin: new Vec3(40, 16, 0) });\n"
         "bar = thisScene.createLayer('models/util/solidlayer.json');\n"
         "const own = thisScene.createLayer('models/own.json');\n"
@@ -4656,6 +5111,56 @@ static bool blending_sets_combos () {
 }
 
 
+// a layer whose material blends `alphatocoverage` and that has an effect: WE moves the layer's blending to its last
+// pass (AlphaToCoverageEnable, no blending, GH 0x14009ac30); at MSAA a pixel keeps its alpha's share of the samples,
+// so its transparent pixels stay transparent. Layer 1 draws alpha 0 through a passthrough effect: the 0 0 0.5 clear
+// shows. Layer 2 draws alpha 1: white. Unpatched the effect's last pass drew unblended (3354740764's dog on an
+// opaque black box): layer 1 was white too
+static bool alphatocoverage_layer_with_effects () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"pass\",\"file\":\"effects/pass/effect.json\"}]}";
+    std::string clear = b9_object (1, 16), solid = "{\"id\":2,\"name\":\"solid\",\"image\":\"models/b9one.json\","
+                                                   "\"size\":\"8 8\",\"origin\":\"48 16 0\"}";
+    clear.pop_back ();
+    solid.pop_back ();
+    const std::string dir = camera_scene ("\"zoom\":1", clear + effect + "," + solid + effect, "");
+    b9_layer (dir, "uniform float u_TestAlpha; // {\"material\":\"testalpha\",\"default\":0}\n",
+              "gl_FragColor = vec4(1.0, 1.0, 1.0, u_TestAlpha);");
+    std::string material = read_file (dir + "/materials/b9.json");
+    material.replace (material.find ("\"normal\""), 8, "\"alphatocoverage\"");
+    write_file (dir + "/materials/b9.json", material);
+    std::string one = material;
+    one.replace (one.find ("\"blending\""), 10, "\"constantshadervalues\":{\"testalpha\":1},\"blending\"");
+    write_file (dir + "/materials/b9one.json", one);
+    write_file (dir + "/models/b9one.json", "{\"material\":\"materials/b9one.json\",\"solidlayer\":true}\n");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/pass").c_str (), 0755);
+    write_file (dir + "/shaders/pass.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/pass.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n}\n");
+    write_file (dir + "/materials/pass.json", "{\"passes\":[{\"shader\":\"pass\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/pass/effect.json", "{\"name\":\"pass\",\"passes\":[{\"material\":\"materials/pass.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/b9one.json", "models/b9one.json", "effects/pass/effect.json", "shaders/pass.vert",
+                  "shaders/pass.frag", "materials/pass.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    rig.step ();
+    unsigned char transparent[4] = {}, opaque[4] = {};
+    read_pixel (rig.fbo, 16, 16, transparent);
+    read_pixel (rig.fbo, 48, 16, opaque);
+    printf ("    alphatocoverage + effect: alpha 0 → %d %d %d, alpha 1 → %d %d %d\n", transparent[0], transparent[1],
+            transparent[2], opaque[0], opaque[1], opaque[2]);
+    CHECK (transparent[0] < 30 && transparent[2] > 100, "the alpha-0 layer covered the clear (drawn unblended)");
+    CHECK (opaque[0] > 200 && opaque[1] > 200 && opaque[2] > 200, "the alpha-1 layer isn't white");
+    return true;
+}
+
+
 // F9/E39: a material pass's `alphawriting` (WE: default / enabled / disabled, GH 0x140186aa0). The layer's pass
 // writes (1, 1, 1, 0.25) into its composite and an effect after it shows that alpha as grey: by default a pass that
 // isn't the last writes alpha (64), with "disabled" it doesn't (the composite's alpha before it). Unpatched the key
@@ -5194,6 +5699,47 @@ static bool one_text (const std::string& object, InkBox& box, int w = 256, int h
     return true;
 }
 
+// a text layer with effects draws its glyphs into its picture as WE's font pass does: translucently, with the layer's
+// alpha, into the cleared picture, so the picture holds colour × coverage·alpha and alpha (coverage·alpha)², and the
+// effects' output is drawn with that alpha (3042492564's clock, alpha 0.75 and a pulse: in WE its brightest pixels
+// sit at 0.36 of the way from the sea to the text's colour, α³ · the pulse's 0.84; ours 0.63, α · 0.84, and alpha 1
+// or no effects match WE). White "H"s at alpha 0.5 on the 0 0 0.5 clear, the left one through a copy effect: its
+// stem's red 255 · 0.5³ = 32. Unpatched: 128, as the right one without effects (which WE draws at 128 too)
+static bool text_alpha_through_effects_is_wes () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = sized_scene (
+        text_object (1, "H", "\"pointsize\":10,\"origin\":\"64 64 0\",\"alpha\":0.5,"
+                             "\"effects\":[{\"id\":5,\"name\":\"copy\",\"file\":\"effects/copy/effect.json\",\"visible\":true}]") + ","
+            + text_object (2, "H", "\"pointsize\":10,\"origin\":\"192 64 0\",\"alpha\":0.5"),
+        256, 128);
+    ScriptRig rig;
+    rig.width = 256;
+    rig.height = 128;
+    rig.extra = b7_effect (dir, "copy", "gl_FragColor = texSample2D(g_Texture0, v_TexCoord);");
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    auto brightest = [&] (int from, int to) {
+        int best = 0;
+        for (int y = 0; y < rig.height; y++) {
+            for (int x = from; x < to; x++) {
+                unsigned char px[4] = {};
+                read_pixel (rig.fbo, x, y, px);
+                best = std::max (best, static_cast<int> (px[0]));
+            }
+        }
+        return best;
+    };
+    const int through = brightest (0, 128), direct = brightest (128, 256);
+    printf ("    brightest red through the effect %d (want 255 · 0.5³ = 32), without effects %d (want 128)\n", through, direct);
+    CHECK (direct > 118 && direct < 138, "the text without effects isn't at its alpha (red %d)", direct);
+    CHECK (through > 24 && through < 42, "the text through an effect isn't WE's alpha³ (red %d)", through);
+    return true;
+}
+
 // a text layer's origin is in its parent's space and it turns with `angles` (G04, G30; unpatched: the raw local
 // origin, upright)
 static bool text_follows_its_parent_and_turns () {
@@ -5488,6 +6034,35 @@ static bool hdr_needs_literal_bloom () {
     return true;
 }
 
+// an image's `brightness` scales its draw colour (g_Color, g_Color4.rgb) when the renderer runs HDR, else not (WE's
+// GH 0x1402321d0: ctx colour = image colour × (flags & 0x2000 ? brightness : 1)). A layer drawing g_Color4.rgb with
+// colour 0.25 and brightness 2: 0.5 (127) in an HDR scene, 0.25 (64) in the same scene with hdr false. Unpatched: 64
+// in both (2542468435's 1.15 never showed: its genericimage2 VERSION 2 has no g_Brightness term)
+static bool hdr_brightness_scales_colour () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto run = [] (const std::string& general, std::array<unsigned char, 4>& out) {
+        const std::string dir = camera_scene (general,
+            b7_object (1, "hdrbright", 16, "8 8", ",\"color\":\"0.25 0.25 0.25\",\"brightness\":2"));
+        ScriptRig rig;
+        rig.extra = b7_layer (dir, "hdrbright", "gl_FragColor = vec4(g_Color4.rgb, 1.0);", "", true, "uniform vec4 g_Color4;\n");
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        out = pixel_at (rig, 16);
+        return true;
+    };
+    std::array<unsigned char, 4> hdr {}, ldr {};
+    CHECK (run (std::string ("\"hdr\":true") + kB13Bloom0, hdr), "load/build of the HDR scene failed");
+    CHECK (run (std::string ("\"hdr\":false") + kB13Bloom0, ldr), "load/build of the LDR scene failed");
+    printf ("    colour 0.25, brightness 2: HDR %d (want 127), LDR %d (want 64)\n", hdr[0], ldr[0]);
+    CHECK (rgb_near (hdr, 127, 127, 127), "an HDR scene's brightness didn't scale the colour (%d %d %d)", hdr[0], hdr[1], hdr[2]);
+    CHECK (rgb_near (ldr, 64, 64, 64), "an LDR scene's brightness scaled the colour (%d %d %d)", ldr[0], ldr[1], ldr[2]);
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // B14: 3D scenes (docs/player/spikes/we-lwe-gap-audit.md G19–G29, E13, E14). wallpaper64.exe 2.8.485: the scene loader
 // GH 0x1401b6c60 (no orthogonalprojection = perspective), the perspective GH 0x1401b3f70, the object matrix
@@ -5631,7 +6206,8 @@ static bool layer_tilts_and_moves_in_depth () {
 }
 
 // a minimal MDLV0016 file: one mesh, format 0xf (position, normal, tangent, texcoord), a 4 x 4 quad at z 0 facing +z
-static std::string b14_mdl (const std::string& material) {
+// (or a 2·half square at depth z in the model's space)
+static std::string b14_mdl (const std::string& material, float z = 0.0f, float half = 2.0f) {
     std::string out;
     auto u32 = [&out] (uint32_t v) { out.append (reinterpret_cast<const char*> (&v), 4); };
     auto f32 = [&out] (float v) { out.append (reinterpret_cast<const char*> (&v), 4); };
@@ -5642,13 +6218,13 @@ static std::string b14_mdl (const std::string& material) {
     out += material + '\0';
     u32 (0);   // flags: 16-bit indices
     u32 (0xf); // the mesh's format
-    const float corners[4][2] = { { -2, -2 }, { 2, -2 }, { 2, 2 }, { -2, 2 } };
+    const float corners[4][2] = { { -half, -half }, { half, -half }, { half, half }, { -half, half } };
     u32 (4 * 48);
     for (const auto& c : corners) {
-        f32 (c[0]); f32 (c[1]); f32 (0.0f);              // position
-        f32 (0.0f); f32 (0.0f); f32 (1.0f);              // normal
-        f32 (1.0f); f32 (0.0f); f32 (0.0f); f32 (1.0f);  // tangent
-        f32 ((c[0] + 2) / 4); f32 ((2 - c[1]) / 4);      // texcoord
+        f32 (c[0]); f32 (c[1]); f32 (z);                                // position
+        f32 (0.0f); f32 (0.0f); f32 (1.0f);                             // normal
+        f32 (1.0f); f32 (0.0f); f32 (0.0f); f32 (1.0f);                 // tangent
+        f32 ((c[0] + half) / (2 * half)); f32 ((half - c[1]) / (2 * half)); // texcoord
     }
     const uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
     u32 (sizeof (indices));
@@ -5743,6 +6319,286 @@ static bool fog_and_depth () {
     const auto centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
     printf ("    near white quad, far red quad drawn after: centre %d %d %d (want white)\n", centre[0], centre[1], centre[2]);
     CHECK (centre[0] > 240 && centre[1] > 240 && centre[2] > 240, "the far quad drawn after covered the near one (no depth test)");
+    return true;
+}
+
+// fog reaches a 3D scene's image layers: WE gives every layer of a fog scene image flag 0x10, so its last draw is
+// effectpassthrough_4 (genericimage4) with FOG_COMPUTED and the scene's FOG_DIST (GH 0x140212f90, 0x140230ec0,
+// 0x1401d2a20). A white genericimage4 layer 10 units out, fog red from 0 to 5 at density 0 → 1: all red. Its alpha
+// applies once (the base draws with the context colour 1, GH 0x140214b50): a 0.5 white layer over the 0 0 0.5 clear,
+// the fog far off, is 128 128 191 (64 64 159 when both draws take it). Unpatched: the layer stays white
+static bool fog_reaches_world_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (const std::string& general, const std::string& more, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene (general, "{\"id\":1,\"name\":\"w\",\"image\":\"models/fogimg.json\",\"size\":\"200 200\","
+                                                      "\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\"" + more + "}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/fogimg.json", "{\"material\":\"materials/fogimg.json\"}\n");
+        write_file (dir + "/materials/fogimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                    "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/fogimg.json", "materials/fogimg.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> clear {}, fogged {}, half {};
+    CHECK (centre ("", "", clear), "load failed (no fog)");
+    CHECK (centre (",\"fogdistance\":true,\"fogdistancecolor\":\"1 0 0\",\"fogdistancestart\":0,\"fogdistanceend\":5,"
+                   "\"fogdistancestartdensity\":0,\"fogdistanceenddensity\":1", "", fogged),
+           "load failed (fog)");
+    CHECK (centre (",\"fogdistance\":true,\"fogdistancecolor\":\"1 0 0\",\"fogdistancestart\":50,\"fogdistanceend\":100,"
+                   "\"fogdistancestartdensity\":0,\"fogdistanceenddensity\":1", ",\"alpha\":0.5", half),
+           "load failed (alpha)");
+    printf ("    no fog %d %d %d (want white), fog %d %d %d (want red), alpha 0.5 with the fog far off %d %d %d (want 128 128 191)\n",
+            clear[0], clear[1], clear[2], fogged[0], fogged[1], fogged[2], half[0], half[1], half[2]);
+    CHECK (clear[0] > 240 && clear[1] > 240 && clear[2] > 240, "the layer isn't white without fog");
+    CHECK (fogged[0] > 240 && fogged[1] < 16 && fogged[2] < 16, "the fog didn't turn the far layer red");
+    CHECK (near (half[0], 128, 4) && near (half[1], 128, 4) && near (half[2], 191, 4), "the layer's alpha didn't apply once");
+    return true;
+}
+
+// in a 3D scene input.cursorWorldPosition is the cursor cast to the far plane: wallpaper64's getter (GH 0x1401bcb00)
+// unprojects (x, 1 − y, 0.5) through the view and a reversed-depth projection (GH 0x14009afd0 swaps nearz / farz),
+// the point on the cursor's ray at the view depth farz. A 4 x 4 quad model 10 units out, farz 1000: its visible script
+// hides it when the cursor is on the far plane (z −990) and right of x 100; its scale script shrinks it (a model's
+// scale / angles / visible scripts run). Unpatched: the quad stays whole and shown
+static bool cursor_world_position_casts_into_3d () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string hide = "export function update(value) {\n"
+                             "  const c = input.cursorWorldPosition;\n"
+                             "  return !(Math.abs(c.z + 990) < 1 && c.x > 100 && Math.abs(c.y) < 1);\n}";
+    auto frame = [&hide] (double x, const std::string& more, std::array<unsigned char, 4>& centre, std::array<unsigned char, 4>& side) {
+        const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"m\",\"model\":\"models/b14quad.mdl\",\"origin\":\"0 0 0\","
+                                                     + scripted ("visible", "true", hide) + more + "}");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = b14_model (dir, "\"LIGHTING\":0,\"FOG\":0");
+        g_mouseX = x;
+        g_mouseY = kH3 / 2.0;
+        g_buttonDown = false;
+        rig.mouse = &g_clicker;
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        centre = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        side = pixel_xy (rig, kW3 / 2 + 150, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> mid {}, midSide {}, right {}, rightSide {}, small {}, smallSide {};
+    CHECK (frame (kW3 / 2.0, "", mid, midSide), "load failed (pointer at the centre)");
+    CHECK (frame (kW3 * 0.9, "", right, rightSide), "load failed (pointer at the right)");
+    CHECK (frame (kW3 / 2.0, "," + scripted ("scale", "\"1 1 1\"", "export function update(value) {\n  return new Vec3(0.1, 0.1, 0.1);\n}"),
+                  small, smallSide),
+           "load failed (scale script)");
+    printf ("    pointer centre: centre %d %d %d, +150 px %d %d %d (want white, white); pointer right: centre %d %d %d (want the clear "
+            "0 0 128); scale script 0.1: centre %d %d %d, +150 px %d %d %d (want white, clear)\n",
+            mid[0], mid[1], mid[2], midSide[0], midSide[1], midSide[2], right[0], right[1], right[2], small[0], small[1], small[2],
+            smallSide[0], smallSide[1], smallSide[2]);
+    CHECK (mid[0] > 240 && midSide[0] > 240, "the quad isn't shown with the pointer at the centre");
+    CHECK (right[0] < 16 && right[2] > 100,
+           "the far-right cursor on the far plane didn't hide the model (cursorWorldPosition not cast, or the model's visible script "
+           "didn't run)");
+    CHECK (small[0] > 240 && smallSide[0] < 16, "the model's scale script didn't shrink it");
+    return true;
+}
+
+// transparentsorting in a 3D scene draws in WE's two passes (GH 0x1401b9b50): first the opaque objects in the render
+// order (flag 0x200: a model, an image whose material blending is normal or alphatocoverage), then the translucent
+// ones (flag 0x100: a translucent image, particles, text) sorted far to near by their origins. A white translucent
+// image without depth writes, its origin 30 units out, listed first; a red opaque model whose origin is 10 units out
+// but whose mesh lies 60 units out (a sky box): WE draws the model, then the image over it. Unpatched (one sort of
+// every world object by its origin): the image first, then the far mesh over it — the image was gone (3509243656's
+// star spikes under its sky box)
+static bool transparent_sort_draws_opaque_first () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (const std::string& general, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene (general, "{\"id\":1,\"name\":\"t\",\"image\":\"models/tsimg.json\",\"size\":\"200 200\","
+                                                      "\"origin\":\"0 0 -20\",\"scale\":\"0.01 0.01 0.01\"},"
+                                                      "{\"id\":2,\"name\":\"sky\",\"model\":\"models/tssky.mdl\",\"origin\":\"0 0 0\"}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/tsimg.json", "{\"material\":\"materials/tsimg.json\"}\n");
+        write_file (dir + "/materials/tsimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                   "\"depthtest\":\"enabled\",\"depthwrite\":\"disabled\",\"textures\":[\"util/white\"]}]}\n");
+        write_file (dir + "/models/tssky.mdl", b14_mdl ("materials/tssky.json", -50.0f, 40.0f));
+        write_file (dir + "/materials/tssky.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                   "\"combos\":{\"LIGHTING\":0,\"FOG\":0},\"constantshadervalues\":{\"color\":\"1.0 0.0 0.0\"}}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/tsimg.json", "materials/tsimg.json", "models/tssky.mdl", "materials/tssky.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> sorted {}, unsorted {};
+    CHECK (centre (",\"transparentsorting\":true", sorted), "load failed (transparentsorting)");
+    CHECK (centre ("", unsorted), "load failed (no transparentsorting)");
+    printf ("    transparentsorting: centre %d %d %d (want white: the sky, then the image); without it (file order) %d %d %d (want red)\n",
+            sorted[0], sorted[1], sorted[2], unsorted[0], unsorted[1], unsorted[2]);
+    CHECK (sorted[0] > 240 && sorted[1] > 240 && sorted[2] > 240, "the translucent image isn't drawn after the opaque sky");
+    CHECK (unsorted[0] > 240 && unsorted[1] < 16 && unsorted[2] < 16, "without transparentsorting the sky drawn after it should cover the image");
+    return true;
+}
+
+// a sorted 3D scene (transparentsorting) runs its text scripts in the scene's object order, not in the sorted draw
+// order. Text `a` is listed first but nearer the eye (drawn after `b`); it sets shared.n. Text `b`, listed second and
+// far out (drawn first), records shared.n the first time it runs. A white layer shows when `b` saw 1. Unpatched (the
+// script ran as the text drew): `b` ran first and read undefined (3509243656's `userset`: "cannot read property
+// 'toExponential' of undefined" on its first frame)
+static bool sorted_scene_runs_text_scripts_in_object_order () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string a = "export function update(value) {\n  shared.n = (shared.n || 0) + 1;\n  return 'a';\n}";
+    const std::string b = "export function update(value) {\n  if (!shared.bRan) {\n    shared.bRan = true;\n    shared.first = shared.n;\n  }\n  return 'b';\n}";
+    const std::string show = "export function update(value) {\n  return shared.first === 1;\n}";
+    const std::string dir = world_scene (
+        ",\"transparentsorting\":true",
+        "{\"id\":1,\"name\":\"a\",\"origin\":\"0 0 5\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+        "\"text\":{\"value\":\"x\",\"script\":\"" + json_escaped (a) + "\"}},"
+        "{\"id\":2,\"name\":\"b\",\"origin\":\"0 0 -40\",\"visible\":false,\"font\":\"systemfont_arial\",\"pointsize\":10,"
+        "\"text\":{\"value\":\"x\",\"script\":\"" + json_escaped (b) + "\"}},"
+        "{\"id\":3,\"name\":\"w\",\"image\":\"models/toimg.json\",\"size\":\"200 200\",\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\","
+        + scripted ("visible", "false", show) + "}");
+    mkdir ((dir + "/models").c_str (), 0755);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    write_file (dir + "/models/toimg.json", "{\"material\":\"materials/toimg.json\"}\n");
+    write_file (dir + "/materials/toimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"normal\",\"cullmode\":\"nocull\","
+                                               "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+    ScriptRig rig;
+    rig.width = kW3;
+    rig.height = kH3;
+    rig.extra = { "models/toimg.json", "materials/toimg.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    const auto px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+    printf ("    centre %d %d %d (want white: `b` saw a's first update; the clear 0 0 128: b ran first)\n", px[0], px[1], px[2]);
+    CHECK (px[0] > 240 && px[1] > 240 && px[2] > 240, "the far text's script ran before the one listed first");
+    return true;
+}
+
+// a layer placed in a 3D world draws its effects' output into the world with its material's depth test and write
+// (an effect's material has both off: it draws into an FBO). A red opaque model quad at z 0 writes depth; a white
+// translucent image 5 units behind it (depth tested) with a copy effect is drawn after it (transparentsorting): the
+// red stays in front. Unpatched: the effect's last draw ignored the depth and the white covered the red
+// (3509243656's star spikes over the star spheres: the stars came out at a third of WE's brightness)
+static bool world_layer_effect_draw_is_depth_tested () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    auto centre = [] (bool effect, std::array<unsigned char, 4>& px) {
+        const std::string fx = effect ? ",\"effects\":[{\"id\":9,\"name\":\"copy\",\"file\":\"effects/copy/effect.json\"}]" : "";
+        const std::string dir = world_scene (",\"transparentsorting\":true",
+                                             "{\"id\":1,\"name\":\"back\",\"image\":\"models/dtimg.json\",\"size\":\"200 200\","
+                                             "\"origin\":\"0 0 -5\",\"scale\":\"0.01 0.01 0.01\"" + fx + "},"
+                                             "{\"id\":2,\"name\":\"front\",\"model\":\"models/dtfront.mdl\",\"origin\":\"0 0 0\"}");
+        for (const char* sub : { "/models", "/materials", "/shaders", "/effects", "/effects/copy" }) {
+            mkdir ((dir + sub).c_str (), 0755);
+        }
+        write_file (dir + "/models/dtimg.json", "{\"material\":\"materials/dtimg.json\"}\n");
+        write_file (dir + "/materials/dtimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                   "\"depthtest\":\"enabled\",\"depthwrite\":\"disabled\",\"textures\":[\"util/white\"]}]}\n");
+        write_file (dir + "/models/dtfront.mdl", b14_mdl ("materials/dtfront.json", 0.0f, 2.0f));
+        write_file (dir + "/materials/dtfront.json", "{\"passes\":[{\"shader\":\"generic4\",\"blending\":\"normal\",\"depthtest\":\"enabled\","
+                                                     "\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"],\"combos\":{\"LIGHTING\":0,\"FOG\":0},"
+                                                     "\"constantshadervalues\":{\"color\":\"1.0 0.0 0.0\"}}]}\n");
+        write_file (dir + "/shaders/copy.vert",
+                    "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                    "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+        write_file (dir + "/shaders/copy.frag", "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+                                                "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord);\n}\n");
+        write_file (dir + "/materials/copy.json", "{\"passes\":[{\"shader\":\"copy\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                  "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+        write_file (dir + "/effects/copy/effect.json", "{\"name\":\"copy\",\"passes\":[{\"material\":\"materials/copy.json\"}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/dtimg.json", "materials/dtimg.json", "models/dtfront.mdl", "materials/dtfront.json",
+                      "shaders/copy.vert", "shaders/copy.frag", "materials/copy.json", "effects/copy/effect.json" };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        rig.step ();
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> plain {}, effected {};
+    CHECK (centre (false, plain), "load failed (no effect)");
+    CHECK (centre (true, effected), "load failed (copy effect)");
+    printf ("    the image behind the red quad: without an effect %d %d %d, through a copy effect %d %d %d (want red both)\n", plain[0],
+            plain[1], plain[2], effected[0], effected[1], effected[2]);
+    CHECK (plain[0] > 240 && plain[1] < 16, "the image without an effect covered the nearer quad");
+    CHECK (effected[0] > 240 && effected[1] < 16, "the effect's last draw ignored the depth test and covered the nearer quad");
+    return true;
+}
+
+// a 3D scene's layers are hit-tested in the world (GH 0x1401afbf0 → GH 0x1401cb5d0 / 0x1401cafc0): the cursor's ray
+// against the layer's quad, the local position (u · w, (1 − v) · h). A 2 x 2 unit layer (200 px, scale 0.01) 10 units
+// out, hidden; its cursorEnter shows it when the local position is its centre (100, 100). The pointer at the screen's
+// centre hits it (shown: white); at the far right it misses (the clear 0 0 128). Unpatched: a world-placed layer was
+// never hit (3509243656's planet markers never showed)
+static bool cursor_hits_world_layers () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string script = "export function cursorEnter(e) {\n"
+                               "  shared.hit = Math.abs(e.localPosition.x - 100) < 4 && Math.abs(e.localPosition.y - 100) < 4;\n}\n"
+                               "export function update(value) {\n  return shared.hit === true;\n}";
+    auto centre = [&script] (double x, std::array<unsigned char, 4>& px) {
+        const std::string dir = world_scene ("", "{\"id\":1,\"name\":\"t\",\"image\":\"models/hitimg.json\",\"size\":\"200 200\","
+                                                 "\"origin\":\"0 0 0\",\"scale\":\"0.01 0.01 0.01\"," + scripted ("visible", "false", script) + "}");
+        mkdir ((dir + "/models").c_str (), 0755);
+        mkdir ((dir + "/materials").c_str (), 0755);
+        write_file (dir + "/models/hitimg.json", "{\"material\":\"materials/hitimg.json\"}\n");
+        write_file (dir + "/materials/hitimg.json", "{\"passes\":[{\"shader\":\"genericimage4\",\"blending\":\"translucent\",\"cullmode\":\"nocull\","
+                                                    "\"depthtest\":\"enabled\",\"depthwrite\":\"enabled\",\"textures\":[\"util/white\"]}]}\n");
+        ScriptRig rig;
+        rig.width = kW3;
+        rig.height = kH3;
+        rig.extra = { "models/hitimg.json", "materials/hitimg.json" };
+        g_mouseX = x;
+        g_mouseY = kH3 / 2.0;
+        g_buttonDown = false;
+        rig.mouse = &g_clicker;
+        if (!rig.open (dir)) {
+            return false;
+        }
+        for (int i = 0; i < 3; i++) {
+            rig.step ();
+        }
+        px = pixel_xy (rig, kW3 / 2, kH3 / 2);
+        return true;
+    };
+    std::array<unsigned char, 4> hit {}, miss {};
+    CHECK (centre (kW3 / 2.0, hit), "load failed (pointer at the centre)");
+    CHECK (centre (kW3 * 0.9, miss), "load failed (pointer at the right)");
+    printf ("    pointer on the layer: centre %d %d %d (want white); pointer off it: %d %d %d (want the clear 0 0 128)\n", hit[0], hit[1],
+            hit[2], miss[0], miss[1], miss[2]);
+    CHECK (hit[0] > 240 && hit[1] > 240 && hit[2] > 240, "the cursor over the world layer didn't enter it at its centre");
+    CHECK (miss[0] < 16 && miss[2] > 100, "the cursor off the world layer entered it");
     return true;
 }
 
@@ -6373,7 +7229,8 @@ static bool camera_paths_and_fade () {
 }
 
 // a 3D scene's transparentsorting key (GH 0x1401b6660, comparator GH 0x1401cc550): sortorder ascending, then
-// farthest first along the view. Unpatched: sortorder wasn't read (the distance alone ordered the run)
+// farthest first along the view. Unpatched: sortorder wasn't read (the distance alone ordered the run). The key orders
+// WE's translucent list only (flag 0x100: here translucent layers); opaque ones draw in the render order before them
 static bool transparent_sort_takes_sortorder () {
     if (!script_tests_can_run ()) {
         return true;
@@ -6390,6 +7247,11 @@ static bool transparent_sort_takes_sortorder () {
         rig.extra = b7_layer (dir, "b15red", "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);");
         const auto green = b7_layer (dir, "b15green", "gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);");
         rig.extra.insert (rig.extra.end (), green.begin (), green.end ());
+        for (const char* name : { "b15red", "b15green" }) {
+            write_file (dir + "/materials/" + name + ".json",
+                        "{\"passes\":[{\"shader\":\"" + std::string (name) + "\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                        "\"depthwrite\":\"disabled\",\"blending\":\"translucent\"}]}\n");
+        }
         if (!rig.open (dir)) {
             return false;
         }
@@ -6478,6 +7340,117 @@ static std::string stock_velocity (const char* v) {
 // capvelocity (case 0x12: v ×= min (1, maxspeed / |v|)), reducemovementnearcontrolpoint (case 0xd), boids (case
 // 0x11: cohesion pulls two particles 20 px apart together), maintaindistancetocontrolpoint (case 0xb: a particle 10 px
 // from control point 1 put at `distance` 4), remapvalue (lifetimefraction → opacity 0.5)
+// ---------------------------------------------------------------------------------------------
+// An object's colour is WE's vec3 field (GH 0x1401d0bc0: atof per space-separated component), so "1 1 1" is white —
+// LWE read a colour without a '.' as 0..255 (1/255, black). And a project folder whose files are symlinks (a farm of
+// links, as a private copy of a Workshop item is built) loads: LWE resolved each file and refused it as outside the
+// folder
+static bool object_colour_and_linked_folder () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string objects
+        = "{\"id\":1,\"name\":\"w\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"1 1 1\",\"origin\":\"16 16 0\"},"
+          "{\"id\":2,\"name\":\"g\",\"image\":\"models/util/solidlayer.json\",\"size\":\"8 8\",\"color\":\"0 1 0\",\"origin\":\"48 16 0\"}";
+    const std::string dir = script_scene (objects);
+    CHECK (!dir.empty (), "no scene folder");
+    char tmpl[] = "/tmp/lwe-linked-scene.XXXXXX";
+    const char* farm = mkdtemp (tmpl);
+    CHECK (farm != nullptr, "no farm folder");
+    const std::string linked = farm;
+    for (const char* f : { "project.json", "scene.json" }) {
+        CHECK (symlink ((dir + "/" + f).c_str (), (linked + "/" + f).c_str ()) == 0, "symlink %s failed", f);
+    }
+    bool ok = true;
+    {
+        ScriptRig rig;
+        rig.dir.clear ();
+        const bool opened = rig.open (linked);
+        rig.dir.clear ();
+        if (!opened) {
+            printf ("    FAIL: the folder of symlinks didn't load\n");
+            ok = false;
+        } else {
+            rig.step ();
+            unsigned char white[4] = {}, green[4] = {};
+            read_pixel (rig.fbo, 16, 16, white);
+            read_pixel (rig.fbo, 48, 16, green);
+            printf ("    \"1 1 1\" → %d %d %d, \"0 1 0\" → %d %d %d\n", white[0], white[1], white[2], green[0], green[1], green[2]);
+            if (!(white[0] > 250 && white[1] > 250 && white[2] > 250)) {
+                printf ("    FAIL: \"1 1 1\" isn't white\n");
+                ok = false;
+            }
+            if (!(green[0] < 5 && green[1] > 250 && green[2] < 5)) {
+                printf ("    FAIL: \"0 1 0\" isn't green\n");
+                ok = false;
+            }
+        }
+    }
+    for (const char* f : { "project.json", "scene.json" }) {
+        unlink ((linked + "/" + f).c_str ());
+        unlink ((dir + "/" + f).c_str ());
+    }
+    rmdir (linked.c_str ());
+    rmdir (dir.c_str ());
+    return ok;
+}
+
+// A script on an effect's shader constant: its thisObject is the effect's material, whose properties are the effect's
+// constants (WE). 3163060610's waterripple `scale` script sets `thisObject.scale = 0.22`; LWE's thisObject was the
+// layer, so the cloud layer shrank to 0.22 of its size where WE keeps it whole. Here a white 8 x 8 layer at x 16 has
+// an effect whose `gain` constant's script sets thisObject.gain = 0.5 and thisObject.scale = 0.25: the layer stays
+// 8 columns wide (unpatched: 2) and draws grey (the constant took 0.5 through thisObject)
+static bool constant_script_this_object_is_the_material () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    std::string layer = b9_object (1, 16);
+    layer.pop_back ();
+    const std::string script = "export function update() {\n  thisObject.gain = 0.5;\n  thisObject.scale = 0.25;\n}\n";
+    std::string escaped;
+    for (char c : script) {
+        if (c == '\n') {
+            escaped += "\\n";
+        } else {
+            escaped += c;
+        }
+    }
+    const std::string effect = ",\"effects\":[{\"id\":9,\"name\":\"gain\",\"file\":\"effects/gain/effect.json\",\"passes\":[{\"constantshadervalues\":"
+                               "{\"gain\":{\"value\":1,\"script\":\"" + escaped + "\"}}}]}]}";
+    const std::string dir = script_scene (layer + effect);
+    b9_layer (dir, "", "gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);");
+    mkdir ((dir + "/effects").c_str (), 0755);
+    mkdir ((dir + "/effects/gain").c_str (), 0755);
+    write_file (dir + "/shaders/gain.vert",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+                "void main() {\n\tgl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n\tv_TexCoord = a_TexCoord;\n}\n");
+    write_file (dir + "/shaders/gain.frag", "uniform sampler2D g_Texture0;\nuniform float u_Gain; // {\"material\":\"gain\",\"default\":1}\n"
+                                            "varying vec2 v_TexCoord;\nvoid main() {\n"
+                                            "\tgl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(u_Gain, u_Gain, u_Gain, 1.0);\n}\n");
+    write_file (dir + "/materials/gain.json", "{\"passes\":[{\"shader\":\"gain\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                              "\"depthwrite\":\"disabled\",\"blending\":\"normal\"}]}\n");
+    write_file (dir + "/effects/gain/effect.json", "{\"name\":\"gain\",\"passes\":[{\"material\":\"materials/gain.json\"}]}\n");
+    ScriptRig rig;
+    rig.extra = { "effects/gain/effect.json", "shaders/gain.vert", "shaders/gain.frag", "materials/gain.json",
+                  "shaders/b9.vert", "shaders/b9.frag", "materials/b9.json", "models/b9.json" };
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    for (int i = 0; i < 3; i++) {
+        rig.step ();
+    }
+    int width = 0;
+    for (int x = 0; x < 64; x++) {
+        unsigned char px[4] = {};
+        read_pixel (rig.fbo, x, 16, px);
+        width += px[2] > 100 && px[0] > 60 ? 1 : 0;
+    }
+    unsigned char centre[4] = {};
+    read_pixel (rig.fbo, 16, 16, centre);
+    printf ("    layer %d columns wide, centre %d %d %d\n", width, centre[0], centre[1], centre[2]);
+    CHECK (width == 8, "the layer is %d columns wide, not 8 (thisObject.scale scaled the layer)", width);
+    CHECK (centre[0] > 100 && centre[0] < 160, "the gain constant didn't take 0.5 through thisObject (%d)", centre[0]);
+    return true;
+}
+
 static bool particle_stock_motion_operators () {
     if (!script_tests_can_run ()) {
         return true;
@@ -6715,8 +7688,11 @@ int main (int argc, char** argv) {
     run ("hidden_parent_hides_children", hidden_parent_hides_children);
     run ("particle_follows_its_parent", particle_follows_its_parent);
     run ("sprite_orientation_as_we", sprite_orientation_as_we);
+    run ("sprite_texture_stands_as_we", sprite_texture_stands_as_we);
     run ("aligned_layer_turns_about_its_origin", aligned_layer_turns_about_its_origin);
     run ("engine_uniforms_are_fed", engine_uniforms_are_fed);
+    run ("simulation_steps_at_the_frame_rate", simulation_steps_at_the_frame_rate);
+    run ("pointer_jump_is_no_move", pointer_jump_is_no_move);
     run ("bloom_is_live_and_tinted", bloom_is_live_and_tinted);
     run ("annotation_defaults_parse", annotation_defaults_parse);
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
@@ -6730,7 +7706,9 @@ int main (int argc, char** argv) {
     run ("hdr_bloom_is_wes_chain", hdr_bloom_is_wes_chain);
     run ("fbo_formats_as_written", fbo_formats_as_written);
     run ("hdr_needs_literal_bloom", hdr_needs_literal_bloom);
+    run ("hdr_brightness_scales_colour", hdr_brightness_scales_colour);
     run ("color_blend_modes_read_the_scene", color_blend_modes_read_the_scene);
+    run ("blend_mode_layer_takes_its_colour_once", blend_mode_layer_takes_its_colour_once);
     run ("layer_api_reaches_layers", layer_api_reaches_layers);
     run ("script_effect_and_property_changes", script_effect_and_property_changes);
     run ("text_script_is_a_real_layer", text_script_is_a_real_layer);
@@ -6744,6 +7722,7 @@ int main (int argc, char** argv) {
     run ("layer_tilts_and_moves_in_depth", layer_tilts_and_moves_in_depth);
     run ("model_draws_and_lights", model_draws_and_lights);
     run ("fog_and_depth", fog_and_depth);
+    run ("fog_reaches_world_layers", fog_reaches_world_layers);
     run ("shadow_casters_compile", shadow_casters_compile);
     run ("skinned_casters_compile", skinned_casters_compile);
     run ("model_skins_and_morphs", model_skins_and_morphs);
@@ -6752,6 +7731,11 @@ int main (int argc, char** argv) {
     run ("texture_components_define_combos", texture_components_define_combos);
     run ("layer_model_matrix_is_fed", layer_model_matrix_is_fed);
     run ("attachment_matrix_is_whole", attachment_matrix_is_whole);
+    run ("puppet_effects_run_on_its_image", puppet_effects_run_on_its_image);
+    run ("puppet_uvs_are_the_images", puppet_uvs_are_the_images);
+    run ("fullscreen_layer_ignores_zoom", fullscreen_layer_ignores_zoom);
+    run ("text_alpha_through_effects_is_wes", text_alpha_through_effects_is_wes);
+    run ("constant_takes_the_compiled_declaration", constant_takes_the_compiled_declaration);
     run ("tube_and_directional_lights", tube_and_directional_lights);
     run ("shape_draws_its_effect_in_place", shape_draws_its_effect_in_place);
     run ("volumetric_lights_glow", volumetric_lights_glow);
@@ -6777,6 +7761,7 @@ int main (int argc, char** argv) {
     run ("this_layer_is_the_running_script", this_layer_is_the_running_script);
     run ("resize_screen_reaches_scripts", resize_screen_reaches_scripts);
     run ("blending_sets_combos", blending_sets_combos);
+    run ("alphatocoverage_layer_with_effects", alphatocoverage_layer_with_effects);
     run ("alphawriting_masks_alpha", alphawriting_masks_alpha);
     run ("effect_fbo_fit_and_swap", effect_fbo_fit_and_swap);
     run ("texture_format_combos_per_slot", texture_format_combos_per_slot);
@@ -6796,6 +7781,13 @@ int main (int argc, char** argv) {
     run ("particle_stock_initializers", particle_stock_initializers);
     run ("sdl_stays_default_without_host_output", sdl_stays_default_without_host_output);
     run ("pull_on_sdl_context_returns_zero", pull_on_sdl_context_returns_zero);
+    run ("object_colour_and_linked_folder", object_colour_and_linked_folder);
+    run ("constant_script_this_object_is_the_material", constant_script_this_object_is_the_material);
+    run ("cursor_world_position_casts_into_3d", cursor_world_position_casts_into_3d);
+    run ("transparent_sort_draws_opaque_first", transparent_sort_draws_opaque_first);
+    run ("cursor_hits_world_layers", cursor_hits_world_layers);
+    run ("sorted_scene_runs_text_scripts_in_object_order", sorted_scene_runs_text_scripts_in_object_order);
+    run ("world_layer_effect_draw_is_depth_tested", world_layer_effect_draw_is_depth_tested);
     printf ("host_api_test: %d passed, %d failed\n", g_passes, g_failures);
     return g_failures ? 1 : 0;
 }

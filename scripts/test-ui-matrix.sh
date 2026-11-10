@@ -15,7 +15,7 @@
 #
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
 #                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
-#                                  probe-morph.js = the settings-modal morph probe, same hermetic stack)
+#                                  probe-sidebar.js = the item sidebar probe, same hermetic stack)
 #                                  [--changed [<rev>]]
 #   --changed: only the cells the change can affect (scripts/matrix-cells-for.sh maps changed files → cells;
 #   no rev = the uncommitted change, <rev> = everything since it). Central files mean the full matrix, docs
@@ -300,7 +300,7 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
- "GlobalIntervalSeconds":600,"AutoMute":false,"AdvancedSettings":true,"RestartMpvpaperEverySeconds":0}
+ "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"advanced","RestartMpvpaperEverySeconds":0}
 EOF
 
 # A private PulseAudio for the auto-mute cells: its own socket under $XDG_RUNTIME_DIR/pulse, ONE null sink (mx_null),

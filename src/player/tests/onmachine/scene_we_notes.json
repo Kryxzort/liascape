@@ -1,0 +1,131 @@
+{
+  "3184155462": {
+    "class": "measured",
+    "note": "owner report: the cursor ripple is much stronger than on Windows. At a matched 30 fps it isn't (see Focus).",
+    "focus": "The owner reports that the mouse-driven \"liquid\" (`cursorripple` on the Background layer 16: ripplescale 0.33, rippledecay 1, ripplespeed 0.5, ripplestrength 0.55, behind the `watereffect` property) looks much stronger in ours than on Windows. **At the same frame rate it isn't.** WE's own ripple depends on the frame rate:\n\n- **The cause.** `cursorripple_apply_force.frag` scales each frame's force by `timeAmt = min(1/30, g_Frametime) / 0.02` times that frame's pointer delta. The simulate pass's decay has a per-frame floor (`max(1.001/255, …)`). So the force added per second goes with the frame time, and at a high frame rate the decay also wins.\n- **The test.** A 1 s drag from (200,1600) to (1600,1600) native px between 1 and 2 s. `cameraparallax=false`, so only the ripple differs between `watereffect=true` and `false`. The measure is mean \\|on − off\\| (0–255) in the path's band (y 700–900 of the 1920 × 1080 frame).\n\n| t (s) | 1.5 | 1.8 | 2.1 | 2.4 | 2.7 | 3.0 | 3.5 |\n|---|---|---|---|---|---|---|---|\n| WE, 30 fps | 2.1 | 4.8 | **5.6** | 4.2 | 2.4 | 1.2 | 0.4 |\n| WE, 30 fps, two \"on\" runs (noise) | 1.3 | 2.0 | 2.0 | 1.5 | 1.0 | 0.7 | 0.4 |\n| WE, 120 fps | 0.6 | 0.4 | 0.2 | 0.1 | 0.1 | 0.1 | 0.1 |\n| ours, 30 fps (deterministic) | 1.7 | 2.9 | **3.7** | 3.0 | 1.6 | 0.6 | 0.0 |\n\n- **The result.** At 30 fps ours has WE's strength, shape and masked area (the rock mass on the left; `docs/player/reports/we-ref/3184155462/ripple-diff.jpg`). At 120 fps, WE's ripple is about a tenth as strong. The owner's Windows WE is configured for **240 fps**, so what they see is the weak one.\n- **What a fix should look at.** The frame rate and `g_Frametime` the player gives this scene, and how often it updates `g_PointerPosition` / `…Last` (a pointer delta accumulated over several frames but applied in one also overdrives it). The effect's constants and shaders are not the problem.\n- **The references** are in `docs/player/reports/we-ref/3184155462/`: `drag/` (defaults, a drag along y = 1080 at 1–2 s), `ripple-on/`, `ripple-off/`, `ripple-on-120fps/` and `ripple-off-120fps/`. The full-size PNGs are in `~/.cache/liascape/we-ref/captures/{drag,rip-on1,rip-on2,rip-off1,rip120-on1,rip120-off1}/3184155462/`. The worker replays the same path with `--pointer 200,1600:1600,1600 --pointer-time 1-2 --prop cameraparallax=false --prop watereffect=true`.\n- **Below,** the default capture (the pointer still) matches: it is the lowest-scoring scene, at the noise."
+  },
+  "3516174947": {
+    "class": "ok",
+    "note": "the preview-compare question (\"needs a WE capture\"): at its default lens size 0.75 WE also shows more than the canvas — black on all four sides at the canvas's aspect, bars top and bottom (132 px of 1080, the 0.125 that zoom 0.75 predicts) on a 16:9 desktop (we-ref/3516174947/desktop/); at lens 1 the canvas fills (lens1/). Our letterbox is WE's. The rest is its random camera path and the prompt box's timing."
+  },
+  "3019192537": {
+    "class": "ok",
+    "note": "Was the worst (0.60): WE looked far darker and more saturated. That was the reference, not us. At Ultra WE presents an HDR scene through an FP16 (scRGB) swap chain holding lin () of the picture; Windows sRGB-encodes it for an SDR display, DXVK under Proton showed it raw. The frames are re-encoded now (we-proton.md \"The FP16 swap chain\"), and ours matches. The rest is camera shake (random)."
+  },
+  "3395587987": {
+    "class": "ok",
+    "note": "Was 0.48 (WE a deep, dark blue): the FP16 swap-chain skew of 3019192537, fixed in the capture. Matches; the particles are random."
+  },
+  "3490034653": {
+    "class": "random",
+    "note": "0.293 → 0.218 with the 2026-11-11 fixes (its puppets' textures are padded: the parts sampled their pictures off by uv · padding before). Since the scene clock (0.414 → 0.289) the layers register to WE's within ~1 px (phase correlation over the trees, the background and the girl; the camera shake is a function of g_Time and now in phase). What is left: a lighter haze over the girl and the trees in ours (its three `light_shafts_1` systems inside compose layers; random in WE), the petals (random) and the clock text on her hair (the capture's minute)."
+  },
+  "3354740764": {
+    "class": "pointer",
+    "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts; (ca97141) the `Clouds` compose layer: 0.327 → 0.218 (2 s 0.088, 5 s 0.097). Its procedural_noise (LAYERED) reads `_rt_imageLayerComposite_51_a`, a white 4 x 4 solid layer the clouds name in `dependencies`; WE draws a dependency through its composite (image flag 0x1010, scene load GH 0x1401b7xxx), ours drew it straight to the screen and the clouds read an empty composite, so their dark Worley noise covered the bottom of the grass. Proved with private copies in WE and ours (clouds recoloured red: one patch in both; layer 51 black, the slot empty, `dependencies` removed). The 0.5 s frame is parallax easing in from WE's late pointer (scene 2.17 s; camera shake and parallax). Left: ours' light shafts (`shine`) in the top right of the sky (random in WE, which showed none in these runs) and the clock's minute. The notepad wraps as WE's once ours has Consolas (the compare gives ours the Windows fonts)."
+  },
+  "3276522107": {
+    "class": "random",
+    "note": "a 3D train interior. Its full-screen post-processing layer covered the clock strip, so its frames had the request time only (0.524, rank 1); since 2026-11-06 the strip is that layer's last effect and every frame reads WE's clock: 0.524 → 0.134. The lit train layer's 2 s flash is now in phase with WE's (seats dark at 2 s, lit at 5 s on both). What is left: the rain on the windows (particles, random in WE) and the scrolling buildings 5–12 px apart (a texture a second under motion blur: half a frame; ours renders on the 1/30 s grid); the god rays match."
+  },
+  "2672425887": {
+    "class": "ok",
+    "note": "was 0.427 (\"the demon fades in 3 s later\"): the capture's time base. With WE's own scene time per frame (the clock strip) it is 0.136; WE's clock read 1.70 / 3.23 / 6.20 s at the 0.5 / 2 / 5 s frames. What is left is the 5 s frame's falling debris (random in WE)."
+  },
+  "3509243656": {
+    "class": "random",
+    "note": "a 3D \"three-body\" simulation: its planets' paths and the civilisation texts come from Math.random in scripts, so they differ from WE's every run (and the first two frames are its black intro: curtains open from 2 s). A private copy with seeded Math.random (scripts/dev/we_ref_variant.py, captures/det/v3509-det*) puts WE's planets and ours in the same places and showed three real differences, fixed 2026-11-10/11 (fork 09c9bd4, 2bd528c, 65ec574): the star spikes (`sa3`) drawn before the sky box and covered by it (WE's transparentsorting draws the opaque objects first), the planet rings (`OL`) never shown (WE casts the cursor's ray against a world-placed layer), and the stars at a third of WE's brightness, so their glow looked half as wide: the spikes' pulse effect drew its output over the star spheres without the layer's depth test (seeded copy without bloom: WE's star core 185 159 128, ours 112 91 87 → 183 151 115). The 2026-11-06 23:23 reference was not a misread clock: its three frames read 4.084 / 4.083 / 4.082 s after their request times and show the opened scene at \"0.5 s\" (every other run is black there); that run's first picture came 4 s late. Recaptured 2026-11-11 00:13 at WE's 0.61 / 2.13 / 5.13 s. Left: the galaxy band's height in the first frames (a slider eases toward input.cursorWorldPosition; WE has no pointer until the capture's nudge)."
+  },
+  "2783122117": {
+    "class": "ok",
+    "note": "was 0.562 (a crowd of skeletons \"at another phase\"): the capture's time base. Rendered at WE's own scene time it is 0.014."
+  },
+  "3593587273": {
+    "class": "ok",
+    "note": "was 0.499 (\"a puppet at another pose\"): the capture's time base. Rendered at WE's own scene time it is 0.023."
+  },
+  "3233141951": {
+    "class": "pointer",
+    "note": "the 2 s and 5 s frames match since the scene clock (was 0.327; the dragon and the girl were \"20 px apart\": phase). The 0.5 s frame (scene 1.1 s) still differs: parallax easing in from WE's late pointer (the capture's xdotool nudge lands after load; wallpiper's frames don't have it). A light shaft at the top left is random in WE."
+  },
+  "3419466417": {
+    "class": "ok",
+    "note": "was 0.336 (the sword-glint sweep \"at another phase\"): the capture's time base. Rendered at WE's own scene time: 0.077."
+  },
+  "3219908811": {
+    "class": "pointer",
+    "note": "the 2 s and 5 s frames match since the scene clock (was 0.374). The notice panel is not late: a WE burst (frames every ~0.35 s with its clock, captures/notice-burst) fades it in over 3.4–4.2 s and holds from ~6 s exactly as ours does (panel region within 2 / 255 of ours at every frame; the alpha keyframes 100–130–279 at 30 fps); its 5 s difference is the panel's text and edges (6 / 255). The 0.5 s frame (scene 1.26 s) is parallax easing in from WE's late pointer. The petals are random."
+  },
+  "3363252053": {
+    "class": "random",
+    "note": "fireworks at other moments (random in WE); 0.220 → 0.199 with the scene clock. The 0.5 s frame has the late pointer's parallax ease."
+  },
+  "3414858021": {
+    "class": "ok",
+    "note": "matches once WE sees the pointer. The Wednesday reference (`captures/wednesday`, 2026-11-11) and ours on that date agree: \"WEDNESDA\" runs off the right edge in WE too, the date block's place, font and size are the same. The rain and the light beam are random."
+  },
+  "2542468435": {
+    "class": "ok",
+    "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed."
+  },
+  "1726902114": {
+    "class": "ok",
+    "note": "the light shafts hang from the top left as in WE since 317bb73 (particle sprites were upside down). They are random in WE."
+  },
+  "2561227934": {
+    "class": "ok",
+    "note": "the light shafts stand as in WE since 317bb73 (particle sprites were upside down); they are random in WE."
+  },
+  "2134765860": {
+    "class": "ok",
+    "note": "a room whose daylight follows the wall clock. Was 0.46: WE captured by day, ours rendered in the evening. Recaptured in the evening and rendered at the capture's wall time (libfaketime; the worker takes a fake clock): 0.005."
+  },
+  "3477054430": {
+    "class": "ok",
+    "note": "the kitty's head turns as in WE (2026-11-06, fork 409a94f + 9d4085c): its angles script never ran (a model registered only its origin), and input.cursorWorldPosition in a 3D scene is the cursor cast to the far plane (WE's unProject at NDC z 0 through its reversed-depth projection), not scene pixels. With the pointer at the left / right (we-ref/3477054430/ptrL-3d, ptrR-3d) the head region went 5.1 → 0.7 and 4.3 → 0.8 / 255 off WE; scores 0.040 → 0.025, 0.029 → 0.022. The moon takes the scene's fog (0108). The 0.5 s frame's head is still easing in from WE's late pointer."
+  },
+  "2951169110": {
+    "class": "random",
+    "note": "the greeting text picks one of five lines with Math.random() per time of day (WE: \"Good evening\", wallpiper: \"How has your day been?\", ours \"Welcome back home\"). The 0.5 s frame is parallax easing in from WE's late pointer (wallpiper's first frame differs the same way)."
+  },
+  "3289734539": {
+    "class": "pointer",
+    "note": "the 0.5 s frame (scene 1.3 s) is parallax easing in from WE's late pointer: wallpiper's 0.5 s frame differs from this capture the same way; the 2 s and 5 s frames match but for random particles."
+  },
+  "3478602089": {
+    "class": "random",
+    "note": "the warm diagonal glow is its `light_shafts_1` system (sphererandom emitter, starttime 15, huge orange sprites): WE's runs differ by as much as ours does — the frame's mean is 188 in the reference run, 160 and 163 in two more (`captures/3478602089/r1`, `r2`), ours 184. Random in WE."
+  },
+  "3013489778": {
+    "class": "ok",
+    "note": "fixed 2026-11-10 (fork 0118, 7bbd6de): 0.125 → 0.003. The girl (puppet layer 161) didn't pulse: WE runs a puppet's effects on its image (texture space) and draws the mesh last, ours ran them on the posed layer. Measured with private copies whose pulse mask is a ramp in u, then v (`captures/var/v3013-rampx`, `-rampy`): each posed pixel samples its part's place in the 4380 × 2998 atlas (the face u 0.31–0.40, constant per part), where ours sampled the layer's smooth position and fell between the mask's blobs (painted for layer 18, reused on 161)."
+  },
+  "3163060610": {
+    "class": "ok",
+    "note": "fixed 2026-11-06 night (fork 92c1ada): the big cloud behind the window (`主要云`, id 784) was missing. Its waterripple `scale` constant has a script `thisObject.scale = c_de_scale + 0.1` (0.22); WE's thisObject there is the effect's material (its constants), ours was the layer, which shrank to 0.22 of its size. 0.119 → 0.059 (2 s and 5 s 0.002). The 0.5 s frame is its \"Loading\" text and parallax easing in from WE's late pointer."
+  },
+  "2511663284": {
+    "class": "random",
+    "note": "fireflies and rain: random particles in WE."
+  },
+  "3463520581": {
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork, a puppet's uvs are its image's): Kirito's face (puppet 126, an 852 x 726 image in an 896 x 768 texture) took its mesh's uvs as the texture's, so every piece of the face drew its content 28, 16 px up-left — eye, nose and mouth under the front hair, the sky where the face should be. Proved on private copies at rest without effects (`captures/var/v3463-s*`): the face alone sat 14, 8 px (at 1920) from WE's, now 0, 0. 0.084 → 0.017."
+  },
+  "3042492564": {
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork): the lighter rectangle was the full-screen `localcontrast` layer 583 drawn through the camera object's zoom 0.73 — its output (the frame shrunk) landed in the zoomed 73 % rectangle; WE draws a full-screen layer over the whole screen (`captures/var/v3042-bg*`: at strength 3 WE changes pixels across the frame, at 0 none). The clock's glow: WE's font pass draws a text layer with effects into its picture translucently, so the layer's alpha 0.75 reaches the screen cubed (0.36 of the way to the text's colour with the pulse, ours drew 0.63; `captures/var/v3042-t*`). Left: a faint dark rim from the clock's `shine` rays; the clock reads a minute later (the fake clock's rounding). 0.101 → 0.057."
+  },
+  "2290002190": {
+    "class": "ok",
+    "note": "fixed 2026-11-11 (fork, a constant takes the declaration its pass compiles): its cloud shadows (stock `clouds`, PERSPECTIVE 1) stood still in ours — the vertex shader's vec2 `g_CloudSpeeds` was uploaded into the fragment shader's vec4 and GL refused it. Mean |WE − ours| at 0.5 / 2 / 5 s 5.5 / 9.8 / 15.1 → 2.2 / 2.3 / 2.3. 0.102 → 0.008."
+  },
+  "2683776412": {
+    "class": "ok",
+    "note": "its clouds (stock `clouds`, PERSPECTIVE 1) stood still before 2026-11-11 (the speed constant uploaded into the wrong declaration): 0.026 → 0.014."
+  },
+  "1884904087": {
+    "class": "random",
+    "note": "the greeting under the clock is picked at random (WE: \"Have a nice evening, YOURNAME!\", ours on 2026-11-11 \"Hi YOURNAME, how has your day been?\"); the rest matches (0.006 when the picks agreed)."
+  }
+}

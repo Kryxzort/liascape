@@ -1,0 +1,7085 @@
+{
+ "run": {
+  "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
+  "refs": "/home/kryxzort/.cache/liascape/we-ref/captures",
+  "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
+  "worker": "/home/kryxzort/Projects/liascape/.claude/worktrees/weref-2d/src/player/target/release/liascape-scene-worker",
+  "core": "/home/kryxzort/Projects/liascape/.claude/worktrees/weref-2d/build/lwe-core-weref-2d-b/lib",
+  "started": "2026-11-11T02:21:28+05:30",
+  "commit": "d80410e7+dirty",
+  "pin": "5cb69c7d4a68",
+  "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84",
+  "we": "2.8.485",
+  "proton": "experimental-11.0-20261027b-x86_64",
+  "fonts": "/mnt/Windows/Windows/Fonts",
+  "fake_clock": true
+ },
+ "generated": "2026-11-11T02:43:11+0530",
+ "scenes": [
+  {
+   "id": "3414858021",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.5119516849517822,
+     "hist": 0.13260609378619453,
+     "edges": 0.28387963905798574,
+     "local": 0.7417213053752979,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.08486407995223999,
+     "dist": 0.4593990436669601,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.495
+    },
+    {
+     "ssim": 0.13412094116210938,
+     "hist": 0.12420657096163511,
+     "edges": 0.10570337388506001,
+     "local": 0.33076344927151996,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.040213268250226974,
+     "dist": 0.18544730609942783,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.997
+    },
+    {
+     "ssim": 0.13607573509216309,
+     "hist": 0.13080288440102938,
+     "edges": 0.11939025015527527,
+     "local": 0.3316255832711856,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.04026232287287712,
+     "dist": 0.19034902242026552,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.995
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "matches once WE sees the pointer. The Wednesday reference (`captures/wednesday`, 2026-11-11) and ours on that date agree: \"WEDNESDA\" runs off the right edge in WE too, the date block's place, font and size are the same. The rain and the light beam are random.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.27839845739555114,
+   "ssim": 0.26071612040201825,
+   "hist": 0.12920518304961967,
+   "edges": 0.169657754366107,
+   "local": 0.4680367793060012,
+   "mean_abs": 0.055113223691781364,
+   "worst_t": 0.5,
+   "worst_dist": 0.4593990436669601
+  },
+  {
+   "id": "3219908811",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.8149494528770447,
+     "hist": 0.12898332531025902,
+     "edges": 0.3640650371254326,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.16631515324115753,
+     "dist": 0.6430945083502517,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.262
+    },
+    {
+     "ssim": 0.03216421604156494,
+     "hist": 0.09731947802573875,
+     "edges": 0.08384186602215637,
+     "local": 0.2512928520639737,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.032787371426820755,
+     "dist": 0.12126938924124063,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.764
+    },
+    {
+     "ssim": 0.011949598789215088,
+     "hist": 0.06245505501572402,
+     "edges": 0.01919841580278958,
+     "local": 0.14513537163535753,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.014564082957804203,
+     "dist": 0.06345618529107451,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.762
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "pointer",
+   "note": "the 2 s and 5 s frames match since the scene clock (was 0.374). The notice panel is not late: a WE burst (frames every ~0.35 s with its clock, captures/notice-burst) fades it in over 3.4\u20134.2 s and holds from ~6 s exactly as ours does (panel region within 2 / 255 of ours at every frame; the alpha keyframes 100\u2013130\u2013279 at 30 fps); its 5 s difference is the panel's text and edges (6 / 255). The 0.5 s frame (scene 1.26 s) is parallax easing in from WE's late pointer. The petals are random.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.2759400276275223,
+   "ssim": 0.2863544225692749,
+   "hist": 0.09625261945057394,
+   "edges": 0.15570177298345952,
+   "local": 0.46547607456644374,
+   "mean_abs": 0.0712222025419275,
+   "worst_t": 0.5,
+   "worst_dist": 0.6430945083502517
+  },
+  {
+   "id": "3233141951",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.5794049501419067,
+     "hist": 0.16057094484956555,
+     "edges": 0.21314913412160752,
+     "local": 0.9611169484754404,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.12316017597913742,
+     "dist": 0.5369005853794387,
+     "t": 0.5,
+     "t_ours": 1.1,
+     "we_scene_time": 1.096
+    },
+    {
+     "ssim": 0.05861711502075195,
+     "hist": 0.16597855929099045,
+     "edges": 0.02304045138202393,
+     "local": 0.3303534984588623,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.023667549714446068,
+     "dist": 0.15449498617848714,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.56
+    },
+    {
+     "ssim": 0.037798285484313965,
+     "hist": 0.09787373478957229,
+     "edges": 0.025826443889710227,
+     "local": 0.18532847364743552,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.015981335192918777,
+     "dist": 0.09167806347538135,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.556
+    }
+   ],
+   "props": [],
+   "pointer": "2044,1144:2048,1148",
+   "window": [
+    1920,
+    1076
+   ],
+   "class": "pointer",
+   "note": "the 2 s and 5 s frames match since the scene clock (was 0.327; the dragon and the girl were \"20 px apart\": phase). The 0.5 s frame (scene 1.1 s) still differs: parallax easing in from WE's late pointer (the capture's xdotool nudge lands after load; wallpiper's frames don't have it). A light shaft at the top left is random in WE.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.2610245450111024,
+   "ssim": 0.22527345021565756,
+   "hist": 0.14147441297670943,
+   "edges": 0.08733867646444722,
+   "local": 0.49226630686057943,
+   "mean_abs": 0.05426968696216742,
+   "worst_t": 0.5,
+   "worst_dist": 0.5369005853794387
+  },
+  {
+   "id": "2951169110",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.5996750593185425,
+     "hist": 0.07906431686137522,
+     "edges": 0.6331118069724913,
+     "local": 0.9429651002089182,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.15010736882686615,
+     "dist": 0.6052272726250115,
+     "t": 0.5,
+     "t_ours": 0.8,
+     "we_scene_time": 0.826
+    },
+    {
+     "ssim": 0.009944498538970947,
+     "hist": 0.00803247625063855,
+     "edges": 0.023273931106753243,
+     "local": 0.051504850232352815,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0029822364449501038,
+     "dist": 0.02469608610287549,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.329
+    },
+    {
+     "ssim": 0.010166287422180176,
+     "hist": 0.006924002377798112,
+     "edges": 0.011310693059007781,
+     "local": 0.05366802867501974,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0019982787780463696,
+     "dist": 0.02279723391652115,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.327
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "the greeting text picks one of five lines with Math.random() per time of day (WE: \"Good evening\", wallpiper: \"How has your day been?\", ours \"Welcome back home\"). The 0.5 s frame is parallax easing in from WE's late pointer (wallpiper's first frame differs the same way).",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.21757353088146936,
+   "ssim": 0.20659528175989786,
+   "hist": 0.031340265163270625,
+   "edges": 0.2225654770460841,
+   "local": 0.34937932637209695,
+   "mean_abs": 0.05169596134995421,
+   "worst_t": 0.5,
+   "worst_dist": 0.6052272726250115
+  },
+  {
+   "id": "3490034653",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0970836877822876,
+     "hist": 0.137413453485691,
+     "edges": 0.025667579785351946,
+     "local": 0.26112892975409824,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.04461162909865379,
+     "dist": 0.14007999191512432,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.529
+    },
+    {
+     "ssim": 0.07788807153701782,
+     "hist": 0.2040451709929926,
+     "edges": 0.03450271081537515,
+     "local": 0.6147334376970927,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.047387391328811646,
+     "dist": 0.25549602913190667,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 3.029
+    },
+    {
+     "ssim": 0.07839071750640869,
+     "hist": 0.2167077033354789,
+     "edges": 0.027335525284147177,
+     "local": 0.6157527764638265,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0485987551510334,
+     "dist": 0.25705169391499577,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 6.028
+    }
+   ],
+   "props": [],
+   "pointer": "1716,716:1720,720",
+   "window": [
+    1920,
+    804
+   ],
+   "class": "random",
+   "note": "0.293 \u2192 0.218 with the 2026-11-11 fixes (its puppets' textures are padded: the parts sampled their pictures off by uv \u00b7 padding before). Since the scene clock (0.414 \u2192 0.289) the layers register to WE's within ~1 px (phase correlation over the trees, the background and the girl; the camera shake is a function of g_Time and now in phase). What is left: a lighter haze over the girl and the trees in ours (its three `light_shafts_1` systems inside compose layers; random in WE), the petals (random) and the clock text on her hair (the capture's minute).",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.21754257165400892,
+   "ssim": 0.08445415894190471,
+   "hist": 0.18605544260472082,
+   "edges": 0.02916860529495809,
+   "local": 0.49720504797167253,
+   "mean_abs": 0.04686592519283295,
+   "worst_t": 5.0,
+   "worst_dist": 0.25705169391499577
+  },
+  {
+   "id": "3354740764",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.4938562512397766,
+     "hist": 0.09560277936441874,
+     "edges": 0.13635873848043834,
+     "local": 0.9100940326849619,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.08231543004512787,
+     "dist": 0.467577388746393,
+     "t": 0.5,
+     "t_ours": 2.2,
+     "we_scene_time": 2.165
+    },
+    {
+     "ssim": 0.025640547275543213,
+     "hist": 0.08562952715704815,
+     "edges": 0.041577666323018625,
+     "local": 0.18313299864530563,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0179564468562603,
+     "dist": 0.08807350247226801,
+     "t": 2.0,
+     "t_ours": 3.6,
+     "we_scene_time": 3.596
+    },
+    {
+     "ssim": 0.0364726185798645,
+     "hist": 0.08369160387532561,
+     "edges": 0.022208452979766258,
+     "local": 0.20699549466371536,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.026093261316418648,
+     "dist": 0.09422044534409232,
+     "t": 5.0,
+     "t_ours": 6.6,
+     "we_scene_time": 6.593
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "pointer",
+   "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts; (ca97141) the `Clouds` compose layer: 0.327 \u2192 0.218 (2 s 0.088, 5 s 0.097). Its procedural_noise (LAYERED) reads `_rt_imageLayerComposite_51_a`, a white 4 x 4 solid layer the clouds name in `dependencies`; WE draws a dependency through its composite (image flag 0x1010, scene load GH 0x1401b7xxx), ours drew it straight to the screen and the clouds read an empty composite, so their dark Worley noise covered the bottom of the grass. Proved with private copies in WE and ours (clouds recoloured red: one patch in both; layer 51 black, the slot empty, `dependencies` removed). The 0.5 s frame is parallax easing in from WE's late pointer (scene 2.17 s; camera shake and parallax). Left: ours' light shafts (`shine`) in the top right of the sky (random in WE, which showed none in these runs) and the clock's minute. The notepad wraps as WE's once ours has Consolas (the compare gives ours the Windows fonts).",
+   "trust": "FXC, system fonts: Windows' arial/comicsans/consolas, clock: Wine's",
+   "dist": 0.2166237788542511,
+   "ssim": 0.18532313903172812,
+   "hist": 0.08830797013226416,
+   "edges": 0.06671495259440774,
+   "local": 0.43340750866466093,
+   "mean_abs": 0.042121712739268936,
+   "worst_t": 0.5,
+   "worst_dist": 0.467577388746393
+  },
+  {
+   "id": "2561227934",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.09988009929656982,
+     "hist": 0.2142000696665471,
+     "edges": 0.07612193016646496,
+     "local": 0.523384173711141,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.06530972570180893,
+     "dist": 0.24504368186891567,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 0.965
+    },
+    {
+     "ssim": 0.05032140016555786,
+     "hist": 0.20913171496629746,
+     "edges": 0.059074566533947825,
+     "local": 0.3100664218266805,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.03404693305492401,
+     "dist": 0.16175760289772056,
+     "t": 2.0,
+     "t_ours": 2.5,
+     "we_scene_time": 2.462
+    },
+    {
+     "ssim": 0.1280050277709961,
+     "hist": 0.20179416063904557,
+     "edges": 0.04807959100298986,
+     "local": 0.4989563276370366,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0654340386390686,
+     "dist": 0.2380631569508169,
+     "t": 5.0,
+     "t_ours": 5.5,
+     "we_scene_time": 5.462
+    }
+   ],
+   "props": [],
+   "pointer": "2596,1546:2600,1550",
+   "window": [
+    1812,
+    1080
+   ],
+   "class": "ok",
+   "note": "the light shafts stand as in WE since 317bb73 (particle sprites were upside down); they are random in WE.",
+   "trust": "FXC, system fonts: Windows' comicsans",
+   "dist": 0.21495481390581772,
+   "ssim": 0.09273550907770793,
+   "hist": 0.20837531509063004,
+   "edges": 0.06109202923446755,
+   "local": 0.444135641058286,
+   "mean_abs": 0.05493023246526718,
+   "worst_t": 0.5,
+   "worst_dist": 0.24504368186891567
+  },
+  {
+   "id": "3363252053",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3545166850090027,
+     "hist": 0.060322073946820744,
+     "edges": 0.20816469802545823,
+     "local": 0.5802378207445145,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0663958415389061,
+     "dist": 0.3341237061205109,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.327
+    },
+    {
+     "ssim": 0.08055180311203003,
+     "hist": 0.049472387090186726,
+     "edges": 0.08083804118475546,
+     "local": 0.22932441905140877,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.027827048674225807,
+     "dist": 0.11902495230402008,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.797
+    },
+    {
+     "ssim": 0.06671708822250366,
+     "hist": 0.0660235031472979,
+     "edges": 0.05299386183459853,
+     "local": 0.28928878903388977,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.024039186537265778,
+     "dist": 0.1306052361732973,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.795
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "fireworks at other moments (random in WE); 0.220 \u2192 0.199 with the scene clock. The 0.5 s frame has the late pointer's parallax ease.",
+   "trust": "FXC, system fonts: Windows' calibri, clock: Wine's",
+   "dist": 0.19458463153260944,
+   "ssim": 0.1672618587811788,
+   "hist": 0.05860598806143511,
+   "edges": 0.1139988670149374,
+   "local": 0.36628367627660435,
+   "mean_abs": 0.03942069225013256,
+   "worst_t": 0.5,
+   "worst_dist": 0.3341237061205109
+  },
+  {
+   "id": "3289734539",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.6532784104347229,
+     "hist": 0.028580114750906032,
+     "edges": 0.09359731572002783,
+     "local": 0.889909832427899,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.1320207566022873,
+     "dist": 0.4873919589529733,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.298
+    },
+    {
+     "ssim": 0.0005854964256286621,
+     "hist": 0.015084362173912779,
+     "edges": 0.007860282386159767,
+     "local": 0.00874649810915192,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0031867576763033867,
+     "dist": 0.007388527272448684,
+     "t": 2.0,
+     "t_ours": 2.7,
+     "we_scene_time": 2.695
+    },
+    {
+     "ssim": 0.0005887746810913086,
+     "hist": 0.016136563527678154,
+     "edges": 0.00525682630952351,
+     "local": 0.008754061224559942,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0031916743610054255,
+     "dist": 0.0070815287391357085,
+     "t": 5.0,
+     "t_ours": 5.7,
+     "we_scene_time": 5.694
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "pointer",
+   "note": "the 0.5 s frame (scene 1.3 s) is parallax easing in from WE's late pointer: wallpiper's 0.5 s frame differs from this capture the same way; the 2 s and 5 s frames match but for random particles.",
+   "trust": "FXC, system fonts: Windows' arial",
+   "dist": 0.16728733832151924,
+   "ssim": 0.21815089384714761,
+   "hist": 0.019933680150832325,
+   "edges": 0.035571474805237036,
+   "local": 0.3024701305872036,
+   "mean_abs": 0.04613306287986537,
+   "worst_t": 0.5,
+   "worst_dist": 0.4873919589529733
+  },
+  {
+   "id": "3478602089",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.019992411136627197,
+     "hist": 0.1491950936072805,
+     "edges": 0.08529688525419177,
+     "local": 0.1718645617365837,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.041281405836343765,
+     "dist": 0.10445548763425773,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.297
+    },
+    {
+     "ssim": 0.022341251373291016,
+     "hist": 0.1717424293354737,
+     "edges": 0.09824206714749173,
+     "local": 0.258211021622022,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.047776930034160614,
+     "dist": 0.13816258119518698,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.759
+    },
+    {
+     "ssim": 0.02507871389389038,
+     "hist": 0.27360166069436526,
+     "edges": 0.3140531627694697,
+     "local": 0.3028122087319692,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.06433941423892975,
+     "dist": 0.21589824148052486,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.759
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "the warm diagonal glow is its `light_shafts_1` system (sphererandom emitter, starttime 15, huge orange sprites): WE's runs differ by as much as ours does \u2014 the frame's mean is 188 in the reference run, 160 and 163 in two more (`captures/3478602089/r1`, `r2`), ours 184. Random in WE.",
+   "trust": "FXC",
+   "dist": 0.15283877010332317,
+   "ssim": 0.022470792134602863,
+   "hist": 0.1981797278790398,
+   "edges": 0.1658640383903844,
+   "local": 0.2442959306968583,
+   "mean_abs": 0.05113258336981138,
+   "worst_t": 5.0,
+   "worst_dist": 0.21589824148052486
+  },
+  {
+   "id": "3276522107",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.08196783065795898,
+     "hist": 0.049533657085666004,
+     "edges": 0.07465637884485243,
+     "local": 0.34896456574400264,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.020296772941946983,
+     "dist": 0.15411772610669217,
+     "t": 0.5,
+     "t_ours": 0.8,
+     "we_scene_time": 0.75
+    },
+    {
+     "ssim": 0.05054318904876709,
+     "hist": 0.05674498298726841,
+     "edges": 0.04693969991366198,
+     "local": 0.2365547368923823,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.016420913860201836,
+     "dist": 0.10686631436253088,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.263
+    },
+    {
+     "ssim": 0.05458962917327881,
+     "hist": 0.0515630320298967,
+     "edges": 0.09864171699230606,
+     "local": 0.31366627011448145,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.016798220574855804,
+     "dist": 0.1405177195907686,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.261
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "a 3D train interior. Its full-screen post-processing layer covered the clock strip, so its frames had the request time only (0.524, rank 1); since 2026-11-06 the strip is that layer's last effect and every frame reads WE's clock: 0.524 \u2192 0.134. The lit train layer's 2 s flash is now in phase with WE's (seats dark at 2 s, lit at 5 s on both). What is left: the rain on the windows (particles, random in WE) and the scrolling buildings 5\u201312 px apart (a texture a second under motion blur: half a frame; ours renders on the 1/30 s grid); the god rays match.",
+   "trust": "FXC (1 compiled)",
+   "dist": 0.13383392001999725,
+   "ssim": 0.062366882960001625,
+   "hist": 0.05261389070094371,
+   "edges": 0.07341259858360683,
+   "local": 0.2997285242502888,
+   "mean_abs": 0.017838635792334873,
+   "worst_t": 0.5,
+   "worst_dist": 0.15411772610669217
+  },
+  {
+   "id": "2672425887",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.02466493844985962,
+     "hist": 0.0771092470071737,
+     "edges": 0.011820330969267046,
+     "local": 0.184627503156662,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.012440499849617481,
+     "dist": 0.08057364807724464,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.696
+    },
+    {
+     "ssim": 0.07118487358093262,
+     "hist": 0.151832108013417,
+     "edges": 0.044028756490297916,
+     "local": 0.30563751608133316,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.05251996964216232,
+     "dist": 0.15221888979942272,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.231
+    },
+    {
+     "ssim": 0.08110547065734863,
+     "hist": 0.1261783988377512,
+     "edges": 0.02823871862194194,
+     "local": 0.3680547426144282,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.05169164389371872,
+     "dist": 0.16563148747347167,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.196
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "was 0.427 (\"the demon fades in 3 s later\"): the capture's time base. With WE's own scene time per frame (the clock strip) it is 0.136; WE's clock read 1.70 / 3.23 / 6.20 s at the 0.5 / 2 / 5 s frames. What is left is the 5 s frame's falling debris (random in WE).",
+   "trust": "FXC",
+   "dist": 0.13280800845004634,
+   "ssim": 0.05898509422938029,
+   "hist": 0.11837325128611398,
+   "edges": 0.028029268693835634,
+   "local": 0.2861065872841411,
+   "mean_abs": 0.03888403779516617,
+   "worst_t": 5.0,
+   "worst_dist": 0.16563148747347167
+  },
+  {
+   "id": "2375914945",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3655325770378113,
+     "hist": 0.07570724585246853,
+     "edges": 0.13580395762060482,
+     "local": 0.6052103439966837,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.07151632010936737,
+     "dist": 0.3335251170049632,
+     "t": 0.5,
+     "t_ours": 0.9,
+     "we_scene_time": 0.861
+    },
+    {
+     "ssim": 0.0060808658599853516,
+     "hist": 0.07056351713655826,
+     "edges": 0.011053728245466132,
+     "local": 0.026042537453273933,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.007367697078734636,
+     "dist": 0.025960470070382664,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.331
+    },
+    {
+     "ssim": 0.004673123359680176,
+     "hist": 0.054699440416041065,
+     "edges": 0.029043843545437098,
+     "local": 0.019822730061908562,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.006420032121241093,
+     "dist": 0.024097412818772253,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.329
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.12786099996470604,
+   "ssim": 0.12542885541915894,
+   "hist": 0.0669900678016893,
+   "edges": 0.05863384313716935,
+   "local": 0.21702520383728874,
+   "mean_abs": 0.028434683103114367,
+   "worst_t": 0.5,
+   "worst_dist": 0.3335251170049632
+  },
+  {
+   "id": "3516174947",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.18479526042938232,
+     "hist": 0.07462208202102277,
+     "edges": 0.04425622800402085,
+     "local": 0.5167220172782739,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.03898698464035988,
+     "dist": 0.2342308453173056,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.294
+    },
+    {
+     "ssim": 0.017804503440856934,
+     "hist": 0.06490904515427465,
+     "edges": 0.01622191988071664,
+     "local": 0.1037150885288914,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.005974041763693094,
+     "dist": 0.05268207059792276,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.796
+    },
+    {
+     "ssim": 0.0030709505081176758,
+     "hist": 0.10000347693355742,
+     "edges": 0.014267962233639131,
+     "local": 0.01640371458294491,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.003633077722042799,
+     "dist": 0.02869668736075809,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.792
+    }
+   ],
+   "props": [],
+   "pointer": "1716,716:1720,720",
+   "window": [
+    1920,
+    804
+   ],
+   "class": "ok",
+   "note": "the preview-compare question (\"needs a WE capture\"): at its default lens size 0.75 WE also shows more than the canvas \u2014 black on all four sides at the canvas's aspect, bars top and bottom (132 px of 1080, the 0.125 that zoom 0.75 predicts) on a 16:9 desktop (we-ref/3516174947/desktop/); at lens 1 the canvas fills (lens1/). Our letterbox is WE's. The rest is its random camera path and the prompt box's timing.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.10520320109199548,
+   "ssim": 0.06855690479278564,
+   "hist": 0.07984486803628495,
+   "edges": 0.024915370039458873,
+   "local": 0.21228027346337008,
+   "mean_abs": 0.01619803470869859,
+   "worst_t": 0.5,
+   "worst_dist": 0.2342308453173056
+  },
+  {
+   "id": "2511663284",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.06312781572341919,
+     "hist": 0.06178526529686482,
+     "edges": 0.05797671234269619,
+     "local": 0.1740049161016941,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.012920997105538845,
+     "dist": 0.09509221507544618,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.297
+    },
+    {
+     "ssim": 0.0698697566986084,
+     "hist": 0.06479332464854076,
+     "edges": 0.053740207075634094,
+     "local": 0.17088618191579977,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.013355989009141922,
+     "dist": 0.09593348792915742,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.797
+    },
+    {
+     "ssim": 0.082583487033844,
+     "hist": 0.08157072416917867,
+     "edges": 0.0637495947958866,
+     "local": 0.20991552310685316,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.015615388751029968,
+     "dist": 0.11681376683522221,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.794
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "fireflies and rain: random particles in WE.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.10261315661327526,
+   "ssim": 0.0718603531519572,
+   "hist": 0.06938310470486142,
+   "edges": 0.058488838071405626,
+   "local": 0.18493554037478233,
+   "mean_abs": 0.013964124955236912,
+   "worst_t": 5.0,
+   "worst_dist": 0.11681376683522221
+  },
+  {
+   "id": "3019192537",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.07758623361587524,
+     "hist": 0.18630075839254004,
+     "edges": 0.24134244134244143,
+     "local": 0.16716571214298406,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.018844572827219963,
+     "dist": 0.1589542236746541,
+     "t": 0.5,
+     "t_ours": 1.8,
+     "we_scene_time": 1.794
+    },
+    {
+     "ssim": 0.008424162864685059,
+     "hist": 0.1777121135143482,
+     "edges": 0.15746862222583846,
+     "local": 0.04912762654324373,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0054177637211978436,
+     "dist": 0.08430168397041597,
+     "t": 2.0,
+     "t_ours": 3.3,
+     "we_scene_time": 3.296
+    },
+    {
+     "ssim": 0.008135974407196045,
+     "hist": 0.17613078972193422,
+     "edges": 0.03683492496589369,
+     "local": 0.047825266141444445,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0053212870843708515,
+     "dist": 0.05938151510215773,
+     "t": 5.0,
+     "t_ours": 6.3,
+     "we_scene_time": 6.295
+    }
+   ],
+   "props": [],
+   "pointer": "1588,892:1592,896",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "Was the worst (0.60): WE looked far darker and more saturated. That was the reference, not us. At Ultra WE presents an HDR scene through an FP16 (scRGB) swap chain holding lin () of the picture; Windows sRGB-encodes it for an SDR display, DXVK under Proton showed it raw. The frames are re-encoded now (we-proton.md \"The FP16 swap chain\"), and ours matches. The rest is camera shake (random).",
+   "trust": "FXC, FP16 swap chain: re-encoded",
+   "dist": 0.10087914091574259,
+   "ssim": 0.031382123629252114,
+   "hist": 0.1800478872096075,
+   "edges": 0.14521532951139118,
+   "local": 0.08803953494255741,
+   "mean_abs": 0.00986120787759622,
+   "worst_t": 0.5,
+   "worst_dist": 0.1589542236746541
+  },
+  {
+   "id": "2828233985",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3236943483352661,
+     "hist": 0.019892335529775044,
+     "edges": 0.03521807785195197,
+     "local": 0.46731622361888486,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.052849411964416504,
+     "dist": 0.2483252542625907,
+     "t": 0.5,
+     "t_ours": 0.5,
+     "we_scene_time": 0.518
+    },
+    {
+     "ssim": 0.01015406847000122,
+     "hist": 0.010941949215605876,
+     "edges": 0.0,
+     "local": 0.030114783187552046,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.001989922020584345,
+     "dist": 0.014269045340387154,
+     "t": 2.0,
+     "t_ours": 2.0,
+     "we_scene_time": 2.031
+    },
+    {
+     "ssim": 0.019511878490447998,
+     "hist": 0.02682993723560491,
+     "edges": 0.016129032258064613,
+     "local": 0.08452286361716688,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.003038054099306464,
+     "dist": 0.03980221653101837,
+     "t": 5.0,
+     "t_ours": 5.0,
+     "we_scene_time": 5.029
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, system fonts: Windows' consolas, clock: Wine's",
+   "dist": 0.10079883871133206,
+   "ssim": 0.11778676509857178,
+   "hist": 0.019221407326995277,
+   "edges": 0.017115703370005526,
+   "local": 0.1939846234745346,
+   "mean_abs": 0.019292462694769103,
+   "worst_t": 0.5,
+   "worst_dist": 0.2483252542625907
+  },
+  {
+   "id": "3395587987",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.02230626344680786,
+     "hist": 0.04337791310201673,
+     "edges": 0.010550996483001174,
+     "local": 0.05551720674460133,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.005960911978036165,
+     "dist": 0.03413282297442634,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.694
+    },
+    {
+     "ssim": 0.07589209079742432,
+     "hist": 0.055320001866754016,
+     "edges": 0.19783979882095892,
+     "local": 0.13330727815628052,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.012901789508759975,
+     "dist": 0.11339177082365404,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.198
+    },
+    {
+     "ssim": 0.07727420330047607,
+     "hist": 0.033274765389133654,
+     "edges": 0.18097544294204104,
+     "local": 0.15000149235129356,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.013054193928837776,
+     "dist": 0.11103275036176583,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.195
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "Was 0.48 (WE a deep, dark blue): the FP16 swap-chain skew of 3019192537, fixed in the capture. Matches; the particles are random.",
+   "trust": "FXC, FP16 swap chain: re-encoded",
+   "dist": 0.08618578138661541,
+   "ssim": 0.05849085251490275,
+   "hist": 0.0439908934526348,
+   "edges": 0.1297887460820004,
+   "local": 0.11294199241739182,
+   "mean_abs": 0.01063896513854464,
+   "worst_t": 2.0,
+   "worst_dist": 0.11339177082365404
+  },
+  {
+   "id": "3419466417",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.04169464111328125,
+     "hist": 0.02401636094880472,
+     "edges": 0.08100203163619879,
+     "local": 0.1301490655168891,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.007135083433240652,
+     "dist": 0.07255679050605181,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.428
+    },
+    {
+     "ssim": 0.047546446323394775,
+     "hist": 0.02669475080938455,
+     "edges": 0.0695055151384667,
+     "local": 0.13658329852235815,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.009267487563192844,
+     "dist": 0.07447897664329613,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.929
+    },
+    {
+     "ssim": 0.061190247535705566,
+     "hist": 0.028238647440059446,
+     "edges": 0.0811031301300783,
+     "local": 0.14035223405032107,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.009970844723284245,
+     "dist": 0.08233109998983554,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.961
+    }
+   ],
+   "props": [],
+   "pointer": "2556,1076:2560,1080",
+   "window": [
+    1920,
+    810
+   ],
+   "class": "ok",
+   "note": "was 0.336 (the sword-glint sweep \"at another phase\"): the capture's time base. Rendered at WE's own scene time: 0.077.",
+   "trust": "FXC",
+   "dist": 0.07645562237972782,
+   "ssim": 0.0501437783241272,
+   "hist": 0.026316586399416236,
+   "edges": 0.07720355896824793,
+   "local": 0.13569486602985611,
+   "mean_abs": 0.008791138573239246,
+   "worst_t": 5.0,
+   "worst_dist": 0.08233109998983554
+  },
+  {
+   "id": "2679885269",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.03304833173751831,
+     "hist": 0.07264936350959295,
+     "edges": 0.04406998189335176,
+     "local": 0.17708515903602043,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.00993677694350481,
+     "dist": 0.08638391631265056,
+     "t": 0.5,
+     "t_ours": 1.8,
+     "we_scene_time": 1.828
+    },
+    {
+     "ssim": 0.02644479274749756,
+     "hist": 0.07141469627581085,
+     "edges": 0.0332561908133876,
+     "local": 0.12205070940156777,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.008460826240479946,
+     "dist": 0.06548282806255928,
+     "t": 2.0,
+     "t_ours": 3.3,
+     "we_scene_time": 3.296
+    },
+    {
+     "ssim": 0.029573261737823486,
+     "hist": 0.07060478090906006,
+     "edges": 0.036503818957697276,
+     "local": 0.15652835896859565,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.008780675008893013,
+     "dist": 0.07725220618527721,
+     "t": 5.0,
+     "t_ours": 6.3,
+     "we_scene_time": 6.295
+    }
+   ],
+   "props": [],
+   "pointer": "796,446:800,450",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.07637298352016236,
+   "ssim": 0.029688795407613117,
+   "hist": 0.07155628023148795,
+   "edges": 0.037943330554812214,
+   "local": 0.1518880758020613,
+   "mean_abs": 0.00905942606429259,
+   "worst_t": 0.5,
+   "worst_dist": 0.08638391631265056
+  },
+  {
+   "id": "3479521040",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.005887031555175781,
+     "hist": 0.05564639493858201,
+     "edges": 0.010905507248282764,
+     "local": 0.025053208189395566,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.007698697503656149,
+     "dist": 0.02259245236074436,
+     "t": 0.5,
+     "t_ours": 1.6,
+     "we_scene_time": 1.63
+    },
+    {
+     "ssim": 0.03496354818344116,
+     "hist": 0.06665997303209338,
+     "edges": 0.031223729627836483,
+     "local": 0.23081061244010925,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.011557193472981453,
+     "dist": 0.09930898871905108,
+     "t": 2.0,
+     "t_ours": 3.1,
+     "we_scene_time": 3.13
+    },
+    {
+     "ssim": 0.03753453493118286,
+     "hist": 0.0765256426441826,
+     "edges": 0.018765519817340648,
+     "local": 0.24065910372883081,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.013587761670351028,
+     "dist": 0.10251632409030875,
+     "t": 5.0,
+     "t_ours": 6.1,
+     "we_scene_time": 6.128
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, system fonts: Windows' arial, clock: Wine's",
+   "dist": 0.07480592172336807,
+   "ssim": 0.026128371556599934,
+   "hist": 0.06627733687161934,
+   "edges": 0.020298252231153297,
+   "local": 0.16550764145277855,
+   "mean_abs": 0.010947884215662876,
+   "worst_t": 5.0,
+   "worst_dist": 0.10251632409030875
+  },
+  {
+   "id": "3422085307",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.012769877910614014,
+     "hist": 0.19623507858748626,
+     "edges": 0.07080554877171086,
+     "local": 0.06022492369326452,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.005931657738983631,
+     "dist": 0.07530656595300299,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.397
+    },
+    {
+     "ssim": 0.014425873756408691,
+     "hist": 0.19247162113569435,
+     "edges": 0.07801632192608399,
+     "local": 0.043174359520586826,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.005529350135475397,
+     "dist": 0.07137765859545432,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.896
+    },
+    {
+     "ssim": 0.014164090156555176,
+     "hist": 0.19779203636022033,
+     "edges": 0.0496406668572843,
+     "local": 0.0630115675739944,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.006994661409407854,
+     "dist": 0.0726392379626658,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.894
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.07310782083704104,
+   "ssim": 0.013786613941192627,
+   "hist": 0.195499578694467,
+   "edges": 0.06615417918502638,
+   "local": 0.05547028359594858,
+   "mean_abs": 0.0061518897612889605,
+   "worst_t": 0.5,
+   "worst_dist": 0.07530656595300299
+  },
+  {
+   "id": "3184155462",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.023047327995300293,
+     "hist": 0.1446638543661519,
+     "edges": 0.016492733525246495,
+     "local": 0.11231115274131298,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.014638874679803848,
+     "dist": 0.07283886179926366,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.398
+    },
+    {
+     "ssim": 0.01778334379196167,
+     "hist": 0.14596851335142588,
+     "edges": 0.015522356443024687,
+     "local": 0.1030197711661458,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.009524671360850334,
+     "dist": 0.06853910844632236,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.93
+    },
+    {
+     "ssim": 0.013817906379699707,
+     "hist": 0.15541773496999345,
+     "edges": 0.016434247343835362,
+     "local": 0.12285309222837289,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.007666250690817833,
+     "dist": 0.07537169604518755,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.927
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "measured",
+   "note": "owner report: the cursor ripple is much stronger than on Windows. At a matched 30 fps it isn't (see Focus).",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.07224988876359119,
+   "ssim": 0.018216192722320557,
+   "hist": 0.14868336756252373,
+   "edges": 0.016149779104035516,
+   "local": 0.11272800537861055,
+   "mean_abs": 0.010609932243824005,
+   "worst_t": 5.0,
+   "worst_dist": 0.07537169604518755
+  },
+  {
+   "id": "3309103316",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.21583956480026245,
+     "hist": 0.031771373149452026,
+     "edges": 0.029991127597808864,
+     "local": 0.3966616652905941,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.044620364904403687,
+     "dist": 0.19610286917670913,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.363
+    },
+    {
+     "ssim": 0.000841975212097168,
+     "hist": 0.006885599926425684,
+     "edges": 0.008184523809523725,
+     "local": 0.0032423403269300857,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0013166486751288176,
+     "dist": 0.004239319408898058,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.861
+    },
+    {
+     "ssim": 0.0009586811065673828,
+     "hist": 0.007346756538156343,
+     "edges": 0.012231594913455157,
+     "local": 0.0036582417281654975,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.0013076475588604808,
+     "dist": 0.005300747140742164,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.86
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.06854764524211644,
+   "ssim": 0.07254674037297566,
+   "hist": 0.015334576538011352,
+   "edges": 0.01680241544026258,
+   "local": 0.1345207491152299,
+   "mean_abs": 0.01574822037946433,
+   "worst_t": 0.5,
+   "worst_dist": 0.19610286917670913
+  },
+  {
+   "id": "2905264428",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.12769752740859985,
+     "hist": 0.0745202247478572,
+     "edges": 0.04853792932548173,
+     "local": 0.22529107394317785,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.03960831090807915,
+     "dist": 0.1305082112202011,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.662
+    },
+    {
+     "ssim": 0.0024320483207702637,
+     "hist": 0.06227383378943917,
+     "edges": 0.01715194496583472,
+     "local": 0.030977958192427952,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.00874309241771698,
+     "dist": 0.025908157705014243,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.197
+    },
+    {
+     "ssim": 0.0031029582023620605,
+     "hist": 0.13147170395846994,
+     "edges": 0.015566401894335669,
+     "local": 0.05084866285324097,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.014911320060491562,
+     "dist": 0.045593107487242025,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.162
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.06733649213748578,
+   "ssim": 0.04441084464391073,
+   "hist": 0.08942192083192209,
+   "edges": 0.027085425395217372,
+   "local": 0.10237256499628226,
+   "mean_abs": 0.021087574462095898,
+   "worst_t": 0.5,
+   "worst_dist": 0.1305082112202011
+  },
+  {
+   "id": "3516106265",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.03224050998687744,
+     "hist": 0.06058634317402241,
+     "edges": 0.05175339759030062,
+     "local": 0.08067126106470823,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.0033576551359146833,
+     "dist": 0.056341479468340304,
+     "t": 0.5,
+     "t_ours": 1.1,
+     "we_scene_time": 1.064
+    },
+    {
+     "ssim": 0.027578532695770264,
+     "hist": 0.04600409783788266,
+     "edges": 0.03708425498575463,
+     "local": 0.07547777068490784,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.002801932394504547,
+     "dist": 0.047534561578930885,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.562
+    },
+    {
+     "ssim": 0.04481351375579834,
+     "hist": 0.0736499659515173,
+     "edges": 0.09040598795860078,
+     "local": 0.12179080955684185,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.003954208921641111,
+     "dist": 0.08279248777581567,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.559
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.06222284294102896,
+   "ssim": 0.034877518812815346,
+   "hist": 0.06008013565447412,
+   "edges": 0.05974788017821867,
+   "local": 0.09264661376881932,
+   "mean_abs": 0.003371265484020114,
+   "worst_t": 5.0,
+   "worst_dist": 0.08279248777581567
+  },
+  {
+   "id": "3163060610",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.13701337575912476,
+     "hist": 0.028397473765065524,
+     "edges": 0.0707158188048348,
+     "local": 0.3746187786261241,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.030493808910250664,
+     "dist": 0.1733123048295547,
+     "t": 0.5,
+     "t_ours": 0.6,
+     "we_scene_time": 0.591
+    },
+    {
+     "ssim": 0.00026702880859375,
+     "hist": 0.005999153934751891,
+     "edges": 0.0,
+     "local": 0.0013320578533845644,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.000965519342571497,
+     "dist": 0.0016795567855438726,
+     "t": 2.0,
+     "t_ours": 2.1,
+     "we_scene_time": 2.096
+    },
+    {
+     "ssim": 0.00043779611587524414,
+     "hist": 0.005607749594834714,
+     "edges": 0.00028176951253866545,
+     "local": 0.001967006246559322,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0010819504968822002,
+     "dist": 0.0018993445302050457,
+     "t": 5.0,
+     "t_ours": 5.1,
+     "we_scene_time": 5.093
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "fixed 2026-11-06 night (fork 92c1ada): the big cloud behind the window (`\u4e3b\u8981\u4e91`, id 784) was missing. Its waterripple `scale` constant has a script `thisObject.scale = c_de_scale + 0.1` (0.22); WE's thisObject there is the effect's material (its constants), ours was the layer, which shrank to 0.22 of its size. 0.119 \u2192 0.059 (2 s and 5 s 0.002). The 0.5 s frame is its \"Loading\" text and parallax easing in from WE's late pointer.",
+   "trust": "FXC (29 compiled), system fonts: Windows' comicsans, clock: Wine's",
+   "dist": 0.05896373538176788,
+   "ssim": 0.04590606689453125,
+   "hist": 0.013334792431550708,
+   "edges": 0.02366586277245782,
+   "local": 0.12597261424202266,
+   "mean_abs": 0.010847092916568121,
+   "worst_t": 0.5,
+   "worst_dist": 0.1733123048295547
+  },
+  {
+   "id": "3042492564",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.02945798635482788,
+     "hist": 0.02828734065916595,
+     "edges": 0.11960393648493628,
+     "local": 0.0978144807741046,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.009649256244301796,
+     "dist": 0.06775999556750019,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.261
+    },
+    {
+     "ssim": 0.02040231227874756,
+     "hist": 0.023866845238171456,
+     "edges": 0.08430726215457451,
+     "local": 0.07974244514480233,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.005048293154686689,
+     "dist": 0.05167824870561416,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.76
+    },
+    {
+     "ssim": 0.022410154342651367,
+     "hist": 0.022773553966825476,
+     "edges": 0.07357509130795725,
+     "local": 0.08762818400282413,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0051806215196847916,
+     "dist": 0.05228123055859919,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.761
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "fixed 2026-11-11 (fork): the lighter rectangle was the full-screen `localcontrast` layer 583 drawn through the camera object's zoom 0.73 \u2014 its output (the frame shrunk) landed in the zoomed 73 % rectangle; WE draws a full-screen layer over the whole screen (`captures/var/v3042-bg*`: at strength 3 WE changes pixels across the frame, at 0 none). The clock's glow: WE's font pass draws a text layer with effects into its picture translucently, so the layer's alpha 0.75 reaches the screen cubed (0.36 of the way to the text's colour with the pulse, ours drew 0.63; `captures/var/v3042-t*`). Left: a faint dark rim from the clock's `shine` rays; the clock reads a minute later (the fake clock's rounding). 0.101 \u2192 0.057.",
+   "trust": "FXC, system fonts: Windows' comicsans, clock: Wine's",
+   "dist": 0.05723982494390451,
+   "ssim": 0.024090150992075603,
+   "hist": 0.02497591328805429,
+   "edges": 0.09249542998248934,
+   "local": 0.08839503664057702,
+   "mean_abs": 0.006626056972891092,
+   "worst_t": 0.5,
+   "worst_dist": 0.06775999556750019
+  },
+  {
+   "id": "3509243656",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.012080252170562744,
+     "hist": 0.07686498483043072,
+     "edges": 0.13841637540782303,
+     "local": 0.052507305052131414,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0006968533853068948,
+     "dist": 0.062432539214459,
+     "t": 0.5,
+     "t_ours": 0.6,
+     "we_scene_time": 0.61
+    },
+    {
+     "ssim": 0.004407823085784912,
+     "hist": 0.09995462803616989,
+     "edges": 0.03173899015970316,
+     "local": 0.017579755707023043,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.000225322408368811,
+     "dist": 0.03293499727701699,
+     "t": 2.0,
+     "t_ours": 2.1,
+     "we_scene_time": 2.129
+    },
+    {
+     "ssim": 0.010540425777435303,
+     "hist": 0.20899847685845924,
+     "edges": 0.08841493269766132,
+     "local": 0.04280740853088597,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.003966654650866985,
+     "dist": 0.0754870322037205,
+     "t": 5.0,
+     "t_ours": 5.1,
+     "we_scene_time": 5.128
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "a 3D \"three-body\" simulation: its planets' paths and the civilisation texts come from Math.random in scripts, so they differ from WE's every run (and the first two frames are its black intro: curtains open from 2 s). A private copy with seeded Math.random (scripts/dev/we_ref_variant.py, captures/det/v3509-det*) puts WE's planets and ours in the same places and showed three real differences, fixed 2026-11-10/11 (fork 09c9bd4, 2bd528c, 65ec574): the star spikes (`sa3`) drawn before the sky box and covered by it (WE's transparentsorting draws the opaque objects first), the planet rings (`OL`) never shown (WE casts the cursor's ray against a world-placed layer), and the stars at a third of WE's brightness, so their glow looked half as wide: the spikes' pulse effect drew its output over the star spheres without the layer's depth test (seeded copy without bloom: WE's star core 185 159 128, ours 112 91 87 \u2192 183 151 115). The 2026-11-06 23:23 reference was not a misread clock: its three frames read 4.084 / 4.083 / 4.082 s after their request times and show the opened scene at \"0.5 s\" (every other run is black there); that run's first picture came 4 s late. Recaptured 2026-11-11 00:13 at WE's 0.61 / 2.13 / 5.13 s. Left: the galaxy band's height in the first frames (a slider eases toward input.cursorWorldPosition; WE has no pointer until the capture's nudge).",
+   "trust": "FXC, system fonts: Windows' arial, FP16 swap chain: re-encoded, clock: Wine's",
+   "dist": 0.05695152289839883,
+   "ssim": 0.00900950034459432,
+   "hist": 0.12860602990835326,
+   "edges": 0.08619009942172917,
+   "local": 0.03763148976334681,
+   "mean_abs": 0.0016296101481808971,
+   "worst_t": 5.0,
+   "worst_dist": 0.0754870322037205
+  },
+  {
+   "id": "3291745179",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.037686169147491455,
+     "hist": 0.03791552802665123,
+     "edges": 0.017158544955387822,
+     "local": 0.1227547995125254,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.008364592678844929,
+     "dist": 0.05914710519441286,
+     "t": 0.5,
+     "t_ours": 1.6,
+     "we_scene_time": 1.629
+    },
+    {
+     "ssim": 0.03286874294281006,
+     "hist": 0.03927769117336132,
+     "edges": 0.0027510316368638543,
+     "local": 0.0905340380850248,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.007042654789984226,
+     "dist": 0.045426578870395494,
+     "t": 2.0,
+     "t_ours": 3.1,
+     "we_scene_time": 3.13
+    },
+    {
+     "ssim": 0.035519421100616455,
+     "hist": 0.040908319887605016,
+     "edges": 0.05563689604685207,
+     "local": 0.10801708717675258,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0085203992202878,
+     "dist": 0.062369995670102124,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.161
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.05564789324497016,
+   "ssim": 0.03535811106363932,
+   "hist": 0.03936717969587252,
+   "edges": 0.025182157546367916,
+   "local": 0.10710197492476758,
+   "mean_abs": 0.007975882229705652,
+   "worst_t": 5.0,
+   "worst_dist": 0.062369995670102124
+  },
+  {
+   "id": "3489263099",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.008210301399230957,
+     "hist": 0.041796599423209874,
+     "edges": 0.08039324046863339,
+     "local": 0.028256207704544067,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.004564212169498205,
+     "dist": 0.03537792070950116,
+     "t": 0.5,
+     "t_ours": 0.8,
+     "we_scene_time": 0.804
+    },
+    {
+     "ssim": 0.01942312717437744,
+     "hist": 0.07984787822434175,
+     "edges": 0.11562923673081205,
+     "local": 0.07326594026138385,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.006542910821735859,
+     "dist": 0.06690214322175915,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.294
+    },
+    {
+     "ssim": 0.021669209003448486,
+     "hist": 0.07455913880976259,
+     "edges": 0.07750584699070118,
+     "local": 0.08906729325341682,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.006226225756108761,
+     "dist": 0.06363394783715234,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.292
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.05530467058947088,
+   "ssim": 0.016434212525685627,
+   "hist": 0.0654012054857714,
+   "edges": 0.09117610806338221,
+   "local": 0.06352981373978157,
+   "mean_abs": 0.005777782915780942,
+   "worst_t": 2.0,
+   "worst_dist": 0.06690214322175915
+  },
+  {
+   "id": "3319542538",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.03203475475311279,
+     "hist": 0.02156681039250582,
+     "edges": 0.06771165728785022,
+     "local": 0.10728442016988993,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.003889950690791011,
+     "dist": 0.05965144601297202,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.53
+    },
+    {
+     "ssim": 0.03108370304107666,
+     "hist": 0.017148669189702235,
+     "edges": 0.05833321415948722,
+     "local": 0.0774572161026299,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0040026442147791386,
+     "dist": 0.04765865241294986,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 3.03
+    },
+    {
+     "ssim": 0.030082285404205322,
+     "hist": 0.022125544930802918,
+     "edges": 0.025782105525673837,
+     "local": 0.12685206222037473,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0034904852509498596,
+     "dist": 0.05666183437866937,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 6.029
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.05465731093486375,
+   "ssim": 0.031066914399464924,
+   "hist": 0.020280341504336993,
+   "edges": 0.0506089923243371,
+   "local": 0.10386456616429818,
+   "mean_abs": 0.0037943600521733365,
+   "worst_t": 0.5,
+   "worst_dist": 0.05965144601297202
+  },
+  {
+   "id": "2288455459",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.025804877281188965,
+     "hist": 0.01980711514665107,
+     "edges": 0.03769065927139792,
+     "local": 0.10530703592424591,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0033210618421435356,
+     "dist": 0.05083312884524026,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.264
+    },
+    {
+     "ssim": 0.027844548225402832,
+     "hist": 0.022049443011252688,
+     "edges": 0.03107876702814849,
+     "local": 0.10638449915374319,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0034309453330934048,
+     "dist": 0.05089435622162404,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.761
+    },
+    {
+     "ssim": 0.03230011463165283,
+     "hist": 0.018784739705649586,
+     "edges": 0.040830068219098625,
+     "local": 0.1163212393100063,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.00389780942350626,
+     "dist": 0.05650936776744738,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.759
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.05274561761143723,
+   "ssim": 0.02864984671274821,
+   "hist": 0.020213765954517782,
+   "edges": 0.03653316483954835,
+   "local": 0.10933759146266514,
+   "mean_abs": 0.0035499388662477336,
+   "worst_t": 5.0,
+   "worst_dist": 0.05650936776744738
+  },
+  {
+   "id": "3174556087",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.03094416856765747,
+     "hist": 0.04193193771369194,
+     "edges": 0.03232784357575136,
+     "local": 0.09992003068327904,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.01395564153790474,
+     "dist": 0.05411121603316961,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.694
+    },
+    {
+     "ssim": 0.024590611457824707,
+     "hist": 0.038987352916610866,
+     "edges": 0.029838742325079215,
+     "local": 0.06741272390354425,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.012491267174482346,
+     "dist": 0.0413662196567487,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.161
+    },
+    {
+     "ssim": 0.03205949068069458,
+     "hist": 0.04182060473524369,
+     "edges": 0.03331451897226645,
+     "local": 0.0866555805162837,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.013081695884466171,
+     "dist": 0.050641546100595514,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.161
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, system fonts: Windows' arial/consolas, clock: Wine's",
+   "dist": 0.04870632726350461,
+   "ssim": 0.029198090235392254,
+   "hist": 0.040913298455182164,
+   "edges": 0.03182703495769901,
+   "local": 0.08466277836770232,
+   "mean_abs": 0.013176201532284418,
+   "worst_t": 0.5,
+   "worst_dist": 0.05411121603316961
+  },
+  {
+   "id": "3042865984",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.047289252281188965,
+     "hist": 0.10319341595110171,
+     "edges": 0.03711340122315565,
+     "local": 0.09114500554278493,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.012755935080349445,
+     "dist": 0.06959164078204363,
+     "t": 0.5,
+     "t_ours": 1.1,
+     "we_scene_time": 1.098
+    },
+    {
+     "ssim": 0.006080031394958496,
+     "hist": 0.09779532962055164,
+     "edges": 0.02739244360425319,
+     "local": 0.015611761016771197,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.003923911135643721,
+     "dist": 0.031545092368479875,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.596
+    },
+    {
+     "ssim": 0.006922662258148193,
+     "hist": 0.10039624648057767,
+     "edges": 0.01730865580875318,
+     "local": 0.017014453808466595,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.004250604659318924,
+     "dist": 0.03072211527785061,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.628
+    }
+   ],
+   "props": [],
+   "pointer": "3436,1436:3440,1440",
+   "window": [
+    1920,
+    804
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.04395294947612471,
+   "ssim": 0.020097315311431885,
+   "hist": 0.10046166401741034,
+   "edges": 0.027271500212054007,
+   "local": 0.04125707345600758,
+   "mean_abs": 0.006976816958437364,
+   "worst_t": 0.5,
+   "worst_dist": 0.06959164078204363
+  },
+  {
+   "id": "3480481965",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.011019587516784668,
+     "hist": 0.06014261008603638,
+     "edges": 0.053793103448275925,
+     "local": 0.03122242276246349,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.002638177713379264,
+     "dist": 0.03545974579063691,
+     "t": 0.5,
+     "t_ours": 0.9,
+     "we_scene_time": 0.93
+    },
+    {
+     "ssim": 0.013888716697692871,
+     "hist": 0.05911753679455515,
+     "edges": 0.07338129496402879,
+     "local": 0.03653639554977417,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.002846169052645564,
+     "dist": 0.0416273000259569,
+     "t": 2.0,
+     "t_ours": 2.4,
+     "we_scene_time": 2.429
+    },
+    {
+     "ssim": 0.021833956241607666,
+     "hist": 0.06197221602383649,
+     "edges": 0.0696378830083565,
+     "local": 0.056277947345127664,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0032391296699643135,
+     "dist": 0.0497555908824592,
+     "t": 5.0,
+     "t_ours": 5.4,
+     "we_scene_time": 5.426
+    }
+   ],
+   "props": [],
+   "pointer": "2556,1076:2560,1080",
+   "window": [
+    1920,
+    810
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC (5 compiled), fonts: the scene's own, clock: Wine's",
+   "dist": 0.04228087889968434,
+   "ssim": 0.015580753485361734,
+   "hist": 0.06041078763480934,
+   "edges": 0.06560409380688707,
+   "local": 0.041345588552455105,
+   "mean_abs": 0.0029078254786630473,
+   "worst_t": 5.0,
+   "worst_dist": 0.0497555908824592
+  },
+  {
+   "id": "1726902114",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.012512564659118652,
+     "hist": 0.04812032294611876,
+     "edges": 0.015035695213432398,
+     "local": 0.06584613855617742,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.008771979250013828,
+     "dist": 0.03613881459649906,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.495
+    },
+    {
+     "ssim": 0.011819005012512207,
+     "hist": 0.04676709789302417,
+     "edges": 0.01762510873008538,
+     "local": 0.05570414320876201,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.008582822047173977,
+     "dist": 0.033135385791004175,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 3.03
+    },
+    {
+     "ssim": 0.018634259700775146,
+     "hist": 0.055849528905606724,
+     "edges": 0.010993714354504247,
+     "local": 0.1279586423188448,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.010843025520443916,
+     "dist": 0.05734651925790817,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 6.03
+    }
+   ],
+   "props": [],
+   "pointer": "1020,707:1024,711",
+   "window": [
+    1554,
+    1080
+   ],
+   "class": "ok",
+   "note": "the light shafts hang from the top left as in WE since 317bb73 (particle sprites were upside down). They are random in WE.",
+   "trust": "FXC",
+   "dist": 0.04220690654847047,
+   "ssim": 0.014321943124135336,
+   "hist": 0.050245649914916556,
+   "edges": 0.014551506099340675,
+   "local": 0.08316964136126141,
+   "mean_abs": 0.009399275605877241,
+   "worst_t": 5.0,
+   "worst_dist": 0.05734651925790817
+  },
+  {
+   "id": "3445973124",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.011820971965789795,
+     "hist": 0.022263003761618223,
+     "edges": 0.042213550904576236,
+     "local": 0.05548939768535396,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0024972360115498304,
+     "dist": 0.033088421828582015,
+     "t": 0.5,
+     "t_ours": 1.1,
+     "we_scene_time": 1.098
+    },
+    {
+     "ssim": 0.015328764915466309,
+     "hist": 0.023614265861655877,
+     "edges": 0.049087759040098544,
+     "local": 0.07903062614301841,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.002650232519954443,
+     "dist": 0.0428482222978963,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.596
+    },
+    {
+     "ssim": 0.015905320644378662,
+     "hist": 0.022654918978933423,
+     "edges": 0.01957519041881739,
+     "local": 0.06759966739142935,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.002875623758882284,
+     "dist": 0.033497518290292565,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.561
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.03647805413892363,
+   "ssim": 0.014351685841878256,
+   "hist": 0.02284406286740251,
+   "edges": 0.03695883345449739,
+   "local": 0.06737323040660058,
+   "mean_abs": 0.0026743640967955193,
+   "worst_t": 2.0,
+   "worst_dist": 0.0428482222978963
+  },
+  {
+   "id": "3461192631",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.016470789909362793,
+     "hist": 0.05887870417444368,
+     "edges": 0.004053056958836954,
+     "local": 0.04080897261155769,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.007863461039960384,
+     "dist": 0.02977028098293227,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.495
+    },
+    {
+     "ssim": 0.027030527591705322,
+     "hist": 0.05853923896549874,
+     "edges": 0.0030943951664670344,
+     "local": 0.05639150661105911,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.00985828135162592,
+     "dist": 0.037353337087222487,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.997
+    },
+    {
+     "ssim": 0.026124775409698486,
+     "hist": 0.06038738574464379,
+     "edges": 0.002929047836022214,
+     "local": 0.06132135582932582,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.009434646926820278,
+     "dist": 0.03889712608784049,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.996
+    }
+   ],
+   "props": [],
+   "pointer": "665,373:669,377",
+   "window": [
+    1914,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own",
+   "dist": 0.03534024805266508,
+   "ssim": 0.0232086976369222,
+   "hist": 0.05926844296152874,
+   "edges": 0.0033588333204420673,
+   "local": 0.052840611683980875,
+   "mean_abs": 0.009052129772802195,
+   "worst_t": 5.0,
+   "worst_dist": 0.03889712608784049
+  },
+  {
+   "id": "2182433068",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.017873108386993408,
+     "hist": 0.01532722313961527,
+     "edges": 0.05909178865232656,
+     "local": 0.03022280001702408,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.004217743873596191,
+     "dist": 0.029312574879593614,
+     "t": 0.5,
+     "t_ours": 0.7,
+     "we_scene_time": 0.726
+    },
+    {
+     "ssim": 0.01835697889328003,
+     "hist": 0.027369487001822224,
+     "edges": 0.058792611633909364,
+     "local": 0.04889671007792155,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.004371511284261942,
+     "dist": 0.03740852641850679,
+     "t": 2.0,
+     "t_ours": 2.2,
+     "we_scene_time": 2.231
+    },
+    {
+     "ssim": 0.016375243663787842,
+     "hist": 0.01814586790131783,
+     "edges": 0.07056954515729918,
+     "local": 0.04014108586125076,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.004114910494536161,
+     "dist": 0.03469798146923498,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.263
+    }
+   ],
+   "props": [],
+   "pointer": "741,720:745,724",
+   "window": [
+    1112,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.03380636092244513,
+   "ssim": 0.017535110314687092,
+   "hist": 0.02028085934758511,
+   "edges": 0.0628179818145117,
+   "local": 0.03975353198539879,
+   "mean_abs": 0.004234721884131432,
+   "worst_t": 2.0,
+   "worst_dist": 0.03740852641850679
+  },
+  {
+   "id": "1195626192",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.007956385612487793,
+     "hist": 0.029902683841068603,
+     "edges": 0.026979711605281897,
+     "local": 0.0462004739480714,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.006370446179062128,
+     "dist": 0.02762353695743786,
+     "t": 0.5,
+     "t_ours": 1.1,
+     "we_scene_time": 1.132
+    },
+    {
+     "ssim": 0.006561160087585449,
+     "hist": 0.03619943764413791,
+     "edges": 0.019350830111965034,
+     "local": 0.043442673360308014,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.006278706714510918,
+     "dist": 0.02611120358558863,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.628
+    },
+    {
+     "ssim": 0.008709907531738281,
+     "hist": 0.04424027899710511,
+     "edges": 0.02525122598985885,
+     "local": 0.06116079663236936,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.00683817733079195,
+     "dist": 0.034859512246625084,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.593
+    }
+   ],
+   "props": [],
+   "pointer": "2996,1683:3000,1687",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.029531417596550525,
+   "ssim": 0.007742484410603841,
+   "hist": 0.03678080016077054,
+   "edges": 0.023860589235701928,
+   "local": 0.05026798131358293,
+   "mean_abs": 0.006495776741454999,
+   "worst_t": 5.0,
+   "worst_dist": 0.034859512246625084
+  },
+  {
+   "id": "2638125030",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.01222449541091919,
+     "hist": 0.04232833431295615,
+     "edges": 0.07367698773479725,
+     "local": 0.03173271999306356,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.004997809883207083,
+     "dist": 0.036388229030745504,
+     "t": 0.5,
+     "t_ours": 1.9,
+     "we_scene_time": 1.862
+    },
+    {
+     "ssim": 0.007708728313446045,
+     "hist": 0.04333070985166469,
+     "edges": 0.017175190210836577,
+     "local": 0.016974326424436487,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.004477781243622303,
+     "dist": 0.019506096433865014,
+     "t": 2.0,
+     "t_ours": 3.3,
+     "we_scene_time": 3.329
+    },
+    {
+     "ssim": 0.01049739122390747,
+     "hist": 0.04130541424443806,
+     "edges": 0.06548176041362452,
+     "local": 0.018278146162629128,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.004893208853900433,
+     "dist": 0.029990096147573496,
+     "t": 5.0,
+     "t_ours": 6.3,
+     "we_scene_time": 6.328
+    }
+   ],
+   "props": [],
+   "pointer": "955,535:959,539",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.02862814053739467,
+   "ssim": 0.010143538316090902,
+   "hist": 0.04232148613635297,
+   "edges": 0.05211131278641945,
+   "local": 0.022328397526709728,
+   "mean_abs": 0.004789599993576606,
+   "worst_t": 0.5,
+   "worst_dist": 0.036388229030745504
+  },
+  {
+   "id": "3477054430",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.015453636646270752,
+     "hist": 0.02252352562339086,
+     "edges": 0.056457625819384516,
+     "local": 0.04625367132636408,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0022515300661325455,
+     "dist": 0.03430842268034552,
+     "t": 0.5,
+     "t_ours": 0.7,
+     "we_scene_time": 0.745
+    },
+    {
+     "ssim": 0.01195526123046875,
+     "hist": 0.019553007865693993,
+     "edges": 0.028420557857196438,
+     "local": 0.03547302105774482,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0012191644636914134,
+     "dist": 0.02382319783104216,
+     "t": 2.0,
+     "t_ours": 2.2,
+     "we_scene_time": 2.23
+    },
+    {
+     "ssim": 0.010342597961425781,
+     "hist": 0.01738030683974151,
+     "edges": 0.04221879537434925,
+     "local": 0.0352713528360861,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.001135517260991037,
+     "dist": 0.025604005682071718,
+     "t": 5.0,
+     "t_ours": 5.2,
+     "we_scene_time": 5.229
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "the kitty's head turns as in WE (2026-11-06, fork 409a94f + 9d4085c): its angles script never ran (a model registered only its origin), and input.cursorWorldPosition in a 3D scene is the cursor cast to the far plane (WE's unProject at NDC z 0 through its reversed-depth projection), not scene pixels. With the pointer at the left / right (we-ref/3477054430/ptrL-3d, ptrR-3d) the head region went 5.1 \u2192 0.7 and 4.3 \u2192 0.8 / 255 off WE; scores 0.040 \u2192 0.025, 0.029 \u2192 0.022. The moon takes the scene's fog (0108). The 0.5 s frame's head is still easing in from WE's late pointer.",
+   "trust": "FXC (1 compiled), fonts: the scene's own",
+   "dist": 0.027911875397819797,
+   "ssim": 0.012583831946055094,
+   "hist": 0.019818946776275454,
+   "edges": 0.0423656596836434,
+   "local": 0.038999348406731665,
+   "mean_abs": 0.0015354039302716653,
+   "worst_t": 0.5,
+   "worst_dist": 0.03430842268034552
+  },
+  {
+   "id": "1884904087",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.01086503267288208,
+     "hist": 0.01478124590472864,
+     "edges": 0.016644966157602803,
+     "local": 0.05791177354209746,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0025000879541039467,
+     "dist": 0.02691828427696015,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.529
+    },
+    {
+     "ssim": 0.011241614818572998,
+     "hist": 0.015295853369658816,
+     "edges": 0.015378254011396808,
+     "local": 0.05919088922382798,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0025202513206750154,
+     "dist": 0.02726457268893142,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.963
+    },
+    {
+     "ssim": 0.01046842336654663,
+     "hist": 0.015457800958435516,
+     "edges": 0.016360128521739736,
+     "local": 0.05568306978481511,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.002453327178955078,
+     "dist": 0.026209033841443574,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.962
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "random",
+   "note": "the greeting under the clock is picked at random (WE: \"Have a nice evening, YOURNAME!\", ours on 2026-11-11 \"Hi YOURNAME, how has your day been?\"); the rest matches (0.006 when the picks agreed).",
+   "trust": "FXC, system fonts: Windows' comicsans, clock: Wine's",
+   "dist": 0.02679729693577838,
+   "ssim": 0.010858356952667236,
+   "hist": 0.015178300077607657,
+   "edges": 0.016127782896913117,
+   "local": 0.057595244183580176,
+   "mean_abs": 0.00249122215124468,
+   "worst_t": 2.0,
+   "worst_dist": 0.02726457268893142
+  },
+  {
+   "id": "2047150134",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00837486982345581,
+     "hist": 0.019491098262034483,
+     "edges": 0.021937842778793404,
+     "local": 0.03326188194720695,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0017108034808188677,
+     "dist": 0.020776813739364408,
+     "t": 0.5,
+     "t_ours": 1.2,
+     "we_scene_time": 1.198
+    },
+    {
+     "ssim": 0.01153475046157837,
+     "hist": 0.015948551859105615,
+     "edges": 0.021937842778793404,
+     "local": 0.03297236225140902,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.002030891366302967,
+     "dist": 0.02092941274147602,
+     "t": 2.0,
+     "t_ours": 2.7,
+     "we_scene_time": 2.694
+    },
+    {
+     "ssim": 0.024075329303741455,
+     "hist": 0.026212100990245242,
+     "edges": 0.015577078357760454,
+     "local": 0.06965628598118201,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.003506577108055353,
+     "dist": 0.03647732045507818,
+     "t": 5.0,
+     "t_ours": 5.7,
+     "we_scene_time": 5.726
+    }
+   ],
+   "props": [],
+   "pointer": "679,380:683,384",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, system fonts: Windows' consolas, clock: Wine's",
+   "dist": 0.02606118231197287,
+   "ssim": 0.014661649862925211,
+   "hist": 0.020550583703795113,
+   "edges": 0.01981758797178242,
+   "local": 0.045296843393265986,
+   "mean_abs": 0.0024160906517257295,
+   "worst_t": 5.0,
+   "worst_dist": 0.03647732045507818
+  },
+  {
+   "id": "3029971128",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.04562485218048096,
+     "hist": 0.0282599328845114,
+     "edges": 0.02605018173742557,
+     "local": 0.14157566746386388,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.015344120562076569,
+     "dist": 0.06702217881769085,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 1.032
+    },
+    {
+     "ssim": 0.0017095208168029785,
+     "hist": 0.00970062878466032,
+     "edges": 0.013951149435435073,
+     "local": 0.0051154692967732745,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0016193966148421168,
+     "dist": 0.006777852678091955,
+     "t": 2.0,
+     "t_ours": 2.5,
+     "we_scene_time": 2.529
+    },
+    {
+     "ssim": 0.0002875328063964844,
+     "hist": 0.009767132945401815,
+     "edges": 0.005904368172599428,
+     "local": 0.0030270483500013747,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.001295820577070117,
+     "dist": 0.004128674570519607,
+     "t": 5.0,
+     "t_ours": 5.5,
+     "we_scene_time": 5.527
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.025976235355434137,
+   "ssim": 0.015873968601226807,
+   "hist": 0.01590923153819118,
+   "edges": 0.015301899781820024,
+   "local": 0.049906061703546174,
+   "mean_abs": 0.006086445917996268,
+   "worst_t": 0.5,
+   "worst_dist": 0.06702217881769085
+  },
+  {
+   "id": "3593587273",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.006197631359100342,
+     "hist": 0.06346505988958427,
+     "edges": 0.008840279900360515,
+     "local": 0.02452324501549204,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.006083305925130844,
+     "dist": 0.023677330870366674,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.364
+    },
+    {
+     "ssim": 0.006089746952056885,
+     "hist": 0.06319898484091978,
+     "edges": 0.008378026690396556,
+     "local": 0.02283301615777115,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.006363844498991966,
+     "dist": 0.02299223123921168,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.862
+    },
+    {
+     "ssim": 0.006089746952056885,
+     "hist": 0.06319898484091978,
+     "edges": 0.008378026690396556,
+     "local": 0.02283301615777115,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.006363844498991966,
+     "dist": 0.02299223123921168,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.826
+    }
+   ],
+   "props": [],
+   "pointer": "156,142:160,146",
+   "window": [
+    1180,
+    1080
+   ],
+   "class": "ok",
+   "note": "was 0.499 (\"a puppet at another pose\"): the capture's time base. Rendered at WE's own scene time it is 0.023.",
+   "trust": "FXC",
+   "dist": 0.02322059778293001,
+   "ssim": 0.00612570842107137,
+   "hist": 0.06328767652380794,
+   "edges": 0.008532111093717876,
+   "local": 0.02339642577701145,
+   "mean_abs": 0.006270331641038259,
+   "worst_t": 0.5,
+   "worst_dist": 0.023677330870366674
+  },
+  {
+   "id": "2921510865",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.024057447910308838,
+     "hist": 0.03284836230583247,
+     "edges": 0.021476955793293895,
+     "local": 0.08163491853823264,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.017068423330783844,
+     "dist": 0.04257277355438772,
+     "t": 0.5,
+     "t_ours": 3.3,
+     "we_scene_time": 3.261
+    },
+    {
+     "ssim": 0.0027360916137695312,
+     "hist": 0.01943880142070646,
+     "edges": 0.007088066225309997,
+     "local": 0.01973256786974768,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0023868652060627937,
+     "dist": 0.012045971374258455,
+     "t": 2.0,
+     "t_ours": 4.8,
+     "we_scene_time": 4.761
+    },
+    {
+     "ssim": 0.0030329227447509766,
+     "hist": 0.01937914475360621,
+     "edges": 0.010579881328358298,
+     "local": 0.02161686945085724,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0026221666485071182,
+     "dist": 0.013386742875075368,
+     "t": 5.0,
+     "t_ours": 7.8,
+     "we_scene_time": 7.756
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.022668495934573846,
+   "ssim": 0.009942154089609781,
+   "hist": 0.023888769493381715,
+   "edges": 0.013048301115654063,
+   "local": 0.04099478528627919,
+   "mean_abs": 0.007359151728451252,
+   "worst_t": 0.5,
+   "worst_dist": 0.04257277355438772
+  },
+  {
+   "id": "2469881470",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.013938486576080322,
+     "hist": 0.017245071485331,
+     "edges": 0.013581806007228248,
+     "local": 0.04194498721820613,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.005643116310238838,
+     "dist": 0.022930417636797783,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 1.032
+    },
+    {
+     "ssim": 0.010534465312957764,
+     "hist": 0.019091177712561306,
+     "edges": 0.021314487684090833,
+     "local": 0.022067838251435507,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0051945471204817295,
+     "dist": 0.01786182414864841,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.558
+    },
+    {
+     "ssim": 0.012115478515625,
+     "hist": 0.016715670134954497,
+     "edges": 0.025087610831467377,
+     "local": 0.03206407360266894,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.0051023513078689575,
+     "dist": 0.02161452182877256,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.56
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.020802254538072915,
+   "ssim": 0.01219614346822103,
+   "hist": 0.017683973110948933,
+   "edges": 0.01999463484092882,
+   "local": 0.03202563302410353,
+   "mean_abs": 0.005313338246196508,
+   "worst_t": 0.5,
+   "worst_dist": 0.022930417636797783
+  },
+  {
+   "id": "3023509773",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0029473304748535156,
+     "hist": 0.012798434955887181,
+     "edges": 0.009334782712641876,
+     "local": 0.0170859913972284,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0015080454759299755,
+     "dist": 0.010436640095330386,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.496
+    },
+    {
+     "ssim": 0.00978696346282959,
+     "hist": 0.012906270140322447,
+     "edges": 0.010777929018358168,
+     "local": 0.045422582111010947,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0027730136644095182,
+     "dist": 0.021299703503888285,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.999
+    },
+    {
+     "ssim": 0.011859238147735596,
+     "hist": 0.022587248696953995,
+     "edges": 0.013129972026903136,
+     "local": 0.04657926200889051,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.0033888770267367363,
+     "dist": 0.02467499419175926,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.998
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.018803779263659313,
+   "ssim": 0.0081978440284729,
+   "hist": 0.016097317931054542,
+   "edges": 0.011080894585967727,
+   "local": 0.03636261183904329,
+   "mean_abs": 0.00255664538902541,
+   "worst_t": 5.0,
+   "worst_dist": 0.02467499419175926
+  },
+  {
+   "id": "2064316482",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.009815752506256104,
+     "hist": 0.020976922323115488,
+     "edges": 0.004094885703958329,
+     "local": 0.03455040665964285,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0031065845396369696,
+     "dist": 0.01832420935518445,
+     "t": 0.5,
+     "t_ours": 1.8,
+     "we_scene_time": 1.795
+    },
+    {
+     "ssim": 0.007155716419219971,
+     "hist": 0.02183983465100674,
+     "edges": 0.0029139130314127515,
+     "local": 0.02872570518714686,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0027615753933787346,
+     "dist": 0.015715176018393947,
+     "t": 2.0,
+     "t_ours": 3.3,
+     "we_scene_time": 3.262
+    },
+    {
+     "ssim": 0.01114577054977417,
+     "hist": 0.022042186189349597,
+     "edges": 0.004480833861857603,
+     "local": 0.03455730791514119,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0032421378418803215,
+     "dist": 0.019015527549716048,
+     "t": 5.0,
+     "t_ours": 6.3,
+     "we_scene_time": 6.261
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.01768497097443148,
+   "ssim": 0.009372413158416748,
+   "hist": 0.021619647721157275,
+   "edges": 0.003829877532409561,
+   "local": 0.032611139920643635,
+   "mean_abs": 0.003036765924965342,
+   "worst_t": 5.0,
+   "worst_dist": 0.019015527549716048
+  },
+  {
+   "id": "3463520581",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.004330456256866455,
+     "hist": 0.020386144267594303,
+     "edges": 0.007492113564668834,
+     "local": 0.026204930307964485,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0028882010374218225,
+     "dist": 0.01473626753590191,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.664
+    },
+    {
+     "ssim": 0.004568696022033691,
+     "hist": 0.027323863400649847,
+     "edges": 0.029805539911880174,
+     "local": 0.022126717648158472,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.00356097100302577,
+     "dist": 0.019434504763563655,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.162
+    },
+    {
+     "ssim": 0.006190955638885498,
+     "hist": 0.02098772436750267,
+     "edges": 0.015560982072322371,
+     "local": 0.023484190460294485,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.003603508463129401,
+     "dist": 0.016212285117719005,
+     "t": 5.0,
+     "t_ours": 6.1,
+     "we_scene_time": 6.128
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "fixed 2026-11-11 (fork, a puppet's uvs are its image's): Kirito's face (puppet 126, an 852 x 726 image in an 896 x 768 texture) took its mesh's uvs as the texture's, so every piece of the face drew its content 28, 16 px up-left \u2014 eye, nose and mouth under the front hair, the sky where the face should be. Proved on private copies at rest without effects (`captures/var/v3463-s*`): the face alone sat 14, 8 px (at 1920) from WE's, now 0, 0. 0.084 \u2192 0.017.",
+   "trust": "FXC (13 compiled)",
+   "dist": 0.016794352472394858,
+   "ssim": 0.005030035972595215,
+   "hist": 0.022899244011915607,
+   "edges": 0.017619545182957125,
+   "local": 0.023938612805472482,
+   "mean_abs": 0.0033508935011923313,
+   "worst_t": 2.0,
+   "worst_dist": 0.019434504763563655
+  },
+  {
+   "id": "2694785040",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0016132593154907227,
+     "hist": 0.053688190056886576,
+     "edges": 0.003644772545370545,
+     "local": 0.0066414541118623065,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0024780845269560814,
+     "dist": 0.013943006548657334,
+     "t": 0.5,
+     "t_ours": 0.8,
+     "we_scene_time": 0.818
+    },
+    {
+     "ssim": 0.0014490485191345215,
+     "hist": 0.06471959926055787,
+     "edges": 0.0025706940874036244,
+     "local": 0.009423322354753813,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.00253253523260355,
+     "dist": 0.016719769931758797,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.296
+    },
+    {
+     "ssim": 0.002003908157348633,
+     "hist": 0.05237147996100409,
+     "edges": 0.003656558413437927,
+     "local": 0.015911062558492024,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0029696801211684942,
+     "dist": 0.0165800988896406,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.327
+    }
+   ],
+   "props": [],
+   "pointer": "2092,1686:2096,1690",
+   "window": [
+    1340,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.015747625123352243,
+   "ssim": 0.0016887386639912922,
+   "hist": 0.056926423092816175,
+   "edges": 0.003290675015404032,
+   "local": 0.01065861300836938,
+   "mean_abs": 0.0026600999602427087,
+   "worst_t": 2.0,
+   "worst_dist": 0.016719769931758797
+  },
+  {
+   "id": "1934084447",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.004157364368438721,
+     "hist": 0.03419183022863271,
+     "edges": 0.01961354721237918,
+     "local": 0.011206328907671073,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0028436523862183094,
+     "dist": 0.015370183471035317,
+     "t": 0.5,
+     "t_ours": 1.6,
+     "we_scene_time": 1.562
+    },
+    {
+     "ssim": 0.0031873583793640137,
+     "hist": 0.03341792422783997,
+     "edges": 0.03816728446167639,
+     "local": 0.010416282573714852,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.00271810544654727,
+     "dist": 0.018398134023826933,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.998
+    },
+    {
+     "ssim": 0.0016503334045410156,
+     "hist": 0.033298663519740514,
+     "edges": 0.013552286423206494,
+     "local": 0.005410465955113371,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.002424225676804781,
+     "dist": 0.011488429796485717,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.996
+    }
+   ],
+   "props": [],
+   "pointer": "1276,716:1280,720",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.015085582430449324,
+   "ssim": 0.00299835205078125,
+   "hist": 0.0336361393254044,
+   "edges": 0.023777706032420687,
+   "local": 0.009011025812166432,
+   "mean_abs": 0.00266199450319012,
+   "worst_t": 2.0,
+   "worst_dist": 0.018398134023826933
+  },
+  {
+   "id": "2783122117",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0004642605781555176,
+     "hist": 0.015872695590556186,
+     "edges": 0.00016854879487604446,
+     "local": 0.0010427369027941797,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0022822204045951366,
+     "dist": 0.0036603481213713556,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.297
+    },
+    {
+     "ssim": 0.0014662742614746094,
+     "hist": 0.014860087031330144,
+     "edges": 0.000167982529816868,
+     "local": 0.002549446297052782,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.004244687967002392,
+     "dist": 0.00421033007978762,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.828
+    },
+    {
+     "ssim": 0.03738468885421753,
+     "hist": 0.02347646093268778,
+     "edges": 0.000671782624029782,
+     "local": 0.06125008392458161,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.020672092214226723,
+     "dist": 0.03442008054498325,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.793
+    }
+   ],
+   "props": [],
+   "pointer": "1916,536:1920,540",
+   "window": [
+    1920,
+    540
+   ],
+   "class": "ok",
+   "note": "was 0.562 (a crowd of skeletons \"at another phase\"): the capture's time base. Rendered at WE's own scene time it is 0.014.",
+   "trust": "FXC",
+   "dist": 0.01409691958204741,
+   "ssim": 0.013105074564615885,
+   "hist": 0.018069747851524706,
+   "edges": 0.0003361046495742315,
+   "local": 0.02161408904147619,
+   "mean_abs": 0.009066333528608084,
+   "worst_t": 5.0,
+   "worst_dist": 0.03442008054498325
+  },
+  {
+   "id": "2683776412",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0014715790748596191,
+     "hist": 0.028084405099595023,
+     "edges": 0.012799801903717212,
+     "local": 0.015638259006664157,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.0038880049251019955,
+     "dist": 0.01330979282511958,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.463
+    },
+    {
+     "ssim": 0.001483619213104248,
+     "hist": 0.031098474661427677,
+     "edges": 0.008612695849813501,
+     "local": 0.018487341081102688,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.00391346262767911,
+     "dist": 0.013933522190510316,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.964
+    },
+    {
+     "ssim": 0.0011058449745178223,
+     "hist": 0.04154284273209673,
+     "edges": 0.0013239538480918078,
+     "local": 0.01634405708561341,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.003849545493721962,
+     "dist": 0.013808329934077077,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.927
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "its clouds (stock `clouds`, PERSPECTIVE 1) stood still before 2026-11-11 (the speed constant uploaded into the wrong declaration): 0.026 \u2192 0.014.",
+   "trust": "FXC",
+   "dist": 0.013683881649902327,
+   "ssim": 0.0013536810874938965,
+   "hist": 0.033575240831039806,
+   "edges": 0.00757881720054084,
+   "local": 0.01682321905779342,
+   "mean_abs": 0.0038836710155010223,
+   "worst_t": 2.0,
+   "worst_dist": 0.013933522190510316
+  },
+  {
+   "id": "3022080536",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.006739914417266846,
+     "hist": 0.02437226537115768,
+     "edges": 0.01325798984896076,
+     "local": 0.0366186829827105,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.001666944706812501,
+     "dist": 0.020533630264016892,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 1.032
+    },
+    {
+     "ssim": 0.0012750029563903809,
+     "hist": 0.026242185661131727,
+     "edges": 0.00688250711820948,
+     "local": 0.004774338672480856,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0012047711061313748,
+     "dist": 0.008439741044529613,
+     "t": 2.0,
+     "t_ours": 2.5,
+     "we_scene_time": 2.496
+    },
+    {
+     "ssim": 0.0011579394340515137,
+     "hist": 0.02544177482968704,
+     "edges": 0.006927381845099556,
+     "local": 0.0037380655703600496,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0011870220769196749,
+     "dist": 0.00794263283628079,
+     "t": 5.0,
+     "t_ours": 5.5,
+     "we_scene_time": 5.527
+    }
+   ],
+   "props": [],
+   "pointer": "3100,1756:3104,1760",
+   "window": [
+    1904,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.012305334714942431,
+   "ssim": 0.0030576189359029136,
+   "hist": 0.025352075287325485,
+   "edges": 0.009022626270756598,
+   "local": 0.015043695741850471,
+   "mean_abs": 0.0013529126299545169,
+   "worst_t": 0.5,
+   "worst_dist": 0.020533630264016892
+  },
+  {
+   "id": "2542468435",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0005611777305603027,
+     "hist": 0.04177397672245354,
+     "edges": 0.00679140436148673,
+     "local": 0.007436494032541911,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0025541314389556646,
+     "dist": 0.012112377745718718,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.462
+    },
+    {
+     "ssim": 0.000552833080291748,
+     "hist": 0.040124491393452554,
+     "edges": 0.002142808566030996,
+     "local": 0.007084200779596965,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0026293876580893993,
+     "dist": 0.010744570149863323,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.928
+    },
+    {
+     "ssim": 0.0005320906639099121,
+     "hist": 0.03727655955654606,
+     "edges": 0.006212236482439848,
+     "local": 0.0070778958809872465,
+     "worst_cell": [
+      3,
+      1
+     ],
+     "mean_abs": 0.0027380352839827538,
+     "dist": 0.01098075517126633,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.96
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "Two causes. The FP16 swap-chain skew (reference) and ours: WE scales an image's colour by its brightness in an HDR scene (GH 0x1402321d0), and the layer's 1.15 never showed (genericimage2 VERSION 2 has no g_Brightness term). Both fixed.",
+   "trust": "FXC, FP16 swap chain: re-encoded",
+   "dist": 0.011279234355616124,
+   "ssim": 0.0005487004915873209,
+   "hist": 0.03972500922415072,
+   "edges": 0.005048816469985858,
+   "local": 0.007199530231042041,
+   "mean_abs": 0.0026405181270092726,
+   "worst_t": 0.5,
+   "worst_dist": 0.012112377745718718
+  },
+  {
+   "id": "2932157836",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 2.8908252716064453e-05,
+     "hist": 0.005660862995399604,
+     "edges": 0.016636870868616427,
+     "local": 0.0022540224405626454,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0009835361270233989,
+     "dist": 0.005144425980786819,
+     "t": 0.5,
+     "t_ours": 0.9,
+     "we_scene_time": 0.934
+    },
+    {
+     "ssim": 0.0019838809967041016,
+     "hist": 0.013150804593493876,
+     "edges": 0.019103884107426916,
+     "local": 0.01656368716309468,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.001384210423566401,
+     "dist": 0.012015208188123794,
+     "t": 2.0,
+     "t_ours": 2.3,
+     "we_scene_time": 2.332
+    },
+    {
+     "ssim": 0.002065598964691162,
+     "hist": 0.012178351983218465,
+     "edges": 0.025824177885607424,
+     "local": 0.016395111956323188,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.00145150616299361,
+     "dist": 0.013138719250069484,
+     "t": 5.0,
+     "t_ours": 5.3,
+     "we_scene_time": 5.328
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.010099451139660034,
+   "ssim": 0.0013594627380371094,
+   "hist": 0.010330006524037314,
+   "edges": 0.020521644287216922,
+   "local": 0.01173760718666017,
+   "mean_abs": 0.0012730842378611367,
+   "worst_t": 5.0,
+   "worst_dist": 0.013138719250069484
+  },
+  {
+   "id": "2815800031",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0008676648139953613,
+     "hist": 0.03158715531492116,
+     "edges": 0.006088666790812547,
+     "local": 0.004797639014820258,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0028732437640428543,
+     "dist": 0.009234755569791427,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.397
+    },
+    {
+     "ssim": 0.0011138916015625,
+     "hist": 0.03259430525150063,
+     "edges": 0.008948545861297563,
+     "local": 0.005188292047629754,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0029425141401588917,
+     "dist": 0.010199225317317314,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.895
+    },
+    {
+     "ssim": 0.0009990334510803223,
+     "hist": 0.03173846548878559,
+     "edges": 0.013652108194976309,
+     "local": 0.004928256928299864,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.002938526915386319,
+     "dist": 0.010856301850566435,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.894
+    }
+   ],
+   "props": [],
+   "pointer": "2044,1018:2048,1022",
+   "window": [
+    1920,
+    958
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC (2 compiled)",
+   "dist": 0.010096760912558391,
+   "ssim": 0.0009935299555460613,
+   "hist": 0.031973308685069125,
+   "edges": 0.009563106949028807,
+   "local": 0.004971395996916626,
+   "mean_abs": 0.0029180949398626885,
+   "worst_t": 5.0,
+   "worst_dist": 0.010856301850566435
+  },
+  {
+   "id": "1155728109",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.004502534866333008,
+     "hist": 0.013618267484550278,
+     "edges": 0.012145126243091275,
+     "local": 0.011676172434818,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.0028693811036646366,
+     "dist": 0.010006290935873614,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.264
+    },
+    {
+     "ssim": 0.004533171653747559,
+     "hist": 0.012491113003526946,
+     "edges": 0.010411502231036152,
+     "local": 0.011576553185780844,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.0028759841807186604,
+     "dist": 0.009413440498771141,
+     "t": 2.0,
+     "t_ours": 2.7,
+     "we_scene_time": 2.727
+    },
+    {
+     "ssim": 0.004247128963470459,
+     "hist": 0.012900737728484862,
+     "edges": 0.012845849802371578,
+     "local": 0.012470768556037607,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.0028527951799333096,
+     "dist": 0.010164686762023707,
+     "t": 5.0,
+     "t_ours": 5.7,
+     "we_scene_time": 5.692
+    }
+   ],
+   "props": [],
+   "pointer": "956,628:960,632",
+   "window": [
+    1640,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.00986147273222282,
+   "ssim": 0.004427611827850342,
+   "hist": 0.013003372738854027,
+   "edges": 0.011800826092166336,
+   "local": 0.01190783139221215,
+   "mean_abs": 0.0028660534881055355,
+   "worst_t": 5.0,
+   "worst_dist": 0.010164686762023707
+  },
+  {
+   "id": "2679248947",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0021455883979797363,
+     "hist": 0.013634838802413557,
+     "edges": 0.00890245044662008,
+     "local": 0.014459825276086727,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.002394401701167226,
+     "dist": 0.009489081952026667,
+     "t": 0.5,
+     "t_ours": 0.9,
+     "we_scene_time": 0.932
+    },
+    {
+     "ssim": 0.0030062198638916016,
+     "hist": 0.013672810850406088,
+     "edges": 0.004446307031549579,
+     "local": 0.015690121295241017,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.002815322019159794,
+     "dist": 0.009232725924130918,
+     "t": 2.0,
+     "t_ours": 2.4,
+     "we_scene_time": 2.429
+    },
+    {
+     "ssim": 0.0026984214782714844,
+     "hist": 0.016321176936759784,
+     "edges": 0.007878604987431648,
+     "local": 0.014579986610139409,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.003214415395632386,
+     "dist": 0.010023478811361555,
+     "t": 5.0,
+     "t_ours": 5.4,
+     "we_scene_time": 5.428
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.009581762229173047,
+   "ssim": 0.002616743246714274,
+   "hist": 0.014542942196526477,
+   "edges": 0.007075787488533769,
+   "local": 0.014909977727155717,
+   "mean_abs": 0.0028080463719864688,
+   "worst_t": 5.0,
+   "worst_dist": 0.010023478811361555
+  },
+  {
+   "id": "1556245028",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0010402202606201172,
+     "hist": 0.0271757196644167,
+     "edges": 0.014168153563018926,
+     "local": 0.00751447017925481,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.002103469567373395,
+     "dist": 0.010835181777449604,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.727
+    },
+    {
+     "ssim": 0.0005086660385131836,
+     "hist": 0.026020971239138557,
+     "edges": 0.014261896724706014,
+     "local": 0.0030793348948160806,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.001911859610117972,
+     "dist": 0.009132973872767694,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.197
+    },
+    {
+     "ssim": 0.0005397200584411621,
+     "hist": 0.026269237387344713,
+     "edges": 0.01089541294171359,
+     "local": 0.00310622986095647,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0019165362464264035,
+     "dist": 0.008526715041630951,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.196
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.009498290230616083,
+   "ssim": 0.0006962021191914877,
+   "hist": 0.02648864276363332,
+   "edges": 0.013108487743146177,
+   "local": 0.004566678311675787,
+   "mean_abs": 0.001977288474639257,
+   "worst_t": 0.5,
+   "worst_dist": 0.010835181777449604
+  },
+  {
+   "id": "2189783622",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0002646446228027344,
+     "hist": 0.02313765211280571,
+     "edges": 0.023154836528439526,
+     "local": 0.002841318647066752,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0012839889386668801,
+     "dist": 0.010190286709209894,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 0.965
+    },
+    {
+     "ssim": 0.00015097856521606445,
+     "hist": 0.021476549551719657,
+     "edges": 0.021143948578310368,
+     "local": 0.0028293695456037917,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.00108689337503165,
+     "dist": 0.009418204059251962,
+     "t": 2.0,
+     "t_ours": 2.5,
+     "we_scene_time": 2.462
+    },
+    {
+     "ssim": 0.00018769502639770508,
+     "hist": 0.022643020596489847,
+     "edges": 0.016656283327533328,
+     "local": 0.0031156573289384446,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0011947409948334098,
+     "dist": 0.00885086649140548,
+     "t": 5.0,
+     "t_ours": 5.5,
+     "we_scene_time": 5.462
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.009486452419955778,
+   "ssim": 0.00020110607147216797,
+   "hist": 0.02241907408700507,
+   "edges": 0.020318356144761074,
+   "local": 0.0029287818405363294,
+   "mean_abs": 0.00118854110284398,
+   "worst_t": 0.5,
+   "worst_dist": 0.010190286709209894
+  },
+  {
+   "id": "1174926427",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.004045426845550537,
+     "hist": 0.01093168438084776,
+     "edges": 0.0002660281989891322,
+     "local": 0.010218534182058647,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0011661682510748506,
+     "dist": 0.006518730824250134,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.66
+    },
+    {
+     "ssim": 0.007125556468963623,
+     "hist": 0.011131041851538003,
+     "edges": 0.005557025668166182,
+     "local": 0.03169400815386325,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.0012405043235048652,
+     "dist": 0.014983482890788899,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.196
+    },
+    {
+     "ssim": 0.0031284689903259277,
+     "hist": 0.01064340667431636,
+     "edges": 0.0015946139996306785,
+     "local": 0.0071864723989468375,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.001038340968079865,
+     "dist": 0.005542086551571237,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.161
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.009014766755536757,
+   "ssim": 0.004766484101613362,
+   "hist": 0.010902044302234041,
+   "edges": 0.002472555955595331,
+   "local": 0.016366338244956247,
+   "mean_abs": 0.0011483378475531936,
+   "worst_t": 2.0,
+   "worst_dist": 0.014983482890788899
+  },
+  {
+   "id": "3134525336",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00041091442108154297,
+     "hist": 0.014199249706242936,
+     "edges": 0.02503539746385841,
+     "local": 0.004163506945284705,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0011589700588956475,
+     "dist": 0.009219255843930144,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.695
+    },
+    {
+     "ssim": 0.0007293820381164551,
+     "hist": 0.015499678249807284,
+     "edges": 0.014804833032772469,
+     "local": 0.00529325008392334,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.001225814688950777,
+     "dist": 0.007867691893127889,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.198
+    },
+    {
+     "ssim": 0.0011350512504577637,
+     "hist": 0.013764204035646217,
+     "edges": 0.019418088856898774,
+     "local": 0.007216413815816243,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0012931894743815064,
+     "dist": 0.0091418980983912,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.196
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.00874294861181641,
+   "ssim": 0.0007584492365519205,
+   "hist": 0.014487710663898812,
+   "edges": 0.01975277311784322,
+   "local": 0.005557723615008096,
+   "mean_abs": 0.0012259914074093103,
+   "worst_t": 0.5,
+   "worst_dist": 0.009219255843930144
+  },
+  {
+   "id": "3749550751",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0012047886848449707,
+     "hist": 0.012318173023269813,
+     "edges": 0.017220526012377002,
+     "local": 0.008814195714270076,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0019737505353987217,
+     "dist": 0.008913435126863878,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.495
+    },
+    {
+     "ssim": 0.0013685226440429688,
+     "hist": 0.012119596941061083,
+     "edges": 0.016078568367772883,
+     "local": 0.008747259775797525,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.0019936535973101854,
+     "dist": 0.008674367787718941,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.998
+    },
+    {
+     "ssim": 0.0010294318199157715,
+     "hist": 0.011704626911942637,
+     "edges": 0.016140743161383253,
+     "local": 0.005896558388485573,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.0019538779743015766,
+     "dist": 0.007646871077185581,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.996
+    }
+   ],
+   "props": [],
+   "pointer": "2996,1390:3000,1394",
+   "window": [
+    1920,
+    892
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.008411557997256134,
+   "ssim": 0.0012009143829345703,
+   "hist": 0.012047465625424511,
+   "edges": 0.016479945847177713,
+   "local": 0.007819337959517725,
+   "mean_abs": 0.0019737607023368278,
+   "worst_t": 0.5,
+   "worst_dist": 0.008913435126863878
+  },
+  {
+   "id": "3104056709",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.001710057258605957,
+     "hist": 0.02729264101112336,
+     "edges": 0.003706929306275364,
+     "local": 0.004782213519016902,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.004539384040981531,
+     "dist": 0.008147595296766601,
+     "t": 0.5,
+     "t_ours": 1.4,
+     "we_scene_time": 1.43
+    },
+    {
+     "ssim": 0.0018171072006225586,
+     "hist": 0.02549328745038664,
+     "edges": 0.006024134268089898,
+     "local": 0.006088177324272692,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.004558695014566183,
+     "dist": 0.008675069701163884,
+     "t": 2.0,
+     "t_ours": 2.9,
+     "we_scene_time": 2.93
+    },
+    {
+     "ssim": 0.0017484426498413086,
+     "hist": 0.02747785619462466,
+     "edges": 0.004243339711905492,
+     "local": 0.005069560487754643,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.0047817537561059,
+     "dist": 0.008389640122584816,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.927
+    }
+   ],
+   "props": [],
+   "pointer": "3729,2096:3733,2100",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.008404101706838434,
+   "ssim": 0.0017585357030232747,
+   "hist": 0.026754594885378218,
+   "edges": 0.0046581344287569175,
+   "local": 0.005313317110348079,
+   "mean_abs": 0.004626610937217872,
+   "worst_t": 2.0,
+   "worst_dist": 0.008675069701163884
+  },
+  {
+   "id": "2290002190",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0016140341758728027,
+     "hist": 0.01551406135121475,
+     "edges": 0.006038768438907827,
+     "local": 0.007297678229709466,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.003423654939979315,
+     "dist": 0.006984079679699196,
+     "t": 0.5,
+     "t_ours": 1.2,
+     "we_scene_time": 1.165
+    },
+    {
+     "ssim": 0.0017325282096862793,
+     "hist": 0.0155446535448438,
+     "edges": 0.010986823508358445,
+     "local": 0.007961081185688576,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0035177820827811956,
+     "dist": 0.008214378229252906,
+     "t": 2.0,
+     "t_ours": 2.7,
+     "we_scene_time": 2.661
+    },
+    {
+     "ssim": 0.0024703145027160645,
+     "hist": 0.014329529795961075,
+     "edges": 0.013321757459802241,
+     "local": 0.007397515932098031,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.003648315090686083,
+     "dist": 0.008490606581596893,
+     "t": 5.0,
+     "t_ours": 5.7,
+     "we_scene_time": 5.66
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "fixed 2026-11-11 (fork, a constant takes the declaration its pass compiles): its cloud shadows (stock `clouds`, PERSPECTIVE 1) stood still in ours \u2014 the vertex shader's vec2 `g_CloudSpeeds` was uploaded into the fragment shader's vec4 and GL refused it. Mean |WE \u2212 ours| at 0.5 / 2 / 5 s 5.5 / 9.8 / 15.1 \u2192 2.2 / 2.3 / 2.3. 0.102 \u2192 0.008.",
+   "trust": "FXC",
+   "dist": 0.007896354830182998,
+   "ssim": 0.001938958962758382,
+   "hist": 0.015129414897339877,
+   "edges": 0.010115783135689504,
+   "local": 0.007552091782498691,
+   "mean_abs": 0.0035299173711488643,
+   "worst_t": 5.0,
+   "worst_dist": 0.008490606581596893
+  },
+  {
+   "id": "3291729669",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00589144229888916,
+     "hist": 0.006348219901544126,
+     "edges": 0.0,
+     "local": 0.013902326427341904,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.0013345773331820965,
+     "dist": 0.007207774598178144,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.529
+    },
+    {
+     "ssim": 0.006485104560852051,
+     "hist": 0.0064119120063483885,
+     "edges": 0.0,
+     "local": 0.01527218684592905,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0013520698994398117,
+     "dist": 0.007809569823304008,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.997
+    },
+    {
+     "ssim": 0.00699615478515625,
+     "hist": 0.006436710058813321,
+     "edges": 0.0,
+     "local": 0.015937931015893508,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0013803134206682444,
+     "dist": 0.008167567752077592,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.995
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.007728304057853248,
+   "ssim": 0.00645756721496582,
+   "hist": 0.006398947322235279,
+   "edges": 0.0,
+   "local": 0.015037481429721486,
+   "mean_abs": 0.0013556535510967176,
+   "worst_t": 5.0,
+   "worst_dist": 0.008167567752077592
+  },
+  {
+   "id": "2388299037",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0003986954689025879,
+     "hist": 0.010607726564306311,
+     "edges": 0.02106541983885435,
+     "local": 0.0039550447060416145,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.001177412923425436,
+     "dist": 0.007640751333115392,
+     "t": 0.5,
+     "t_ours": 0.8,
+     "we_scene_time": 0.792
+    },
+    {
+     "ssim": 0.0003509521484375,
+     "hist": 0.012990660980682876,
+     "edges": 0.019763609895254164,
+     "local": 0.004526552278548479,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.001318486058153212,
+     "dist": 0.008014105503283202,
+     "t": 2.0,
+     "t_ours": 2.2,
+     "we_scene_time": 2.231
+    },
+    {
+     "ssim": 0.0004023909568786621,
+     "hist": 0.011838474716058115,
+     "edges": 0.01218377838694873,
+     "local": 0.004467227418596546,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.0013116515474393964,
+     "dist": 0.006265336133243932,
+     "t": 5.0,
+     "t_ours": 5.2,
+     "we_scene_time": 5.229
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.007306730989880842,
+   "ssim": 0.0003840128580729167,
+   "hist": 0.0118122874203491,
+   "edges": 0.017670936040352414,
+   "local": 0.004316274801062214,
+   "mean_abs": 0.0012691835096726816,
+   "worst_t": 2.0,
+   "worst_dist": 0.008014105503283202
+  },
+  {
+   "id": "2219762084",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0037781596183776855,
+     "hist": 0.0073199295680586385,
+     "edges": 0.0023545240497814257,
+     "local": 0.009883873992900286,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0009713541949167848,
+     "dist": 0.006033500806951404,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.727
+    },
+    {
+     "ssim": 0.0040514469146728516,
+     "hist": 0.00924359471304779,
+     "edges": 0.0,
+     "local": 0.01293737358840493,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0010200012475252151,
+     "dist": 0.006945365093532892,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.229
+    },
+    {
+     "ssim": 0.004267454147338867,
+     "hist": 0.006185659102202771,
+     "edges": 0.006734006734006703,
+     "local": 0.013818350106400127,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0010096378391608596,
+     "dist": 0.008009674443363594,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.227
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.006996180114615963,
+   "ssim": 0.004032353560129802,
+   "hist": 0.0075830611277697335,
+   "edges": 0.00302951026126271,
+   "local": 0.012213199229235113,
+   "mean_abs": 0.0010003310938676198,
+   "worst_t": 5.0,
+   "worst_dist": 0.008009674443363594
+  },
+  {
+   "id": "2134765860",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00104600191116333,
+     "hist": 0.013924920194910866,
+     "edges": 0.006974318708871996,
+     "local": 0.007830937703450521,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0012001983122900128,
+     "dist": 0.006842929665140728,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 0.965
+    },
+    {
+     "ssim": 0.001116931438446045,
+     "hist": 0.014344874715682373,
+     "edges": 0.006973983237216541,
+     "local": 0.008252527928561904,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.001197860692627728,
+     "dist": 0.007074609400682168,
+     "t": 2.0,
+     "t_ours": 2.4,
+     "we_scene_time": 2.363
+    },
+    {
+     "ssim": 0.0011666417121887207,
+     "hist": 0.013561364722853866,
+     "edges": 0.006981146534902227,
+     "local": 0.008341073989868164,
+     "worst_cell": [
+      1,
+      2
+     ],
+     "mean_abs": 0.0012059505097568035,
+     "dist": 0.006960816962168284,
+     "t": 5.0,
+     "t_ours": 5.4,
+     "we_scene_time": 5.363
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "a room whose daylight follows the wall clock. Was 0.46: WE captured by day, ours rendered in the evening. Recaptured in the evening and rendered at the capture's wall time (libfaketime; the worker takes a fake clock): 0.005.",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.006959452009330393,
+   "ssim": 0.0011098583539326985,
+   "hist": 0.013943719877815702,
+   "edges": 0.0069764828269969215,
+   "local": 0.00814151320729353,
+   "mean_abs": 0.0012013365048915148,
+   "worst_t": 2.0,
+   "worst_dist": 0.007074609400682168
+  },
+  {
+   "id": "3422383300",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 7.170438766479492e-05,
+     "hist": 0.01202125387227057,
+     "edges": 0.017589052437543162,
+     "local": 0.0022746060276404023,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0008004760602489114,
+     "dist": 0.006625954386554306,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.695
+    },
+    {
+     "ssim": 7.456541061401367e-05,
+     "hist": 0.011389347355021848,
+     "edges": 0.02532965697115841,
+     "local": 0.00227225242027392,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0007947494741529226,
+     "dist": 0.008047846214502432,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.197
+    },
+    {
+     "ssim": 7.325410842895508e-05,
+     "hist": 0.008838745534383819,
+     "edges": 0.016607523066004326,
+     "local": 0.0022805730889861784,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.0007899872143752873,
+     "dist": 0.00579540187930217,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.197
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.006823067493452969,
+   "ssim": 7.317463556925456e-05,
+   "hist": 0.010749782253892079,
+   "edges": 0.019842077491568633,
+   "local": 0.002275810512300167,
+   "mean_abs": 0.0007950709162590405,
+   "worst_t": 2.0,
+   "worst_dist": 0.008047846214502432
+  },
+  {
+   "id": "3387433141",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0013235807418823242,
+     "hist": 0.008116160569119592,
+     "edges": 0.018291449013400407,
+     "local": 0.00453082059781688,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.001080548157915473,
+     "dist": 0.007037842318413761,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.495
+    },
+    {
+     "ssim": 0.0019385218620300293,
+     "hist": 0.009317573305424931,
+     "edges": 0.016937203842400717,
+     "local": 0.004968641519856949,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.001198603305965662,
+     "dist": 0.0073231044441312235,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.963
+    },
+    {
+     "ssim": 0.0016797780990600586,
+     "hist": 0.00543867248807015,
+     "edges": 0.008943109187213416,
+     "local": 0.005514635025368382,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.0011346611427143216,
+     "dist": 0.005034680272385245,
+     "t": 5.0,
+     "t_ours": 5.9,
+     "we_scene_time": 5.927
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.006465209011643411,
+   "ssim": 0.0016472935676574707,
+   "hist": 0.0076241354542048905,
+   "edges": 0.014723920681004846,
+   "local": 0.005004699047680737,
+   "mean_abs": 0.0011379375355318189,
+   "worst_t": 2.0,
+   "worst_dist": 0.0073231044441312235
+  },
+  {
+   "id": "1797172968",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00029271841049194336,
+     "hist": 0.020651481498472107,
+     "edges": 0.0038152418206937044,
+     "local": 0.002866089344024658,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.002457584720104933,
+     "dist": 0.005840986990188143,
+     "t": 0.5,
+     "t_ours": 1.8,
+     "we_scene_time": 1.828
+    },
+    {
+     "ssim": 0.0003777742385864258,
+     "hist": 0.021127635867256987,
+     "edges": 0.0037241609982734403,
+     "local": 0.0030182599633311233,
+     "worst_cell": [
+      0,
+      1
+     ],
+     "mean_abs": 0.002450124127790332,
+     "dist": 0.005989169633681351,
+     "t": 2.0,
+     "t_ours": 3.3,
+     "we_scene_time": 3.33
+    },
+    {
+     "ssim": 0.00046509504318237305,
+     "hist": 0.021164632884630274,
+     "edges": 0.005649033149747629,
+     "local": 0.0037978225542853274,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.0025253198109567165,
+     "dist": 0.006641608486115891,
+     "t": 5.0,
+     "t_ours": 6.3,
+     "we_scene_time": 6.328
+    }
+   ],
+   "props": [],
+   "pointer": "956,596:960,600",
+   "window": [
+    1728,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.006157255036661795,
+   "ssim": 0.00037852923075358075,
+   "hist": 0.020981250083453123,
+   "edges": 0.004396145322904925,
+   "local": 0.003227390620547036,
+   "mean_abs": 0.002477676219617327,
+   "worst_t": 5.0,
+   "worst_dist": 0.006641608486115891
+  },
+  {
+   "id": "3366535880",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00012236833572387695,
+     "hist": 0.017213540569496602,
+     "edges": 0.0068745469661982694,
+     "local": 0.003063112497329712,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.001519202021881938,
+     "dist": 0.0057732617570550515,
+     "t": 0.5,
+     "t_ours": 1.5,
+     "we_scene_time": 1.529
+    },
+    {
+     "ssim": 9.566545486450195e-05,
+     "hist": 0.018359481432711874,
+     "edges": 0.005978089368536721,
+     "local": 0.0030294557412465415,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.001481420360505581,
+     "dist": 0.005805050519083033,
+     "t": 2.0,
+     "t_ours": 3.0,
+     "we_scene_time": 2.964
+    },
+    {
+     "ssim": 0.00010877847671508789,
+     "hist": 0.019539411769625516,
+     "edges": 0.005746182633271313,
+     "local": 0.0031359046697616577,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.0015200364869087934,
+     "dist": 0.00603052382452239,
+     "t": 5.0,
+     "t_ours": 6.0,
+     "we_scene_time": 5.997
+    }
+   ],
+   "props": [],
+   "pointer": "1916,1076:1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.005869612033553492,
+   "ssim": 0.00010893742243448894,
+   "hist": 0.018370811257278,
+   "edges": 0.0061996063226687674,
+   "local": 0.0030761576361126373,
+   "mean_abs": 0.0015068862897654374,
+   "worst_t": 5.0,
+   "worst_dist": 0.00603052382452239
+  },
+  {
+   "id": "2325974975",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.00011533498764038086,
+     "hist": 0.014267151962520241,
+     "edges": 0.009286602274402922,
+     "local": 0.0017666287021711469,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0009155063307844102,
+     "dist": 0.005275339954328091,
+     "t": 0.5,
+     "t_ours": 0.7,
+     "we_scene_time": 0.725
+    },
+    {
+     "ssim": 0.00011968612670898438,
+     "hist": 0.016336389396826037,
+     "edges": 0.00932510255921526,
+     "local": 0.0017699731591468055,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0009600963094271719,
+     "dist": 0.005699196176964997,
+     "t": 2.0,
+     "t_ours": 2.2,
+     "we_scene_time": 2.231
+    },
+    {
+     "ssim": 0.00011473894119262695,
+     "hist": 0.016211110660461166,
+     "edges": 0.009122404948837537,
+     "local": 0.0017640259660159547,
+     "worst_cell": [
+      3,
+      2
+     ],
+     "mean_abs": 0.0009167617536149919,
+     "dist": 0.005630332594022315,
+     "t": 5.0,
+     "t_ours": 5.2,
+     "we_scene_time": 5.231
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.005534956241771801,
+   "ssim": 0.00011658668518066406,
+   "hist": 0.015604884006602482,
+   "edges": 0.009244703260818573,
+   "local": 0.0017668759424446356,
+   "mean_abs": 0.0009307881312755247,
+   "worst_t": 2.0,
+   "worst_dist": 0.005699196176964997
+  },
+  {
+   "id": "2371103399",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.000418245792388916,
+     "hist": 0.016834575940359368,
+     "edges": 0.0046434663102332685,
+     "local": 0.0031325892002011337,
+     "worst_cell": [
+      1,
+      1
+     ],
+     "mean_abs": 0.0011742118513211608,
+     "dist": 0.005360858947895543,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.697
+    },
+    {
+     "ssim": 0.00024068355560302734,
+     "hist": 0.016739742855102414,
+     "edges": 0.007435357542511123,
+     "local": 0.0018396311594794195,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.0011310874251648784,
+     "dist": 0.005459114494047442,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.197
+    },
+    {
+     "ssim": 0.0002688169479370117,
+     "hist": 0.018495035125802504,
+     "edges": 0.004321290150131385,
+     "local": 0.0017953647572236757,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.0012353562051430345,
+     "dist": 0.0051825195667349845,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.196
+    }
+   ],
+   "props": [],
+   "pointer": "1916,536:1920,540",
+   "window": [
+    1920,
+    540
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.00533416433622599,
+   "ssim": 0.0003092487653096517,
+   "hist": 0.017356451307088096,
+   "edges": 0.005466704667625259,
+   "local": 0.002255861705634743,
+   "mean_abs": 0.0011802184938763578,
+   "worst_t": 2.0,
+   "worst_dist": 0.005459114494047442
+  },
+  {
+   "id": "1160682576",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 6.711483001708984e-05,
+     "hist": 0.014038006360390966,
+     "edges": 0.006483583640535917,
+     "local": 0.0006142242054920644,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.0004764426266774535,
+     "dist": 0.004308719710838123,
+     "t": 0.5,
+     "t_ours": 1.2,
+     "we_scene_time": 1.164
+    },
+    {
+     "ssim": 6.920099258422852e-05,
+     "hist": 0.01398386269144089,
+     "edges": 0.011058826027635194,
+     "local": 0.0005746947329801818,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.0005157311679795384,
+     "dist": 0.00520170646148454,
+     "t": 2.0,
+     "t_ours": 2.6,
+     "we_scene_time": 2.594
+    },
+    {
+     "ssim": 7.2479248046875e-05,
+     "hist": 0.013793372572692487,
+     "edges": 0.0073317293088625,
+     "local": 0.0005783455271739513,
+     "worst_cell": [
+      2,
+      0
+     ],
+     "mean_abs": 0.0005431922036223114,
+     "dist": 0.004420267808877246,
+     "t": 5.0,
+     "t_ours": 5.6,
+     "we_scene_time": 5.592
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.004643564660399969,
+   "ssim": 6.959835688273112e-05,
+   "hist": 0.013938413874841448,
+   "edges": 0.008291379659011203,
+   "local": 0.0005890881552153992,
+   "mean_abs": 0.0005117886660931011,
+   "worst_t": 2.0,
+   "worst_dist": 0.00520170646148454
+  },
+  {
+   "id": "1864677589",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.0001729726791381836,
+     "hist": 0.01000746477889181,
+     "edges": 0.0046826424034983605,
+     "local": 0.0013380795862758532,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0007023283396847546,
+     "dist": 0.0033913371161022453,
+     "t": 0.5,
+     "t_ours": 1.7,
+     "we_scene_time": 1.695
+    },
+    {
+     "ssim": 4.881620407104492e-05,
+     "hist": 0.009102432879106842,
+     "edges": 0.004827451376371528,
+     "local": 0.00036935839549793553,
+     "worst_cell": [
+      2,
+      3
+     ],
+     "mean_abs": 0.0006688016001135111,
+     "dist": 0.002911429230966368,
+     "t": 2.0,
+     "t_ours": 3.2,
+     "we_scene_time": 3.164
+    },
+    {
+     "ssim": 4.470348358154297e-05,
+     "hist": 0.008279390223926073,
+     "edges": 0.006309268536298429,
+     "local": 0.00028108722957161564,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.0006648682174272835,
+     "dist": 0.0030154689659908484,
+     "t": 5.0,
+     "t_ours": 6.2,
+     "we_scene_time": 6.162
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.0031060784376864873,
+   "ssim": 8.883078893025716e-05,
+   "hist": 0.009129762627308241,
+   "edges": 0.005273120772056106,
+   "local": 0.0006628417371151348,
+   "mean_abs": 0.0006786660524085164,
+   "worst_t": 0.5,
+   "worst_dist": 0.0033913371161022453
+  },
+  {
+   "id": "3013489778",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 3.5762786865234375e-06,
+     "hist": 0.0018571243947148924,
+     "edges": 0.008581235697940448,
+     "local": 0.0001284612541591438,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 8.113806688925251e-05,
+     "dist": 0.0021272832783847686,
+     "t": 0.5,
+     "t_ours": 1.0,
+     "we_scene_time": 0.999
+    },
+    {
+     "ssim": 1.4722347259521484e-05,
+     "hist": 0.00479370027356592,
+     "edges": 0.009631351710395308,
+     "local": 0.0006432433923085531,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.00025477458257228136,
+     "dist": 0.003082400118662668,
+     "t": 2.0,
+     "t_ours": 2.5,
+     "we_scene_time": 2.53
+    },
+    {
+     "ssim": 6.556510925292969e-06,
+     "hist": 0.0022379942652030124,
+     "edges": 0.013551843681058995,
+     "local": 0.00017500255004658052,
+     "worst_cell": [
+      1,
+      0
+     ],
+     "mean_abs": 0.00015389265900012106,
+     "dist": 0.003212435307543964,
+     "t": 5.0,
+     "t_ours": 5.5,
+     "we_scene_time": 5.529
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "ok",
+   "note": "fixed 2026-11-10 (fork 0118, 7bbd6de): 0.125 \u2192 0.003. The girl (puppet layer 161) didn't pulse: WE runs a puppet's effects on its image (texture space) and draws the mesh last, ours ran them on the posed layer. Measured with private copies whose pulse mask is a ramp in u, then v (`captures/var/v3013-rampx`, `-rampy`): each posed pixel samples its part's place in the 4380 \u00d7 2998 atlas (the face u 0.31\u20130.40, constant per part), where ours sampled the layer's smooth position and fell between the mask's blobs (painted for layer 18, reused on 161).",
+   "trust": "FXC, fonts: the scene's own, clock: Wine's",
+   "dist": 0.002807372901530467,
+   "ssim": 8.285045623779297e-06,
+   "hist": 0.0029629396444946082,
+   "edges": 0.010588143696464917,
+   "local": 0.00031556906550475914,
+   "mean_abs": 0.00016326843615388498,
+   "worst_t": 5.0,
+   "worst_dist": 0.003212435307543964
+  },
+  {
+   "id": "1264170639",
+   "exit": 0,
+   "invalid": "",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 9.357929229736328e-06,
+     "hist": 0.005129437663961683,
+     "edges": 0.0,
+     "local": 0.00024188227689592168,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.0002078891557175666,
+     "dist": 0.001101259594630034,
+     "t": 0.5,
+     "t_ours": 1.3,
+     "we_scene_time": 1.297
+    },
+    {
+     "ssim": 8.940696716308594e-06,
+     "hist": 0.005300570852203342,
+     "edges": 0.0,
+     "local": 0.0002445710973309663,
+     "worst_cell": [
+      0,
+      3
+     ],
+     "mean_abs": 0.00017793943698052317,
+     "dist": 0.0011361677086548507,
+     "t": 2.0,
+     "t_ours": 2.8,
+     "we_scene_time": 2.76
+    },
+    {
+     "ssim": 1.919269561767578e-05,
+     "hist": 0.006049590017376952,
+     "edges": 0.0,
+     "local": 0.0003927151265088469,
+     "worst_cell": [
+      2,
+      2
+     ],
+     "mean_abs": 0.00027554851840250194,
+     "dist": 0.0013334903501133473,
+     "t": 5.0,
+     "t_ours": 5.8,
+     "we_scene_time": 5.758
+    }
+   ],
+   "props": [],
+   "pointer": "956,536:960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "FXC",
+   "dist": 0.0011903058844660774,
+   "ssim": 1.24971071879069e-05,
+   "hist": 0.005493199511180658,
+   "edges": 0.0,
+   "local": 0.00029305616691191163,
+   "mean_abs": 0.00022045903703353056,
+   "worst_t": 5.0,
+   "worst_dist": 0.0013334903501133473
+  },
+  {
+   "id": "3243449890",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9924376606941223,
+     "hist": 0.8994161710700662,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.22271940112113953,
+     "dist": 0.9776145324222499,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.9921748638153076,
+     "hist": 0.9020622656619715,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.21446269750595093,
+     "dist": 0.9780649122769866,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.8946056365966797,
+     "hist": 0.8959465083881314,
+     "edges": 0.5670367889874262,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.6131064295768738,
+     "dist": 0.8609783504541154,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for consolas, clock: Wine's, video: crashed",
+   "dist": 0.9388859317177839,
+   "ssim": 0.9597393870353699,
+   "hist": 0.8991416483733897,
+   "edges": 0.8556789296624755,
+   "local": 1.0,
+   "mean_abs": 0.3500961760679881,
+   "worst_t": 2.0,
+   "worst_dist": 0.9780649122769866
+  },
+  {
+   "id": "3046119914",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9989508986473083,
+     "hist": 0.9291860391337579,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.43546271324157715,
+     "dist": 0.9855224774209441,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.9989690184593201,
+     "hist": 0.9291860391024864,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.43581390380859375,
+     "dist": 0.9855279133582933,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.7075417041778564,
+     "hist": 0.8580561959314152,
+     "edges": 0.5093563789418717,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.49467340111732483,
+     "dist": 0.7857450262280143,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, video: crashed",
+   "dist": 0.918931805669084,
+   "ssim": 0.9018205404281616,
+   "hist": 0.9054760913892199,
+   "edges": 0.8364521263139572,
+   "local": 1.0,
+   "mean_abs": 0.4553166727224986,
+   "worst_t": 2.0,
+   "worst_dist": 0.9855279133582933
+  },
+  {
+   "id": "3426575339",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9969809055328369,
+     "hist": 0.980308537414942,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.32624220848083496,
+     "dist": 0.9951559791428395,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.877795398235321,
+     "hist": 0.9047428018771493,
+     "edges": 0.583340502147965,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.6015219688415527,
+     "dist": 0.8609552802756191,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.8790637850761414,
+     "hist": 0.9058156810474538,
+     "edges": 0.5909010539542884,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.6017034649848938,
+     "dist": 0.8630624825231908,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, video: crashed",
+   "dist": 0.9063912473138832,
+   "ssim": 0.9179466962814331,
+   "hist": 0.9302890067798483,
+   "edges": 0.7247471853674178,
+   "local": 1.0,
+   "mean_abs": 0.5098225474357605,
+   "worst_t": 0.5,
+   "worst_dist": 0.9951559791428395
+  },
+  {
+   "id": "3089687436",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9985532760620117,
+     "hist": 1.0,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.40943682193756104,
+     "dist": 0.9995659828186035,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.8139813542366028,
+     "hist": 0.9398210855059518,
+     "edges": 0.6107367462200155,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.5236096382141113,
+     "dist": 0.8543059726161744,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.819001317024231,
+     "hist": 0.9401938636931638,
+     "edges": 0.5843310177281402,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.5229231715202332,
+     "dist": 0.85060537139153,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
+   "dist": 0.901492442275436,
+   "ssim": 0.8771786491076151,
+   "hist": 0.9600049830663719,
+   "edges": 0.7316892546493853,
+   "local": 1.0,
+   "mean_abs": 0.4853232105573018,
+   "worst_t": 0.5,
+   "worst_dist": 0.9995659828186035
+  },
+  {
+   "id": "2886313155",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9993258714675903,
+     "hist": 0.9921567417567677,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3588296175003052,
+     "dist": 0.9982291097916307,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.4831593632698059,
+     "hist": 0.938912523113356,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.33566680550575256,
+     "dist": 0.8327303136036129,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.7527469396591187,
+     "hist": 0.9740009573365533,
+     "edges": 0.6969992067182755,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.5735560655593872,
+     "dist": 0.8600241147087013,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, video: crashed",
+   "dist": 0.896994512701315,
+   "ssim": 0.745077391465505,
+   "hist": 0.9683567407355591,
+   "edges": 0.8989997355727585,
+   "local": 1.0,
+   "mean_abs": 0.4226841628551483,
+   "worst_t": 0.5,
+   "worst_dist": 0.9982291097916307
+  },
+  {
+   "id": "2883756643",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9993667602539062,
+     "hist": 1.0,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.5239018797874451,
+     "dist": 0.9998100280761719,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.7744809985160828,
+     "hist": 0.8810187265554232,
+     "edges": 0.6546970906483706,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.43213799595832825,
+     "dist": 0.8394874629955835,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.7878327369689941,
+     "hist": 0.9050341373388856,
+     "edges": 0.6690681181188931,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.4503237009048462,
+     "dist": 0.851170272182254,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "960,540",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, fonts: the scene's own, clock: Wine's, video: crashed",
+   "dist": 0.8968225877513364,
+   "ssim": 0.853893498579661,
+   "hist": 0.9286842879647695,
+   "edges": 0.7745884029224213,
+   "local": 1.0,
+   "mean_abs": 0.46878785888353985,
+   "worst_t": 0.5,
+   "worst_dist": 0.9998100280761719
+  },
+  {
+   "id": "3326873240",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9984650015830994,
+     "hist": 0.9973740744475671,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.5497885942459106,
+     "dist": 0.9990143153644432,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.724584698677063,
+     "hist": 0.9094582485872854,
+     "edges": 0.7019136923514078,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.4044194519519806,
+     "dist": 0.8396497977908575,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.7398227453231812,
+     "hist": 0.8913432373914058,
+     "edges": 0.6649811007184767,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3533231317996979,
+     "dist": 0.8332116912189309,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, fonts: the scene's own, clock: Wine's, video: crashed",
+   "dist": 0.8906252681247439,
+   "ssim": 0.8209574818611145,
+   "hist": 0.9327251868087528,
+   "edges": 0.7889649310232949,
+   "local": 1.0,
+   "mean_abs": 0.43584372599919635,
+   "worst_t": 0.5,
+   "worst_dist": 0.9990143153644432
+  },
+  {
+   "id": "3556794116",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.6442466974258423,
+     "hist": 0.9963847829199284,
+     "edges": 0.8292687890484557,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.42935889959335327,
+     "dist": 0.8584047236214295,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.6605629920959473,
+     "hist": 1.0,
+     "edges": 0.7614487619271874,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.45352277159690857,
+     "dist": 0.8504586500142217,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.6384037733078003,
+     "hist": 0.9980365468463717,
+     "edges": 0.819895099789975,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.4331015348434448,
+     "dist": 0.8551074613196095,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
+   "dist": 0.8546569449850869,
+   "ssim": 0.6477378209431967,
+   "hist": 0.9981404432554334,
+   "edges": 0.8035375502552059,
+   "local": 1.0,
+   "mean_abs": 0.4386610686779022,
+   "worst_t": 0.5,
+   "worst_dist": 0.8584047236214295
+  },
+  {
+   "id": "2890767643",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3851824402809143,
+     "hist": 1.0,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.1905031055212021,
+     "dist": 0.8155547320842743,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.6003791689872742,
+     "hist": 0.9834779408099531,
+     "edges": 0.7859331938643961,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3540586829185486,
+     "dist": 0.833995977631052,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.6434793472290039,
+     "hist": 0.9892433917928102,
+     "edges": 0.7516501825282282,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.37557724118232727,
+     "dist": 0.8412225190329089,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for consolas, clock: Wine's, video: crashed",
+   "dist": 0.8302577429160785,
+   "ssim": 0.5430136521657308,
+   "hist": 0.9909071108675879,
+   "edges": 0.8458611254642081,
+   "local": 1.0,
+   "mean_abs": 0.306713009874026,
+   "worst_t": 5.0,
+   "worst_dist": 0.8412225190329089
+  },
+  {
+   "id": "3028473503",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3338159918785095,
+     "hist": 0.9976579005909709,
+     "edges": 1.0,
+     "local": 0.9515754580497742,
+     "worst_cell": [
+      0,
+      0
+     ],
+     "mean_abs": 0.20752376317977905,
+     "dist": 0.7851490150966793,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.5272624492645264,
+     "hist": 0.9494200987097923,
+     "edges": 0.8839736419642185,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.1777312010526657,
+     "dist": 0.8248574829141601,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.5937224626541138,
+     "hist": 0.9540450175334563,
+     "edges": 0.8434116377436465,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      0
+     ],
+     "mean_abs": 0.20247524976730347,
+     "dist": 0.8376080698516547,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1920,1080",
+   "window": [
+    1920,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for arial, clock: Wine's, video: crashed",
+   "dist": 0.8158715226208314,
+   "ssim": 0.48493363459904987,
+   "hist": 0.9670410056114065,
+   "edges": 0.9091284265692883,
+   "local": 0.9838584860165914,
+   "mean_abs": 0.19591007133324942,
+   "worst_t": 5.0,
+   "worst_dist": 0.8376080698516547
+  },
+  {
+   "id": "3432999904",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.9997705817222595,
+     "hist": 1.0,
+     "edges": 1.0,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.6055731177330017,
+     "dist": 0.9999311745166779,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.22168081998825073,
+     "hist": 0.880965148861953,
+     "edges": 1.0,
+     "local": 0.5696384956439337,
+     "worst_cell": [
+      0,
+      2
+     ],
+     "mean_abs": 0.10930859297513962,
+     "dist": 0.6135888244620459,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.5006271004676819,
+     "hist": 0.9370330011434908,
+     "edges": 0.906172397228487,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3332957923412323,
+     "dist": 0.8188292098147001,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "1170,540",
+   "window": [
+    1920,
+    886
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for comicsans, clock: Wine's, video: crashed",
+   "dist": 0.8107830695978079,
+   "ssim": 0.5740261673927307,
+   "hist": 0.9393327166684813,
+   "edges": 0.9687241324094957,
+   "local": 0.8565461652146446,
+   "mean_abs": 0.34939250101645786,
+   "worst_t": 0.5,
+   "worst_dist": 0.9999311745166779
+  },
+  {
+   "id": "3432876246",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.7052980065345764,
+     "hist": 0.83546785240423,
+     "edges": 0.6604846279432895,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3941726088523865,
+     "dist": 0.8107798980298768,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.7111022472381592,
+     "hist": 0.8224121999542061,
+     "edges": 0.6607035310387901,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3952840566635132,
+     "dist": 0.8099538203700469,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.7244063019752502,
+     "hist": 0.7798984636632896,
+     "edges": 0.6609565588495092,
+     "local": 1.0,
+     "worst_cell": [
+      3,
+      3
+     ],
+     "mean_abs": 0.3998928666114807,
+     "dist": 0.8054928950951348,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "2000,1400",
+   "window": [
+    1542,
+    1080
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, video: crashed",
+   "dist": 0.8087422044983529,
+   "ssim": 0.7136021852493286,
+   "hist": 0.8125928386739086,
+   "edges": 0.660714905943863,
+   "local": 1.0,
+   "mean_abs": 0.39644984404246014,
+   "worst_t": 0.5,
+   "worst_dist": 0.8107798980298768
+  },
+  {
+   "id": "3413117423",
+   "exit": 0,
+   "invalid": "WE crashed",
+   "times": [
+    0.5,
+    2.0,
+    5.0
+   ],
+   "pairs": [
+    {
+     "ssim": 0.3646959066390991,
+     "hist": 0.9587152785163692,
+     "edges": 1.0,
+     "local": 0.9176883498827616,
+     "worst_cell": [
+      1,
+      3
+     ],
+     "mean_abs": 0.2576754093170166,
+     "dist": 0.776458332659832,
+     "t": 0.5,
+     "t_ours": 0.5
+    },
+    {
+     "ssim": 0.5297448039054871,
+     "hist": 0.7761808955876552,
+     "edges": 0.836912932948742,
+     "local": 0.9687751034895579,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.12988068163394928,
+     "dist": 0.7721747379257929,
+     "t": 2.0,
+     "t_ours": 2.0
+    },
+    {
+     "ssim": 0.5311198234558105,
+     "hist": 0.7741838537490356,
+     "edges": 0.8321069388786746,
+     "local": 0.972131942709287,
+     "worst_cell": [
+      2,
+      1
+     ],
+     "mean_abs": 0.12981921434402466,
+     "dist": 0.7722336883750713,
+     "t": 5.0,
+     "t_ours": 5.0
+    }
+   ],
+   "props": [],
+   "pointer": "2048,1080",
+   "window": [
+    1920,
+    1012
+   ],
+   "class": "",
+   "note": "",
+   "trust": "d3dc?, system fonts: Proton's stand-ins for cambria, clock: Wine's, video: crashed",
+   "dist": 0.7736222529868989,
+   "ssim": 0.4751868446667989,
+   "hist": 0.8363600092843534,
+   "edges": 0.889673290609139,
+   "local": 0.9528651320272021,
+   "mean_abs": 0.17245843509833017,
+   "worst_t": 0.5,
+   "worst_dist": 0.776458332659832
+  }
+ ]
+}

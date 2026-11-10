@@ -1,0 +1,62 @@
+{
+  "id": "1155728109",
+  "tag": "",
+  "desktop": false,
+  "kind": "ortho",
+  "canvas": [
+    1920,
+    1265
+  ],
+  "window": [
+    1640,
+    1080
+  ],
+  "we": "2.8.485",
+  "proton": "1793301796 experimental-11.0-20261027b-x86_64",
+  "props": [],
+  "pointer": "956,628:960,632",
+  "pointer_time": "0-0.3",
+  "fps": 30,
+  "d3dcompiler": "native-ms",
+  "shaders_compiled": 0,
+  "fonts": "windows",
+  "clock": "Wine wall clock",
+  "we_settings": [],
+  "gamescope_args": [],
+  "we_crashed": false,
+  "first_frame_ms": 6571,
+  "wall_ms": 12036,
+  "we_gpu_mib": 288,
+  "rss_mib": 1449,
+  "cpu_s": 22.8,
+  "shots": [
+    {
+      "t": 0.5,
+      "late_ms": 18,
+      "t_actual": 0.518,
+      "scene_time": 1.264
+    },
+    {
+      "t": 2,
+      "late_ms": 10,
+      "t_actual": 2.01,
+      "scene_time": 2.727
+    },
+    {
+      "t": 5,
+      "late_ms": 10,
+      "t_actual": 5.01,
+      "scene_time": 5.692
+    }
+  ],
+  "burst": [],
+  "captured": "2026-11-06T19:47:12+05:30",
+  "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame",
+  "scene_clock": {
+    "strip": 0.012,
+    "crop": 0.03,
+    "read": 3,
+    "of": 3,
+    "offset_median": 0.717
+  }
+}

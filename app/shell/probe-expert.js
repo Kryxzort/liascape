@@ -1,12 +1,14 @@
-// Expert tier + playlist start probe — `scripts/test-ui-matrix.sh --probe probe-expert.js` (the matrix's hermetic stack:
-// private backend + headless liascape-player + this tree's UI). Phase 3 Task 10 (plan 2026-10-29, designer call 12 + § Playlist start):
-//   1. "Show expert options" off (the default): no Expert section, no `expert` row, the toggle is in Advanced and unchecked
-//   2. on: the Expert section and its row (with the "Expert" tag) appear; the toggle persists (saved, and after a reload)
-//   3. an expert value changed, then the group hidden: the value is untouched, the "Show expert options" row carries the
-//      deviated marker; the marker's reset puts the value back and the marker goes
+// Settings levels + playlist start probe — `scripts/test-ui-matrix.sh --probe probe-expert.js` (the matrix's hermetic stack:
+// private backend + headless liascape-player + this tree's UI). Settings levels (owner 2026-11-06, web-ui.md § "Settings
+// levels") + Phase 3 Task 10 (plan 2026-10-29 § Playlist start):
+//   1. Standard is the default: the level picker sits in the top bar (Basic · Standard · Advanced · Expert), no
+//      Advanced / Expert row renders
+//   2. each level shows its own rows and every row below it (tagged Advanced / Expert); the choice is saved and survives a reload
+//   3. a changed setting a lower level hides: the value is untouched and stays live, the "tucked away" note counts it; its
+//      Show raises the level (there the row's own reset puts it back) — no bulk reset
 //   4. "When the playlist starts again": Settings (a Select + a hint per value) and the playlist modal (beside the global
 //      value it overrides; the playlist's own choice only matters under "Override global rotation settings")
-//   5. "Pause when covered": the Playback row (liascape-player), default "A fullscreen or maximized window", saved + live
+//   5. "Pause behind windows": the Playback row (liascape-player), default "A fullscreen or maximized window", saved + live
 // Exit 1 on any FAIL.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -80,56 +82,73 @@ const cell = async (name, fn) => {
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
   try {
-    // a known start: the toggle off, the expert value at its default, the start choice at its default
-    await http("POST", "/settings", { ShowExpertOptions: false, RotateWhileParked: true, GlobalPlaylistStart: "start_over", PauseWhenCovered: "maximized", AdvancedSettings: true });
+    // a known start: the default level, the expert value at its default, the start choice at its default
+    await http("POST", "/settings", { SettingsLevel: "standard", RotateWhileParked: true, GlobalPlaylistStart: "start_over", PauseWhenCovered: "maximized" });
     await loadSettings();
+    const LEVEL = (l) => js(`document.querySelector('[data-settings-level] [data-level="${l}"]')?.click(); await window.__x.sleep(500); return true`);
+    const view = () => js(`const rows = [...document.querySelectorAll(".settings .srow")];
+      return { level: document.querySelector("[data-settings-level]")?.dataset.settingsLevel ?? null, n: rows.length,
+        lv: rows.reduce((m, r) => { m[r.dataset.level] = (m[r.dataset.level] ?? 0) + 1; return m; }, {}),
+        hidden: document.querySelector("[data-hidden-changed]")?.dataset.hiddenChanged ?? null }`);
+    const has = (label) => js(`return !!window.__x.row(${JSON.stringify(label)})`);
 
-    await cell("off (default): no Expert section, no expert row, the toggle in Advanced unchecked", async () => {
+    await cell("Standard (default): the picker in the top bar, no Advanced / Expert row", async () => {
       const v = [];
-      const secs = await js(`return window.__x.sections()`);
-      if (secs.includes("Expert")) v.push(`the Expert section shows with the toggle off: ${JSON.stringify(secs)}`);
-      if (await js(`return document.querySelectorAll("[data-expert]").length`)) v.push("an expert row renders with the toggle off");
-      if (await js(`return !!window.__x.row(${JSON.stringify(EXPERT_ROW)})`)) v.push(`"${EXPERT_ROW}" renders with the toggle off`);
-      const t = await js(`return window.__x.info("Show expert options")`);
-      if (!t) v.push('no "Show expert options" row');
-      else if (t.checked !== false) v.push(`the toggle reads checked=${t.checked}`);
-      const adv = await js(`return window.__x.sections().indexOf("Advanced")`);
-      const rowsInAdv = await js(`const h = [...document.querySelectorAll(".settings .ssection")].find((s) => s.querySelector("h3")?.textContent.trim() === "Advanced"); return [...(h?.querySelectorAll(".srow") ?? [])].map((r) => window.__x.label(r))`);
-      if (adv < 0 || rowsInAdv[0] !== "Advanced settings" || rowsInAdv[1] !== "Show expert options") v.push(`Advanced's first rows ${JSON.stringify(rowsInAdv.slice(0, 3))}: "Show expert options" belongs directly under "Advanced settings"`);
+      const p = await js(`const el = document.querySelector("[data-settings-level]");
+        return el ? { inTopbar: !!el.closest(".topbar"), pills: [...el.querySelectorAll("[data-level]")].map((b) => [b.textContent.trim(), b.classList.contains("active")]) } : null`);
+      if (!p) return ["no level picker ([data-settings-level])"];
+      if (!p.inTopbar) v.push("the level picker isn't in the top bar beside the tabs");
+      if (JSON.stringify(p.pills.map((x) => x[0])) !== JSON.stringify(["Basic", "Standard", "Advanced", "Expert"])) v.push(`pills ${JSON.stringify(p.pills)}`);
+      if (p.pills.filter((x) => x[1]).map((x) => x[0]).join() !== "Standard") v.push(`active ${JSON.stringify(p.pills)}, want Standard`);
+      const w = await view();
+      if (w.lv.advanced || w.lv.expert) v.push(`Advanced / Expert rows at Standard: ${JSON.stringify(w.lv)}`);
+      if (await has(EXPERT_ROW)) v.push(`"${EXPERT_ROW}" renders at Standard`);
+      if (await field("settingsLevel") !== "standard") v.push(`settingsLevel ${await field("settingsLevel")}, want standard`);
       return v;
     });
 
-    await cell("on: the Expert section + its tagged row appear; the toggle is saved and survives a reload", async () => {
+    await cell("each level shows its rows and every row below; tagged; saved and kept over a reload", async () => {
       const v = [];
-      await js(`window.__x.row("Show expert options").querySelector("input[type=checkbox]").click(); await window.__x.sleep(500); return true`);
-      const secs = await js(`return window.__x.sections()`);
-      if (secs[secs.length - 1] !== "Expert") v.push(`sections ${JSON.stringify(secs)}: the Expert section should be last`);
+      const seen = {};
+      for (const l of ["basic", "standard", "advanced", "expert"]) {
+        await LEVEL(l); seen[l] = { ...(await view()), speed: await has("Playback speed"), hw: await has("Hardware decoding"), exp: await has(EXPERT_ROW) };
+      }
+      if (seen.basic.speed || seen.basic.lv.standard || seen.basic.lv.advanced || seen.basic.lv.expert) v.push(`Basic shows more than Basic rows: ${JSON.stringify(seen.basic.lv)}`);
+      if (!seen.standard.speed || seen.standard.hw) v.push(`Standard: "Playback speed" ${seen.standard.speed}, "Hardware decoding" ${seen.standard.hw}`);
+      if (!seen.advanced.hw || seen.advanced.exp) v.push(`Advanced: "Hardware decoding" ${seen.advanced.hw}, "${EXPERT_ROW}" ${seen.advanced.exp}`);
+      if (!seen.expert.exp) v.push(`Expert: no "${EXPERT_ROW}"`);
+      const ns = ["basic", "standard", "advanced", "expert"].map((l) => seen[l].n);
+      if (!(ns[0] < ns[1] && ns[1] < ns[2] && ns[2] < ns[3])) v.push(`row counts per level ${JSON.stringify(ns)} should grow`);
       const r = await js(`return window.__x.info(${JSON.stringify(EXPERT_ROW)})`);
-      if (!r) v.push(`no "${EXPERT_ROW}" row with the toggle on`);
-      else { if (!r.tag || !r.expert) v.push(`the expert row lacks its Expert tag (${JSON.stringify(r)})`); if (r.sel !== "Keep rotating") v.push(`its default reads ${JSON.stringify(r.sel)}, want "Keep rotating"`); }
-      if (!(await waitFor(async () => (await field("showExpertOptions")) === true, 4000))) v.push(`showExpertOptions not saved (${await field("showExpertOptions")})`);
+      if (!r?.tag || !r?.expert) v.push(`the Expert row lacks its tag (${JSON.stringify(r)})`);
+      else if (r.sel !== "Keep rotating") v.push(`its default reads ${JSON.stringify(r.sel)}, want "Keep rotating"`);
+      const hw = await js(`return window.__x.row("Hardware decoding")?.querySelector("[data-expert-tag]")?.textContent?.trim() ?? null`);
+      if (hw !== "Advanced") v.push(`"Hardware decoding" tag ${JSON.stringify(hw)}, want "Advanced"`);
+      if (!(await waitFor(async () => (await field("settingsLevel")) === "expert", 4000))) v.push(`settingsLevel not saved (${await field("settingsLevel")})`);
       await loadSettings();
-      if (!(await js(`return !!window.__x.row(${JSON.stringify(EXPERT_ROW)})`))) v.push("after a reload the Expert row is gone — the toggle did not persist");
+      if (!(await has(EXPERT_ROW))) v.push("after a reload the Expert row is gone — the level did not persist");
       return v;
     });
 
-    await cell("an expert value, then hidden: value kept, the Show-expert-options row carries the deviated marker, its reset restores", async () => {
+    await cell("a changed setting hidden by a lower level: kept and live, the note counts it, Show raises the level", async () => {
       const v = [];
+      await LEVEL("standard"); await sleep(300);
+      const n0 = +((await view()).hidden ?? 0); // the stack's own non-default hidden settings (engine, transition style, …)
+      await LEVEL("expert");
       await js(`await window.__x.select(${JSON.stringify(EXPERT_ROW)}, "Hold until a monitor returns"); return true`);
       if (!(await waitFor(async () => (await field("rotateWhileParked")) === false, 4000))) v.push(`rotateWhileParked not saved false (${await field("rotateWhileParked")})`);
-      let t = await js(`return window.__x.info("Show expert options")`);
-      if (t?.deviated) v.push("the deviated marker shows while the toggle is on (it is for the hidden state)");
-      await js(`window.__x.row("Show expert options").querySelector("input[type=checkbox]").click(); await window.__x.sleep(500); return true`);
-      if (await js(`return window.__x.sections().includes("Expert") || !!window.__x.row(${JSON.stringify(EXPERT_ROW)})`)) v.push("the group is still shown after the toggle went off");
-      await sleep(600);
+      if ((await view()).hidden) v.push("the note shows at Expert, where nothing is hidden");
+      await LEVEL("standard"); await sleep(300);
+      if (await has(EXPERT_ROW)) v.push("the Expert row is still shown at Standard");
       if ((await field("rotateWhileParked")) !== false) v.push(`hiding changed the value: rotateWhileParked ${await field("rotateWhileParked")}`);
-      t = await js(`return window.__x.info("Show expert options")`);
-      if (!t?.deviated) v.push(`no deviated marker on "Show expert options" with a non-default hidden expert value (${JSON.stringify(t)})`);
-      await js(`window.__x.row("Show expert options").querySelector(".s-reset").click(); await window.__x.sleep(600); return true`);
-      if (!(await waitFor(async () => (await field("rotateWhileParked")) === true, 4000))) v.push(`the marker's reset did not restore rotateWhileParked (${await field("rotateWhileParked")})`);
-      t = await js(`return window.__x.info("Show expert options")`);
-      if (t?.deviated) v.push("the marker stays after the reset");
-      if ((await field("showExpertOptions")) !== false) v.push("the reset switched the toggle on");
+      if (+((await view()).hidden ?? 0) !== n0 + 1) v.push(`the note reads ${JSON.stringify((await view()).hidden)}, want ${n0 + 1}`);
+      await js(`document.querySelector("[data-hidden-show]")?.click(); await window.__x.sleep(500); return true`);
+      if ((await view()).level !== "expert" || !(await has(EXPERT_ROW))) v.push(`Show didn't raise the level to Expert (${(await view()).level})`);
+      await js(`window.__x.row(${JSON.stringify(EXPERT_ROW)})?.querySelector(".s-reset")?.click(); await window.__x.sleep(600); return true`);
+      if (!(await waitFor(async () => (await field("rotateWhileParked")) === true, 4000))) v.push(`the row's reset did not restore rotateWhileParked (${await field("rotateWhileParked")})`);
+      await LEVEL("standard"); await sleep(300);
+      if (+((await view()).hidden ?? 0) !== n0) v.push(`after the reset the note reads ${JSON.stringify((await view()).hidden)}, want ${n0 || null}`);
+      if (await js(`return !!document.querySelector("[data-hidden-reset]")`)) v.push("a bulk reset button on the note (it could flip the player engine)");
       return v;
     });
 
@@ -176,10 +195,10 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell('"Pause when covered": Settings → Playback row, default "A fullscreen or maximized window", saved', async () => {
+    await cell('"Pause behind windows": Settings → Playback row, default "A fullscreen or maximized window", saved', async () => {
       const v = [];
       await loadSettings();
-      const L = "Pause when covered";
+      const L = "Pause behind windows";
       let r = await js(`return window.__x.info(${JSON.stringify(L)})`);
       if (!r) return [`no "${L}" row (the stack runs liascape-player)`];
       if (r.sel !== "A fullscreen or maximized window") v.push(`default reads ${JSON.stringify(r.sel)}`);

@@ -24,7 +24,8 @@
 //! every tick, unchanged (R46).
 //!
 //! **Scene frames are gated per output (Phase 2 Task 8):** one scene worker serves every
-//! output showing it (D1) and ticks at the fastest of their `eff(scene_fps, refresh)`, so a
+//! output showing it (D1) and ticks at the fastest of their `scene_rate(scene_fps, refresh)` (WE's
+//! `fps`, which may exceed the refresh), so a
 //! new scene frame wakes output `<c>` at most `eff(out:<c>.scene_fps, refresh)` times per
 //! second ([`Redraw::mark_shown_gated`]): on a grid of that period, a frame that comes early
 //! is deferred to its slot ([`Redraw::promote_due`]) — never dropped, so the last frame before

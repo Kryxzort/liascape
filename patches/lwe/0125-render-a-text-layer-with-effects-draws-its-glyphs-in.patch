@@ -1,0 +1,108 @@
+From bf7deb277f39ed4470e21054f39d732759ba26c3 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 02:13:12 +0530
+Subject: [PATCH 125/126] render: a text layer with effects draws its glyphs
+ into its picture as WE's font pass
+
+WE draws a text layer that has effects in two steps: its font pass puts the glyphs (colour, coverage x alpha) into
+the layer's cleared picture with translucent blending, then the effects run on that picture and their output is
+drawn with its alpha. The picture is then colour x coverage*alpha with alpha (coverage*alpha)^2, so the layer's alpha
+reaches the screen cubed (and soft glyph edges thin out). Ours drew the picture with normal blending: alpha once.
+
+Measured in WE on 3042492564's clock (alpha 0.75, a pulse that keeps 0.84 of the colour without audio; private copies
+with the clock's text fixed, the rest hidden): its brightest pixels sit 0.36 of the way from the sea to the text's
+colour, 0.75^3 x 0.84 = 0.35; ours 0.63 (0.75 x 0.84). At alpha 1 (0.83 both) or without effects (0.75 both) WE and
+ours matched already. Now 0.35; mean |WE - ours| over the clock 5.41 -> 3.26 (pulse only), 13.27 -> 9.20 (its
+`shine` only: the wide glow ours drew is gone), 10.89 -> 7.56 (both). The layer's base pass stands in for the font
+pass: CPass::setTranslucentOverEmpty draws it as translucent over transparent black (src x srcA, srcA x srcA)
+without a clear. Left: a faint dark rim where the shine's rays raise the alpha outside the glyphs (WE shows none).
+Host test text_alpha_through_effects_is_wes (128 unpatched, 31 patched; without effects 128 both).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3042492564: the clock glows in ours; ~/.cache/liascape/we-ref/captures/var/v3042-t*)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp    | 11 +++++++++++
+ .../WallpaperEngine/Render/Objects/Effects/CPass.cpp  |  8 +++++++-
+ .../WallpaperEngine/Render/Objects/Effects/CPass.h    |  4 ++++
+ 3 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 4e2de23..e25ae86 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1428,6 +1428,7 @@ void CImage::updateActivePasses () {
+ 	// every pass back to the blending it was built with, and to its material's depth test and write
+ 	this->m_passes[i]->setBlendingMode (this->m_passBlending[i]);
+ 	this->m_passes[i]->setDepthModes (std::nullopt, std::nullopt);
++	this->m_passes[i]->setTranslucentOverEmpty (false);
+ 
+ 	if (visible) {
+ 	    this->m_activePasses.push_back (this->m_passes[i]);
+@@ -1498,6 +1499,16 @@ void CImage::updateActivePasses () {
+ 	}
+     }
+ 
++    // a text layer with effects: WE's font pass draws the glyphs (colour, coverage × alpha) into the layer's cleared
++    // picture translucently, so the picture is colour × coverage·alpha with alpha (coverage·alpha)², and the effects'
++    // output is drawn with that alpha. Measured in WE (3042492564's clock, alpha 0.75, a pulse that keeps 0.84 of the
++    // colour without audio; private copies with the clock's text fixed): its brightest pixels sit at 0.36 of the way
++    // from the sea to the text's colour, α³ · 0.84 = 0.35; ours drew α · 0.84 = 0.63. At alpha 1, or without effects
++    // (the glyphs straight into the scene), WE and ours matched already. The base pass stands in for the font pass
++    if (this->m_image.is<Text> () && this->m_activePasses.size () > 1 && this->m_image.shape.empty ()) {
++	this->m_activePasses.front ()->setTranslucentOverEmpty (true);
++    }
++
+     // a shape's last pass draws additively (GH 0x1402176a0 calls the shape's vtable +0x108, GH 0x1402866d0, which sets
+     // the pass's blending to 2 = additive, GH 0x140182410's names): its rays add to the scene
+     if (!this->m_image.shape.empty () && !this->m_activePasses.empty ()) {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 8362f8b..1715300 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -166,7 +166,11 @@ void CPass::setupRenderFramebuffer () const {
+     glViewport (0, 0, this->m_drawTo->getRealWidth (), this->m_drawTo->getRealHeight ());
+ 
+     // set texture blending
+-    switch (this->getBlendingMode ()) {
++    if (this->m_translucentOverEmpty) {
++	// translucent over transparent black, without clearing: src · srcA and srcA · srcA
++	glEnable (GL_BLEND);
++	glBlendFuncSeparate (GL_SRC_ALPHA, GL_ZERO, GL_SRC_ALPHA, GL_ZERO);
++    } else switch (this->getBlendingMode ()) {
+ 	case BlendingMode_Translucent:
+ 	    glEnable (GL_BLEND);
+ 	    glBlendFuncSeparate (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+@@ -638,6 +642,8 @@ void CPass::setInput (std::shared_ptr<const TextureProvider> input) { this->m_in
+ 
+ void CPass::setInputIsTexture0 (bool inputIsTexture0) { this->m_inputIsTexture0 = inputIsTexture0; }
+ 
++void CPass::setTranslucentOverEmpty (bool overEmpty) { this->m_translucentOverEmpty = overEmpty; }
++
+ void CPass::setPreviousInput (std::shared_ptr<const TextureProvider> input) {
+     this->m_previousInput = std::move (input);
+ }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index b9c72c7..fe62967 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -41,6 +41,9 @@ public:
+     /** g_Texture0 is the input even where the material names a texture (a puppet's material drawing its mesh from
+      *  the effects' output, CImage::m_puppetEffectsOnImage) */
+     void setInputIsTexture0 (bool inputIsTexture0);
++    /** Draws as translucent blending over a cleared (transparent black) target: colour × alpha and alpha², whatever
++     *  was there (a text layer's base pass into its picture, as WE's font pass draws, CImage::updateActivePasses) */
++    void setTranslucentOverEmpty (bool overEmpty);
+     void setPreviousInput (std::shared_ptr<const TextureProvider> input);
+     /** Replaces what texture unit `index` samples (a compose layer's base pass reads its group target) */
+     void setTexture (int index, std::shared_ptr<const TextureProvider> texture);
+@@ -236,6 +239,7 @@ private:
+     mutable std::map<int, bool> m_samplerUsed = {};
+     std::shared_ptr<const TextureProvider> m_input = nullptr;
+     bool m_inputIsTexture0 = false;
++    bool m_translucentOverEmpty = false;
+     std::shared_ptr<const TextureProvider> m_previousInput = nullptr;
+     glm::vec4 m_texture0Resolution = {};
+     /** g_Texture<n>Texel per bound texture (std::map: the uniforms point at its nodes) */

@@ -203,9 +203,14 @@ const PAGE = `window.__mx = {
   row(label) { return [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === label); },
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
-  modalRange(i) { return document.querySelectorAll(".lib-settings input[type=range]")[i]; },
-  modalReset(i) { return [...document.querySelectorAll(".lib-settings .srow")].filter((r) => r.querySelector("input[type=range]"))[i]?.querySelector("button"); },
-  closeModal() { const b = [...document.querySelectorAll(".modal-backdrop")].pop(); this.click(b, "modal backdrop"); },
+  // the item sidebar (WE-style, 2026-11-10 — it replaced the per-card settings modal): focus a card without applying it
+  // (the right-click menu's "Settings"), its volume (0) / speed (1) sliders and resets, its close
+  side() { return document.querySelector(".side-panel:not(.closing)"); },
+  async openSide(t) { await this.cardMenu(t, "Settings"); await this.sleep(250);
+    if (this.side()?.querySelector(".side-head h2")?.textContent.trim() !== t) throw new Error("no sidebar for " + t); },
+  modalRange(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] input[type=range]'); },
+  modalReset(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] button'); },
+  closeModal() { this.click(this.side()?.querySelector("[data-side-close]"), "sidebar close"); },
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
   playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.title) }; },
 }; true`;
@@ -422,7 +427,7 @@ const C = {};
 for (const t of itemTargets) {
   C[`itemVol:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 37, "volume slider");`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.setValue(m.modalRange(0), 37, "volume slider");`);
     await sleep(170); c.during = await snapshot();
     await sleep(500); await ui(`m.closeModal();`);
   }, check(c) {
@@ -434,7 +439,7 @@ for (const t of itemTargets) {
   } };
   C[`itemSpd:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(1), 1.7, "speed slider");`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.setValue(m.modalRange(1), 1.7, "speed slider");`);
     await sleep(170); c.during = await snapshot();
     await sleep(500); await ui(`m.closeModal();`);
   }, check(c) {
@@ -447,7 +452,7 @@ for (const t of itemTargets) {
   C[`itemVolReset:${t}`] = { async pre(c) { c.target = pick(c, t); if (c.target) await post("/library/volume", { path: c.target, intValue: 30 }); },
     async run(c) {
       if (!c.target) return c.skip = "no target";
-      await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.click(m.modalReset(0), "volume reset");`);
+      await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.click(m.modalReset(0), "volume reset");`);
       await sleep(600); await ui(`m.closeModal();`);
     }, check(c) {
       const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -457,7 +462,7 @@ for (const t of itemTargets) {
     c.target = pick(c, t);
     const inPlaylistBar = await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`);
     if (!c.target || !inPlaylistBar) return c.skip = "target not in the playlist bar";
-    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
+    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
     await sleep(700); await ui(`m.closeModal();`);
   }, check(c) {
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -471,7 +476,7 @@ const effectiveOf = (c, p, field, global) => (c.before.lib || []).find((i) => i.
 for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6], ["Vol", 0, "volumeOverride", 80, 20]]) for (const t of ["shown", "other"]) {
   C[`item${kind}Drag:${t}`] = { async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500);`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500);`);
     c.samples = []; let on = true;
     const sampler = (async () => { while (on) { try { c.samples.push({ t: Date.now(), st: await ctl.call("state") }); } catch {} await sleep(40); } })();
     await ui(`await m.drag(m.modalRange(${idx}), ${from}, ${to}, 40, 40, "slider");`);
@@ -504,7 +509,7 @@ const setting = (name, key, value, drive) => {
 // LIVE — through the values in between, during the drag (RED before: the global sliders only saved 250 ms
 // after the last tick; nothing moved while dragging) — and one with its own override never moves, not even
 // for a moment (override ?? global, R61). The persisted value afterwards is the drag's last one.
-for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
+for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Playback speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
   C[`globalDrag${kind}`] = {
     async pre(c) { if (c.other) await post(kind === "Vol" ? "/library/volume" : "/library/speed", kind === "Vol" ? { path: c.other, intValue: own } : { path: c.other, doubleValue: own }); },
     async run(c) {
@@ -535,21 +540,21 @@ for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "
     } };
 }
 setting("volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`);
-setting("speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`);
-setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
-setting("loopOff", "loop", false, `m.setCheck(m.input("Loop"), false, "Loop");`);
-setting("scaleFit", "videoScale", "fit", `await m.select("Video scale", "fit");`);
-setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video FPS cap"), 24, "fps");`);
+setting("speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`);
+setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
+setting("loopOff", "loop", false, `m.setCheck(m.input("Loop videos"), false, "Loop videos");`);
+setting("scaleFit", "videoScale", "fit", `await m.select("Fit to screen", "Fit");`);
+setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video frame rate cap"), 24, "fps");`);
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
-setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable cache"), true, "Disable cache");`);
-setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Demuxer max (MiB)"), 64, "demuxer");`);
+setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable video cache"), true, "Disable video cache");`);
+setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Read-ahead buffer (MiB)"), 64, "demuxer");`);
 // numeric settings fields type freely and snap on blur (owner: "everything should let you empty out the field
 // entirely and only snap back to minimum when you focus out" — components/NumInput.tsx): focused, the field keeps
 // exactly what was typed (empty / past the max) and nothing is saved; blur → clamped to min / max, saved
-for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Demuxer max (MiB)", "demuxerMaxMib", 40, "", 1, true],
-  ["overToMax", "Video FPS cap", "videoFpsCap", 24, "999", 480, false]]) {
+for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Read-ahead buffer (MiB)", "demuxerMaxMib", 40, "", 1, true],
+  ["overToMax", "Video frame rate cap", "videoFpsCap", 24, "999", 480, false]]) {
   C[`num:${name}`] = { states: ["idle", "single"], noSwitch: true,
-    async pre() { await post("/settings", { [key]: start, ...(adv ? { advancedSettings: true } : {}) }); },
+    async pre() { await post("/settings", { [key]: start, ...(adv ? { settingsLevel: "expert" } : {}) }); },
     async run(c) {
       await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.input(${JSON.stringify(label)}); i++) await m.sleep(100);
         const el = m.input(${JSON.stringify(label)}); el.focus(); m.setValue(el, ${JSON.stringify(typed)}, ${JSON.stringify(label)});`);
@@ -605,8 +610,10 @@ C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: fal
 // the playlist bar's border is on what plays, not on item 1: Shuffle's first pick is the player's, known to the UI by the
 // `wallpaper-changed` event, which can beat the POST's own reply (a slow reply here makes that the case every time) or come
 // after it. Rounds from nothing and over a playing shuffled session; each Play over one must leave what played (first ≠ last).
-C["playlistMark:shufflePlay"] = { states: ["idle"], switch: true, exp: { paused: false },
-  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, order: 1 }), name: null }); },
+// …under both "When the playlist starts again" choices (resume: a Play from nothing comes back on the item it was on)
+for (const [cell, start] of [["playlistMark:shufflePlay", "start_over"], ["playlistMark:shufflePlay:resume", "resume"]])
+C[cell] = { states: ["idle"], switch: true, exp: { paused: false },
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300, order: 1, playlistStart: start }), name: null }); },
   async run(c) {
     c.rounds = [];
     const slow = (re) => `const f = window.__mxF = window.__mxF || window.fetch; window.fetch = ${re ? `async (u, o) => { const r = await f(u, o); if (${re}.test(String(u))) await new Promise((d) => setTimeout(d, 400)); return r; }` : "f"};`;
@@ -627,6 +634,80 @@ C["playlistMark:shufflePlay"] = { states: ["idle"], switch: true, exp: { paused:
     for (const r of c.rounds) if (JSON.stringify(r.marks) !== JSON.stringify([r.cur])) v.push(`Play (${r.how}, from ${r.from}): ${r.cur} plays, the bar marks ${JSON.stringify(r.marks)}`);
     for (const r of c.rounds) { const odd = r.seen.filter((t) => t !== r.cur && t !== r.prev); if (odd.length) v.push(`Play (${r.how}, from ${r.prev ?? "nothing"}, to ${r.cur}): the bar marked ${JSON.stringify(odd)} on the way`); }
     if (c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
+    return v;
+  } };
+// "travel to running wallpaper on app open" (owner todo 2026-11-10): a small window (the grid and the playlist bar overflow),
+// the item LAST in both plays, the page reloads (= the app opens): the playing card sits inside the Library's scroll view
+// and the playing bar item inside the bar's row, without a wheel or a click. RED on the old UI: both stayed at 0.
+C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
+    const lib = (await http("GET", "/library")).json || [];
+    const s0 = await getSettings();
+    try {
+      // large cards in a small window: a column or two, so the last video card sits below the fold
+      await post("/settings", { ...s0, cardSize: "Large" });
+      // title Z→A: the scenes first, so the last video (k1) is the grid's last card
+      c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
+      win.setContentSize(480, 400); await sleep(300); await loadUi(); await sleep(400);
+      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
+      const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene); // the scenes are off here (s3 crashes)
+      const last = vids[vids.length - 1]?.videoPath;
+      // the scenes pad the bar (they're skipped while scene support is off) so its row overflows too
+      const bar = [...lib.filter((i) => i.videoPath !== last).map((i) => i.videoPath), last];
+      c.last = TITLE(last);
+      await post("/playlist/state", { videoPaths: bar, settings: PS(), name: null });
+      await post("/playlist/play-from", { paths: bar, startIndex: bar.length - 1, settings: PS() });
+      await waitSettled(10000, last); await sleep(300);
+      await loadUi();
+      const look = `(() => { const at = (sc, el, ax) => { if (!sc || !el) return null; const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
+          const off = ax === "y" ? r.top - s.top + sc.scrollTop : r.left - s.left + sc.scrollLeft, len = ax === "y" ? s.height : s.width, size = ax === "y" ? r.height : r.width;
+          const a = ax === "y" ? r.top - s.top : r.left - s.left;
+          return { inView: a >= -1 && a + size <= len + 1, hiddenAtZero: off + size > len + 1, scroll: Math.round(ax === "y" ? sc.scrollTop : sc.scrollLeft) }; };
+        return { grid: at(document.querySelector(".lib-scroll"), document.querySelector(".lib-scroll .card.playing"), "y"),
+                 bar: at(document.querySelector(".playlist-bar-row"), document.querySelector(".pl-item.playing"), "x") }; })()`;
+      await waitFor(async () => { const r = (c.r = await js(look)); return r.grid?.inView && r.bar?.inView; }, 2500, 100);
+      c.r = await js(look);
+    } finally {
+      await js(c.sort0 == null ? `localStorage.removeItem("liascape.libSort"); true` : `localStorage.setItem("liascape.libSort", ${JSON.stringify(c.sort0)}); true`);
+      await post("/settings", { ...(await getSettings()), cardSize: s0.cardSize }); win.setContentSize(1400, 900); await sleep(300); await loadUi(); }
+  }, check(c) {
+    const v = [];
+    for (const k of ["grid", "bar"]) {
+      const r = c.r?.[k];
+      if (!r) { v.push(`${k}: no playing element (${c.last} should play)`); continue; }
+      if (!r.hiddenAtZero) v.push(`${k}: ${c.last} fits at scroll 0 — the cell proved nothing (window too big?)`);
+      if (!r.inView) v.push(`${k}: on app open the playing ${c.last} is out of view (scroll ${r.scroll})`);
+    }
+    return v;
+  } };
+// "mark the wallpapers already downloaded in Browse" (owner todo 2026-11-10): a local Wallpaper Engine folder with two video
+// items — "900000001" (the Workshop id of the library's s1: the same item, whatever its type there) and "9002" (not in the
+// library) — Browse → that source: the first card says "In library", the second doesn't. RED on the old UI: no badge.
+C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const ws = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-inlib");
+    for (const [id, title] of [["900000001", "weIn"], ["9002", "weOut"]]) {
+      const d = path.join(ws, id); fs.mkdirSync(d, { recursive: true });
+      fs.copyFileSync(K[0], path.join(d, "v.mp4"));
+      fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title, type: "video", file: "v.mp4" }));
+    }
+    const s0 = await getSettings();
+    c.libHasS1 = ((await http("GET", "/library")).json || []).some((i) => i.workshopId === "900000001");
+    try {
+      await post("/settings", { ...s0, workshopFolder: ws, autoAddWeWallpapersToLibrary: false });
+      const srcs = (await http("GET", "/sources")).json || [];
+      const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
+      await ui(`m.tab("Browse"); await m.sleep(500); m.click(m.byText(".pill", ${JSON.stringify(weName)}), "source pill");`);
+      await waitFor(() => ui(`return !!m.card("weIn") && !!m.card("weOut");`), 8000, 150);
+      c.badges = await ui(`return Object.fromEntries(["weIn", "weOut"].map((t) => [t, m.card(t)?.querySelector("[data-in-library]")?.textContent?.trim() ?? null]));`);
+    } finally {
+      await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
+      await ui(`m.tab("Library"); await m.sleep(400);`);
+    }
+  }, check(c) {
+    const v = [];
+    if (!c.libHasS1) v.push("the library has no item with Workshop id 900000001 (s1) — the fixture is off");
+    if (!c.badges) return [...v, "Browse showed no weIn / weOut cards"];
+    if (c.badges.weIn !== "In library") v.push(`weIn (in the library as s1): badge ${JSON.stringify(c.badges.weIn)}, expected "In library"`);
+    if (c.badges.weOut != null) v.push(`weOut (not in the library): badge ${JSON.stringify(c.badges.weOut)}, expected none`);
     return v;
   } };
 // a right click on a card or bar item whose hover preview plays: the same <video> keeps playing under the menu (the menu's
@@ -708,7 +789,7 @@ for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async 
 // keybind volume-up, then any UI settings save: the keybind's volume must survive (the UI posts its whole copy)
 C["cli:volume-up+uiSave"] = { async run(c) {
     c.cli = await cli("volume-up"); await sleep(400);
-    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop"), false, "Loop");`); await sleep(900); },
+    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop videos"), false, "Loop videos");`); await sleep(900); },
   check: (c) => volKeyAuto(c, "volume-up", " + a UI save") };
 C["plAdvanceOff"] = { async run(c) {
   await ui(`m.click(document.querySelector('button[title="Playlist settings"]'), "pl settings"); await m.sleep(500); m.setCheck(m.plCheck("Switch when video ends"), false, "advance"); await m.sleep(400); m.click(m.byText(".pl-modal button", "Close"), "close");`);
@@ -735,7 +816,7 @@ function volKeyAuto(c, a, what = "") {
 }
 action("volume-up", (c) => volKeyAuto(c, "volume-up"));
 action("volume-down", (c) => volKeyAuto(c, "volume-down"));
-// the same keybinds by VolumeKeyTarget (Advanced → "Volume keys adjust"): "auto" (default) moves the playing
+// the same keybinds by VolumeKeyTarget (Advanced → "Volume keys change"): "auto" (default) moves the playing
 // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own (giving it
 // one); "global" always the global (an overridden one keeps its own). Every other item keeps its own, and every
 // source runs override ?? global (the general oracle, R61). `cur` = the playing item (mid-effect: the incoming).
@@ -779,7 +860,7 @@ for (const a of ["volume-up", "volume-down"]) {
 C["cli:volume-up:modalOpen"] = { states: ["single", "playlist"],
   async pre(c) { await post("/library/volume", { path: c.shown, intValue: 30 }); },
   async run(c) {
-    const open = `await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600);`;
+    const open = `await m.openSide(${JSON.stringify(TITLE(c.shown))}); await m.sleep(600);`;
     await ui(`${open}`); c.cli = await cli("volume-up"); await sleep(600);
     c.shownValue = await ui(`return m.modalRange(0)?.value;`);
     await ui(`m.closeModal();`); await sleep(900);
@@ -1075,7 +1156,7 @@ for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.2
   if (kind === "Vol" && t === "shown") continue;
   C[`seq:item${kind}Drag+next:${t}`] = { states: t === "shown" ? ["single", ...PL_STATES] : PL_STATES, switch: true, async run(c) {
       c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-      await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(${idx}), ${from}, ${to}, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
+      await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); await m.drag(m.modalRange(${idx}), ${from}, ${to}, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
       await sleep(900);
       await cliStep(c, "next");
     }, check(c) {
@@ -1095,7 +1176,7 @@ C["seq:mute+next"] = { states: ["single", ...PL_STATES], switch: true, async run
   }, exp: { muted: true }, check: (c) => stayed(c, "next") };
 // a global setting changed (Settings page), then next: B takes the new global (the other live item keeps its override)
 for (const [name, key, value, drive] of [["volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`],
-  ["speed", "speed", 1.5, `m.setValue(m.input("Speed"), 1.5, "Speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute audio"), true, "Mute audio");`]]) {
+  ["speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`]]) {
   C[`seq:set:${name}+next`] = { states: name === "noAudio" ? ["playlist", "effect"] : ["single", ...PL_STATES], switch: true,
     async pre(c) { if (c.other) await post("/library/volume", { path: c.other, intValue: 30 }); },
     async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next"); },
@@ -1121,7 +1202,7 @@ C["seq:next+prev"] = { states: PL_STATES, switch: true, async run(c) { await cli
 // reopening/closing it again sends nothing stale
 C["seq:previewDrag+reopen"] = { states: ["single", "playlist", "effect"], async run(c) {
     c.target = c.shown;
-    const open = `await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(600);`;
+    const open = `await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(600);`;
     await ui(`${open} await m.drag(m.modalRange(1), 1.0, 1.8, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
     await sleep(1000);
     c.reqAt = await js(`window.__mxReq.length`);
@@ -1280,7 +1361,7 @@ for (const k of Object.keys(TR)) C[`gTr${k}`] = { states: ["pending", "pendingGl
     if (c.state === "pending" && !(req && req.effect_id === "fade" && req.duration_ms === 600)) v.push(`a global change reached the playlist's own transition: the armed switch runs ${fmtSw(req)} (its playlist: fade 600 ms)`);
     return v;
   } };
-C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); await m.select("Transition method", "Frozen");`); await sleep(1200); },
+C["gMethodFrozen"] = { states: ["pending", "pendingGlobal"], rearms: true, async run(c) { await ui(`m.tab("Settings"); await m.sleep(600); await m.select("Transition style", "Frozen");`); await sleep(1200); },
   check(c) { const v = [...armedCheck(c)]; const req = armedReq(c);
     if (c.after.s.transitionMethod !== "frozen") v.push(`transitionMethod ${c.after.s.transitionMethod}`);
     if (!(req && req.method === "frozen")) v.push(`the armed switch still runs method ${req?.method}, the setting says frozen`); return v; } };
@@ -1355,7 +1436,7 @@ C["selToggle:remove"] = { states: PL_STATES, rearms: true, async run(c) {
 // the settings modal opened from a selected card edits every selected item: both live sides (A and B / the pending B)
 C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
     c.targets = [c.shown, c.other];
-    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(c.shown))}, "Settings (volume / speed)"); await m.sleep(600); m.setValue(m.modalRange(0), 33, "volume");`);
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.openSide(${JSON.stringify(TITLE(c.shown))}); await m.sleep(600); m.setValue(m.modalRange(0), 33, "volume");`);
     await sleep(170); c.during = await snapshot(); await sleep(600); await ui(`m.closeModal();`); await sleep(500);
   }, check(c) {
     const v = [];
@@ -1372,14 +1453,14 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
 // value doesn't step — and after the release the slider shows no keyboard-focus ring either
 C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c) {
     c.targets = [K[2], K[3]];
-    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.cardMenu(${JSON.stringify(TITLE(K[2]))}, "Settings (volume / speed)"); await m.sleep(1400);`); // landed (the open flies 900 ms): a real press hit-tests
+    await ui(`${c.targets.map(ctrlClick).join(" ")} await m.openSide(${JSON.stringify(TITLE(K[2]))}); await m.sleep(1400);`); // landed (the open flies 900 ms): a real press hit-tests
     const r = await ui(`const s = m.modalRange(0); if (!s) throw new Error("no volume slider"); const b = s.getBoundingClientRect(); return { x: Math.round(b.x + b.width * 0.3), y: Math.round(b.y + b.height / 2), w: Math.round(b.width) };`);
     const send = (e) => win.webContents.sendInputEvent(e);
     send({ type: "mouseMove", x: r.x, y: r.y }); await sleep(60);
     send({ type: "mouseDown", x: r.x, y: r.y, button: "left", clickCount: 1 }); await sleep(80);
     send({ type: "mouseMove", x: r.x + 20, y: r.y, button: "left", modifiers: ["leftButtonDown"] }); await sleep(120);
     const look = `const s = m.modalRange(0); const cs = s ? getComputedStyle(s) : null;
-      return { open: !!document.querySelector(".lib-settings"), value: s?.value, focusVisible: !!s?.matches(":focus-visible"),
+      return { open: !!document.querySelector(".side-panel:not(.closing)"), value: s?.value, focusVisible: !!s?.matches(":focus-visible"),
         outline: cs ? cs.outlineStyle + " " + cs.outlineWidth : null, filter: cs?.filter ?? null };`;
     c.held0 = await ui(look);
     for (const k of ["f", "F", "Delete", "Escape", "Right"]) {
@@ -1388,7 +1469,7 @@ C["keys:sliderHeld"] = { states: ["idle", "single"], noSwitch: true, async run(c
     c.held = await ui(look);
     send({ type: "mouseUp", x: r.x + 20, y: r.y, button: "left", clickCount: 1 }); await sleep(300);
     c.released = await ui(look);
-    await ui(`if (document.querySelector(".modal-backdrop")) m.closeModal();`); await sleep(900);
+    await ui(`if (m.side()) m.closeModal();`); await sleep(900);
   }, check(c) {
     const v = [];
     if (!c.held.open || !c.released.open) v.push("the modal closed while the slider was held (Escape went through)");
@@ -1487,10 +1568,10 @@ C["selAll+Delete+undo"] = { states: ["playlist", "pending"], switch: true, async
 // value is saved and stays live — closing must flush, never drop or revert it
 for (const t of ["shown", "other"]) C[`itemVolDragEsc:${t}`] = { states: ["single", "effect", "pending"], async run(c) {
     c.target = pick(c, t); if (!c.target) return c.skip = "no target";
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(600);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(600);
       await m.drag(m.modalRange(0), 80, 30, 10, 30, "volume"); ${key("Escape")}`);
     await sleep(1200);
-    c.open = await ui(`return !!document.querySelector(".lib-settings");`);
+    c.open = await ui(`return !!document.querySelector(".side-panel:not(.closing)");`);
   }, check(c) {
     const v = [];
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -1610,34 +1691,34 @@ const NORM_STATES = ["single", "playlist", "effect", "pending", "paused", "pause
 const normOn = async (target) => { const s = await getSettings(); s.normalizeAudio = true; if (target !== undefined) s.normalizeTargetLufs = target; await post("/settings", s); };
 const normMeasured = (c) => (c.measured ? [] : ["the clips were never measured (normalization's background backfill, 30 s)"]);
 C["set:normalizeOn"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === true ? [] : ["normalizeAudio not saved on"])] };
 C["set:normalizeOff"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); await normOn(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), false, "Normalize audio");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), false, "Even out loudness");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === false ? [] : ["normalizeAudio not saved off"])] };
 // the target's preset (−14 → −19): every live measured source re-targets
 C["set:normalizeTarget"] = { states: ["single", "effect", "pending", "paused"], async pre(c) { c.measured = await measureAll(); await normOn(-14); },
-  async run() { await ui(settingsTab(`m.click(m.row("Target loudness")?.querySelector(".combo-caret"), "presets"); await m.sleep(300); m.click(m.byText(".sel-pop .sel-opt", "Quiet (−19)"), "Quiet");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.click(m.row("Loudness target")?.querySelector(".combo-caret"), "presets"); await m.sleep(300); m.click(m.byText(".sel-pop .sel-opt", "Quiet (−19)"), "Quiet");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeTargetLufs === -19 ? [] : [`normalizeTargetLufs ${c.after.s.normalizeTargetLufs}, expected -19`])] };
 // switched on with nothing measured yet: the background backfill measures every clip — and what plays takes its
 // loudnorm once it's measured (not only at its next switch)
 C["set:normalizeFresh"] = { states: ["single", "playlist", "effect"], async pre() { unmeasureAll(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`));
+    await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`));
     c.measured = await waitFor(() => K.every((p) => measured(readIndex(), p)), 30000, 200);
     await sleep(1500);
   }, check: (c) => normMeasured(c) };
 // on, then next: B comes up normalized (its own measurement)
 C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async pre(c) { c.measured = await measureAll(); },
-  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Normalize audio"), true, "Normalize audio");`)); await sleep(900); await cliStep(c, "next"); },
+  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); await cliStep(c, "next"); },
   check: (c) => [...normMeasured(c), ...stayed(c, "next")] };
 // normalization on; Mute audio on → next (B starts with no audio: no filter) → Mute audio off: B's audio comes back
 // normalized — not only at its next switch
 C["seq3:normalize+noAudio+next+noAudioOff"] = { states: ["single", "playlist", "effect"], switch: true, async pre(c) { c.measured = await measureAll(); await normOn(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Mute audio"), true, "Mute audio");`)); await sleep(900);
+    await ui(settingsTab(`m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`)); await sleep(900);
     await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
-    await ui(`m.setCheck(m.input("Mute audio"), false, "Mute audio");`); await sleep(900);
+    await ui(`m.setCheck(m.input("Mute wallpapers"), false, "Mute wallpapers");`); await sleep(900);
   }, check: (c) => [...normMeasured(c), ...stayed(c, "next"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
 
 // --- Settings → Appearance (theme / thumbnail aspect / card size / gif autoplay): UI-only — it must not touch
@@ -1668,15 +1749,15 @@ function untouched(c) {
 }
 const APPEAR = {
   "appear:theme": { states: ["idle", "single", "effect", "pending", "paused", "pausedEffect", "muted"], drive: (c) => `await m.select("Theme", ${JSON.stringify(c.theme)});`, saved: (c) => c.after.s.theme === c.theme },
-  "appear:aspect": { drive: () => `await m.select("Thumbnail aspect", "16:9");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
+  "appear:aspect": { drive: () => `await m.select("Card shape", "Widescreen");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
-  "appear:gifs": { drive: () => `m.setCheck(m.input("Autoplay GIF thumbnails"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
-  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Live wallpaper behind all tabs"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
+  "appear:gifs": { drive: () => `m.setCheck(m.input("Animate GIF previews"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
+  "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Wallpaper behind every tab"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
   // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
   // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
-  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
+  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
   "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
-    drive: () => `m.setValue(m.input("Restart mpvpaper every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Restart only at playlist changeover"), true, "changeover");`,
+    drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Only restart between wallpapers"), true, "changeover");`,
     saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 && c.after.s.restartOnlyAtPlaylistChangeover === true },
 };
 for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effect", "pending"], noSwitch: true,
@@ -1689,7 +1770,7 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
-// --- Settings → Appearance → "Glow effects" / "Morph animations" / "Autoplay video thumbnails": UI-only toggles. Each cell
+// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Play video previews": UI-only toggles. Each cell
 // turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
 // there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
 const GLOW_JS = String.raw`window.__glow = {
@@ -1713,7 +1794,7 @@ const GLOW_JS = String.raw`window.__glow = {
 true`;
 // each measure: the element (an expression), what to read, and whether the mouse has to be over it
 const GLOW_SPECS = [
-  { name: "active tab", tab: "Library", el: `document.querySelector(".tab.active")`, read: "boxShadow" },
+  { name: "active tab", tab: "Library", el: `document.querySelector(".tabs .tab-pill")`, read: "boxShadow" }, // the sliding pill under the active tab carries its fill + glow
   { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
   { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
   { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
@@ -1776,33 +1857,30 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Morph animations": the card → modal flight (components/useMorph.ts; the library card's and the playlist-bar item's
-// settings modal). On: the panel flies (a transform animation, `data-morph` set) out of its source, which is lifted
-// (hidden) meanwhile. Off: no flight at all, nothing lifted — the panel fades in where it is, and closing (backdrop or
-// Escape, even mid-open) fades it out and unmounts it; no animation left running, no box that moves after it appeared.
-const MORPH_SAMPLE = String.raw`(() => { const p = document.querySelector(".morph-panel"); if (!p) return null;
-  const run = document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target && (p === a.effect.target || p.contains(a.effect.target)));
+// "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx — it replaced the card → modal flight,
+// 2026-11-10), opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
+// in (transform + opacity animations only, nothing else animated), and closes (its close button, or Escape) by sliding out.
+// Off: nothing animates — it's there at once and gone at once (≤ 100 ms) — also after a page reload; back on: it slides.
+const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-panel"); if (!p) return null;
+  const run = p.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && !a.effect?.target?.matches?.("img, video"));
+  const props = [...new Set(run.flatMap((a) => (a.effect.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((x) => !["offset", "easing", "composite", "computedOffset"].includes(x)))))];
   const b = p.getBoundingClientRect(), cs = getComputedStyle(p);
-  return { flying: !!p.dataset.morph, anims: run.length,
-    flights: run.filter((a) => a.effect.getKeyframes().some((k) => k.transform && k.transform !== "none")).length,
-    lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length, opacity: +cs.opacity, hidden: cs.visibility === "hidden",
-    rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
-async function morphOpen(c, via, { full = false, esc = false } = {}) {
+  return { anims: run.length, props, opacity: +cs.opacity, rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
+async function sideOpen(c, via, { full = false, esc = false } = {}) {
   const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
-  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings (volume / speed)");` : `await m.cardMenu(${JSON.stringify(t)}, "Settings (volume / speed)");`;
+  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings");`
+    : `m.ctx(m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"), "card"); await m.sleep(150); m.click(m.byText(".lib-ctx button", "Settings"), "Settings");`;
   const r = {};
-  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(${esc ? 40 : 60});`); // Escape: mid-open
-  r.early = await js(MORPH_SAMPLE);
+  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(60);`);
+  r.early = await js(SIDE_SAMPLE);
   if (full) {
-    await sleep(400); r.mid = await js(MORPH_SAMPLE);
-    await sleep(750); r.late = await js(MORPH_SAMPLE);
+    await sleep(400); r.mid = await js(SIDE_SAMPLE);
+    await sleep(750); r.late = await js(SIDE_SAMPLE);
   }
-  // close (a backdrop click, or Escape): time until the modal is gone and nothing is left lifted / running
   const close = esc ? `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));` : `m.closeModal();`;
-  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".modal-backdrop")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
+  r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".side-panel")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
   await sleep(250);
-  r.after = await ui(`return { backdrops: document.querySelectorAll(".modal-backdrop").length, lifted: document.querySelectorAll(".thumb-wrap.lifted, .pl-item.lifted").length,
-    running: document.getAnimations().filter((a) => a.playState === "running" && a.effect?.target?.closest?.(".modal-backdrop")).length };`);
+  r.after = await ui(`return { panels: document.querySelectorAll(".side-panel").length, focused: document.querySelectorAll(".card.focused").length };`);
   return r;
 }
 C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
@@ -1810,44 +1888,41 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     const cands = K.filter((p) => p !== c.shown && inBar(p));
     c.cardItem = cands[0]; c.barItem = cands[1] ?? cands[0];
     if (!c.cardItem) return c.skip = "no non-playing item in the playlist bar";
-    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Morph animations"), ${b}, "Morph animations"); await m.sleep(400);`);
+    const flip = async (b) => { await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Smooth window animations"), ${b}, "Smooth window animations"); await m.sleep(400);`);
       return waitFor(async () => (await getSettings()).morphs === b, 4000, 100); };
-    c.onCard = await morphOpen(c, "card", { full: true }); c.onBar = await morphOpen(c, "bar");
+    c.onCard = await sideOpen(c, "card", { full: true }); c.onBar = await sideOpen(c, "bar"); c.onEsc = await sideOpen(c, "card", { esc: true });
     c.savedOff = await flip(false);
-    c.offCard = await morphOpen(c, "card", { full: true }); c.offBar = await morphOpen(c, "bar", { full: true }); c.offEsc = await morphOpen(c, "card", { esc: true });
+    c.offCard = await sideOpen(c, "card", { full: true }); c.offBar = await sideOpen(c, "bar", { full: true }); c.offEsc = await sideOpen(c, "card", { esc: true });
     await loadUi(); await sleep(400);
-    c.reloaded = await morphOpen(c, "card");
+    c.reloaded = await sideOpen(c, "card");
     c.savedOn = await flip(true);
-    c.back = await morphOpen(c, "card");
+    c.back = await sideOpen(c, "card");
   }, check(c) {
-    const v = [];
-    for (const [n, r] of [["card", c.onCard], ["playlist-bar item", c.onBar]]) {
-      if (!r.early?.flying || !r.early.flights || !r.early.lifted) v.push(`morphs on (the default), ${n}: no flight at +60 ms ${JSON.stringify(r.early)}`);
-      if (r.closeMs < 0 || r.after.backdrops || r.after.lifted) v.push(`morphs on, ${n}: the modal didn't close cleanly ${JSON.stringify([r.closeMs, r.after])}`);
-    }
-    if (!c.savedOff) v.push("turning Morph animations off wasn't saved (morphs !== false)");
-    const off = (n, r) => {
-      for (const k of ["early", "mid", "late"]) {
-        const x = r[k]; if (!x) continue;
-        if (x.flying || x.flights) v.push(`morphs off, ${n}: a flight at ${k} ${JSON.stringify(x)}`);
-        if (x.lifted) v.push(`morphs off, ${n}: the source is lifted (hidden) at ${k}`);
-      }
-      if (r.mid && (r.mid.anims || r.mid.hidden || r.mid.opacity < 1)) v.push(`morphs off, ${n}: not settled at +460 ms ${JSON.stringify(r.mid)}`);
-      if (r.mid && r.late && JSON.stringify(r.mid.rect) !== JSON.stringify(r.late.rect)) v.push(`morphs off, ${n}: the panel moved after it appeared ${JSON.stringify(r.mid.rect)} → ${JSON.stringify(r.late.rect)}`);
-      if (r.closeMs < 0 || r.closeMs > 450) v.push(`morphs off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
-      if (r.after.backdrops || r.after.lifted || r.after.running) v.push(`morphs off, ${n}: left behind after closing ${JSON.stringify(r.after)}`);
+    const v = [], J = JSON.stringify;
+    const on = (n, r) => {
+      if (!r.early?.anims) v.push(`animations on, ${n}: the sidebar didn't slide in (+60 ms ${J(r.early)})`);
+      const bad = (r.early?.props ?? []).filter((x) => !["transform", "opacity", "translate"].includes(x));
+      if (bad.length) v.push(`animations on, ${n}: it animates ${bad.join(", ")} (transform / opacity only)`);
+      if (r.closeMs < 0 || r.after.panels || r.after.focused) v.push(`animations on, ${n}: it didn't close cleanly ${J([r.closeMs, r.after])}`);
     };
-    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape mid-open", c.offEsc);
-    off("card, page reloaded", c.reloaded);
-    if (!c.savedOn) v.push("turning Morph animations back on wasn't saved");
-    if (!c.back.early?.flying || !c.back.early.flights) v.push(`morphs back on: no flight at +60 ms ${JSON.stringify(c.back.early)}`);
-    if (c.back.closeMs < 0 || c.back.after.backdrops || c.back.after.lifted) v.push(`morphs back on: the modal didn't close cleanly ${JSON.stringify([c.back.closeMs, c.back.after])}`);
+    on("card", c.onCard); on("playlist-bar item", c.onBar); on("card, Escape", c.onEsc); on("back on", c.back);
+    if (c.onCard.mid?.anims) v.push(`animations on: still animating at +460 ms ${J(c.onCard.mid)}`);
+    if (!c.savedOff) v.push("turning Smooth window animations off wasn't saved (morphs !== false)");
+    const off = (n, r) => {
+      for (const k of ["early", "mid", "late"]) { const x = r[k]; if (x?.anims) v.push(`animations off, ${n}: it animates at ${k} ${J(x)}`); }
+      if (!r.early) v.push(`animations off, ${n}: not there at +60 ms`);
+      if (r.mid && r.late && J(r.mid.rect) !== J(r.late.rect)) v.push(`animations off, ${n}: the panel moved after it appeared ${J(r.mid.rect)} → ${J(r.late.rect)}`);
+      if (r.closeMs < 0 || r.closeMs > 100) v.push(`animations off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      if (r.after.panels) v.push(`animations off, ${n}: left behind after closing ${J(r.after)}`);
+    };
+    off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape", c.offEsc); off("card, page reloaded", c.reloaded);
+    if (!c.savedOn) v.push("turning Smooth window animations back on wasn't saved");
     return v;
   } };
 
-// "Autoplay video thumbnails": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
+// "Play video previews": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
 // k2..k4 here; k1 has a gif) play it without a hover — only the ones on screen, at most 4 at a time across the page
-// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Autoplay GIF thumbnails".
+// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Animate GIF previews".
 const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
   return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
     cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
@@ -1857,7 +1932,7 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
     c.off = await settle((r) => r.total === 0, 1500);
     await sleep(600); c.off = await count();                      // the default: nothing plays by itself
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), true, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), true, "Play video previews"); await m.sleep(300);`);
     c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
     c.on = await settle((r) => r.total >= 4 && r.playing >= 1, 6000);
@@ -1867,14 +1942,14 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     c.away = await settle((r) => r.cards === 0, 4000);
     await ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(200);`);
     c.back = await settle((r) => r.total >= 4, 4000);
-    // a settings modal open: nothing plays behind it; closed again: it resumes
-    await ui(`await m.cardMenu("k2", "Settings (volume / speed)"); await m.sleep(900);`);
-    c.modal = await settle((r) => r.total === 0, 3000);
+    // the item sidebar open: the grid stays in view beside it, so its previews keep playing (the old modal covered them)
+    await ui(`await m.openSide("k2"); await m.sleep(900);`);
+    c.modal = await settle((r) => r.total >= 4, 3000);
     await ui(`m.closeModal(); await m.sleep(900);`);
     c.closed = await settle((r) => r.total >= 4, 4000);
     await loadUi(); await sleep(600);
     c.reloaded = await settle((r) => r.total >= 4, 6000);
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Autoplay video thumbnails"), false, "Autoplay video thumbnails"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), false, "Play video previews"); await m.sleep(300);`);
     await ui(`m.tab("Library"); await m.sleep(300);`);
     c.offAgain = await settle((r) => r.total === 0, 3000);
   }, check(c) {
@@ -1886,8 +1961,8 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     if (c.on.gifCard) v.push("on: the gif item (k1) got a video/animated layer — it follows the GIF setting");
     if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
     if (c.back.total < 4) v.push(`on, cards back on screen: only ${c.back.total} videos ${J(c.back)}`);
-    if (c.modal.total) v.push(`on, a settings modal open: ${c.modal.total} videos still mounted behind it`);
-    if (c.closed.total < 4) v.push(`on, modal closed: only ${c.closed.total} videos ${J(c.closed)}`);
+    if (c.modal.total < 4) v.push(`on, the item sidebar open: only ${c.modal.total} videos (the grid beside it stays live) ${J(c.modal)}`);
+    if (c.closed.total < 4) v.push(`on, sidebar closed: only ${c.closed.total} videos ${J(c.closed)}`);
     if (c.reloaded.total < 4) v.push(`on, page reloaded: only ${c.reloaded.total} videos ${J(c.reloaded)}`);
     if (c.offAgain.total) v.push(`turned off again: ${c.offAgain.total} videos still mounted`);
     return v;
@@ -1929,7 +2004,7 @@ async function amReady() {
   return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
     res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
 }
-const amEnable = settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400);`);
+const amEnable = settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400);`);
 const amSkip = (c) => (PULSE ? false : (c.skip = "no private audio server (pulseaudio) for this stack"));
 const amReadyCheck = (c) => (c.ready ? [] : ["auto-mute's stream watch (pactl subscribe) never connected to the stack's audio server"]);
 // a stream plays: every live source mutes (ramped, while paused too); it ends: after the unmute delay (2 s) they unmute
@@ -1986,7 +2061,7 @@ C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async r
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when system audio plays"), false, "auto-mute");`);
+    const t = Date.now(); await ui(`m.setCheck(m.input("Hush when other audio plays"), false, "auto-mute");`);
     c.unmutedMs = (await waitFor(() => muteNow(false), 3000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
   }, check(c) {
     const v = [...amReadyCheck(c)];
@@ -2008,10 +2083,10 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Min level (dB)"), -6, "min level"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(9000); const stop = sampler(c, 40); await sleep(2500); await stop();
-    const t = Date.now(); await ui(`m.setValue(m.input("Min level (dB)"), -70, "min level");`);
+    const t = Date.now(); await ui(`m.setValue(m.input("Ignore sounds below (dB)"), -70, "min level");`);
     c.mutedMs = (await waitFor(() => muteNow(true), 4000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
     await stopTones(); await waitFor(() => muteNow(false), 5000, 50);
   }, check(c) {
@@ -2025,7 +2100,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
 // Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
 C["autoMute:delay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Mute after (ms)"), 1500, "delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     const t0 = Date.now(); tone(6000); await sleep(800); c.early = await muteNow(true);
     c.mutedMs = (await waitFor(() => muteNow(true), 3500, 40)) ? Date.now() - t0 : null;
@@ -2040,7 +2115,7 @@ C["autoMute:delay"] = { states: ["single"], async run(c) {
 // Unmute after 4000 ms (default 2000): still muted 3 s after the stream ended, unmuted by 8 s
 C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when system audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Unmute after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
     await stopTones(); const t1 = Date.now(); // the stream ends here
@@ -2188,7 +2263,7 @@ C["seq3:trash+undo+next"] = { states: ["playlist", "pending"], switch: true, asy
 C["seq3:pause+itemVolDrag+resume"] = { states: ["single", "playlist", "effect"], async run(c) {
     c.target = c.shown;
     await cliStep(c, "toggle-pause"); await sleep(300);
-    await ui(`await m.cardMenu(${JSON.stringify(TITLE(c.target))}, "Settings (volume / speed)"); await m.sleep(500); await m.drag(m.modalRange(0), 80, 25, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
+    await ui(`await m.openSide(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); await m.drag(m.modalRange(0), 80, 25, 20, 40, "slider"); await m.sleep(400); m.closeModal();`);
     await sleep(900); c.whilePaused = await ctl.call("state");
     await cliStep(c, "toggle-pause");
   }, check(c) {
@@ -2203,7 +2278,7 @@ C["seq3:pause+itemVolDrag+resume"] = { states: ["single", "playlist", "effect"],
 C["seq3:set:speed+next+prev"] = { states: ["playlist", "effect"], switch: true,
   async pre(c) { if (c.other) await post("/library/speed", { path: c.other, doubleValue: 0.8 }); },
   async run(c) {
-    await ui(settingsTab(`m.setValue(m.input("Speed"), 1.5, "Speed");`)); await sleep(900);
+    await ui(settingsTab(`m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`)); await sleep(900);
     await nexts(c, 1); await cliStep(c, "previous");
   }, check: (c) => [...(c.after.cur?.path === c.before.cur?.path ? [] : [`speed → next → previous from ${TITLE(c.before.cur?.path)} landed on ${TITLE(c.after.cur?.path)}`]),
     ...(c.after.s.speed === 1.5 ? [] : [`settings.speed ${c.after.s.speed}, expected 1.5`])] };
@@ -2424,7 +2499,7 @@ C["volume:scene"] = { states: ["scene"], async run(c) {
 // scene's speed scales its animation and its pitch-kept sound under liascape-player (owner decision), so the slider shows
 for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["itemSpd", 1, 1.7, "speedOverride"]]) {
   C[`${k}:scene`] = { states: ["scene"], async run(c) {
-      await ui(`await m.cardMenu("s1", "Settings (volume / speed)"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
+      await ui(`await m.openSide("s1"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
       await waitWorker(SC[0], (w) => (k === "itemVol" ? near(w.audio?.gain_db, VolumeDb(val), 0.1) : near(w.audio?.speed, val, 0.001)), 4000);
       await sleep(500); await ui(`m.closeModal();`);
     }, check(c) {
@@ -2440,7 +2515,7 @@ for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["item
 
 // Mute audio (NoAudio) on a scene: no_audio on its source (the oracle) and its worker, live, same worker
 C["noAudio:scene"] = { states: ["scene"], async run(c) {
-    await ui(`${settingsRow("Mute audio")} m.setCheck(m.input("Mute audio"), true, "Mute audio");`);
+    await ui(`${settingsRow("Mute wallpapers")} m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
     await waitWorker(SC[0], (w) => w.audio?.no_audio === true, 5000);
   }, check(c) {
     const v = c.after.s.noAudio === true ? [] : [`settings.noAudio ${c.after.s.noAudio}`];
@@ -2511,10 +2586,10 @@ C["settings:sceneFps"] = { states: ["scene"], async run(c) {
 
 // the GPU / VRAM group (liascape-player): each control → its player prop, live, the scene on the same worker
 for (const [name, prop, want, drive, saved] of [
-  ["autoThrottleScenes", "player.scene_throttle", false, `${settingsRow("Auto-throttle scenes")} m.setCheck(m.input("Auto-throttle scenes"), false, "auto-throttle");`, (s) => s.autoThrottleScenes === false],
-  ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Limit VRAM per scene")} m.setCheck(m.input("Limit VRAM per scene"), true, "VRAM limit"); await m.sleep(300);
-    for (let i = 0; i < 30 && !m.input("VRAM limit (MiB)"); i++) await m.sleep(100); m.setValue(m.input("VRAM limit (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
-  ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When VRAM runs low")} await m.select("When VRAM runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
+  ["autoThrottleScenes", "player.scene_throttle", false, `${settingsRow("Ease off heavy scenes")} m.setCheck(m.input("Ease off heavy scenes"), false, "auto-throttle");`, (s) => s.autoThrottleScenes === false],
+  ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Cap each scene's video memory")} m.setCheck(m.input("Cap each scene's video memory"), true, "VRAM limit"); await m.sleep(300);
+    for (let i = 0; i < 30 && !m.input("Video memory cap (MiB)"); i++) await m.sleep(100); m.setValue(m.input("Video memory cap (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
+  ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When video memory runs low")} await m.select("When video memory runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
 ]) {
   C[`settings:${name}`] = { states: ["scene"], async run(c) {
       c.was = await pget(prop);
@@ -2667,6 +2742,8 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     // the seconds field; 4 s
     await ui(plOpen); c.lab0 = await js(plLabels);
     await ui(`m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); await m.sleep(400);`); c.lab1 = await js(plLabels);
+    await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), false, "separate off"); await m.sleep(300);`);
+    c.rule1 = await ui(`return document.querySelector(".pl-modal [data-scene-rule]")?.textContent ?? "";`);
     await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), true, "separate"); await m.sleep(300);
       ${sceneSecsTo4(`document.querySelectorAll(".pl-modal .hms")[2]`)} ${plClose}`);
     c.tChange = Date.now();
@@ -2679,6 +2756,7 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
     if (c.saved?.switchWhenVideoEnds !== true) v.push(`playlist switchWhenVideoEnds ${c.saved?.switchWhenVideoEnds}, expected true`);
     if (c.lab0?.some((l) => /separate timing|switch scenes after/i.test(l))) v.push(`scene timing shown with "Switch when video ends" off: ${JSON.stringify(c.lab0)}`);
+    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.rule1 ?? "")) v.push(`the playlist modal (scene timing off) doesn't state the scene rule: ${JSON.stringify(c.rule1)}`);
     if (!c.lab1?.includes("Separate timing for scenes") || !c.lab1?.includes("SWITCH SCENES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes" + "SWITCH SCENES AFTER"`);
     return v;
   } };
@@ -2686,6 +2764,7 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     // the globals: advance on, no limits, toggle off → s1 stays; the toggle row shows, the seconds row doesn't; on → it
     // does; 4 s
     await ui(settingsTab(`await m.sleep(200);`)); c.rows0 = await js(rowLabels);
+    c.hint0 = await ui(`return m.row("Separate timing for scenes")?.querySelector(".shint")?.textContent ?? "";`);
     await ui(`m.setCheck(m.input("Separate timing for scenes"), true, "separate"); await m.sleep(500);`); c.rows1 = await js(rowLabels);
     await ui(sceneSecsTo4(`m.row("Switch scenes after")`));
     c.tChange = Date.now();
@@ -2695,6 +2774,8 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 0 }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
+    // the scene rule said plainly while the toggle is off (owner 2026-11-10: the one set, the minimum if both are)
+    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.hint0 ?? "")) v.push(`"Separate timing for scenes" (off) hint doesn't state the scene rule: ${JSON.stringify(c.hint0)}`);
     if (!c.rows0?.includes("Separate timing for scenes") || c.rows0?.includes("Switch scenes after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes after"`);
     if (!c.rows1?.includes("Switch scenes after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes after"`);
     return v;
@@ -2862,7 +2943,7 @@ const waitPixel = (p, want, ms = 6000) => waitFor(async () => (await scPixel(p))
 const liveSp = (st, p) => { const id = srcIdsOf(st, p)[0]; return id ? st.graph[id].scene_props : undefined; };
 const spColor = (sp) => (Array.isArray(sp?.color) ? sp.color.map((x) => Math.round(x)) : sp?.color);
 const spIndex = () => readScIndex()[SC_KEY(SC[0])]?.sceneProps ?? null;
-const openSpModal = `await m.cardMenu("s1", "Settings (volume / speed)"); for (let i = 0; i < 50 && !document.querySelector("[data-scene-prop=color]"); i++) await m.sleep(100);`;
+const openSpModal = `await m.openSide("s1"); for (let i = 0; i < 50 && !document.querySelector("[data-scene-prop=color]"); i++) await m.sleep(100);`;
 const spSet = (name, value) => post("/library/scene-props", { path: SC[0], name, value });
 // set in the modal → live on the playing scene (same worker) → persisted; the bool hides its dependant at once
 C["sceneProp:set"] = { states: ["scene"], async run(c) {
@@ -3016,7 +3097,7 @@ C["cover:oneOfTwo"] = { states: ["playlist"], noSwitch: true, async run(c) {
   } };
 // the setting live from the UI: fullscreen-only ignores a maximized window; Off releases at once; the default counts both
 C["cover:modeLive"] = { states: ["playlist"], noSwitch: true, async run(c) {
-    const pick = (opt) => ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Pause when covered"); i++) await m.sleep(100); await m.sleep(300); await m.select("Pause when covered", ${JSON.stringify(opt)}); await m.sleep(400);`);
+    const pick = (opt) => ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Pause behind windows"); i++) await m.sleep(100); await m.sleep(300); await m.select("Pause behind windows", ${JSON.stringify(opt)}); await m.sleep(400);`);
     await pick("A fullscreen window");
     c.saved = await waitFor(async () => (await getSettings()).pauseWhenCovered === "fullscreen", 4000);
     await cover("maximized"); await sleep(1100); c.maxIgnored = !(await heldNow());
@@ -3281,17 +3362,21 @@ for (const mode of ["start_over", "resume"]) {
     } };
 }
 
-// --- parked: no monitor shows the wallpaper — rotating invisibly by default, held in the expert mode
+// --- parked: no monitor shows the wallpaper — rotating invisibly by default, held at the Expert level's "Hold"
 // 3 s interval on a 3-clip timed playlist; outputs removed, then returned
-const EXPERT_HOLD = `m.tab("Settings"); for (let i = 0; i < 60 && !m.row("Show expert options"); i++) await m.sleep(100); await m.sleep(300);
-  m.setCheck(m.row("Show expert options").querySelector("input[type=checkbox]"), true, "Show expert options"); await m.sleep(500);
+const LEVEL = (l) => `for (let i = 0; i < 60 && !document.querySelector('[data-settings-level] [data-level="${l}"]'); i++) await m.sleep(100);
+  m.click(document.querySelector('[data-settings-level] [data-level="${l}"]'), "level ${l}"); await m.sleep(400);`;
+const EXPERT_HOLD = `m.tab("Settings"); ${LEVEL("expert")} for (let i = 0; i < 60 && !m.row("When no monitor shows the wallpaper"); i++) await m.sleep(100); await m.sleep(300);
   await m.select("When no monitor shows the wallpaper", "Hold until a monitor returns"); await m.sleep(500); m.tab("Library"); await m.sleep(500);`;
 async function parkedRun(c, hold) {
   if (hold) { await ui(EXPERT_HOLD); c.heldSet = await waitFor(async () => (await getSettings()).rotateWhileParked === false && (await pget("prog:main.while_parked")) === "hold", 5000, 100); }
   await ctl.call("headless.remove_output", { name: "VIRTUAL-1" }); await ctl.call("headless.remove_output", { name: "VIRTUAL-2" });
   c.parked = await waitFor(async () => progOf(await ctl.call("state"))?.phase === "parked", 5000, 50);
   const ps = (await http("GET", "/playlist/state")).json;
-  await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: null });
+  // hold: the interval counts from what the held item already played (the UI steps before parking take a few seconds),
+  // so it's still 3 s short of due when the outputs return and the held item is what comes back
+  const played = hold ? (progOf(await ctl.call("state"))?.played_ms ?? 0) : 0;
+  await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: hold ? Math.ceil((played + 3000) / 1000) : 3 }, name: null });
   c.p0 = progOf(await ctl.call("state")); c.t0 = Date.now();
   await sleep(hold ? 7000 : 9500);
   c.p1 = progOf(await ctl.call("state"));
@@ -3331,43 +3416,50 @@ C["parked:hold"] = { states: ["playlist"], switch: true, rearms: true, async run
     return v;
   } };
 
-// --- expert:toggle — the tier through the UI, and what it does to the player (the pure-UI cases: probe-expert.js)
-C["expert:toggle"] = { states: ["idle", "playlist"], noSwitch: true, async run(c) {
-    const T = JSON.stringify("Show expert options"), R = JSON.stringify("When no monitor shows the wallpaper");
+// --- expert:toggle — the Settings levels through the UI (the top-bar picker), and what hiding does to the player: an
+// Expert row hidden at Standard keeps its value and stays live; the "tucked away" note counts it and its Show raises the level (the
+// pure-UI cases: probe-expert.js)
+C["expert:toggle"] = { states: ["idle", "playlist"], noSwitch: true,
+  async pre() { await post("/settings", { settingsLevel: "standard" }); },
+  async run(c) {
+    const R = JSON.stringify("When no monitor shows the wallpaper");
     const snap = () => ui(`const sec = [...document.querySelectorAll(".settings .ssection h3")].map((h) => h.textContent.trim());
-      return { sections: sec, expertRows: document.querySelectorAll("[data-expert]").length, row: !!m.row(${R}), toggle: m.row(${T})?.querySelector("input[type=checkbox]")?.checked ?? null,
-        tag: !!m.row(${R})?.querySelector("[data-expert-tag]"), sel: m.row(${R})?.querySelector(".sel")?.textContent?.trim() ?? null, dev: !!m.row(${T})?.querySelector(".s-reset[data-deviated]") };`);
+      return { level: document.querySelector("[data-settings-level]")?.dataset.settingsLevel ?? null, sections: sec, expertRows: document.querySelectorAll("[data-expert]").length, row: !!m.row(${R}),
+        tag: !!m.row(${R})?.querySelector("[data-expert-tag]"), sel: m.row(${R})?.querySelector(".sel")?.textContent?.trim() ?? null,
+        hidden: document.querySelector("[data-hidden-changed]")?.dataset.hiddenChanged ?? null };`);
     const wp = () => (c.state === "playlist" ? pget("prog:main.while_parked") : Promise.resolve(null));
-    await ui(`m.tab("Settings"); for (let i = 0; i < 60 && !m.row(${T}); i++) await m.sleep(100); await m.sleep(300);`);
-    c.s0 = await snap(); c.wp0 = await wp();
-    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), true, "toggle"); await m.sleep(500);`); c.s1 = await snap();
+    await ui(`m.tab("Settings"); ${LEVEL("standard")} await m.sleep(300);`);
+    c.s0 = await snap(); c.wp0 = await wp(); c.n0 = +(c.s0.hidden ?? 0); // the stack's own non-default hidden settings
+    await ui(LEVEL("expert")); c.s1 = await snap();
     await ui(`await m.select(${R}, "Hold until a monitor returns"); await m.sleep(500);`);
     c.saved1 = await waitFor(async () => (await getSettings()).rotateWhileParked === false, 4000, 100);
     if (c.state === "playlist") await waitFor(async () => (await wp()) === "hold", 4000, 100);
     c.wp1 = await wp();
-    await ui(`m.setCheck(m.row(${T}).querySelector("input[type=checkbox]"), false, "toggle"); await m.sleep(600);`); c.s2 = await snap();
+    await ui(LEVEL("standard")); c.s2 = await snap();
     c.kept = (await getSettings()).rotateWhileParked; c.wp2 = await wp();
-    await ui(`m.row(${T}).querySelector(".s-reset")?.click(); await m.sleep(600);`);
+    await ui(`m.click(document.querySelector("[data-hidden-show]"), "show"); await m.sleep(500);`); c.s2b = await snap();
+    await ui(`m.row(${R})?.querySelector(".s-reset")?.click(); await m.sleep(600);`);
+    await ui(LEVEL("standard"));
     c.saved3 = await waitFor(async () => (await getSettings()).rotateWhileParked === true, 4000, 100);
     if (c.state === "playlist") await waitFor(async () => (await wp()) === "rotate", 4000, 100);
-    c.s3 = await snap(); c.wp3 = await wp(); c.tog3 = (await getSettings()).showExpertOptions;
+    c.s3 = await snap(); c.wp3 = await wp(); c.lv3 = (await getSettings()).settingsLevel;
   }, check(c) {
     const v = [];
-    if (c.s0.sections.includes("Expert") || c.s0.expertRows || c.s0.row || c.s0.toggle !== false) v.push(`off by default: ${JSON.stringify(c.s0)}`);
-    if (c.s1.sections[c.s1.sections.length - 1] !== "Expert" || !c.s1.row || !c.s1.tag || c.s1.sel !== "Keep rotating") v.push(`on: ${JSON.stringify(c.s1)}`);
+    if (c.s0.level !== "standard" || c.s0.expertRows || c.s0.row) v.push(`Standard hides the Expert rows: ${JSON.stringify(c.s0)}`);
+    if (c.s1.level !== "expert" || !c.s1.row || !c.s1.tag || c.s1.sel !== "Keep rotating") v.push(`Expert shows them: ${JSON.stringify(c.s1)}`);
     if (!c.saved1) v.push("Hold until a monitor returns wasn't saved");
     if (c.state === "playlist") {
       if (c.wp0 !== "rotate") v.push(`prog:main.while_parked ${c.wp0} by default, expected rotate`);
       if (c.wp1 !== "hold") v.push(`prog:main.while_parked ${c.wp1} after choosing Hold, expected hold (live)`);
-      if (c.wp2 !== "hold") v.push(`prog:main.while_parked ${c.wp2} after hiding the group: hiding must not reset it`);
-      if (c.wp3 !== "rotate") v.push(`prog:main.while_parked ${c.wp3} after the marker's reset, expected rotate`);
+      if (c.wp2 !== "hold") v.push(`prog:main.while_parked ${c.wp2} after going back to Standard: hiding must not reset it`);
+      if (c.wp3 !== "rotate") v.push(`prog:main.while_parked ${c.wp3} after the row's reset, expected rotate`);
     }
-    if (c.s2.sections.includes("Expert") || c.s2.expertRows || c.s2.row) v.push(`hidden again: ${JSON.stringify(c.s2)}`);
-    if (c.kept !== false) v.push(`hiding the group changed rotateWhileParked to ${c.kept}`);
-    if (!c.s2.dev) v.push("no deviated marker on \"Show expert options\" while a hidden expert value differs");
-    if (!c.saved3) v.push("the marker's reset didn't restore rotateWhileParked");
-    if (c.s3.dev) v.push("the deviated marker stays after the reset");
-    if (c.tog3 !== false) v.push(`the marker's reset switched the toggle (showExpertOptions ${c.tog3})`);
+    if (c.s2.expertRows || c.s2.row) v.push(`hidden again at Standard: ${JSON.stringify(c.s2)}`);
+    if (c.kept !== false) v.push(`going back to Standard changed rotateWhileParked to ${c.kept}`);
+    if (+(c.s2.hidden ?? 0) !== c.n0 + 1) v.push(`the "tucked away" note should count one more (${c.n0 + 1}) while a hidden Expert value differs: ${JSON.stringify(c.s2)}`);
+    if (c.s2b.level !== "expert" || !c.s2b.row) v.push(`the note's Show didn't raise the level to Expert: ${JSON.stringify(c.s2b)}`);
+    if (!c.saved3) v.push("the row's reset didn't restore rotateWhileParked");
+    if (+(c.s3.hidden ?? 0) !== c.n0) v.push(`after the reset the note should be back to ${c.n0}: ${JSON.stringify(c.s3)}`);
     return v;
   } };
 
@@ -3391,6 +3483,61 @@ C["cli:next:backendDown"] = { states: ["playlist"], switch: true, async run(c) {
     if (!c.landed) v.push(`two keybinds with no backend: prog:main is on ${TITLE(c.progDown?.path)}, expected ${TITLE(c.want)} (two items on)`);
     for (const e of c.evs) if (e.event === "transition.scheduled" && !String(e.origin).startsWith("program:")) v.push(`a switch from ${e.origin} to ${TITLE(e.path)} with no backend`);
     if (c.after.cur?.path !== c.want) v.push(`the new backend says ${TITLE(c.after.cur?.path)} plays, expected ${TITLE(c.want)}`);
+    return v;
+  } };
+
+// `liascape loop-current` (owner todo 2026-11-10, "keybind toggle to infinite loop current wallpaper"): a 3 s timed playlist;
+// the keybind → prog:main.keep, no switch for 7 s, the topbar says so, /current.keep; again → the rotation resumes (a switch
+// within ~4.5 s); with the backend stopped (the app closed) the CLI toggles it on the player itself and the new backend
+// reports it; a Play of the playlist lifts it.
+C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
+    const ps = (await http("GET", "/playlist/state")).json;
+    await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: ps.name });
+    await sleep(400);
+    c.on = await cliStep(c, "loop-current"); c.tOn = Date.now();
+    c.keep1 = await pget("prog:main.keep"); c.cur1 = await curPath();
+    c.status1 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
+    c.curKeep = (await http("GET", "/current")).json?.keep;
+    await sleep(7000);
+    c.switchesKept = events.filter((e) => e._t >= c.tOn && e.event === "transition.scheduled").length;
+    { const st = await ctl.call("state"); const lay = Object.entries(st.graph).find(([id]) => id.startsWith("lay:") && id.endsWith(":main"))?.[1];
+      c.loop = lay?.content ? st.graph[lay.content]?.loop : undefined; }
+    c.off = await cliStep(c, "loop-current"); c.tOff = Date.now();
+    c.keep2 = await pget("prog:main.keep");
+    c.status2 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
+    c.resumed = await waitFor(() => events.some((e) => e._t >= c.tOff && e.event === "transition.scheduled"), 5500, 100);
+    await waitSettled(8000);
+    // the app closed: the one-shot CLI reaches the player itself; the next backend reads it from there
+    await win.loadURL("about:blank");
+    await stopBackend(3000); c.down = !procAlive(backendPid);
+    c.closed = await cli("loop-current");
+    c.keep3 = await pget("prog:main.keep");
+    c.up = await startBackend(); await loadUi(); await sleep(500);
+    c.curKeep3 = (await http("GET", "/current")).json?.keep;
+    // the now-playing line (it comes back after any timed status the page's startup shows)
+    await waitFor(async () => /looping this one/.test(c.status3 = await ui(`return document.querySelector(".topbar .status")?.textContent ?? "";`)), 9000, 200);
+    // a Play lifts it
+    await ui(`m.click(document.querySelector(".play-btn"), "Play");`); await sleep(800); await waitSettled(8000);
+    c.keep4 = await pget("prog:main.keep");
+    await post("/playlist/state", { videoPaths: ps.videoPaths, settings: ps.settings, name: ps.name });
+  }, check(c) {
+    const v = [];
+    if (c.on?.code !== 0 || !/Looping .* the playlist stays on it/.test(c.on?.out ?? "")) v.push(`loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
+    if (c.keep1 !== true) v.push(`prog:main.keep after loop-current: ${c.keep1}, expected true`);
+    if (c.curKeep !== true) v.push(`/current.keep ${c.curKeep}, expected true`);
+    if (!/^Looping /.test(c.status1 ?? "")) v.push(`topbar after loop-current: ${JSON.stringify(c.status1)}`);
+    if (c.switchesKept) v.push(`${c.switchesKept} switch(es) within 7 s under the keep (3 s interval) — it must stay on ${TITLE(c.cur1)}`);
+    if (c.loop !== true) v.push(`the kept video's loop ${c.loop}, expected true`);
+    if (c.off?.code !== 0 || !/Rotation resumed/.test(c.off?.out ?? "")) v.push(`loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
+    if (c.keep2 !== false) v.push(`prog:main.keep after the 2nd loop-current: ${c.keep2}, expected false`);
+    if (!/^Rotation resumed/.test(c.status2 ?? "")) v.push(`topbar after the 2nd loop-current: ${JSON.stringify(c.status2)}`);
+    if (!c.resumed) v.push("no switch within 5.5 s of lifting the keep (3 s interval)");
+    if (!c.down) v.push("the backend didn't stop (the fixture failed)");
+    if (c.closed?.code !== 0 || c.keep3 !== true) v.push(`loop-current with the app closed: exit ${c.closed?.code} (${JSON.stringify(c.closed?.out)}), prog:main.keep ${c.keep3}`);
+    if (!c.up) v.push("the restarted backend didn't answer /health");
+    if (c.curKeep3 !== true) v.push(`the new backend's /current.keep ${c.curKeep3}, expected true (the player kept it)`);
+    if (!/looping this one/.test(c.status3 ?? "")) v.push(`the reopened page's status line doesn't say it loops: ${JSON.stringify(c.status3)}`);
+    if (c.keep4 !== false) v.push(`prog:main.keep after a Play: ${c.keep4}, expected false (a Play starts the rotation)`);
     return v;
   } };
 
@@ -3606,7 +3753,7 @@ const FUZZ_RULES = [
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
-  // Settings → "Mute audio" on disables the Volume slider and "Normalize audio" (and hides the target): their drive
+  // Settings → "Mute wallpapers" on disables the Volume slider and "Even out loudness" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
   [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^playlistBarVol:/, { when: offGlobal(42) }],

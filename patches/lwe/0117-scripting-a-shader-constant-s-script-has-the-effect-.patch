@@ -1,0 +1,191 @@
+From 92c1ada97636ca6f462890a43c0cdd72b02b5f10 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:34:49 +0530
+Subject: [PATCH 117/126] scripting: a shader constant's script has the
+ effect's material as thisObject
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A script on an effect's shader constant (constantshadervalues: {"value", "script"}) ran with thisObject =
+the layer. In WE it is not the layer: 3163060610's cloud layer (`主要云`, 1743 x 1508) carries a
+waterripple whose `scale` constant's script does `thisObject.scale = c_de_scale + 0.1` (0.22), and WE
+draws the cloud whole across the window; LWE scaled the layer to 0.22 (health bbox 383 x 332) and the
+cloud was gone. Every constant script in the library (32, in 3163060610 and 2890767643) sets
+`thisObject.<its own constant>` — the effect's material properties by their material names.
+
+thisObject is now a material object: an accessor per constant of the effect (its constantshadervalues
+keys; get / set the constant in every pass that has it, live), and getAnimation () bound to the layer
+as before (the running constant's own keyframe animation). thisLayer is still the layer.
+
+3163060610 against WE: 0.119 → 0.059 (2 s 0.082 → 0.002, 5 s 0.084 → 0.002).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md 3163060610 (the big cloud missing)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp |  7 +-
+ .../Scripting/ScriptEngine.cpp                | 71 ++++++++++++++++++-
+ .../WallpaperEngine/Scripting/ScriptEngine.h  |  5 +-
+ 3 files changed, 78 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 53a6705..4f0cf7d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1071,8 +1071,9 @@ void CImage::setup () {
+ 		);
+ 	    }
+ 
+-	    // scripts on the effect's shader constants (a fade, an audio pulse) run like a layer property's; their
+-	    // thisObject is this image, and getAnimation () reaches the constant's own keyframe animation
++	    // scripts on the effect's shader constants (a fade, an audio pulse) run like a layer property's (thisLayer =
++	    // this image); their thisObject is the effect's material (its constants), and getAnimation () reaches the
++	    // constant's own keyframe animation
+ 	    int passIndex = 0;
+ 	    for (const auto& pass : cur->passOverrides) {
+ 		for (const auto& [name, constant] : pass->constants) {
+@@ -1080,7 +1081,7 @@ void CImage::setup () {
+ 			this->getScene ().getScriptEngine ().queueScript (
+ 			    "effect_" + std::to_string (cur->id) + "_" + std::to_string (effectIndex) + "_pass_"
+ 				+ std::to_string (passIndex) + "_" + name + "_" + std::to_string (this->getId ()),
+-			    *constant->value, *this
++			    *constant->value, *this, nullptr, -1, cur.get ()
+ 			);
+ 		    }
+ 		}
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+index 691d8f1..d0aa716 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.cpp
+@@ -21,6 +21,7 @@
+ #include <glm/glm.hpp>
+ 
+ #include <algorithm>
++#include <set>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+@@ -923,7 +924,7 @@ void ScriptEngine::destroyLayer (ScriptLayerHandle handle) {
+ 
+ void ScriptEngine::queueScript (
+     const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect,
+-    int animationLayer
++    int animationLayer, const ImageEffect* material
+ ) {
+     const auto source = currentValue.getScriptSource ();
+ 
+@@ -940,6 +941,7 @@ void ScriptEngine::queueScript (
+ 			   .object = object,
+ 			   .effect = effect,
+ 			   .animationLayer = animationLayer,
++			   .material = material,
+ 			   .scriptScale = scriptScaleOf (key.substr (0, key.rfind ('_'))) }
+     );
+     this->m_pendingModules = true;
+@@ -1020,6 +1022,36 @@ void ScriptEngine::runPendingJobs () {
+     }
+ }
+ 
++namespace {
++// a material's constant, an accessor of the IMaterial a shader-constant script's thisObject is: data[0] the engine,
++// data[1] the constant's name, data[2] the effect (the constant lives in each of its passes that sets it)
++JSValue material_constant (JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, int magic, JSValue* data) {
++    int64_t engine = 0, effect = 0;
++    JS_ToInt64 (ctx, &engine, data[0]);
++    JS_ToInt64 (ctx, &effect, data[2]);
++    const char* name = JS_ToCString (ctx, data[1]);
++    if (name == nullptr) {
++	return JS_UNDEFINED;
++    }
++    const std::string key = name;
++    JS_FreeCString (ctx, name);
++    auto* self = reinterpret_cast<ScriptEngine*> (engine);
++    const auto* owner = reinterpret_cast<const ImageEffect*> (effect);
++    JSValue result = JS_UNDEFINED;
++    for (const auto& pass : owner->passOverrides) {
++	const auto it = pass->constants.find (key);
++	if (it == pass->constants.end () || it->second == nullptr || it->second->value == nullptr) {
++	    continue;
++	}
++	if (magic == 0) {
++	    return self->dynamicToJs (*it->second->value);
++	}
++	self->jsToDynamic (argv[0], *it->second->value);
++    }
++    return result;
++}
++} // namespace
++
+ void ScriptEngine::evaluateModule (LoadedModule& module) {
+     JSContext* ctx = this->m_context;
+     module.evaluated = true;
+@@ -1058,6 +1090,43 @@ void ScriptEngine::evaluateModule (LoadedModule& module) {
+ 	}
+ 	JS_FreeValue (ctx, of);
+     }
++    // a script on an effect's shader constant: thisObject is the effect's material (WE: not the layer — 3163060610's
++    // waterripple `scale` script sets `thisObject.scale` to 0.22, and WE's cloud keeps its size), its properties the
++    // effect's constants; getAnimation () still reaches the running constant's own keyframe animation
++    if (module.material != nullptr && module.effect == nullptr && module.animationLayer < 0) {
++	JSValue layer = thisObject;
++	thisObject = JS_NewObject (ctx);
++	std::set<std::string> names;
++	for (const auto& pass : module.material->passOverrides) {
++	    for (const auto& [name, constant] : pass->constants) {
++		if (!names.insert (name).second) {
++		    continue;
++		}
++		JSValue data[] = { JS_NewInt64 (ctx, reinterpret_cast<int64_t> (this)), JS_NewString (ctx, name.c_str ()),
++				   JS_NewInt64 (ctx, reinterpret_cast<int64_t> (module.material)) };
++		JSValue getter = JS_NewCFunctionData (ctx, material_constant, 0, 0, 3, data);
++		JSValue setter = JS_NewCFunctionData (ctx, material_constant, 1, 1, 3, data);
++		for (auto& d : data) {
++		    JS_FreeValue (ctx, d);
++		}
++		JSAtom atom = JS_NewAtom (ctx, name.c_str ());
++		JS_DefinePropertyGetSet (ctx, thisObject, atom, getter, setter, JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
++		JS_FreeAtom (ctx, atom);
++	    }
++	}
++	// the layer's getAnimation, bound to the layer (it reads the running script's property)
++	JSValue getAnimation = JS_GetPropertyStr (ctx, layer, "getAnimation");
++	JSValue bind = JS_GetPropertyStr (ctx, getAnimation, "bind");
++	JSValue bound = JS_IsFunction (ctx, bind) ? JS_Call (ctx, bind, getAnimation, 1, &layer) : JS_UNDEFINED;
++	if (JS_IsException (bound)) {
++	    JS_FreeValue (ctx, JS_GetException (ctx));
++	    bound = JS_UNDEFINED;
++	}
++	JS_SetPropertyStr (ctx, thisObject, "getAnimation", bound);
++	JS_FreeValue (ctx, bind);
++	JS_FreeValue (ctx, getAnimation);
++	JS_FreeValue (ctx, layer);
++    }
+     JS_SetPropertyStr (ctx, this->m_globalThis, "__thisObjectBinding", JS_DupValue (ctx, thisObject));
+     JS_FreeValue (ctx, module.binding);
+     module.binding = JS_NewArray (ctx);
+diff --git a/src/core/WallpaperEngine/Scripting/ScriptEngine.h b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+index 73bc90d..7115ec5 100644
+--- a/src/core/WallpaperEngine/Scripting/ScriptEngine.h
++++ b/src/core/WallpaperEngine/Scripting/ScriptEngine.h
+@@ -62,6 +62,9 @@ public:
+ 	const ImageEffect* effect = nullptr;
+ 	/** a script on a puppet animation layer's value: thisObject is that IAnimationLayer (its key), else -1 */
+ 	int animationLayer = -1;
++	/** a script on an effect's shader constant: thisObject is that effect's material, whose properties are the
++	 *  effect's constants by their material names (3163060610: `thisObject.scale = …` in a waterripple `scale`) */
++	const ImageEffect* material = nullptr;
+ 	/** animation events its value's timeline passed before the script started (sent after its init) */
+ 	std::vector<std::pair<std::string, int>> pendingAnimationEvents = {};
+ 	/** the script's unit per stored unit: a script sees `angles` in degrees, the layer keeps radians */
+@@ -124,7 +127,7 @@ public:
+      */
+     void queueScript (
+ 	const std::string& key, DynamicValue& currentValue, ScriptableObject& object, const ImageEffect* effect = nullptr,
+-	int animationLayer = -1
++	int animationLayer = -1, const ImageEffect* material = nullptr
+     );
+ 
+     /**

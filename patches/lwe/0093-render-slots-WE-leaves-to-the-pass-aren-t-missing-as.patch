@@ -1,7 +1,7 @@
-From ed7c15b761ebfe10ed74df8111da66a6c6c0e7d1 Mon Sep 17 00:00:00 2001
+From 7bb6797ed0d4c16d3c142cc7ad3cc463e5d8a742 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 01:38:19 +0530
-Subject: [PATCH 093/104] render: slots WE leaves to the pass aren't missing
+Subject: [PATCH 093/126] render: slots WE leaves to the pass aren't missing
  assets
 
 Three findings of the scene health report that WE doesn't have:

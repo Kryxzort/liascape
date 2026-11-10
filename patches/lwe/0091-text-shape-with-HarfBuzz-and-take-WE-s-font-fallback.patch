@@ -1,7 +1,7 @@
-From bcba5bcd5aa05c9141b08f757dfaa1f70eb65927 Mon Sep 17 00:00:00 2001
+From c2ae7d2e7e0bf58fbaebdae889c6d21a85a9ee26 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 01:38:19 +0530
-Subject: [PATCH 091/104] text: shape with HarfBuzz and take WE's font fallback
+Subject: [PATCH 091/126] text: shape with HarfBuzz and take WE's font fallback
  chain
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,17 +1,17 @@
 {
- "generated": "2026-11-05 04:12 IST",
+ "generated": "2026-11-11 02:56 IST",
  "run": {
   "dir": "/mnt/Games/Steam/SteamLibrary/steamapps/workshop/content/431960",
   "assets": "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
-  "worker": "/mnt/CachyOS/@home/kryxzort/Projects/liascape/.claude/worktrees/attach/src/player/target/release/liascape-scene-worker",
+  "worker": "/home/kryxzort/Projects/liascape/.claude/worktrees/weref-2d/src/player/target/release/liascape-scene-worker",
   "seconds": 3,
-  "started": "2026-11-05T03:55:48+05:30",
-  "commit": "0351ef7+dirty",
-  "lwe": "f50bc8258688f972249992742b0a5c78e420a12c",
-  "pin": "f50bc8258688",
+  "started": "2026-11-11T02:46:56+05:30",
+  "commit": "33a85dfc",
+  "lwe": "5cb69c7d4a68b5c07fcc81444f803e7791ba2ab8",
+  "pin": "5cb69c7d4a68",
   "gpu": "NVIDIA GeForce RTX 3070 Ti, 595.84"
  },
- "commit": "8ffccd4",
+ "commit": "33a85dfc",
  "summary": {
   "clean": 89,
   "degraded": 7,
@@ -312,6 +312,7 @@
     "2469881470",
     "2828233985",
     "2890767643",
+    "3163060610",
     "3243449890",
     "3354740764",
     "3363252053",
@@ -320,10 +321,10 @@
     "3490034653",
     "3516174947"
    ],
-   "scene_count": 10,
-   "occurrences": 209,
+   "scene_count": 11,
+   "occurrences": 210,
    "kinds": {
-    "offcanvas": 209
+    "offcanvas": 210
    },
    "examples": [
     {
@@ -674,14 +675,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.760195,
-   "build_ms": 246.715383,
-   "frame_ms_mean": 0.7947859444444444,
-   "frame_ms_p95": 1.795313,
+   "load_ms": 1.296435,
+   "build_ms": 374.709045,
+   "frame_ms_mean": 0.6387586888888889,
+   "frame_ms_p95": 0.928708,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1155728109/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1155728109/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1155728109/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1155728109/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -706,14 +707,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.934128,
-   "build_ms": 306.536376,
-   "frame_ms_mean": 1.166340155555556,
-   "frame_ms_p95": 2.3838739999999996,
+   "load_ms": 1.772167,
+   "build_ms": 339.18188399999997,
+   "frame_ms_mean": 0.9287995444444448,
+   "frame_ms_p95": 1.335479,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1160682576/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1160682576/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1160682576/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1160682576/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -738,14 +739,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.282208,
-   "build_ms": 158.561549,
-   "frame_ms_mean": 0.7480420222222222,
-   "frame_ms_p95": 1.687256,
+   "load_ms": 1.692507,
+   "build_ms": 252.08382200000003,
+   "frame_ms_mean": 0.6929421999999998,
+   "frame_ms_p95": 0.957758,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1174926427/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1174926427/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1174926427/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1174926427/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -770,14 +771,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.904087,
-   "build_ms": 441.781078,
-   "frame_ms_mean": 1.5989336444444446,
-   "frame_ms_p95": 2.996087,
+   "load_ms": 1.57933,
+   "build_ms": 448.839086,
+   "frame_ms_mean": 1.3472973888888888,
+   "frame_ms_p95": 1.621197,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1195626192/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1195626192/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1195626192/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1195626192/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -802,14 +803,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.1581360000000003,
-   "build_ms": 409.937741,
-   "frame_ms_mean": 1.1406878444444448,
-   "frame_ms_p95": 2.4936160000000003,
+   "load_ms": 6.321288,
+   "build_ms": 381.554694,
+   "frame_ms_mean": 1.0600839444444443,
+   "frame_ms_p95": 1.366461,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1264170639/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1264170639/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1264170639/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1264170639/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -834,14 +835,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.919515,
-   "build_ms": 930.466478,
-   "frame_ms_mean": 1.8843340333333325,
-   "frame_ms_p95": 2.754472,
+   "load_ms": 3.545931,
+   "build_ms": 1095.551303,
+   "frame_ms_mean": 1.698161533333333,
+   "frame_ms_p95": 2.1279760000000003,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1556245028/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1556245028/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1556245028/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1556245028/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -909,14 +910,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.53356,
-   "build_ms": 355.910356,
-   "frame_ms_mean": 0.7181071888888888,
-   "frame_ms_p95": 1.796306,
+   "load_ms": 1.356368,
+   "build_ms": 270.07167100000004,
+   "frame_ms_mean": 0.9404112666666666,
+   "frame_ms_p95": 1.46995,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1726902114/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1726902114/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1726902114/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1726902114/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -941,14 +942,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.068573,
-   "build_ms": 566.913543,
-   "frame_ms_mean": 1.6068466555555554,
-   "frame_ms_p95": 2.45619,
+   "load_ms": 4.547141,
+   "build_ms": 723.9930850000001,
+   "frame_ms_mean": 1.4702822,
+   "frame_ms_p95": 1.925136,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1797172968/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1797172968/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1797172968/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1797172968/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -973,14 +974,14 @@
    "built": 39,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.614734,
-   "build_ms": 1620.132954,
-   "frame_ms_mean": 2.067533933333333,
-   "frame_ms_p95": 3.720949,
+   "load_ms": 12.916021,
+   "build_ms": 2067.415661,
+   "frame_ms_mean": 2.074473211111111,
+   "frame_ms_p95": 3.0852470000000003,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1864677589/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1864677589/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1864677589/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1864677589/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1128,14 +1129,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.3232169999999996,
-   "build_ms": 417.630732,
-   "frame_ms_mean": 0.9973244,
-   "frame_ms_p95": 1.718598,
+   "load_ms": 2.972995,
+   "build_ms": 440.324961,
+   "frame_ms_mean": 0.9507163555555554,
+   "frame_ms_p95": 1.271159,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1884904087/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1884904087/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1884904087/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1884904087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1160,14 +1161,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.856332,
-   "build_ms": 273.404491,
-   "frame_ms_mean": 1.0846217333333328,
-   "frame_ms_p95": 2.112291,
+   "load_ms": 1.785037,
+   "build_ms": 309.44899999999996,
+   "frame_ms_mean": 0.8753283,
+   "frame_ms_p95": 1.257088,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1934084447/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/1934084447/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1934084447/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/1934084447/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1192,14 +1193,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.231099,
-   "build_ms": 208.865673,
-   "frame_ms_mean": 0.8185036111111116,
-   "frame_ms_p95": 1.654035,
+   "load_ms": 1.866635,
+   "build_ms": 217.370073,
+   "frame_ms_mean": 0.5853319888888888,
+   "frame_ms_p95": 0.762725,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2047150134/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2047150134/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2047150134/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2047150134/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1224,14 +1225,14 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.021257,
-   "build_ms": 1046.748995,
-   "frame_ms_mean": 3.583072833333332,
-   "frame_ms_p95": 5.617843,
+   "load_ms": 3.699378,
+   "build_ms": 1105.793747,
+   "frame_ms_mean": 3.5699339777777785,
+   "frame_ms_p95": 5.89254,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2064316482/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2064316482/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2064316482/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2064316482/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1256,14 +1257,14 @@
    "built": 42,
    "perspective": false,
    "hdr": false,
-   "load_ms": 18.9304,
-   "build_ms": 2284.763309,
-   "frame_ms_mean": 2.792509966666667,
-   "frame_ms_p95": 4.55997,
+   "load_ms": 17.335533,
+   "build_ms": 2636.755349,
+   "frame_ms_mean": 2.497953377777778,
+   "frame_ms_p95": 3.955375,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2134765860/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2134765860/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2134765860/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2134765860/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1289,14 +1290,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.349329,
-   "build_ms": 244.192068,
-   "frame_ms_mean": 0.8671593666666672,
-   "frame_ms_p95": 1.858873,
+   "load_ms": 1.329341,
+   "build_ms": 336.05352700000003,
+   "frame_ms_mean": 0.8390103444444444,
+   "frame_ms_p95": 1.175555,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2182433068/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2182433068/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2182433068/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2182433068/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1321,14 +1322,14 @@
    "built": 1,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.4178190000000002,
-   "build_ms": 268.386585,
-   "frame_ms_mean": 1.3934484666666662,
-   "frame_ms_p95": 2.185573,
+   "load_ms": 1.447924,
+   "build_ms": 286.712174,
+   "frame_ms_mean": 1.4114449222222214,
+   "frame_ms_p95": 1.655432,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2189783622/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2189783622/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2189783622/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2189783622/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1354,14 +1355,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.4810450000000002,
-   "build_ms": 175.43923,
-   "frame_ms_mean": 0.7528218777777779,
-   "frame_ms_p95": 1.775339,
+   "load_ms": 1.416125,
+   "build_ms": 189.048803,
+   "frame_ms_mean": 0.7573543444444444,
+   "frame_ms_p95": 0.995913,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2219762084/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2219762084/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2219762084/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2219762084/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1386,14 +1387,14 @@
    "built": 11,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.694271,
-   "build_ms": 746.092569,
-   "frame_ms_mean": 5.116798433333333,
-   "frame_ms_p95": 4.742603,
+   "load_ms": 5.449393000000001,
+   "build_ms": 829.341021,
+   "frame_ms_mean": 5.265884255555555,
+   "frame_ms_p95": 4.235206,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2288455459/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2288455459/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2288455459/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2288455459/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1431,14 +1432,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.173413,
-   "build_ms": 328.598108,
-   "frame_ms_mean": 1.1117927888888888,
-   "frame_ms_p95": 1.933139,
+   "load_ms": 2.80341,
+   "build_ms": 326.74723900000004,
+   "frame_ms_mean": 0.995687966666667,
+   "frame_ms_p95": 1.328009,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2290002190/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2290002190/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2290002190/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2290002190/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1463,14 +1464,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 7.168155,
-   "build_ms": 1307.96967,
-   "frame_ms_mean": 1.811135611111112,
-   "frame_ms_p95": 2.989426,
+   "load_ms": 9.76492,
+   "build_ms": 1461.657871,
+   "frame_ms_mean": 2.0500047444444447,
+   "frame_ms_p95": 3.0727089999999997,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2325974975/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2325974975/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2325974975/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2325974975/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1548,14 +1549,14 @@
    "built": 43,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.144407999999999,
-   "build_ms": 2165.120488,
-   "frame_ms_mean": 2.2531900111111116,
-   "frame_ms_p95": 3.751434,
+   "load_ms": 5.937456,
+   "build_ms": 2588.9931420000003,
+   "frame_ms_mean": 2.505899544444444,
+   "frame_ms_p95": 4.411771,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2371103399/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2371103399/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2371103399/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2371103399/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1673,14 +1674,14 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.717244,
-   "build_ms": 996.598707,
-   "frame_ms_mean": 3.938312555555557,
-   "frame_ms_p95": 5.868109,
+   "load_ms": 4.873744,
+   "build_ms": 977.998764,
+   "frame_ms_mean": 3.602436244444444,
+   "frame_ms_p95": 4.7102580000000005,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2375914945/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2375914945/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2375914945/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2375914945/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -1705,14 +1706,14 @@
    "built": 35,
    "perspective": false,
    "hdr": false,
-   "load_ms": 14.831682,
-   "build_ms": 2013.023445,
-   "frame_ms_mean": 3.429374633333334,
-   "frame_ms_p95": 5.183752,
+   "load_ms": 27.021621999999997,
+   "build_ms": 2379.616671,
+   "frame_ms_mean": 2.895479044444443,
+   "frame_ms_p95": 4.4676409999999995,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2388299037/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2388299037/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2388299037/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2388299037/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -1766,14 +1767,14 @@
    "built": 12,
    "perspective": false,
    "hdr": false,
-   "load_ms": 13.365322,
-   "build_ms": 1646.5732979999998,
-   "frame_ms_mean": 3.468091177777778,
-   "frame_ms_p95": 5.5547260000000005,
+   "load_ms": 4.909846,
+   "build_ms": 1669.315099,
+   "frame_ms_mean": 3.9490711000000016,
+   "frame_ms_p95": 5.5972100000000005,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2469881470/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2469881470/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2469881470/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2469881470/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2443,14 +2444,14 @@
    "built": 34,
    "perspective": false,
    "hdr": false,
-   "load_ms": 8.349483,
-   "build_ms": 1631.153012,
-   "frame_ms_mean": 4.484710266666666,
-   "frame_ms_p95": 5.938445,
+   "load_ms": 13.575327,
+   "build_ms": 2043.298995,
+   "frame_ms_mean": 4.364994655555555,
+   "frame_ms_p95": 5.454841999999999,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2511663284/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2511663284/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2511663284/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2511663284/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2475,14 +2476,14 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 1.864704,
-   "build_ms": 467.084101,
-   "frame_ms_mean": 2.9452486888888876,
-   "frame_ms_p95": 4.68274,
+   "load_ms": 1.807821,
+   "build_ms": 303.462701,
+   "frame_ms_mean": 2.290655077777778,
+   "frame_ms_p95": 2.635751,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2542468435/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2542468435/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2542468435/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2542468435/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2507,14 +2508,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.0037800000000003,
-   "build_ms": 692.442711,
-   "frame_ms_mean": 1.5094020666666668,
-   "frame_ms_p95": 2.539659,
+   "load_ms": 2.127103,
+   "build_ms": 920.247218,
+   "frame_ms_mean": 1.3576141666666677,
+   "frame_ms_p95": 1.678336,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2561227934/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2561227934/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2561227934/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2561227934/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2552,14 +2553,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.978453,
-   "build_ms": 233.513451,
-   "frame_ms_mean": 0.8509985111111111,
-   "frame_ms_p95": 1.828723,
+   "load_ms": 1.975175,
+   "build_ms": 231.537885,
+   "frame_ms_mean": 0.7783740333333335,
+   "frame_ms_p95": 1.0259010000000002,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2638125030/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2638125030/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2638125030/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2638125030/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2584,14 +2585,14 @@
    "built": 14,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.134517,
-   "build_ms": 1194.729356,
-   "frame_ms_mean": 3.370460822222221,
-   "frame_ms_p95": 4.973212,
+   "load_ms": 7.762955,
+   "build_ms": 1442.251309,
+   "frame_ms_mean": 2.688396366666667,
+   "frame_ms_p95": 3.640749,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2672425887/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2672425887/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2672425887/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2672425887/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2629,14 +2630,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 23.901265,
-   "build_ms": 1455.734503,
-   "frame_ms_mean": 7.4891975,
-   "frame_ms_p95": 6.4355530000000005,
+   "load_ms": 7.427558,
+   "build_ms": 1809.170634,
+   "frame_ms_mean": 7.452766977777778,
+   "frame_ms_p95": 5.397796,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2679248947/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2679248947/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2679248947/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2679248947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2674,14 +2675,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.945105,
-   "build_ms": 945.656032,
-   "frame_ms_mean": 1.2494537222222224,
-   "frame_ms_p95": 2.257174,
+   "load_ms": 3.748607,
+   "build_ms": 1191.845002,
+   "frame_ms_mean": 1.2467074888888894,
+   "frame_ms_p95": 1.814811,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2679885269/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2679885269/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2679885269/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2679885269/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -2719,14 +2720,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.71231,
-   "build_ms": 232.673508,
-   "frame_ms_mean": 1.1614507999999997,
-   "frame_ms_p95": 2.1101259999999997,
+   "load_ms": 1.5832769999999998,
+   "build_ms": 230.383065,
+   "frame_ms_mean": 0.9880118999999998,
+   "frame_ms_p95": 1.249813,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2683776412/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2683776412/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2683776412/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2683776412/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2751,14 +2752,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.054486,
-   "build_ms": 358.04364300000003,
-   "frame_ms_mean": 1.4253188111111113,
-   "frame_ms_p95": 2.246743,
+   "load_ms": 2.0853439999999996,
+   "build_ms": 404.762617,
+   "frame_ms_mean": 1.3846597555555558,
+   "frame_ms_p95": 1.979635,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2694785040/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2694785040/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2694785040/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2694785040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2783,14 +2784,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.514537,
-   "build_ms": 188.559227,
-   "frame_ms_mean": 0.7048360888888889,
-   "frame_ms_p95": 1.664642,
+   "load_ms": 1.52502,
+   "build_ms": 189.298831,
+   "frame_ms_mean": 0.4664723333333335,
+   "frame_ms_p95": 0.614502,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2783122117/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2783122117/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2783122117/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2783122117/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2815,14 +2816,14 @@
    "built": 9,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.316418,
-   "build_ms": 1079.344881,
-   "frame_ms_mean": 5.462862933333333,
-   "frame_ms_p95": 6.808631,
+   "load_ms": 5.680308,
+   "build_ms": 1229.394372,
+   "frame_ms_mean": 5.215020988888889,
+   "frame_ms_p95": 4.857283000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2815800031/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2815800031/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2815800031/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2815800031/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -2849,14 +2850,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.703845,
-   "build_ms": 2667.354692,
-   "frame_ms_mean": 2.465142888888888,
-   "frame_ms_p95": 3.713621,
+   "load_ms": 2.642598,
+   "build_ms": 3156.328485,
+   "frame_ms_mean": 2.7340374666666674,
+   "frame_ms_p95": 3.818549,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2828233985/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2828233985/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2828233985/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2828233985/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3524,14 +3525,14 @@
    "built": 95,
    "perspective": false,
    "hdr": false,
-   "load_ms": 40.683314,
-   "build_ms": 9850.281572,
-   "frame_ms_mean": 19.749633633333328,
-   "frame_ms_p95": 24.619715,
+   "load_ms": 38.89582,
+   "build_ms": 10707.379292,
+   "frame_ms_mean": 20.550405811111112,
+   "frame_ms_p95": 31.512795000000004,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2883756643/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2883756643/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2883756643/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2883756643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -3557,14 +3558,14 @@
    "built": 8,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.928178,
-   "build_ms": 861.2065220000001,
-   "frame_ms_mean": 6.423219955555558,
-   "frame_ms_p95": 11.502673,
+   "load_ms": 2.1338,
+   "build_ms": 963.238573,
+   "frame_ms_mean": 6.036665955555553,
+   "frame_ms_p95": 11.479493,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2886313155/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2886313155/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2886313155/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2886313155/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -3602,14 +3603,14 @@
    "built": 17,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.433503,
-   "build_ms": 2121.290165,
-   "frame_ms_mean": 7.438993699999999,
-   "frame_ms_p95": 14.270874,
+   "load_ms": 4.800204,
+   "build_ms": 2459.465914,
+   "frame_ms_mean": 7.997713166666667,
+   "frame_ms_p95": 13.746622,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2890767643/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2890767643/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2890767643/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2890767643/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4348,14 +4349,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.327146,
-   "build_ms": 650.345542,
-   "frame_ms_mean": 1.6853166555555557,
-   "frame_ms_p95": 2.713161,
+   "load_ms": 2.863319,
+   "build_ms": 611.488308,
+   "frame_ms_mean": 1.687999066666666,
+   "frame_ms_p95": 2.206361,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2905264428/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2905264428/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2905264428/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2905264428/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4393,14 +4394,14 @@
    "built": 72,
    "perspective": false,
    "hdr": false,
-   "load_ms": 38.571968,
-   "build_ms": 8324.680073,
-   "frame_ms_mean": 65.47202385555555,
-   "frame_ms_p95": 66.551114,
+   "load_ms": 79.16555,
+   "build_ms": 9139.896121,
+   "frame_ms_mean": 17.057447788888886,
+   "frame_ms_p95": 18.669667,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2921510865/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2921510865/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2921510865/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2921510865/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4425,14 +4426,14 @@
    "built": 22,
    "perspective": false,
    "hdr": false,
-   "load_ms": 16.335392000000002,
-   "build_ms": 2146.931517,
-   "frame_ms_mean": 6.0068551222222215,
-   "frame_ms_p95": 8.264417,
+   "load_ms": 36.267481,
+   "build_ms": 2282.7534050000004,
+   "frame_ms_mean": 3.862136911111111,
+   "frame_ms_p95": 5.120546999999999,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2932157836/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2932157836/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2932157836/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2932157836/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4458,14 +4459,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.2957,
-   "build_ms": 510.950211,
-   "frame_ms_mean": 2.0923539111111107,
-   "frame_ms_p95": 1.978265,
+   "load_ms": 2.716098,
+   "build_ms": 610.706351,
+   "frame_ms_mean": 2.1330362,
+   "frame_ms_p95": 1.802567,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2951169110/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/2951169110/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2951169110/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/2951169110/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4503,14 +4504,14 @@
    "built": 18,
    "perspective": false,
    "hdr": false,
-   "load_ms": 10.108152,
-   "build_ms": 1761.6909380000002,
-   "frame_ms_mean": 3.5386909777777764,
-   "frame_ms_p95": 6.105557999999999,
+   "load_ms": 10.637072,
+   "build_ms": 2180.104425,
+   "frame_ms_mean": 3.181388944444444,
+   "frame_ms_p95": 4.066102,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3013489778/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3013489778/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3013489778/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3013489778/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4559,14 +4560,14 @@
    "built": 1,
    "perspective": false,
    "hdr": true,
-   "load_ms": 2.019729,
-   "build_ms": 380.548705,
-   "frame_ms_mean": 2.995035933333333,
-   "frame_ms_p95": 4.660879,
+   "load_ms": 1.582592,
+   "build_ms": 419.921249,
+   "frame_ms_mean": 3.4304882222222224,
+   "frame_ms_p95": 3.845058,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3019192537/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3019192537/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3019192537/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3019192537/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4591,14 +4592,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.52489,
-   "build_ms": 876.280683,
-   "frame_ms_mean": 3.813115911111112,
-   "frame_ms_p95": 6.6931780000000005,
+   "load_ms": 2.473268,
+   "build_ms": 999.828045,
+   "frame_ms_mean": 4.956065944444446,
+   "frame_ms_p95": 8.04987,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3022080536/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3022080536/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3022080536/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3022080536/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4623,14 +4624,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.902757,
-   "build_ms": 419.309447,
-   "frame_ms_mean": 0.9496219888888888,
-   "frame_ms_p95": 1.84321,
+   "load_ms": 2.296294,
+   "build_ms": 489.427072,
+   "frame_ms_mean": 0.8624917444444438,
+   "frame_ms_p95": 1.158756,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3023509773/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3023509773/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3023509773/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3023509773/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4668,14 +4669,14 @@
    "built": 6,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.3496110000000003,
-   "build_ms": 857.4379009999999,
-   "frame_ms_mean": 5.196465644444444,
-   "frame_ms_p95": 8.244524,
+   "load_ms": 2.080689,
+   "build_ms": 831.759371,
+   "frame_ms_mean": 5.768896077777778,
+   "frame_ms_p95": 11.09046,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3028473503/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3028473503/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3028473503/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3028473503/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4713,14 +4714,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.813414,
-   "build_ms": 516.667158,
-   "frame_ms_mean": 2.5812756555555554,
-   "frame_ms_p95": 3.112053,
+   "load_ms": 2.595492,
+   "build_ms": 593.502396,
+   "frame_ms_mean": 3.5348451777777776,
+   "frame_ms_p95": 2.923008,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3029971128/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3029971128/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3029971128/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3029971128/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4745,14 +4746,14 @@
    "built": 79,
    "perspective": false,
    "hdr": false,
-   "load_ms": 52.739591,
-   "build_ms": 5694.781554,
-   "frame_ms_mean": 6.9123328777777795,
-   "frame_ms_p95": 11.451338,
+   "load_ms": 31.635581,
+   "build_ms": 6787.752214,
+   "frame_ms_mean": 8.434790444444445,
+   "frame_ms_p95": 11.870647,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3042492564/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3042492564/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3042492564/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3042492564/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4793,14 +4794,14 @@
    "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 13.499002,
-   "build_ms": 1809.590321,
-   "frame_ms_mean": 15.200348533333331,
-   "frame_ms_p95": 18.095672,
+   "load_ms": 6.533945999999999,
+   "build_ms": 1945.691329,
+   "frame_ms_mean": 12.590615666666665,
+   "frame_ms_p95": 14.640494,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3042865984/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3042865984/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3042865984/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3042865984/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4825,14 +4826,14 @@
    "built": 13,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.875217999999999,
-   "build_ms": 1307.804682,
-   "frame_ms_mean": 8.755581966666663,
-   "frame_ms_p95": 13.064847,
+   "load_ms": 2.993322,
+   "build_ms": 1353.665815,
+   "frame_ms_mean": 7.812809488888887,
+   "frame_ms_p95": 10.616511,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3046119914/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3046119914/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3046119914/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3046119914/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4857,14 +4858,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.40889,
-   "build_ms": 828.7234,
-   "frame_ms_mean": 5.478210488888887,
-   "frame_ms_p95": 9.695424,
+   "load_ms": 1.768291,
+   "build_ms": 902.518293,
+   "frame_ms_mean": 6.213976266666666,
+   "frame_ms_p95": 10.745289,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3089687436/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3089687436/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3089687436/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3089687436/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4902,14 +4903,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.65315,
-   "build_ms": 616.936211,
-   "frame_ms_mean": 2.6397672888888897,
-   "frame_ms_p95": 3.713882,
+   "load_ms": 1.851996,
+   "build_ms": 635.841377,
+   "frame_ms_mean": 2.019658244444444,
+   "frame_ms_p95": 2.385856,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3104056709/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3104056709/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3104056709/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3104056709/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -4934,14 +4935,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.637245,
-   "build_ms": 399.385969,
-   "frame_ms_mean": 1.7368881333333333,
-   "frame_ms_p95": 2.675345,
+   "load_ms": 2.44861,
+   "build_ms": 455.695987,
+   "frame_ms_mean": 1.5693717555555553,
+   "frame_ms_p95": 1.987908,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3134525336/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3134525336/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3134525336/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3134525336/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -4989,22 +4990,23 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 45.278046,
-   "build_ms": 4858.501847,
-   "frame_ms_mean": 4.320309933333333,
-   "frame_ms_p95": 7.407088,
+   "load_ms": 68.65482300000001,
+   "build_ms": 5811.204196000001,
+   "frame_ms_mean": 5.176887411111109,
+   "frame_ms_p95": 7.998137000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3163060610/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3163060610/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3163060610/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3163060610/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
     "script_error": 1,
+    "offcanvas": 1,
     "alpha0": 1
    },
    "errors": 1,
-   "warnings": 1,
+   "warnings": 2,
    "problems": [
     {
      "kind": "script_error",
@@ -5016,6 +5018,16 @@
      "object_name": "封面",
      "property": "effect_243_1_pass_0_ui_editor_properties_strength",
      "phase": "load",
+     "type": "image"
+    },
+    {
+     "kind": "offcanvas",
+     "severity": "warning",
+     "cause": "visible layer off the canvas (frames 1 and 31)",
+     "message": "visible, wholly off the 3840×2160 canvas: bbox (1030, 862, 1030, 862)",
+     "loss": 0.0,
+     "object": 135,
+     "object_name": "封面",
      "type": "image"
     },
     {
@@ -5047,14 +5059,14 @@
    "built": 19,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.913192,
-   "build_ms": 1221.773368,
-   "frame_ms_mean": 10.454469388888883,
-   "frame_ms_p95": 9.343923,
+   "load_ms": 11.61579,
+   "build_ms": 1325.468086,
+   "frame_ms_mean": 10.962285111111113,
+   "frame_ms_p95": 8.942221,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3174556087/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3174556087/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3174556087/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3174556087/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5093,14 +5105,14 @@
    "built": 15,
    "perspective": false,
    "hdr": false,
-   "load_ms": 6.922121,
-   "build_ms": 1303.407733,
-   "frame_ms_mean": 5.723207900000002,
-   "frame_ms_p95": 8.319533999999999,
+   "load_ms": 8.056258,
+   "build_ms": 1628.8657959999998,
+   "frame_ms_mean": 7.1714479777777775,
+   "frame_ms_p95": 8.022390000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3184155462/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3184155462/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3184155462/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3184155462/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -5128,14 +5140,14 @@
    "built": 41,
    "perspective": false,
    "hdr": false,
-   "load_ms": 35.918158999999996,
-   "build_ms": 4957.631142,
-   "frame_ms_mean": 7.026788188888888,
-   "frame_ms_p95": 9.818548,
+   "load_ms": 18.423826,
+   "build_ms": 5948.263824,
+   "frame_ms_mean": 5.677027866666666,
+   "frame_ms_p95": 7.302259,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3219908811/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3219908811/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3219908811/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3219908811/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5218,14 +5230,14 @@
    "built": 65,
    "perspective": false,
    "hdr": false,
-   "load_ms": 33.060957,
-   "build_ms": 4916.316805,
-   "frame_ms_mean": 42.54499395555557,
-   "frame_ms_p95": 50.941520999999995,
+   "load_ms": 19.048119,
+   "build_ms": 5724.838863000001,
+   "frame_ms_mean": 10.09256801111111,
+   "frame_ms_p95": 11.520256,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3233141951/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3233141951/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3233141951/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3233141951/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5447,14 +5459,14 @@
    "built": 83,
    "perspective": false,
    "hdr": false,
-   "load_ms": 46.709853,
-   "build_ms": 9040.442808,
-   "frame_ms_mean": 13.52781006666667,
-   "frame_ms_p95": 16.940344,
+   "load_ms": 51.689493000000006,
+   "build_ms": 10152.066502,
+   "frame_ms_mean": 16.499234533333333,
+   "frame_ms_p95": 14.619193,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3243449890/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3243449890/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3243449890/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3243449890/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5607,14 +5619,14 @@
    "built": 25,
    "perspective": true,
    "hdr": false,
-   "load_ms": 6.487126,
-   "build_ms": 1502.956251,
-   "frame_ms_mean": 8.396067700000003,
-   "frame_ms_p95": 11.868294,
+   "load_ms": 12.551887,
+   "build_ms": 2547.2116690000003,
+   "frame_ms_mean": 8.482766677777777,
+   "frame_ms_p95": 14.542955999999998,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3276522107/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3276522107/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3276522107/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3276522107/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5673,14 +5685,14 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.730132,
-   "build_ms": 2642.960987,
-   "frame_ms_mean": 1.980384477777777,
-   "frame_ms_p95": 2.9611210000000003,
+   "load_ms": 11.611778,
+   "build_ms": 3455.406448,
+   "frame_ms_mean": 2.2259159222222227,
+   "frame_ms_p95": 3.483917,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3289734539/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3289734539/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3289734539/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3289734539/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5888,14 +5900,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.622749,
-   "build_ms": 564.038012,
-   "frame_ms_mean": 1.1956118777777778,
-   "frame_ms_p95": 2.197724,
+   "load_ms": 1.810095,
+   "build_ms": 712.250405,
+   "frame_ms_mean": 1.0754367222222216,
+   "frame_ms_p95": 1.700442,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3291729669/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3291729669/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3291729669/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3291729669/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -5920,14 +5932,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.49209,
-   "build_ms": 464.56708,
-   "frame_ms_mean": 1.3793300444444443,
-   "frame_ms_p95": 2.312401,
+   "load_ms": 2.148764,
+   "build_ms": 529.1297529999999,
+   "frame_ms_mean": 1.2087118111111113,
+   "frame_ms_p95": 2.109339,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3291745179/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3291745179/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3291745179/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3291745179/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -5965,14 +5977,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.193735,
-   "build_ms": 421.373015,
-   "frame_ms_mean": 1.837798166666666,
-   "frame_ms_p95": 2.742562,
+   "load_ms": 1.475871,
+   "build_ms": 545.8568,
+   "frame_ms_mean": 1.8272875999999996,
+   "frame_ms_p95": 2.167596,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3309103316/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3309103316/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3309103316/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3309103316/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -5997,14 +6009,14 @@
    "built": 46,
    "perspective": false,
    "hdr": false,
-   "load_ms": 12.109435,
-   "build_ms": 2988.758867,
-   "frame_ms_mean": 5.231417188888889,
-   "frame_ms_p95": 5.665951,
+   "load_ms": 9.005056000000002,
+   "build_ms": 3578.287008,
+   "frame_ms_mean": 5.9206138,
+   "frame_ms_p95": 5.609292999999999,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3319542538/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3319542538/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3319542538/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3319542538/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6052,14 +6064,14 @@
    "built": 62,
    "perspective": false,
    "hdr": false,
-   "load_ms": 18.124419,
-   "build_ms": 4676.6562650000005,
-   "frame_ms_mean": 9.349546722222218,
-   "frame_ms_p95": 12.348135,
+   "load_ms": 13.521331,
+   "build_ms": 5311.40041,
+   "frame_ms_mean": 9.744317088888888,
+   "frame_ms_p95": 12.970169,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3326873240/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3326873240/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3326873240/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3326873240/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6112,14 +6124,14 @@
    "built": 47,
    "perspective": false,
    "hdr": false,
-   "load_ms": 41.211534,
-   "build_ms": 3466.427124,
-   "frame_ms_mean": 3.1561183888888884,
-   "frame_ms_p95": 5.037345999999999,
+   "load_ms": 16.288259999999998,
+   "build_ms": 4360.582039,
+   "frame_ms_mean": 3.3217967777777777,
+   "frame_ms_p95": 5.745456000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3354740764/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3354740764/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3354740764/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3354740764/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6188,14 +6200,14 @@
    "built": 48,
    "perspective": false,
    "hdr": false,
-   "load_ms": 15.890265,
-   "build_ms": 3112.575453,
-   "frame_ms_mean": 4.395250777777778,
-   "frame_ms_p95": 6.465417,
+   "load_ms": 14.633256,
+   "build_ms": 3500.089552,
+   "frame_ms_mean": 4.230230455555557,
+   "frame_ms_p95": 5.900501,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3363252053/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3363252053/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3363252053/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3363252053/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6255,14 +6267,14 @@
    "built": 5,
    "perspective": false,
    "hdr": false,
-   "load_ms": 4.532686999999999,
-   "build_ms": 922.372931,
-   "frame_ms_mean": 4.778254188888888,
-   "frame_ms_p95": 6.950569,
+   "load_ms": 3.235461,
+   "build_ms": 1121.6986499999998,
+   "frame_ms_mean": 4.2152492555555545,
+   "frame_ms_p95": 4.904901,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3366535880/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3366535880/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3366535880/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3366535880/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6287,14 +6299,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.702053,
-   "build_ms": 431.133374,
-   "frame_ms_mean": 0.9637027444444444,
-   "frame_ms_p95": 1.665415,
+   "load_ms": 8.765499,
+   "build_ms": 509.374136,
+   "frame_ms_mean": 0.7815925666666665,
+   "frame_ms_p95": 1.282813,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3387433141/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3387433141/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3387433141/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3387433141/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6332,14 +6344,14 @@
    "built": 2,
    "perspective": false,
    "hdr": true,
-   "load_ms": 1.113056,
-   "build_ms": 346.118203,
-   "frame_ms_mean": 1.3819707,
-   "frame_ms_p95": 2.172242,
+   "load_ms": 0.8174589999999999,
+   "build_ms": 556.539284,
+   "frame_ms_mean": 1.7751488333333334,
+   "frame_ms_p95": 2.953172,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3395587987/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3395587987/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3395587987/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3395587987/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6364,14 +6376,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.789462,
-   "build_ms": 723.045611,
-   "frame_ms_mean": 7.060627877777776,
-   "frame_ms_p95": 9.108633,
+   "load_ms": 1.551889,
+   "build_ms": 784.470785,
+   "frame_ms_mean": 5.032152822222222,
+   "frame_ms_p95": 9.452086,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3413117423/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3413117423/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3413117423/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3413117423/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6409,14 +6421,14 @@
    "built": 139,
    "perspective": false,
    "hdr": false,
-   "load_ms": 17.984522,
-   "build_ms": 6851.042743,
-   "frame_ms_mean": 6.765390911111112,
-   "frame_ms_p95": 8.864808,
+   "load_ms": 18.239091,
+   "build_ms": 9230.492656,
+   "frame_ms_mean": 7.089373011111113,
+   "frame_ms_p95": 10.513302,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3414858021/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3414858021/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3414858021/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3414858021/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6497,14 +6509,14 @@
    "built": 23,
    "perspective": false,
    "hdr": false,
-   "load_ms": 9.353313,
-   "build_ms": 2387.455668,
-   "frame_ms_mean": 8.163206955555554,
-   "frame_ms_p95": 12.407881,
+   "load_ms": 8.227098,
+   "build_ms": 3055.82215,
+   "frame_ms_mean": 7.044634822222221,
+   "frame_ms_p95": 8.213502,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3419466417/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3419466417/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3419466417/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3419466417/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6529,14 +6541,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.906111,
-   "build_ms": 440.377753,
-   "frame_ms_mean": 1.2698509666666664,
-   "frame_ms_p95": 1.8051,
+   "load_ms": 1.331169,
+   "build_ms": 482.079426,
+   "frame_ms_mean": 1.4204816666666664,
+   "frame_ms_p95": 1.886985,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3422085307/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3422085307/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3422085307/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3422085307/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6561,14 +6573,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 2.8015230000000004,
-   "build_ms": 526.328593,
-   "frame_ms_mean": 1.5109409555555555,
-   "frame_ms_p95": 2.31422,
+   "load_ms": 2.289304,
+   "build_ms": 752.0991369999999,
+   "frame_ms_mean": 1.5072500555555557,
+   "frame_ms_p95": 1.91167,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3422383300/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3422383300/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3422383300/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3422383300/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6593,14 +6605,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.156919,
-   "build_ms": 909.814747,
-   "frame_ms_mean": 7.4579749444444445,
-   "frame_ms_p95": 5.220673000000001,
+   "load_ms": 1.231214,
+   "build_ms": 845.123393,
+   "frame_ms_mean": 12.012141744444444,
+   "frame_ms_p95": 10.044752,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3426575339/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3426575339/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3426575339/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3426575339/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6625,14 +6637,14 @@
    "built": 4,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.70091,
-   "build_ms": 757.622792,
-   "frame_ms_mean": 5.601153166666667,
-   "frame_ms_p95": 9.324114,
+   "load_ms": 1.397832,
+   "build_ms": 722.430842,
+   "frame_ms_mean": 6.010556533333332,
+   "frame_ms_p95": 11.353163,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3432876246/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3432876246/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3432876246/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3432876246/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6657,14 +6669,14 @@
    "built": 10,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.191179,
-   "build_ms": 909.38293,
-   "frame_ms_mean": 3.3302419666666676,
-   "frame_ms_p95": 7.234408999999999,
+   "load_ms": 11.614326,
+   "build_ms": 1157.664441,
+   "frame_ms_mean": 4.0550802333333325,
+   "frame_ms_p95": 8.69707,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3432999904/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3432999904/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3432999904/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3432999904/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6707,14 +6719,14 @@
    "built": 28,
    "perspective": false,
    "hdr": false,
-   "load_ms": 21.22635,
-   "build_ms": 2505.07395,
-   "frame_ms_mean": 5.772830688888886,
-   "frame_ms_p95": 6.82334,
+   "load_ms": 8.308245000000001,
+   "build_ms": 3031.9101929999997,
+   "frame_ms_mean": 4.65074121111111,
+   "frame_ms_p95": 5.401736,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3445973124/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3445973124/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3445973124/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3445973124/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6762,14 +6774,14 @@
    "built": 3,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.439037,
-   "build_ms": 193.235436,
-   "frame_ms_mean": 0.7741645,
-   "frame_ms_p95": 1.719119,
+   "load_ms": 1.214372,
+   "build_ms": 230.733333,
+   "frame_ms_mean": 0.6150529888888889,
+   "frame_ms_p95": 0.81516,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3461192631/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3461192631/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3461192631/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3461192631/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6794,14 +6806,14 @@
    "built": 74,
    "perspective": false,
    "hdr": false,
-   "load_ms": 30.266973,
-   "build_ms": 5476.407808,
-   "frame_ms_mean": 4.070760855555555,
-   "frame_ms_p95": 5.564262,
+   "load_ms": 20.672876,
+   "build_ms": 7423.622284,
+   "frame_ms_mean": 4.336900388888888,
+   "frame_ms_p95": 6.98914,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3463520581/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3463520581/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3463520581/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3463520581/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -6890,14 +6902,14 @@
    "built": 15,
    "perspective": true,
    "hdr": false,
-   "load_ms": 2.933822,
-   "build_ms": 847.369802,
-   "frame_ms_mean": 1.7013732555555556,
-   "frame_ms_p95": 3.4247180000000004,
+   "load_ms": 3.488688,
+   "build_ms": 1139.048895,
+   "frame_ms_mean": 1.8058667222222229,
+   "frame_ms_p95": 3.255034,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3477054430/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3477054430/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3477054430/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3477054430/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6924,14 +6936,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.435194,
-   "build_ms": 220.099588,
-   "frame_ms_mean": 0.8036736333333333,
-   "frame_ms_p95": 1.551038,
+   "load_ms": 1.714029,
+   "build_ms": 262.791463,
+   "frame_ms_mean": 0.6813138333333332,
+   "frame_ms_p95": 0.778533,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3478602089/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3478602089/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3478602089/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3478602089/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},
@@ -6956,14 +6968,14 @@
    "built": 40,
    "perspective": false,
    "hdr": false,
-   "load_ms": 10.802283,
-   "build_ms": 2227.117314,
-   "frame_ms_mean": 5.0544020888888905,
-   "frame_ms_p95": 6.882151,
+   "load_ms": 71.857116,
+   "build_ms": 2496.421611,
+   "frame_ms_mean": 5.190329744444445,
+   "frame_ms_p95": 7.218666000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3479521040/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3479521040/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3479521040/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3479521040/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7074,14 +7086,14 @@
    "built": 20,
    "perspective": false,
    "hdr": false,
-   "load_ms": 5.434445,
-   "build_ms": 1538.162898,
-   "frame_ms_mean": 3.117564844444445,
-   "frame_ms_p95": 4.942174,
+   "load_ms": 4.7623999999999995,
+   "build_ms": 1768.708525,
+   "frame_ms_mean": 2.5088713111111116,
+   "frame_ms_p95": 3.202996,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3480481965/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3480481965/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3480481965/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3480481965/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7141,14 +7153,14 @@
    "built": 49,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11.325799,
-   "build_ms": 2652.280907,
-   "frame_ms_mean": 15.11675721111112,
-   "frame_ms_p95": 21.526054,
+   "load_ms": 11.458319,
+   "build_ms": 3227.354325,
+   "frame_ms_mean": 17.632784388888886,
+   "frame_ms_p95": 28.915508,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3489263099/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3489263099/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3489263099/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3489263099/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7217,14 +7229,14 @@
    "built": 51,
    "perspective": false,
    "hdr": false,
-   "load_ms": 11.746061,
-   "build_ms": 2393.645534,
-   "frame_ms_mean": 4.501816877777778,
-   "frame_ms_p95": 7.013317,
+   "load_ms": 17.971251000000002,
+   "build_ms": 2859.815995,
+   "frame_ms_mean": 4.770612911111111,
+   "frame_ms_p95": 7.092237000000001,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3490034653/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3490034653/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3490034653/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3490034653/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -7335,14 +7347,14 @@
    "built": 142,
    "perspective": true,
    "hdr": true,
-   "load_ms": 57.296549,
-   "build_ms": 7713.838363,
-   "frame_ms_mean": 18.23358146666667,
-   "frame_ms_p95": 36.473383,
+   "load_ms": 22.351507,
+   "build_ms": 9080.260305,
+   "frame_ms_mean": 17.473200733333336,
+   "frame_ms_p95": 26.667069,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3509243656/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3509243656/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3509243656/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3509243656/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8033,14 +8045,14 @@
    "built": 69,
    "perspective": false,
    "hdr": false,
-   "load_ms": 33.014389,
-   "build_ms": 4726.736199,
-   "frame_ms_mean": 11.274270444444449,
-   "frame_ms_p95": 13.022718,
+   "load_ms": 21.469904000000003,
+   "build_ms": 5576.890821,
+   "frame_ms_mean": 5.608069722222222,
+   "frame_ms_p95": 5.852646,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3516106265/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3516106265/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3516106265/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3516106265/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8102,14 +8114,14 @@
    "built": 132,
    "perspective": false,
    "hdr": false,
-   "load_ms": 39.06002,
-   "build_ms": 10013.821673,
-   "frame_ms_mean": 5.509585811111113,
-   "frame_ms_p95": 8.780616,
+   "load_ms": 27.545964,
+   "build_ms": 12887.437648,
+   "frame_ms_mean": 5.923851311111109,
+   "frame_ms_p95": 8.960516,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3516174947/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3516174947/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3516174947/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3516174947/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8255,14 +8267,14 @@
    "built": 7,
    "perspective": false,
    "hdr": false,
-   "load_ms": 3.9245,
-   "build_ms": 1359.04434,
-   "frame_ms_mean": 4.958252822222222,
-   "frame_ms_p95": 10.012456,
+   "load_ms": 3.714256,
+   "build_ms": 1524.8418350000002,
+   "frame_ms_mean": 6.720992944444446,
+   "frame_ms_p95": 11.319847,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3556794116/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3556794116/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3556794116/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3556794116/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {
@@ -8300,14 +8312,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.163081,
-   "build_ms": 131.217146,
-   "frame_ms_mean": 0.5618683333333334,
-   "frame_ms_p95": 1.462596,
+   "load_ms": 0.9808169999999999,
+   "build_ms": 144.09156000000002,
+   "frame_ms_mean": 0.4934925111111111,
+   "frame_ms_p95": 0.856185,
    "static": true,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3593587273/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3593587273/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3593587273/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3593587273/lwe-smoke-3s.png"
    ],
    "exit": 1,
    "counts": {},
@@ -8332,14 +8344,14 @@
    "built": 2,
    "perspective": false,
    "hdr": false,
-   "load_ms": 1.514507,
-   "build_ms": 465.993176,
-   "frame_ms_mean": 0.8378143666666669,
-   "frame_ms_p95": 1.73613,
+   "load_ms": 0.962701,
+   "build_ms": 459.910541,
+   "frame_ms_mean": 0.7257207777777778,
+   "frame_ms_p95": 0.890402,
    "static": false,
    "shots": [
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3749550751/lwe-smoke-1s.png",
-    "/tmp/claude-1000/-home-kryxzort/9cda02c8-41f4-4969-86dd-8df24efc7a6f/scratchpad/att/health/scenes/3749550751/lwe-smoke-3s.png"
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3749550751/lwe-smoke-1s.png",
+    "/tmp/claude-1000/-home-kryxzort/0bd18ed6-6839-4f58-85bd-fda200306755/scratchpad/weref-2d/health-r4/scenes/3749550751/lwe-smoke-3s.png"
    ],
    "exit": 0,
    "counts": {},

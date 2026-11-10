@@ -121,7 +121,7 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
     (
         "headless.add_output",
         add_output,
-        "add a virtual output {name, width, height, hz}",
+        "add a virtual output {name, width, height, hz, x?, y?} (x, y: its desktop position; default right of the others)",
     ),
     (
         "headless.remove_output",
@@ -908,11 +908,13 @@ fn add_output(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
         refresh_mhz: hz.saturating_mul(1000),
     };
     let name = info.name.clone();
+    let pos = (opt_f64(args, "x")?, opt_f64(args, "y")?);
     let gfx = &rt.gfx;
-    rt.backend
-        .as_headless_mut()
-        .ok_or_else(headless_err)?
-        .add(gfx, info)?;
+    let h = rt.backend.as_headless_mut().ok_or_else(headless_err)?;
+    h.add(gfx, info)?;
+    if pos.0.is_some() || pos.1.is_some() {
+        h.set_position(&name, pos.0.unwrap_or(0.0), pos.1.unwrap_or(0.0))?;
+    }
     rt.apply_output_changes();
     Ok(json!({ "id": format!("out:{name}") }))
 }
@@ -934,10 +936,12 @@ fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, Api
     let name = arg_str(args, "output")?.to_string();
     let (x, y) = (arg_f64(args, "x")?, arg_f64(args, "y")?);
     let buttons = opt_f64(args, "buttons")?.unwrap_or(0.0).max(0.0) as u32;
+    // `entered`: the pointer came onto the output here (the Wayland backend's `enter`)
+    let entered = args.get("entered").and_then(Value::as_bool).unwrap_or(false);
     rt.backend
         .as_headless_mut()
         .ok_or_else(headless_err)?
-        .pointer(&name, x, y, buttons)?;
+        .pointer(&name, (x, y), buttons, entered)?;
     let scenes = rt.pointer_events();
     Ok(json!({ "scenes": scenes }))
 }

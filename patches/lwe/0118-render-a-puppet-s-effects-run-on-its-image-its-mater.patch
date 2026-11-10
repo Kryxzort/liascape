@@ -1,0 +1,271 @@
+From 7bbd6de783a4674e253a3ea8a9e605b36633b907 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 20:13:30 +0530
+Subject: [PATCH 118/126] render: a puppet's effects run on its image, its
+ material draws the mesh last
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A puppet layer with effects drew its mesh first (the material pass, posed, into the layer FBO) and ran
+the effects on that posed picture. WE runs them on the image itself — in texture space, as for a plain
+image — and the material (genericimage4, the only pass that skins) draws the mesh last from their
+output. Measured on 3013489778's girl (puppet layer 161, a time `pulse` with an opacity mask painted
+for another layer): with the mask swapped for a ramp in u, then in v (private copies, WE under Proton),
+the value each pixel of the posed girl samples is its part's place in the 4380 x 2998 atlas — the face
+u 0.31-0.40, v 0.61-0.70, constant per part, jumping between hair strands. Ours sampled the posed
+layer's smooth position (face u 0.52-0.61), which fell between the mask's blobs: WE's girl pulses,
+ours barely did.
+
+With effects (and only effects) after the material, the material pass moves to the end of the chain:
+the first effect copies the image into the FBO (normal blending, as the material does in front of a
+plain image's effects), the effects run there, and the material draws the mesh into the scene reading
+the chain's output as g_Texture0 (CPass::setInputIsTexture0 overrides the material's own texture) at
+the mesh's coordinates on the composite (the texture's over its copy limits). Its blending stays its
+own (translucent where it was normal). A puppet without effects, or with a tint / colour-blend / fog
+pass after them, keeps the old order.
+
+After: the ramp maps match WE's (face row u 0.315-0.406 vs WE 0.314-0.402). 3013489778 against WE:
+0.125 -> 0.003. Host test puppet_effects_run_on_its_image (red 131 unpatched, 26 patched).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md 3013489778 (the girl doesn't pulse)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 88 ++++++++++++++++---
+ .../WallpaperEngine/Render/Objects/CImage.h   | 11 ++-
+ .../Render/Objects/Effects/CPass.cpp          |  7 +-
+ .../Render/Objects/Effects/CPass.h            |  4 +
+ 4 files changed, 97 insertions(+), 13 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 4f0cf7d..f628f1c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -369,6 +369,19 @@ CImage::CImage (Wallpapers::CScene& scene, const Image& image) :
+     glBindBuffer (GL_ARRAY_BUFFER, this->m_texcoordPass);
+     glBufferData (GL_ARRAY_BUFFER, sizeof (texcoordPass), texcoordPass, GL_STATIC_DRAW);
+ 
++    // a puppet's mesh on its composite: the copy put the texture's (0, 0)–(width, height) over the whole FBO
++    if (this->m_hasPuppetMesh && width > 0.0f && height > 0.0f) {
++	std::vector<GLfloat> composite;
++	composite.reserve (this->m_puppetVertices.size () * 2);
++	for (const auto& vertex : this->m_puppetVertices) {
++	    composite.push_back ((vertex.uv.x - x) / (width - x));
++	    composite.push_back ((vertex.uv.y - y) / (height - y));
++	}
++	glGenBuffers (1, &this->m_puppetCompositeTexCoord);
++	glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetCompositeTexCoord);
++	glBufferData (GL_ARRAY_BUFFER, composite.size () * sizeof (GLfloat), composite.data (), GL_STATIC_DRAW);
++    }
++
+     // compute the center of the image in scene space for rotation
+     this->m_sceneCenter
+ 	= glm::vec3 ((this->m_pos.x + this->m_pos.z) / 2.0f, (this->m_pos.y + this->m_pos.w) / 2.0f, 0.0f);
+@@ -420,6 +433,9 @@ CImage::~CImage () {
+     if (this->m_puppetTexCoord != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetTexCoord);
+     }
++    if (this->m_puppetCompositeTexCoord != GL_NONE) {
++	glDeleteBuffers (1, &this->m_puppetCompositeTexCoord);
++    }
+     if (this->m_puppetColor != GL_NONE) {
+ 	glDeleteBuffers (1, &this->m_puppetColor);
+     }
+@@ -903,9 +919,9 @@ void CImage::updateShapeBuffers () {
+     glBufferData (GL_ARRAY_BUFFER, sizeof (texcoords), texcoords, GL_DYNAMIC_DRAW);
+ }
+ 
+-void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const {
++void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene, bool fromComposite) const {
+     pass->setGeometryCallback (
+-	[this, pass, toScene] () {
++	[this, pass, toScene, fromComposite] () {
+ 	    const GLint position = glGetAttribLocation (pass->getProgramID (), "a_Position");
+ 	    const GLint texCoord = glGetAttribLocation (pass->getProgramID (), "a_TexCoord");
+ 
+@@ -917,7 +933,11 @@ void CImage::setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) co
+ 
+ 	    if (texCoord >= 0) {
+ 		glEnableVertexAttribArray (texCoord);
+-		glBindBuffer (GL_ARRAY_BUFFER, this->m_puppetTexCoord);
++		glBindBuffer (
++		    GL_ARRAY_BUFFER,
++		    fromComposite && this->m_puppetCompositeTexCoord != GL_NONE ? this->m_puppetCompositeTexCoord
++										 : this->m_puppetTexCoord
++		);
+ 		glVertexAttribPointer (texCoord, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+ 	    }
+ 
+@@ -1408,10 +1428,45 @@ void CImage::updateActivePasses () {
+ 	this->m_activePasses.pop_back ();
+     }
+ 
++    // a puppet with effects runs them on its image, in texture space, and draws the mesh last: the material (the
++    // only pass that skins, genericimage4's SKINNING) goes from the front of the chain to its end and reads the
++    // effects' output there. Measured in WE (3013489778, a time `pulse` with an opacity mask on puppet layer 161):
++    // with the mask replaced by a ramp in u (then v), the mask value each pixel of the posed girl samples is the
++    // texture coordinate of its puppet part in the atlas — her face samples u 0.31–0.40, v 0.61–0.70, where the face
++    // sits in the 4380 × 2998 atlas, constant per part and jumping between hair strands — not the posed layer's
++    // smooth position (ours before: u 0.52–0.61 across the face). The material's blending stays its own: it is
++    // already the last draw
++    this->m_puppetEffectsOnImage = false;
++    if (this->m_hasPuppetMesh && this->m_image.shape.empty () && !this->m_image.model->passthrough
++	&& this->m_activePasses.size () > 1) {
++	const auto isEffect = [this] (const Effects::CPass* pass) {
++	    const auto it = std::ranges::find (this->m_passes, pass);
++	    const auto i = static_cast<size_t> (std::distance (this->m_passes.begin (), it));
++	    return it != this->m_passes.end () && i < this->m_passEffects.size () && this->m_passEffects[i] != nullptr;
++	};
++	size_t material = 0;
++	while (material < this->m_activePasses.size () && !isEffect (this->m_activePasses[material])) {
++	    material++;
++	}
++	// only a chain of effects after the material (a tint / colour-blend / fog pass after them keeps the old order)
++	const bool effectsOnly = std::all_of (
++	    this->m_activePasses.begin () + static_cast<std::ptrdiff_t> (material), this->m_activePasses.end (), isEffect
++	);
++	if (material > 0 && material < this->m_activePasses.size () && effectsOnly) {
++	    std::rotate (
++		this->m_activePasses.begin (), this->m_activePasses.begin () + static_cast<std::ptrdiff_t> (material),
++		this->m_activePasses.end ()
++	    );
++	    this->m_puppetEffectsOnImage = true;
++	    // the first effect copies the image into the FBO, as the material does in front of a plain image's effects
++	    this->m_activePasses.front ()->setBlendingMode (BlendingMode_Normal);
++	}
++    }
++
+     // if there's more than one pass the blendmode has to be moved from the beginning to the end (of the passes that
+     // run: a hidden last effect hands the layer's blending to the pass before it)
+     // (a shape's passes each draw into the scene with their own blending, GH 0x1402176a0 per pass)
+-    if (this->m_activePasses.size () > 1 && this->m_image.shape.empty ()) {
++    if (this->m_activePasses.size () > 1 && this->m_image.shape.empty () && !this->m_puppetEffectsOnImage) {
+ 	const auto first = this->m_activePasses.front ();
+ 	const auto last = this->m_activePasses.back ();
+ 
+@@ -1471,8 +1526,12 @@ void CImage::setupPasses () {
+ 	std::shared_ptr<const CFBO> prevDrawTo = drawTo;
+ 	bool writesToTarget = false;
+ 	const bool isFirstPass = first;
++	// the pass that draws a puppet's mesh: its first (the material, effects after it in the posed layer's FBO) or,
++	// with effects on its image, its last (the material, from their output)
++	const bool meshPass = this->m_hasPuppetMesh && (this->m_puppetEffectsOnImage ? std::next (cur) == end : isFirstPass);
+ 	GLuint spacePosition = (isFirstPass)
+-	    ? (this->m_hasPuppetMesh ? this->m_puppetSpacePosition : this->getCopySpacePosition ())
++	    ? (this->m_hasPuppetMesh && !this->m_puppetEffectsOnImage ? this->m_puppetSpacePosition
++								      : this->getCopySpacePosition ())
+ 	    : this->getPassSpacePosition ();
+ 	const glm::mat4* projection
+ 	    = (isFirstPass) ? &this->m_modelViewProjectionCopy : &this->m_modelViewProjectionPass;
+@@ -1513,11 +1572,20 @@ void CImage::setupPasses () {
+ 	    continue;
+ 	}
+ 
+-	// the puppet mesh replaces the first pass's quad; a puppet without effects draws it straight to the scene, in
+-	// the layer's scene-space rectangle (before, its layer pixels were drawn with the scene's projection)
+-	if (isFirstPass && this->m_hasPuppetMesh) {
+-	    pass->setBlendingMode (BlendingMode_Translucent);
+-	    this->setupPuppetGeometryCallback (pass, spacePosition == this->getSceneSpacePosition ());
++	// the puppet mesh replaces the material pass's quad; a puppet without effects draws it straight to the scene, in
++	// the layer's scene-space rectangle (before, its layer pixels were drawn with the scene's projection). With
++	// effects on its image the material comes last: it reads their output (not its own texture) at the mesh's
++	// coordinates on the composite and draws to the scene
++	if (this->m_hasPuppetMesh) {
++	    pass->setInputIsTexture0 (meshPass && this->m_puppetEffectsOnImage);
++	}
++	if (meshPass) {
++	    if (!this->m_puppetEffectsOnImage || pass->getBlendingMode () == BlendingMode_Normal) {
++		pass->setBlendingMode (BlendingMode_Translucent);
++	    }
++	    this->setupPuppetGeometryCallback (
++		pass, spacePosition == this->getSceneSpacePosition (), this->m_puppetEffectsOnImage
++	    );
+ 	}
+ 
+ 	pass->setDestination (drawTo);
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 79d7514..65b4900 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -176,8 +176,9 @@ private:
+     void updatePuppetPose ();
+     /** autosize: the canvas grown (symmetrically) to hold the mesh in every frame of every animation */
+     [[nodiscard]] glm::vec2 puppetCanvasSize (const glm::vec2& size) const;
+-    /** `toScene`: the pass draws to the scene (no effects), with the mesh in the layer's scene rectangle */
+-    void setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene) const;
++    /** `toScene`: the pass draws to the scene, with the mesh in the layer's scene rectangle; `fromComposite`: it reads
++     *  the layer's composite (the effects' output, the image over the whole FBO), not the texture */
++    void setupPuppetGeometryCallback (Effects::CPass* pass, bool toScene, bool fromComposite = false) const;
+     void updatePuppetScenePositionBuffer ();
+     /**
+      * A shape (ImageData::shape): its quad's corners in the scene, this frame — the first effect's point0..point3
+@@ -208,6 +209,12 @@ private:
+     GLuint m_puppetSpacePosition = GL_NONE;
+     GLuint m_puppetScenePosition = GL_NONE;
+     GLuint m_puppetTexCoord = GL_NONE;
++    /** the mesh's texture coordinates on the layer's composite: the texture's over its copy limits (the image fills the
++     *  FBO) */
++    GLuint m_puppetCompositeTexCoord = GL_NONE;
++    /** a puppet with effects: the effects run on the image (texture space, as for a plain image), and the base pass
++     *  (the material, the only one that skins) draws the mesh last, from their output, into the scene */
++    bool m_puppetEffectsOnImage = false;
+     GLuint m_puppetIndices = GL_NONE;
+     GLsizei m_puppetIndexCount = 0;
+     bool m_hasPuppetMesh = false;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 0b072d5..9e5c87d 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -259,7 +259,7 @@ std::shared_ptr<const TextureProvider> CPass::resolveTexture0 () {
+     auto texture0 = this->resolveTexture (this->m_input, 0, this->m_input);
+     const auto it = this->m_textures.find (0);
+ 
+-    if (it == this->m_textures.end ()) {
++    if (it == this->m_textures.end () || (this->m_inputIsTexture0 && texture0 != nullptr)) {
+ 	return texture0;
+     }
+ 
+@@ -365,6 +365,9 @@ void CPass::bindTextureUnit (int index, const std::shared_ptr<const TextureProvi
+ 
+ void CPass::bindTextureOverrides (uint32_t currentTexture, std::shared_ptr<const TextureProvider>& texture0) const {
+     for (auto [index, chain] : this->m_textures) {
++	if (index == 0 && this->m_inputIsTexture0 && texture0 != nullptr) {
++	    continue;
++	}
+ 	// find the expected texture
+ 	auto expectedTexture = chain->texture;
+ 
+@@ -633,6 +636,8 @@ void CPass::setDestination (std::shared_ptr<const CFBO> drawTo) { this->m_drawTo
+ 
+ void CPass::setInput (std::shared_ptr<const TextureProvider> input) { this->m_input = std::move (input); }
+ 
++void CPass::setInputIsTexture0 (bool inputIsTexture0) { this->m_inputIsTexture0 = inputIsTexture0; }
++
+ void CPass::setPreviousInput (std::shared_ptr<const TextureProvider> input) {
+     this->m_previousInput = std::move (input);
+ }
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index 6d0449d..9b7b26a 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -38,6 +38,9 @@ public:
+ 
+     void setDestination (std::shared_ptr<const CFBO> drawTo);
+     void setInput (std::shared_ptr<const TextureProvider> input);
++    /** g_Texture0 is the input even where the material names a texture (a puppet's material drawing its mesh from
++     *  the effects' output, CImage::m_puppetEffectsOnImage) */
++    void setInputIsTexture0 (bool inputIsTexture0);
+     void setPreviousInput (std::shared_ptr<const TextureProvider> input);
+     /** Replaces what texture unit `index` samples (a compose layer's base pass reads its group target) */
+     void setTexture (int index, std::shared_ptr<const TextureProvider> texture);
+@@ -225,6 +228,7 @@ private:
+     /** samplerIsUsed, by unit */
+     mutable std::map<int, bool> m_samplerUsed = {};
+     std::shared_ptr<const TextureProvider> m_input = nullptr;
++    bool m_inputIsTexture0 = false;
+     std::shared_ptr<const TextureProvider> m_previousInput = nullptr;
+     glm::vec4 m_texture0Resolution = {};
+     /** g_Texture<n>Texel per bound texture (std::map: the uniforms point at its nodes) */

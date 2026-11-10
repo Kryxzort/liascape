@@ -119,9 +119,9 @@ public static class FeatureHealth
                     ["limitVramPerScene", "sceneVramLimitMib", "vramLowMode"]));
                 var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
                 f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
-                // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause when covered" can't act
+                // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause behind windows" can't act
                 var (cok, cwhy) = Part(i.PlayerHealth, "cover");
-                f.Add(new("cover", "Pause when covered", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
+                f.Add(new("cover", "Pause behind windows", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
                 // the player's own PipeWire audio bus (player-core.md § Audio bus): down → the sources play on mpv's default
                 // device (nothing stops, but no bus meter and no in-player auto-mute). No setting of its own to mark: it
                 // shows in the Settings summary only. Unknown while the first session is being set up / before a player ran.
@@ -163,7 +163,7 @@ public static class FeatureHealth
         }
         var ff = new[] { "ffmpeg", "ffprobe" }.Where(t => !i.OnPath(t)).ToArray();
         f.Add(new("ffmpeg", "ffmpeg", ff.Length == 0,
-            ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Normalize audio), and imports, thumbnails and video durations fail",
+            ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Even out loudness), and imports, thumbnails and video durations fail",
             ["normalizeAudio"]));
         f.Add(new("steamcmd", "steamcmd", i.SteamCmdFound,
             i.SteamCmdFound ? null : "steamcmd not found (set its path, or install it) — \"Download via steamcmd\" can't download",

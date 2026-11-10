@@ -1,0 +1,68 @@
+From 9d4085ca9fe42fe32159af21ca40c444ec7a1c8c Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:24:22 +0530
+Subject: [PATCH 116/126] scripting: in a 3D scene input.cursorWorldPosition is
+ the cursor cast to the far plane
+
+scenescript64's getter calls the host's vtable +0xa8 with flag 0: wallpaper64 GH 0x1401bcb00,
+which unprojects (x, 1 - y, 0.5) through the frame's view (ctx +0x38) and projection (ctx +0x40)
+with viewport (0, 0, 1, 1), glm style (NDC z = 2 * 0.5 - 1 = 0), and zeroes z when context flag
+0x400 is set. WE's 3D projection is the renderer's vtable +0x10, GH 0x14009afd0: DirectXMath's
+XMMatrixPerspectiveFovRH called with nearz and farz swapped (a reversed depth), where NDC z 0 is
+the far plane. So the cursor's world position is the point on its ray at the view depth farz.
+In an orthographic scene the same unprojection is scene pixels (x right, y up), as before.
+
+3477054430's head turns toward cursorWorldPosition - its origin: in WE it turns left with the
+pointer at the centre or the left (the far point is thousands of units left) and right at the
+right; ours gave scene pixels and the head never turned that way. 3509243656 divides it by 8000 /
+9000 (its farz is 10000). Ours unprojects with the camera's own world view-projection (GL clip,
+far at z +1, y flipped) in double precision.
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3477054430: we-ref captures ptrL-3d, ptrR-3d); docs/player/spikes/we-lwe-gap-audit.md "3D scenes against WE"
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ .../WallpaperEngine/Scripting/InputObject.cpp  | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Scripting/InputObject.cpp b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+index 0986963..05a794c 100644
+--- a/src/core/WallpaperEngine/Scripting/InputObject.cpp
++++ b/src/core/WallpaperEngine/Scripting/InputObject.cpp
+@@ -2,17 +2,33 @@
+ 
+ #include "EngineObject.h"
+ #include "ScriptEngine.h"
++#include "WallpaperEngine/Render/Camera.h"
+ #include "WallpaperEngine/Render/Wallpapers/CScene.h"
+ 
++#include <glm/glm.hpp>
++
+ using namespace WallpaperEngine::Scripting;
+ 
+ JSValue get_cursor_world_position (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+     JSClassID classId;
+     auto* input = static_cast<InputObject*> (JS_GetAnyOpaque (this_val, &classId));
+ 
+-    // the cursor in WE's world: scene pixels, x right, y up
++    // WE (wallpaper64 GH 0x1401bcb00, the script host's vtable +0xa8 that scenescript64's getter calls with flag 0):
++    // glm-style unProject of (x, 1 − y, 0.5) through the frame's view and projection, viewport (0, 0, 1, 1), so NDC z 0.
++    // Its 3D projection is DirectXMath's PerspectiveFovRH with nearz and farz swapped (GH 0x14009afd0: a reversed
++    // depth), where NDC z 0 is the far plane: in a 3D scene the cursor is the point on its ray at the view depth farz
++    // (3477054430's head turns toward it, 3509243656 divides it by 8000 / 9000 at farz 10000). An orthographic
++    // scene's unProject is scene pixels, x right, y up, z 0 (ctx flag 0x400 zeroes z).
+     const auto& scene = input->getScene ();
+     const glm::vec2 position = *scene.getMousePositionNormalized ();
++    const auto& camera = scene.getCamera ();
++    if (camera.isPerspective ()) {
++	// ours: GL clip space, far at z +1, clip y flipped (the scene FBO is read top-down)
++	const glm::dmat4 inverse = glm::inverse (glm::dmat4 (camera.getWorldViewProjection ()));
++	const glm::dvec4 world = inverse
++	    * glm::dvec4 (2.0 * position.x - 1.0, 2.0 * position.y - 1.0, 1.0, 1.0);
++	return scene.getScriptEngine ().newVec (glm::vec3 (glm::dvec3 (world) / world.w));
++    }
+     return scene.getScriptEngine ().newVec (glm::vec3 (
+ 	position.x * static_cast<float> (scene.getWidth ()), (1.0f - position.y) * static_cast<float> (scene.getHeight ()),
+ 	0.0f

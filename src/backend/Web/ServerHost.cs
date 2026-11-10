@@ -504,7 +504,7 @@ public static class ServerHost
             SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
             return Results.Json(new { added });
         });
-        // a scene's offline loudness estimate (Settings → Audio → "Scene loudness"; web-backend.md § Scene loudness):
+        // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; web-backend.md § Scene loudness):
         // queue {paths?: [...] (none = every scene), force?: recalculate what's already estimated} → {queued}
         app.MapPost("/library/scene-loudness/estimate", (SceneLoudnessReq? r) =>
             Results.Json(new { queued = SceneLoudnessOps.Enqueue(r?.Paths is { Count: > 0 } p ? p : null, r?.Force == true, "request") }));
@@ -615,11 +615,11 @@ public static class ServerHost
         app.MapPost("/action", (NameReq r) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var err = AppOps.RunAction(r.Name);
+            var err = AppOps.RunAction(r.Name, out var info);
             if (sw.ElapsedMilliseconds > 500) Console.WriteLine($"/action {r.Name}: {sw.ElapsedMilliseconds} ms");
             return err is string e
                 ? Results.Json(new { error = e }, statusCode: AppOps.Actions.Contains(r.Name) ? 409 : 400)
-                : Results.Json(new { ok = true });
+                : Results.Json(new { ok = true, message = info });
         });
         // next/prev/random step the library/playlist to pick an item — unplayable scenes (AllowScenes off,
         // the engine can't, or crashed and not whitelisted) are skipped (PlayerHelper.IsSkippedPath), but when
@@ -660,6 +660,7 @@ public static class ServerHost
             playing = PlayerHelper.IsPlaying,
             timed = PlayerHelper.IsTimedPlaylistActive(),
             position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview
+            keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape loop-current`: the rotation holds what plays
         }));
 
         // ---- image proxy + local media ----------------------------------------------------

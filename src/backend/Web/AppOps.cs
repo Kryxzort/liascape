@@ -273,14 +273,19 @@ public static class AppOps
     // current engine (e.g. an all-scene library under liascape-player, PlayerHelper.IsSkippedPath) — reported
     // cleanly, same contract as the /next /prev /random HTTP routes.
     public static readonly string[] Actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-        "next", "previous", "random", "volume-up", "volume-down"];
-    public static string? RunAction(string action)
+        "next", "previous", "random", "volume-up", "volume-down", "loop-current"];
+    public static string? RunAction(string action) => RunAction(action, out _);
+    // `info`: what a successful action has to say (loop-current: what it did) — the CLI prints it, the UI shows it
+    public static string? RunAction(string action, out string? info)
     {
+        info = null;
         if (!Actions.Contains(action)) return $"unknown action (one of: {string.Join(", ", Actions)})";
         try
         {
             switch (action)
             {
+                case "loop-current":
+                    return LoopCurrent(out info);
                 case "toggle-mute":
                     if (PlayerHelper.IsUserMuted)
                         PlayerHelper.SetUserMute(false);
@@ -324,6 +329,25 @@ public static class AppOps
             }
         }
         catch (InvalidOperationException e) { return e.Message; }
+        return null;
+    }
+
+    // `liascape loop-current` (owner todo 2026-11-10, "keybind toggle to infinite loop current wallpaper"): toggles "keep
+    // playing this one" — the rotation (the player's prog:main) stays on what plays, which loops, until toggled off; a
+    // user switch still moves (and the keep holds that one), a Play of a playlist lifts it. The player keeps it across a
+    // backend or player restart, and with the app closed the CLI toggles it straight on the player. A single wallpaper
+    // (no rotation) already stays: said so, nothing changes. WS `loop-current {keep, path, message}` → the UI's status.
+    public static string? LoopCurrent(out string? info)
+    {
+        info = null;
+        if (!PlayerEngine.IsLiascapePlayer) return "loop-current needs the liascape-player engine (Settings → Player engine)";
+        var path = LiascapePlayerProgram.CurrentPath ?? PlayerHelper.QueryCurrentPath();
+        string title = path == null ? "" : LibraryService.LoadAll().FirstOrDefault(i => i.VideoPath == path)?.Title ?? Path.GetFileNameWithoutExtension(path.TrimEnd('/'));
+        if (!LiascapePlayerProgram.IsActive)
+            return path == null ? "nothing is playing" : $"no playlist is rotating — {title} already stays on screen";
+        if (LiascapePlayerProgram.ToggleKeep() is not bool keep) return "the player didn't answer — nothing changed";
+        info = keep ? $"Looping {title} — the playlist stays on it until you run loop-current again" : $"Rotation resumed (from {title})";
+        EventBus.Broadcast("loop-current", new { keep, path, message = info });
         return null;
     }
 

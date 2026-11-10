@@ -1,0 +1,61 @@
+From e6211c0c874eaa238e221d1e6250b55aa3b3fcf0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 01:58:13 +0530
+Subject: [PATCH 123/126] render: a puppet's uvs are its image's, scaled into a
+ padded texture
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A puppet mesh's uvs run 0 - 1 over its image (the puppet editor draws the mesh on it), not over its texture. A
+texture padded past its image took them as the texture's, so each piece sampled its content uv · (texture - image)
+off: 3463520581's face (an 852 x 726 image in an 896 x 768 texture) drew its eye, nose and mouth 28, 16 px up-left,
+under the front hair, with the sky showing where the face should be. The mesh's uvs now take the image's share of
+the texture, as the layer's own quad does (uploadGeometryBuffers), and the composite coordinates follow.
+
+Measured: the face mesh covers every painted texel with image uvs, 99.5 % with texture uvs (Asuna's body: 100 % /
+90 %; 3013489778's atlas uvs reach 0.998 of a 4380 px image). Against WE (private copies, puppets at rest, no
+effects): the face alone sat 14, 8 px (at 1920) from WE's, now 0, 0 (mean error 1.96 -> 0.27); face + front hair
+1.60 -> 0.45. Host test puppet_uvs_are_the_images (blue padding unpatched, the image's green patched).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3463520581: Kirito's face under his front hair; ~/.cache/liascape/we-ref/captures/var/v3463-s*)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index d5f0c35..d9091d0 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -472,6 +472,17 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	this->m_puppetVertexMesh.clear ();
+ 	this->m_puppetShapes.clear ();
+ 	this->m_puppetShapeWeights.clear ();
++	// the mesh's uvs are the image's (0 - 1 over its width and height, as the puppet editor drew them on it), not
++	// the texture's: a texture padded past its image (3463520581's face: 852 x 726 in 896 x 768) takes them scaled
++	// to the image's part of it, as the layer's own quad does (uploadGeometryBuffers). Measured: the face's mesh
++	// covers every painted pixel with image uvs, 99.5 % with texture uvs, and WE's posed face sits 28, 16 px from
++	// ours drawn with texture uvs (the content shifted by uv · (texture - image) inside each piece)
++	glm::vec2 uvScale (1.0f);
++	if (const auto texture = this->getTexture (); texture != nullptr && texture->getTextureWidth (0) > 0
++	    && texture->getTextureHeight (0) > 0) {
++	    uvScale = { static_cast<float> (texture->getRealWidth ()) / static_cast<float> (texture->getTextureWidth (0)),
++			static_cast<float> (texture->getRealHeight ()) / static_cast<float> (texture->getTextureHeight (0)) };
++	}
+ 	for (size_t m = 0; m < this->m_puppet.meshes.size (); m++) {
+ 	    const auto& mesh = this->m_puppet.meshes[m];
+ 	    const auto base = static_cast<GLuint> (this->m_puppetVertices.size ());
+@@ -479,7 +490,8 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 		this->m_puppetShapes.emplace_back (m, t);
+ 	    }
+ 	    this->m_puppetShapeWeights.emplace_back (mesh.morphs.size (), 0.0f);
+-	    for (const auto& vertex : mesh.vertices) {
++	    for (auto vertex : mesh.vertices) {
++		vertex.uv *= uvScale;
+ 		this->m_puppetVertices.push_back (vertex);
+ 		this->m_puppetVertexMesh.push_back (static_cast<uint16_t> (m));
+ 		texcoords.push_back (vertex.uv.x);

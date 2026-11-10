@@ -58,7 +58,8 @@ happen regardless of timing.
 - `src/redraw.rs` — the redraw policy of frame-paced (Wayland) outputs. § Wayland.
 - `src/signal/` — Signals (Phase 3): `covered.rs` (the pure cover rules per source + the hold's
   debounce), `hypr.rs` / `sway.rs` (the IPC cover sources on `lia-cover`), `mod.rs` (the feed, source
-  choice, the runtime's `cover_tick`, the `cover` probe); `automute.rs` (the in-player auto-mute, on unless
+  choice, the runtime's `cover_tick`, the `cover` probe); `cursor.rs` (the desktop pointer, audit C6:
+  Hyprland `cursorpos` polled on `lia-cursor`, the `pointer` probe — § Scene worker → "The desktop pointer"); `automute.rs` (the in-player auto-mute, on unless
   `LIASCAPE_PLAYER_AUTOMUTE=0`: the rule, `automute_tick`, the `automute` probe) + `mpris.rs`
   (`lia-mpris`, zbus). § Signals.
 - `src/api/` — `proto.rs` (wire shapes), `server.rs` (socket, clients, event tap),
@@ -341,8 +342,9 @@ user's setting, default `maximized`; live; kept by the snapshot) and observed `c
 **Output props.** `name`/`width`/`height`/`refresh_hz` (read-only; kept current with
 `set_observed` on a mode change), `layer` = `background|bottom|top|overlay` (live, §
 Wayland), `paused`, `pointer` (read-only `[x, y, buttons]`, observed — § Wayland),
-`scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at, 0–480, default 30,
-0 = the refresh; live — § Scene worker → "The `scene` Source kind"). Observed `covered`
+`scene_fps` (Phase 2 Task 5: the frame rate scenes shown here render at — WE's `fps`: 0–480, default
+**15** (WE's own, 2026-11-06; was 30), **not capped by the refresh** (the scene ticks at it, the output
+presents at most at its refresh), 0 = the refresh; live — § Scene worker → "The `scene` Source kind"). Observed `covered`
 (`none|maximized|fullscreen|unavailable`) and `covered_by` (`{app_id, pid}` / `{}`) — the covered
 Signal (Phase 3 Task 6, § Signals).
 
@@ -1885,6 +1887,14 @@ source; the transition recipe stays the one place a switch happens. The contract
     once; no sooner than `PARKED_MIN_PLAY_MS` = 1 s after the last commit, so an image at minimum 0 can't switch
     every tick), an end-of-video switch waits for an output (a parked A never ends); `hold` stops both clocks and
     the rules until an output returns. An output added mid-switch is adopted by the recipe as usual.
+  - **`keep`** (a Program prop, Bool, default false, settable + kept in `program.json`; `state.programs[].keep`; owner
+    2026-11-10 "keybind toggle to infinite loop current wallpaper" — the backend's `liascape loop-current`): while true
+    no rotation rule fires (timer, end, maximum, scenes-after, still-image minimum — `tick` step 7 is skipped), the timer's
+    countdown stands, and a video item's `loop` is kept on (a short clip would otherwise end and stand). Set true while
+    an end switch is armed → it is cancelled (`program.disarmed {why: keep}`, A loops on). User verbs still switch and
+    the keep holds the new item; a broken item / failed B still moves on. Set false → the item starts over for the
+    rules: `played_ms` 0 and the countdown a full interval (a long keep never trips the maximum the instant it ends).
+    Tests: `tests/program.rs::keep_holds_the_current_item_and_loops_it` / `keep_stops_the_timer_and_resets_it_when_lifted`.
   - **Persistence** (`recipes/program/store.rs`, designer call 4): `<state>/program.json` = `{version: 1, rev,
     programs: [{id, props (settable, as `get` returns them), order: {items, idx, shuffle}}]}`, written on
     `lia-snapshot` (`Writer::send_file`, before the snapshot queued with it) only when a definition changed
@@ -2451,9 +2461,9 @@ note on stderr and exits 0 (or stdout closes).
 | `step` | `{ms}` (0–600000) | `{now_ms}` (deferred until every frame is in; the client's later requests wait for it) | `unsupported` (real clock), `timeout`, `busy` (64 queued) | `ctl step '{"ms":16}'` |
 | `outbox.read` | `{after?: u64, limit?: 500 (1–2000)}` (Phase 3 Task 9, § Outbox) | `{events: [{seq, t_wall, kind, fields}] (unacked, seq > after, oldest first), last_seq (the newest ever appended, 0 = none), dropped_before: u64\|null (entries past `after` were dropped by the bound: everything before this seq)}` | `bad_request` (`after`/`limit` not a non-negative integer, `limit` 0) | `ctl outbox.read '{"after":12,"limit":100}'` |
 | `outbox.ack` | `{seq}` — the backend stored every entry ≤ seq (a seq past the newest acks all) | `{}` (reads skip them at once; the file is compacted on `lia-snapshot`) | `bad_request` (no/bad `seq`) | `ctl outbox.ack '{"seq":14}'` |
-| `headless.add_output` | `{name, width, height, hz? (60)}` | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
+| `headless.add_output` | `{name, width, height, hz? (60), x?, y?}` — `x, y`: its desktop position for the desktop pointer (default: right of the outputs before it, y 0; `--outputs` lays them out left to right) | `{id: out:<name>}` | `out_of_range`, `unsupported` (exists / not headless) | `ctl headless.add_output '{"name":"VIRTUAL-3","width":1920,"height":1080,"hz":60}'` |
 | `headless.remove_output` | `{name}` | `{}` | `no_such_node`, `unsupported` | `ctl headless.remove_output '{"name":"VIRTUAL-2"}'` |
-| `headless.pointer` | `{output, x, y, buttons? (0)}` — surface px from the top-left (Task 7) | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
+| `headless.pointer` | `{output, x, y, buttons? (0), entered? (false)}` — surface px from the top-left (Task 7); `entered` = the pointer came onto the output there (Wayland `enter`): the scene gets it as a jump, no stroke from where it left | `{scenes: [ids the pointer reached]}` | `no_such_node`, `out_of_range`, `unsupported` | `ctl headless.pointer '{"output":"VIRTUAL-1","x":960,"y":540}'` |
 | `headless.cover` | `{output \| "*", state: none\|maximized\|fullscreen, app_id?, pid?}` — the fake cover source (Phase 3 Task 6, § Signals); read by the next tick | `{}` | `no_such_node`, `bad_request`, `unsupported` | `ctl headless.cover '{"output":"*","state":"fullscreen"}'` |
 
 **Error codes** beyond the graph's (§ Graph & properties): `bad_request` (not JSON / no
@@ -3848,7 +3858,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   (`getTextureAnimation`, `getAnimation`, `size`), `registerAudioBuffers`, cursor/media events,
   `engine.userProperties`, `createLayer`, sound layers. `host_api_test`: `update_moves_the_property`,
   `init_runs_first_and_modules_load`, `undefined_leaves_the_property` (solid squares on a 64×32 scene, need
-  `LIASCAPE_WE_ASSETS_DIR`; RED on 45ed25c); `HOST_API_TEST_ONLY=<substring>` runs a subset.
+  `LIASCAPE_WE_ASSETS_DIR`; RED on c3a7d68); `HOST_API_TEST_ONLY=<substring>` runs a subset.
   **0022 (2026-11-02, batch B2): object alpha/colour live, `g_Color4` = (colour, alpha)** (audit E2, E3).
   `CPass::setupUniforms` binds `g_Brightness`/`g_UserAlpha`/`g_Alpha`/`g_Color`/`g_Color4`/`g_CompositeColor`
   by address (passing the `const T&` getters picked the by-value overloads: frozen at setup); `CImage` keeps
@@ -3864,7 +3874,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   value adds). Not done: `timeofday`, `options.parent`/`children`, `random`, events, the SceneScript animation
   API. `host_api_test`: `object_uniforms_are_live`, `keyframes_drive_alpha`, `keyframes_move_origin` (white
   squares — a colour string without a '.' is 0..255 — red channel = alpha × 255; the first ships its own
-  `g_Color4` shader in the scene folder; RED on e78d94d).
+  `g_Color4` shader in the scene folder; RED on 8902c4a).
   **0024–0028 (2026-11-03, batch B3): particle core semantics** (audit P1, P3–P8, P13, P14, P16, P18, P19, P38;
   "B3 result" in its § 5). **0024:** one particle RNG per scene (`CScene::getParticleRng`, WE's scene+0x1f08);
   `randomframe` = one draw from it (it was seeded by the slot address); `WPENGINE_PARTICLE_SEED` seeds it. **0025:**
@@ -3883,7 +3893,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   `randomframe` (`SPRITESHEETBLENDNPOT` not done). `host_api_test`: `particle_count_rate_and_prewarm`,
   `particle_colorrandom_one_t`, `particle_colorn_hsv_shift`, `particle_hide_resets_and_overrides_live` (additive
   8/255 or 4/255 grey stacks at fixed points of a 64×32 scene, so the red channel counts particles; need
-  `LIASCAPE_WE_ASSETS_DIR`; all RED on ccb545d).
+  `LIASCAPE_WE_ASSETS_DIR`; all RED on d4969e4).
   **0029 (2026-11-03, batch B5): parallax and camera as in WE** (audit G10–G12, G14/E1, G15–G19; "B5 result" in its
   § 5; decoded: camera update GH 0x1401b8af0, render-loop offset GH 0x1401b9b50, shake GH 0x1401c7680, zoom in the
   tick GH 0x1401afbf0). `CScene::updateCamera` (each frame, before animations and scripts): the parallax target
@@ -3902,7 +3912,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   CText ignores the offset (B4). **The worker keeps LWE's pointer at the scene's centre until the host sends one**
   (`lwe::Scene::first_render`; `pointer: Option` in main.rs) — at (0,0) a parallax scene sat pulled to a corner.
   `host_api_test`: `parallax_follows_the_pointer`, `parallax_position_uniform`, `camera_zoom_and_shake` (8×8 squares
-  on a 64×32 scene, a fake `wp_mouse_input`; all RED on 4c75eae).
+  on a 64×32 scene, a fake `wp_mouse_input`; all RED on 93438d4).
   **0030 (2026-11-03, batch B6): the hierarchy as in WE** (audit G03, G04 particles, P36, G31; "B6 result" in its
   § 5; decoded: effectively visible GH 0x1401b50e0, image model matrix GH 0x1402277d0, alignment offset GH
   0x140230a80). `CScene::isEffectivelyVisible(object)` = its own `visible` AND every ancestor's (groups read
@@ -3915,7 +3925,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   system; world-space control points stay put); its own x/y angles stay its own. An aligned image turns and scales
   about its origin (`m_scenePivot`), not the shifted quad's centre. Not done: text parent transforms (CText, B4), a
   sound object under a hidden parent. `host_api_test`: `hidden_parent_hides_children`, `particle_follows_its_parent`,
-  `aligned_layer_turns_about_its_origin` (all RED on d7a9f34).
+  `aligned_layer_turns_about_its_origin` (all RED on 9f64193).
   **0031–0036 (2026-11-03, batch B9): small uniform, property and shader fixes** (audit "B9 result" in its § 5).
   **0031:** `g_Frametime` (`Context::frameTime`, the frame's dt), `g_PointerState` (`CScene::getPointerState`: xy 1
   while the left button of the host's `wp_mouse_input` is down, z 1 on the press frame), `g_Daytime` and
@@ -3932,7 +3942,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   non-system usertexture is its scenetexture property's value (at pass build; empty → the slot's fallback, no log).
   `host_api_test`: `engine_uniforms_are_fed`, `bloom_is_live_and_tinted`, `annotation_defaults_parse`,
   `fragment_gets_vertex_varyings`, `properties_list_as_written`, `usertexture_reads_its_property` (a solid layer with
-  its own `b9` shader; all RED on c959e7a, built against the new headers).
+  its own `b9` shader; all RED on 602de79, built against the new headers).
   **0037 (2026-11-03, E41): effect `visible` is live.** `CImage` builds every effect that can be visible
   (`effectCanBeVisible`: true now, bound to a property, or scripted), tags each pass with its effect
   (`m_passEffects`; base/tint/colour-blend passes nullptr) and keeps its built blending (`m_passBlending`).
@@ -3941,7 +3951,7 @@ linux-wallpaperengine `next-v2`'s core library, from the owner's fork (D3) — `
   main/sub FBO reset, `setupPasses` over them). A script on an effect's `visible` is queued as
   `effect_<id>_<index>_visible_<object>`. A passthrough layer with no visible effect returns early. Hidden effects
   that can't compile now log "Leaving out effect" at load (they did nothing before either). `host_api_test`:
-  `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on cc6f1c9).
+  `effect_visible_is_live` (two chained effects bound to bools toggled both ways; RED on 94cfc2e).
   `--lwe-smoke … --prop-at T name=value` without `--audio-dump` now sets the property `T` s into the frames and
   writes `lwe-smoke-before-<T>s.png` first.
   **0038–0044 (2026-11-03, batch B10): the SceneScript API.** `ScriptableObjectAdapter` keeps one JS object per
@@ -4028,8 +4038,8 @@ path: <item folder>, position?, paused?, speed?, preview?}}`. The transition rec
 hard-coded `kind == "video"` learned about `scene`.
 
 - **Schema.** `Source.kind` enum + `scene`; `Source.preview` (Str, the item's preview image —
-  stored on every kind, shown by Task 10's crash policy); `Output.scene_fps` (F64 0–480, default **30** = D5,
-  `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
+  stored on every kind, shown by Task 10's crash policy); `Output.scene_fps` (F64 0–480, default **15** = WE's
+  own default `fps` (2026-11-06; was 30 = D5), `0` = that output's refresh). `Graph::outputs_of(id)` = the inverse of `srcs:<c>` (every
   `out:<c>` whose `srcs:` holds `id` — shown there, or held there by a transition).
   `onset::kind_has_audio(kind)` = `video | scene` (`has_audio`, `audible`, the restore fade,
   the snapshot's `playing` and the periodic refresh all go through it).
@@ -4058,8 +4068,9 @@ hard-coded `kind == "video"` learned about `scene`.
   left without). `SourceHost::demand_computes` counts recomputes. **The worker is spawned at the first demand that names an
   output** (so the ring is exported at the right size from the start; a node created but not
   shown has no worker); `max_size` = the largest width and height over the outputs (the cover
-  size covers each), tick rate = max `eff_fps(scene_fps, refresh)` (`scene_fps` capped at the
-  refresh; 0 → the refresh; neither known → 30; Task 8 adds the GPU cap); a change of
+  size covers each), tick rate = max `scene_rate(scene_fps, refresh)` (**WE's `fps`, not capped at the
+  refresh** — below; 0 → the refresh; neither known → 15; Task 8 adds the GPU cap); each output's
+  presents of the scene's frames stay gated at `eff_fps(scene_fps, refresh)` (≤ its refresh, `redraw`); a change of
   `max_size` sends **`Resize`** (stats `resizes`); no output at all (every output unplugged —
   parked) changes nothing. `set_audio_route` re-routes scenes too (`ToWorker::Route`).
   `SourceHost::scene(id)`/`scene_mut(id)`, `workers_info()`; `Source::as_scene(_mut)`.
@@ -4268,6 +4279,47 @@ forwards the pointer, feeds the visualiser and passes user properties through.
   (re-sent after a restart's `Ready`). The worker hands it to LWE's `wp_mouse_input` (`CScene`
   divides by its size; our button bits = `WP_MOUSE_INPUT_BUTTON_*`); the synthetic
   `pointer_dot` scales it to the ring. Unit `pointer_maps_through_fill_and_viewport`.
+  A sample that **entered** the output (Wayland `enter`, `headless.pointer {entered: true}`)
+  goes as `Pointer {jump: true}` → `wp_project_pointer_jump` (fork 0106): WE polls the cursor
+  on the whole desktop and never sees a jump, so the scene's `g_PointerPositionLast` takes the
+  new position too (cursorripple drew a saturated stroke along it). `ToWorker::Rate {hz}` =
+  the outputs' demand (before the GPU budget's cap), on `Ready` and each demand change →
+  `wp_project_set_frame_rate` (fork 0105): a simulation effect (cursorripple) steps at it
+  whatever rate the ticks arrive at. Probe `workers`: `pointer_jumps`, `rate_sent`. API
+  `pointer_enter_is_a_jump_and_rate_is_the_demand`.
+- **WE's frame limiter (2026-11-06, decoded from wallpaper64.exe 2.8.485).** The render loop
+  (FUN_140141520) sleeps each frame so that `fps` frames fill each second (`fps` = `general.user.fps`
+  at window +0x18c, read by FUN_1401461e0; a 1 s budget split over the frames left, `Sleep` in ms,
+  QueryPerformanceCounter; 0 = no limit) and presents with `IDXGISwapChain1::Present1(0,
+  DXGI_PRESENT_ALLOW_TEARING)` — no vsync wait — so a scene runs at `fps` even above the monitor's
+  refresh (DWM shows the newest frame each vblank). The UI slider is 10..`runtime.frequencymax`;
+  default 15 (the loader's value when unset; the first-run preset "medium"). (The `clamp(round(1000/fps)
+  ·0.5, 6, 100)` FUN_14006dd90 stores is the **audio capture thread's** `Sleep` between reads, not
+  the frame limiter.) Ours: `scene_rate` (above) = `scene_fps` uncapped → the tick rate and
+  `ToWorker::Rate`; default 15. API `scene_fps_is_wes_rate_above_the_refresh`.
+- **The desktop pointer (audit C6, 2026-11-06; `signal/cursor.rs`).** WE reads `GetCursorPos` every
+  frame over the whole desktop (other monitors and windows included) → `ScreenToClient` of the
+  wallpaper's window ÷ its size (outside 0..1 off it). Ours: on Hyprland, the `lia-cursor` thread
+  polls the read-only `cursorpos` request on `.socket.sock` (no Wayland protocol gives a client the
+  global pointer; socket2 has no cursor event) at the highest `demand_hz` of the unpaused scenes —
+  parked (no requests) when there is none; a reading is published only when it moved, so the
+  loop's check is one atomic load. `Runtime::pointer_events` → `desktop_pointer_forward`: the point
+  through each output's `OutputBackend::desktop_rect` (xdg-output logical position/size; headless:
+  `pos`) into its pixels (`cursor::desktop_to_output`), then the layer's fit **unclamped**
+  (`scene::pointer::to_source_uv_unclamped`: on the other monitor it lies off the scene); a scene
+  on several outputs takes the one the cursor is on, else its first by name. It runs on a new
+  reading, a button change, or every `cursor::REFRESH` (250 ms: places new scenes, re-derives the
+  rate). A scene's first position is a jump; nothing else is (no enter jumps while it reads). The
+  surface's samples then give only the buttons (OR over outputs; a press is seen only over the
+  bare desktop) and still set `out:<c>.pointer`. **Fallback:** no reading yet / a failed request
+  (no socket, Hyprland gone; retried every 2 s) / not Hyprland → the surface pointer as before,
+  its next sample a jump (`pointer.desktop_lost`). `LIASCAPE_PLAYER_POINTER_SOURCE` = `hyprland` |
+  `surface`; default Hyprland on Wayland when `HYPRLAND_INSTANCE_SIGNATURE` is set, surface
+  headless. Events `pointer.source`, `pointer.desktop`, `pointer.desktop_lost`; probe **`pointer`**
+  `{source, in_use, ok, reason, rate_hz, pos, polls, changes, fails, request_us_mean, forwards,
+  jumps}`. Cost (owner's machine, 240 polls/s): `lia-cursor` ~1.4 % of a core, Hyprland ~0.6 % (audit "Frame
+  limiter and desktop pointer result"); none while every scene is paused. API
+  `desktop_pointer_from_a_fake_hyprland`; units in `signal::cursor`, `scene::pointer`.
 - **Visualiser input (D4: all system audio, as a mix of streams — `audio/sysmon.rs`).**
   `SysMon::start()` (thread `lia-sysmon`, own PipeWire loop) taps every `Stream/Output/Audio`
   node `admit()` lets through — **the plug point for a per-app white/blacklist**; today all but
@@ -4504,7 +4556,7 @@ scenes unchanged. Worker side `src/bin/liascape-scene-worker/{audio,stretch}.rs`
 
 Owner decision (Phase 2 plan, "Loudness: learn on first play"): a scene's integrated loudness is measured
 over its first ~60 s of play from its worker's own stream, stored in the item's index like a video's
-`loudness*`, and normalizes the scene from then on. **Refined (owner 2026-10-28: "60s to normalize for
+`loudness*`, and normalizes the scene from then on — set once per play (2026-11-06: "Applying it" below). **Refined (owner 2026-10-28: "60s to normalize for
 rest of scene, keep measuring to get a more accurate measure when the scene is played in future (probably
 add a max cap for people who will never change wallpaper)")**: measuring goes on past the window and on
 every later play, continuing ONE integration over all of them, until a cap. The player measures and
@@ -4633,7 +4685,13 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   measured (above); `gain.mute`/`gain.user` −96: still measured (the content plays, pre-gain).
 - **Applying it** is the backend's: the scene source's **`gain.normalize`** slot (the summed `Gains`
   → the worker's stream; § Units) — set at create from the stored value, live through `animate` (a
-  setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too).
+  setting slot: `Runtime::setting_anim`, unpaused clock — it lands while paused too). **Set once per play**
+  (owner 2026-11-06, "not … real-time … checks for 60s and calculates rest of the scene for future"; player-adapter.md
+  § Scenes → "Loudness"): a playing source keeps the value it opened with; the only automatic change is the one ramp
+  when its configuration's first window completes (the report that makes the stored measurement complete), and every
+  report after that refines the NEXT play's value. Nothing changes here — the reports, their cadence and the book
+  are the same; the worker has no gain of its own besides the slots (no AGC, no limiter: the ±1 clip after the gain,
+  WE's own device clip).
 - **Probe `workers` → `loudness`**: `{seconds (audible, every play), session_s, seed_s, played_s,
   lufs (so far, null = nothing audible), done (capped or ended), capped, window_s, cap_s, measuring
   (this source is its path's measuring one — the `Book`; the other values are the path's), received
@@ -4657,7 +4715,8 @@ reports; the backend stores and applies (player-adapter.md § Scenes → "Loudne
   `cap_stops_measuring`, `state_round_trips_and_a_bad_seed_is_ignored` (RED against the API with the old
   semantics: 5 of 5); worker `loudness_segments_count_only_played_sound` + meter off; lib
   `restart_start_folds_live_changes` + `LoudnessMeter`; api `scene_loudness_is_learned_once_after_its_window`
-  (now: not again before the next window, and a report at the end), `scene_loudness_accumulates_over_two_plays`
+  (now: not again before the next window, and a report at the end; 2026-11-06: a report never moves the source's
+  `gain.normalize` — created at 4.5, still 4.5, no `anim.start` on its gains, the stream's gain = the create sum), `scene_loudness_accumulates_over_two_plays`
   (−20 then −23 dBFS plays of one folder, the second seeded with the first's state → `seed_s`/`session_s`,
   the energy mean of both within 0.3 LU), `scene_loudness_stops_at_the_cap` (window 1, cap 3: reports at
   1/2/3 s, `capped`, `received` stands still, nothing at the end; seeded at the cap → nothing metered) —
@@ -5234,9 +5293,9 @@ source. worker. scene.` gives `ready_ms` = `worker.spawned` → `source.ready`. 
 `--no-build`, `--bin`, `--assets`. **`--ab-legacy --legacy-output <out>`** runs the installed
 `linux-wallpaperengine --screen-root <out> --screenshot …` per scene — it draws on the real output,
 so it is **owner-run only**; the report then lists scenes that start there but not here.
-**The report's run (2026-10-28, LWE `40eacc9`, 96 scenes, 506 s):** 92 ok, 1 static (a still image + a sound
+**The report's run (2026-10-28, LWE `bab619b`, 96 scenes, 506 s):** 92 ok, 1 static (a still image + a sound
 — by design), 3 load_failed (3D/perspective scenes next-v2 can't parse), 0 blank/broken/crashed/timeout. The
-first run (LWE `c5c2cad`: 86 ok, 1 blank, 4 load_failed, 4 broken) found five LWE causes, every one reproducing
+first run (LWE `c902d06`: 86 ok, 1 blank, 4 load_failed, 4 broken) found five LWE causes, every one reproducing
 with `--lwe-smoke` (LWE's core alone); four are fixed by fork patches 0012/0014–0017 (§ "LWE core"), the 3D
 one is a Phase 6 item in `docs/TODO.md`. The runs also found three
 player fixes: the stopped worker's last stderr line (§ `WorkerHost` "Log tail"), the core handler

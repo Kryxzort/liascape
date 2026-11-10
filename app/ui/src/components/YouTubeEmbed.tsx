@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 
-// Shared between the Browse PreviewModal and the Library Settings modal (1:1 — the only fully-duplicate
+// Shared between the Browse and the Library item sidebars (1:1 — the only fully-duplicate
 // bit). Overlays the thumbnail stage with a 16:9 YouTube player (the video's own aspect), centered.
 const ytId = (u: string) => u.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)?.[1] ?? null;
 

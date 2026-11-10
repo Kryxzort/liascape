@@ -209,7 +209,15 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start (see $T/backend.log)"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
+# A body that isn't JSON is a quoting slip in THIS script, never a backend fault: the backend answers 400 before the
+# route runs, `-f` + `>/dev/null` swallowed it, and the check after it waited for a switch nobody asked for (2026-11-06:
+# `post /apply "{"path":"$Bc"}"` sent {path:/tmp/…/b.mp4} — read as "/apply b after a library item never switched").
+# Loud, and nothing is sent: a FAIL on stderr (a `$(post …)` caller captures stdout, and its subshell's `fail` count
+# is lost — so each one is also logged and counted at the end).
+post() {
+  jq empty >/dev/null 2>&1 <<<"$2" || { echo "  FAIL post $1: the body isn't JSON (a quoting slip in the IT): $2" | tee -a "$T/post-not-json.log" >&2; return 2; }
+  curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"
+}
 # an import copies the clip + ffmpeg-extracts its thumbnail: seconds under load, past `post`'s 10 s
 lib_import() { curl -sf -m 60 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$1\",\"title\":\"$2\"}" "$U/library/import" | jq -r .videoPath; }
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
@@ -329,6 +337,26 @@ post /apply "{\"path\":\"$Bc\"}" >/dev/null
 waitfor $WAIT shows "$Bc" && ok "/apply b → cur b" || bad "/apply b → cur $(cur path), transitions $(ctl state | jq -c '[.transitions[].phase]')"
 ctl logs '{"kind_prefix":"transition.started"}' | jq -r '.events[-1] | "\(.effect_id) \(.method)"' | grep -q "fade full-live" && ok "a→b ran fade full-live" || bad "a→b effect: $(ctl logs '{"kind_prefix":"transition.started"}' | jq -c '.events[-1]')"
 curl -sf -m 5 "$U/current" | jq -e ".playing == true and .path == \"$Bc\" and (.position|type) == \"number\"" >/dev/null && ok "/current playing b + position" || bad "/current $(curl -sf -m 5 "$U/current")"
+# Two quick clicks: the second /apply right behind the first is never lost behind the first's switch (each /apply runs
+# under PlayerHelper's lock; a switch is a barrier in the adapter's queue, never coalesced). Judged by what was
+# SCHEDULED last, not only by `cur` (it may still name the target of an earlier switch).
+last_sched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r '.events[-1].path // empty'; }
+quick_ok() { shows "$1" && [ "$(last_sched)" = "$1" ]; }
+n0=$(nsch); post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$C\"}" >/dev/null
+waitfor $WAIT quick_ok "$C" && ok "two quick clicks (a, c) → c ($(( $(nsch) - n0 )) switches scheduled)" \
+  || bad "two quick clicks (a, c) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]')"
+# …and clicked while the player is stalled (2026-11-07): the adapter's worker found no answer (hello 1 s + the
+# supervisor wait 2 s, the breaker open) and DROPPED the switch — no log line, never retried; the stall breaker
+# closing (R81) re-applied settings only, so the screen stayed on the old wallpaper for good (a 13–34 s stall in the
+# owner's log = every click in it lost). Now a switch (or stop) lost to a stall is the backend's intent and is put on
+# screen once the player answers again — found by the adapter's own probe, with NO further request from here (the
+# `ctl` reads below go to the player, never the backend).
+CP=$(comp_pid); kill -STOP "$CP"; t0=$(ms_now)
+post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$Bc\"}" >/dev/null; tq=$(( $(ms_now) - t0 ))
+sleep_left=$(( 4500 - tq )); [ "$sleep_left" -gt 0 ] && sleep "$(python3 -c "print($sleep_left/1000)")"
+kill -CONT "$CP"
+waitfor 20000 quick_ok "$Bc" && ok "two clicks (a, b) on a player stalled 4.5 s → b once it answers again (both /apply answered in ${tq} ms)" \
+  || bad "clicks on a stalled player (a, b) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]'); log: $(grep -E "stall|not responding|switch" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -4 | tr '\n' ' ' | cut -c1-600)"
 
 echo "== live settings"
 fit1() { [ "$(ctl get '{"path":"lay:VIRTUAL-1:main.fit"}' | jq -r .value)" = fit ]; }
@@ -350,6 +378,48 @@ post /pause '{}' >/dev/null; waitfor $WAIT paused_is false && ok "/pause again �
 g55=$(dB 55); g20=$(dB 20)
 post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
+
+echo "== normalization: an out-of-range target in settings.json is clamped; an af mpv can't build plays without it, never silent"
+# TODO "A rejected `af` silences the video" (owner 2026-11-06): a target of 0 LUFS built a loudnorm ffmpeg refuses
+# (I takes −70…−5) and mpv then played the video with NO audio. The backend clamps a stored target; the player survives any
+# af mpv can't build (falls back to its chain without it, re-selects the audio track, reports `source.rejected`).
+sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
+src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
+af_has() { cur af | grep -q -- "$1"; }
+refused_seen() { ctl logs '{"kind_prefix":"source.rejected","limit":1000}' | jq -e --arg id "$1" '[.events[] | select(.id==$id and .prop=="af")] | length >= 1' >/dev/null; }
+ao_up() { src_probe "$1" | jq -e '.ao == "null"' >/dev/null; }
+sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'   # written straight into the file (the UI can't send 0 any more)
+NC=$(lib_import "$C" "norm cee")   # a library item: its loudness is measured and stored on first play
+post /apply "{\"path\":\"$NC\"}" >/dev/null
+waitfor $WAIT shows "$NC" || bad "/apply norm cee → cur $(cur path)"
+# its loudness is measured on first need; once it lands the backend re-applies: its af becomes a loudnorm
+waitfor 30000 af_has loudnorm && af_has 'I=-5:' && ok "target 0 in settings.json → loudnorm clamped to I=-5 ($(cur af | cut -c1-40)…)" \
+  || bad "target 0: its af = $(cur af)"
+SIDC=$(srcIdForPath "$NC")
+waitfor $WAIT ao_up "$SIDC" && src_probe "$SIDC" | jq -e '.refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
+  || bad "clamped loudnorm: $(src_probe "$SIDC")"
+# any af mpv can't build, set on the live source: refused (source.rejected, the backend's log), audio output still up.
+# (The backend's next settings pass may put its own af back meanwhile — that clears `af_refused`; the event stays.)
+ctl set "{\"path\":\"$SIDC.af\",\"value\":\"loudnorm=I=0:TP=-1.5:LRA=11\"}" >/dev/null
+waitfor $WAIT refused_seen "$SIDC" && waitfor $WAIT ao_up "$SIDC" \
+  && ok "an unbuildable af on the live source → source.rejected, audio output still up ($(src_probe "$SIDC" | cut -c1-160))" \
+  || bad "unbuildable af live: $(src_probe "$SIDC"), rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
+waitfor $WAIT grep -q "player refused af on $SIDC" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…and the backend's log says so" || bad "backend log has no 'player refused af on $SIDC'"
+# a NEW source opened with it (the owner's case: mpv deselected the track at its audio init → no audio at all)
+ctl create "$(jq -nc --arg p "$C" '{kind:"source", props:{path:$p, loop:true, af:"loudnorm=I=0:TP=-1.5:LRA=11"}}')" > "$T/afc.json"
+SIDX=$(jq -r .id "$T/afc.json")
+waitfor $WAIT refused_seen "$SIDX" && waitfor $WAIT ao_up "$SIDX" \
+  && ok "a new source opened with it: source.rejected, audio output up ($(src_probe "$SIDX" | cut -c1-120))" \
+  || bad "new source with an unbuildable af: $(src_probe "$SIDX")"
+ctl destroy "{\"id\":\"$SIDX\"}" >/dev/null 2>&1
+sf_raw '.NormalizeAudio = false | .NormalizeTargetLufs = -14'
+setting '.NormalizeAudio = false'; waitfor $WAIT cur_is af "" || bad "normalization off → af $(cur af)"
+# leave the library without this item (an all-scene library check further down counts on it), nothing shown
+stop_now
+curl -sf -m 5 "$U/library" | jq -c --arg p "$NC" '[.[] | select(.videoPath==$p)][0]' > "$T/nc.json"
+post /library/delete "$(cat "$T/nc.json")" >/dev/null
+curl -sf -m 5 "$U/library" | jq -e --arg p "$NC" '[.[] | select(.videoPath==$p)] | length == 0' >/dev/null || bad "norm cee still in the library"
 
 echo "== timed playlist: advance-on-end, no minimum play time (2 s clips → advance on end)"
 # A rotation's rate is counted on the PLAYER's clock: the handoffs (after index $1) whose t_mono_ms lies
@@ -753,15 +823,15 @@ post /apply "{\"path\":\"$SV1\"}" >/dev/null
 waitfor $WAIT shows "$SV1" && ok "/apply sv1 (library/single-wallpaper mode) → cur sv1" || bad "/apply sv1 → cur $(cur path)"
 
 step_many() {   # $1 = /next|/prev|/random, $2 = iteration count
-  local route=$1 n=$2 allok=1 sceneHit=0 i p code
+  local route=$1 n=$2 allok=1 sceneHit=0 i p code codes=""
   for i in $(seq 1 "$n"); do
     code=$(postcode "$route")
-    [ "$code" = 200 ] || allok=0
+    [ "$code" = 200 ] || { allok=0; codes="$codes #$i:$code"; }
     sleep 0.5
     p=$(cur path)
     { [ "$p" = "$SS1" ] || [ "$p" = "$SS2" ]; } && sceneHit=1
   done
-  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response"
+  [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response:$codes (000 = no answer within 10 s)"
   [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — TryStepLibrary/ApplyRandom didn't skip it"
 }
 step_many /next 20
@@ -829,7 +899,7 @@ fps_now() { all_fps "$1" && near "$(ctl probe '{"name":"workers"}' | jq -r --arg
 setting ".SceneMonitors = ($OUTS | to_entries | map({Name: .value, Fps: 45, IsPrimary: (.key == 0)}))"
 waitfor $WAIT fps_now 45 && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneMonitors fps 45 on $OUTS → each out:<c>.scene_fps 45 live, the worker ticks at 45, same pid" || bad "SceneMonitors fps → out:$O1 $(out_fps "$O1"), worker $(ctl probe '{"name":"workers"}' | jq -c --arg id "$SID" '.workers[] | select(.id==$id) | {fps_target, pid}')"
 setting '.SceneMonitors = []'
-waitfor $WAIT fps_now 30 && ok "SceneMonitors emptied → back to the default 30" || bad "SceneMonitors [] → out:$O1 $(out_fps "$O1")"
+waitfor $WAIT fps_now 15 && ok "SceneMonitors emptied → back to the default 15 (LiascapePlayerMedia.DefaultSceneFps)" || bad "SceneMonitors [] → out:$O1 $(out_fps "$O1")"
 
 # /library/volume on the playing scene moves that source only — mid-fade (6 s) to another scene, both live
 setting '.GlobalTransitionDurationMs = 6000'
@@ -883,6 +953,20 @@ post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/
 swr=none; waitfor 15000 sw_seen "$m0" "$A"
 between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s on a scene: advanced 3 s in (+$(sw_field 1) ms, align $(sw_field 3))" || bad "max 3 s × scene: $swr (want align now at +2.3…3.9 s)"
 setting '.GlobalMaxPlaySeconds = 0'; stop_now
+# both set → the minimum (owner 2026-11-10: "use either maximum or minimum if other one's off, minimum if both on"), even
+# with a shorter maximum: min 6 s + max 3 s → the scene plays its 6 s (it used to be cut at the 3 s maximum)
+setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 3'
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 5300 6900 && [ "$(sw_field 3)" = now ] && ok "min 6 s + max 3 s on a scene: it played the minimum (+$(sw_field 1) ms, align $(sw_field 3))" || bad "min 6 + max 3 × scene: $swr (want align now at +5.3…6.9 s — the minimum, not the maximum)"
+setting '.GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0'; stop_now
+# …a playlist's own limits (its override) the same: min 5 s + max 2 s → 5 s
+m0=$(tev_n)
+post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0,\"OverrideGlobalSettings\":true,\"SwitchWhenVideoEnds\":true,\"IntervalSeconds\":5,\"MaxPlaySeconds\":2,\"SeparateSceneTiming\":false}}" >/dev/null
+swr=none; waitfor 15000 sw_seen "$m0" "$A"
+between "$(sw_field 1)" 4300 5900 && [ "$(sw_field 3)" = now ] && ok "a playlist's min 5 s + max 2 s on a scene: the minimum (+$(sw_field 1) ms)" || bad "playlist min 5 + max 2 × scene: $swr (want align now at +4.3…5.9 s)"
+stop_now
 
 echo "-- separate timing for scenes: ON → a scene switches after its own time (0 = off), the minimum / maximum don't apply to it; videos keep theirs"
 setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = true | .GlobalSwitchScenesAfterSeconds = 3'
@@ -1201,6 +1285,8 @@ waitfor $WAIT cur_near gain.normalize 6 0.1 && [ "$(wpid "$SID5")" = "$WP5" ] &&
   && ok "gain.normalize moved live to $(cur gain.normalize) dB (−14 − (−20)) — same source $SID5, same worker $WP5" || bad "normalize live: $(cur gain.normalize), src $SID5 → $(srcIdForPath "$S5"), worker $WP5 → $(wpid "$SID5")"
 ramp=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
 echo "$ramp" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp), never a step" || bad "normalize not ramped: $ramp"
+grep -q "scene 900000005 loudness .* its window is measured: this play's normalization is set now, once" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…the window landing (adapter log: set now, once)" || bad "adapter log has no window-landing line for s5"
 waitfor $WAIT eval 'near "$(waudio "$SID5" gain_db)" 6 0.1' && ok "…reaches the worker's stream (effective $(waudio "$SID5" gain_db) dB)" || bad "worker gain_db $(waudio "$SID5" gain_db)"
 setting '.NormalizeTargetLufs = -23'
 waitfor $WAIT cur_near gain.normalize -3 0.1 && ok "target −23 → gain.normalize $(cur gain.normalize) live" || bad "target −23 → $(cur gain.normalize)"
@@ -1254,20 +1340,33 @@ waitfor $WAIT eval 'python3 -c "import sys; sys.exit(0 if float(\"$(idx_s 900000
 A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b.gain.normalize" '[.events[] | select(.path==$p)] | length')
 [ "$A5b" = 0 ] && near "$(cur gain.normalize)" "$W5" 0.01 && ok "…gain.normalize untouched ($(cur gain.normalize), no ramp)" || bad "a sub-0.5 refinement moved gain.normalize: $(cur gain.normalize), ramps $A5b"
 grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
-# a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU →
-# gain.normalize ramps to it — same source, same worker
+# a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU → the
+# STORED value moves (the next play's), but this play keeps the normalization it started with — set once per play
+# (owner 2026-11-06: "not … real-time … calculates rest of the scene for future"); the next play opens at the new value
 stop_now
 mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-10}'
 post /apply "{\"path\":\"$S5\"}" >/dev/null
 waitfor 5000 scene_ready "$S5" || bad "third play s5 → $(basename "$(cur path)")"
 SID5c=$(srcIdForPath "$S5"); WP5c=$(wpid "$SID5c")
+G5c=$(ctl get "{\"path\":\"$SID5c.gain.normalize\"}" | jq -r .value)
 waitfor 15000 eval 'python3 -c "import sys; sys.exit(0 if float(\"$(loud_i 900000005)\") >= $I5 + 0.5 else 1)"' \
-  && ok "a louder third play moved loudnessI $I5 → $(loud_i 900000005) ($(idx_loud 900000005))" || bad "third play: index $(idx_loud 900000005) (was $I5)"
-W5c=$(python3 -c "print(round(min(-14 - float('$(loud_i 900000005)'), -1.5 - float('$(jq -r '."900000005".loudnessTP' "$IDX")')), 3))")
-waitfor $WAIT cur_near gain.normalize "$W5c" 0.05 && [ "$(srcIdForPath "$S5")" = "$SID5c" ] && [ "$(wpid "$SID5c")" = "$WP5c" ] \
-  && ok "…gain.normalize ramped live to $(cur gain.normalize) dB — same source $SID5c, same worker $WP5c" || bad "third play: gain.normalize $(cur gain.normalize) (want $W5c), src $SID5c → $(srcIdForPath "$S5"), worker $WP5c → $(wpid "$SID5c")"
-ramp5c=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq -c --arg p "$SID5c.gain.normalize" '[.events[] | select(.path==$p)][-1] | {to, duration_ms}')
-echo "$ramp5c" | jq -e '.duration_ms >= 300' >/dev/null && ok "…as a ramp ($ramp5c)" || bad "third play: normalize not ramped: $ramp5c"
+  && ok "a louder third play moved the stored loudnessI $I5 → $(loud_i 900000005) ($(idx_loud 900000005))" || bad "third play: index $(idx_loud 900000005) (was $I5)"
+n5c=$(ns_l "$SID5c"); waitfor 10000 eval '[ "$(ns_l "$SID5c")" -gt "$n5c" ]' || bad "third play: no further report after the stored value moved"
+pass5c=$(post /settings "$(curl -sf -m 5 "$U/settings" | jq '.Volume = 99')" >/dev/null; waitfor $WAIT cur_near gain.user "$(dB 99)" 0.05 && echo y)   # a full resolver pass meanwhile
+A5c=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5c.gain.normalize" '[.events[] | select(.path==$p)] | length')
+[ "$A5c" = 0 ] && near "$(cur gain.normalize)" "$G5c" 0.001 && [ "$(srcIdForPath "$S5")" = "$SID5c" ] && [ "$pass5c" = y ] \
+  && ok "…this play keeps its normalization: gain.normalize $(cur gain.normalize) = its create value, 0 ramps over $(ns_l "$SID5c") reports + a full resolver pass" \
+  || bad "third play: gain.normalize $(cur gain.normalize) (created $G5c), $A5c ramps, src $SID5c → $(srcIdForPath "$S5"), resolve pass $pass5c"
+grep -q "scene 900000005 loudness .* stored, applied from its next play (this play keeps its normalization)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
+  && ok "…adapter log: applied from its next play" || bad "adapter log has no 'applied from its next play' line"
+setting '.Volume = 100'
+stop_now
+post /apply "{\"path\":\"$S5\"}" >/dev/null
+waitfor 5000 scene_ready "$S5" || bad "fourth play s5 → $(basename "$(cur path)")"
+SID5d=$(srcIdForPath "$S5"); G5d=$(ctl get "{\"path\":\"$SID5d.gain.normalize\"}" | jq -r .value)
+A5d=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5d.gain.normalize" '[.events[] | select(.path==$p)] | length')
+python3 -c "import sys; sys.exit(0 if float('$G5d') <= float('$G5c') - 0.4 else 1)" && [ "$A5d" = 0 ] \
+  && ok "the next play opens at the refined value: gain.normalize $G5c → $G5d from its first frame (no ramp)" || bad "fourth play: gain.normalize $G5d (third play's $G5c), ramps $A5d"
 # a scene without sound: nothing learned, never normalized
 post /apply "{\"path\":\"$S6\"}" >/dev/null
 waitfor 5000 scene_ready "$S6" || bad "/apply s6 → $(basename "$(cur path)")"
@@ -2437,5 +2536,6 @@ grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-pl
 
 echo "== adapter log (tail)"
 tail -n 8 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+nj=$(cat "$T/post-not-json.log" 2>/dev/null | wc -l); fail=$((fail + nj))   # post()'s body-not-JSON FAILs (above)
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

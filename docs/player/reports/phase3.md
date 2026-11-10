@@ -1,7 +1,7 @@
 # Phase 3 on-machine battery
 
 Run 2026-11-01 to 02 on the owner's machine: Hyprland 0.57 (Lua config), NVIDIA, DP-1 143.98 Hz + DP-2 239.76 Hz,
-the release build of `26efde8` (step 4b: + its fix). Script: `src/player/tests/onmachine/programs.sh` (+ `programs_steps.sh`,
+the release build of `017c12a` (step 4b: + its fix). Script: `src/player/tests/onmachine/programs.sh` (+ `programs_steps.sh`,
 `programs_report.py`). Every number comes from the player's own event file. Audio went to a private PipeWire, so
 nothing reached the speakers.
 
@@ -183,7 +183,7 @@ Run 2026-11-02 with the owner's go-ahead, at their machine (`programs.sh vt susp
    rotated: the first switch at the clip's end at 07:03:50 (`reason: end`).
    - **Finding F7:** that "fresh shuffle" was item 138 again, the same as the session before. The program's seed is
      saved but its RNG state isn't, so every new player process replays the same shuffle (`docs/TODO.md` F7).
-   - **First attempt failed for a setup reason:** login ran the NixOS-installed `liascape`, pinned to `c256e15`
+   - **First attempt failed for a setup reason:** login ran the NixOS-installed `liascape`, pinned to `7c15b36`
      (Oct 29, before Task 8), which replayed an old single-wallpaper session, and its leftover `timer-daemon`
      restarted an old player 3 min later. While the app is being built, the startup line and the keybinds now run
      the dev tree's `scripts/dev/liascape-dev` (temporary, owner's go-ahead 2026-11-02).

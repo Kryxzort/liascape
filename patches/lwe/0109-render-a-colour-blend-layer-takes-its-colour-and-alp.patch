@@ -1,0 +1,56 @@
+From 5a42e7e071c3434d8f9e05454d848d14c950e81a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 18:21:46 +0530
+Subject: [PATCH 109/126] render: a colour-blend layer takes its colour and
+ alpha once
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A layer with a colour blend mode (≠ 0, ≠ 31) is a flag-0x10 layer in WE too (GH 0x140212f90).
+Its base and effects draw with the context colour (1, 1, 1, 1), and the layer's colour and
+alpha are set for the BLENDMODE draw alone (GH 0x140214b50, 0x1402321d0). LWE bound the layer's
+g_Color4 to both the base pass and the genericimage3 BLENDMODE pass, so a 0.3 layer came out at
+0.09, and a colour of 0.5 at 0.25. Its base pass now reads (1, 1, 1, 1), as the fogged layers'
+does (0107).
+
+Measured on the 12 library scenes with such a layer whose alpha or colour isn't 1:
+2371103399 0.071 → 0.013 against WE (its two mode-7 layers at alpha 0.3: 128 → 143.6 where
+they differ, WE 142.9), 3309103316 0.141 → 0.136 (64.3 there, WE 64.5). The other 10 are
+unchanged within the clock digits' noise.
+
+Origin: ours
+Why: docs/player/spikes/we-lwe-gap-audit.md "3D scenes against WE" (2371103399, 3309103316)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index 3a9c014..a54e974 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -1255,7 +1255,8 @@ void CImage::setup () {
+     // (genericimage2/3); the renderer then adds FOG_DIST / FOG_HEIGHT to a draw whose FOG combo is on, from the scene's
+     // fog. 3477054430's moon, 180 units out with fog from 6.5 to 500, is 12 % darker that way in WE. Ours: only the
+     // layers that end up fogged (world-placed, material FOG on) take the extra pass; the blend-mode-only one stays
+-    // genericimage3's (no library scene with fog has a layer whose material turns FOG off)
++    // genericimage3's (no library scene with fog has a layer whose material turns FOG off). Either way the base pass
++    // draws with the colour (1, 1, 1, 1), below
+     const int colorBlendMode = this->m_image.colorBlendMode->value->getInt ();
+     const bool blendPass = colorBlendMode > 0 && colorBlendMode != 31;
+     const auto& fog = this->getScene ().getScene ().fog;
+@@ -1305,8 +1306,9 @@ void CImage::setup () {
+ 
+ 	// WE draws a flag-0x10 layer's base and effects with the context colour (1, 1, 1, 1) and sets the layer's colour
+ 	// and alpha (GH 0x1402321d0) for this last draw only (GH 0x140214b50), so they apply once. 3276522107's lit train
+-	// (alpha keyframed 0 … 0.3 … 1) flickers as in WE that way; with both draws taking them its 0.3 frames were 0.09
+-	if (fogPass && !this->m_hasPuppetMesh) {
++	// (alpha keyframed 0 … 0.3 … 1) flickers as in WE that way; with both draws taking them its 0.3 frames were 0.09.
++	// The same for a colour blend mode's draw: 2371103399's two blend-mode-7 layers at alpha 0.3 came out at 128 where WE has 143
++	if (!this->m_hasPuppetMesh) {
+ 	    this->m_passes.front ()->addUniform ("g_Color4", &UNIT_COLOR4);
+ 	}
+ 

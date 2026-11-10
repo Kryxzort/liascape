@@ -1,6 +1,6 @@
 # liascape-player Phase 2 — on-machine battery report (Task 14)
 
-Branch `liascape-player` (worktree of the Task 14 run), battery on `4f1040f` + the fixes it found (§ 10). Builds per step:
+Branch `liascape-player` (worktree of the Task 14 run), battery on `f1149b6` + the fixes it found (§ 10). Builds per step:
 step 1 on `0743b77` (F1); steps 3 and 4 (before) on `5139419` (F1–F3); steps 4 (after) and 6 on `9550127` (+ F5); steps 2, 5
 and 7 — the final numbers — on `d7d412b` (every fix). Release builds throughout. Machine: i9-12900K, RTX 3070 Ti (NVIDIA 595.84), Hyprland 0.56.2, DP-1 143.981 Hz +
 DP-2 239.760 Hz (1920×1080 each), PipeWire 1.6.9. Run 2026-10-28/29 overnight, unattended, while other agents'
@@ -353,7 +353,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
 
 ## 9. Scene corpus — fresh run + A/B against the legacy engine
 
-`scene_corpus.sh` (fresh, release build of this branch, LWE `40eacc9`) on the 96 scenes of the SFW folder, then
+`scene_corpus.sh` (fresh, release build of this branch, LWE `bab619b`) on the 96 scenes of the SFW folder, then
 `--ab-legacy --legacy-output DP-1` (the installed `linux-wallpaperengine`, `--silent`, `SDL_AUDIODRIVER=dummy`,
 `--screenshot` after 4 s, drawing on DP-1). Report regenerated: `docs/player/reports/scene-corpus.{md,json}`.
 
@@ -499,7 +499,7 @@ source mirror writes through `set_observed_on` (exact id). After: `SourceHost::s
 
 | build | 2 workers steady: Ginsn/s / CPU % | 4 workers mid-fade: Ginsn/s / CPU % (per worker) |
 |---|---|---|
-| before (`c5dfcdb`), 4 rounds | 0.17–0.21 / 3.4–22.6 (noise) | **0.75–1.03** / 7.4–13.6 (**1.9–3.4 %**) |
+| before (`576c225`), 4 rounds | 0.17–0.21 / 3.4–22.6 (noise) | **0.75–1.03** / 7.4–13.6 (**1.9–3.4 %**) |
 | demand cache, 6 rounds | 0.06–0.11 / −1.6–8 | **0.29–0.41** / 4.4–11.2 (1.1–2.8 %) |
 | + `set_observed_on`, 2 rounds | 0.06–0.11 / 2.0–2.2 | 0.29–0.35 / 3.6–6.0 (**0.9–1.5 %**) |
 
@@ -510,7 +510,7 @@ reverted). The plan's bound is the on-machine step-5 number (Wayland, 0.1 % stea
 outputs) — § 10 "On-machine checks for the owner".
 
 **F6b round 2 (2026-10-29) — what scaled per worker per frame, fixed; the bound passes on-machine (loaded machine,
-to confirm on a quiet one).** `perf trace` of the main thread (base = `7c97559`, 4 synthetic workers mid-fade, 144 +
+to confirm on a quiet one).** `perf trace` of the main thread (base = `2fec9e1`, 4 synthetic workers mid-fade, 144 +
 240 Hz headless) put the excess at **~56 syscalls per worker frame** — and the loop wakes ~1.5 times per frame (the
 `Frame`, then its fence). Per wake, before:
 - every hosted source was updated (`SourceHost::update`): per scene an `epoll_wait`, a `read` of the output pipe and a
@@ -536,7 +536,7 @@ builds, 3 alternating rounds, `results/f6b-20261029/ab9`):
 
 | build | 2 workers steady: excess G insn/s user (kernel) | 4 workers mid-fade: excess G insn/s user (kernel) | loop wakes/s mid-fade |
 |---|---|---|---|
-| base `7c97559` | 0.06–0.08 (0.05) | **0.28–0.29 (0.12–0.13)** | 1075–1328 |
+| base `2fec9e1` | 0.06–0.08 (0.05) | **0.28–0.29 (0.12–0.13)** | 1075–1328 |
 | F6b round 2 | 0.03–0.04 (0.03) | **0.08–0.14 (0.055–0.068)** | 1184–1531 |
 
 Main-thread syscalls per worker frame ~56 → ~29 (`tr-base`, `tr-wnoout`). On the real outputs, `scenes.sh workers`
@@ -566,7 +566,7 @@ B's anti-click ramp-in starts after the handoff and ~10 ms before the meter's ti
 **Root cause (a real hole, not the meter's).** New: `scenes.sh onsetrec` — frozen S→S between two synthetic tone
 scenes on a headless 240 Hz output, every switch through the dropout detector **and** an independent `pw-record`
 of the private sink for the whole run, analysed for onsets that dip > 20 dB under their ramp and for runs of
-*exact* silence (≥ 16 samples) inside sound. Base build (`c5dfcdb`), 60 switches: **60 runs of exact silence, all
+*exact* silence (≥ 16 samples) inside sound. Base build (`576c225`), 60 switches: **60 runs of exact silence, all
 whole 64-frame graph cycles (64–384 samples), one per switch, 10–37 ms into B's ramp-in** — the detector flagged 5
 of them (micro-gaps at 1511–1515, the F7 signature) and called the rest `unmeasured`, because the meter's capture
 lost the same cycles. Full-live S→S: **30 of 30 switches, B at full level** (1.3–8 ms of silence — clicks). Mapped

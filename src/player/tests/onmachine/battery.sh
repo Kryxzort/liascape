@@ -202,7 +202,7 @@ fi
 [ -n "$BIN" ] && [ -x "$BIN" ] || { echo "no liascape-player binary found (set LIASCAPE_PLAYER_BIN, or build src/player)" >&2; exit 2; }
 
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
-[ -n "$DOTNET" ] || DOTNET=/nix/store/a9ml93kizcwff3yakmqw4qs3w4llpbf2-dotnet-sdk-wrapped-10.0.301/bin/dotnet
+[ -n "$DOTNET" ] || DOTNET=/nix/store/h78hbfhakw6sbd82xpjx1qyd0pbmhdjl-dotnet-sdk-wrapped-10.0.403/bin/dotnet
 DLL=$REPO/src/backend/bin/Debug/net10.0/liascape-backend.dll
 
 # ------------------------------------------------------------------ small helpers

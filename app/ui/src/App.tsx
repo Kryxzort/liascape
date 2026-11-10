@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { LEVELS, LEVEL_HINT, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
 import { RefreshCw, Square, Undo2, Upload } from "lucide-react";
 import { useStore } from "./store";
@@ -6,18 +7,15 @@ import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
 import { PlaylistBar } from "./components/PlaylistBar";
-import { PreviewModal } from "./components/PreviewModal";
-import { CardSettingsModal } from "./components/CardSettingsModal";
-import { SETTINGS_MORPH, closeMs } from "./components/morph";
-import type { Wallpaper } from "./api/client";
+import { useMotion } from "./components/motion";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { Select } from "./components/Select";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
-// small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The morph modals
-// (Preview/LibrarySettings) stay eager — a lazy Suspense gap would break the first card→modal morph.
+// small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
+// views import them).
 const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings })));
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
@@ -25,14 +23,30 @@ const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ d
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
 
 type Tab = "browse" | "library" | "settings";
+const TAB_ORDER: Tab[] = ["browse", "library", "settings"];
 const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
 const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
 
 export default function App() {
   const s = useStore();
-  const [tab, setTab] = useState<Tab>("library");
-  const [preview, setPreview] = useState<Wallpaper | null>(null);
+  const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
+  const [tab, setTabNow] = useState<Tab>("library");
+  // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
+  // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → none). No direction until
+  // the first switch, so the app's first page doesn't slide in.
+  const [tabDir, setTabDir] = useState<"l" | "r" | null>(null);
+  const setTab = (t: Tab) => { if (t !== tab) setTabDir(TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(tab) ? "r" : "l"); setTabNow(t); };
   const importRef = useRef<HTMLInputElement>(null);
+  // the item sidebar starts under the top bar, whose height changes as it wraps (any window size): --topbar-h on .app
+  const appRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tb = topbarRef.current, a = appRef.current;
+    if (!tb || !a) return;
+    const ro = new ResizeObserver(() => a.style.setProperty("--topbar-h", `${tb.getBoundingClientRect().bottom - a.getBoundingClientRect().top}px`));
+    ro.observe(tb);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)
@@ -42,6 +56,7 @@ export default function App() {
     if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value);
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
+    else if (e.type === "loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);
@@ -80,8 +95,6 @@ export default function App() {
   }, []); // eslint-disable-line
   useEvents(onEvent, onReconnect);
 
-  // (Escape closes the preview from inside it — morphing back into its card, components/useMorph.ts)
-
   // FREEZE FIX: pause all gif animation when the window is hidden OR loses focus (you fullscreen
   // another app over it). On X11 an occluded window keeps reporting visible, so without this the
   // autoplay gifs decode forever in the background → ThreadPool backlog → eventual main-thread wedge.
@@ -98,16 +111,6 @@ export default function App() {
     return () => { for (const ev of ["visibilitychange", "focus", "blur"] as const) removeEventListener(ev, sync, true); };
   }, []);
 
-  // PERF: while a modal is open, freeze the (invisible, behind the opaque backdrop) card gif overlays
-  // via CSS — pure-waste animation that janks the morph. Class toggle = no 300-card re-render.
-  // Keep frozen through the close-morph too (the slower settings one covers the preview's) or the gifs resume
-  // mid-morph-back → jank.
-  useEffect(() => {
-    if (s.cardSettingsItem || preview) { document.body.classList.add("modal-open"); return; }
-    const t = setTimeout(() => document.body.classList.remove("modal-open"), closeMs(s.settings?.morphs !== false, SETTINGS_MORPH) + 40);
-    return () => clearTimeout(t);
-  }, [s.cardSettingsItem, preview, s.settings?.morphs]);
-
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
   useEffect(() => {
@@ -121,11 +124,14 @@ export default function App() {
     document.documentElement.classList.toggle("bg-live", !!s.settings?.liveWallpaperBehindAllTabs);
   }, [s.settings?.liveWallpaperBehindAllTabs]);
 
-  // Settings → Appearance → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
+  // Settings → Look & feel → "Glow effects": off = :root.no-glow, which index.css turns every glow off under (default on —
   // the class is set only once the saved settings say `false`)
   useEffect(() => {
     document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
   }, [s.settings?.glows]);
+  // COOL: "Smooth window animations" off, or the OS asks for reduced motion → :root.no-motion: the tab slide and the
+  // playlist bar's dock lift don't animate (index.css); the morphs read useMotion() themselves
+  useEffect(() => { document.documentElement.classList.toggle("no-motion", !motion); }, [motion]);
 
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -135,22 +141,29 @@ export default function App() {
   };
 
   const src = s.sources[s.activeSource];
-  const gVol = (s.settings?.volume as number) ?? 100;
-  const gSpd = (s.settings?.speed as number) ?? 1;
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
-    <div className="app">
+    <div className="app" ref={appRef} data-tab-dir={tabDir ?? undefined}>
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
       {(tab === "settings" || bgAllTabs) && <WallpaperBg />}
-      <div className="topbar">
-        <div className="tabs">
-          {(["browse", "library", "settings"] as Tab[]).map((t) => (
+      <div className="topbar" ref={topbarRef}>
+        <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(tab) } as React.CSSProperties}>
+          <span className="tab-pill" aria-hidden />
+          {TAB_ORDER.map((t) => (
             <button key={t} className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
 
+        {tab === "settings" && (
+          <div className="pills level-pills" data-settings-level={levelOf(s.settings?.settingsLevel)} title="How much of Settings to show — hidden settings keep working">
+            {LEVELS.map((l) => (
+              <button key={l} className={`pill${levelOf(s.settings?.settingsLevel) === l ? " active" : ""}`} data-level={l} title={LEVEL_HINT[l]}
+                onClick={() => s.setSetting("settingsLevel", l)}>{LEVEL_LABEL[l]}</button>
+            ))}
+          </div>
+        )}
         {tab === "browse" && (
           <div className="pills">
             {s.sources.filter((x) => x.available).map((x) => (
@@ -195,19 +208,14 @@ export default function App() {
 
       {s.loading && <div className="loadbar" />}
 
-      {/* one LayoutGroup spanning the cards AND the modal → card↔preview morph works both ways */}
+      {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>
-        {tab === "browse" && <Browse onPreview={setPreview} previewUrl={preview?.pageUrl ?? null} />}
+        {tab === "browse" && <Browse onShowInLibrary={(p) => { s.focusLib(p); setTab("library"); }} />}
         {tab === "library" && <Library />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
 
         {tab === "library" && <PlaylistBar />}
 
-        <PreviewModal w={preview} source={s.activeSource} onClose={() => setPreview(null)}
-          onDownload={(w) => s.download(s.activeSource, w, true)} />
-        {/* lifted: library cards AND playlistBar items open it; it morphs out of / back into them (components/morph.ts) */}
-        <CardSettingsModal item={s.cardSettingsItem} siblings={s.cardSettingsSiblings} morphId={s.cardSettingsMorphId} source={s.cardSettingsSource}
-          globalVolume={gVol} globalSpeed={gSpd} onClose={s.closeCardSettings} />
       </LayoutGroup>
       <Suspense fallback={null}>
         <SteamModal />

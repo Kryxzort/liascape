@@ -92,7 +92,8 @@ video-end lock block…). A stalled player must never stall volume/speed/pause/t
   for the socket — RED before: 635 ms, two timeouts, the breaker open, "busy", "no player"). `EnsureRunning` never spawns a second
   `serve` over a stalled (alive) one. Mutations queued while it was stalled are dropped (logged) — and
   **R81** catches up: the breaker closing fires `LiascapePlayerClient.Recovered` → `LiascapePlayerMedia.OnRecovered`
-  → `ReapplyAll()` (below), so a dropped set isn't lost for good.
+  → `ReapplyAll()` (below), so a dropped set isn't lost for good — and a dropped **switch or stop** is put on screen
+  then too (§ Reconnection, "A switch the stall swallowed").
 - **Every queued command's own `Call` uses `LiascapePlayerClient.QuickMs`** (item 6) — a queued property set
   (or a `transition`'s `fit` pre-assertion, or a per-item `set`) is never worth the 2000 ms default; a
   backlog behind a stalled player then drains in ≤ 300 ms per item instead of up to 2000 ms. `Switch`'s
@@ -417,14 +418,21 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     (align:now, its transition), the same moment a still image moves on. No minimum → the maximum moves it; neither →
     it plays until a user switch (the Settings hint says so). Judgement call: "minimum then the next end" with no end
     to wait for = the minimum; holding a scene to the maximum instead would make the minimum meaningless for scenes.
+    **Both set → the minimum, even when the maximum is shorter** (owner 2026-11-10: "make scene use either maximum or
+    minimum if other one's off, minimum if both on"): a scene's rule is `(min, 0)` with a minimum, `(NeverMs, max)`
+    without — it used to be `(min, max)`, so a maximum below the minimum cut it first. Videos keep "a cap beats the
+    minimum"; still images keep `(min, max)`. Hints: `ROT_HINT.minScenes` / `maxScenes` / `sceneRule` (Settings' "Separate
+    timing for scenes" row and a line in the playlist modal while it's off). Tests: `rule.rs::item_rule_table`, self-test
+    `ItemPlayRule`, adapter IT "min 6 s + max 3 s on a scene" / "a playlist's min 5 s + max 2 s", matrix
+    `global:sceneTiming` / `playlist:sceneTiming` (the hint text).
     `ApplyPlaylist`'s old fallback (scenes + no interval → `GlobalIntervalSeconds`) is gone, and a playlist play under
     advance-on-end (`AppOps.PlayPlaylist`) always goes through `ApplyTimedPlaylist`, minimum 0 included (it used to
     take `ApplyPlaylist` there, where ONE item — a trash leaving one survivor — became a plain non-timed launch an Undo
     could never re-arm; matrix `pending × selTrashUndo:shown+other`, `seq:trash×2+undo×2`, `seq3:playlistBarRemove+…`).
   - **Maximum**: once the playing item played that long the rotation advances **now** with its transition, even
     mid-video (align:now; an armed end-of-video switch is cancelled and its pre-fetched B taken — `AdvanceAndLaunch`):
-    the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** (max < min → the
-    max fires; documented, not enforced).
+    the tick's `MaxPlayReached(advance-on-end, CanRotate, played, max)`. **A cap beats the minimum** for a video / still
+    image (max < min → the max fires; documented, not enforced) — not for a scene (above: its minimum wins).
   - **0 = off, strictly, for both** (global + playlist): minimum 0 → a video switches at its first end however short
     (a 1 s clip at 1 s); maximum 0 → never cut — a 10 h video plays to its end. IT § "0 = off for both limits".
   - **"Separate timing for scenes"** (`GlobalSeparateSceneTiming` / `PlaylistSettings.SeparateSceneTiming`, the row
@@ -447,6 +455,17 @@ off … a toggle which … lets you configure differently for scenes"). Per rota
     not expect), **separate timing ON, scenes after 1800** — a video plays to its end, a scene / image switches after
     30 min (with the toggle off and both 0 a scene would never move and an image would flash by). Only a file without
     the keys sees them: the one-off migration writes them for every combo.
+- **"Keep playing this one"** (`liascape loop-current`, owner todo 2026-11-10; `AppOps.LoopCurrent` →
+  `LiascapePlayerProgram.ToggleKeep`): toggles the player program's `keep` (player-core.md § Programs) — no rotation away
+  from the current item (it loops) until run again. Essential on the media queue and waited for (≤ 5 s): it reads
+  `prog:main.keep` and sets the opposite. It lives in the player only: `program.json` keeps it across a player restart, a
+  backend restart never touches it (`Props` / `Reapply` don't carry it), and with the app closed the one-shot CLI toggles it
+  straight on the player (`RunAction` locally). A Play / play-from of a playlist (`LoadNow`) sets it false — starting the
+  playlist is starting the rotation; a next / previous / random keeps it (the new item is held). No program (a single
+  wallpaper) → "no playlist is rotating — <title> already stays on screen" (exit 1, nothing changes); legacy → "needs the
+  liascape-player engine". The answer: `/action` → `{ok, message}` (ActionForward prints it on stdout, exit 0), WS
+  `loop-current {keep, path, message}` (the UI's topbar status + its status line's ", looping this one"), `/current.keep`
+  (`Kept()`). Matrix `cli:loopCurrent`.
 - **Removed**: "Wait for video to end after interval" (`GlobalWaitForVideoEnd` / `PlaylistWaitForVideoEnd` /
   `PlaylistSettings.WaitForVideoEnd` / `LastSession.WaitForVideoEnd` / `TimedState.WaitForVideoEnd`, `_waitForVideoEnd`
   and its tick branches) and the separate `GlobalMinPlaySeconds` / `PlaylistSettings.MinPlaySeconds` (merged into the
@@ -518,7 +537,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Create props** (`SourceProps`): `kind: "scene"`, `preview` = the item's preview image
   (`LibraryService.PreviewImageOf`: `preview.jpg|png|jpeg`, else `preview.gif|webp`) — what the player shows
   while no worker frame exists (Task 10), and `scene_props` (below).
-- **Scene user properties (the card settings modal's editor; library.md § "Scene properties").** `scene_props` is one more
+- **Scene user properties (the Library sidebar's editor; library.md § "Scene properties").** `scene_props` is one more
   per-source value of the resolver (`Desired`, scene paths only): `SceneProperties.PlayerMap(path, its index
   overrides, a drag's transient values)` — so a new source opens with them (`SourceProps`; the worker applies them
   after the load, before the first frame) and every Fresh pass (`/settings`, R81's reapply after a player restart)
@@ -544,7 +563,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Broken scenes (D6 + the owner's call).** The player logs `source.broken {id, path, scene_id, reason,
   signal|code, restarts, record}` once when a scene's worker crashed past its budget (3 restarts in 60 s;
   player-core.md § Scene worker → Errors). `LiascapePlayerMedia.OnEvent` → `PlayerHelper.OnSceneBroken(path)` off
-  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the card settings modal's "Scene
+  the event thread: `LibraryService.MarkCrashed` (the index's `crashed: true` — the Library sidebar's "Scene
   crashed — won't be played" + whitelist box, which nothing set before), WS `scene-crashed {path}`
   (`OnSceneCrashed`), and if it's the **playing item of a timed playlist** (`PlayingHistoryIndex`, no wait in
   flight) the rotation **advances at once**: a timer rotation (advance-on-end off) → `_timedRemainingMs = 0` + the
@@ -594,8 +613,8 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   SAMPLE peak, dBFS) (library.md). **The measurement** is replaced by any report covering MORE audible seconds (a
   lost report is made up by the next; two sources of one scene at once — the longer stays; a duplicate is ignored);
   **the applied value moves only by ≥ `ApplyHysteresisLu` (0.5 LU / dB)** — `loudnessI`/`loudnessTP` stay put
-  through a refinement smaller than that, so `gain.normalize` never twitches by tenths (drift accumulates: it's
-  compared with the APPLIED value). A scene outside the library or trashed meanwhile stores nothing. **Each new
+  through a refinement smaller than that (drift accumulates: it's compared with the APPLIED value). The applied value
+  is what a NEW play starts with — a playing source keeps its own (the next bullet). A scene outside the library or trashed meanwhile stores nothing. **Each new
   source continues it:** `SourceProps` (create only) carries `loudness_seed` = the current configuration's live
   state, else its estimate's seed (`SceneLoudnessSeed`) — never a resolver value (a live source already holds that measurement plus its own play
   since; re-seeding it would drop the latter). **The seed is a floor, not the truth** (2026-10-29): the index can
@@ -606,16 +625,36 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
   twice). Nothing here waits for a report; after a player restart the seed is all there is (as before).
   (Entries learned before 2026-10-28 without a state are gone: the one-off script of 2026-10-29 moved every flat
   measurement under its configuration — library.md § Loudness.)
-  Applied changed → `PlayerHelper.OnLoudnessMeasured` → with normalization on `ApplyEffective` (one Fresh resolver
-  pass); stored but not applied → nothing sent (adapter log `stored (< 0.5 LU: not applied)`). **Applied as
+  **Set once per play (owner 2026-11-06: "make scene audio normalization not do the real-time normalization where it
+  just changes every second and just make it how you said where it checks for 60s and calculates rest of the scene
+  for future").** Before, every report whose applied value moved ≥ 0.5 LU ramped the playing source (`OnLoudnessMeasured`
+  → `ApplyEffective`): a first play moved at 60, 120, 180 s… (the owner's log: 1884904087 and 2951169110 three times
+  in one play; measured before/after: docs/NIGHT-NOTES.md 2026-11-06). Now each live scene source keeps a **pin**
+  (`LiascapePlayerMedia.NormalizePin`, by source id, on the queue's worker; `PinNormalize` pure): every resolver pass
+  sends the pinned `gain.normalize`, whatever the index says since. A pin is made at the source's first sight from
+  what it RUNS (its create value — not the index, which may have moved since: a stopped play's end report stored
+  after the reopen's create), and re-made from the index only by: **the window landing** — `MergeSceneLoudnessReport`'s
+  `WindowReached` (the report that makes the CURRENT configuration's live measurement complete for the first time:
+  before it, none or a partial) → `LandSceneNormalize(path)` (batch `normland`, the item's sources, `gain.normalize`
+  only, Fresh, `RepinNormalize`) — at most once per play, and only a play that started without a complete
+  measurement: it plays at its estimate (else unity — never estimated) until then; **the user's normalization
+  settings** (on/off, target: the pin's own differ); **a property commit's new configuration** (a `sceneprops` pass
+  that sends a changed `loudness_key`: `RepinOnKeyChange` — another sound). An estimate landing (`sceneloudness`) and
+  every further report change only the stored value: adapter log `stored, applied from its next play (this play
+  keeps its normalization)`, `stored (< 0.5 LU: not applied)`, and on the landing `… — its window is measured: this
+  play's normalization is set now, once`. Pins of sources gone are dropped on each Fresh read. Edges: the window
+  counts the estimate's seed (10 s) — an estimated scene lands after ~50 s of audible play, a never-estimated one
+  after 60 s; a backend restart mid-play pins what each source runs (a landing missed while away is not replayed —
+  the next play starts at the measured value); a same-scene transition across the window lands both sources.
+  **Applied as
   the scene source's `gain.normalize`** (`LiascapePlayerMedia.SceneNormalizeDb(meta, s)`, a per-source value of the
   resolver for scene paths only): `NormalizeTargetLufs − loudnessI`, never boosting the sample peak past
   `NormalizePeakCeilingDb` −1.5 dBFS (a plain gain has no limiter — the video loudnorm's TP −1.5), clamped −60…+24
   dB, rounded to 0.001; **0** while normalization is off or nothing is learned. NoAudio doesn't zero it (silent
   anyway; un-muting comes back at the right level). At **create** (`SourceProps`) the value is set directly — a
   reopened scene plays normalized from its first frame; **live** it goes as `animate` over `NormalizeRampMs` (500
-  ms; a setting slot, so it lands while paused too) — the moment it's learned, a target change, normalization on/off:
-  a ramp on the same source and worker, never a step. It stacks with `gain.user` (the per-item / global volume) and
+  ms; a setting slot, so it lands while paused too) — the window landing, a target change, normalization on/off, a
+  property commit's new configuration: a ramp on the same source and worker, never a step. It stacks with `gain.user` (the per-item / global volume) and
   `gain.mute` like the video `af` + `volume-gain`. A silent scene (no sound, or digital silence) never reports
   → never stored, never normalized. **Legacy engine:** unchanged — LWE scenes aren't normalized (the stored value
   is unused there; `OnLoudnessMeasured` returns for a scene path), and nothing learns under legacy.
@@ -647,7 +686,7 @@ transitions (every method, every switch combo), the snapshot/restore and R81 nee
 - **Tests:** self-test `SceneAdapterAssertions` (the `ScenesPlayable` truth table — AllowScenes × engine ×
   capability × LWE —, D6's `SkipScene` table, a scene folder's `SourceProps` — kind, preview, `af` "",
   Volume —, gain.normalize 0 unlearned / absent on a video, `SceneLoudnessAssertions`: the `MergeSceneLoudness`
-  rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates; per configuration (`MergeSceneEstimate`): the first estimate adopts the un-keyed measurement, a new configuration jumps to its estimate and seeds from it, an old key's late report is stored under it and applies nothing, its first live report takes over by the 0.5 rule, a re-estimate never displaces live data, toggled back the first configuration's measurement applies, a silent configuration applies nothing, a low estimate's first note is the card's — and the `SceneNormalizeDb` table — peak cap, clamps, off,
+  rules — the longer report replaces the measurement (state, seconds, partial), a shorter or duplicate one is ignored, the applied I/TP move only by ≥ 0.5, drift accumulates; per configuration (`MergeSceneEstimate`): the first estimate adopts the un-keyed measurement, a new configuration jumps to its estimate and seeds from it, an old key's late report is stored under it and applies nothing, its first live report takes over by the 0.5 rule, a re-estimate never displaces live data, toggled back the first configuration's measurement applies, a silent configuration applies nothing, a low estimate's first note is the card's; set once per play (2026-11-06): `MergeSceneLoudnessReport`'s `WindowReached` — a partial no, the window over it yes, a further window / the end no, an old configuration's late report no, a new configuration's own window yes, a never-estimated scene's first window yes — and the `PinNormalize` table (first sight pins what the source runs, else the index; a moved index is kept out; a landing, a target change, normalization off re-pin; a reused id on another path) — and the `SceneNormalizeDb` table — peak cap, clamps, off,
   unlearned, NoAudio —, the ownership filter on a `liascape-player-scene.src4` block, the `GpuProps` table) + the round trip (its
   private player runs `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`: `Capabilities`/`ScenesAvailable` from `hello`, a clip →
   synthetic scene fade lands `kind: scene`, ready, its preview; `ApplySceneFps` 45 then back to 30;
@@ -794,6 +833,21 @@ process: the player's snapshot saves it as A where it plays (player-core.md § S
 `failed:player restarted` **re-arms** it for A's end (it used to back off 1 s and switch NOW — A cut short; with the
 old snapshot rule B showed at once, then again).
 
+**A switch the stall swallowed (2026-11-07).** The queue's worker meeting a stalled player (`Ready` gets no answer —
+`hello` 1 s + the supervisor wait 2 s, the breaker open — or the `transition` request times out) used to DROP an
+align:now switch: no log line, never retried, and R81 re-applied settings only — the screen kept the old wallpaper for
+good while every UI named the new one (each click in a 13–34 s stall lost; found reproducing an IT flake that was
+really a quoting slip in the IT). Now (`Lost` → `LostToStall`) it is `_intent` all the same, logged ("switch to X
+(…): liascape-player is not responding — it runs once the player answers again"), `LostSwitches` counts it, and a probe
+(`ProbeUntilAnswered`: a QuickMs `hello` every 500 ms, ≤ 30 min — nothing else may call the player for minutes with
+the UI closed) ends the stall's silence: the answer closes the breaker → `OnRecovered` queues `ReconcileAfterStall`
+(essential, first) = `ReconcileShown`'s check — the intent shown or incoming (a timed-out request can still reach the
+player once it runs) → nothing, else a cut to it. A lost `stop` (its QuickMs call failed with the breaker open) the
+same way. A newer click while still stalled only moves `_intent`: the newest shows, once. An **aligned** switch is not
+handled here: its caller hears "unreachable" and retries itself (A plays meanwhile). Guard: adapter IT § "apply /
+transition" "two clicks (a, b) on a player stalled 4.5 s → b once it answers again" (RED before: c stayed, nothing
+scheduled, transitions []).
+
 ## Event flow
 `Switch` → `transition` reply `{corr, to}` → `LastCorr`. The event thread records each corr's terminal
 outcome — `transition.handoff` → "handoff", `.cancelled {reason}` → "cancelled:<reason>", `.failed
@@ -924,7 +978,7 @@ during a 6 s fade to scene 2 moves scene 1's source only; **scene loudness** (a 
 without sound): an unlearned scene at `gain.normalize` 0 → after 3 s of play the index gains `loudnessI` −20 ± 1
 (complete, ≥ 3 s) and `gain.normalize` ramps (`anim.start` ≥ 300 ms) to +6 live — same source, same worker — and
 reaches the worker's stream; target −23 → −3, normalization off → 0, on → 6, all live; a per-item volume stacks
-on it; reopened → +6 from the first frame, it continues the whole first play (the `workers` probe's `seed_s` ≥ play 1's last report and ≈ play 1's play time — its end report + a rest < window/12, or, when the `/apply` lands during the stop's fade-out, play 1's live measurement handed over; `measuring` — the player's own measurement, never the index's lagging copy: TODO "A reopen right after a stop…") and the index then holds play 1's last report, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); a third play of the folder at −10 dBFS moves `loudnessI` ≥ 0.5 LU → `gain.normalize` ramps (≥ 300 ms) to its new value on the same source and worker; the
+on it; reopened → +6 from the first frame, it continues the whole first play (the `workers` probe's `seed_s` ≥ play 1's last report and ≈ play 1's play time — its end report + a rest < window/12, or, when the `/apply` lands during the stop's fade-out, play 1's live measurement handed over; `measuring` — the player's own measurement, never the index's lagging copy: TODO "A reopen right after a stop…") and the index then holds play 1's last report, its report covers both plays (`seed_s` + `session_s`), the index refines (`loudnessSeconds` grows) while `loudnessI` stays and `gain.normalize` isn't ramped again (< 0.5 LU); the first play's landing is logged `its window is measured: this play's normalization is set now, once`; a third play of the folder at −10 dBFS moves the stored `loudnessI` ≥ 0.5 LU but **keeps its own `gain.normalize`** (its create value, 0 ramps over a further report and a full resolver pass — a Volume change —, the log `applied from its next play`; set once per play, 2026-11-06 — RED before: it ramped) and the fourth play opens ≥ 0.4 dB lower from its first frame (no ramp); the
 soundless scene → no event, nothing stored, 0; switched away after ~1.2 s → a partial (`loudnessPartial`) stored,
 the next open plays at its +12, and that play's complete measurement replaces it (RED on the base backend); **scene loudness
 estimated offline** (S8: a synthetic scene that also carries WE sound objects — sound 1 always, sound 2 bound to the

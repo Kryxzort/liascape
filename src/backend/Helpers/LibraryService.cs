@@ -113,6 +113,9 @@ public static class LibraryService
         var m = ReadLoudness(mediaPath);
         if (m == null) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture; var v = m.Value;
+        // ffmpeg's loudnorm takes I in −70…−5 only; outside it the filter fails and mpv drops the item's audio
+        // altogether (owner 2026-11-06: a target of 0 silenced every video), so a stored target out of range is clamped.
+        targetLufs = Math.Clamp(double.IsFinite(targetLufs) ? targetLufs : -14, -70, -5);
         return "loudnorm=I=" + targetLufs.ToString(inv) + ":TP=-1.5:LRA=11" +
                ":measured_I=" + v.I.ToString(inv) + ":measured_TP=" + v.TP.ToString(inv) +
                ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
@@ -133,19 +136,33 @@ public static class LibraryService
     //   (reports are cumulative: a lost one is made up by the next; two sources of one scene at once keep the longer).
     // - The APPLIED value (LoudnessI, LoudnessTP) = the CURRENT configuration's live measurement once it has one,
     //   else its estimate; within one configuration it moves only when it changed ≥ ApplyHysteresisLu (0.5 LU / dB)
-    //   — `gain.normalize` follows a refinement smoothly (the 500 ms ramp) and never twitches by a tenth; a change of
-    //   configuration jumps to the new one's value (another sound). A report of another configuration (an old key's
-    //   end report after a property change) is stored under it and applies nothing.
-    // Returns (stored: `m` changed, applied: LoudnessI/TP changed → normalization should follow it live). Pure (the
-    // self-test drives it on a bare LibMeta).
+    //   — it is what a NEW play of the scene starts with: a play in progress keeps its own `gain.normalize`
+    //   (LiascapePlayerMedia.NormalizePin — set once per play, 2026-11-06); a change of configuration jumps to the new
+    //   one's value (another sound). A report of another configuration (an old key's end report after a property
+    //   change) is stored under it and applies nothing.
+    // Returns (stored: `m` changed, applied: LoudnessI/TP changed — the next play's value). Pure (the self-test drives
+    // it on a bare LibMeta).
+    // - WindowReached (owner 2026-11-06, "set it once"): this report made the CURRENT configuration's live measurement
+    //   complete for the first time (before: none or a partial) — the moment a play that started without a complete
+    //   measurement sets its normalization, once (LiascapePlayerMedia.LandSceneNormalize). Every later report only
+    //   refines the stored value: it applies from the next play on (player-adapter.md § Scenes → "Loudness").
     public const double ApplyHysteresisLu = 0.5;
+    public readonly record struct SceneLoudnessMerge(bool Stored, bool Applied, bool WindowReached);
     public static (bool Stored, bool Applied) MergeSceneLoudness(LibMeta m, string? key, double lufs, double? peakDbfs,
         double seconds, bool complete, JsonElement? state = null)
     {
-        if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return (false, false);
+        var r = MergeSceneLoudnessReport(m, key, lufs, peakDbfs, seconds, complete, state);
+        return (r.Stored, r.Applied);
+    }
+
+    public static SceneLoudnessMerge MergeSceneLoudnessReport(LibMeta m, string? key, double lufs, double? peakDbfs,
+        double seconds, bool complete, JsonElement? state = null)
+    {
+        if (!double.IsFinite(lufs) || !double.IsFinite(seconds) || seconds <= 0) return default;
         string fp = !string.IsNullOrEmpty(key) ? key : m.SceneLoudnessFp ?? "";
         var e = SceneLoudnessEntryOf(m, fp, create: true)!;
-        if (e.Live is { } old && seconds <= old.Seconds + 1e-9) return (false, false);
+        if (e.Live is { } old && seconds <= old.Seconds + 1e-9) return default;
+        bool wasComplete = e.Live is { Partial: not true };
         double? peak = peakDbfs is double p && double.IsFinite(p) ? p : null;
         e.Live = new SceneLoudnessLive
         {
@@ -153,8 +170,9 @@ public static class LibraryService
             Seconds = seconds, Lufs = lufs, PeakDbfs = peak, Partial = complete ? null : true,
         };
         m.LoudnessLRA = null; m.LoudnessThresh = null; m.LoudnessSkip = null;
-        bool applied = fp == (m.SceneLoudnessFp ?? "") && ApplySceneLoudness(m, jump: false);
-        return (true, applied);
+        bool current = fp == (m.SceneLoudnessFp ?? "");
+        bool applied = current && ApplySceneLoudness(m, jump: false);
+        return new SceneLoudnessMerge(true, applied, current && complete && !wasComplete);
     }
 
     // The offline estimate of configuration `fp` (the item's current props): stored in its entry, and `fp` becomes the
@@ -220,15 +238,15 @@ public static class LibraryService
         return applied;
     }
 
-    // Store a scene's loudness report in its index entry (a scene folder in the library only). Applied = the value
-    // normalization uses moved (it should follow live — PlayerHelper.OnLoudnessMeasured).
-    public static (bool Stored, bool Applied) StoreSceneLoudness(string scenePath, string? key, double lufs, double? peakDbfs,
+    // Store a scene's loudness report in its index entry (a scene folder in the library only). Applied = the stored value
+    // a NEW play of the scene starts with moved; WindowReached = the live sources set their normalization now, once.
+    public static SceneLoudnessMerge StoreSceneLoudness(string scenePath, string? key, double lufs, double? peakDbfs,
         double seconds, bool complete, JsonElement? state = null)
     {
-        // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `r` stays (false, false)
-        if (!PlayerHelper.IsScenePath(scenePath)) return (false, false);
-        (bool, bool) r = (false, false);
-        LibraryStore.SetMeta(scenePath, m => r = MergeSceneLoudness(m, key, lufs, peakDbfs, seconds, complete, state));
+        // outside the library (Locate) or gone (trashed meanwhile): SetMeta writes nothing, `r` stays default
+        if (!PlayerHelper.IsScenePath(scenePath)) return default;
+        SceneLoudnessMerge r = default;
+        LibraryStore.SetMeta(scenePath, m => r = MergeSceneLoudnessReport(m, key, lufs, peakDbfs, seconds, complete, state));
         return r;
     }
 

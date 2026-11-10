@@ -1,0 +1,43 @@
+From 409a94f3297d27ab900f2ff51fe1392e6e683442 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:24:22 +0530
+Subject: [PATCH 115/126] scripting: a model's scale, angles and visible
+ scripts run
+
+A model object (MDL mesh) registered only its origin with the script engine, so a script on its
+scale, angles or visible never ran and the model drew with the static value. WE runs them as it
+does an image's. The model draws with exactly those values (CScene::localMatrixOf takes the group
+scale and angles, isEffectivelyVisible the group visible), so registering them is enough.
+
+3477054430's kitty head turns by an angles script (toward input.cursorWorldPosition) and stood at
+its init pose; 3509243656's stars spin and size by angles / scale scripts and stood still.
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3477054430, 3509243656); docs/player/spikes/we-lwe-gap-audit.md "3D scenes against WE"
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Objects/CModel.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+index 8e77dd4..8582e8c 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -523,7 +523,14 @@ const glm::vec3& CModelMesh::getCompositeColor () const { return this->m_white;
+ 
+ // a script reaches a model layer (thisScene.getLayer, createLayer's result) as any layer: its object's transform
+ CModel::CModel (Wallpapers::CScene& scene, const MeshObject& object) :
+-    CObject (scene, object), Scripting::ScriptableObject (scene, object), m_object (object) { }
++    CObject (scene, object), Scripting::ScriptableObject (scene, object), m_object (object) {
++    // a model's scale / angles / visible are the values it draws with (CScene::localMatrixOf, isEffectivelyVisible):
++    // scripts on them run as an image's do (3477054430's head turns by an angles script, 3509243656's stars spin and
++    // size by angles / scale scripts; both stood still)
++    this->registerProperty ("scale", *object.groupScale->value);
++    this->registerProperty ("angles", *object.groupAngles->value);
++    this->registerProperty ("visible", *object.groupVisible->value);
++}
+ 
+ CModel::~CModel () = default;
+ 

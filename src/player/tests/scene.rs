@@ -1173,7 +1173,7 @@ fn scene_clock_follows_speed_and_position() {
     assert!(ok, "frames of the new time");
 }
 
-/// The tick rate follows the outputs' `scene_fps` (D5: 30 by default), live, same worker.
+/// The tick rate follows the outputs' `scene_fps` (WE's default 15), live, same worker.
 #[test]
 fn scene_tick_rate_follows_demand() {
     let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
@@ -1189,10 +1189,10 @@ fn scene_tick_rate_follows_demand() {
         tick_for(h, d);
         (h.scene_src(&id).stats().latched - l0) as f64 / w0.elapsed().as_secs_f64()
     };
-    let f30 = fps(&mut h, Duration::from_secs(2));
+    let f15 = fps(&mut h, Duration::from_secs(2));
     assert!(
-        (f30 - 30.0).abs() <= 2.0,
-        "default scene_fps 30: {f30:.2}/s"
+        (f15 - 15.0).abs() <= 2.0,
+        "default scene_fps 15 (WE's): {f15:.2}/s"
     );
     set(&mut h, "out:VIRTUAL-1.scene_fps", PropValue::F64(60.0));
     tick_for(&mut h, Duration::from_millis(500));
@@ -1213,6 +1213,9 @@ fn scene_budget_throttles_live_and_recovers() {
     let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
         return;
     };
+    // 30 fps (20 ms × 30 = 600 ms of GPU a second; at WE's default 15 it would be under the
+    // budget's 400 ms/s load bar)
+    set(&mut h, "out:VIRTUAL-1.scene_fps", PropValue::F64(30.0));
     let mut heavy = spec(Pattern::FrameIndex);
     heavy.report_gpu_ms = Some(20.0);
     let id = h.scene("t8-heavy", &heavy, json!({}));

@@ -19,6 +19,7 @@ sealed class Program
           play | stop | toggle-play
           toggle-pause | toggle-mute
           volume up | volume down   ±5 (the global volume or the playing wallpaper's — Settings)
+          loop-current              keep playing the current wallpaper (no rotation, it loops) — again: rotate on
           kill                      stop the wallpaper without asking a running app
           ctl <verb> ['<json>']     the running player's control socket (state, logs, probe, …)
           serve                     the app's backend (the app starts it itself)
@@ -97,15 +98,16 @@ sealed class Program
             var start = System.Diagnostics.Process.GetCurrentProcess().StartTime;
             if ((DateTime.Now - start).TotalMilliseconds > 1500) // a keybind should feel instant
                 Console.Error.WriteLine($"liascape {name}: slow — runtime start {(tMain - start).TotalMilliseconds:F0} ms, init {(tFwd - tMain).TotalMilliseconds:F0} ms, forward {(DateTime.Now - tFwd).TotalMilliseconds:F0} ms");
-            if (message != null) Console.Error.WriteLine($"liascape {name}: {message}");
+            if (message != null) (code == 0 ? Console.Out : Console.Error).WriteLine($"liascape {name}: {message}");
             Environment.ExitCode = code;
             return;
         }
-        if (Liascape.Web.AppOps.RunAction(action) is string err)
+        if (Liascape.Web.AppOps.RunAction(action, out var said) is string err)
         {
             Console.Error.WriteLine($"liascape {name}: {err}");
             Environment.ExitCode = 1;
         }
+        else if (said != null) Console.WriteLine($"liascape {name}: {said}");
         DrainLiascapePlayerBeforeExit();
     }
 

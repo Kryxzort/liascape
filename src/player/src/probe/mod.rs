@@ -101,6 +101,12 @@ pub const PROBES: &[(&str, ProbeFn, &str)] = &[
          stream with its verdict and level, MPRIS, recent decisions with timestamps",
     ),
     (
+        "pointer",
+        pointer,
+        "the desktop pointer (audit C6): source (hyprland|surface), in use, status, poll rate, \
+         position, polls/changes/fails, mean request time, forwards/jumps",
+    ),
+    (
         "cover",
         cover,
         "the covered Signal (Phase 3): source + status, per output covered/app_id/pid/showing, \
@@ -140,6 +146,10 @@ pub fn run(rt: &mut Runtime, name: &str, args: &Value) -> Result<Value, ApiError
 
 fn automute(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
     Ok(rt.automute_probe())
+}
+
+fn pointer(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
+    Ok(rt.desktop_pointer.probe())
 }
 
 fn cover(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
@@ -232,6 +242,14 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("hwdec_interop".into(), json!(m.hwdec_interop()));
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
+            // The graph `af` mpv refused to build (it plays the fallback chain: no user filters).
+            o.insert(
+                "af_refused".into(),
+                json!(
+                    m.af_refused()
+                        .map(|r| json!({"af": r.af, "reason": r.reason}))
+                ),
+            );
             // How often its dropped first frame was asked for again (`REFETCH_AFTER`, sources/mpv.rs).
             o.insert("frame_refetches".into(), json!(m.frame_refetches()));
             // Phase 2: where it renders, and the worker's timings for it.

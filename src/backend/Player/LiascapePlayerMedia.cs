@@ -251,11 +251,12 @@ public static class LiascapePlayerMedia
     // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
     // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
     // under liascape-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
-    // changed entry sets its fps, a removed one goes back to the player's default (30, D5). Coalescible
+    // changed entry sets its fps, a removed one goes back to the player's default (15, WE's own default fps;
+    // 30 before 2026-11-06). Coalescible
     // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
     // fresh or restarted player runs them too. `IsPrimary` has no liascape-player meaning (one worker per scene,
     // every output shows it; its audio is one stream on the bus) — the UI hides it there.
-    public const double DefaultSceneFps = 30;
+    public const double DefaultSceneFps = 15;
 
     public static void ApplySceneFps(IReadOnlyList<SceneMonitor>? prev, IReadOnlyList<SceneMonitor> cur)
     {
@@ -387,6 +388,14 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneLoudness", () => { if (SceneLoudnessOf(e) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State); });
             return;
         }
+        if (kind == "source.rejected")
+        {
+            // a value a source refused (it keeps playing; e.g. an `af` mpv couldn't build → it plays without it,
+            // un-normalized) — no source changed, only worth a line in the log
+            var rp = Str(e, "path");
+            LiascapePlayerClient.Log($"player refused {Str(e, "prop")} on {Str(e, "id")} ({(rp.Length > 0 ? Path.GetFileName(rp) : "?")}): {Str(e, "reason")}");
+            return;
+        }
         // every subscribed kind (LiascapePlayerClient.Topics) may change which sources show which file
         InvalidateSources();
         if (kind == "source.broken")
@@ -471,18 +480,23 @@ public static class LiascapePlayerMedia
     }
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —
-    // MergeSceneLoudness) and, when the applied value moved (≥ 0.5 LU) with normalization on, ramp every live source of
-    // that scene to its new `gain.normalize` — the same worker keeps playing.
+    // MergeSceneLoudness) — the value the scene's NEXT play starts with. A play in progress keeps its normalization
+    // (owner 2026-11-06: "not real-time … checks for 60s and calculates rest of the scene for future"), except once: the
+    // report that completes the configuration's first window (`WindowReached`) sets the live sources' `gain.normalize`
+    // (LandSceneNormalize — a 500 ms ramp, the same worker keeps playing).
     private static void OnSceneLoudness(string path, string key, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
     {
-        var (stored, applied) = LibraryService.StoreSceneLoudness(path, key, lufs, peak, seconds, complete, state);
+        var r = LibraryService.StoreSceneLoudness(path, key, lufs, peak, seconds, complete, state);
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} loudness {lufs.ToString("0.0", inv)} LUFS over {seconds.ToString("0.0", inv)} s"
-            + (key.Length > 0 ? $" [{key}]" : "")
-            + (complete ? "" : " (partial)") + (!stored ? " — kept the stored one" : applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)"));
-        if (stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
-        if (stored) LiascapePlayerProgram.PushItem(path); // its next source continues this measurement (`loudness_seed`)
-        if (applied) PlayerHelper.OnLoudnessMeasured(path);
+            + (key.Length > 0 ? $" [{key}]" : "") + (complete ? "" : " (partial)")
+            + (!r.Stored ? " — kept the stored one"
+                : r.WindowReached ? (r.Applied ? " — stored, applied" : " — stored (< 0.5 LU: not applied)") + " — its window is measured: this play's normalization is set now, once"
+                : r.Applied ? " — stored, applied from its next play (this play keeps its normalization)"
+                : " — stored (< 0.5 LU: not applied)"));
+        if (r.Stored) Liascape.Web.SceneLoudnessOps.BroadcastItem(path);
+        if (r.Stored) LiascapePlayerProgram.PushItem(path); // its next source starts at this value and continues this measurement (`loudness_seed`)
+        if (r.WindowReached && SettingsService.Load().NormalizeAudio) LandSceneNormalize(path);
     }
 
     private static int _eventOutcomes;
@@ -558,7 +572,9 @@ public static class LiascapePlayerMedia
     // live transition to it (requested since the restart), or it shown on any layer / parked → nothing.
     // Else a cut to it (or a stop, after our own stop). Any transition settings would do — what matters
     // is that the screen and the backend agree again.
-    private static void ReconcileShown()
+    private static void ReconcileShown() => ReconcileShown("restarted");
+
+    private static void ReconcileShown(string why)
     {
         var intent = _intent;
         var client = C;
@@ -571,13 +587,14 @@ public static class LiascapePlayerMedia
         if (intent.Path == null)
         {
             if (shown.Count == 0) return;
-            LiascapePlayerClient.Log($"liascape-player restarted showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
+            LiascapePlayerClient.Log($"liascape-player {why} showing {string.Join(", ", shown.Select(Path.GetFileName))} after the backend stopped — stopping it");
             Stop();
             return;
         }
         if (shown.Contains(intent.Path)) return;
-        LiascapePlayerClient.Log($"liascape-player restarted showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
-            + $" (its snapshot was behind) — the backend last switched to {Path.GetFileName(intent.Path)}: switching back (cut)");
+        LiascapePlayerClient.Log($"liascape-player {why} showing {(shown.Count > 0 ? string.Join(", ", shown.Select(Path.GetFileName)) : "nothing")}"
+            + (why == "restarted" ? " (its snapshot was behind)" : "")
+            + $" — the backend last switched to {Path.GetFileName(intent.Path)}: switching {(why == "restarted" ? "back" : "to it")} (cut)");
         Interlocked.Increment(ref _reconciles);
         Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
     }
@@ -593,8 +610,70 @@ public static class LiascapePlayerMedia
     private static void OnRecovered()
     {
         LiascapePlayerClient.Log("liascape-player answered again after a stall — re-applying settings (R81)");
+        if (_lostToStall) QueueEssential(ReconcileAfterStall); // first: a lost click is what the user waits for
         ReapplyAll();
         LiascapePlayerProgram.Reapply();
+    }
+
+    // ---- a switch / stop the stall swallowed (2026-11-07) -------------------------------------------------
+    // The queue's worker meets a stalled player (SIGSTOPped, a 13–34 s loop stall in the owner's log, a machine at
+    // load 90): `Ready` finds no answer (hello 1 s + the supervisor wait 2 s, the breaker opens) or the `transition`
+    // request times out — and the switch was DROPPED: no log line, never retried. R81 above re-applied settings
+    // only, so the screen kept the old wallpaper for good while the UI named the new one (every click in a stall
+    // lost; the adapter IT's "two clicks on a stalled player"). Now such a switch is the backend's intent all the
+    // same (`_intent`, what a restart puts back too) and `_lostToStall` is set; a probe pings the player until it
+    // answers (nothing else may call it for minutes: the UI closed, no rotation), and the breaker closing queues
+    // `ReconcileAfterStall` — `ReconcileShown`'s check: the intent shown or incoming (the timed-out request may have
+    // reached the player after all) → nothing; else a switch to it (a stop after our stop). A newer click while
+    // still stalled only moves `_intent`: the newest one shows, once.
+    private static volatile bool _lostToStall;
+    private static int _probing; // 1 = ProbeUntilAnswered runs
+    private const int LostProbeEveryMs = 500;
+    private static readonly TimeSpan LostProbeFor = TimeSpan.FromMinutes(30);
+
+    private static int _lostSwitches;
+    // switches / stops a stall swallowed (put back once the player answers) — self-test/IT evidence
+    public static int LostSwitches => Volatile.Read(ref _lostSwitches);
+
+    internal static void LostToStall(string what)
+    {
+        Interlocked.Increment(ref _lostSwitches);
+        _lostToStall = true;
+        LiascapePlayerClient.Log($"{what}: liascape-player is not responding — it runs once the player answers again");
+        if (Interlocked.Exchange(ref _probing, 1) == 0) _ = Task.Run(ProbeUntilAnswered);
+    }
+
+    private static async Task ProbeUntilAnswered()
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            while (_lostToStall && sw.Elapsed < LostProbeFor)
+            {
+                await Task.Delay(LostProbeEveryMs).ConfigureAwait(false);
+                var client = C;
+                if (!_lostToStall || !client.SocketExists) continue; // gone: the next switch starts one (EnsureRunning)
+                // an answer closes the breaker → Recovered → OnRecovered (a new pid → Restarted → OnRestarted: the same
+                // reconcile); while it is open this fails fast without reaching the player. Answered with the breaker
+                // already closed (another call closed it first, or a restart reconciled) → queued here; one runs, the
+                // rest find the flag cleared.
+                try { client.Call("hello", null, LiascapePlayerClient.QuickMs); }
+                catch (LiascapePlayerException) { continue; }
+                if (_lostToStall) _ = QueueEssential(ReconcileAfterStall);
+                break;
+            }
+            if (_lostToStall) LiascapePlayerClient.Log($"liascape-player still not answering after {LostProbeFor.TotalMinutes:0} min — the next switch tries again");
+        }
+        finally { Interlocked.Exchange(ref _probing, 0); }
+        if (_lostToStall && Interlocked.Exchange(ref _probing, 1) == 0) _ = Task.Run(ProbeUntilAnswered); // lost again meanwhile
+    }
+
+    private static void ReconcileAfterStall()
+    {
+        if (!_lostToStall) return;
+        _lostToStall = false; // a switch below that is lost again sets it again
+        LiascapePlayerProgram.RetryLostDestroy(); // a single wallpaper replaced a rotation in the stall: end it first
+        ReconcileShown("answered again after a stall");
     }
 
     private static int _reapplyCount;
@@ -755,6 +834,38 @@ public static class LiascapePlayerMedia
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
 
+    // ---- a scene's normalization is set ONCE per play (owner 2026-11-06) --------------------------------------
+    // "make scene audio normalization not do the real-time normalization where it just changes every second and just
+    // make it how you said where it checks for 60s and calculates rest of the scene for future". Each live scene
+    // source keeps the `gain.normalize` it started with — its pin (`_normPins`, by source id; the queue's worker) —
+    // through every resolver pass: a refinement of the stored loudness (the reports every further 60 s, an estimate
+    // landing) moves the index, i.e. the NEXT play's value, never this one's. A pin changes only on:
+    //  - the window landing (LandSceneNormalize): the report that completes the configuration's first 60 s of audible
+    //    play (`WindowReached`) re-pins every live source of the scene to the measured value — at most once per play,
+    //    and only for a play that started without a complete measurement (until then it plays at its estimate, else
+    //    at unity);
+    //  - the user's own changes: normalization on/off or its target (the pin's settings differ), a property commit
+    //    that changes the scene's audio configuration (`loudness_key` sent by a `sceneprops` pass: another sound).
+    // First sight of a source (no pin yet: created since, or this backend restarted) pins what it RUNS (`have`, its
+    // create value) — not the index, which may have moved since its create (the stopped play's end report).
+    public sealed record NormalizePin(string Path, double Db, bool On, double Target);
+    public static NormalizePin PinNormalize(NormalizePin? pin, string path, double? running, double indexDb, AppSettings s, bool repin)
+    {
+        bool same = pin != null && pin.Path == path;
+        if (!repin && same && pin!.On == s.NormalizeAudio && pin.Target == s.NormalizeTargetLufs) return pin;
+        double db = !repin && !same && running is double r ? r : indexDb;
+        return new NormalizePin(path, db, s.NormalizeAudio, s.NormalizeTargetLufs);
+    }
+    private static readonly Dictionary<string, NormalizePin> _normPins = new();
+    private static readonly object _pinLock = new();
+    private static readonly IReadOnlySet<string> NormalizeOnly = new HashSet<string> { "gain.normalize" };
+
+    // The window landing: every live source of `path` re-pinned to its stored value (the measurement just completed),
+    // ramped. Coalescible per item; Fresh (a source created since the last read is pinned from the index too).
+    public static void LandSceneNormalize(string path) =>
+        QueueBatch("normland", FullPath(path), paths =>
+            ResolveNow(new Req { Items = paths, OnlyItems = true, Props = NormalizeOnly, Fresh = true, RepinNormalize = true }));
+
     // A scene's `gain.normalize` (dB) under `s`: its learned loudness (LibMeta.LoudnessI, the player's
     // `scene.loudness`) brought to NormalizeTargetLufs — like the video loudnorm's linear mode, never boosted past
     // −1.5 dBFS at its sample peak (a plain gain has no limiter), clamped to −60…+24 dB. 0 = off / not learned
@@ -892,7 +1003,11 @@ public static class LiascapePlayerMedia
 
     private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
     {
-        if (Ready(s) is not { } client) return null;
+        if (Ready(s) is not { } client)
+        {
+            if (C.IsStalled) Lost(path, alignEnd, "not answering");
+            return null;
+        }
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
@@ -918,8 +1033,22 @@ public static class LiascapePlayerMedia
             try { return Requested(client.Call("transition", req), path, alignEnd); }
             catch (LiascapePlayerException e2) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
         }
+        catch (LiascapePlayerException e) when (e.Code == "timeout")
+        {
+            Lost(path, alignEnd, e.Message);
+            return null;
+        }
         catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
         finally { _requesting = null; }
+    }
+
+    // A switch the stall swallowed (above, `LostToStall`). An aligned one is not: its caller (DoVideoEndWait / the
+    // rotation's fallback) hears "unreachable" and retries on its own; A still shows meanwhile, as it should.
+    private static void Lost(string path, bool alignEnd, string why)
+    {
+        if (alignEnd) { LiascapePlayerClient.Log($"aligned switch to {Path.GetFileName(path)} not requested — {why}"); return; }
+        _intent = new Intent(path, null);
+        LostToStall($"switch to {Path.GetFileName(path)} ({why})");
     }
 
     private static string? Requested(JsonElement res, string path, bool alignEnd)
@@ -1070,7 +1199,8 @@ public static class LiascapePlayerMedia
         var client = C;
         _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
         _alignedCorrs.Clear();
-        if (client.SocketExists) client.TryCall("stop", null, LiascapePlayerClient.QuickMs); // item 6
+        if (client.SocketExists && client.TryCall("stop", null, LiascapePlayerClient.QuickMs) == null && client.IsStalled) // item 6
+            LostToStall("stop");
         InvalidateSources();
     }
 
@@ -1113,7 +1243,9 @@ public static class LiascapePlayerMedia
     //   speed     = clamp(transient item ?? its override ?? transient global ?? Speed, 0.1, 4)
     //   af        = its OWN item's loudnorm at the target ("" off / NoAudio / unmeasured — kicks a measure)
     //   gain.normalize (scenes only) = SceneNormalizeDb(its learned loudness, the target) — 0 off / not
-    //               learned yet; sent as `animate` over NormalizeRampMs (a landing mid-play ramps, never steps)
+    //               learned yet — for a NEW source; a live one keeps its pin (NormalizePin: set once per play —
+    //               the window landing, the user's normalization settings, a property commit's new configuration);
+    //               sent as `animate` over NormalizeRampMs (never a step)
     //   no_audio, hwdec, fps_cap, cache, demuxer_max_mib, demuxer_back_mib = the global settings
     //   gain.mute = −96 when muted, else 0
     //   + the layer: lay:*:main.fit = VideoScale (Fresh passes only; one `set` if any main layer differs)
@@ -1128,7 +1260,9 @@ public static class LiascapePlayerMedia
     //   the pass gives up (R81 re-applies when the player answers again).
     // CALLERS — queue key → what they pass (every one coalescible: the newest pass per key wins):
     //   /settings (`PlayerHelper.ApplyEffectiveLive`), the volume key on the global, normalization, a
-    //     loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
+    //     video's loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
+    //   a scene's window landing (its configuration's first complete loudness report) → `LandSceneNormalize(path)`:
+    //     batch "normland", its sources only, gain.normalize re-pinned from the index, Fresh.
     //   R81 (a restart / the stall breaker closing) → `ReapplyAll()`: "reapply", the same + log + count.
     //   /library/volume|speed, the volume key on an item's own volume (`ApplyOverrideLive`) →
     //     `ApplyOverride(path)`: batch "override" (every item queued since the pending one ran), those
@@ -1157,6 +1291,8 @@ public static class LiascapePlayerMedia
         public IReadOnlySet<string>? Props { get; init; }         // null = every resolved prop (+ fit)
         public bool Fresh { get; init; }                          // diff against a new `state` read
         public bool Force { get; init; }                          // send even when the source already runs it
+        public bool RepinNormalize { get; init; }                 // the items' gain.normalize from the index (a window landing)
+        public bool RepinOnKeyChange { get; init; }               // …for a source whose loudness_key this pass changes (a property commit)
     }
 
     private static readonly IReadOnlySet<string> GainUser = new HashSet<string> { "gain.user" };
@@ -1189,7 +1325,7 @@ public static class LiascapePlayerMedia
             catch (Exception e) { LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-plan failed: {e.Message}"); }
             bool latest = _scenePropsSeq.TryGetValue(FullPath(path), out var now) && now == seq;
             QueueSet("sceneprops:" + FullPath(path), () =>
-                ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps }));
+                ResolveNow(new Req { Items = [path], OnlyItems = true, Props = latest ? SceneConfig : SceneLoudnessProps, RepinOnKeyChange = true }));
             LiascapePlayerProgram.PushItem(path);
         });
     }
@@ -1377,6 +1513,7 @@ public static class LiascapePlayerMedia
         for (int attempt = 0; attempt < 2; attempt++)
         {
             if ((r.Fresh ? ReadLive(client) : CachedLive(client)) is not { } live) return 0;
+            if (r.Fresh) lock (_pinLock) foreach (var gone in _normPins.Keys.Where(k => !live.Values.ContainsKey(k)).ToList()) _normPins.Remove(gone);
             AppSettings? loaded = null;
             AppSettings S() => loaded ??= SettingsService.Load(); // only when a value needs it (not a drag preview)
             bool muted = PlayerHelper.IsMuted;
@@ -1392,9 +1529,21 @@ public static class LiascapePlayerMedia
                 foreach (var id in ids)
                 {
                     if (!live.Values.TryGetValue(id, out var have)) live.Values[id] = have = [];
+                    bool keyChanged = false;
                     foreach (var (prop, v0) in want)
                     {
                         var v = prop == "scene_props" && v0 is JsonElement sp ? WithResets(path, sp, have.GetValueOrDefault(prop)) : v0;
+                        if (prop == "gain.normalize" && v0 is double indexDb)
+                            lock (_pinLock)
+                            {
+                                // the play keeps its normalization (NormalizePin above)
+                                _normPins.TryGetValue(id, out var pin);
+                                double? running = have.GetValueOrDefault(prop) is double hd ? hd : null;
+                                bool repin = (r.RepinNormalize && item) || (r.RepinOnKeyChange && keyChanged);
+                                var np = PinNormalize(pin, path, running, indexDb, S(), repin);
+                                _normPins[id] = np;
+                                v = np.Db;
+                            }
                         if (!r.Force && have.TryGetValue(prop, out var h) && Same(h, v)) continue;
                         var sent = Send(client, id, prop, v);
                         if (sent == Sent.Ok) have[prop] = v;
@@ -1402,6 +1551,7 @@ public static class LiascapePlayerMedia
                         // state, else its estimate's 10 s seed ({} = nothing: the player's book may still hold some)
                         if (sent == Sent.Ok && prop == "loudness_key")
                         {
+                            keyChanged = true;
                             object seed = LibraryService.SceneLoudnessSeed(path) is JsonElement sd ? sd : new Dictionary<string, object>();
                             if (Send(client, id, "loudness_seed", seed) == Sent.Ok) have["loudness_seed"] = seed;
                         }

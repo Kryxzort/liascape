@@ -1,0 +1,108 @@
+From 984737bb28ad2be6042ddc6ae418413ea7b79342 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 23:02:33 +0530
+Subject: [PATCH 112/126] fs: a project folder of symlinks loads, its files
+ open where they point
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DirectoryAdapter resolved each file with std::filesystem::canonical and then refused it unless the
+resolved path was under the (canonical) project folder. A folder whose files are symlinks — a farm of
+links to the Workshop item, as the WE-reference tools build private copies of a scene — had every file
+resolve outside it, so project.json "could not be found" and the load failed. WE, on Windows, opens a
+linked file like any other.
+
+The containment check is now on the path's name (lexically normalised, no `..` out of the folder);
+the file is then opened, tested and resolved through its links. physicalPath returns the resolved
+file as before.
+
+Origin: ours
+Why: docs/TODO.md "LWE fails to load a project folder whose files are symlinks"
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ .../FileSystem/Adapters/Directory.cpp         | 35 +++++++++++++++----
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/FileSystem/Adapters/Directory.cpp b/src/core/WallpaperEngine/FileSystem/Adapters/Directory.cpp
+index 78b54e6..595a2ec 100644
+--- a/src/core/WallpaperEngine/FileSystem/Adapters/Directory.cpp
++++ b/src/core/WallpaperEngine/FileSystem/Adapters/Directory.cpp
+@@ -1,6 +1,7 @@
+ #include <filesystem>
+ #include <fstream>
+ #include <memory>
++#include <optional>
+ 
+ #include "Directory.h"
+ 
+@@ -9,13 +10,31 @@
+ using namespace WallpaperEngine::FileSystem;
+ using namespace WallpaperEngine::FileSystem::Adapters;
+ 
++namespace {
++// a path inside the mount by its name: no `..` out of it. Its files may be symlinks to anywhere (a farm of links, as
++// a private copy of a Workshop item is built), and open where they point, as WE's do on Windows; resolving them
++// first (std::filesystem::canonical) and then asking whether that is under the mount refused every linked file
++std::optional<std::filesystem::path> inside (const std::filesystem::path& base, const std::filesystem::path& path) {
++    const auto full = (base / path).lexically_normal ();
++    const auto relative = full.lexically_relative (base);
++
++    if (relative.empty () || *relative.begin () == "..") {
++	return std::nullopt;
++    }
++
++    return full;
++}
++} // namespace
++
+ ReadStreamSharedPtr DirectoryAdapter::open (const std::filesystem::path& path) const {
+-    auto finalpath = std::filesystem::canonical (this->basepath / path);
++    const auto named = inside (this->basepath, path);
+ 
+-    if (finalpath.string ().find (this->basepath.string ()) != 0) {
++    if (!named.has_value ()) {
+ 	throw std::filesystem::filesystem_error ("Cannot find file", path, std::error_code ());
+     }
+ 
++    const auto finalpath = std::filesystem::canonical (*named);
++
+     const auto status = std::filesystem::status (finalpath);
+ 
+     if (!std::filesystem::exists (finalpath)) {
+@@ -31,12 +50,14 @@ ReadStreamSharedPtr DirectoryAdapter::open (const std::filesystem::path& path) c
+ 
+ bool DirectoryAdapter::exists (const std::filesystem::path& path) const {
+     try {
+-	const auto finalpath = std::filesystem::canonical (this->basepath / path);
++	const auto named = inside (this->basepath, path);
+ 
+-	if (finalpath.string ().find (this->basepath.string ()) != 0) {
++	if (!named.has_value ()) {
+ 	    return false;
+ 	}
+ 
++	const auto finalpath = std::filesystem::canonical (*named);
++
+ 	const auto status = std::filesystem::status (finalpath);
+ 
+ 	if (!std::filesystem::exists (finalpath)) {
+@@ -103,13 +124,13 @@ std::optional<std::filesystem::path> DirectoryAdapter::findIgnoringCase (const s
+ }
+ 
+ std::filesystem::path DirectoryAdapter::physicalPath (const std::filesystem::path& path) const {
+-    auto finalpath = std::filesystem::canonical (this->basepath / path);
++    const auto named = inside (this->basepath, path);
+ 
+-    if (finalpath.string ().find (this->basepath.string ()) != 0) {
++    if (!named.has_value ()) {
+ 	throw std::filesystem::filesystem_error ("Cannot find file", path, std::error_code ());
+     }
+ 
+-    return finalpath;
++    return std::filesystem::canonical (*named);
+ }
+ 
+ bool DirectoryFactory::handlesMountpoint (const std::filesystem::path& path) const {

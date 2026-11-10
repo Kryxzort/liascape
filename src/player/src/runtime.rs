@@ -831,6 +831,9 @@ pub struct Runtime {
     pub(crate) vram: VramState,
     /// Phase 3 Task 6: the covered Signal and the cover hold (`crate::signal`).
     pub(crate) cover: crate::signal::CoverRt,
+    /// Audit C6 (2026-11-06): the desktop pointer — the cursor over windows and other monitors
+    /// too, like WE's `GetCursorPos` (`crate::signal::cursor`).
+    pub(crate) desktop_pointer: crate::signal::cursor::PointerRt,
     /// Phase 3 Task 14: the in-player auto-mute Signal (`crate::signal::automute`; on unless
     /// `LIASCAPE_PLAYER_AUTOMUTE=0`).
     pub(crate) automute: crate::signal::automute::AutoMuteRt,
@@ -2552,24 +2555,197 @@ impl Runtime {
         }
     }
 
+    /// Audit C6: start the desktop pointer's source (`signal::cursor`) — Hyprland's `cursorpos`
+    /// on `lia-cursor`, else the surface pointer as before.
+    pub(crate) fn start_desktop_pointer(&mut self) {
+        let headless = self.backend.kind() == "headless";
+        let choice = crate::signal::cursor::choose_from_env(headless);
+        self.desktop_pointer = crate::signal::cursor::PointerRt::start(choice.clone());
+        log::event(
+            "signal",
+            Level::Info,
+            "pointer.source",
+            None,
+            json!({ "source": self.desktop_pointer.source,
+                    "reason": self.desktop_pointer.reason,
+                    "choice": format!("{choice:?}") }),
+        );
+    }
+
     /// Pointer samples from the backend → `out:<c>.pointer` `[x, y, buttons]` (observed), and
     /// (Phase 2 Task 7, mouse on) every scene on that output — both sides mid-transition (the
     /// `srcs:<c>` alias) — gets it in its own native pixels, mapped back through the main
     /// layer's fit/viewport (`scene::pointer`); a point in a letterbox bar reaches nobody.
+    /// Audit C6: while the desktop pointer has a reading, scenes get **its** position instead
+    /// (the surface's samples give only the buttons) — [`Runtime::desktop_pointer_forward`].
     /// Returns the scene ids reached.
     pub(crate) fn pointer_events(&mut self) -> Vec<String> {
+        let desktop = self
+            .desktop_pointer
+            .feed
+            .as_ref()
+            .and_then(crate::signal::cursor::Desktop::usable);
         let mut reached = Vec::new();
         for s in self.backend.take_pointer() {
             let _ = self.graph.set_observed(
                 &p(&format!("out:{}.pointer", s.output)),
                 PropValue::List(vec![s.x, s.y, s.buttons as f64]),
             );
-            reached.extend(self.forward_pointer(&s.output, s.x, s.y, s.buttons));
+            if desktop.is_some() {
+                let dp = &mut self.desktop_pointer;
+                if dp.buttons.insert(s.output.clone(), s.buttons) != Some(s.buttons) {
+                    dp.buttons_dirty = true;
+                }
+                continue;
+            }
+            let entered = s.entered || std::mem::take(&mut self.desktop_pointer.surface_jump);
+            reached.extend(self.forward_pointer(&s.output, (s.x, s.y), s.buttons, entered));
+        }
+        reached.extend(self.desktop_pointer_forward(desktop));
+        reached
+    }
+
+    /// Audit C6: the desktop pointer → every scene, like WE's per-frame `GetCursorPos` →
+    /// `ScreenToClient`: the desktop point mapped into each output's pixels through its desktop
+    /// rect (`OutputBackend::desktop_rect`), then into the scene through the layer's fit — **not
+    /// clamped** (on the other monitor it lies off the scene, as WE's lies outside 0..1). A scene
+    /// on several outputs (one worker) takes the output the cursor is on, else its first. Runs
+    /// when the reading changed, the buttons changed, or every `REFRESH` (a new scene is placed,
+    /// the poll rate follows the scenes' rate); otherwise one atomic load. A scene's first
+    /// position is a jump (placed, not moved); while the desktop pointer reads, nothing else is.
+    fn desktop_pointer_forward(&mut self, desktop: Option<(f64, f64)>) -> Vec<String> {
+        use crate::signal::cursor::{REFRESH, desktop_to_output};
+        let Some(feed) = self.desktop_pointer.feed.clone() else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        let refresh = self.desktop_pointer.next_refresh.is_none_or(|t| now >= t);
+        if refresh {
+            self.desktop_pointer.next_refresh = Some(now + REFRESH);
+            // Poll at the fastest unpaused scene's rate (WE reads once per frame); none → park.
+            let hz = self
+                .host
+                .scene_ids()
+                .iter()
+                .filter_map(|id| self.host.scene(id))
+                .filter(|sc| !sc.is_paused())
+                .map(crate::sources::scene::SceneSource::demand_hz)
+                .fold(0.0, f64::max);
+            feed.set_rate(hz);
+        }
+        let Some(g) = desktop else {
+            if self.desktop_pointer.live {
+                self.desktop_pointer.live = false;
+                self.desktop_pointer.surface_jump = true;
+                let st = feed.status();
+                log::event(
+                    "signal",
+                    Level::Warn,
+                    "pointer.desktop_lost",
+                    None,
+                    json!({ "reason": st.reason }),
+                );
+            }
+            return Vec::new();
+        };
+        let first = !self.desktop_pointer.live;
+        if first {
+            self.desktop_pointer.live = true;
+            log::event(
+                "signal",
+                Level::Info,
+                "pointer.desktop",
+                None,
+                json!({ "source": self.desktop_pointer.source, "pos": [g.0, g.1] }),
+            );
+        }
+        let v = feed.version();
+        if !(first
+            || refresh
+            || v != self.desktop_pointer.seen
+            || self.desktop_pointer.buttons_dirty)
+        {
+            return Vec::new();
+        }
+        self.desktop_pointer.seen = v;
+        self.desktop_pointer.buttons_dirty = false;
+        let buttons = self.desktop_pointer.buttons.values().fold(0, |a, b| a | b);
+        // scene id → (output, output pixels, the cursor is on that output)
+        let mut chosen: BTreeMap<String, (String, (f64, f64), bool)> = BTreeMap::new();
+        let mut outs = self.backend.outputs();
+        outs.sort_by(|a, b| a.name.cmp(&b.name));
+        for info in outs {
+            let name = info.name;
+            let Some(rect) = self.backend.desktop_rect(&name) else {
+                continue;
+            };
+            let size = (info.width as f64, info.height as f64);
+            let Some(px) = desktop_to_output(g, rect, size) else {
+                continue;
+            };
+            let on = (0.0..size.0).contains(&px.0) && (0.0..size.1).contains(&px.1);
+            for id in self.graph.resolve(&format!("srcs:{name}")) {
+                if self.host.scene(&id).is_none() {
+                    continue;
+                }
+                match chosen.get(&id) {
+                    Some((_, _, true)) => {}
+                    Some(_) if !on => {}
+                    _ => {
+                        chosen.insert(id, (name.clone(), px, on));
+                    }
+                }
+            }
+        }
+        let mut reached = Vec::new();
+        for (id, (output, px, _)) in chosen {
+            let Some(n) = self.scene_px(&output, &id, px, false) else {
+                continue;
+            };
+            let Some(sc) = self.host.scene_mut(&id) else {
+                continue;
+            };
+            let jump = first || sc.pointer().is_none();
+            if sc.pointer() != Some((n.0, n.1, buttons)) {
+                self.desktop_pointer.forwards += 1;
+                self.desktop_pointer.jumps += u64::from(jump);
+            }
+            sc.set_pointer(n.0, n.1, buttons, jump);
+            reached.push(id);
         }
         reached
     }
 
-    fn forward_pointer(&mut self, output: &str, x: f64, y: f64, buttons: u32) -> Vec<String> {
+    /// `entered` = the pointer came onto the output here (no stroke from where it left).
+    fn forward_pointer(
+        &mut self,
+        output: &str,
+        (x, y): (f64, f64),
+        buttons: u32,
+        entered: bool,
+    ) -> Vec<String> {
+        let mut reached = Vec::new();
+        for id in self.graph.resolve(&format!("srcs:{output}")) {
+            let Some(n) = self.scene_px(output, &id, (x, y), true) else {
+                continue;
+            };
+            if let Some(sc) = self.host.scene_mut(&id) {
+                sc.set_pointer(n.0, n.1, buttons, entered);
+                reached.push(id);
+            }
+        }
+        reached
+    }
+
+    /// Output `output`'s pixel `(x, y)` → scene `id`'s native pixels through the main layer's
+    /// fit/viewport; `clamp` = `None` for a point off the drawn picture (a letterbox bar).
+    fn scene_px(
+        &self,
+        output: &str,
+        id: &str,
+        (x, y): (f64, f64),
+        clamp: bool,
+    ) -> Option<(f64, f64)> {
         let num = |g: &Graph, path: String| match g.get(&p(&path)) {
             Ok(PropValue::I64(i)) => i as f64,
             Ok(PropValue::F64(f)) => f,
@@ -2580,7 +2756,7 @@ impl Runtime {
             num(&self.graph, format!("out:{output}.height")),
         );
         if ow < 1.0 || oh < 1.0 {
-            return Vec::new();
+            return None;
         }
         let lay = format!("lay:{output}:main");
         let fit = match self.graph.get(&p(&format!("{lay}.fit"))) {
@@ -2591,25 +2767,19 @@ impl Runtime {
             Ok(PropValue::List(v)) if v.len() == 4 => [v[0], v[1], v[2], v[3]],
             _ => [0.0, 0.0, 1.0, 1.0],
         };
-        let mut reached = Vec::new();
-        for id in self.graph.resolve(&format!("srcs:{output}")) {
-            let Some(sc) = self.host.scene_mut(&id) else {
-                continue;
-            };
-            let Some(native) = sc.native() else { continue };
-            let rect = crate::gfx::compose::fit_rect(
-                (native[0], native[1]),
-                (ow as u32, oh as u32),
-                fit,
-                viewport,
-            );
-            if let Some(uv) = crate::scene::pointer::to_source_uv(&rect, x, y) {
-                let (nx, ny) = crate::scene::pointer::to_native_px(uv, native);
-                sc.set_pointer(nx, ny, buttons);
-                reached.push(id);
-            }
-        }
-        reached
+        let native = self.host.scene(id)?.native()?;
+        let rect = crate::gfx::compose::fit_rect(
+            (native[0], native[1]),
+            (ow as u32, oh as u32),
+            fit,
+            viewport,
+        );
+        let uv = if clamp {
+            crate::scene::pointer::to_source_uv(&rect, x, y)
+        } else {
+            crate::scene::pointer::to_source_uv_unclamped(&rect, x, y)
+        }?;
+        Some(crate::scene::pointer::to_native_px(uv, native))
     }
 
     /// Phase 2 Task 7 (D4): every live scene that wants audio input gets the latest frame of
@@ -4121,6 +4291,8 @@ impl Runtime {
         self.cover_tick();
         self.automute_tick();
         self.update_player_paused();
+        // the desktop pointer's newest reading (and any queued surface samples) before the step
+        self.pointer_events();
         let now = self.now();
         self.run_anims(now);
         self.destroy_due(now);
@@ -4942,6 +5114,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             pids: Vec::new(),
         },
         cover: crate::signal::CoverRt::idle(),
+        desktop_pointer: crate::signal::cursor::PointerRt::idle(),
         automute: crate::signal::automute::AutoMuteRt::new(
             crate::signal::automute::env_enabled(),
         ),
@@ -4954,6 +5127,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     ));
     rt.update_scene_assets();
     rt.start_cover();
+    rt.start_desktop_pointer();
     rt.start_automute();
     if opts.debug {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));

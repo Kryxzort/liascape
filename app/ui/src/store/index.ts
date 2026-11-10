@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { captureSource, type MorphSource } from "../components/morph";
 import {
   api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter,
 } from "../api/client";
@@ -48,11 +47,13 @@ interface State {
   sceneLoudness: { done: number; total: number; currentId: string } | null;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
+  // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
+  keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   status: string; error: string | null;
-  // per-wallpaper settings modal (lifted so library cards AND the playlist bar can open it)
-  cardSettingsItem: LibraryItem | null; cardSettingsSiblings: LibraryItem[];
-  cardSettingsMorphId: string | null; // the surface the modal morphs FROM/back to (`data-morph-id`: lib-… or pl-…) — hidden while open
-  cardSettingsSource: MorphSource | null; // that surface's picture state at the click (components/morph.ts)
+  // the item sidebar (WE-style, 2026-11-10 — replaced the per-card settings modal): the focused Library item's path / Browse
+  // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
+  // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
+  libFocus: string | null; browseFocus: string | null;
   // PERF/FREEZE: false when the window is hidden OR unfocused (you fullscreened another app over it).
   // On X11 an occluded window often never fires visibilitychange, so Chromium keeps decoding all the
   // autoplay gifs for hours → ThreadPool decode backlog saturates → main thread stalls (futex_wait) →
@@ -92,7 +93,7 @@ interface State {
   setUnsub(u: State["unsub"]): void;
   setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
-  openCardSettings(item: LibraryItem, siblings?: LibraryItem[], morphId?: string): void; closeCardSettings(): void;
+  focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
   refreshPlayingStatus(): void;
@@ -116,7 +117,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 // or steam tokens). Used for the per-setting reset icon + "Clear settings". workshopFolder is
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  loop: true, noAudio: true, disableCache: false, advancedSettings: false, videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
+  loop: true, noAudio: true, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
   globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
@@ -128,8 +129,8 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",
-  // Phase 3 Task 10: pause when covered, the playlist start, the Expert tier (+ its first setting)
-  pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", showExpertOptions: false, rotateWhileParked: true,
+  // Phase 3 Task 10: pause when covered, the playlist start, while parked
+  pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,
 };
 
 // `wallpaper-changed` events seen so far (setPlaying). A Play's reply can come before or after the event of what it started.
@@ -145,14 +146,15 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
   get().refreshPlayingStatus(); // persistent now-playing line
 }
 
+let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
   browseFilter: { ...DEFAULT_FILTER, ...LS.get<Partial<WorkshopFilter>>("browseFilter", {}) }, browseSort: LS.get("browseSort", 0),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
-  themes: [], theme: null, settings: null, playingPath: null, status: "", error: null,
-  cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null, appActive: true,
+  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
+  libFocus: null, browseFocus: null, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -176,30 +178,38 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // ---- browse ----
-  setSource(i) { set({ activeSource: i }); LS.set("activeSource", i); get().reload(); },
+  setSource(i) { set({ activeSource: i, browseFocus: null }); LS.set("activeSource", i); get().reload(); },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
   // update the filter instantly (UI is snappy) but DEBOUNCE the network reload — rapid chip toggles
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
+  // API: every Browse list read carries the generation it started in (`browseGen`): a source switch / search / refresh
+  // starts a new one, and a reply from an older one is dropped — a slow online source's page used to land AFTER the
+  // source the user switched to and replace (or extend) its list, under the new source's pill (seen 2026-11-10 in the
+  // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
     const { activeSource, query } = get();
     const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const gen = ++browseGen;
     set({ loading: true, page: 1 });
     try {
       const list = await api.browse(activeSource, 1, query || undefined, filter);
+      if (gen !== browseGen) return;
       set({ wallpapers: list, hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
-    } finally { set({ loading: false }); }
+    } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async loadMore() {
     const { activeSource, query, page, loading, hasMore, wallpapers } = get();
     if (loading || !hasMore) return;
     const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const gen = browseGen;
     set({ loading: true });
     try {
       const next = page + 1;
       const list = await api.browse(activeSource, next, query || undefined, filter);
+      if (gen !== browseGen) return; // a reload started meanwhile: this page belongs to the old list
       // Dedup by pageUrl — "Most Popular" et al. shift between requests, so pages overlap
       // pages overlap; appending dupes = duplicate React keys → reorder/jump. Keep existing order, add
       // only fresh items at the bottom, and stop when a page yields nothing new.
@@ -207,7 +217,7 @@ export const useStore = create<State>((set, get) => ({
       const fresh = list.filter((w) => !existing.has(w.pageUrl));
       if (fresh.length === 0) { set({ page: next, hasMore: false }); return; }
       set({ wallpapers: [...wallpapers, ...fresh], page: next, hasMore: list.length > 0 });
-    } finally { set({ loading: false }); }
+    } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async download(source, w, apply) {
     const ctrl = new AbortController(); dlCtrls[w.pageUrl] = ctrl;
@@ -251,11 +261,11 @@ export const useStore = create<State>((set, get) => ({
   // reflect a change instantly without waiting for a full library reload.
   patchLibraryItem(path, partial) { set((s) => ({ libraryItems: s.libraryItems.map((i) => i.videoPath === path ? { ...i, ...partial } : i) })); },
   // API: `library-item-changed` — the backend changed an item itself (a volume keybind on a wallpaper with its
-  // own volume, `VolumeKeyTarget`): the grid's copy AND an open settings modal's (it re-inits from cardSettingsItem),
-  // else the modal shows — and its next slider save restores — the old value
+  // own volume, `VolumeKeyTarget`): the grid's copy — the sidebar reads it from there (else it would show — and its next
+  // slider save restore — the old value)
   itemChangedByBackend(path, partial) {
     const p = (i: LibraryItem) => (i.videoPath === path ? { ...i, ...partial } : i);
-    set((s) => ({ libraryItems: s.libraryItems.map(p), cardSettingsItem: s.cardSettingsItem && p(s.cardSettingsItem), cardSettingsSiblings: s.cardSettingsSiblings.map(p) }));
+    set((s) => ({ libraryItems: s.libraryItems.map(p) }));
   },
   async applyItem(path) {
     await api.apply(path); set({ playingPath: path });
@@ -301,6 +311,7 @@ export const useStore = create<State>((set, get) => ({
     const seen = playingEvents;
     const r = await api.playPlaylist(playlist, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }   // error/interval messages
+    set({ keepCurrent: false }); // a Play starts the rotation: loop-current's keep ends (LiascapePlayerProgram.LoadNow)
     await markPlayingAfterPlay(get, set, seen);
   },
   async playFrom(index) {
@@ -308,6 +319,7 @@ export const useStore = create<State>((set, get) => ({
     const seen = playingEvents;
     const r = await api.playFrom(playlist, index, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }
+    set({ keepCurrent: false });
     await markPlayingAfterPlay(get, set, seen);
   },
   setPlaylistSettings(p) {
@@ -374,11 +386,9 @@ export const useStore = create<State>((set, get) => ({
 
   openExternal(body) { api.open(body).catch(() => {}); },
 
-  openCardSettings(item, siblings, morphId) {
-    // "Morph animations" off: nothing to lift (hide) — the surface stays; the picture's aspect / video time are still read from it
-    set({ cardSettingsItem: item, cardSettingsSiblings: siblings ?? [item], cardSettingsMorphId: get().settings?.morphs === false ? null : morphId ?? null, cardSettingsSource: captureSource(morphId ?? null) });
-  },
-  closeCardSettings() { set({ cardSettingsItem: null, cardSettingsSiblings: [], cardSettingsMorphId: null, cardSettingsSource: null }); get().loadLibrary(); },
+  // closing re-reads the library (the modal did too: what its edits saved, whatever the optimistic patches missed)
+  focusLib(path) { const was = get().libFocus; set({ libFocus: path }); if (was && !path) get().loadLibrary().catch(() => {}); },
+  focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); },
 
   // ---- shared ----
   applyTheme(name) {
@@ -388,6 +398,7 @@ export const useStore = create<State>((set, get) => ({
     const s = { ...(get().settings ?? {}), theme: name };
     set({ settings: s }); api.saveSettings(s).catch(() => {});
   },
+  setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
   setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
   // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
@@ -431,6 +442,7 @@ function buildPlayingStatus(get: () => State): string {
         + (sepScenes ? (scenesAfter > 0 ? `, scenes after ${fmtInterval(scenesAfter)}` : ", scenes stay") : "")
       : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
     if (shuffle) desc += " (shuffled)";
+    if (st.keepCurrent) desc += ", looping this one (loop-current)";
     if (cur) desc += ` → ${cur}`;
     parts.push(desc);
   } else if (cur) {
@@ -483,7 +495,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) p.playingPath = cur.v?.path ?? null;
+  if (cur) { p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
   if (lib) p.libraryItems = lib.v;
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;

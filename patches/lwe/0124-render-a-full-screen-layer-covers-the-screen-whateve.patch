@@ -1,0 +1,77 @@
+From 2c423e89dd52a249dfccafcf10fc28bfe7ce5d96 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 02:05:03 +0530
+Subject: [PATCH 124/126] render: a full-screen layer covers the screen
+ whatever the camera's zoom
+
+A full-screen layer (models/util/fullscreenlayer.json) drew its last pass through the scene's view, zoom and camera
+position included. 3042492564's camera object zooms 0.73: its full-screen `localcontrast` layer drew the effect's
+output into the zoomed 73 % rectangle (x 259-1660, y 146-886 at 1920), a copy of the whole frame shrunk into it, so a
+lighter rectangle sat over the sea and sky even with the effect at strength 0. The layer now draws with the view
+without the frame's adjustment, as a 3D scene's screen layers already do (getScreenProjection).
+
+Measured in WE (private copies: the background and the layer, the camera kept): at strength 3 WE's effect changes
+pixels across the whole frame (x 0-1919), at strength 0 none; ours changed only the rectangle at both. Now: x 0-1919
+at strength 3, nothing at strength 0; mean |WE - ours| 3.70 -> 1.65 (strength 3), 3.39 -> 0.79 (strength 0, the
+copy without the layer 0.79). Host test fullscreen_layer_ignores_zoom (corner blue unpatched, red patched).
+
+Origin: ours
+Why: docs/player/reports/scene-we-ref.md (3042492564: the lighter rectangle; ~/.cache/liascape/we-ref/captures/var/v3042-bg*)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kWN88ooeafgoHLbfM
+---
+ src/core/WallpaperEngine/Render/Camera.cpp         |  2 ++
+ src/core/WallpaperEngine/Render/Camera.h           |  3 +++
+ src/core/WallpaperEngine/Render/Objects/CImage.cpp | 11 +++++++++--
+ 3 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Camera.cpp b/src/core/WallpaperEngine/Render/Camera.cpp
+index 4087124..768e74f 100644
+--- a/src/core/WallpaperEngine/Render/Camera.cpp
++++ b/src/core/WallpaperEngine/Render/Camera.cpp
+@@ -29,6 +29,8 @@ const glm::mat4& Camera::getProjection () const { return this->m_projection; }
+ 
+ const glm::mat4& Camera::getLookAt () const { return this->m_view; }
+ 
++const glm::mat4& Camera::getUnadjustedLookAt () const { return this->m_lookat; }
++
+ void Camera::setViewAdjust (const glm::mat4& adjust) {
+     this->m_adjust = adjust;
+     this->m_view = this->m_lookat * adjust;
+diff --git a/src/core/WallpaperEngine/Render/Camera.h b/src/core/WallpaperEngine/Render/Camera.h
+index b3391d1..f80790b 100644
+--- a/src/core/WallpaperEngine/Render/Camera.h
++++ b/src/core/WallpaperEngine/Render/Camera.h
+@@ -54,6 +54,9 @@ public:
+     [[nodiscard]] const glm::mat4& getProjection () const;
+     /** The view: the lookAt with the frame's adjustment (zoom, camera shake) applied in world space */
+     [[nodiscard]] const glm::mat4& getLookAt () const;
++    /** The view without the frame's adjustment: where a full-screen layer draws (it covers the screen whatever the
++     *  zoom, shake or camera position) */
++    [[nodiscard]] const glm::mat4& getUnadjustedLookAt () const;
+     /** Sets the frame's world-space view adjustment (CScene::updateCamera) */
+     void setViewAdjust (const glm::mat4& adjust);
+     /**
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index d9091d0..4e2de23 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -2132,8 +2132,15 @@ bool CImage::isPerspectiveLayer () const {
+ glm::mat4 CImage::screenViewProjection () const {
+     const auto& camera = this->getScene ().getCamera ();
+ 
+-    // a 3D scene's screen layers keep the 2D layout over the scene's target
+-    return camera.isPerspective () ? camera.getScreenProjection () : camera.getProjection () * camera.getLookAt ();
++    // a 3D scene's screen layers keep the 2D layout over the scene's target. A full-screen layer covers the target
++    // whatever the camera's zoom, shake and position: measured in WE on 3042492564 (its camera's zoom 0.73, a private
++    // copy with its `localcontrast` layer at strength 3), the effect changes pixels across the whole frame and at
++    // strength 0 none; ours drew its output into the zoomed 73 % rectangle, the frame shrunk into it
++    if (camera.isPerspective ()) {
++	return camera.getScreenProjection ();
++    }
++    return camera.getProjection ()
++	* (this->getImage ().model->fullscreen ? camera.getUnadjustedLookAt () : camera.getLookAt ());
+ }
+ 
+ void CImage::updateWorldPosition () {

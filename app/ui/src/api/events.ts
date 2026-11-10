@@ -7,13 +7,15 @@ export type LiascapeEvent =
   | { type: "scene-crashed"; payload: { path: string } }
   | { type: "scene-vram-stopped"; payload: { path: string; usedMib: number; limitMib: number; message: string } }
   | { type: "timed-stopped"; payload: null }
+  // `liascape loop-current` toggled "keep playing this one" (the rotation holds what plays)
+  | { type: "loop-current"; payload: { keep: boolean; path: string | null; message: string } }
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }
   | { type: "library-synced"; payload: { count: number } }
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)
   | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote">> }
-  // the background scene-loudness queue (Settings → Audio → "Scene loudness", imports): shaped like unsub-progress
+  // the background scene-loudness queue (Settings → Sound → "Pre-measure scenes", imports): shaped like unsub-progress
   | { type: "scene-loudness-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; cancelled?: boolean } }
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }

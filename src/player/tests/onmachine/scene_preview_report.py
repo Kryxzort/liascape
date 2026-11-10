@@ -393,7 +393,7 @@ def render_md(out, res):
     a(f"- **Images:** side-by-sides (our frame with the crop boxed | our crop | the preview) `{res}/sbs/<id>.png`; "
       f"the worst 20 on one sheet: `{out['contact_sheet']}`. Captures are not committed.\n")
     a("## Calibration\n")
-    a("3414858021 rendered by the core before its head fix (pin `157c111`) and after: see "
+    a("3414858021 rendered by the core before its head fix (pin `40f2b85`) and after: see "
       "`docs/player/spikes/we-lwe-gap-audit.md` § \"Preview compare result\" for the numbers that set the weights.\n")
     classes = {}
     for r in sc:
