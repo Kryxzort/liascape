@@ -117,11 +117,11 @@ export const Library = memo(function Library() {
       if (e.key === "Escape") { if (libFocus || sel.size) { focusLib(null); setSel(new Set()); } return; }
       if (e.key === "Enter") { if (libFocus && byPath[libFocus]) { e.preventDefault(); applyItem(libFocus); } return; }
       const ids = filtered.map((i) => i.videoPath);
-      // nothing focused yet: the first arrow focuses the playing card (else the first one)
       const from = libFocus ? ids.indexOf(libFocus) : -1;
-      const start = from < 0 && playingPath && ids.includes(playingPath) ? ids.indexOf(playingPath) : null;
-      const j = start ?? stepIndex(from, e.key, gridCols(scrollRef.current), ids.length);
-      if (j == null) return;
+      let j = stepIndex(from, e.key, gridCols(scrollRef.current), ids.length);
+      if (j == null) return; // not an arrow
+      // nothing focused yet: the first arrow focuses the playing card (else the first one)
+      if (from < 0 && playingPath && ids.includes(playingPath)) j = ids.indexOf(playingPath);
       e.preventDefault();
       focus(ids[j], true);
     };
