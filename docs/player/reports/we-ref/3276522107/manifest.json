@@ -18,45 +18,45 @@
   "pointer_time": "0-0.3",
   "fps": 30,
   "d3dcompiler": "native-ms",
-  "shaders_compiled": 0,
+  "shaders_compiled": 1,
   "fonts": "windows",
   "clock": "Wine wall clock",
   "we_settings": [],
   "gamescope_args": [],
   "we_crashed": false,
-  "first_frame_ms": 6557,
-  "wall_ms": 12020,
+  "first_frame_ms": 7752,
+  "wall_ms": 13427,
   "we_gpu_mib": 602,
-  "rss_mib": 1493,
-  "cpu_s": 22.8,
+  "rss_mib": 1485,
+  "cpu_s": 24.5,
   "shots": [
     {
       "t": 0.5,
-      "late_ms": 5,
-      "t_actual": 0.505,
-      "scene_time": null
+      "late_ms": 12,
+      "t_actual": 0.512,
+      "scene_time": 0.75
     },
     {
       "t": 2,
-      "late_ms": 17,
-      "t_actual": 2.017,
-      "scene_time": null
+      "late_ms": 6,
+      "t_actual": 2.006,
+      "scene_time": 2.263
     },
     {
       "t": 5,
-      "late_ms": 18,
-      "t_actual": 5.018,
-      "scene_time": null
+      "late_ms": 12,
+      "t_actual": 5.012,
+      "scene_time": 5.261
     }
   ],
   "burst": [],
-  "captured": "2026-11-06T21:42:07+05:30",
+  "captured": "2026-11-06T22:59:19+05:30",
   "time_base": "seconds after the first non-black frame (one probe interval, ~0.15 s); shot t was requested late_ms after t (t_actual) and lands on the next composited frame",
   "scene_clock": {
     "strip": 0.012,
     "crop": 0.03,
-    "read": 0,
+    "read": 3,
     "of": 3,
-    "offset_median": null
+    "offset_median": 0.249
   }
 }

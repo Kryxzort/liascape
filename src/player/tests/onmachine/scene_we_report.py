@@ -21,6 +21,7 @@ to --sbs-dir; a contact sheet of the worst 20 to <results>/contact-worst20.png. 
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -96,7 +97,9 @@ def ours_key(x):
     st = x.get("scene_time")
     if st is None:
         return round(float(x.get("t_actual", x["t"])), 1)
-    return round(max(1, round(float(st) * FPS)) / FPS, 1)  # the worker's frame for it, named to 0.1 s
+    # the worker's frame for it, named to 0.1 s (half up, as the worker rounds: Python's round (22.5) is 22, which
+    # lost 3276522107's frame at scene time 0.750)
+    return round(max(1, math.floor(float(st) * FPS + 0.5)) / FPS, 1)
 
 
 def our_shots(d):

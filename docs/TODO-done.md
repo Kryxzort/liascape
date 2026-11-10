@@ -1123,3 +1123,19 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         Windows fonts. Whole corpus recaptured: mean score 0.119 → 0.072; 3509243656 0.261 → 0.053, 2783122117 0.562 → 0.014, 3593587273 0.499
         → 0.023, 2134765860 0.46 → 0.005, 2672425887 0.427 → 0.136, 3354740764 0.523 → 0.330, 3419466417 0.336 →
         0.077, 3490034653 0.414 → 0.289. 3354740764's notepad wrapping was the font (Inconsolata for Consolas).
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)":
+  - [x] `input.cursorWorldPosition` in a 3D scene — done 2026-11-06 (fork 409a94f + 9d4085c; gap audit "3D scenes
+        against WE, part 2"). WE's getter (wallpaper64 GH 0x1401bcb00) unprojects (x, 1 − y, 0.5) through the frame's
+        view and a reversed-depth PerspectiveFovRH (GH 0x14009afd0 swaps nearz / farz), so the cursor is the point on
+        its ray at the view depth farz; ours unprojects the same. And a model's scale / angles / visible scripts never
+        ran (CModel registered only origin), so 3477054430's head stood still whatever the cursor. Its head now turns
+        as in WE's `ptrL-3d` / `ptrR-3d` captures (head region 5.1 → 0.7 and 4.3 → 0.8 / 255); api test
+        `cursor_world_position_casts_into_3d`.
+  - [x] The flag-0x10 last draw for 2D layers: genericimage3 (ours) or genericimage4 (WE when the renderer's vtable
+        +0x40 > 2) — closed 2026-11-06, not ported: with the override WE builds, the two differ only in lighting,
+        fog, clipping, morph modifiers and alpha-to-coverage's saturate, and none of those applies to any of the
+        library's 75 2D blend-mode layers (no 2D scene has fog, none of them is lit). Gap audit "… part 2".
+  - [x] The clock strip in 3D scenes (3276522107 and 3477054430 never read, 3509243656 rarely) — done 2026-11-06:
+        WE never shows the plain strip layer in a perspective scene, so there it is the last effect of the scene's
+        full-screen layer (dimmer in an HDR scene, under its bloom). All three read every frame; 3276522107 left the
+        top of the ranking (0.524 → 0.134).

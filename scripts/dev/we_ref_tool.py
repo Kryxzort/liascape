@@ -233,6 +233,10 @@ def cmd_scrgb(scene_dir, rd):
 CLOCK_STRIP = 0.012  # of the frame height (13 px of 1080)
 CLOCK_CROP = 0.03    # what the compare leaves out at the bottom: the strip and any bloom around it
 CLOCK_LIT = 0.5      # a lit cell: grey, under any bloom threshold of an HDR scene and dim for an LDR one
+# a lit cell drawn by a full-screen layer's effect in an HDR scene: the strip is then inside the frame the scene's
+# bloom reads, and 3509243656's (threshold 0.46, feather 0.88) spread 0.5 cells 120 px up the frame. 0.22 lands as
+# ~56 / 255 in its re-encoded frame (0.08 was 22: under the read's 40) and low in the bloom's soft knee
+CLOCK_LIT_HDR_FX = 0.22
 CLOCK_NAME = "liascape_clock"
 CLOCK_VERT = """attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
@@ -256,6 +260,40 @@ void main() {
 		bit = mod(floor(N / exp2(24.0 - cell)), 2.0);
 	}
 	gl_FragColor = vec4(bit * %(lit).3f, bit * %(lit).3f, bit * %(lit).3f, 1.0);
+}
+"""
+# A perspective scene with a full-screen layer draws the strip as that layer's last effect instead (the topmost one
+# shown by default). WE never shows the plain strip layer in a perspective scene: 3276522107 and 3477054430 read in
+# no frame, not even with their post-processing layers removed from a private copy, and 3509243656 only now and then;
+# the full-screen layer's last effect output is the frame itself. The effect passes its input through and overwrites
+# only the strip (the bottom CLOCK_STRIP of the layer's UV: the frame's bottom edge in WE and in ours).
+CLOCK_FX_VERT = """uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+	gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);
+	v_TexCoord = a_TexCoord;
+}
+"""
+CLOCK_FX_FRAG = """// liascape we-ref capture only: the clock strip (CLOCK_FRAG) as a full-screen layer's last effect
+uniform sampler2D g_Texture0; // {"hidden":true}
+uniform float g_Time;
+varying vec2 v_TexCoord;
+void main() {
+	vec4 c = texSample2D(g_Texture0, v_TexCoord);
+	if (v_TexCoord.y > 1.0 - %(strip).4f) {
+		float N = floor(g_Time * 1000.0);
+		float cell = floor(v_TexCoord.x * 26.0);
+		float bit = 0.0;
+		if (cell < 0.5) {
+			bit = 1.0;
+		} else if (cell < 24.5) {
+			bit = mod(floor(N / exp2(24.0 - cell)), 2.0);
+		}
+		c = vec4(bit * %(lit).3f, bit * %(lit).3f, bit * %(lit).3f, 1.0);
+	}
+	gl_FragColor = c;
 }
 """
 
@@ -299,6 +337,37 @@ def read_pkg(path):
     return version, [(n, data[off + o : off + o + ln]) for n, o, ln in entries]
 
 
+WE_ASSETS = [os.environ.get("LIASCAPE_WE_ASSETS_DIR", ""), "/@steam/SteamLibrary/steamapps/common/wallpaper_engine/assets",
+             os.path.expanduser("~/.local/share/Steam/steamapps/common/wallpaper_engine/assets")]
+
+
+def clock_fx_host(scene, item, pkg_files):
+    """the topmost full-screen image layer shown by default (its model has "fullscreen": true), or None"""
+    def model(name):
+        if name in pkg_files:
+            return pkg_files[name]
+        for base in [item] + [a for a in WE_ASSETS if a]:
+            p = os.path.join(base, name)
+            if os.path.isfile(p):
+                return open(p, "rb").read()
+        return None
+
+    def shown(v):
+        return bool(v.get("value", True)) if isinstance(v, dict) else v is not False
+
+    host = None
+    for o in scene.get("objects", []):
+        if not isinstance(o.get("image"), str) or not shown(o.get("visible", True)):
+            continue
+        raw = model(o["image"])
+        try:
+            if raw is not None and json.loads(raw.decode("utf-8-sig")).get("fullscreen") is True:
+                host = o
+        except ValueError:
+            pass
+    return host
+
+
 def cmd_clock_inject(item, out):
     """out: a directory of links to the item's files (its shader blobs left out, so WE compiles them here) with the
     scene (scene.pkg's scene.json, or a loose scene.json) carrying the clock layer. Re-run: the scene is rewritten,
@@ -321,8 +390,8 @@ def cmd_clock_inject(item, out):
             if not os.path.lexists(dst):
                 os.symlink(os.path.join(root, fn), dst)
     extra = {
-        # (not "fullscreen": true — that left 3276522107 all black; its plain layer is drawn under the scene's
-        # post-processing letterbox, so that scene's clock goes unread)
+        # (not "fullscreen": true — that left 3276522107 all black; a perspective scene with a full-screen layer gets
+        # the strip as that layer's last effect instead, CLOCK_FX_FRAG)
         f"models/{CLOCK_NAME}.json": json.dumps({"material": f"materials/{CLOCK_NAME}.json"}).encode(),
         f"materials/{CLOCK_NAME}.json": json.dumps({"passes": [{
             "blending": "translucent", "cullmode": "nocull", "depthtest": "disabled", "depthwrite": "disabled",
@@ -345,10 +414,33 @@ def cmd_clock_inject(item, out):
     # them to the camera's centre lost 3509243656's strip and didn't bring back 3276522107's)
     origin, size = f"{w / 2} {h / 2} 0", f"{w} {h}"
     ids = [o.get("id", 0) for o in scene.get("objects", []) if isinstance(o.get("id"), int)]
-    scene.setdefault("objects", []).append({
-        "id": max(ids + [0]) + 1, "name": CLOCK_NAME, "image": f"models/{CLOCK_NAME}.json",
-        "origin": origin, "size": size, "scale": "1 1 1", "angles": "0 0 0",
-        "parallaxDepth": "0 0", "visible": True, "castshadow": False})
+    host = clock_fx_host(scene, item, dict(files)) if op is None else None
+    if host is not None:
+        hdr = (scene.get("general") or {}).get("hdr")
+        lit = CLOCK_LIT_HDR_FX if (hdr.get("value") if isinstance(hdr, dict) else hdr) else CLOCK_LIT
+        eids = [e.get("id", 0) for o in scene.get("objects", []) for e in o.get("effects") or []
+                if isinstance(e.get("id"), int)]
+        eids += [p.get("id", 0) for o in scene.get("objects", []) for e in o.get("effects") or []
+                 for p in e.get("passes") or [] if isinstance(p.get("id"), int)]
+        n = max(ids + eids + [0]) + 1
+        host.setdefault("effects", []).append({"file": f"effects/{CLOCK_NAME}/effect.json", "id": n,
+                                               "name": CLOCK_NAME, "visible": True, "passes": [{"id": n + 1}]})
+        extra = {
+            f"effects/{CLOCK_NAME}/effect.json": json.dumps({
+                "version": 1, "name": CLOCK_NAME, "group": "", "passes": [{"material": f"materials/effects/{CLOCK_NAME}.json"}],
+                "dependencies": [f"materials/effects/{CLOCK_NAME}.json", f"shaders/effects/{CLOCK_NAME}.frag",
+                                 f"shaders/effects/{CLOCK_NAME}.vert"]}).encode(),
+            f"materials/effects/{CLOCK_NAME}.json": json.dumps({"passes": [{
+                "shader": f"effects/{CLOCK_NAME}", "blending": "normal", "depthtest": "disabled",
+                "depthwrite": "disabled", "cullmode": "nocull"}]}).encode(),
+            f"shaders/effects/{CLOCK_NAME}.vert": CLOCK_FX_VERT.encode(),
+            f"shaders/effects/{CLOCK_NAME}.frag": (CLOCK_FX_FRAG % {"strip": CLOCK_STRIP, "lit": lit}).encode(),
+        }
+    else:
+        scene.setdefault("objects", []).append({
+            "id": max(ids + [0]) + 1, "name": CLOCK_NAME, "image": f"models/{CLOCK_NAME}.json",
+            "origin": origin, "size": size, "scale": "1 1 1", "angles": "0 0 0",
+            "parallaxDepth": "0 0", "visible": True, "castshadow": False})
     new = json.dumps(scene, ensure_ascii=False, indent="\t").encode("utf-8")
     if packed:
         names = {n for n, _ in files}
@@ -401,7 +493,7 @@ def cmd_clock_manifest(rd):
         p = os.path.join(rd, b["file"])
         b["scene_time"] = clock_read(p) if os.path.exists(p) and os.path.getsize(p) else None
     # a frame whose strip is unreadable (a scene fading in from black, 3509243656's intro; a strip under the scene's
-    # own letterbox): WE's clock runs at the wall clock's rate (the test scene: the request-to-clock offset held to
+    # own full-screen layer): WE's clock runs at the wall clock's rate (the test scene: the request-to-clock offset held to
     # ±0.03 s over 4 s), so it gets the request time plus the median offset of the frames that were read
     offs = sorted(float(x["scene_time"]) - float(x.get("t_actual", x["t"]))
                   for x in m.get("shots", []) + m.get("burst", []) if x.get("scene_time") is not None and "t_actual" in x)

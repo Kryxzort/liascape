@@ -25,16 +25,16 @@
     "note": "fixed 2026-11-06 (fork 7797317, 317bb73): the dog's black box and the upside-down light shafts. Since the scene clock (2026-11-06) the 0.5 s frame is no longer black (0.959 → 0.14: WE's clock was ~1 s ahead, inside the opening fade). The notepad wraps as WE's once ours has Consolas: its 4 pt text in a 195.5 px box fits 21 Consolas characters, 24 of Inconsolata (this system's stand-in, 0.50 em vs 0.55) — the compare now gives ours the Windows fonts. The overall colour is two layers, found by removing layers from a private copy in both WE and ours: the Bliss layer with all its effects matches to 2.2 / 255. (1) The `Clouds` compose layer (id 58: turned 180°, scaled 1.2 × 2.3, `perspective`, procedural_noise with a perspective UV quad) darkens the bottom 30 % of the grass in ours (−14 to −32 / 255) where WE's barely changes anything; without it the grass matches (58,112 vs 59,112). TODO \"compose layer turned 180°\". (2) The sky's top right: ours' light shafts (`shine`); without them the sky matches (73,95 vs 76,97). WE's shafts are random and showed none in these runs. The clock is the capture's minute."
   },
   "3276522107": {
-    "class": "known",
-    "note": "a 3D train interior: its post-processing layer letterboxes the frame over every layer, the clock strip too, so its frames carry the request time only (WE's clock 0.25–0.9 s along, see the 3D notes). The lit train layer flashes on a 2 s alpha loop; the rest is the windows' scrolling buildings (g_Time) and god rays."
+    "class": "random",
+    "note": "a 3D train interior. Its full-screen post-processing layer covered the clock strip, so its frames had the request time only (0.524, rank 1); since 2026-11-06 the strip is that layer's last effect and every frame reads WE's clock: 0.524 → 0.134. The lit train layer's 2 s flash is now in phase with WE's (seats dark at 2 s, lit at 5 s on both). What is left: the rain on the windows (particles, random in WE) and the scrolling buildings 5–12 px apart (a texture a second under motion blur: half a frame; ours renders on the 1/30 s grid); the god rays match."
   },
   "2672425887": {
     "class": "ok",
     "note": "was 0.427 (\"the demon fades in 3 s later\"): the capture's time base. With WE's own scene time per frame (the clock strip) it is 0.136; WE's clock read 1.70 / 3.23 / 6.20 s at the 0.5 / 2 / 5 s frames. What is left is the 5 s frame's falling debris (random in WE)."
   },
   "3509243656": {
-    "class": "ok",
-    "note": "a 3D scene whose intro is an engine.runtime fade from black: the clock strip sits under it, so its 5 s frame reads WE's clock and the earlier ones get that offset (WE's clock was 0.3–0.75 s ahead of t = 0). At WE's scene time it is 0.053 (was 0.261): the intro's timing was the capture's time base. Some runs read no frame at all (then only the request time)."
+    "class": "random",
+    "note": "a 3D \"three-body\" simulation: its planets' paths and the civilisation texts come from Math.random in scripts, so they differ from WE's every run. Its intro fades in from black: since 2026-11-06 the clock strip is the post-processing layer's last effect (lit 0.22, under its HDR bloom) and every frame reads, even mid-intro (the 0.5 s frame was at WE's 4.6 s). Its galaxy band sits lower in WE's first frame: a slider eases toward input.cursorWorldPosition / 8000, and WE has no pointer until the capture's nudge after load (the late pointer of the parallax scenes)."
   },
   "2783122117": {
     "class": "ok",
@@ -82,6 +82,6 @@
   },
   "3477054430": {
     "class": "ok",
-    "note": "the moon now takes the scene's distance fog like WE (0108: 149 → 129.6, WE 129.5). Left: the kitty's head turns from input.cursorWorldPosition, which WE casts into the 3D world and ours gives in scene pixels (head turned left in WE, front in ours)."
+    "note": "the kitty's head turns as in WE (2026-11-06, fork 409a94f + 9d4085c): its angles script never ran (a model registered only its origin), and input.cursorWorldPosition in a 3D scene is the cursor cast to the far plane (WE's unProject at NDC z 0 through its reversed-depth projection), not scene pixels. With the pointer at the left / right (we-ref/3477054430/ptrL-3d, ptrR-3d) the head region went 5.1 → 0.7 and 4.3 → 0.8 / 255 off WE; scores 0.040 → 0.025, 0.029 → 0.022. The moon takes the scene's fog (0108). The 0.5 s frame's head is still easing in from WE's late pointer."
   }
 }

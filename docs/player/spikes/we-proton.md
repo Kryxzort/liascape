@@ -272,13 +272,20 @@ cells, so a dimmed or re-encoded (FP16) frame still reads.
 - **Real scenes**: 2672425887 read 0.09 s ahead in one run; 1155728109, 3354740764 0.39–0.40 s; 3019192537 0.90 s.
 - **The strip doesn't touch the picture.** Captures with and without it, mean |Δ| above the crop: 0.15 (the run-to-run
   noise of 1155728109 is 0.16), and the band just above the strip differs no more than the top half.
-- **Where it can't be read:** a frame where the scene itself is black at the bottom (3509243656's intro fades in
-  from black, camera fade included) and 3276522107, whose post-processing layer letterboxes the frame over every
-  layer, ours too. Such a shot gets `scene_time_estimated`: its request time plus the median offset of the frames
-  that were read. A `"fullscreen": true` model for the strip left 3276522107 all black, and placing it at a perspective
-  camera's centre lost 3509243656's strip, so it stays a plain image layer with the canvas's bounds. The 3D
-  scenes 3276522107 and 3477054430 never read (their post-processing / overlays cover it); 3509243656 reads at 5 s
-  in some runs.
+- **Where it can't be read:** a frame where the scene itself is black at the bottom. Such a shot gets
+  `scene_time_estimated`: its request time plus the median offset of the frames that were read. A `"fullscreen":
+  true` model for the strip left 3276522107 all black, and placing it at a perspective camera's centre lost
+  3509243656's strip.
+- **3D scenes: the strip rides on the full-screen layer** (2026-11-06). In a perspective scene WE never shows the
+  plain strip layer: 3276522107 and 3477054430 read in no frame even from private copies with their post-processing
+  layers removed (`captures/clkexp/c3276-nopp`, `c3477-nodith`), and 3509243656 only now and then. So when a
+  perspective scene has a full-screen layer (a model with `"fullscreen": true`, shown by default), the strip is that
+  layer's last effect (`we_ref_tool.py` CLOCK_FX_FRAG: the input passed through, the bottom 1.2 % of the layer's UV
+  overwritten), and no strip layer is added. The layer's output is the frame, so it reads: 3 of 3 frames in all three
+  3D scenes (`clkexp/c3276-fx`, `c3477-fx`, then the default captures). In an HDR scene the strip is inside what the
+  scene's bloom reads: 3509243656's (threshold 0.46, feather 0.88) spread 0.5 cells 120 px up the frame, so there
+  the cells are lit at 0.22 (~56 / 255 after the re-encode; 0.08 landed at 22, under the read's 40). Its frames now
+  read even inside the black intro (the 0.5 s frame was at WE's 4.6 s: the probe's first picture comes late).
 - **The manifest**: `shots[].scene_time` (+ `scene_time_estimated`), `scene_clock` {strip, crop, read, of,
   offset_median}. `--burst S` adds frames back to back with their scene times (`burst[]`, and the probe's frames
   before t = 0). `--no-clock` captures the item itself.

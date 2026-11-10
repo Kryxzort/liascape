@@ -3270,3 +3270,64 @@ under far fog: 127 127 191, once; on 1273652 the layer stays white) and `blend_m
   faces front. The getter is in scenescript64.dll (0x1810e6dd4: host interface +0x498, vtable +0xa8). Which world
   point wallpaper64 hands it (ray depth, plane) wasn't decoded.
 - WE's clock head start at the first frame (above), and its g_Time epoch (the building scroll).
+
+### 3D scenes against WE, part 2: the cursor in the world, model scripts, the clock in 3D (fork 409a94f, 9d4085c, 2026-11-06)
+
+**`input.cursorWorldPosition` in a 3D scene (Observed, ported).** wallpaper64.exe 2.8.485 (sha256 `da37927f…`, the
+Windows drive's copy the captures run; the `/@steam` copy, `40e2ce02…`, is another build and its addresses differ):
+
+- scenescript64.dll's getter (0x1810e6dd4) calls `host[+0x498]->vtable[+0xa8] (out vec3, 0)`. In wallpaper64 that
+  slot is GH 0x1401bcb00 (vtable 0x1404d0428, slot 21). With the flag 0 it builds win = (x, 1 − y, 0.5) from the
+  context's normalised cursor (ctx +0x8c, +0x90; y down) and calls GH 0x1401cb9b0: a glm-style unProject through the
+  view (ctx +0x38, the camera update's lookAt) and projection (ctx +0x40), viewport (0, 0, 1, 1): NDC (2x − 1,
+  2y − 1, 2·0.5 − 1 = 0), times inverse (proj · view), divided by w. Context flag 0x400 zeroes z. (With a non-zero
+  flag it returns (x · ctx +0x74, y · ctx +0x78, 0), mirrored by flag 0x800: the screen position, not used here.)
+- WE's 3D projection is the renderer's vtable +0x10 (renderer vtable 0x1404c5fd0; GH 0x1401b3f70 calls it with
+  fov × π/180, width / height, nearz, farz): GH 0x14009afd0 passes its 5th argument (nearz) as DirectXMath's FarZ and
+  the 6th (farz) as NearZ to XMMatrixPerspectiveFovRH (GH 0x14005d980, its asserts at lines 0x9f4–0x9f7): a
+  reversed depth, NDC z 1 at nearz and 0 at farz.
+- So in a 3D scene the cursor's world position is the point on the cursor's ray at the view depth farz. In an
+  orthographic scene the same unProject gives scene pixels (x right, y up) at z 0, as LWE had it.
+- The library: 3477054430's head (`angles` script: turn by `cursorWorldPosition − origin` once that is over 100
+  apart) and 3509243656 (a slider eases toward `cursorWorldPosition / 8000, / 9000`, clamped to ±1; its farz is
+  10000, so the far plane spans about ±8300 × ±4700). The far point explains the captures: with the pointer at the
+  left or the centre it lies thousands of units left of the kitty (head −62°), at the right it is right of it (−2°).
+- **Ours (9d4085c):** `inverse (dmat4 (worldViewProjection)) · (2x − 1, 2y − 1, 1, 1)` in double (GL clip: far at
+  +1; the y flip of the scene FBO's projection undone by the sign). The kitty's head region against WE: pointer left
+  5.1 → 0.7, right 4.3 → 0.8 (mean |Δ| / 255).
+
+**A model's scale / angles / visible scripts (Observed in ours, fixed).** CModel registered only `origin` with the
+script engine, so 3477054430's head never ran its `angles` script (it stood at its static −32°, which hid the
+cursor difference) and 3509243656's four planets never ran their `angles` / `scale` scripts. A model draws with its
+group scale / angles / visible (CScene::localMatrixOf, isEffectivelyVisible); **409a94f** registers them.
+Test: api `cursor_world_position_casts_into_3d` (a 4 × 4 quad model 10 units out, farz 1000: its visible script
+hides it when the cursor is on the far plane (z −990) and right of x 100, its scale script shrinks it; fails on the
+old core: the quad stays whole and shown). Host tests 128 / 128 on this pair (127 + 1 failing on the pin).
+
+**The clock strip in 3D scenes.** In a perspective scene WE never shows the plain strip layer (none of 3276522107's
+or 3477054430's frames read, not even from private copies without their post-processing layers). The strip is now
+the last effect of the scene's topmost full-screen layer (`we-proton.md` "The scene clock"), and all three 3D scenes
+read every frame. 3276522107 then scores 0.524 → 0.134 (its lit train's flash in phase with WE's), and 3509243656's
+frames carry WE's time even inside its black intro.
+
+**genericimage3 or genericimage4 for a 2D layer's last draw (checked, not ported).** WE picks
+`effectpassthrough_4` (genericimage4) when the renderer's vtable +0x40 is > 2, else `effectpassthrough`
+(genericimage3). With the override WE builds (BLENDMODE, FOG_COMPUTED, LIGHTING / REFLECTION from the model flags,
+the layer's depth test / write), the two shaders differ only in: the lighting (deprecated vs V1 lights), fog (gi3's
+fragment has none; gi4 fogs with FOG_COMPUTED and FOG_DIST / FOG_HEIGHT), CLIPPING* combos, morph modifiers, the
+reflection distance and a `saturate` on alpha-to-coverage. For the library's 2D blend-mode layers (75, in 20
+scenes) none of it applies: no 2D scene has distance or height fog (only the 3D 3276522107 and 3477054430 do, whose
+layers take genericimage4 already), no 2D blend-mode layer sets lighting or reflection, the override carries no
+clipping, morph or alpha-to-coverage combo. Both shaders give the same pixels there, so the choice stays
+genericimage3 until a scene needs it (Inferred from the shaders and the scene data; no pixel test).
+
+**Not done / found:**
+- A 3D scene's CursorEvent `worldPosition` and hit test: ours tests solid layers in scene pixels. WE's 3D hit test
+  wasn't read (no library 3D scene has cursor events on a world-placed layer: 3509243656's `cursorEnter` layers are
+  hidden solid layers).
+- 3509243656's first frame: WE has no cursor until the capture's pointer nudge after load, so its slider starts from
+  the far plane's corner and eases back; ours has the pointer from frame 0 (the parallax scenes' "late pointer").
+- 3276522107: the rain on the windows (random particles). The scrolling buildings sit 5–12 px from WE's: they scroll
+  a whole texture a second (`scroll` speedx ±1, under motion blur), so that is under half a frame of time, and ours
+  renders on the 1/30 s grid (scene 2.263 s → frame 68, 2.267 s). The god rays through the windows match. Not a
+  renderer difference.
