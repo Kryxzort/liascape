@@ -1789,7 +1789,7 @@ const GLOW_JS = String.raw`window.__glow = {
 true`;
 // each measure: the element (an expression), what to read, and whether the mouse has to be over it
 const GLOW_SPECS = [
-  { name: "active tab", tab: "Library", el: `document.querySelector(".tab.active")`, read: "boxShadow" },
+  { name: "active tab", tab: "Library", el: `document.querySelector(".tabs .tab-pill")`, read: "boxShadow" }, // the sliding pill under the active tab carries its fill + glow
   { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
   { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
   { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
