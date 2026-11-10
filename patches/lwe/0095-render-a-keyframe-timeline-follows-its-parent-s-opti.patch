@@ -1,7 +1,7 @@
 From f14509b223979c323669e50bb71584740dec0a2d Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 01:46:32 +0530
-Subject: [PATCH 095/111] render: a keyframe timeline follows its parent's
+Subject: [PATCH 095/117] render: a keyframe timeline follows its parent's
  (options.parent)
 
 WE's binding parser reads an animation's `options.parent.key` (GH 0x1401d1740, B2's G01 row); the

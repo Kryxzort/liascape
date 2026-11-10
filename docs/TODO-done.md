@@ -1201,3 +1201,32 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         Windows fonts. Whole corpus recaptured: mean score 0.119 → 0.072; 3509243656 0.261 → 0.053, 2783122117 0.562 → 0.014, 3593587273 0.499
         → 0.023, 2134765860 0.46 → 0.005, 2672425887 0.427 → 0.136, 3354740764 0.523 → 0.330, 3419466417 0.336 →
         0.077, 3490034653 0.414 → 0.289. 3354740764's notepad wrapping was the font (Inconsolata for Consolas).
+- Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6" → "Real-WE references (goal pictures)" → "Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). The top real d":
+  - [x] 3354740764's `Clouds` compose layer — done 2026-11-06 night (fork `ca97141`, patch 0114). Not the turn,
+        the scale or `perspective`: the clouds' procedural_noise (LAYERED) reads `_rt_imageLayerComposite_51_a`,
+        the white 4 x 4 solid layer 51 they name in `dependencies`. WE's scene load sets image flags 0x1010 on
+        every image / text object named in a `dependencies` list (GH 0x1401b7xxx), so it draws through its
+        composite (base off screen, then a last draw) and the composite holds its picture; ours drew 51 straight to
+        the screen and the clouds read an empty composite, which lowered the Worley noise's alpha a quarter: dark
+        clouds over the bottom of the grass. Proved with private copies in WE and ours (clouds recoloured red,
+        layer 51 black, the slot empty, `dependencies` removed). 0.327 → 0.218. Fork test: the existing suite
+        (128 / 128); the variant scenes in `~/.cache/liascape/we-ref/probe-scenes/v3354-clred*`.
+  - [x] 3219908811's notice panel at 5 s — not a difference. A WE burst with its scene clock (frames every ~0.35 s,
+        `captures/notice-burst`) fades the panel in over 3.4–4.2 s and holds from ~6 s exactly as ours does (the
+        panel region within 2 / 255 at every frame; alpha keyframes 100 → 130 → 279 at 30 fps). The 5 s "dim"
+        was its text and edges (6 / 255).
+  - [x] LWE: a colour written "1 1 1" read as 0–255 bytes — done 2026-11-06 night (fork `09b8200`, patch 0113).
+        WE's vec3 field parser (GH 0x1401d0bc0, image / text / light `color`, clear and ambient colours): atof per
+        space-separated component, missing ones 0, a JSON number is all three; whole numbers are not special. A
+        particle `colorrandom` keeps the byte reading (WE divides an instanceoverride `color` by 255 into
+        `colorn`). Fork test `object_colour_and_linked_folder`; `create_layer_builds_layers` now creates a black
+        layer (its `Vec3(1, 1, 1)` is white, as in WE).
+  - [x] LWE: a project folder whose files are symlinks failed to load — done 2026-11-06 night (fork `984737b`,
+        patch 0112). The directory adapter resolved each file and refused it as outside the folder; the check is
+        now on the path's name (no `..` out of the folder), the file opens through its links. Same fork test.
+  - [x] 3163060610's big cloud missing — done 2026-11-06 night (fork `92c1ada`, patch 0117). A script on an
+        effect's shader constant ran with thisObject = the layer; the cloud's waterripple `scale` script does
+        `thisObject.scale = c_de_scale + 0.1`, so ours scaled the cloud layer to 0.22 (health bbox 383 x 332 of 1743 x
+        1508) where WE keeps it whole. thisObject is now the effect's material: an accessor per constant (all 32
+        constant scripts in the library set their own constant that way), getAnimation () as before. 0.119 →
+        0.059. Fork test `constant_script_this_object_is_the_material`.

@@ -14,6 +14,21 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] `.claude/worktrees/switchover`: the stopped switch-over-bar agent's uncommitted draft (seam probe + §11 checklist
       report) — keep for later or drop.
 
+## UI — owner's Todoist, clarified 2026-11-10
+- [ ] **Wallpaper Engine-style sidebar** (replaces the right-click → Settings modal; drops the "scene config pops in
+      when the settings grow" fix): focusing a card opens a sidebar holding everything the right-click menu has
+      (Settings, Open in file manager, Delete, Delete from source). Same in the Browse tab.
+- [ ] **Morph replays while settings are open**: with a wallpaper's settings open, the morph animation plays again
+      every 1–2 min instead of staying still (probably a periodic refresh re-mounting the view).
+- [ ] Morph: a little faster still; the morph glitch when a property changes.
+- [ ] Scene timing fallback: with the scene-specific timing options off, use the general minimum or maximum, whichever
+      is on; the minimum if both are on.
+- [ ] Scroll to the playing wallpaper on app open, in both the playlist bar and the main grid.
+- [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
+      research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
+      Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
+      triggers/actions can't express (the escape hatch, not just one more action type).
+
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
@@ -383,27 +398,29 @@ Two bug classes kept recurring; fix the class, not the instance:
         `src/player/tests/onmachine/scene_we_compare.sh` renders ours at the same times and ranks the differences
         (`docs/player/reports/scene-we-ref.md`). Rerun the compare after every LWE patch; recapture after a WE update.
     - [ ] Work down `scene-we-ref.md` (the fixes are follow-ups; this only measured). Since the scene clock
-          (2026-11-06) the "time" rows are gone; the top is 3D (3509243656, 3276522107: the 3D agent's), then
-          3354740764 (the clouds compose layer below), 3490034653 (registered to ~1 px; light-shaft haze, random),
-          and parallax scenes' 0.5 s frames (the late pointer, below).
-    - [ ] 3354740764's `Clouds` compose layer (id 58: angles z −π, scale 1.2 × 2.3, `perspective`, procedural_noise
-          with PERSPSWITCH and a UV quad, LAYERED from `_rt_imageLayerComposite_51_a`): ours darkens the bottom 30 % of
-          the grass (−14…−32 / 255) where WE's changes almost nothing. Proved by removing the layer from a private copy
-          in both (WE `captures/var/v3354-noclouds`, ours `ov-noclouds`): without it the grass matches. Look at how a
-          turned / scaled compose layer maps its effect UVs onto the screen (CImage passthrough copy + MVP;
-          `isPerspectiveLayer` skips compose layers: "no library scene turns one" — this one does).
-    - [ ] 3219908811's notice panel at 5 s: WE's still dim (fading in), ours fully in. With the scene clock both are
-          at the same scene time, so it is a real timing / alpha difference.
-    - [ ] The 0.5 s frames of parallax scenes (3233141951, 3219908811, 3363252053): WE's pointer arrives with the
-          capture's xdotool nudge after load and its parallax eases in from there; wallpiper (GetCursorPos hook) has
-          it from the first frame. Nudge earlier, or take the 0.5 s frame from wallpiper.
+          (2026-11-06) the "time" rows are gone. Since the 2D round (2026-11-06 night, pin `92c1ada`) the top is 3D
+          (3276522107: the 3D agent's), then the parallax scenes' 0.5 s frames (the late pointer, below), random
+          particles / shafts (3490034653, 3478602089, 2561227934, 3363252053, 2511663284), random text (2951169110)
+          and the open one below (3013489778). Explained so far: each ranked scene's note (`scene_we_notes.json`).
+    - [ ] 3013489778's girl doesn't pulse in ours (open). Her time `pulse` effect (puppet layer 161, visualizer = 1)
+          has an opacity mask painted for layer 18 (`masks/pulse_mask_00240ba8`, 1589 x 1275 = half of 18's 3179 x
+          2551) and reused on 161 (4380 x 2998). Ours samples the mask's soft spots (≤ 0.35) and the girl barely
+          changes; WE pulses her evenly (with the tints set black, WE darkens the whole girl by 27 %, ours ~0). WE
+          variants in `captures/var/v3013-*`: without the time pulse WE's girl is steady at ours' brightness, without
+          the audio pulse it still pulses. Decode how WE maps an opacity mask whose size isn't the layer's (the
+          mask UV in pulse.vert is `a_TexCoord · g_Texture2Resolution.zw / .xy`), or whether a puppet's effect
+          passes see other texcoords.
+    - [ ] A compose (passthrough) layer named in another object's `dependencies` (3243449890's 16613, read by four
+          clipping masks) keeps LWE's handling; WE sets flag 0x1010 on it too (the 2D round ported it for image and
+          text layers only). 3243449890 has no WE reference yet.
+    - [ ] The 0.5 s frames of parallax scenes (3233141951, 3219908811, 3363252053, 3354740764, 2951169110,
+          3289734539): WE's pointer arrives with the capture's xdotool nudge after load and its parallax eases in
+          from there; wallpiper (GetCursorPos hook) has it from the first frame. Nudge earlier, or take the 0.5 s
+          frame from wallpiper.
     - [ ] The compare gives ours the Windows install's fonts (the faces WE drew with); the owner's player uses
           fontconfig's, so 19 scenes naming `systemfont_*` draw with stand-ins (3354740764's Consolas → Inconsolata
           wraps after 24 characters, not 21). Owner's call: a "Windows fonts folder" setting (auto-found on a
           mounted Windows install) for the player.
-    - [ ] Minor, LWE: a layer colour written without a decimal point ("1 1 1") is read as 0–255 bytes (1/255 =
-          black; WE draws white). No library scene writes one (their layer colours are "1.00000 …"); found with a
-          hand-written test scene. And LWE fails to load a project folder whose files are symlinks (a farm).
     - [ ] 3184155462's cursor ripple vs the owner's Windows: WE's ripple force scales with the frame time (≈10× weaker
           at 120 fps than at 30); at a matched 30 fps ours is WE's strength. The owner's Windows WE (main profile,
           `/mnt/Windows/…/wallpaper_engine/config.json`) runs at **240 fps** (Ultra, MSAA x8; the Linux library's
