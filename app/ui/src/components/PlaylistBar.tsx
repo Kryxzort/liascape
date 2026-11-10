@@ -16,6 +16,7 @@ import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
 import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
 import { useAutoplayVideo } from "./autoplay";
+import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 
 function PlItem({ path, item, index, playing }: { path: string; item?: LibraryItem; index: number; playing: boolean }) {
@@ -116,6 +117,8 @@ export function PlaylistBar() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const rowRef = useRef<HTMLDivElement>(null);
   useSmoothScroll(rowRef, "x");
+  // …and the playlist bar's playing item (horizontal; once per session)
+  useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);
   // expose the playlist bar's live height as --playlist-bar-h so the library scroll can pad its bottom enough to
   // reveal the last row above the bar — whether it's collapsed or expanded.
   const playlistBarRef = useRef<HTMLDivElement>(null);

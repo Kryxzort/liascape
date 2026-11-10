@@ -62,6 +62,7 @@ export function PlaylistSettingsModal({
                   <div className="field-label" title={ROT_HINT.max + (sep ? "" : ROT_HINT.maxScenes)}>MAXIMUM PLAY TIME</div>
                   <PlayTimeInput label="Maximum play time" zeroText="off" disabled={!ovr}
                     value={ps.maxPlaySeconds ?? 0} onChange={(v) => setPS({ maxPlaySeconds: v })} />
+                  {!sep && <div className="shint" data-scene-rule>{ROT_HINT.sceneRule}</div>}
                   <label className="ck" title={ROT_HINT.separate}><input type="checkbox" disabled={!ovr} checked={sep}
                     onChange={(e) => setPS({ separateSceneTiming: e.target.checked })} /> Separate timing for scenes</label>
                   {sep && <>

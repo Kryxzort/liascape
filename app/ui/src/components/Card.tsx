@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
 import { useStore } from "../store";
 
@@ -8,9 +8,9 @@ import { useStore } from "../store";
 // preview/more-info modal; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
 export const Card = memo(function Card({
-  w, playing, selected, progress, autoPlayGifs, previewing, onClick, onContext, onMiddle, onCancel,
+  w, playing, selected, inLibrary, progress, autoPlayGifs, previewing, onClick, onContext, onMiddle, onCancel,
 }: {
-  w: Wallpaper; playing: boolean; selected: boolean; progress: number | undefined; autoPlayGifs: boolean;
+  w: Wallpaper; playing: boolean; selected: boolean; inLibrary: boolean; progress: number | undefined; autoPlayGifs: boolean;
   previewing: boolean;
   onClick: (e: React.MouseEvent, w: Wallpaper) => void;
   onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void;
@@ -47,6 +47,8 @@ export const Card = memo(function Card({
             style={{ opacity: active ? 1 : 0, backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center" }} />
         )}
         {w.isScene && <span className="badge">SCENE</span>}
+        {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
+        {inLibrary && <span className="badge inlib ico" data-in-library title="Already in your library"><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover affordance: the OUTLINE of a SOLID download glyph — we stroke a filled silhouette with
             no fill, so it traces the shape's inner+outer contour (hollow). pointer-events:none. */}
         {!downloading && (

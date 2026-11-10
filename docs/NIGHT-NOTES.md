@@ -764,6 +764,23 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   4 more (20 × /random non-200, two scene-loudness timing checks); none came back on the rerun, so load flakes — the
   /random check now prints the HTTP codes it got if it fails again.
 
+## 2026-11-10 — your Todoist behaviour items
+- **Already done, nothing changed:** the playlist bar's green border on the wrong item (fixed 2026-11-02, `958b6be4`;
+  re-checked under Shuffle with both start modes — green) and the transition from nothing (fixed the same day,
+  `5908d185`: the first wallpaper after nothing / a Stop is a plain cut).
+- **Scenes and min/max (separate scene timing off):** they already used the one limit you set; with both set a
+  maximum *shorter* than the minimum still cut the scene first. Now a scene with a minimum plays the minimum, both set
+  or not; the hints in Settings and the playlist window say it in one line. Videos keep "the maximum is a hard cap".
+- **New `liascape loop-current`** (Settings → Keyboard shortcuts): keeps the current wallpaper playing — the playlist
+  stops rotating and it loops; run it again to rotate on. It survives app / backend / player restarts and works with the
+  app closed; pressing Play on the playlist ends it; next/previous still move (and the new one is kept). The top bar
+  says "Looping …" / "Rotation resumed".
+- **The app opens on the playing wallpaper:** the Library grid and the playlist bar scroll to it the first time they
+  show it (once per app session — it never moves your scroll later).
+- **Browse shows "In library"** (green, top-right) on items you already have — Workshop and the Wallpaper Engine local tab.
+- Checks: UI matrix 832 + 6 load flakes that pass alone (+ 6 new cells, each RED on the old UI/player), player crate
+  756/756 (1 audio-bus timing test passed alone), adapter IT 415/0, backend self-test PASS.
+
 ## 2026-11-10 — the 2D WE-port round resumed
 - **Landed the stopped round's pin** (LWE `92c1ada`: 3354740764's clouds, 3163060610's big cloud, "1 1 1" = white,
   symlinked folders) after the full check on top of today's lp-player: pushed `0126290`, your player restarted on it.

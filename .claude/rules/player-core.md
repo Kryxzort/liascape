@@ -1887,6 +1887,14 @@ source; the transition recipe stays the one place a switch happens. The contract
     once; no sooner than `PARKED_MIN_PLAY_MS` = 1 s after the last commit, so an image at minimum 0 can't switch
     every tick), an end-of-video switch waits for an output (a parked A never ends); `hold` stops both clocks and
     the rules until an output returns. An output added mid-switch is adopted by the recipe as usual.
+  - **`keep`** (a Program prop, Bool, default false, settable + kept in `program.json`; `state.programs[].keep`; owner
+    2026-11-10 "keybind toggle to infinite loop current wallpaper" — the backend's `liascape loop-current`): while true
+    no rotation rule fires (timer, end, maximum, scenes-after, still-image minimum — `tick` step 7 is skipped), the timer's
+    countdown stands, and a video item's `loop` is kept on (a short clip would otherwise end and stand). Set true while
+    an end switch is armed → it is cancelled (`program.disarmed {why: keep}`, A loops on). User verbs still switch and
+    the keep holds the new item; a broken item / failed B still moves on. Set false → the item starts over for the
+    rules: `played_ms` 0 and the countdown a full interval (a long keep never trips the maximum the instant it ends).
+    Tests: `tests/program.rs::keep_holds_the_current_item_and_loops_it` / `keep_stops_the_timer_and_resets_it_when_lifted`.
   - **Persistence** (`recipes/program/store.rs`, designer call 4): `<state>/program.json` = `{version: 1, rev,
     programs: [{id, props (settable, as `get` returns them), order: {items, idx, shuffle}}]}`, written on
     `lia-snapshot` (`Writer::send_file`, before the snapshot queued with it) only when a definition changed
