@@ -48,11 +48,26 @@ export function morph(from: MorphSource, to: Element | null) {
   to.style.transition = "none";
   to.style.visibility = "hidden";
   const sx = end.width / from.rect.width, sy = end.height / from.rect.height;
+  const dx = end.left - from.rect.left, dy = end.top - from.rect.top;
+  // COOL: mid-flight it lifts a touch (1.06×) and glows in the accent — one object travelling, not a swap — then settles into the
+  // target's look. The midpoint's translate is the straight line's middle (the curve's ease comes from EASE, per segment).
   const a = g.animate([
-    { transform: "none", backgroundColor: from.style.bg, color: from.style.color, boxShadow: from.style.shadow, borderRadius: from.style.radius },
-    { transform: `translate(${end.left - from.rect.left}px, ${end.top - from.rect.top}px) scale(${sx}, ${sy})`,
+    { offset: 0, transform: "none", backgroundColor: from.style.bg, color: from.style.color, boxShadow: from.style.shadow, borderRadius: from.style.radius },
+    { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2}px) scale(${(1 + sx) / 2 * 1.06}, ${(1 + sy) / 2 * 1.06})`,
+      boxShadow: "0 0 22px -3px var(--accent), 0 6px 18px rgba(0,0,0,.35)" },
+    { offset: 1, transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
       backgroundColor: cs.backgroundColor, color: cs.color, boxShadow: cs.boxShadow, borderRadius: cs.borderRadius },
   ], { duration: MORPH_MS, easing: EASE, fill: "forwards" });
+  // the chevron TURNS on the way (owner 2026-11-11: "make the chevron smoothly flip like the cool apps, not just snap"): the copy
+  // starts with the source's direction and the landing swapped it for the target's at once. Rotate the ghost's chevron between
+  // the two (an `open` button points left = 0°, the folded pill right = 180°) on the same clock, with a springy overshoot.
+  const gc = g.querySelector<SVGElement>(".wf-chev"), tc = to.querySelector(".wf-chev");
+  if (gc && tc) {
+    const deg = (el: Element) => (el.closest(".wf-open")?.classList.contains("open") ? 0 : 180);
+    gc.style.transition = "none";
+    gc.animate([{ transform: `rotate(${deg(gc)}deg)` }, { transform: `rotate(${deg(tc)}deg)` }],
+      { duration: MORPH_MS, easing: "cubic-bezier(.3, 1.45, .45, 1)", fill: "forwards" });
+  }
   const done = () => {
     g.remove();
     if (!to.isConnected) return;

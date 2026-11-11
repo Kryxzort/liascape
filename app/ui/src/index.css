@@ -1081,13 +1081,13 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 /* the pill's chevron points where the column goes: left while it's out (fold it), right while folded (bring it back) */
 .wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform .28s cubic-bezier(.2, 1.3, .36, 1); }
 .wf-open:not(.open) .wf-chev { transform: rotate(180deg); }
-/* the docked title = the pill morphed up (hooks/filterMorph.ts): the pill's type + shape, so the ghost lands on its twin — a
-   quiet chip until a filter is on (then the pill's accent fill, like the pill) */
-.wf-title-btn { padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none;
-  color: var(--text); background: color-mix(in srgb, var(--surface0) 60%, transparent); transition: box-shadow .2s, background .15s; }
-.wf-title-btn:hover { box-shadow: var(--glow-sm); }
-.wf-title-btn.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
-.wf-title-btn .wf-chev { margin-left: -2px; opacity: .75; }
+/* the docked title IS the pill (hooks/filterMorph.ts): it carries the pill's own classes (`pill ico wf-open`) — no type or shape
+   of its own — so the ghost flies between two identical buttons and never stretches (owner 2026-11-11: "the filter button
+   changing font and stuff feels weird": a `.wf-title` rule later in this file had made it 12 px / 800 / uppercase) */
+.wf-title-btn { flex: none; }
+/* folding: the ghost carries the title down to the pill — the column sliding out must not take a second copy with it (owner
+   2026-11-11: "it duplicates the button instead of it staying the same one, i still see the old one quietly sliding out") */
+.wf-col.closing [data-wf-title] { visibility: hidden; transition: none; }
 .wf-morph { display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
 .wf-col[data-mode="drawer"] { width: min(280px, 88vw); z-index: 46; outline: none;
   border-right-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));

@@ -436,11 +436,18 @@ app.whenReady().then(async () => {
       const fold = await page(`${anim} document.querySelector("[data-wf-title]").click(); await m.sleep(120);
         const g = document.querySelector(".wf-morph"), col = document.querySelector(".wf-col[data-mode=dock]"), pill = document.querySelector("[data-wf-open]");
         const gr = g?.getBoundingClientRect();
-        return { ghost: !!g, gx: gr?.left, colAnim: a(col), gridAnim: a(document.querySelector(".scroll > .grid")), ghostAnim: a(g),
-          pillHidden: pill ? getComputedStyle(pill).visibility === "hidden" : null };`);
+        const ch = g?.querySelector(".wf-chev"), chA = ch?.getAnimations()[0];
+        const chDeg = ch ? (() => { const m = new DOMMatrixReadOnly(getComputedStyle(ch).transform); return Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI); })() : null;
+        return { ghost: !!g, gx: gr?.left, chevAnim: !!chA, chDeg, colAnim: a(col), gridAnim: a(document.querySelector(".scroll > .grid")), ghostAnim: a(g),
+          pillHidden: pill ? getComputedStyle(pill).visibility === "hidden" : null,
+          oldTitle: (() => { const t = document.querySelector(".wf-col.closing [data-wf-title]"); return t ? getComputedStyle(t).visibility : "gone"; })() };`);
       if (!fold.ghost) v.push("no ghost flying from the title to the pill");
       else if (fold.ghostAnim.some((k) => !["transform", "backgroundColor", "color", "boxShadow", "borderRadius"].includes(k))) v.push(`the ghost animates ${J(fold.ghostAnim)}`);
+      // the chevron turns on the way (0° on the title → 180° on the pill), mid-turn at 120 ms of 340 — not snapped at the landing
+      if (!fold.chevAnim) v.push("the ghost's chevron doesn't rotate");
+      else if (fold.chDeg === 0 || Math.abs(fold.chDeg) === 180) v.push(`the chevron sits at ${fold.chDeg}° mid-flight (not turning)`);
       if (fold.pillHidden !== true) v.push(`the pill isn't held hidden under the flying ghost (${fold.pillHidden})`);
+      if (fold.oldTitle === "visible") v.push("the sliding-out column still shows its title beside the ghost (two buttons)");
       if (!fold.colAnim?.length) v.push("the column didn't slide out");
       else if (fold.colAnim.some((k) => !["transform", "opacity"].includes(k))) v.push(`the column animates ${J(fold.colAnim)}`);
       if (!fold.gridAnim?.length) v.push("the grid didn't glide");

@@ -140,7 +140,7 @@ export function WorkshopFilterColumn({ mode, closing = false, entering = false, 
           {/* docked: the title IS the sort row's "Filters · N" pill, morphed up here (hooks/filterMorph.ts) — a click folds the column
               and it flies back down */}
           {mode === "dock"
-            ? <button type="button" className={`wf-title wf-title-btn${n ? " active" : ""}`} data-wf-title aria-expanded="true" onClick={onFold}>
+            ? <button type="button" className={`pill ico wf-open open wf-title-btn${n ? " active" : ""}`} data-wf-title aria-expanded="true" onClick={onFold}>
                 <SlidersHorizontal size={14} /> Filters{n ? ` · ${n}` : ""}<ChevronLeft className="wf-chev" size={14} aria-hidden />
               </button>
             : <span className="wf-title"><SlidersHorizontal size={14} /> Filters</span>}

@@ -298,12 +298,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   the library's copy): double-click / Enter / the sidebar's Apply still apply it. **Collapsible** (owner: "the sidebar should be
   collapsable btw", then "a clunky new button and no transition? this isn't you!", then "how about the filter button morphing
   into the filter title area of the expanded section?"): ONE control in two places — docked and out, the column's title
-  (`[data-wf-title]`, the pill's type + shape, a chevron pointing left; `aria-expanded`) folds it; folded, the sort row's
+  (`[data-wf-title]` — the pill's OWN classes `pill ico wf-open open`, so both are the same 101×31 button and the ghost never stretches; owner: "the filter button changing font and stuff feels weird" when a later `.wf-title` rule made it 12 px / 800 / uppercase — chevron left; `aria-expanded`) folds it; folded, the sort row's
   "Filters · N" pill (`[data-wf-open]`, chevron right) brings it back; below the breakpoint the pill opens the drawer
   (`filterColHidden`, localStorage `liascape.browseFilterHidden`). `hooks/filterMorph.ts`: `snapshot()` the element being left
   before the change, `morph()` it after the commit (Browse's layout effect) — a ghost clone on `<body>` (`.wf-morph`) flies
   translate + scale (origin 0 0) onto the counterpart's RESTING box (its box minus its ancestors' running translate), its
-  background / colour / shadow / radius easing into the target's; the target stays `visibility: hidden` until it lands
+  background / colour / shadow / radius easing into the target's, lifting 1.06× with an accent glow at mid-flight, and its chevron TURNING 0° ↔ 180° on the same clock with a springy overshoot (owner 2026-11-11: "make the chevron smoothly flip like the cool apps, not just snap" — the swap at landing had flipped it at once); the sliding-out column hides its own title (`.wf-col.closing [data-wf-title]` — owner: "it duplicates the button … i still see the old one quietly sliding out"); the target stays `visibility: hidden` until it lands
   (`MORPH_MS` 340). Meanwhile the column slides off its edge (`.closing`, `wf-dock-out` 220 ms, `useLinger` — `WF_DOCK_MS`) or
   in (`.entering`, `wf-dock-in` 340 ms, a hint of overshoot), and the grid's margin flips at once while `.scroll.wf-shift-*`
   plays the children's old offset back to 0 (transform only, no fill; `n % 2` alternates two identical keyframes so a quick
