@@ -28,7 +28,7 @@ Every command below is hermetic unless marked; run anything over ~30 s in the ba
 - Never break a CLI command or flag, or a state-file format: an old file must still load.
 - Every new UI element follows the app's design and its toggles (theme, glow / `no-glow`, motion / `no-motion`, translucency / `bg-live`, themed controls, a probe): the checklist at the top of `.claude/rules/ui/design.md`. Put it in every UI agent's brief.
 - Commit messages: short, title-case, no period (`Fix App Name`, `Add Shuffle Toggle`); the story (what broke, who asked, dates) goes in the body.
-- Every commit names each Claude that wrote part of it, one trailer per model and effort: `Claude-Agent: <model id>, effort <low|medium|high|xhigh|max|default>, <role>` (e.g. `Claude-Agent: claude-opus-5-5, effort medium, comment sweep (src/player)`); `default` when the effort wasn't set. A subagent reports its model and effort with its work so the committer can name it.
+- Every commit names each Claude that wrote part of it, one trailer per model and effort: `Claude-Agent: <model id>, effort <low|medium|high|xhigh|max|unknown>, <role>` (e.g. `Claude-Agent: claude-opus-5-5, effort medium, comment sweep (src/player)`); the effort its starter set (agents), else `unknown` — a session can't see its own effort, so never guess one. A subagent reports its model and effort with its work so the committer can name it.
 - Code comments say why, never history — no dates, owner quotes or R/Phase/Task numbers: `.claude/rules/writing-rules.md` § Code comments.
 
 ## Where the rule for X lives
