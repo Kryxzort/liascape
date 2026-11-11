@@ -94,8 +94,12 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 
 A trailer is part of the Workshop LISTING, not the downloaded files (`project.json` has no field for it): a download
 from the app's Workshop browser stores it, but items auto-imported from WE subscriptions never had one (owner
-2026-11-11). Wallpaper Engine gets it from the Steam client's UGC API (an item's additional previews); this app reads
-the item's public Workshop page (`SteamWorkshopScraper.CheckYoutubeAsync`: `YOUTUBE_VIDEO_ID`). **Cached per item**:
+2026-11-11). Wallpaper Engine gets it from the Steam client's UGC API (an item's additional previews); **this app asks
+the same servers anonymously over the client protocol** (`Helpers/SteamWorkshopDetails.cs`, SteamKit2:
+`PublishedFile.GetDetails` + `includeadditionalpreviews`, 100 items a request — the owner's 275 in 7.6 s, 23 trailers),
+and only reads the item's public Workshop page (`SteamWorkshopScraper.CheckYoutubeAsync`: `YOUTUBE_VIDEO_ID`, through
+`SteamGate`) for what those servers don't answer or when they're unreachable; the page fallback alone waits out a
+steamcommunity cooldown (the client protocol isn't steamcommunity.com). **Cached per item**:
 found → `youtubeUrl` (never looked up again); page read, none → `trailerCheckedAt` (unix s; re-checked after 30 days);
 couldn't check (no connection, an error page) → nothing stored, retried next start — never "can't tell" saved as "none"
 (WE's own offline-mode bug). Steam rate-limits steamcommunity.com per IP for a long while once tripped (a burst of ~150 quick reads → 429s for 30+

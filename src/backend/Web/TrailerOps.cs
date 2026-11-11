@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
+using Liascape.Models;
 using Liascape.Scrapers;
 
 namespace Liascape.Web;
@@ -10,8 +12,9 @@ namespace Liascape.Web;
 // The YouTube trailer cache for library items (owner 2026-11-11: "find me a video with a youtube trailer in my library" —
 // none had one stored: a trailer link is part of the Workshop LISTING, not the downloaded files, and only a download from
 // the app's own Workshop browser saved it; everything auto-imported from WE subscriptions never got one). Wallpaper Engine
-// gets it from the Steam client's UGC API (an item's "additional previews"); this app isn't a Steam client, so it reads the
-// item's public Workshop page — the same lookup Browse already does (SteamWorkshopScraper.TryGetYoutubeUrlAsync).
+// gets it from the Steam client's UGC API (an item's "additional previews"); this app asks the same servers ANONYMOUSLY over
+// the client protocol (SteamWorkshopDetails — 100 items a request; tested 2026-11-11, all known trailers in 355 ms), and
+// only falls back to reading the item's public Workshop page (rate-gated) for what they don't answer.
 // Cached in the item's index entry (owner: "we should probably cache the youtube link right?"):
 //   - a trailer found → `youtubeUrl`, never looked up again;
 //   - the page read, no trailer → `trailerCheckedAt` (unix s), re-checked after RecheckDays (an author may add one);
@@ -31,12 +34,9 @@ public static class TrailerOps
     private const int MaxFailsInARow = 3, RecheckDays = 30;
     private static int _running, _scheduled;
 
-    public static void Kick(string why)
-    {
-        // Steam asked us to wait (a cooldown, possibly from before a restart): come back when it's over — once
-        if (SteamGate.CooldownRemaining is { } cd && cd > TimeSpan.Zero) { ScheduleAfter(cd, why); return; }
-        _ = Task.Run(async () => { try { await RunAsync(why).ConfigureAwait(false); } catch { } });
-    }
+    // Always runs: Steam's servers (the first path) aren't steamcommunity.com, so its cooldown doesn't apply to them; only the
+    // page-reading fallback waits it out (RunAsync).
+    public static void Kick(string why) => _ = Task.Run(async () => { try { await RunAsync(why).ConfigureAwait(false); } catch { } });
 
     private static void ScheduleAfter(TimeSpan wait, string why)
     {
@@ -58,6 +58,30 @@ public static class TrailerOps
             if (todo.Count == 0) return;
             Console.WriteLine($"trailers: checking {todo.Count} item(s) ({why})");
             int found = 0, none = 0, fails = 0, inARow = 0;
+            void Record(string path, string? url)
+            {
+                var at = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                LibraryStore.SetMeta(path, (m) => { if (url != null) m.YoutubeUrl = url; m.TrailerCheckedAt = at; });
+                if (url != null) { found++; EventBus.Broadcast("library-item-changed", new { path, youtubeUrl = url }); }
+                else none++;
+            }
+            // FIRST: Steam's own servers, anonymously — 100 items a request, no page reads (SteamWorkshopDetails). Whatever
+            // they answer for is recorded; the rest (unreachable servers, an item they didn't return) falls to page reading.
+            var t0 = DateTime.UtcNow;
+            var cm = await SteamWorkshopDetails.GetTrailersAsync(todo.Select((i) => ulong.Parse(i.WorkshopId!)).Distinct().ToList()).ConfigureAwait(false);
+            if (cm != null)
+            {
+                var rest = new List<LibraryItem>();
+                foreach (var item in todo)
+                    if (cm.TryGetValue(ulong.Parse(item.WorkshopId!), out var t)) Record(item.VideoPath, t.Youtube is { } y ? $"https://www.youtube.com/watch?v={y}" : null);
+                    else rest.Add(item);
+                Console.WriteLine($"trailers: Steam servers answered {todo.Count - rest.Count} item(s) in {(DateTime.UtcNow - t0).TotalSeconds:0.0} s — {found} found, {none} without");
+                todo = rest;
+                if (todo.Count == 0) return;
+            }
+            else Console.WriteLine("trailers: Steam's servers unreachable — reading Workshop pages instead (rate-gated)");
+            // the fallback reads steamcommunity.com: during its cooldown (maybe from before a restart) come back after it
+            if (SteamGate.CooldownRemaining is { } cool && cool > TimeSpan.Zero) { ScheduleAfter(cool, why); return; }
             foreach (var item in todo)
             {
                 var (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!, SteamGate.Kind.Background).ConfigureAwait(false);
@@ -73,14 +97,7 @@ public static class TrailerOps
                     fails++;
                     if (++inARow >= MaxFailsInARow) { Console.WriteLine($"trailers: {inARow} checks failed in a row — offline? stopping, retried next start"); break; }
                 }
-                else
-                {
-                    inARow = 0;
-                    var at = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    LibraryStore.SetMeta(item.VideoPath, (m) => { if (url != null) m.YoutubeUrl = url; m.TrailerCheckedAt = at; });
-                    if (url != null) { found++; EventBus.Broadcast("library-item-changed", new { path = item.VideoPath, youtubeUrl = url }); }
-                    else none++;
-                }
+                else { inARow = 0; Record(item.VideoPath, url); }
             }
             Console.WriteLine($"trailers: finished — {found} found, {none} without, {fails} couldn't be checked");
         }
