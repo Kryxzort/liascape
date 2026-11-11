@@ -905,3 +905,25 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   commands and the rest are in the report's "Waiting on owner".
 - The battery took over your wallpaper three times this morning (09:00–09:12, 09:14–09:23, 09:24–09:34) and put your
   player and backend back after each.
+
+## 2026-11-12 night
+- Pushed today: Steam app mode fails clearly instead of switching method (`b1ded8f9`); docs rebuilt — `docs/history`
+  replaced by `docs/decisions.md` (65+ entries), player docs ~720K → ~195K (`985a737f`); history stripped from code
+  comments (`f35881e8`); rules for public-repo hygiene (`e316014a`), tests (`8133c34f`) and a `Claude-Agent:` commit
+  trailer naming model + effort (`unknown` for a main session — it can't see its own effort).
+- **The idle CPU fix (`1f930e7e`)**: the UI drew 144 frames/s while idle (a leftover always-on freeze diagnostic counting
+  frames). Measured on the owner's machine after a reload: main-thread work 143 → 2.3 ms/s, 0 style recalcs/s.
+  Guard: probe-layout `perf:idle`. UI lint is clean (was 35) and `npm run build` works again.
+- Live traces (owner's machine, dev build, synthetic input) found the remaining lag: playlist-bar hover forces a layout
+  every frame (`useDockLift` re-reads every item's box) + re-renders per item; tab switches and sidebar opens have single
+  100–250 ms tasks. Two agents are optimising these (no change in looks/feel); results get re-measured live before commit.
+- The owner's window runs the Vite DEV build: part of any lag there is React's dev mode and won't exist in `liascape`.
+
+### Waiting on you
+- Re-check the download arrow at 1920×1080 by eye (layout centred exactly; the pixel probe passes against the ring).
+- Check Workshop item 876845903 with the sidebar's Unsubscribe.
+- Delete Re:Zero x Loser (plain Delete) and re-add it from WE (Local).
+- By eye: playlist bar sweeps after the hover optimisation; which icon is off (high or low); the filter column fold and
+  the library row; the trailer that ended 2 s early; re-listen to 3019725456; switch-over by eye and ear; phase 4/5
+  order and the start-up seam; the crash-isolation window + 8 h soak; the warble; WE side-by-sides; every setting by eye.
+- Known red test, not yours to do: `playlistMark:shufflePlay:resume` (its guard is wrong for resume mode; in TODO).
