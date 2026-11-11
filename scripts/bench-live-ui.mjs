@@ -4,12 +4,18 @@
 // layouts, renders); this measures real TIME on real hardware, judged in frames of the display's measured refresh rate.
 // Harmless input only: pointer moves, tab clicks, right-click (opens the item sidebar without applying) + Escape. Never a
 // left-click on a card (applies it), Enter (plays) or any button. Restores the tab it started on.
-// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|tabs|sidebar> [out-label]
+// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|tabs|sidebar> [out-label] [--profile high|typical]
 //   prints one JSON line (hz, budgetMs, overBudget = main-thread tasks longer than one frame, over2Frames, main-thread ms by
 //   phase, worst tasks, layouts) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
 // Compare runs only at the same refresh rate, build (Vite dev vs packaged) and tab. Rules: .claude/rules/testing.md.
 import fs from "node:fs";
-const scen = process.argv[2], label = process.argv[3] || scen;
+// --profile high (default): this machine's CPU, judged at the display's measured refresh rate.
+// --profile typical: the CPU slowed 4× (Chromium's DevTools throttling) and judged at 60 Hz — most users' screens, on a
+// weaker PC. A change must hold up under both.
+const args = process.argv.slice(2), pi = args.indexOf("--profile");
+const profile = pi >= 0 ? args.splice(pi, 2)[1] : "high";
+if (!["high", "typical"].includes(profile)) { console.error("--profile high|typical"); process.exit(2); }
+const scen = args[0], label = args[1] || `${scen}-${profile}`;
 const list = await (await fetch("http://localhost:9222/json")).json();
 const ws = new WebSocket(list.find((x) => x.type === "page").webSocketDebuggerUrl);
 let id = 0; const pend = new Map(); const events = []; let done;
@@ -36,7 +42,9 @@ const leftClickTab = async (name) => {
 const curTab = await ev(`document.querySelector("button.tab.active")?.textContent.trim()`);
 // the frame budget from the display's real refresh: sample rAF for half a second before the run (a 240 Hz monitor = 4.2 ms)
 const hz = await ev(`new Promise((r) => { let n = 0; const t0 = performance.now(); const f = (t) => { n++; if (t - t0 < 500) requestAnimationFrame(f); else r(Math.round(n * 1000 / (t - t0))); }; requestAnimationFrame(f); })`);
-const budget = 1000 / hz;
+const budgetHz = profile === "typical" ? 60 : hz;
+const budget = 1000 / budgetHz;
+if (profile === "typical") await call("Emulation.setCPUThrottlingRate", { rate: 4 });
 
 async function run() {
   if (scen === "idle") { await sleep(4000); return; }
@@ -68,6 +76,7 @@ const t0 = Date.now(); let err = null;
 try { await run(); } catch (e) { err = e.message; }
 const wall = (Date.now() - t0) / 1000;
 const prof = (await call("Profiler.stop")).result.profile;
+if (profile === "typical") await call("Emulation.setCPUThrottlingRate", { rate: 1 }); // never leave the owner's window slowed
 await call("Tracing.end"); await finished;
 if (curTab && scen !== "idle") { const now = await ev(`document.querySelector("button.tab.active")?.textContent.trim()`); if (now !== curTab) await leftClickTab(curTab); }
 fs.writeFileSync(`${label}.trace.json`, JSON.stringify({ traceEvents: events })); fs.writeFileSync(`${label}.cpuprofile`, JSON.stringify(prof));
@@ -86,7 +95,7 @@ const self = new Map(); const dts = prof.timeDeltas || []; const byNode = new Ma
 (prof.samples || []).forEach((s, i) => cnt.set(s, (cnt.get(s) || 0) + (dts[i] || 0)));
 for (const [nid, us] of cnt) { const f = byNode.get(nid).callFrame; if (["(idle)", "(program)", "(root)", "(garbage collector)"].includes(f.functionName)) continue;
   const k = `${f.functionName || "(anon)"} ${(f.url || "").split("/").slice(-2).join("/").split("?")[0]}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + us / 1000); }
-console.log(JSON.stringify({ scen, err, wallS: +wall.toFixed(1), frames: states, mainThreadMs: ms, tasks: tasks.length, hz, budgetMs: +budget.toFixed(2), overBudget: tasks.filter((d) => d > budget).length, over2Frames: tasks.filter((d) => d > 2 * budget).length, over16ms: tasks.filter((d) => d > 16).length,
+console.log(JSON.stringify({ scen, err, wallS: +wall.toFixed(1), frames: states, mainThreadMs: ms, tasks: tasks.length, profile, displayHz: hz, budgetHz, budgetMs: +budget.toFixed(2), overBudget: tasks.filter((d) => d > budget).length, over2Frames: tasks.filter((d) => d > 2 * budget).length, over16ms: tasks.filter((d) => d > 16).length,
   over50ms: tasks.filter((d) => d > 50).length, worstMs: tasks.slice(0, 5).map((d) => +d.toFixed(1)), layouts: lay.length,
   layoutAvgMs: lay.length ? +(lay.reduce((a, e) => a + e.dur, 0) / lay.length / 1000).toFixed(2) : 0 }));
 console.log("JS self (ms):"); for (const [k, v] of [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`  ${v.toFixed(1).padStart(7)}  ${k}`);

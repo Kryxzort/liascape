@@ -39,6 +39,8 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   interaction, rAF callbacks when idle): software GL on a 60 Hz Xvfb makes its milliseconds meaningless.
 - Judge real smoothness with `scripts/bench-live-ui.mjs` on the running app: before and after a change, same scenario,
   same refresh rate, same build (Vite dev vs packaged), same tab. Report `overBudget` / `over2Frames`, not averages.
+- Run both profiles: `--profile high` (this machine, its measured refresh) and `--profile typical` (CPU slowed 4×, judged at
+  60 Hz — most users' screens on a weaker PC). A change that only helps one of them isn't done.
 
 ## Changing behaviour changes the test
 - A deliberate behaviour change rewrites the old assertion to the new behaviour in the same commit; never delete it or
