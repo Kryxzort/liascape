@@ -5,23 +5,27 @@ import { useEffect, type RefObject } from "react";
 //
 // Each `.pl-item` gets an amount a ∈ [0, 1] from a bell curve of the distance between the pointer's x and the item's
 // resting centre (1 under the pointer, ½ one item pitch away, ~1/16 two away). From it:
-//   - magnify: scale 1 + MAG·a from the item's bottom edge (it grows up out of the bar), lifted LIFT·a px — ~15 px of rise
-//     in all, inside the gap under the bar's header (no collision with its buttons);
+//   - magnify: grown from the item's bottom edge (it rises out of the bar) and lifted LIFT·a px, the scale picked so its top
+//     rises RISE·a px whatever the item's height — a fixed rise the gap under the bar's header is sized for;
 //   - make room: pushed sideways away from the pointer by PUSH·(d/σ)·e^(−d²/2σ²) — a bump that's 0 under the pointer,
 //     largest about a pitch away and gone two pitches out, so the neighbours part around the magnified item while far
 //     items never move (the row's ends never get pushed out of view);
 //   - stacking: the most magnified item on top.
+// σ comes from the measured item pitch (the items' width follows the Thumbnail shape), so the bell spans the same number
+// of items at every shape and a neighbour moves the same few px — the dock feels the same at Square and Widescreen.
 // A spring per item (slightly under-damped: it overshoots a touch and settles — the bounce; critically damped mid-sweep, below) follows a, frame-synced in one
 // rAF loop that stops itself once everything rests. The result is written as the `--dock` custom property (one transform);
 // dnd-kit owns the inline transform while sorting and React never touches --dock. Distances use the items' LAYOUT boxes
 // (offsetLeft, unaffected by transforms), so the motion never feeds back into itself.
 // While dragging, everything settles flat. `enabled` false ("Smooth window animations" off / reduced motion) → --dock is
 // cleared and the CSS fallback applies (the hovered item alone, 2 px).
-const MAG = 0.16;      // the extra scale right under the pointer (1.16× — 1.3× collides with the header)
-const LIFT = 4;        // px
-const PUSH = 14;       // px — the sideways push's strength (a neighbour moves ~8 px)
-const SIGMA = 104;     // px — the bell's width: ½ at one item pitch (122 px)
-const REACH = 3 * SIGMA;
+// RISE: how far the top of the item under the pointer rises, fully magnified; its bounce peaks ~13 % higher. The bar's
+// head leaves that + ≥ 3 px of clearance (index.css .playlist-bar-head). Guard: probe-plbar bar:headroom, bar:shape.
+const RISE = 12;       // px
+const LIFT = 4;        // px — of the rise, the part that's a lift (the rest is growth)
+const PUSH = 14;       // px — the sideways push's strength: a neighbour one pitch away moves ~8 px. Guard: probe-plbar bar:shapes
+const SIGMA_PITCH = 1 / Math.sqrt(2 * Math.LN2); // the bell's width in item pitches: ½ at one pitch
+const REACH_SIGMA = 3; // past 3σ the bell is ~1 %: the item rests
 const OMEGA = 21;      // rad/s, the spring's natural frequency (~3.3 Hz)
 const ZETA = 0.55;     // damping ratio: < 1 → a small overshoot (~12 %) — the bounce
 // The bounce only where the eye rests (docs/decisions.md § "Bounce the playlist bar's dock only when entering, stopping or
@@ -68,7 +72,7 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     // `top` is where the items' strip starts: the row reaches up into the bar's head for the magnified items' headroom, and
     // a pointer up there counts only on an item (a magnified one), not in the empty space — hovering the header must not
     // magnify the items under it. Nothing is read at mount (the effect runs inside a tab switch's click).
-    type Geo = { els: HTMLElement[]; centres: number[]; widths: number[]; left: number; top: number; clientLeft: number };
+    type Geo = { els: HTMLElement[]; centres: number[]; widths: number[]; mags: number[]; sigma: number; left: number; top: number; clientLeft: number };
     let geo: Geo | null = null;
     const sizes = new WeakMap<Element, string>();
     const ro = new ResizeObserver((es) => {
@@ -82,9 +86,12 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     const measure = (): Geo => {
       const els = [...row.children] as HTMLElement[];
       for (const el of els) if (!sizes.has(el)) ro.observe(el);
-      const r = row.getBoundingClientRect();
-      return { els, centres: els.map((el) => el.offsetLeft + el.offsetWidth / 2), widths: els.map((el) => el.offsetWidth),
-        left: r.left, top: r.top + (parseFloat(getComputedStyle(row).paddingTop) || 0), clientLeft: row.clientLeft };
+      const r = row.getBoundingClientRect(), cs = getComputedStyle(row);
+      const widths = els.map((el) => el.offsetWidth);
+      const pitch = (widths[0] ?? 0) + (parseFloat(cs.columnGap) || 0);
+      return { els, centres: els.map((el) => el.offsetLeft + el.offsetWidth / 2), widths,
+        mags: els.map((el) => (RISE - LIFT) / Math.max(1, el.offsetHeight)), sigma: Math.max(1, pitch * SIGMA_PITCH),
+        left: r.left, top: r.top + (parseFloat(cs.paddingTop) || 0), clientLeft: row.clientLeft };
     };
     const geom = () => (geo ??= measure());
     const stale = () => { geo = null; };
@@ -96,7 +103,8 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
       const dt = Math.min(last ? t - last : 16, 50) / 1000;
       last = t;
       // reads first: the pointer in the row's content coordinates, each item's resting centre (layout, not the transform)
-      const { els, centres, widths, left, clientLeft } = geom();
+      const { els, centres, widths, mags, sigma, left, clientLeft } = geom();
+      const reach = REACH_SIGMA * sigma;
       const scrollLeft = row.scrollLeft, clientWidth = row.clientWidth;
       const x = px === null ? null : px - left - clientLeft + scrollLeft;
       const viewL = scrollLeft, viewR = scrollLeft + clientWidth;
@@ -107,7 +115,7 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
       const keys: (number | null)[] = []; // per item: its stacking key (null = at rest)
       els.forEach((el, i) => {
         const d = x === null ? Infinity : centres[i] - x;
-        const target = x === null || dragging || Math.abs(d) >= REACH ? 0 : Math.exp(-(d * d) / (2 * SIGMA * SIGMA));
+        const target = x === null || dragging || Math.abs(d) >= reach ? 0 : Math.exp(-(d * d) / (2 * sigma * sigma));
         let b = body.get(el);
         if (!b) { b = { a: 0, v: 0 }; body.set(el, b); }
         // semi-implicit Euler in ≤ 8 ms steps (stable at any frame time)
@@ -118,16 +126,16 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
           left -= h;
         }
         if (Math.abs(target - b.a) < 0.001 && Math.abs(b.v) < 0.01) { b.a = target; b.v = 0; } else moving = true;
-        let push = x === null || dragging || Math.abs(d) >= REACH ? 0
-          : PUSH * (d / SIGMA) * Math.exp(-(d * d) / (2 * SIGMA * SIGMA)) * Math.min(1, Math.max(0, b.a * 4)); // eases in with the item
+        let push = x === null || dragging || Math.abs(d) >= reach ? 0
+          : PUSH * (d / sigma) * Math.exp(-(d * d) / (2 * sigma * sigma)) * Math.min(1, Math.max(0, b.a * 4)); // eases in with the item
         // an item fully on screen at rest stays fully on screen magnified: the first / last one sits at the row's edge, where
         // the push (or its own growth) would cut it off — its magnified box is clamped into the view (nudged inward if need be).
         // One already partly scrolled out is left alone (it mustn't jump in).
-        const w = widths[i], half = (w * (1 + MAG * Math.max(0, b.a))) / 2;
+        const w = widths[i], mag = mags[i], half = (w * (1 + mag * Math.max(0, b.a))) / 2;
         if (centres[i] - w / 2 >= viewL - 0.5 && centres[i] + w / 2 <= viewR + 0.5)
           push = Math.min(Math.max(push, viewL - (centres[i] - half)), viewR - (centres[i] + half));
         const rest = b.a === 0 && push === 0;
-        const dock = rest ? null : `translate(${push.toFixed(2)}px, ${(-LIFT * b.a).toFixed(2)}px) scale(${(1 + MAG * b.a).toFixed(4)})`;
+        const dock = rest ? null : `translate(${push.toFixed(2)}px, ${(-LIFT * b.a).toFixed(2)}px) scale(${(1 + mag * b.a).toFixed(4)})`;
         keys[i] = rest ? null : Math.round(Math.max(0, b.a) * 100);
         if (dock !== b.dock) { if (dock === null) el.style.removeProperty("--dock"); else el.style.setProperty("--dock", dock); b.dock = dock; }
       });

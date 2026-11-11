@@ -334,7 +334,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   /* fully transparent bg → the live wallpaper video shows at 100% behind the playlist bar (the scroll ends
      above it via .lib-scroll margin, so no cards are behind it). Thumbnails + chrome stay opaque/visible. */
   background: transparent; padding: 8px 12px 0; }
-.playlist-bar-head { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; /* the magnified item's rise (+ its bounce) fits under it: probe-plbar bar:headroom */
+.playlist-bar-head { display: flex; align-items: center; gap: 10px;
+  /* the items start 17 px under it (15 + the row's 34 − 32): a magnified item's rise (useDockLift RISE, 12 px) + its bounce
+     + ≥ 3 px clear, the same at every Thumbnail shape (the items' height doesn't change with it). Guard: probe-plbar bar:headroom */
+  margin-bottom: 15px;
   /* above the row, which reaches up under it (the magnified items' headroom): only its controls take the pointer */
   position: relative; z-index: 2; pointer-events: none; }
 .playlist-bar-head > * { pointer-events: auto; }
@@ -353,11 +356,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .playlist-bar-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 /* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
    escapes the row's clip. Side margins cancel .playlist-bar's 12px padding so items sit flush left/right. */
-/* padding-top 34 / margin-top -32: room for the dock magnification (1.16× + 4 px + its overshoot — the row clips vertically)
-   at the same height as before: the row reaches up under the head (above it, pointer-events only on its controls).
+/* padding-top 34 / margin-top -32: room for the dock magnification (its rise + its overshoot — the row clips vertically)
+   without a taller bar: the row reaches up under the head (above it, pointer-events only on its controls).
    position: relative → the items' offsetLeft is in the row's own coordinates (useDockLift reads their resting boxes). */
 .playlist-bar-row { position: relative; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 34px 0 2px; margin: -32px -12px 0; }
-.pl-item { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
+/* as tall as a Square item at every Thumbnail shape, the width follows the shape (Widescreen ≈ 199 × 112): the bar keeps its
+   height and a widescreen item isn't a strip. Guard: probe-plbar bar:shape, bar:shapes */
+.pl-item { position: relative; flex: 0 0 auto; height: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
   overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
   transition: box-shadow .2s;
   /* COOL: the dock magnification — `--dock` (one transform: push, lift, scale from the bottom edge) is written every frame by
@@ -368,7 +373,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    it moves, not their thumbnails, titles and buttons (an unregistered custom property inherits). Unset → the `none` fallback. */
 @property --dock { syntax: "*"; inherits: false; }
 /* COOL: dock-style hover, by pointer position — every item magnifies by
-   its distance from the pointer (hooks/useDockLift.ts → --dock above): 1.16× + 4 px under it, the neighbours about half and
+   its distance from the pointer (hooks/useDockLift.ts → --dock above): a 12 px rise under it, the neighbours about half and
    parting around it, a little bounce. The glow is the fixed .pl-hover-glow layer (escapes the row clip).
    `.hov` (the glow, the remove button, the motion-off lift below) is the row's hovered item (PlaylistBar.tsx), kept in the gaps. */
 /* absolutely fill the box (like the animated layer) — an in-flow img leaves a 1px sub-pixel gap that

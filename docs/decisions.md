@@ -196,6 +196,12 @@ The owner picked Wallpaper Engine's left filter column over dropdowns and chips.
 clicking the name toggles include only, because a cycle through hide surprised users ("users are gonna assume … it
 toggles left to right"), so hiding is always deliberate (✕ or right-click). `components/WorkshopFilterColumn.tsx`.
 
+### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12
+The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were "too small"
+and the bar's height changed with the setting. The dock rises a fixed 12 px (not a fixed 1.16×, which on 112 px items
+needs a header gap the owner found "too much"), and its bell is measured in item pitches so it parts the same at both.
+`hooks/useDockLift.ts`; guard probe-plbar `bar:shape`, `bar:shapes`, `bar:headroom`.
+
 ### Bounce the playlist bar's dock only when entering, stopping or leaving — 2026-11-11
 Items magnify by pointer distance; a bounce on every item during a sweep "feels stuttery" (owner), so sweeping is
 critically damped and only entry, stop and leave overshoot. `hooks/useDockLift.ts`; guard probe-plbar `bar:bounce`.

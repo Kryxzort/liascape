@@ -93,7 +93,7 @@ const PERF_SCRIPT_SHARE_MAX = 0.5; // of a Library switch's script time, the mos
 const PERF_SIDE_RENDERS_MAX = 200; // components re-rendered per sidebar step: the sidebar's own few dozen pass, the grid's
                                    // cards (~6 components each, PERF_N of them) don't
 const DOCK_PLAYLIST = 45;          // perf:dockRepaint: playlist bar items (most of them scrolled out of the bar's view)
-const DOCK_MAG = 0.16;             // hooks/useDockLift.ts MAG: the magnification at amount 1
+const DOCK_GROW = 8;               // hooks/useDockLift.ts RISE − LIFT: px an item grows at amount 1 (its scale: 1 + DOCK_GROW / height)
 const DOCK_BAR_REPAINTS_MAX = 0.75; // perf:dockRepaint: repaints of the whole playlist bar per dock frame: ~1 when every frame
                                     // writes a z-index, ~0.5 when only a change of the items' order does (a sweep reorders them often)
 // React's DevTools hook, installed before the page's scripts: production react-dom calls onCommitFiberRoot on every commit.
@@ -483,10 +483,11 @@ app.whenReady().then(async () => {
       console.log(`        idle: ${tree?.length ?? 0} layers — ${[...by.entries()].sort((a, b) => b[1] - a[1]).map(([k, c]) => `${c}× ${k}`).join(", ")}`);
       // per dock frame (its "dockframe" signal comes after its writes): the order the z-indexes give vs the magnification's
       await js(`(() => { const row = document.querySelector(".playlist-bar-row"); window.__dz = { bad: [], moved: 0 };
+        const mag = ${DOCK_GROW} / row.children[0].offsetHeight; // read once: a read in the listener would force the frame's layout
         row.addEventListener("dockframe", () => {
           const its = [...row.children].map((e, i) => { const t = e.style.getPropertyValue("--dock"); if (!t) return null;
-            // the amount ×100 (the dock's stacking key before rounding), from the written scale (4 decimals: ±0.03)
-            const sc = +/scale\\(([-\\d.]+)\\)/.exec(t)[1], k = Math.max(0, (sc - 1) / ${DOCK_MAG}) * 100;
+            // the amount ×100 (the dock's stacking key before rounding), from the written scale (4 decimals: ±0.07)
+            const sc = +/scale\\(([-\\d.]+)\\)/.exec(t)[1], k = Math.max(0, (sc - 1) / mag) * 100;
             return { i, k, z: +e.style.zIndex }; }).filter(Boolean);
           window.__dz.moved = Math.max(window.__dz.moved, its.length);
           const bad = (x) => { if (window.__dz.bad.length < 5) window.__dz.bad.push(x); };
