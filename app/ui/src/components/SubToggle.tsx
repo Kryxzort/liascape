@@ -58,7 +58,7 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
     finally { setBusy(false); setReadTick((n) => n + 1); }
   };
   const slide = motionOn ? { initial: { opacity: 0, x: 14 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -14 },
-    transition: { duration: 0.22, ease: [0.2, 0.9, 0.3, 1] } } : { initial: false as const, transition: { duration: 0 } };
+    transition: { duration: 0.22, ease: [0.2, 0.9, 0.3, 1] as const } } : { initial: false as const, transition: { duration: 0 } };
   const pct = prog && prog.value > 0 ? Math.round(prog.value * 100) : null;
   return (
     <motion.div className="side-sub" data-side-sub data-state={state} layout={motionOn} transition={{ duration: motionOn ? 0.24 : 0 }}>

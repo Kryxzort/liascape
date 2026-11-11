@@ -1,15 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { api } from "../api/client";
-
-// Debug overlay + self-drive bridge (FPS/metrics HUD + a socket-driven self-test), web-native:
-//  • On-screen HUD (top-right): fps · true 1%/0.1% low · frametime · visible/total cards · anim layers
-//    · JS heap MB · long-task rate.
-//  • `window.liascapeDbg` control bridge — replaces the Unix socket; drive it headlessly from the Electron
-//    probe via webContents.executeJavaScript("liascapeDbg.metrics()"). No socat.
-// Enabled by `?debug` (or `localStorage.liascapeDbg=1`). Electron: launch with LIASCAPE_DEBUG=1 (main.js adds it).
-export const DEBUG_ON =
-  new URLSearchParams(location.search).has("debug") || localStorage.getItem("liascapeDbg") === "1";
+import { DEBUG_ON } from "./debugFlag";
 
 interface Metrics { fps: number; low1: number; low01: number; ms: number; vis: number; cards: number; anim: number; heap: number; longs: number; }
 const ZERO: Metrics = { fps: 0, low1: 0, low01: 0, ms: 0, vis: 0, cards: 0, anim: 0, heap: 0, longs: 0 };
@@ -17,65 +9,84 @@ const ZERO: Metrics = { fps: 0, low1: 0, low01: 0, ms: 0, vis: 0, cards: 0, anim
 export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; getScroll: () => HTMLElement | null }) {
   const [m, setM] = useState<Metrics>(ZERO);
   const mRef = useRef<Metrics>(ZERO);
-  // keep latest callbacks in a ref so the meter/bridge effects run ONCE — App passes inline arrows,
-  // and re-running the effect would reset the frame-stamp window → a bogus "1 fps" flash on every
-  // App re-render (modal open, status tick, …).
+  // keep the latest callbacks in a ref so the meter/bridge effects run ONCE — App passes inline arrows, and re-running the
+  // effect would reset the frame-stamp window (a bogus "1 fps" flash on every App re-render). Written after render.
   const cb = useRef({ setTab, getScroll });
-  cb.current = { setTab, getScroll };
-  // BRIDGE (meter + liascapeDbg, fetchable) runs when the Settings toggle is on OR env/?debug (tooling/CDP).
-  // OVERLAY is only shown by the SETTINGS toggles — env/?debug never force the visual HUD (it just keeps
-  // values tracked + fetchable via liascapeDbg).
+  useLayoutEffect(() => { cb.current = { setTab, getScroll }; });
+  // BRIDGE (liascapeDbg, fetchable) runs when the Settings toggle is on OR env/?debug (tooling/CDP).
+  // OVERLAY is only shown by the SETTINGS toggles — env/?debug never force the visual HUD.
   const settingDebug = useStore((s) => !!s.settings?.debugMode);
   const overlayPref = useStore((s) => s.settings?.debugOverlay !== false);
   const bridgeOn = settingDebug || DEBUG_ON;
   const overlayOn = settingDebug && overlayPref;
+  // The frame meter runs only while someone looks: the HUD overlay, or a `liascapeDbg.metrics()` sample. A rAF loop makes
+  // Chromium produce a frame every refresh (144 fps of style + layout + IntersectionObserver work on an idle page), so an
+  // always-on meter would measure — and cause — exactly the load it's there to catch.
+  const overlayOnRef = useRef(overlayOn);
+  useLayoutEffect(() => { overlayOnRef.current = overlayOn; });
+  const meter = useRef<{ use: () => () => void; sample: (ms: number) => Promise<void> } | null>(null);
 
   // ---- rAF frame meter (counts real presented frames; immune to delta-averaging inflation) ----
   useEffect(() => {
     if (!bridgeOn) return;
-    const getScroll = () => cb.current.getScroll();
-    let raf = 0, prev = 0, lastHud = 0, longs = 0;
+    let users = 0, raf = 0, prev = 0, lastHud = 0, longs = 0;
     const stamps: number[] = []; // frame times in the last 1000ms → fps
     const durs: number[] = [];   // recent frametimes (ms) → low percentiles
     let po: PerformanceObserver | undefined;
-    try { po = new PerformanceObserver((l) => { longs += l.getEntries().length; }); po.observe({ entryTypes: ["longtask"] }); } catch { /* unsupported */ }
-
     const pctLow = (sorted: number[], p: number) => {
       if (sorted.length < 50) return 0;
       const k = Math.max(1, Math.floor(sorted.length * p));
       let s = 0; for (let i = 0; i < k; i++) s += sorted[i];
       return Math.round(1000 / (s / k));
     };
+    const publish = (now: number, dt: number) => {
+      lastHud = now;
+      const sorted = [...durs].sort((a, b) => b - a); // slowest first
+      const scroll = cb.current.getScroll();
+      let vis = 0, cards = 0, anim = 0;
+      if (scroll) {
+        const vr = scroll.getBoundingClientRect();
+        const cs = scroll.querySelectorAll<HTMLElement>(".card");
+        cards = cs.length;
+        cs.forEach((c) => { const r = c.getBoundingClientRect(); if (r.bottom > vr.top && r.top < vr.bottom) vis++; });
+        anim = scroll.querySelectorAll(".thumb.anim").length;
+      }
+      const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+      const next: Metrics = {
+        fps: stamps.length, low1: pctLow(sorted, 0.01), low01: pctLow(sorted, 0.001),
+        ms: +dt.toFixed(1), vis, cards, anim,
+        heap: mem ? Math.round(mem.usedJSHeapSize / 1048576) : 0,
+        longs: longs * 4, // per 250ms → per second
+      };
+      longs = 0; mRef.current = next; setM(next);
+    };
     const tick = (now: number) => {
       stamps.push(now); while (stamps.length && stamps[0] <= now - 1000) stamps.shift();
       const dt = now - prev; prev = now;
       if (dt > 0 && dt < 2000) { durs.push(dt); if (durs.length > 2400) durs.shift(); } // ~10s @240
-      if (now - lastHud >= 250) {
-        lastHud = now;
-        const sorted = [...durs].sort((a, b) => b - a); // slowest first
-        const scroll = getScroll();
-        let vis = 0, cards = 0, anim = 0;
-        if (scroll) {
-          const vr = scroll.getBoundingClientRect();
-          const cs = scroll.querySelectorAll<HTMLElement>(".card");
-          cards = cs.length;
-          cs.forEach((c) => { const r = c.getBoundingClientRect(); if (r.bottom > vr.top && r.top < vr.bottom) vis++; });
-          anim = scroll.querySelectorAll(".thumb.anim").length;
-        }
-        const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
-        const next: Metrics = {
-          fps: stamps.length, low1: pctLow(sorted, 0.01), low01: pctLow(sorted, 0.001),
-          ms: +dt.toFixed(1), vis, cards, anim,
-          heap: mem ? Math.round(mem.usedJSHeapSize / 1048576) : 0,
-          longs: longs * 4, // per 250ms → per second
-        };
-        longs = 0; mRef.current = next; setM(next);
-      }
+      if (now - lastHud >= 250) publish(now, dt);
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); po?.disconnect(); };
-  }, [bridgeOn]); // eslint-disable-line
+    const use = () => {
+      if (users++ === 0) {
+        stamps.length = 0; durs.length = 0; prev = 0; lastHud = performance.now();
+        try { po = new PerformanceObserver((l) => { longs += l.getEntries().length; }); po.observe({ entryTypes: ["longtask"] }); } catch { /* unsupported */ }
+        raf = requestAnimationFrame(tick);
+      }
+      let released = false;
+      return () => {
+        if (released) return; released = true;
+        if (--users === 0) { cancelAnimationFrame(raf); raf = 0; po?.disconnect(); po = undefined; }
+      };
+    };
+    // a full second of frames, so `fps` is a real count; the low percentiles need ~50 frames
+    const sample = (ms: number) => new Promise<void>((done) => { const release = use(); setTimeout(() => { release(); done(); }, ms); });
+    meter.current = { use, sample };
+    return () => { meter.current = null; if (users > 0) { cancelAnimationFrame(raf); po?.disconnect(); } users = 0; };
+  }, [bridgeOn]);
+
+  // the visible HUD keeps the meter running for as long as it shows
+  useEffect(() => (overlayOn ? meter.current?.use() : undefined), [overlayOn, bridgeOn]);
 
   // ---- window.liascapeDbg bridge (registered once) ----
   useEffect(() => {
@@ -88,8 +99,9 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     const stopScroll = () => { cancelAnimationFrame(autoRaf); autoRaf = 0; };
     const liascapeDbg = {
       help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
-      metrics: () => fmt(),
-      fps: () => `fps=${mRef.current.fps} low1%=${mRef.current.low1} ms=${mRef.current.ms}`,
+      // overlay off → sample a second first (the meter isn't running); callers await (CDP awaitPromise, executeJavaScript)
+      metrics: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return fmt(); },
+      fps: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return `fps=${mRef.current.fps} low1%=${mRef.current.low1} ms=${mRef.current.ms}`; },
       tab: (t: string) => { setTab(t); return "tab=" + t; },
       source: (i: number) => { S().setSource(i); return "source=" + i; },
       cardsize: (x: string) => { S().setSetting("cardSize", x); return "cardSize=" + x; },
@@ -127,7 +139,7 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     (window as unknown as { liascapeDbg: typeof liascapeDbg }).liascapeDbg = liascapeDbg;
     console.log("[liascapeDbg] ready — liascapeDbg.help()");
     return () => { stopScroll(); try { delete (window as unknown as { liascapeDbg?: unknown }).liascapeDbg; } catch { /* noop */ } };
-  }, [bridgeOn]); // eslint-disable-line
+  }, [bridgeOn]);
 
   if (!overlayOn) return null;
   return (

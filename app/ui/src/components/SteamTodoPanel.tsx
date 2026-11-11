@@ -43,7 +43,9 @@ export function SteamTodoPanel() {
     window.addEventListener("resize", measure);
     return () => { clearInterval(t); window.removeEventListener("resize", measure); };
   }, [show]);
-  useEffect(() => { if (!show) setFolded(false); }, [show]);
+  // hidden → unfolded again for the next to-do (reset during render on the change)
+  const [wasShown, setWasShown] = useState(show);
+  if (show !== wasShown) { setWasShown(show); if (!show) setFolded(false); }
 
   const act = async (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => {
     setBusy(a);
@@ -59,7 +61,7 @@ export function SteamTodoPanel() {
   const layoutT = motionOn ? { type: "spring" as const, stiffness: 380, damping: 32 } : { duration: 0 };
   // the carousel: out to the left, in from the right
   const slide = motionOn
-    ? { initial: { x: 48, opacity: 0 }, animate: { x: 0, opacity: 1 }, exit: { x: -48, opacity: 0 }, transition: { duration: 0.28, ease: [0.2, 0.9, 0.3, 1] } }
+    ? { initial: { x: 48, opacity: 0 }, animate: { x: 0, opacity: 1 }, exit: { x: -48, opacity: 0 }, transition: { duration: 0.28, ease: [0.2, 0.9, 0.3, 1] as const } }
     : { initial: false as const, animate: { x: 0, opacity: 1 }, exit: { opacity: 0, transition: { duration: 0 } }, transition: { duration: 0 } };
   const fade = motionOn
     ? { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.2, delay: 0.08 } }, exit: { opacity: 0, transition: { duration: 0.1 } } }

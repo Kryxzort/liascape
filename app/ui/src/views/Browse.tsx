@@ -13,24 +13,8 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
-import type { LibraryItem, Wallpaper } from "../api/client";
-
-// "Mark the wallpapers already downloaded": what of a Browse list the library already holds — by
-// its Workshop id (Workshop + the WE-local folder: the same item under either source), else by the page it came from
-// (moewalls / motionbgs / desktophut downloads keep it as `pageUrl`; `sourceId` is the source URL too).
-export function libraryKeys(items: LibraryItem[]): Set<string> {
-  const k = new Set<string>();
-  for (const i of items) {
-    if (i.workshopId) k.add("ws:" + i.workshopId);
-    for (const u of [i.pageUrl, i.sourceId, i.videoPath]) if (u) k.add("url:" + u);
-  }
-  return k;
-}
-export const inLibrary = (keys: Set<string>, w: Wallpaper) =>
-  (!!w.workshopId && keys.has("ws:" + w.workshopId)) || keys.has("url:" + w.pageUrl);
-// the library's copy of a Browse item (same rule as inLibrary) — the sidebar's Apply / Show in Library
-export const libraryCopy = (items: LibraryItem[], w: Wallpaper) =>
-  items.find((i) => (!!w.workshopId && i.workshopId === w.workshopId) || [i.pageUrl, i.sourceId, i.videoPath].includes(w.pageUrl)) ?? null;
+import type { Wallpaper } from "../api/client";
+import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
 
 // WE-local browse sort menu (client-side over the single loaded page).
 function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
@@ -116,7 +100,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
     };
     addEventListener("keydown", h);
     return () => removeEventListener("keydown", h);
-  }); // eslint-disable-line
+  });
 
   // a click focuses (the sidebar shows it) — it never downloads: double-click, Enter or a download button does
   // a pointer focus with the sidebar closed: the card stays where it was while the docked sidebar re-fits the grid (gridKeys.ts)
@@ -131,7 +115,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
       const a = ids.indexOf(anchor.current), b = ids.indexOf(w.pageUrl);
       if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(new Set(ids.slice(lo, hi + 1))); }
     } else if (e.ctrlKey || e.metaKey) {
-      const n = new Set(sel); n.has(w.pageUrl) ? n.delete(w.pageUrl) : n.add(w.pageUrl); setSel(n); anchor.current = w.pageUrl;
+      const n = new Set(sel); if (n.has(w.pageUrl)) n.delete(w.pageUrl); else n.add(w.pageUrl); setSel(n); anchor.current = w.pageUrl;
     } else { anchor.current = w.pageUrl; if (sel.size) setSel(new Set()); }
   };
 

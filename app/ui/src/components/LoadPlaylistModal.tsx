@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FolderOpen } from "lucide-react";
 
@@ -8,7 +8,9 @@ export function LoadPlaylistModal({
   open, names, onLoad, onClose,
 }: { open: boolean; names: string[]; onLoad: (name: string) => void; onClose: () => void }) {
   const [sel, setSel] = useState<string | null>(null);
-  useEffect(() => { if (open) setSel(null); }, [open]);
+  // each opening starts with nothing picked (reset during render on the change — no frame shows the old pick)
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) { setWasOpen(open); if (open) setSel(null); }
   const commit = () => { if (sel) { onLoad(sel); onClose(); } };
   return (
     <AnimatePresence>

@@ -127,7 +127,7 @@ export const Library = memo(function Library() {
     };
     addEventListener("keydown", h);
     return () => removeEventListener("keydown", h);
-  }); // eslint-disable-line
+  });
 
   // a pointer focus (a click, a right-click): when the sidebar wasn't open, the docked one re-fits the grid's columns — the card
   // stays where it was in the view instead of sliding away from under the pointer (gridKeys.ts keepCardInView)
@@ -144,7 +144,7 @@ export const Library = memo(function Library() {
       const a = ids.indexOf(anchor.current), b = ids.indexOf(it.videoPath);
       if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(new Set(ids.slice(lo, hi + 1))); }
     } else if (e.ctrlKey || e.metaKey) {
-      const n = new Set(sel); n.has(it.videoPath) ? n.delete(it.videoPath) : n.add(it.videoPath);
+      const n = new Set(sel); if (n.has(it.videoPath)) n.delete(it.videoPath); else n.add(it.videoPath);
       setSel(n); anchor.current = it.videoPath;
     } else { setSel(new Set()); anchor.current = it.videoPath; applyItem(it.videoPath); }
   };

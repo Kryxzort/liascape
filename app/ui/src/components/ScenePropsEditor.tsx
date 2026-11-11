@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RotateCcw, Wand2 } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
@@ -30,7 +30,8 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
   const [data, setDataRaw] = useState<ScenePropsResp | null>(() => cache.get(path) ?? null);
   const setData = (r: ScenePropsResp) => { cache.set(path, r); setDataRaw(r); };
   const [local, setLocal] = useState<Record<string, unknown>>({});
-  const prevRef = useRef<{ pending: Record<string, unknown>; last: number; tm: number | null }>({ pending: {}, last: 0, tm: null });
+  // live preview of a drag, at most every 90 ms; one throttle per scene (a pending value goes to the scene it was set on)
+  const queuePreview = useMemo(() => throttleByName(90, (name, value) => { api.previewSceneProp(path, name, value).catch(() => {}); }), [path]);
   const persistRef = useRef<Record<string, { tm: number; fn: () => void }>>({});
   const alive = useRef(true);
   const readyRef = useRef(onReady);
@@ -55,16 +56,6 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
     // a value the user is still dragging keeps its local copy; a landed one shows what was saved
     if (name != null && !persistRef.current[name]) setLocal((l) => { const n = { ...l }; delete n[name]; return n; });
     if (name == null) setLocal({});
-  };
-  const flushPreview = () => {
-    const r = prevRef.current; r.tm = null; r.last = Date.now();
-    for (const [name, value] of Object.entries(r.pending)) api.previewSceneProp(path, name, value).catch(() => {});
-    r.pending = {};
-  };
-  const queuePreview = (name: string, value: unknown) => {
-    const r = prevRef.current; r.pending[name] = value;
-    const dt = Date.now() - r.last;
-    if (dt >= 90) flushPreview(); else if (r.tm == null) r.tm = window.setTimeout(flushPreview, 90 - dt);
   };
   const persist = (name: string, value: unknown) => api.setSceneProp(path, name, value).then((r) => landed(r, name)).catch(() => {});
   const queuePersist = (name: string, value: unknown) => {
@@ -127,4 +118,20 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
       {data.props.map(row)}
     </section>
   );
+}
+
+// Coalesce per-name values and send them at most every `ms` (leading edge, then one trailing send with the latest values).
+// Module-level on purpose: it reads the clock, which a component body must not (react-hooks/purity).
+function throttleByName(ms: number, send: (name: string, value: unknown) => void) {
+  let pending: Record<string, unknown> = {}, last = 0, tm: number | null = null;
+  const flush = () => {
+    tm = null; last = Date.now();
+    const out = pending; pending = {};
+    for (const [name, value] of Object.entries(out)) send(name, value);
+  };
+  return (name: string, value: unknown) => {
+    pending[name] = value;
+    const dt = Date.now() - last;
+    if (dt >= ms) flush(); else if (tm == null) tm = window.setTimeout(flush, ms - dt);
+  };
 }

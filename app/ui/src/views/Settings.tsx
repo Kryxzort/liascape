@@ -10,8 +10,10 @@ import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
-import { PlayTimeInput, ROT_HINT } from "../components/PlayTimeInput";
-import { HealthCtx, WarnIcon, healthWarnings } from "../components/FeatureWarn";
+import { PlayTimeInput } from "../components/PlayTimeInput";
+import { ROT_HINT } from "../components/rotHint";
+import { WarnIcon } from "../components/FeatureWarn";
+import { HealthCtx, healthWarnings } from "../components/featureHealth";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.

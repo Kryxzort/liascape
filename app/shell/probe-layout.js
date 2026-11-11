@@ -231,6 +231,24 @@ app.whenReady().then(async () => {
     await cell("tabs:slide", () => slide("on"));
     await cell("tabs:slide:off", () => slide("off"));
     await cell("tabs:slide:reduced", () => slide("reduced"));
+    // An idle page asks for no frames: a requestAnimationFrame loop that never stops (a frame counter, a "watch the box"
+    // tick) makes Chromium render every refresh — 144 fps of style, layout and IntersectionObserver work, a third of a
+    // core, with nothing on screen changing. CSS animations don't call rAF, so a shimmer or a spinner can't trip this.
+    await cell("perf:idle", async () => {
+      const v = [];
+      await tab("Library"); win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 }); await sleep(1500);
+      await js(`(() => { window.__rafN = 0; if (!window.__rafWrapped) { const o = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (cb) => { window.__rafN++; return o(cb); }; window.__rafWrapped = true; } })()`);
+      const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3");
+      await d.sendCommand("Performance.enable");
+      const get = async () => Object.fromEntries((await d.sendCommand("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
+      const a = await get(); await sleep(3000); const b = await get();
+      const raf = await js(`window.__rafN`);
+      const recalc = Math.round((b.RecalcStyleCount - a.RecalcStyleCount) / 3), taskMs = Math.round(((b.TaskDuration - a.TaskDuration) / 3) * 1000);
+      console.log(`        idle 3 s on Library: ${raf} rAF callbacks, ${recalc} style recalcs/s, main thread ${taskMs} ms/s`);
+      if (raf > 12) v.push(`a requestAnimationFrame loop keeps running while idle (${raf} callbacks in 3 s)`);
+      return v;
+    });
     await reducedMotion(false); await setMotion(true);
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });

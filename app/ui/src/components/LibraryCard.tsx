@@ -2,7 +2,8 @@ import { memo, useRef, useState } from "react";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { PlaylistToggle } from "./PlaylistToggle";
-import { MotionThumb, hasGifAsset, hasVideoPreview } from "./MotionThumb";
+import { MotionThumb } from "./MotionThumb";
+import { hasGifAsset, hasVideoPreview } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered

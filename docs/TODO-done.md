@@ -1360,3 +1360,8 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         capture's three frames read 4.084 / 4.083 / 4.082 s past their request times and show the opened scene at
         "0.5 s", where every other run (`captures/clk2`, `det/v3509-det`) is still black: that run's first picture came
         4 s late. Recaptured 2026-11-11 00:13 (clock read 3 of 3, offset 0.12 s: 0.61 / 2.13 / 5.13 s).
+
+## UI lint clean (2026-11-12)
+- [x] `npm run lint` clean (was 35 errors) and part of the pre-commit check in CLAUDE.md: helpers moved out of component
+      files, prop-driven resets done during render instead of in effects, `WallpaperBg`'s memory held in state (its random
+      fallback no longer jumps on every library change), the scene-props preview throttle moved to module level.

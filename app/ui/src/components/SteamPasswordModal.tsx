@@ -33,8 +33,12 @@ export function SteamPasswordModal() {
     }, 30);
     return () => clearTimeout(t);
   }, [pw?.step, pw?.busy, pw?.error, pw?.retry]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setCode(""); }, [pw?.step, pw?.retry]);
-  useEffect(() => { if (!open) { setCode(""); if (pwRef.current) pwRef.current.value = ""; } }, [open]);
+  // a new step / a retry / closing → the code field starts empty (reset during render on the change)
+  const codeKey = `${open}|${pw?.step}|${pw?.retry}`;
+  const [lastCodeKey, setLastCodeKey] = useState(codeKey);
+  if (codeKey !== lastCodeKey) { setLastCodeKey(codeKey); setCode(""); }
+  // the password lives only in the DOM input (never in state): clear it there on close
+  useEffect(() => { if (!open && pwRef.current) pwRef.current.value = ""; }, [open]);
 
   const signIn = (e: React.FormEvent) => {
     e.preventDefault();

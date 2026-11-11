@@ -51,11 +51,12 @@ export function LibrarySide({
   globalVolume: number; globalSpeed: number;
   onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void;
 }) {
-  const [vol, setVol] = useState(0);
-  const [spd, setSpd] = useState(1);
-  const [volOv, setVolOv] = useState(false);
-  const [spdOv, setSpdOv] = useState(false);
-  const [wl, setWl] = useState(false);
+  // start from the item's real values — the first paint must not show a 0 volume / 1× speed placeholder
+  const [vol, setVol] = useState(() => item.volumeOverride ?? globalVolume);
+  const [spd, setSpd] = useState(() => item.speedOverride ?? globalSpeed);
+  const [volOv, setVolOv] = useState(() => item.volumeOverride != null);
+  const [spdOv, setSpdOv] = useState(() => item.speedOverride != null);
+  const [wl, setWl] = useState(() => item.isWhitelisted);
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
@@ -82,11 +83,14 @@ export function LibrarySide({
   useEffect(() => () => { for (const d of Object.values(persistRef.current)) if (d.tm != null) { clearTimeout(d.tm); d.fn?.(); d.tm = null; d.fn = null; } }, []);
 
   // the values follow the store's copy (a volume keybind on this item, a patch from another surface)
-  useEffect(() => {
+  // (adjusted during render on the change, so a keybind's new volume never shows a frame late)
+  const [synced, setSynced] = useState({ item, globalVolume, globalSpeed });
+  if (synced.item !== item || synced.globalVolume !== globalVolume || synced.globalSpeed !== globalSpeed) {
+    setSynced({ item, globalVolume, globalSpeed });
     setVolOv(item.volumeOverride != null); setVol(item.volumeOverride ?? globalVolume);
     setSpdOv(item.speedOverride != null); setSpd(item.speedOverride ?? globalSpeed);
     setWl(item.isWhitelisted);
-  }, [item, globalVolume, globalSpeed]);
+  }
 
   // per item (this component is keyed by the path): the duration, read at once — no flight to wait for
   useEffect(() => {

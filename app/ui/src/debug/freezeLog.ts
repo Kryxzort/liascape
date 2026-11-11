@@ -3,19 +3,14 @@ import { API, authHeaders } from "../api/client";
 // DIAGNOSTIC: catch the recurring main-thread wedge. Every ~2s (and on any long task >200ms) we POST a
 // compact snapshot to the backend, which appends it to ~/.cache/liascape/freeze.log. When the main
 // thread wedges, these stop firing — the GAP in the log timestamps the freeze, and the last line before
-// it captures the trigger context (tab, scrolling, gif/anim count, JS heap, DOM size, fps, worst stall).
+// it captures the trigger context (tab, scrolling, gif/anim count, JS heap, DOM size, worst stall).
 // Cheap + always-on so a freeze during normal use is diagnosable after the fact (no live attach needed).
 export function startFreezeLog() {
   if (typeof window === "undefined") return;
 
-  // rAF fps (rolling 1s)
-  let frames = 0, lastFpsT = performance.now(), fps = 0;
-  const tick = (t: number) => {
-    frames++;
-    if (t - lastFpsT >= 1000) { fps = Math.round((frames * 1000) / (t - lastFpsT)); frames = 0; lastFpsT = t; }
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  // No frame counter here: a requestAnimationFrame loop makes Chromium render every refresh (144 fps of style, layout and
+  // IntersectionObserver work on an idle page — a third of a core), and a wedged page renders nothing anyway, so the
+  // heartbeat gap below already timestamps a freeze. Live fps: `liascapeDbg.metrics()` (samples on demand).
 
   // worst main-thread stall since last post (longtask = task that blocked the main thread >50ms)
   let maxLongTask = 0;
@@ -44,7 +39,6 @@ export function startFreezeLog() {
       cards: document.querySelectorAll(".card.lib, .lib-card").length,
       dom: document.getElementsByTagName("*").length,
       heapMB: mem ? Math.round(mem.usedJSHeapSize / 1048576) : null,
-      fps,
       stallMs: maxLongTask,
     };
   };

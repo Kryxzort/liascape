@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { media, api } from "../api/client";
 
@@ -14,15 +14,17 @@ export function WallpaperBg() {
   const videoScale = useStore((s) => (s.settings?.videoScale as string) ?? "fill");
   const globalSpeed = useStore((s) => (s.settings?.speed as number) ?? 1);
 
-  const isVid = (p: string) => /\.(mp4|webm|mov|mkv|avi)$/i.test(p);
   const playingVideo = playingPath && isVid(playingPath) ? playingPath : null;
-  const randomVideo = useMemo(() => {
-    const vids = libraryItems.filter((i) => !i.isScene && isVid(i.videoPath));
-    return vids.length ? vids[Math.floor(Math.random() * vids.length)].videoPath : null;
-  }, [libraryItems]);
-  const lastRef = useRef<string | null>(null);
-  if (playingVideo) lastRef.current = playingVideo;
-  const bgPath = playingVideo ?? lastRef.current ?? randomVideo;
+  // the last video that played (kept while a scene plays) — adjusted during render, so no frame shows the old one
+  const [lastPlayed, setLastPlayed] = useState<string | null>(playingVideo);
+  if (playingVideo && playingVideo !== lastPlayed) setLastPlayed(playingVideo);
+  // nothing played yet → one random library video, kept while it's still in the library (a download or a delete
+  // elsewhere must not swap the background). The randomness is drawn once, at mount.
+  const [seed] = useState(randomSeed);
+  const vids = useMemo(() => libraryItems.filter((i) => !i.isScene && isVid(i.videoPath)).map((i) => i.videoPath), [libraryItems]);
+  const [decor, setDecor] = useState<string | null>(null);
+  if (!lastPlayed && vids.length && (decor == null || !vids.includes(decor))) setDecor(vids[Math.floor(seed * vids.length)]);
+  const bgPath = playingVideo ?? lastPlayed ?? decor;
   const bgVideo = bgPath ? media(bgPath) : null;
   const fit = videoScale === "fill" ? "cover" : "contain";
 
@@ -72,3 +74,6 @@ export function WallpaperBg() {
   return <video ref={ref} className="settings-bg" style={{ objectFit: fit }}
     src={bgVideo} autoPlay muted loop playsInline onLoadedMetadata={syncNow} />;
 }
+
+const isVid = (p: string) => /\.(mp4|webm|mov|mkv|avi)$/i.test(p);
+const randomSeed = () => Math.random();

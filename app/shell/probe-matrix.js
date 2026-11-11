@@ -1874,7 +1874,7 @@ const GLOW_SPECS = [
   { name: "settings section icon", tab: "Settings", el: `document.querySelector(".ssection-ico")`, read: "boxShadow" },
   { name: "settings corner pools", tab: "Settings", el: `document.querySelector(".settings")`, read: "gradient" },
   { name: "hovered settings row bar", tab: "Settings", hover: true, el: `document.querySelectorAll(".settings .srow")[2]`, read: "boxShadow", pseudo: "::before" },
-  { name: "hovered settings checkbox", tab: "Settings", hover: true, el: `document.querySelector(".settings input[type=checkbox]")`, read: "filter" },
+  { name: "hovered settings checkbox", tab: "Settings", hover: true, el: `document.querySelector(".settings input[type=checkbox]")`, read: "boxShadow" }, // the themed box glows with box-shadow, not a filter
 ];
 async function glowLook(c) {
   await js(GLOW_JS);

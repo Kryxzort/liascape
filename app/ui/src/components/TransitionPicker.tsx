@@ -92,7 +92,7 @@ export function TransitionPicker({
   useEffect(() => { if (ready) preview.setScale(videoScale); }, [videoScale, ready]);
 
   const toggle = (id: string) => {
-    const next = new Set(sel); next.has(id) ? next.delete(id) : next.add(id);
+    const next = new Set(sel); if (next.has(id)) next.delete(id); else next.add(id);
     onChange({ transitionEffectIds: [...next] });
   };
   const setIds = (ids: string[]) => onChange({ transitionEffectIds: ids });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Save } from "lucide-react";
 
@@ -7,7 +7,9 @@ export function SavePlaylistModal({
   open, names, onSave, onClose,
 }: { open: boolean; names: string[]; onSave: (name: string) => void; onClose: () => void }) {
   const [name, setName] = useState("");
-  useEffect(() => { if (open) setName(""); }, [open]);
+  // each opening starts with an empty name (reset during render on the change — no frame shows the old text)
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) { setWasOpen(open); if (open) setName(""); }
   const commit = () => { const n = name.trim(); if (n) { onSave(n); onClose(); } };
   return (
     <AnimatePresence>

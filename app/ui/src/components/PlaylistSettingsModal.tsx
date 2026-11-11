@@ -4,8 +4,10 @@ import { Sparkles } from "lucide-react";
 import type { PlaylistSettings } from "../api/client";
 import { useStore } from "../store";
 import { TransitionPicker } from "./TransitionPicker";
-import { PlayTimeInput, ROT_HINT } from "./PlayTimeInput";
-import { HealthCtx, WarnIcon, useFeatureWarnings } from "./FeatureWarn";
+import { PlayTimeInput } from "./PlayTimeInput";
+import { ROT_HINT } from "./rotHint";
+import { WarnIcon } from "./FeatureWarn";
+import { HealthCtx, useFeatureWarnings } from "./featureHealth";
 
 // Playlist Settings overlay. Centered modal:
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
