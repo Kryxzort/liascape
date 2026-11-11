@@ -8,7 +8,7 @@ Users type one command, `liascape` (`scripts/liascape`): bare = the app, `liasca
 ## Verify your work
 Every command below is hermetic unless marked; run anything over ~30 s in the background.
 - Backend build: `dotnet build src/backend`
-- UI build: `cd app/ui && npm run build` · lint: `npm run lint` — not clean yet (35 errors from before 2026-11-11, mostly the newer react-hooks rules; `docs/TODO.md`): add none — compare the count before and after
+- UI build + lint (both clean; keep them clean before every commit): `cd app/ui && npm run build && npm run lint`
 - Player tests: `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q` (this machine's shell carries a stray `LD_LIBRARY_PATH` that breaks native links)
 - UI matrix: `bash scripts/test-ui-matrix.sh --changed` before a commit, the full run before a merge; one area: `--probe <app/shell/probe-*.js>` (skill `ui-verify`)
 - Adapter integration test: `bash scripts/test-liascape-player-adapter.sh [--no-build]`
@@ -36,6 +36,7 @@ Path-scoped rules load when you read or edit matching files; open one directly w
 | area | rule file |
 |---|---|
 | writing rules, docs, skills | `.claude/rules/writing-rules.md` |
+| writing, changing or fixing tests, probes, a red test result | `.claude/rules/testing.md` |
 | build, install, flake, PKGBUILD, AppImage, launcher, dev stack | `.claude/rules/build-and-packaging.md` |
 | backend web API, security, WS events, feature health | `.claude/rules/backend/api.md` |
 | settings, sessions, atomic state files | `.claude/rules/backend/state-files.md` |

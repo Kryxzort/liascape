@@ -22,5 +22,5 @@ paths:
 - The matrix window is SHOWN on the private Xvfb and focused: a hidden BrowserWindow renders no frames (rAF never fires — exits never finish, `appActive` stays false). Drags that need real hit-testing go through `webContents.sendInputEvent`.
 - Find items by `data-*` attributes and labels (`data-title`, `m.row(label)`), never by a tooltip; a renamed label updates the probes.
 - A new control gets a cell; a new family must be mapped in `scripts/matrix-cells-for.sh` (unknown files mean FULL).
-- Show a fix RED first where practical: `--ui-dir <older build>` drives an older bundle.
+- `--ui-dir <older build>` drives an older bundle (show a fix RED first: `.claude/rules/testing.md`).
 - How to verify a visual change (screenshots, per-frame samples): the `ui-verify` skill.
