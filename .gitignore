@@ -24,3 +24,6 @@ scripts/gl-transitions/
 # LWE core: scripts/lwe.sh prepare/build output (build/lwe-src-*, build/lwe-build-*, build/lwe-core)
 /build/
 .direnv/
+
+# Private notes to the owner (night runs): kept locally, never published
+docs/NIGHT-NOTES.md

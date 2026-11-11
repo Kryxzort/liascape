@@ -92,7 +92,7 @@ Phase 5 is the owner's call (§ 5).
 
 | Row | Result | When / evidence |
 |---|---|---|
-| backend adapter IT against a private headless player | **415 pass / 0 fail** | 2026-11-10 (NIGHT-NOTES "your Todoist behaviour items") |
+| backend adapter IT against a private headless player | **415 pass / 0 fail** | 2026-11-10 |
 | UI × player-state matrix | **832 pass + 6 load flakes**, each passing alone | 2026-11-10, same run |
 | backend self-test (`player-selftest`) | PASS | 2026-11-10 |
 | web wallpapers | not a parity item | the legacy app never plays them (above) |
