@@ -5,7 +5,7 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-1. [ ] **UI performance, in progress** (two agents): playlist-bar hover (`useDockLift` forced layout per frame, per-item
+1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
 2. [ ] **Playlist-bar items as tall as the squares at every shape**: `.pl-item` is `width: 112px; aspect-ratio:
@@ -49,7 +49,15 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
        (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
        `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.
-9. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
+10. [ ] **Tab switch still drops frames in production** (bench-live-ui, 2026-11-12, 240 Hz: 23 double-frame misses over 5
+       switches, ~62 ms each; typical profile ~340 ms each): the page remount (~1,000 components for 160 cards) plus the
+       first style/layout/paint of every card. Investigate grid virtualisation (cards only near the viewport; probes that
+       look for off-screen cards would need to scroll) vs keeping pages mounted (duplicate `.scroll` / key handlers / kept
+       scroll state — see the tab agent's notes in the commit df573913). Pick by bench numbers at both profiles.
+11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
+       (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
+       mid-pulse frames look slightly different (crossfade, not blur interpolation).
+12. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
        (docs/superpowers/specs/) going past "motion by role" — spring physics, a magnetic lean toward an approaching
        cursor, icons acting out their meaning (download drops into a tray, trash lid lifts, external-link arrow slides
        out and back, play/pause morph, refresh spins with inertia), springy press feedback; status icons glow only; only
