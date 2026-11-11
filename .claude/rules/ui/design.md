@@ -32,6 +32,7 @@ the floor; a new element is designed to delight within the toggles and the frame
 - Never measure layout in a mount effect (it forces the new page's layout inside the click): size from a ResizeObserver callback, or read on the user's next input. Guard: probe-layout `perf:tabs`.
 - Animate transform / opacity / filter only. Glow is a static shadow toggled by state (pulse via opacity on a composited layer); never animate a blur radius. No `backdrop-filter: blur`.
 - Decode or animate nothing while `!appActive` (the store's focus/visibility flag) — it caused the main-thread freeze.
+- The page has 6 connections to the backend (Chromium, HTTP/1.1) and slow `/img` loads can hold them all: a list being replaced drops at once and its cards abort their unfinished image loads (`components/Card.tsx`), or the next API call queues behind them. Guard: matrix `browse:switchSource`.
 - Bulk-autoplay only gif/webp previews; video previews play on hover (or under "Autoplay video thumbnails", capped at `AUTOPLAY_VIDEO_CAP`, on-screen only).
 - Keep a gif `<img>` mounted and toggle its opacity; never swap its `src` (it restarts).
 

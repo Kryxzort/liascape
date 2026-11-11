@@ -256,7 +256,14 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // ---- browse ----
-  setSource(i) { set({ activeSource: i, browseFocus: null }); LS.set("activeSource", i); get().reload(); },
+  // PERF: another source drops the old list at once (its placeholder grid shows meanwhile): the old cards unmount and abort
+  // their thumbnails' loads (components/Card.tsx). Kept up, a slow source's /img proxy loads hold every one of the
+  // browser's 6 connections to the backend, and the new source's /browse queues behind them for seconds — the old list
+  // under the new pill all that time. Guard: matrix browse:switchSource.
+  setSource(i) {
+    set(i === get().activeSource ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true });
+    LS.set("activeSource", i); get().reload();
+  },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
   // update the filter instantly (UI is snappy) but DEBOUNCE the network reload — rapid chip toggles
@@ -293,7 +300,10 @@ export const useStore = create<State>((set, get) => ({
       set({ wallpapers: list, hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
     } catch (e) {
       // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
-      if (gen === browseGen) get().setStatus(e instanceof Error ? e.message : String(e), true);
+      if (gen === browseGen) {
+        get().setStatus(e instanceof Error ? e.message : String(e), true);
+        if (!get().wallpapers.length) set({ hasMore: false }); // a switched-to source that failed: no placeholders asking for page 2
+      }
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async loadMore() {

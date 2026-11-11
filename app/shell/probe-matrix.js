@@ -762,7 +762,7 @@ C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
       const srcs = (await http("GET", "/sources")).json || [];
       const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
       await ui(`m.tab("Browse"); await m.sleep(500); m.click(m.byText(".pill", ${JSON.stringify(weName)}), "source pill");`);
-      await waitFor(() => ui(`return !!m.card("weIn") && !!m.card("weOut");`), 8000, 150);
+      c.listed = await waitFor(() => ui(`return !!m.card("weIn") && !!m.card("weOut");`), 8000, 150);
       c.badges = await ui(`return Object.fromEntries(["weIn", "weOut"].map((t) => [t, m.card(t)?.querySelector("[data-in-library]")?.textContent?.trim() ?? null]));`);
     } finally {
       await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
@@ -771,10 +771,59 @@ C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
   }, check(c) {
     const v = [];
     if (!c.libHasS1) v.push("the library has no item with Workshop id 900000001 (s1) — the fixture is off");
-    if (!c.badges) return [...v, "Browse showed no weIn / weOut cards"];
+    if (!c.listed || !c.badges) return [...v, "Browse never listed weIn and weOut within 8 s of the source pill (browse:switchSource covers a slow switch)"];
     if (c.badges.weIn !== "In library") v.push(`weIn (in the library as s1): badge ${JSON.stringify(c.badges.weIn)}, expected "In library"`);
     if (c.badges.weOut != null) v.push(`weOut (not in the library): badge ${JSON.stringify(c.badges.weOut)}, expected none`);
     return v;
+  } };
+// a source switch while the old list's remote thumbnails still load: the new source's list shows at once. Staged: the first
+// source's list is a stubbed page of 24 cards with remote thumbnails, and every /img response is held 8 s once its headers
+// arrive (a slow connection behind the /img proxy) — the loads fill the browser's 6 connections to the backend. RED when the
+// old cards' thumbnails keep loading: the Wallpaper Engine (Local) /browse queues behind them, the old list under the new pill.
+C["browse:switchSource"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const ws = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-switch"), d = path.join(ws, "9101");
+    fs.mkdirSync(d, { recursive: true });
+    fs.copyFileSync(K[0], path.join(d, "v.mp4"));
+    fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title: "weSw", type: "video", file: "v.mp4" }));
+    const s0 = await getSettings();
+    const wr = session.defaultSession.webRequest, filter = { urls: ["<all_urls>"] }, isImg = (u) => /\/img\?/.test(u);
+    const held = new Set(), live = new Set(); // live: the /img requests sent and not finished
+    wr.onBeforeRequest(filter, (q, cb) => { if (isImg(q.url)) live.add(q.id); cb({}); });
+    wr.onErrorOccurred(filter, (q) => live.delete(q.id));
+    wr.onHeadersReceived(filter, (q, cb) => {
+      if (!isImg(q.url)) return cb({});
+      const go = () => { held.delete(go); clearTimeout(t); live.delete(q.id); cb({}); }, t = setTimeout(go, 8000); held.add(go);
+    });
+    try {
+      await post("/settings", { ...s0, workshopFolder: ws, autoAddWeWallpapersToLibrary: false });
+      const srcs = (await http("GET", "/sources")).json || [];
+      const name = (i) => (srcs.find?.((x) => x.index === i) ?? srcs[i])?.name;
+      c.from = name(0); c.to = name(3);
+      const items = Array.from({ length: 24 }, (_, i) => ({ title: `sw-${i + 1}`, thumbnailUrl: `https://thumb.invalid/sw-${i + 1}.jpg`, animatedThumbnailUrl: null,
+        pageUrl: `https://thumb.invalid/page/${i + 1}`, isScene: false, workshopId: null, addedAt: null }));
+      await js(`(() => { const items = ${JSON.stringify(items)}, f = window.fetch; window.fetch = (u, o) => {
+        if (String(u).split("?")[0].endsWith("/browse") && o?.method === "POST" && JSON.parse(o.body).source === 0)
+          return Promise.resolve(new Response(JSON.stringify(JSON.parse(o.body).page > 1 ? [] : items), { status: 200, headers: { "Content-Type": "application/json" } }));
+        return f(u, o); }; })(); true`);
+      await ui(`m.tab("Browse"); await m.sleep(300); m.click(m.byText(".pill", ${JSON.stringify(c.from)}), "source pill");`);
+      await waitFor(() => live.size >= 6, 6000, 50);
+      await sleep(300); // past the 6th: the rest queue
+      c.pending = live.size;
+      const t0 = Date.now();
+      await ui(`m.click(m.byText(".pill", ${JSON.stringify(c.to)}), "source pill");`);
+      c.shown = await waitFor(() => ui(`return !!m.card("weSw") && !m.card("sw-1");`), 12000, 50);
+      c.ms = Date.now() - t0;
+      console.log(`        switchSource: ${c.pending} /img loads in flight at the switch, ${c.to}'s list after ${c.ms} ms`);
+    } finally {
+      wr.onBeforeRequest(filter, null); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
+      for (const go of [...held]) go();
+      await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
+      await ui(`m.tab("Library"); await m.sleep(400);`);
+    }
+  }, check(c) {
+    if (!(c.pending >= 6)) return [`only ${c.pending} /img loads of ${c.from}'s stubbed list in flight at the switch (want ≥ 6, the browser's connections per host) — the cell proved nothing`];
+    if (!c.shown) return [`${c.to}'s list never replaced ${c.from}'s within 12 s of its pill (${c.pending} thumbnail loads were in flight)`];
+    return c.ms > 2500 ? [`${c.to}'s list showed ${c.ms} ms after its pill (≤ 2500): it waited for ${c.from}'s ${c.pending} thumbnail loads`] : [];
   } };
 // a right click on a card or bar item whose hover preview plays (a right-click opens the item's sidebar — no menu):
 // the same <video> keeps playing while the pointer stays on the item, nothing applies; off the item it stops. The card's case

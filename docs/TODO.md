@@ -16,9 +16,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
        mid-pulse frames look slightly different (crossfade, not blur interpolation).
-13. [ ] UI matrix `idle × browse:inLibrary` fails alone too, on f03e7156 and later ("weIn (in the library as s1): badge
-       null, expected In library"): the WE-local Browse card of an item already in the library lost its "In library"
-       badge. Find the cause (Browse's libraryMatch / the card's badge), fix, rerun the cell.
+14. [ ] Box selection: Ctrl+click on a card inside a box selection toggles the wrong set (probe-select `lib:ctrlClick`,
+       `br:ctrlClick`: "Ctrl+click on the boxed card 2: [1,2,…], want [1,…]") — fails on 77dd702c too. Fix in
+       hooks/useMarquee.ts / the views' Ctrl+click (the box's selection must be the ordinary `sel` the click edits).
+15. [ ] Owner's call: a reload / search / filter within one Browse source can still queue behind slow `/img` thumbnail
+       loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
+       `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
+       media URL, the dev proxy and the Host checks.
 12. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
        (docs/superpowers/specs/) going past "motion by role" — spring physics, a magnetic lean toward an approaching
        cursor, icons acting out their meaning (download drops into a tray, trash lid lifts, external-link arrow slides

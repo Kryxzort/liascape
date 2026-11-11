@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
 import { useStore } from "../store";
@@ -30,9 +30,16 @@ export const Card = memo(function Card({
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
   const downloading = progress !== undefined;
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]); // PERF: this card's own slice
+  // PERF: a removed <img> keeps loading (Chromium holds it alive until it's done); dropping its src aborts the request, so a
+  // dropped list's thumbnails stop holding the backend's connections (store setSource). Guard: matrix browse:switchSource.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    return () => { for (const i of wrap?.querySelectorAll("img") ?? []) if (!i.complete) i.removeAttribute("src"); };
+  }, []);
   return (
     <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}`}>
-      <div className="thumb-wrap" data-morph-id={`br-${w.pageUrl}`}
+      <div className="thumb-wrap" ref={wrapRef} data-morph-id={`br-${w.pageUrl}`}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onClick={(e) => onClick(e, w)}
         onDoubleClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey) onDownload(w); }}
