@@ -33,9 +33,9 @@ const page = (code) => js(`(async () => { ${code} })()`);
 const row = `document.querySelector(".playlist-bar-row")`;
 // each item's lift (the dock transform's translateY; the sortable's own transform is none at rest) + whether a glow is up
 const state = () => page(`return { items: [...document.querySelectorAll(".pl-item")].map((e) => { const r = e.getBoundingClientRect();
-    const m = new DOMMatrixReadOnly(getComputedStyle(e).transform); return { x: r.x, y: r.y, w: r.width, h: r.height, lift: +m.m42.toFixed(2) }; }),
+    const m = new DOMMatrixReadOnly(getComputedStyle(e).transform); return { x: r.x, y: r.y, w: r.width, h: r.height, lift: +m.m42.toFixed(2), mag: +m.m11.toFixed(4) }; }),
   glow: !!document.querySelector(".pl-hover-glow"), glowBox: (() => { const g = document.querySelector(".pl-hover-glow"); if (!g) return null;
-    const r = g.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(), scroll: ${row}?.scrollLeft ?? null, max: ${row} ? ${row}.scrollWidth - ${row}.clientWidth : null };`);
+    const r = g.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(), scroll: ${row}?.scrollLeft ?? null, rowL: ${row}?.getBoundingClientRect().left, rowR: ${row}?.getBoundingClientRect().right, max: ${row} ? ${row}.scrollWidth - ${row}.clientWidth : null };`);
 const move = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
 const wheel = (x, y, dy) => win.webContents.sendInputEvent({ type: "mouseWheel", x: Math.round(x), y: Math.round(y), deltaX: 0, deltaY: dy, canScroll: true });
 async function shot(name) { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(OUT, `plbar-${name}.png`), img.toPNG()); }
@@ -95,19 +95,20 @@ app.whenReady().then(async () => {
       const y = a.y + a.h / 2;
       move(a.x + a.w / 2, y); await sleep(120); move(a.x + a.w - 4, y); await sleep(350);
       s = await state();
-      if (!(s.items[0].lift < -3)) v.push(`on item 1 its lift is ${s.items[0].lift} px (expected −4)`);
+      const big = (i) => i.mag > 1.1 || (i.mag < 1.01 && i.lift < -3); // magnified — or, motion off, the 2 px fallback can't reach here
+      if (!big(s.items[0])) v.push(`on item 1: scale ${s.items[0].mag}, lift ${s.items[0].lift} px (expected magnified)`);
       const gapX = (a.x + a.w + b.x) / 2;
       move(gapX, y); await sleep(350);
       s = await state();
       await shot("gap");
-      if (!(s.items[0].lift < -3)) v.push(`in the gap item 1 dropped to ${s.items[0].lift} px (it should stay lifted)`);
+      if (!(s.items[0].mag > 1.08)) v.push(`in the gap item 1 dropped to scale ${s.items[0].mag} (it should stay magnified)`);
       if (!s.glow) v.push("in the gap the hover glow went away");
       else { const g = s.glowBox, i = s.items[0]; const off = Math.max(Math.abs(g.x - i.x), Math.abs(g.y - i.y), Math.abs(g.w - i.w), Math.abs(g.h - i.h));
         if (off > 0.5) v.push(`the glow sits ${off.toFixed(2)} px off item 1 (glow ${JSON.stringify(g)}, item ${JSON.stringify(i)})`); }
       move(b.x + 6, y); await sleep(120); move(b.x + b.w / 2, y); await sleep(350);
       s = await state();
-      if (!(s.items[1].lift < -3)) v.push(`on item 2 its lift is ${s.items[1].lift} px (expected −4)`);
-      if (s.items[0].lift < -3) v.push(`item 1 still fully lifted (${s.items[0].lift}) with the pointer on item 2`);
+      if (!(s.items[1].mag > 1.13)) v.push(`on item 2 its scale is ${s.items[1].mag} (expected ~1.16)`);
+      if (!(s.items[0].mag < s.items[1].mag - 0.03)) v.push(`item 1 (${s.items[0].mag}) as magnified as item 2 (${s.items[1].mag}) with the pointer on item 2`);
       return v;
     });
 
@@ -135,14 +136,81 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // owner 2026-11-11: "detecting mouse position, not the item its focused on — so the surrounding stuff moves even if you move the
+    // mouse on the same playlist item": the pointer on item 2's left quarter, then its right quarter → item 1 / item 3 trade lift
+    await cell("bar:continuous", async () => {
+      const v = [];
+      await page(`${row}.scrollLeft = 0;`); await sleep(300);
+      let s = await state();
+      if (s.items.length < 3) return ["fewer than 3 items"];
+      const b = s.items[1], y = b.y + b.h / 2;
+      move(b.x + b.w * 0.25, y); await sleep(450);
+      const L = (await state()).items.map((i) => i.mag);
+      for (let i = 1; i <= 10; i++) { move(b.x + b.w * (0.25 + 0.05 * i), y); await sleep(16); } // slide along the same item
+      await sleep(450);
+      const R = (await state()).items.map((i) => i.mag);
+      const st = await state();
+      console.log(`        left quarter: ${L.slice(0, 4).join(" ")}  right quarter: ${R.slice(0, 4).join(" ")}`);
+      if (!(L[0] > L[2] + 0.02)) v.push(`on item 2's left quarter item 1 (×${L[0]}) isn't magnified more than item 3 (×${L[2]})`);
+      if (!(R[2] > R[0] + 0.02)) v.push(`on item 2's right quarter item 3 (×${R[2]}) isn't magnified more than item 1 (×${R[0]})`);
+      if (!(L[1] > 1.13 && R[1] > 1.13)) v.push(`item 2 under the pointer magnifies only ×${L[1]} / ×${R[1]}`);
+      if (Math.abs(L[1] - R[1]) > 0.01) v.push(`item 2's own scale differs left vs right (×${L[1]} vs ×${R[1]}): the curve isn't symmetric`);
+      return v;
+    });
+
+    // owner 2026-11-11 ("its like really big, so its like colliding with the top"): the magnified item, at the PEAK of its bounce,
+    // stays below the bar header's controls and inside the row (its clip) — sampled every frame through the rise
+    // the first item sits at the row's left edge: magnified (the pointer on it) or a magnified neighbour's push must never cut it off
+    await cell("bar:edge", async () => {
+      const v = [];
+      move(5, 5); await sleep(600);
+      await page(`${row}.scrollLeft = 0;`); await sleep(200);
+      let s = await state();
+      for (const [k, f] of [[0, 0.3], [1, 0.5]]) {
+        const it = s.items[k];
+        move(it.x + it.w * f, it.y + it.h / 2); await sleep(600);
+        const t = await state();
+        const a = t.items[0];
+        if (a.x < t.rowL - 0.5) v.push(`pointer on item ${k + 1}: item 1 is cut off at the row's left edge (${a.x.toFixed(1)} < ${t.rowL.toFixed(1)})`);
+        s = t;
+      }
+      await shot("edge");
+      return v;
+    });
+
+    await cell("bar:headroom", async () => {
+      const v = [];
+      move(5, 5); await sleep(700);
+      await page(`${row}.scrollLeft = 0;`); await sleep(200);
+      const s = await state();
+      const it = s.items[1];
+      const peak = page(`const el = document.querySelectorAll(".pl-item")[1], rowEl = ${row};
+        const ctl = [...document.querySelectorAll(".playlist-bar-head > *")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0);
+        let top = Infinity; const t0 = performance.now();
+        while (performance.now() - t0 < 800) { await new Promise((r) => requestAnimationFrame(r)); top = Math.min(top, el.getBoundingClientRect().top); }
+        const er = el.getBoundingClientRect();
+        const hit = ctl.filter((r) => r.bottom > top && r.left < er.right && r.right > er.left).map((r) => r.bottom);
+        return { top, rowTop: rowEl.getBoundingClientRect().top, ctlBottom: Math.max(...ctl.map((r) => r.bottom)), hit };`);
+      await sleep(30); move(it.x + it.w / 2, it.y + it.h / 2);
+      const r = await peak;
+      await shot("headroom");
+      console.log(`        peak top ${r.top.toFixed(1)}, header controls end ${r.ctlBottom.toFixed(1)}, row top ${r.rowTop.toFixed(1)}`);
+      if (r.hit.length) v.push(`at its peak the item (top ${r.top.toFixed(1)}) runs into a header control above it (bottom ${r.hit.map((x) => x.toFixed(1))})`);
+      if (r.top < r.rowTop + 1) v.push(`at its peak the item is clipped by the row's top (${r.top.toFixed(1)} vs ${r.rowTop.toFixed(1)})`);
+      return v;
+    });
+
     await cell("bar:leave", async () => {
       const v = [];
       let s = await state();
       const a = s.items[0];
       move(a.x + a.w / 2, a.y + a.h / 2); await sleep(350);
-      move(a.x + a.w / 2, a.y - 60); await sleep(400); // up, off the row (the bar's head / the page)
+      move(a.x + a.w / 2, a.y - 25); await sleep(700); // up into the head's empty space (the row reaches under it): not on the items
       s = await state();
-      const lifted = s.items.filter((i) => i.lift < -0.1).length;
+      if (s.items.some((i) => i.mag > 1.002)) v.push(`the pointer over the bar's header (above the items) still magnifies them (${s.items.map((i) => i.mag)})`);
+      move(a.x + a.w / 2, a.y - 80); await sleep(700); // up, off the bar
+      s = await state();
+      const lifted = s.items.filter((i) => i.lift < -0.1 || i.mag > 1.002).length;
       if (lifted) v.push(`${lifted} item(s) still lifted after the pointer left the row`);
       if (s.glow) v.push("a hover glow stayed after the pointer left the row");
       return v;

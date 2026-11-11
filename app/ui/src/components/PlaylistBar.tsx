@@ -7,7 +7,7 @@ import {
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ChevronRight, ChevronDown, SlidersHorizontal, Save, FolderOpen, Play, X,
+  ChevronRight, ChevronDown, SlidersHorizontal, Save, FolderOpen, Play, X, LocateFixed,
 } from "lucide-react";
 import { useStore } from "../store";
 import { type LibraryItem } from "../api/client";
@@ -16,8 +16,10 @@ import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
 import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
 import { useAutoplayVideo } from "./autoplay";
-import { useTravelToPlaying } from "../hooks/travelToPlaying";
+import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
+import { useDockLift } from "../hooks/useDockLift";
+import { useMotion } from "./motion";
 import { revealCard } from "../hooks/gridKeys";
 
 // The hovered item is the ROW's state (owner 2026-11-11: "doesn't lose the hover thing in the gaps between playlist items"):
@@ -57,7 +59,11 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
     const tick = () => { write(); raf = requestAnimationFrame(tick); };
     write();
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // the dock magnification moves the item in ITS rAF callback — which may run after this one in a frame: it signals each
+    // frame it wrote, so the glow re-reads the box in that same frame (never a frame behind the growing item)
+    const row = boxRef.current?.parentElement;
+    row?.addEventListener("dockframe", write);
+    return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
   const onEnter = () => setHover(path);
   const onLeave = () => setHover((cur) => (cur === path ? null : cur));
@@ -145,12 +151,18 @@ export function PlaylistBar() {
   const rowShown = !collapsed && playlist.length > 0;
   useSmoothScroll(rowRef, "x", [rowShown]);
   const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const motion = useMotion();
+  // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
+  // the remove button, the preview — and the lift's fallback with motion off
+  useDockLift(rowRef, motion, !!dragId, [rowShown, playlist.length]);
   // the pointer on the row itself (not on an item): inside the run of items = a gap (keep), past either end = off them
+  // …and above the items' strip (the row reaches up into the head for the magnified items' headroom) = off them too
   const onRowMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const row = e.currentTarget;
     if (e.target !== row || !hoverPath) return;
     const first = row.firstElementChild?.getBoundingClientRect(), last = row.lastElementChild?.getBoundingClientRect();
-    if (!first || !last || e.clientX < first.left || e.clientX > last.right) setHoverPath(null);
+    const top = row.getBoundingClientRect().top + (parseFloat(getComputedStyle(row).paddingTop) || 0);
+    if (!first || !last || e.clientX < first.left || e.clientX > last.right || e.clientY < top) setHoverPath(null);
   };
   // …and the playlist bar's playing item (horizontal; once per session)
   useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);
@@ -191,6 +203,10 @@ export function PlaylistBar() {
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
+        {/* "Go to playing" (owner 2026-11-11): glides the row to the playing item and rings it; only when it's in the playlist */}
+        <button className="mini ico" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
+          title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
+          onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)}><LocateFixed size={15} /></button>
         <div className="spacer" />
         <button className="play-btn ico" onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>
