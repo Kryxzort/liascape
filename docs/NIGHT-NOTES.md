@@ -888,18 +888,20 @@ Plan (owner: "do whatever you want tonight … continue with our project"; switc
   player suite 756 / 756 (one CPU-timing test failed under load and passed alone); scene health 89 clean / 7 degraded / 0 failed (the baseline); shader sweep the same 6 known failures. LWE pin `5cb69c7` (fork patches 0123–0126). The release
   build is ready; I did not restart your player or backend (you stopped them for the mpvpaper soak).
 
-## 2026-11-11 early morning — the switch-over check, stopped at the disk line
-- **Stopped early on purpose: `/home` fell under 25 GB free** (24.7 GB after building the merged branch's tests). Deleting
-  files frees nothing here (snapshots), so I stopped instead of building more. Nothing is merged or pushed; your
-  player kept running the whole time (I never stopped it). The work is on the local branch `switchover`.
-- **The battery's scene "late handoff" is not a bug in the switch.** The wide Kimi scene now takes about 2.5 s to load
-  (it took 0.7–1.1 s a week ago, before most of the Wallpaper Engine port); the test gives it about 2 s. When the next
-  wallpaper isn't ready in time, the old video holds its last frame until it is and then fades — that's how it was
-  designed. Counted properly: the 13 switches where the scene was ready on time hand off within one frame; the 12
-  late ones start their fade within 4 ms of the scene being ready. The test now tells the two apart.
-- **The one "drop" in the reveal cell is the detector misreading a video that had already ended** (only happened
-  where the start waited 88 ms for Kimi). A fix is written but not built yet (disk).
-- **The small "micro-gaps" in the frozen cells are not something you'd hear differently.** A separate recording shows
-  the flagged switches start their sound exactly like the ~200 unflagged ones. Whether the bar should count these is
-  your call.
-- Worth looking at later: Kimi loading 0.7 s → 2.5 s is a real slowdown from the port.
+## 2026-11-11 morning — the switch-over check, measured (`docs/player/reports/switch-over.md`)
+- **Verdict: not yet, but nothing found against it.** 1075 test switches over every rotation mode × method on your
+  monitors (audio on a private sink, never your speakers): no real dropout, no visible seam. Still open: the 8 h soak
+  has never run, the crash-isolation run is from before the Wallpaper Engine port, and a few of your calls (below).
+- **The battery's scene "late handoff" was the test.** The wide Kimi scene now takes about 2.5 s to load (0.7–1.1 s
+  a week ago — a real slowdown from the port, on the TODO); the test gave it about 2 s. When the next wallpaper isn't
+  ready in time, the old video holds its last frame until it is and then fades — by design. The test now checks that
+  case as designed (the fade starts within 4 ms of the scene being ready), and the on-time ones hand off within a frame.
+- **The one "drop" was the detector misreading a video that had already ended** — fixed in the player's own records.
+- **The "micro-gaps" in the frozen method:** a few milliseconds at the very start of the new wallpaper's fade-in from
+  silence. A separate recording shows the flagged ones start exactly like the ~250 unflagged ones. Your call whether
+  they count (listen to a few "frozen" switches).
+- **Please, when you can:** watch a short clip switch into a heavy scene (does the held last frame bother you?); the
+  8 h soak overnight (`scenes.sh soak --minutes 480`); the crash run (`scenes.sh crash`, `programs.sh crash`) — the
+  commands and the rest are in the report's "Waiting on owner".
+- The battery took over your wallpaper three times this morning (09:00–09:12, 09:14–09:23, 09:24–09:34) and put your
+  player and backend back after each.

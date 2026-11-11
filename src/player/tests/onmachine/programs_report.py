@@ -63,6 +63,8 @@ def kind_of(path):
     low = path.lower()
     if low.endswith((".png", ".jpg", ".jpeg", ".webp")):
         return "I"
+    if low.endswith((".mp4", ".mkv", ".webm", ".mov", ".avi", ".gif")):
+        return "V"  # before the folder test: a results dir may itself be named `scenes`
     if "/workshop/content/" in path or "/scenes/" in path or not os.path.splitext(path)[1]:
         return "S"
     return "V"
