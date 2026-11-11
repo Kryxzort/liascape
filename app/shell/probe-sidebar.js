@@ -525,6 +525,11 @@ app.whenReady().then(async () => {
         if (r.opts.includes("video")) {
           const p = await pick("video");
           if (p.mode !== "video" || !(p.lay.video > 0.9) || !(p.lay.gif < 0.1)) v.push(`k1 → Video: mode ${p.mode}, layers ${J(p.lay)}`);
+          // owner 2026-11-11: the 16:9 video was cropped into the square picture's frame → the frame takes the video's own shape
+          const sh = await page(`const s = m.side(), f = s.querySelector(".side-frame"), vd = s.querySelector('video[data-preview-layer="video"]'), r = f.getBoundingClientRect();
+            return { shape: +f.dataset.shape, box: r.width / r.height, video: vd && vd.videoHeight ? vd.videoWidth / vd.videoHeight : null };`);
+          console.log(`        Video shape: ${J(sh)}`);
+          if (!sh.video || Math.abs(sh.shape - sh.video) > 0.01 || Math.abs(sh.box - sh.video) > 0.03) v.push(`k1 → Video: the frame (${sh.box.toFixed(3)}) isn't the video's own shape (${sh.video})`);
           // owner 2026-11-11: "in video, show a button to mute/unmute" — muted by default; the button toggles the preview's
           // sound and never applies the wallpaper. (Silent either way: the stack's audio is private, and the volume is 0 first.)
           const cur0 = await current();
@@ -551,7 +556,12 @@ app.whenReady().then(async () => {
         if (r.mode !== "video") v.push(`k2 after picking Video on k1: opened on ${r.mode} (the session's pick applies when it has it)`);
         r = await look("k1");
         if (r.mode !== "video") v.push(`back on k1 after picking Video: it opened on ${r.mode} (the pick is kept for the session)`);
-        if (r.opts.includes("gif")) await pick("gif");
+        if (r.opts.includes("gif")) {
+          await pick("gif");
+          const g = await page(`const f = m.side().querySelector(".side-frame"), r = f.getBoundingClientRect(), i = m.side().querySelector('img[data-preview-layer="image"]');
+            return { box: r.width / r.height, pic: i && i.naturalHeight ? i.naturalWidth / i.naturalHeight : null };`);
+          if (g.pic && Math.abs(g.box - g.pic) > 0.03) v.push(`k1 back on GIF: the frame (${g.box.toFixed(3)}) isn't the picture's shape (${g.pic.toFixed(3)})`);
+        }
         r = await look("k2");
         if (r.mode !== "image" || r.lay.video > 0.1) v.push(`k2 with GIF picked last: opened on ${r.mode} (layers ${J(r.lay)}), expected the still, no video`);
         r = await look("s2");

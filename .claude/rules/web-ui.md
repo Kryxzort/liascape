@@ -427,8 +427,14 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     sidebar, not shared — Browse items rarely have a video, so a Browse "Video" pick would otherwise mean nothing). Layers
     cross-fade on opacity (the video mounts the first time it's shown and stays, paused while hidden); the trailer
     (`YouTubeEmbed`, `autoplay=1&mute=1` — never audible on its own, the desktop owns the sound) mounts only while picked, so a
-    switch / an item change / closing stops it; no close button of its own (owner 2026-11-11 — the switch leaves it). **The trailer loops** like the other previews (`loop=1&playlist=<its own id>` — `loop` alone is ignored for one
-    video). **The trailer remembers its mute + volume**
+    switch / an item change / closing stops it; no close button of its own (owner 2026-11-11 — the switch leaves it). **The frame takes the shown preview's shape** (owner 2026-11-11 chose it over letterboxing or the old cover crop
+    that cut a 16:9 video's sides off in the square picture's frame): picture / gif → the picture's aspect, Video → the
+    video's own (`videoWidth / videoHeight` at its metadata), the trailer → 16:9; `.side-frame[data-shape]`; the rows
+    below move with it on a switch (guard: `lib:preview` frame = the video's aspect, back to the picture's on GIF).
+    **The trailer loops** like the other previews — WE restart it on the player's "ended" (`seekTo(0)` + `playVideo`,
+    `data-yt-loops`), not YouTube's `loop=1&playlist=<id>` (it restarted early). Measured 2026-11-11 on 4 of the owner's
+    trailers: "ended" comes exactly at the content's end; one (YOtzy7bWuHc) reports a duration of 22 s for 21.12 s of
+    content, so its progress bar never reaches the end — nothing is cut. **The trailer remembers its mute + volume**
     (owner 2026-11-11, `YouTubeEmbed`): `enablejsapi=1` + a `listening` post on load → YouTube's `infoDelivery` messages
     (only from that iframe AND youtube.com) carry `info.muted` / `info.volume` → localStorage `liascape_yt_muted` (default
     muted) / `liascape_yt_volume`; the next trailer opens `mute=0|1` and gets `setVolume` once the player answers — its

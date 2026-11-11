@@ -161,6 +161,11 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   useEffect(() => { const v = vidRef.current; if (v) v.volume = Math.max(0, Math.min(1, (Number.isFinite(appVolume) ? appVolume : 100) / 100)); }, [appVolume, vidMounted]);
   useEffect(() => { const v = vidRef.current; if (!v) return; if (mode === "video") v.play().catch(() => {}); else v.pause(); }, [mode, vidMounted]);
   const a = aspect ?? 16 / 9;
+  // the frame takes the SHOWN preview's own shape (owner 2026-11-11: the 16:9 video was cover-cropped into the square
+  // picture's frame — its sides cut off; they chose "the frame reshapes"): the picture / gif → the picture's aspect, Video
+  // → the video's own (from its metadata), the YouTube trailer → 16:9. The rows below move with it on a switch.
+  const [vidAspect, setVidAspect] = useState<number | null>(null);
+  const shape = mode === "video" && video && vidAspect ? vidAspect : mode === "youtube" && youtube ? 16 / 9 : a;
   const known = (w: number, h: number) => { if (!w || !h) return; const r = w / h; aspects.set(id, r); if (aspect == null) setAspect(r); };
   const yt = mode === "youtube" && youtube;
   const playable = !!play && !play.playing && !yt;
@@ -176,7 +181,7 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
           ))}
         </div>
       )}
-      <div className={`side-frame${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`} data-side-playing={play?.playing ? "" : undefined} style={{ aspectRatio: String(a), width: `min(100%, calc(var(--side-media-h) * ${a}))` }}>
+      <div className={`side-frame${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`} data-side-playing={play?.playing ? "" : undefined} data-shape={shape.toFixed(3)} style={{ aspectRatio: String(shape), width: `min(100%, calc(var(--side-media-h) * ${shape}))` }}>
         <div className="side-glow" aria-hidden />
         <div className="side-media" data-side-media data-preview-mode={mode}>
           {base && <img src={base} alt="" data-preview-layer="image" onLoad={(e) => known(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />}
@@ -185,7 +190,8 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
           {gif && <img className={`sm-anim${mode === "gif" ? " on" : ""}`} src={gif} alt="" data-preview-layer="gif" />}
           {video && vidMounted && <video ref={vidRef} className={`sm-anim${mode === "video" && vidOn === video ? " on" : ""}`} src={video} muted={vidMuted} loop autoPlay playsInline
             data-preview-layer="video"
-            onLoadedMetadata={(e) => { const v = e.currentTarget; if (src.videoTime != null && v.duration) v.currentTime = src.videoTime % v.duration; }}
+            onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth && v.videoHeight) setVidAspect(v.videoWidth / v.videoHeight);
+              if (src.videoTime != null && v.duration) v.currentTime = src.videoTime % v.duration; }}
             onPlaying={() => setVidOn(video)} />}
           {yt && <YouTubeEmbed url={youtube} />}
           {/* above the click-to-play layer (z 3): a press here never applies the wallpaper */}
