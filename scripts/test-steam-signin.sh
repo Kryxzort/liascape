@@ -80,11 +80,15 @@ cat > "$T/drive.mjs" <<'EOF'
 // (drops the item into the Workshop folder once its page was "opened")
 import fs from "node:fs";
 const [U, T] = [process.env.U, process.env.T];
+// the backend's API token (serve.token beside serve.port; web-backend.md § Local API security) on every request + the WS
+const TOKEN = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/serve.token`, "utf8").trim();
+const realFetch = globalThis.fetch;
+globalThis.fetch = (u, o = {}) => realFetch(u, { ...o, headers: { ...(o.headers || {}), "X-Liascape-Token": TOKEN } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const out = (ok, name, extra = "") => console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? " — " + extra : ""}`);
 const urls = () => (fs.existsSync(`${T}/xdg-open.urls`) ? fs.readFileSync(`${T}/xdg-open.urls`, "utf8").trim().split("\n").filter(Boolean) : []);
 const status = {}; // workshop id → the statuses seen
-const ws = new WebSocket(U.replace("http", "ws") + "/events");
+const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
 ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status); };
 await new Promise((r) => { ws.onopen = r; });
 const sources = await (await fetch(U + "/sources")).json();

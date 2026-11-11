@@ -7,6 +7,7 @@
 // what the UI tried to send.
 // Usage: electron app/shell/probe-preview.js "http://localhost:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");
+const { withToken } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const url = process.argv[2] || "http://localhost:5173/?api=5174";
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 
@@ -15,7 +16,7 @@ const STUB = ["/preview", "/library/volume", "/library/speed", "/library/whiteli
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
-  await win.loadURL(url);
+  await win.loadURL(withToken(url));
   const js = (s) => win.webContents.executeJavaScript(s);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await js(`(() => {

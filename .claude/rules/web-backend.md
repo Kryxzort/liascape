@@ -13,10 +13,12 @@ services, models, CLI flags and daemons are unchanged** — `Web/` only wraps th
 `Program.cs` `serve` branch → `Web/ServerHost.Run`. Kestrel binds **127.0.0.1:0** (random free
 port; `LIASCAPE_PORT` pins it — the Electron shell passes the previous launch's port while it's free, since the
 UI's origin IS that port and a new origin per launch reset every localStorage pref; dev pins 5174), writes
-it to `~/.config/liascape/serve.port` (Electron reads it). Loopback-only.
+it to `~/.config/liascape/serve.port` (Electron reads it), after the API token `serve.token` beside it — every
+request needs it (§ Local API security below). Loopback-only — which is NOT private: that section says why.
 All other subcommands (`restore`, `random`, `kill`, the keybind actions, the internal `monitor-daemon`/`timer-daemon`/`restart-daemon`)
 and the daemons keep their behavior. **`liascape <action>` is handed to a running backend**
-(`Web/ActionForward`: `serve.port` → `GET /health` must answer `{ok:true}` → `POST /action {name}`), which
+(`Web/ActionForward`: `serve.port` → `GET /health` must answer `{ok:true}` → `POST /action {name}` with the
+`serve.token` header), which
 runs it on its own session state (`AppOps.RunAction` — the same switch the CLI runs) so the UI hears about
 it: run in the one-shot process, a single-session next/prev/random switched the wallpaper behind the
 backend's back (stale history, the UI kept marking the old one playing). It runs locally only when no
@@ -26,8 +28,105 @@ phases to stderr (`slow — runtime start / init / forward`; unloaded the whole 
 matrix saw 6–15 s only under the owner's desktop load, the forward itself < 1 s), and `/action` logs any
 run over 500 ms.
 
+## Local API security (owner 2026-11-11: "make the app as a whole more secure")
+**Threat.** `127.0.0.1` is reachable by every web page open in the user's browser (a `fetch`/`<img>`/`<form>`/WebSocket to
+`http://127.0.0.1:<port>`, and DNS rebinding: `evil.example` re-resolved to 127.0.0.1 makes the API "same-origin" for that
+page) and by every other local user. Until 2026-11-11 the API answered all of them, with `Access-Control-Allow-Origin: *`:
+any website could read `GET /settings` (the Steam refresh token, web cookie, `steamLoginSecure` → the Steam session),
+`GET /media?path=~/.ssh/id_rsa`, use `/img` as a proxy into the LAN, `POST /open` (xdg-open anything), `/action`, a settings
+change, `/steam/steamcmd-signin` (its username was pasted into an `sh -c` string → shell commands), the WS. **`Web/ApiSecurity.cs`**,
+the first middleware (before the error handler — a refusal never runs an endpoint):
+- **The token.** `serve` start (`ApiSecurity.InitToken`, before Kestrel listens) reads `~/.config/liascape/serve.token` —
+  reused while it's 43 base64url chars and 0600 (a backend restarted under an open page — `dotnet watch`, the matrix's
+  `restart:*` cells — keeps answering the page's token), else 32 random bytes — and writes it 0600 (temp + rename) BEFORE
+  `serve.port` (a client that sees the port finds the token). The Electron shell deletes it before it starts its own
+  backend → **a new token per app launch**. Same dir as `serve.port`, not `$XDG_RUNTIME_DIR`: a hermetic test that keeps the
+  session's runtime dir would overwrite the owner's. Every request presents it — header **`X-Liascape-Token`**, or
+  **`?token=`** on a GET/HEAD only (an `<img>`/`<video>` src and the WebSocket can't send headers; a write must use the header,
+  which a foreign page can't set without a preflight it fails). Compared in constant time. **401 `{error}`** otherwise.
+  Exempt: `GET /health` (liveness for scripts / `ActionForward`; says nothing) and the static UI files (`LIASCAPE_UI_DIR`:
+  `/`, any file that exists there — the public bundle; its page gets the token from its URL).
+  Why a query param and not a cookie for media: a cookie is ambient — sent with requests any page triggers (a localhost
+  dev server of anything is same-site with 127.0.0.1's cookies under SameSite rules, the YouTube iframe's requests too),
+  i.e. CSRF again; a capability only the app's page holds can't be ridden. The URL token stays in our origin (the default
+  `strict-origin-when-cross-origin` referrer sends only the origin elsewhere), and the page drops `?token=` from its own URL.
+- **Host** must be `127.0.0.1:<port>` or `localhost:<port>` (the connection's local port) — DNS rebinding arrives as
+  `Host: evil.example:<port>` → 403. Static files too.
+- **Origins.** A request with an `Origin` that isn't its own (`http://127.0.0.1|localhost:<port>`) gets **403** unless the
+  origin is allowed: the Vite dev UI (`http://localhost:5173`, `http://127.0.0.1:5173`) **only while this backend serves no UI
+  itself** (no `LIASCAPE_UI_DIR`: `dotnet watch -- serve`, `dotnet run -- serve`; production and the launcher set it → none),
+  plus `LIASCAPE_DEV_ORIGINS` (comma list; a file:// page fetches as `null` and opens its WebSocket as `file://` — the UI matrix sets `null,file://` for `restart:initDown`). An allowed
+  one gets `Access-Control-Allow-Origin: <it>` + `Vary: Origin`; its preflight (OPTIONS + `Access-Control-Request-Method`) is
+  answered here without the token (a preflight never carries header values): methods GET/POST, headers `Content-Type,
+  X-Liascape-Client, X-Liascape-Token`, max-age 7200. The old `UseCors` (and the lead's stopgap `WithOrigins`) is gone.
+- **Headers** on every answer: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`; `/media` `/img` `/anim` `/still`
+  also `Content-Security-Policy: sandbox; default-src 'none'` (served bytes — a WE "web" wallpaper's index.html, a proxied
+  page — never run as a document with this origin's rights). `/img` passes only an `image/*` / `video/*` Content-Type
+  through, else `application/octet-stream`.
+- **Local files** (`ApiSecurity.MediaAllowed`): `/media`, `/anim` + `/still` with a local path, `/library/duration` and
+  `/open`'s reveal serve only absolute paths without a `..` segment under: the data dir `~/.local/share/liascape` (the
+  library — its `local/<id>` links into Steam's folders are followed, the request path stays inside), the caches
+  `~/.cache/liascape` + `$XDG_CACHE_HOME/liascape`, the settings' `WorkshopFolder` (WE-local Browse cards, their reveal;
+  cached 2 s, re-read on a miss — a folder just changed in Settings never leaves its thumbnails blank; never `/`). Else
+  **403**. That is every path the UI hands `media()` / `thumb()` / `anim()` / `still()` (library items, WE-local results and
+  details). `LibraryStore.Locate` refuses a `..` segment too (Delete / Trash of a crafted path touch nothing).
+- **Remote fetches** (`/img`, remote `/anim` + `/still`): http(s) only, and every resolved address public — never loopback,
+  RFC 1918, CGNAT, link-local (169.254 = cloud metadata), ULA / site-local / multicast / NAT64 v6 (`IsPublic`). Checked up
+  front (**403 `{error}`**) and again at every connect (`PublicOnlyHttp`'s `ConnectCallback` connects only to a checked
+  address — a DNS answer changed in between, a redirect to a private host). No HTTP proxy for these (a local one would be
+  refused by the same rule).
+- **`POST /open`**: `url` must be http(s) (→ `xdg-open` with one argument; else 400); otherwise only `{path, reveal: true}`
+  with the path (and `copiedSceneDir`) passing `MediaAllowed` and a digits-only `workshopId` (403) — no bare path (xdg-open
+  runs a `.desktop` file), no `file:`/custom scheme. (A Steam-client `steam://` route would be its own endpoint.)
+- **Secrets out of the API**: `GET /settings` returns `SettingsService.Redacted` — `SteamRefreshToken`,
+  `SteamAccessToken`, `SteamLoginSecure` empty (the UI never read them; `/steam/status` says signed in or not; POST
+  `/settings` keeps the saved ones whatever the body says, so the UI posting its copy back changes nothing). `settings.json`
+  is written 0600 (its temp file is created 0600; the rename keeps it — an older 0644 file turns 0600 at its next save).
+  The secrets stay in settings.json (not a separate file / the keyring): with the file 0600 a second file adds nothing
+  against another user or a web page, and every Steam call site reads them from `AppSettings`. No log line prints them.
+- **Command lines**: the steamcmd sign-in terminal's `sh -c` script takes the steamcmd path, the install dir and the
+  username as `$1..$3` (were pasted in quotes — a `"; …` in the username ran); `TransitionService`'s ffmpeg calls (legacy
+  transitions) take an argument array (were one string with quoted paths — a Workshop item names its own media file in
+  project.json, so a `"` in it became extra ffmpeg arguments, an output path included). Every other spawn already used
+  `ArgumentList`; `SteamCmdPath` (a settings value run as a program) is by design — it needs the token.
+- **How each client gets the token:**
+  - **The app (production)**: `app/shell/main.js` deletes `serve.token`, starts the backend, waits for `serve.port`, opens
+    `http://127.0.0.1:<port>/?token=<serve.token>` (`api-auth.js` `withToken`). The page (`api/client.ts`) keeps it in
+    `sessionStorage` (`liascape_token` — a reload keeps it), drops it from the address bar (`history.replaceState`), sends
+    `X-Liascape-Token` on every `fetch` (`authHeaders`) and appends `token=` to every src URL it builds (`withToken`:
+    `img/media/anim/still`, the transition preview URLs) and the WS URL (`api/events.ts`); the freeze heartbeat too.
+  - **Dev (Electron + Vite)**: main.js opens `http://localhost:5173/?api=5174&token=…` (the systemd backend's file);
+    `dotnet watch` restarts keep the file, so the open page keeps working.
+  - **Browser dev without Electron**: `http://localhost:5173/?api=<port>&token=$(cat ~/.config/liascape/serve.token)`.
+  - **The CLI** (`liascape next` …, `ActionForward`): reads `serve.token` beside `serve.port` → the header (401 = "the running
+    app answered HTTP 401", never run locally). `liascape ctl` talks to the player's own socket (`$XDG_RUNTIME_DIR`, 0700) —
+    not this API.
+  - **Probes / the UI matrix** (`app/shell/probe-*.js`): `require("./api-auth")` — `withToken(U + "/")` for every page
+    they load (the file:// one of `restart:initDown` too), `authHeaders()` on their own `fetch`es, in-page fetches read
+    `sessionStorage.liascape_token`. The hermetic stack's `HOME`/`XDG_CONFIG_HOME` are exported, so they read the stack's file.
+  - **Shell test scripts** (`test-ui-matrix.sh`, `test-liascape-player-adapter.sh`, `test-settings-merge.sh`,
+    `test-settings-latency.sh`): a `curl()` wrapper right after their `export HOME=…` adds the header from
+    `$XDG_CONFIG_HOME/liascape/serve.token` (read per call). `test-steam-signin.sh`'s node driver wraps `fetch` with the
+    header and opens the WS with `?token=`; its curl only asks `/health`.
+- **Electron** (`main.js`): `contextIsolation`, `sandbox`, no `nodeIntegration`, `webSecurity` pinned; every webContents:
+  `setWindowOpenHandler` → deny (http(s) → `shell.openExternal`), `will-navigate` away from the app's origin → blocked (http(s)
+  → the browser), `<webview>` refused — an "Open on Steam" `target=_blank` link used to open steamcommunity.com inside the app
+  with the preload's bridge; permissions: only `clipboard-sanitized-write` + `fullscreen`; the `liascape:pick` IPC answers only
+  the app's own frame. `LIASCAPE_DEBUG`'s CDP port (:9222) is a debug-only opt-in: anyone local can drive the window then.
+- Check: a private backend (own `HOME`/`XDG_*`/`XDG_RUNTIME_DIR`, a free port) and curl: no token → 401, a wrong `Host` → 403,
+  a foreign `Origin` → 403 / no ACAO, `/settings` without `FAKE-` secrets, `/media` outside → 403, `/img` → 127.0.0.1 /
+  192.168.x / 169.254.169.254 / `[::1]` → 403, the WS 401 / 101, `liascape toggle-pause` forwarded.
+
+- **Dev shells from before the token** (2026-11-11: the owner's installed shell loads the Vite UI without `?token=`, so every
+  request would 401 the moment `dotnet watch` restarted onto this): Vite's dev-only plugin (`app/ui/vite.config.ts`
+  `devApiToken`, `apply: "serve"`, never in a build) serves `GET /__liascape/token` = serve.token, but only to a
+  `Sec-Fetch-Site: same-origin` request (browser-set; another site's fetch is `cross-site` → 403, no header → 403), and
+  injects a loader into index.html that fetches it synchronously into sessionStorage before the app module runs (skipped
+  when the URL already carries `token`). The HTML itself never contains the token. Checked: same-origin 200, cross-site /
+  none 403.
+
 ## Files
-- **`Web/ServerHost.cs`** — minimal-API endpoints (thin wrappers), CORS (for `vite dev`), static
+- **`Web/ServerHost.cs`** — minimal-API endpoints (thin wrappers), the security middleware (`Web/ApiSecurity.cs`), static
   serving of the built UI when `LIASCAPE_UI_DIR` is set (→ same-origin, UI uses relative paths), image
   proxy, `/media`, WebSocket `/events`. Providers array order == the UI source-pill order; WE-local
   (index 3) `available:false` when `AutoAddWeWallpapersToLibrary`.
@@ -249,7 +348,7 @@ that locked the owner's browser out. It now asks Steam's CM servers the way the 
   (60 read → 36 kept for `[Everyone, Questionable, Video] −Girls`).
 
 ## Rules
-- **A throwing endpoint still answers** (`ServerHost` middleware right after `UseCors`; owner 2026-11-11: a Workshop download
+- **A throwing endpoint still answers** (`ServerHost` middleware right after the security guard, `ApiSecurity.Guard` — which sets the dev origin's `Access-Control-Allow-Origin` before it; owner 2026-11-11: a Workshop download
   showed only "Download failed: Failed to fetch"): unhandled, Kestrel sent a bare 500 with the headers reset — CORS's
   `Access-Control-Allow-Origin` too — so the dev UI (Vite :5173, another origin) saw a network error, and with the loggers
   cleared nothing was written. Now: `error: <METHOD> <path>: <Type>: <message>` on stdout, and a JSON `{error}` 500

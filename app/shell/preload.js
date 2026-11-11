@@ -1,5 +1,6 @@
 // Exposes native file/folder pickers to the renderer (Settings "Browse" buttons). contextIsolation
-// stays on; only these two narrow methods cross the bridge. In a plain browser window.liascape is undefined
+// stays on and the preload is sandboxed (main.js webPreferences — it may only use contextBridge / ipcRenderer);
+// only these narrow methods cross the bridge, and main answers the picker only for the app's own page. In a plain browser window.liascape is undefined
 // and Settings falls back to manual text entry.
 const { contextBridge, ipcRenderer } = require("electron");
 

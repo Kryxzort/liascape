@@ -23,13 +23,14 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
   try {
-    const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
     let json = null; try { json = await r.json(); } catch { /* empty */ }
     return { status: r.status, json };
   } catch (e) { return { status: 0, json: null, error: e.message }; }
@@ -105,7 +106,7 @@ app.whenReady().then(async () => {
   const T = fs.mkdtempSync(path.join(path.dirname(E.LIASCAPE_BACKEND_LOG), "health-")); // inside the stack's dir: its cleanup takes it
   try {
     // ---- 1. everything present
-    await win.loadURL(U + "/");
+    await win.loadURL(withToken(U + "/"));
     const f1 = await features();
     await cell("present: /health/features ok for what the stack has", async () => {
       const v = [];
@@ -201,7 +202,7 @@ app.whenReady().then(async () => {
       if (!b) return ["audio-bus missing from the report"];
       return b.ok === false ? [`audio-bus ok=false with no player: ${b.reason}`] : [];
     });
-    await win.loadURL(U + "/");
+    await win.loadURL(withToken(U + "/"));
     for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
     const m2 = await playlistModalWarn();
     await cell("missing: the playlist modal's Transitions field warns like the global row (the catalogue's reason)", async () => {

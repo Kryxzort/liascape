@@ -36,6 +36,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -43,17 +44,18 @@ const J = JSON.stringify;
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
-  const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
   let json = null; try { json = await r.json(); } catch { /* empty */ }
   return { status: r.status, json };
 }
 const post = (p, b = {}) => http("POST", p, b);
 async function setSettings(patch) { const s0 = (await http("GET", "/settings")).json; await post("/settings", { ...s0, ...patch }); }
 
-// fake Workshop thumbnails (served by /media): a few colours
+// fake Workshop thumbnails (served by /media): a few colours — in the stack's private cache dir, since /media serves only
+// where the app keeps wallpapers (its data dir, its caches, the Workshop folder; web-backend.md § Local API security)
 const THUMBS = [];
 function makeThumbs() {
-  const d = path.join(OUT, "wf-thumbs"); fs.mkdirSync(d, { recursive: true });
+  const d = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "wf-thumbs"); fs.mkdirSync(d, { recursive: true });
   const cols = ["0x4c4f9a", "0x1f6f8b", "0x8b3a62", "0x2e7d4f", "0x9a6b2f", "0x5a2e8b"];
   cols.forEach((c, i) => {
     const f = path.join(d, `t${i}.jpg`);
@@ -86,7 +88,7 @@ const SIZES = [[480, 720], [560, 430], [640, 480], [800, 600], [1100, 700], [140
 let wsName = null, weName = null;
 
 async function loadUi(lsInit) {
-  await win.loadURL(U + "/");
+  await win.loadURL(withToken(U + "/"));
   // the stub goes in before the store's first reload can reach a Workshop source: a pre-load localStorage tweak (lsInit) needs a
   // second load, so the page reloads once with the stub's own script re-applied
   const stub = `(() => { window.__browse = []; window.__more = []; const items = ${J(Array.from({ length: 24 }, (_, i) => ({
@@ -99,7 +101,7 @@ async function loadUi(lsInit) {
       if (p === "/browse" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (b.filter) { (b.page > 1 ? window.__more : window.__browse).push(b); return ok(b.page > 1 ? [] : items); } }
       if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
       return f(u, o); }; })(); true`;
-  if (lsInit) { await js(lsInit); await win.loadURL(U + "/"); }
+  if (lsInit) { await js(lsInit); await win.loadURL(withToken(U + "/")); }
   await js(stub);
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
   await js(PAGE); await sleep(400);

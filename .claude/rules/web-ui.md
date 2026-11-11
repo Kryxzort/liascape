@@ -19,8 +19,17 @@ for framer-motion's "cool" ceiling. See memory `web-frontend-rewrite-idea`.
 
 ## API access
 Same-origin: client `API=""` → relative `/sources` etc. (C# serves UI + API on one port). Browser
-dev: append `?api=<port>`. Remote images **must** go through `img(url)` (`/img` proxy — UA/Referer/CORS);
+dev: append `?api=<port>&token=$(cat ~/.config/liascape/serve.token)`. Remote images **must** go through `img(url)` (`/img` proxy — UA/Referer/CORS);
 local media via `media(path)` (`/media`). WS via `useEvents`.
+**The API token** (owner 2026-11-11 "make the app as a whole more secure"; web-backend.md § Local API security): the shell
+opens the page with `?token=`; `api/client.ts` keeps it in `sessionStorage` (`liascape_token`), removes it from the URL, and
+**every request carries it** — `fetch` through `authHeaders()` (`jget` / `jpost` do), a src URL / the WS through
+`withToken(url)` (`img` / `media` / `anim` / `still` / the transition preview URLs / `useEvents` do). A new direct `fetch` or a
+hand-built API URL must go through one of them, or the backend answers 401. `/media` serves only library / cache /
+Workshop-folder paths (a test fixture elsewhere comes back 403 — probe-filters keeps its fake thumbnails in the stack's
+cache dir). Probes load pages with `withToken(U + "/")` and send `authHeaders()` (`app/shell/api-auth.js`).
+**Links** (`<a target=_blank>`, `window.open`) open in the user's browser (main.js `setWindowOpenHandler` → `shell.openExternal`,
+http(s) only); the window never navigates away from the app's origin.
 
 ## PERF rules (non-negotiable — the bench proved these)
 - **`content-visibility:auto` + `contain-intrinsic-size`** on every grid card — skips offscreen

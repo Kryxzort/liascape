@@ -16,13 +16,14 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
   try {
-    const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
     let json = null; try { json = await r.json(); } catch { /* empty */ }
     return { status: r.status, json };
   } catch (e) { return { status: 0, json: null, error: e.message }; }
@@ -63,7 +64,7 @@ const HELPERS = `
     sections() { return [...document.querySelectorAll(".settings .ssection h3")].map((h) => h.textContent.trim()); },
   }; true`;
 async function loadSettings() {
-  await win.loadURL(U + "/");
+  await win.loadURL(withToken(U + "/"));
   for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
   await js(HELPERS);
   await js(`await window.__x.settingsTab(); return true`);

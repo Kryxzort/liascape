@@ -1,6 +1,7 @@
 // Measure main-thread long-task cost of opening the modals (the 300-card re-render hypothesis).
 // Long-tasks are main-thread → measurable even offscreen. electron app/shell/probe-lag2.js <url?debug>
 const { app, BrowserWindow } = require("electron");
+const { withToken } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const url = process.argv[2];
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -8,7 +9,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1500, height: 1000, webPreferences: { backgroundThrottling: false } });
   const js = (s) => win.webContents.executeJavaScript(s);
-  await win.loadURL(url); await wait(6500);
+  await win.loadURL(withToken(url)); await wait(6500);
 
   await js(`window.liascapeDbg.tab('library')`); await wait(1500);
   await js(`window.__lt=0; window.__n=0; window.__po=new PerformanceObserver(l=>{for(const e of l.getEntries()){window.__lt+=e.duration;window.__n++;}}); window.__po.observe({entryTypes:['longtask']});`);

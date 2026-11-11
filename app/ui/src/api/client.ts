@@ -5,16 +5,32 @@ const port = params.get("api") || localStorage.getItem("liascape_api_port") || "
 if (port) localStorage.setItem("liascape_api_port", port);
 export const API = port ? `http://127.0.0.1:${port}` : "";
 
+// API: the backend's token (web-backend.md § Local API security — every request but the static UI and /health needs it).
+// The shell (app/shell/main.js) opens the window with ?token=<~/.config/liascape/serve.token>; browser dev: append
+// &token=… yourself. Kept in sessionStorage (a reload keeps it) and taken out of the address bar at once.
+const TOKEN_KEY = "liascape_token";
+const urlToken = params.get("token");
+if (urlToken) {
+  try { sessionStorage.setItem(TOKEN_KEY, urlToken); } catch { /* storage off: this page load still has it */ }
+  params.delete("token");
+  const q = params.toString();
+  try { history.replaceState(history.state, "", `${location.pathname}${q ? `?${q}` : ""}${location.hash}`); } catch { /* file:// edge cases */ }
+}
+const TOKEN = urlToken || (() => { try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } })();
+// fetch(): the header. An <img>/<video> src or the WebSocket can't send one → ?token= (GET only, the backend's rule)
+export const authHeaders = (h: Record<string, string> = {}): Record<string, string> => (TOKEN ? { ...h, "X-Liascape-Token": TOKEN } : h);
+export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(TOKEN)}` : url);
+
 // route remote thumbs/gifs through the proxy (UA + Referer + CORS); local files via /media
 export const img = (u: string, referer?: string) =>
-  `${API}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`;
-export const media = (path: string) => `${API}/media?path=${encodeURIComponent(path)}`;
+  withToken(`${API}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
+export const media = (path: string) => withToken(`${API}/media?path=${encodeURIComponent(path)}`);
 // animated preview: serve remote gifs from a disk cache (/anim, range/length → loops cleanly, like
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops
 // without a black seam. Other local formats (animated webp) loop fine raw → /media.
 export const anim = (u: string) =>
-  /^https?:/i.test(u) || /\.gif$/i.test(u) ? `${API}/anim?u=${encodeURIComponent(u)}` : media(u);
+  /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${API}/anim?u=${encodeURIComponent(u)}`) : media(u);
 // static thumbnail for an animated preview: a non-black/white extracted frame (so AutoPlayGifs-off
 // doesn't show the gif's black frame-0, AND so a gif used as a static thumbnail doesn't self-animate).
 // Remote URLs and local gif/webp → /still (ffmpeg extract); plain local images → /media as-is.
@@ -23,8 +39,8 @@ export const anim = (u: string) =>
 // A NATIVE request (enlarged modal, no w) only needs /still for gif/webp/remote (frame extraction);
 // plain local images pass straight to /media uncropped + un-re-encoded (crisp, no quality loss).
 export const still = (u: string, w?: number) => {
-  if (w) return `${API}/still?u=${encodeURIComponent(u)}&w=${w}`;
-  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? `${API}/still?u=${encodeURIComponent(u)}` : media(u);
+  if (w) return withToken(`${API}/still?u=${encodeURIComponent(u)}&w=${w}`);
+  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? withToken(`${API}/still?u=${encodeURIComponent(u)}`) : media(u);
 };
 // card thumbnails decode to this width (never upscales — min(w,iw) caps at the source). Generous
 // enough for Large cards at hidpi; previews are usually ≤640px so most are served at native size.
@@ -39,14 +55,14 @@ export const thumb = (u: string, referer?: string) =>
 export const CLIENT_ID = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 
 async function jget<T>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`);
+  const r = await fetch(`${API}${path}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
   return r.json();
 }
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID },
+    headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
@@ -150,7 +166,7 @@ export const api = {
   settings: () => jget<Record<string, unknown>>("/settings"),
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
   saveSettings: (s: Record<string, unknown>) => jpost("/settings", s),
-  mpvPreview: () => fetch(`${API}/mpv-preview`).then((r) => r.text()),
+  mpvPreview: () => fetch(`${API}/mpv-preview`, { headers: authHeaders() }).then((r) => r.text()),
   // Player engine row: asked-for vs running engine, whether liascape-player can run (+ why not)
   playerEngine: () => jget<{ engine: string; active: string; available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
@@ -158,7 +174,7 @@ export const api = {
   // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the
   // settings keys whose rows get a warning icon. ok null = not known yet.
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
-  lwePreview: () => fetch(`${API}/lwe-preview`).then((r) => r.text()),
+  lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
   libraryClear: () => jpost("/library/clear"),
   clearCache: () => jpost<{ freedBytes: number; count: number }>("/cache/clear"),
@@ -193,9 +209,9 @@ export const api = {
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache
   // entry would replay an old (possibly broken) shader. Tiny text, fetched once per picker open.
-  transitionFragUrl: (id: string) => `${API}/transitions/frag/${encodeURIComponent(id)}?t=${Date.now()}`,
-  transitionVertUrl: () => `${API}/transitions/vert?t=${Date.now()}`,
-  transitionPreviewUrl: (which: "a" | "b") => `${API}/transitions/preview/${which}`,
+  transitionFragUrl: (id: string) => withToken(`${API}/transitions/frag/${encodeURIComponent(id)}?t=${Date.now()}`),
+  transitionVertUrl: () => withToken(`${API}/transitions/vert?t=${Date.now()}`),
+  transitionPreviewUrl: (which: "a" | "b") => withToken(`${API}/transitions/preview/${which}`),
   playlistState: () => jget<CustomPlaylist | null>("/playlist/state"),
   savePlaylistState: (p: CustomPlaylist) => jpost("/playlist/state", p),
   playlistNames: () => jget<string[]>("/playlist/names"),

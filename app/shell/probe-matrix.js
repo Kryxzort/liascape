@@ -18,6 +18,7 @@ const cp = require("child_process");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const K = JSON.parse(E.LIASCAPE_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -81,7 +82,7 @@ function subscribe() {
 
 // ---------------------------------------------------------------- backend HTTP (never printed: /settings holds tokens)
 async function http(method, p, body) {
-  const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
   let json = null; try { json = await r.json(); } catch { /* empty */ }
   return { status: r.status, json };
 }
@@ -223,7 +224,7 @@ const PAGE = `window.__mx = {
   playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.dataset.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.dataset.title) }; },
 }; true`;
 async function loadUi() {
-  await win.loadURL(U + "/");
+  await win.loadURL(withToken(U + "/"));
   // record what the page POSTs to /preview (its bodies — the backend only sees what arrives), and count its requests
   // in flight (a fuzz step waits for them: under load a persist was still on its way when the step looked)
   await js(`(() => { window.__mxReq = []; window.__mxInflight = 0; const f = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/preview")) window.__mxReq.push(o?.body ?? null);
@@ -2955,7 +2956,7 @@ C["restart:midLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
     const filter = { urls: [`${U}/library`] };
     session.defaultSession.webRequest.onBeforeRequest(filter, (d, cb) => { if (seen) return cb({}); seen = true; go.then(() => cb({})); });
     try {
-      await win.loadURL(U + "/");
+      await win.loadURL(withToken(U + "/"));
       c.held = await waitFor(() => seen, 8000, 20);
       await sleep(600); // the page's other startup reads land
       await stopBackend(0);
@@ -2981,7 +2982,7 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     c.want = { cards: wantTitles, playlistBar: (ps?.videoPaths || []).map(TITLE), aspect: ASPECT_CSS[BASE_SETTINGS.thumbnailAspect ?? "1:1"] };
     await win.loadURL("about:blank");
     await stopBackend();
-    await win.loadURL(`file://${E.LIASCAPE_UI_DIR}/index.html?api=${new URL(U).port}`);
+    await win.loadURL(withToken(`file://${E.LIASCAPE_UI_DIR}/index.html?api=${new URL(U).port}`)); // the backend admits its Origin "null" (test-ui-matrix.sh: LIASCAPE_DEV_ORIGINS)
     await sleep(2500);
     c.during = await pageData();
     c.up = await startBackend();

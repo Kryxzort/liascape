@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { API, type LibraryItem } from "./client";
+import { API, withToken, type LibraryItem } from "./client";
 
 export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
@@ -46,7 +46,7 @@ export function useEvents(onEvent: (e: LiascapeEvent) => void, onReconnect?: () 
     let retry: ReturnType<typeof setTimeout>;
     const connect = () => {
       if (stop) return;
-      ws = new WebSocket(`${base}/events`);
+      ws = new WebSocket(withToken(`${base}/events`));
       ws.onopen = () => { if (opened) onReconnect?.(); opened = true; };
       ws.onmessage = (m) => {
         try { onEvent(JSON.parse(m.data)); } catch { /* ignore */ }

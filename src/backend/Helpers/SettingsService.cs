@@ -49,10 +49,29 @@ public static class SettingsService
         var tmp = Path.Combine(dir, $".settings.json.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
         try
         {
-            File.WriteAllText(tmp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+            // 0600 from its creation (the rename keeps it): the file holds the Steam sign-in (web-backend.md § Local API security)
+#pragma warning disable CA1416 // Unix file modes: this backend is Linux-only
+            using (var fs = new FileStream(tmp, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            }))
+#pragma warning restore CA1416
+            using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+                w.Write(JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(tmp, ConfigPath, overwrite: true);
         }
         finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+    }
+
+    // GET /settings: a copy without the Steam sign-in's secrets (the refresh token, the web cookie, a pasted
+    // steamLoginSecure) — the UI never reads them (/steam/status says signed in or not) and POST /settings ignores them
+    // (Patch keeps the saved ones), so the empty strings the UI posts back change nothing.
+    public static AppSettings Redacted(AppSettings s)
+    {
+        var c = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(s))!;
+        c.SteamRefreshToken = ""; c.SteamAccessToken = ""; c.SteamLoginSecure = "";
+        return c;
     }
 
     // POST /settings has PATCH semantics. Its body used to be bound as the whole AppSettings, so a partial

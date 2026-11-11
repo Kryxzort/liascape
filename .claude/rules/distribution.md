@@ -65,6 +65,13 @@ definitions **`scripts/dev/liascape-vite.service`** (HMR :5173) and **`scripts/d
 (`dotnet watch --no-hot-reload --project src/backend -- serve`, `LIASCAPE_PORT=5174`) with `@ROOT@` = the checkout's
 physical path, and enables them. Launch the app normally; `main.js` auto-detects Vite. `scripts/dev-stop.sh` stops
 them. `scripts/freeze-monitor.sh` watches for the main-thread freeze.
+**The API token in dev** (2026-11-11, web-backend.md § Local API security): the watch backend writes
+`~/.config/liascape/serve.token` and keeps it across `dotnet watch` restarts; main.js passes it to the Vite page
+(`?api=5174&token=…`). Vite's origin is admitted only because that backend serves no UI (no `LIASCAPE_UI_DIR`). A page
+opened before the backend had a token (the first restart onto this code) gets 401s — relaunch the app once. A browser tab
+without Electron needs `&token=$(cat ~/.config/liascape/serve.token)`. An app launched while Vite is down starts its own
+backend and deletes the token file first (a fresh token per launch) — the watch backend then still answers its own
+in-memory token; the next watch restart reuses the file's (the new one).
 
 ### Runtime deps
 libmpv, Wayland + EGL/GLES, `libxkbcommon`, PipeWire (the player's audio bus), `ffmpeg` (thumbnails, frame grabs),

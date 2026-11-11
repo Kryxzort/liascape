@@ -148,6 +148,9 @@ public static class LibraryStore
     {
         try
         {
+            // a `..` segment: the lexical check below can't see where it lands after a symlink (workshop items are links
+            // into Steam's folders) — a library path never has one, so a request that does (Delete, Trash) touches nothing
+            if (Array.IndexOf(mediaPath.Split(Path.DirectorySeparatorChar), "..") >= 0) return null;
             var full = Path.GetFullPath(mediaPath);
             var root = Path.GetFullPath(Root) + Path.DirectorySeparatorChar;
             if (!full.StartsWith(root, StringComparison.Ordinal)) return null;

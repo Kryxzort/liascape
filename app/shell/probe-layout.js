@@ -18,6 +18,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -25,7 +26,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
-  const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
   let json = null; try { json = await r.json(); } catch { /* empty */ }
   return { status: r.status, json };
 }
@@ -89,7 +90,7 @@ app.whenReady().then(async () => {
   try {
     await post("/playlist/state", { videoPaths: K.slice(0, Math.min(K.length, 4)), settings: null, name: null });
     await setSettings({ morphs: true, glows: true });
-    await win.loadURL(U + "/");
+    await win.loadURL(withToken(U + "/"));
     for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
     await js(PAGE); await sleep(800);
 

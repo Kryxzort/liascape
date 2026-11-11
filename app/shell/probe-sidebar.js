@@ -44,6 +44,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
 const OUT = E.LIASCAPE_OUT;
@@ -52,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
-  const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
   let json = null; try { json = await r.json(); } catch { /* empty */ }
   return { status: r.status, json };
 }
@@ -93,7 +94,7 @@ const PAGE = `window.__sb = {
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__sb; ${code} })()`);
 async function loadUi() {
-  await win.loadURL(U + "/");
+  await win.loadURL(withToken(U + "/"));
   // /open would start a real file manager, the unsubscribe a Steam call: recorded, never sent
   await js(`(() => { window.__opened = []; const f = window.fetch; window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
     if ((o?.method || "GET") === "POST" && (p === "/open" || p.startsWith("/workshop/unsubscribe") || p === "/library/delete-from-source")) { window.__opened.push({ p, body: o?.body ?? null });
@@ -274,8 +275,8 @@ app.whenReady().then(async () => {
       const r = await page(`const media = m.side().querySelector("[data-side-media]"); const before = m.rect(media);
         const vol0 = m.sideRow("volume")?.querySelector("input")?.value; const out = [];
         const t0 = performance.now();
-        fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: -5 }) });
-        setTimeout(() => fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: -5 }) }), 900);
+        fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json", "X-Liascape-Token": sessionStorage.getItem("liascape_token") }, body: JSON.stringify({ delta: -5 }) });
+        setTimeout(() => fetch("/volume", { method: "POST", headers: { "Content-Type": "application/json", "X-Liascape-Token": sessionStorage.getItem("liascape_token") }, body: JSON.stringify({ delta: -5 }) }), 900);
         await new Promise((res) => { const f = () => { const s = m.side(); const md = s?.querySelector("[data-side-media]");
           out.push({ open: !!s, r: md ? m.rect(md) : null, anims: s ? s.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && !(a.effect?.target?.matches?.("img, video"))).length : 0 });
           if (performance.now() - t0 < 2200) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });

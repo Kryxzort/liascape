@@ -31,6 +31,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,7 +40,7 @@ const PASSWORD = "Pr0be-pa55-Zq9!xK";
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 
 async function http(method, p, body) {
-  const r = await fetch(U + p, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
   let json = null; try { json = await r.json(); } catch { /* empty */ }
   return { status: r.status, json };
 }
@@ -96,7 +97,7 @@ async function shot(name) { const img = await win.webContents.capturePage(); fs.
 
 async function load(status) {
   await js(`localStorage.setItem("__probe_steam_status", ${J(J(status ?? null))}); true`).catch(() => {});
-  await win.loadURL(U + "/");
+  await win.loadURL(withToken(U + "/"));
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
   for (let i = 0; i < 50; i++) { if (await js(`window.__fakeWs ? window.__fakeWs("noop", null) : 0`) > 0) break; await sleep(100); } // the page's socket is open
   await sleep(300);
@@ -166,7 +167,7 @@ app.whenReady().then(async () => {
   const SIGNED_OUT = { signedIn: false, rejected: false, accountName: "", daysLeft: null, mode: "subscribe" };
   try {
     await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true });
-    await win.loadURL(U + "/"); await sleep(500);
+    await win.loadURL(withToken(U + "/")); await sleep(500);
 
     await cell("steam:row:signedOut", async () => {
       const v = []; await load(SIGNED_OUT); await tab("Settings");

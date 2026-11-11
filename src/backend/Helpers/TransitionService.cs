@@ -419,15 +419,15 @@ public static class TransitionService
     {
         if (!File.Exists(videoPath)) return false;
         var ci = System.Globalization.CultureInfo.InvariantCulture;
-        string seekArgs;
+        string[] seekArgs;
         if (atSec <= 0.05)
-            seekArgs = $"-ss 0 -i \"{videoPath}\"";
+            seekArgs = ["-ss", "0", "-i", videoPath];
         else
         {
             double pre = Math.Max(0, atSec - 2.0);
-            seekArgs = $"-ss {pre.ToString(ci)} -i \"{videoPath}\" -ss {(atSec - pre).ToString(ci)}";
+            seekArgs = ["-ss", pre.ToString(ci), "-i", videoPath, "-ss", (atSec - pre).ToString(ci)];
         }
-        return RunFfmpeg($"-nostdin -y {seekArgs} -frames:v 1 \"{png}\"") && FileNonEmpty(png);
+        return RunFfmpeg(["-nostdin", "-y", .. seekArgs, "-frames:v", "1", png]) && FileNonEmpty(png);
     }
 
     private static bool GrabSceneFrame(string output, int w, int h, string outRaw)
@@ -452,7 +452,7 @@ public static class TransitionService
             }
             catch { return false; }
         }
-        bool ok = RunFfmpeg($"-nostdin -y -i \"{png}\" -vf {ScaleVf(w, h)} -pix_fmt rgba -f rawvideo \"{outRaw}\"") && FileNonEmpty(outRaw);
+        bool ok = RunFfmpeg(["-nostdin", "-y", "-i", png, "-vf", ScaleVf(w, h), "-pix_fmt", "rgba", "-f", "rawvideo", outRaw]) && FileNonEmpty(outRaw);
         if (grimmed) TryDelete(png);   // keep the LWE dump (reused next transition); only clean the grim temp
         return ok;
     }
@@ -463,7 +463,7 @@ public static class TransitionService
         // launching linux-wallpaperengine just to grab a frame). ffmpeg decodes png/jpg/gif/webp.
         var preview = ScenePreview(sceneFolder);
         if (preview == null) return false;
-        return RunFfmpeg($"-nostdin -y -i \"{preview}\" -frames:v 1 -vf {ScaleVf(w, h)} -pix_fmt rgba -f rawvideo \"{outRaw}\"")
+        return RunFfmpeg(["-nostdin", "-y", "-i", preview, "-frames:v", "1", "-vf", ScaleVf(w, h), "-pix_fmt", "rgba", "-f", "rawvideo", outRaw])
                && FileNonEmpty(outRaw);
     }
 
@@ -486,15 +486,18 @@ public static class TransitionService
         return null;
     }
 
-    private static bool RunFfmpeg(string args)
+    // an argument array, never one string: a path with a quote in it (a Workshop item names its own file in project.json)
+    // split into extra ffmpeg arguments — an output anywhere included
+    private static bool RunFfmpeg(string[] args)
     {
         try
         {
             var psi = new ProcessStartInfo("ffmpeg")
             {
-                Arguments = args, UseShellExecute = false,
+                UseShellExecute = false,
                 RedirectStandardError = true, RedirectStandardOutput = true,
             };
+            foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             if (p == null) return false;
             p.BeginErrorReadLine(); p.BeginOutputReadLine();
@@ -674,7 +677,7 @@ public static class TransitionService
         MpvCmd(JsonSerializer.Serialize(new { command = new object[] { "set_property", "pause", p } }));
 
     private static bool ScalePngToRaw(string png, int w, int h, string outRaw) =>
-        RunFfmpeg($"-nostdin -y -i \"{png}\" -vf {ScaleVf(w, h)} -pix_fmt rgba -f rawvideo \"{outRaw}\"") && FileNonEmpty(outRaw);
+        RunFfmpeg(["-nostdin", "-y", "-i", png, "-vf", ScaleVf(w, h), "-pix_fmt", "rgba", "-f", "rawvideo", outRaw]) && FileNonEmpty(outRaw);
 
     // ---- misc ------------------------------------------------------------------------------------
     // append to the same diagnostic log the renderer writes (liascape-transition.log), tagged [backend]

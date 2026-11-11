@@ -3,17 +3,18 @@
 //    (hot-reload) and talk to the systemd `dotnet watch -- serve` backend (port via serve.port).
 //  • PROD: no Vite → spawn our own backend (LIASCAPE_BACKEND or `dotnet run`) and load the built dist
 //    same-origin. Packaging spawns the published binary.
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
 const net = require("net");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
+const { configDir, tokenFile, withToken } = require("./api-auth");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
-const portFile = path.join(os.homedir(), ".config", "liascape", "serve.port");
+// the backend's config dir ($XDG_CONFIG_HOME/liascape, else ~/.config/liascape — .NET's ApplicationData)
+const portFile = path.join(configDir(), "serve.port");
 const VITE = "http://localhost:5173";
 // Chromium's profile (the renderer's localStorage, caches) in ~/.config/liascape-shell — productName
 // "Liascape" would otherwise put it in ~/.config/Liascape, beside the backend's own ~/.config/liascape.
@@ -67,6 +68,8 @@ async function startBackend() {
   let prev = null;
   try { prev = parseInt(fs.readFileSync(portFile, "utf8").trim(), 10) || null; } catch { /* first run */ }
   try { fs.unlinkSync(portFile); } catch { /* fresh */ }
+  // a fresh API token for every app launch: the backend makes one when the file is gone (web-backend.md § Local API security)
+  try { fs.unlinkSync(tokenFile()); } catch { /* none yet */ }
   const env = { ...process.env };
   if (!env.LIASCAPE_PORT && prev && (await portFree(prev))) env.LIASCAPE_PORT = String(prev);
   const spawnIt = () => {
@@ -97,16 +100,42 @@ function viteUp(cb) {
   req.setTimeout(400, () => { req.destroy(); cb(false); });
 }
 
-// Native folder/file picker for Settings (Wallpaper Engine folder + steamcmd path).
-ipcMain.handle("liascape:pick", async (_e, opts) => {
-  const r = await dialog.showOpenDialog({ properties: [opts?.folder ? "openDirectory" : "openFile"] });
+// ── Hardening (web-backend.md § Local API security; owner 2026-11-11 "make the app as a whole more secure") ────────────
+// The window shows the app's own UI and nothing else: a link / window.open / a page trying to navigate elsewhere goes to
+// the user's browser (http(s) only) — before, an "Open on Steam" link opened steamcommunity.com INSIDE the app, with the
+// preload's bridge and the app's session. No permissions but the clipboard write (Copy ID) and the trailer's fullscreen.
+let appOrigin = null; // the UI's origin (the backend's or Vite's); file:// has none — then only file: pages count
+const isAppUrl = (u) => {
+  try { const x = new URL(u); return appOrigin ? x.origin === appOrigin : x.protocol === "file:"; } catch { return false; }
+};
+function openOutside(u) {
+  try { const x = new URL(u); if (x.protocol === "http:" || x.protocol === "https:") shell.openExternal(x.toString()); } catch { /* not a URL */ }
+}
+app.on("web-contents-created", (_e, wc) => {
+  wc.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: "deny" }; });
+  wc.on("will-navigate", (e, url) => { if (!isAppUrl(url)) { e.preventDefault(); openOutside(url); } });
+  wc.on("will-attach-webview", (e) => e.preventDefault());
+});
+
+// Native folder/file picker for Settings (Wallpaper Engine folder + steamcmd path) — only for the app's own page.
+ipcMain.handle("liascape:pick", async (e, opts) => {
+  if (!isAppUrl(e.senderFrame?.url ?? "")) return null;
+  const r = await dialog.showOpenDialog({ properties: [opts?.folder === true ? "openDirectory" : "openFile"] });
   return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
 });
 
 function openWindow(loadUrl) {
+  try { appOrigin = new URL(loadUrl).origin; if (appOrigin === "null") appOrigin = null; } catch { appOrigin = null; }
+  const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "fullscreen"]);
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED_PERMISSIONS.has(perm)));
   const win = new BrowserWindow({
     width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "Liascape",
-    webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, "preload.js") },
+    webPreferences: {
+      backgroundThrottling: false, preload: path.join(__dirname, "preload.js"),
+      // Electron's defaults, pinned: the page never gets Node, the preload runs isolated and sandboxed (it only bridges
+      // ipcRenderer), same-origin policy on
+      contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true,
+    },
   });
   win.setMenuBarVisibility(false);
   // FREEZE FIX: authoritative active/idle signal from the WM (OS-level focus), more reliable than DOM
@@ -134,10 +163,11 @@ app.whenReady().then(() => {
   viteUp((dev) => {
     if (dev) {
       // backend is the systemd dotnet-watch serve (pinned port) — don't spawn our own; just read it.
-      waitForPort((port) => openWindow(`${VITE}/?api=${port}${DBG ? `&${DBG}` : ""}`));
+      // + the backend's API token (serve.token, written before serve.port; the page keeps it and drops it from its URL)
+      waitForPort((port) => openWindow(withToken(`${VITE}/?api=${port}${DBG ? `&${DBG}` : ""}`)));
     } else {
       startBackend();
-      waitForPort((port) => openWindow(`http://127.0.0.1:${port}/${DBG ? `?${DBG}` : ""}`));
+      waitForPort((port) => openWindow(withToken(`http://127.0.0.1:${port}/${DBG ? `?${DBG}` : ""}`)));
     }
   });
 });

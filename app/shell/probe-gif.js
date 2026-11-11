@@ -1,5 +1,6 @@
 // Verify animated library previews: hover renders an animated layer; AutoPlayGifs bulk-plays gif assets.
 const { app, BrowserWindow } = require("electron");
+const { withToken } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const url = process.argv[2];
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -7,7 +8,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1400, height: 1000, webPreferences: { backgroundThrottling: false } });
   const js = (s) => win.webContents.executeJavaScript(s);
   const out = {};
-  await win.loadURL(url); await wait(6000);
+  await win.loadURL(withToken(url)); await wait(6000);
   await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Library')?.click()`); await wait(1500);
 
   // A. hover a gif-backed card → animated <img> layer appears

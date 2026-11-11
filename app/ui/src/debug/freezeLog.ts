@@ -1,4 +1,4 @@
-import { API } from "../api/client";
+import { API, authHeaders } from "../api/client";
 
 // DIAGNOSTIC: catch the recurring main-thread wedge. Every ~2s (and on any long task >200ms) we POST a
 // compact snapshot to the backend, which appends it to ~/.cache/liascape/freeze.log. When the main
@@ -53,7 +53,7 @@ export function startFreezeLog() {
     try {
       const body = JSON.stringify(extra ? { ...snap(), ...extra } : snap());
       // keepalive → non-blocking, fire-and-forget (survives unload); failures ignored
-      fetch(`${API}/debug/log`, { method: "POST", body, keepalive: true, headers: { "Content-Type": "application/json" } }).catch(() => {});
+      fetch(`${API}/debug/log`, { method: "POST", body, keepalive: true, headers: authHeaders({ "Content-Type": "application/json" }) }).catch(() => {});
     } catch { /* ignore */ }
     maxLongTask = 0; // reset the window each post
   }

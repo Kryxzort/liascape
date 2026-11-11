@@ -56,7 +56,7 @@ electron app/shell/probe.js http://127.0.0.1:<port>   # headless UI self-test (o
   `volume-up` works too), `loop-current` (liascape-player: toggles "keep playing this one" — the playlist stops rotating
   and the current wallpaper loops, until run again; kept by the player across restarts — player-adapter.md § Rotation).
 - `ctl <verb> ['<json>']` — the running player's control socket (`liascape-player ctl`: `state`, `logs`, `probe`, …).
-- `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`.
+- `serve` *(internal — the app starts it)* — headless web API on `127.0.0.1:<random>`, port written to `~/.config/liascape/serve.port`, its API token to `serve.token` beside it (every request needs it — `.claude/rules/web-backend.md` § Local API security).
 - `monitor-daemon` *(internal, **legacy engine only**)* — `AudioMonitor` with the app closed; spawned detached when the app
   closes / by `restore`, killed on app open. Under `liascape-player` the player's own auto-mute Signal mutes with the
   app closed: it is never started and a leftover one is stopped (Phase 3 Task 14).

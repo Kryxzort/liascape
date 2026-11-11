@@ -39,7 +39,8 @@ public static class ServerHost
         new WallpaperEngineService(), new SteamWorkshopService(),
     };
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // remote thumbnails / gifs the page names (/img, /anim, /still): public addresses only (ApiSecurity.PublicOnlyHttp)
+    private static readonly HttpClient Http = ApiSecurity.PublicOnlyHttp(TimeSpan.FromSeconds(30));
     private static readonly FileExtensionContentTypeProvider Mime = new();
 
     private static string ConfigDir => Path.Combine(
@@ -53,12 +54,17 @@ public static class ServerHost
         // otherwise bind a random free port.
         var fixedPort = int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_PORT"), out var lp) ? lp : 0;
         builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, fixedPort));
-        builder.Services.AddCors(); // loopback-only; lets `vite dev` (other port) talk to us
         var app = builder.Build();
 
-        // STOPGAP (2026-11-11, until the local-API hardening lands): any website could read this API's answers (AllowAnyOrigin —
-        // /settings carried the Steam sign-in token). Only the dev UI's origin (Vite :5173) may now; production is same-origin.
-        app.UseCors(p => p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173").AllowAnyHeader().AllowAnyMethod());
+        // Local API security (web-backend.md § Local API security; owner 2026-11-11 "make the app as a whole more secure"):
+        // the token, the Host check and the origin rule, ahead of everything — the error handler below included, so a refusal
+        // never runs an endpoint. The static UI (LIASCAPE_UI_DIR) needs no token: its page gets one from its URL (main.js).
+        var uiDir = Environment.GetEnvironmentVariable("LIASCAPE_UI_DIR");
+        Microsoft.Extensions.FileProviders.PhysicalFileProvider? uiFiles =
+            !string.IsNullOrEmpty(uiDir) && Directory.Exists(uiDir) ? new(Path.GetFullPath(uiDir)) : null;
+        ApiSecurity.InitToken();
+        ApiSecurity.InitOrigins(servesUi: uiFiles != null);
+        app.Use((ctx, next) => ApiSecurity.Guard(ctx, () => next(ctx), uiFiles));
         // An endpoint that THROWS must still answer as itself (owner 2026-11-11: a Workshop download showed only "Download failed:
         // Failed to fetch"). Unhandled, Kestrel answered a bare 500 with the response's headers reset — CORS's
         // Access-Control-Allow-Origin included — so a UI on another origin (Vite :5173 in dev) got a network error instead of the
@@ -81,12 +87,10 @@ public static class ServerHost
 
         // Serve the built React UI same-origin (so the client uses relative paths, no CORS).
         // LIASCAPE_UI_DIR points at app/ui/dist (dev) or the bundled wwwroot (packaged).
-        var uiDir = Environment.GetEnvironmentVariable("LIASCAPE_UI_DIR");
-        if (!string.IsNullOrEmpty(uiDir) && Directory.Exists(uiDir))
+        if (uiFiles != null)
         {
-            var fp = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(uiDir));
-            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fp });
-            app.UseStaticFiles(new StaticFileOptions { FileProvider = fp });
+            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = uiFiles });
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = uiFiles });
         }
 
         MapEndpoints(app);
@@ -94,6 +98,7 @@ public static class ServerHost
         app.Start();
         var port = new Uri(app.Urls.First()).Port;
         Directory.CreateDirectory(ConfigDir);
+        // after serve.token (InitToken, before Start): a client that sees the port finds the token too
         AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
         Console.WriteLine($"liascape serve listening on 127.0.0.1:{port}");
 
@@ -329,7 +334,8 @@ public static class ServerHost
         });
 
         // ---- settings / themes ------------------------------------------------------------
-        app.MapGet("/settings", () => Results.Json(SettingsService.Load()));
+        // the Steam sign-in's secrets never leave the backend (the UI needs none of them: /steam/status says what it shows)
+        app.MapGet("/settings", () => Results.Json(SettingsService.Redacted(SettingsService.Load())));
         app.MapGet("/monitors", async () => Results.Json(await MonitorDetector.DetectAsync()));
 
         // DIAGNOSTIC: the renderer posts a heartbeat (+ long-task events) here; appended to a capped log
@@ -541,7 +547,8 @@ public static class ServerHost
         app.MapPost("/library/trash", (TrashReq r) => Results.Json(new { batch = AppOps.Trash(r.Items) }));
         app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title }); });
         app.MapGet("/library/undo-depth", () => Results.Json(new { depth = AppOps.UndoDepth() }));
-        app.MapGet("/library/duration", (string path) => Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }));
+        app.MapGet("/library/duration", (string path) => ApiSecurity.MediaAllowed(path)
+            ? Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }) : Results.Json(new { error = "not a library path" }, statusCode: 403));
 
         // ---- download (web sources; workshop-acquire = Phase 5) ---------------------------
         app.MapPost("/download", async (DownloadReq r, HttpContext ctx) =>
@@ -589,19 +596,22 @@ public static class ServerHost
         // "Open Page" (xdg-open url) / "Open in File Manager" (reveal → parent dir).
         app.MapPost("/open", (OpenReq r) =>
         {
-            try
+            // only the shapes the UI sends: an http(s) page (a source's page, Steam's) to the browser, or a library / Workshop
+            // item revealed in the file manager. Never a bare path (xdg-open runs a .desktop file, opens anything) or another
+            // scheme (file:, custom handlers).
+            if (r.Url != null)
             {
-                // Library reveal: resolve the real media (symlink target / scene dir), not the .id/.scene.
-                if (r.Url == null && r.Reveal && r.Path != null)
-                    AppOps.RevealLibraryItem(r.Path, r.IsScene, r.WorkshopId, r.CopiedSceneDir);
-                else
-                {
-                    string target = r.Url ?? r.Path ?? "";
-                    if (target.Length > 0)
-                        Process.Start(new ProcessStartInfo("xdg-open", target) { UseShellExecute = false });
-                }
+                if (!Uri.TryCreate(r.Url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https"))
+                    return Results.BadRequest(new { error = "only http(s) URLs open" });
+                try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { u.AbsoluteUri }, UseShellExecute = false }); } catch { }
+                return Results.Ok();
             }
-            catch { }
+            if (!r.Reveal || r.Path == null) return Results.BadRequest(new { error = "nothing to open" });
+            // Library reveal: resolve the real media (symlink target / scene dir), not the .id/.scene.
+            if (!ApiSecurity.MediaAllowed(r.Path) || (r.CopiedSceneDir is { Length: > 0 } c && !ApiSecurity.MediaAllowed(c))
+                || (r.WorkshopId is { Length: > 0 } w && !w.All(char.IsAsciiDigit)))
+                return Results.Json(new { error = "not a library or Workshop item" }, statusCode: 403);
+            try { AppOps.RevealLibraryItem(r.Path, r.IsScene, r.WorkshopId, r.CopiedSceneDir); } catch { }
             return Results.Ok();
         });
 
@@ -700,23 +710,34 @@ public static class ServerHost
         // CORS — proxy remote thumbs/gifs through here. ?u=<url>&r=<referer>
         app.MapGet("/img", async (string u, string? r, HttpContext ctx) =>
         {
+            // a proxy for remote previews only: http(s) to a public address (never this machine / the LAN — SSRF)
+            if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted) is string refused)
+            {
+                ctx.Response.StatusCode = 403;
+                await ctx.Response.WriteAsJsonAsync(new { error = refused });
+                return;
+            }
             try
             {
                 using var msg = new HttpRequestMessage(HttpMethod.Get, u);
                 msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
-                if (!string.IsNullOrEmpty(r)) msg.Headers.Referrer = new Uri(r);
+                if (!string.IsNullOrEmpty(r) && Uri.TryCreate(r, UriKind.Absolute, out var refUri) && refUri.Scheme is "http" or "https") msg.Headers.Referrer = refUri;
                 using var resp = await Http.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead);
                 ctx.Response.StatusCode = (int)resp.StatusCode;
-                ctx.Response.ContentType = resp.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
+                // an image or a video, else plain bytes: never another type served from this origin (an HTML page)
+                var rct = resp.Content.Headers.ContentType?.ToString();
+                ctx.Response.ContentType = rct is null ? "image/jpeg"
+                    : rct.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || rct.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? rct : "application/octet-stream";
                 ctx.Response.Headers.CacheControl = "public, max-age=86400";
                 await resp.Content.CopyToAsync(ctx.Response.Body);
             }
             catch { ctx.Response.StatusCode = 502; }
         });
 
-        // local library/cache media (loopback-only; the app already owns the filesystem)
+        // local library/cache media — only from where the app keeps / finds wallpapers (ApiSecurity.MediaAllowed)
         app.MapGet("/media", (string path) =>
         {
+            if (!ApiSecurity.MediaAllowed(path)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
             if (!File.Exists(path)) return Results.NotFound();
             var ct = Mime.TryGetContentType(path, out var t) ? t : "application/octet-stream";
             // Stream a seekable FileStream with range support — <video> sends `Range: bytes=…` and the
@@ -742,6 +763,7 @@ public static class ServerHost
                 // way (cache keyed on path+mtime). Other local formats (webp/png) → serve as-is via /media.
                 if (!remote)
                 {
+                    if (!ApiSecurity.MediaAllowed(u)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
                     if (!File.Exists(u)) return Results.NotFound();
                     if (!u.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
                         return Results.Stream(File.OpenRead(u), Mime.TryGetContentType(u, out var lt) ? lt : "image/gif", enableRangeProcessing: true);
@@ -759,6 +781,7 @@ public static class ServerHost
                     return Results.Stream(File.OpenRead(trimmed), "image/gif", enableRangeProcessing: true);
                 }
 
+                if (await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
                 var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(u)))[..24];
                 var existing = Directory.GetFiles(dir, hash + ".*").FirstOrDefault();
                 if (existing == null)
@@ -809,6 +832,8 @@ public static class ServerHost
                 if (!remote) { try { key = u + "|" + new FileInfo(u).LastWriteTimeUtc.Ticks; } catch { } }
                 var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..24];
                 var jpg = Path.Combine(dir, hash + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
+                if (!remote && !ApiSecurity.MediaAllowed(u)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
+                if (remote && await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
                 if (!remote && !File.Exists(u)) return Results.NotFound();
                 if (!File.Exists(jpg))
                     await ExtractOnce(jpg, async () =>

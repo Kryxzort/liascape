@@ -38,6 +38,8 @@ public static class ActionForward
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            // the backend's API token, beside serve.port (web-backend.md § Local API security)
+            if (ApiSecurity.ReadToken() is string token) http.DefaultRequestHeaders.Add(ApiSecurity.Header, token);
             var r = http.PostAsJsonAsync($"{url}/action", new { name = action }).GetAwaiter().GetResult();
             if (sw.ElapsedMilliseconds > 1000) // a keybind should feel instant — say where the time went
                 Console.Error.WriteLine($"liascape {action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");

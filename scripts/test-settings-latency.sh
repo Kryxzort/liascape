@@ -30,6 +30,9 @@ T=$(mktemp -d /tmp/liascape-lat-XXXXXX)   # short: a unix socket path must be < 
 LIB=$T/home/.local/share/liascape/library/imported
 mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$LIB" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
+# every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
+# per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
+curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_PROFILE_SETTINGS=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT

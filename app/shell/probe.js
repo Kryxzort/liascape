@@ -1,6 +1,7 @@
 // Headless self-test: loads the UI offscreen, captures console, counts rendered cards, exits.
 // Usage: electron app/shell/probe.js http://127.0.0.1:<port>
 const { app, BrowserWindow } = require("electron");
+const { withToken } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
 const url = process.argv[2] || "http://127.0.0.1:8080";
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 
@@ -9,7 +10,7 @@ app.whenReady().then(async () => {
     webPreferences: { backgroundThrottling: false } });
   const logs = [];
   win.webContents.on("console-message", (_e, level, msg) => logs.push(`[${level}] ${msg}`));
-  await win.loadURL(url);
+  await win.loadURL(withToken(url));
   await new Promise((r) => setTimeout(r, 6000)); // let init() fetch + render
   const browse = await win.webContents.executeJavaScript(`(() => ({
     cards: document.querySelectorAll('.card').length,

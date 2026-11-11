@@ -548,10 +548,13 @@ public static class WorkshopDownloader
             ".cache", "liascape", "steamcmd_workshop");
         Directory.CreateDirectory(installDir);
 
-        // Wrap in a shell command so the terminal stays open after steamcmd exits
-        string innerCmd =
-            $"\"{steamcmdExe}\" +force_install_dir \"{installDir}\" +login \"{username}\" +quit" +
+        // Wrap in a shell command so the terminal stays open after steamcmd exits. The values are the script's positional
+        // arguments ($1–$3), never pasted into its text: the username (and the steamcmd path) come from the settings, and
+        // pasted in quotes a `"; …` in them ran as shell commands (web-backend.md § Local API security).
+        const string innerCmd =
+            "\"$1\" +force_install_dir \"$2\" +login \"$3\" +quit" +
             "; echo; echo 'Sign-in complete. Press Enter to close.'; read";
+        string[] shArgs = ["sh", "-c", innerCmd, "liascape-steamcmd-signin", steamcmdExe, installDir, username];
 
         string[] terminals = ["kitty", "alacritty", "foot", "wezterm", "xterm", "gnome-terminal", "konsole"];
 
@@ -564,19 +567,19 @@ public static class WorkshopDownloader
                 {
                     case "wezterm":
                         psi.ArgumentList.Add("start"); psi.ArgumentList.Add("--");
-                        psi.ArgumentList.Add("sh"); psi.ArgumentList.Add("-c"); psi.ArgumentList.Add(innerCmd);
+                        foreach (var a in shArgs) psi.ArgumentList.Add(a);
                         break;
                     case "foot":
-                        psi.ArgumentList.Add("sh"); psi.ArgumentList.Add("-c"); psi.ArgumentList.Add(innerCmd);
+                        foreach (var a in shArgs) psi.ArgumentList.Add(a);
                         break;
                     case "gnome-terminal":
-                        psi.ArgumentList.Add("--"); psi.ArgumentList.Add("sh"); psi.ArgumentList.Add("-c"); psi.ArgumentList.Add(innerCmd);
+                        psi.ArgumentList.Add("--"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
                         break;
                     case "konsole":
-                        psi.ArgumentList.Add("-e"); psi.ArgumentList.Add("sh"); psi.ArgumentList.Add("-c"); psi.ArgumentList.Add(innerCmd);
+                        psi.ArgumentList.Add("-e"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
                         break;
                     default:
-                        psi.ArgumentList.Add("-e"); psi.ArgumentList.Add("sh"); psi.ArgumentList.Add("-c"); psi.ArgumentList.Add(innerCmd);
+                        psi.ArgumentList.Add("-e"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
                         break;
                 }
                 var proc = Process.Start(psi);
