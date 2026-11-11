@@ -68,5 +68,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - Budget: ≤250 lines and ≤30,000 chars per rule file; reference docs ≤15,000 chars each; `docs/decisions.md` ≤30,000
   chars (past that, merge entries or drop ones the code no longer needs defending). Files over 40,000 chars are truncated when loaded.
 - Code comments cite a current rule or doc path (`.claude/rules/…`, `docs/…`), never a deleted one; `check-rules.sh` lists dead citations.
-- Subagents do not see auto memory: never point a rule at "memory X"; put the fact here.
+- Write only what a fresh agent on a fresh clone can use: never cite your personal memory, a chat or "as discussed" —
+  subagents and other people can't see them; put the fact itself in its home.
+- The repo is public: no account names, emails, tokens, IPs, hostnames, serials or other personal details of the owner
+  in rules, docs, comments or commit messages. Machine-specific paths only in dated reports, never as instructions.
 - Run `bash scripts/check-rules.sh` after editing; run `/doctor prompt-audit` after a big edit if available.

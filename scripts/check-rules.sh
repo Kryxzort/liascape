@@ -5,7 +5,7 @@
 #  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md has name + description;
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
-#  - no "see memory X" pointers (auto memory is invisible to subagents);
+#  - no "see memory X" pointers (auto memory is invisible to subagents); no emails / real IPs in rules and docs (public repo);
 #  - no dead citations: every `.claude/rules/….md` or `docs/….md` path named in any tracked or new text file (code
 #    comments included) exists — one problem per missing path, with its count and the files citing it.
 # Uses PyYAML when installed; otherwise a strict parser for the one allowed shape (any file it accepts is valid YAML).
@@ -86,6 +86,17 @@ def check_paths(f, text):
             if not path_exists(w): bad(f, f"backticked path does not exist: {w}")
     for m in re.finditer(r"(?i)see memory|memory `|auto[- ]memory file", text):
         bad(f, f"memory pointer (invisible to subagents): …{text[max(0, m.start()-30):m.end()+30]!r}…")
+    personal(f, text)
+
+# The repo is public (writing-rules.md § Files): no emails or real IP addresses in the agent-facing text. Loopback, link-local (the SSRF examples),
+# unspecified and documentation-range examples are fine; dated reports, upstream patches and credits aren't scanned.
+OK_IP = re.compile(r"^(127\.|169\.254\.|0\.0\.0\.0$|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)")
+def personal(f, text):
+    for m in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}", text):
+        if m.group().endswith(("@anthropic.com", "@users.noreply.github.com")): continue
+        bad(f, f"email address in public text: {m.group()}")
+    for m in re.finditer(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])", text):
+        if not OK_IP.match(m.group(1)): bad(f, f"IP address in public text: {m.group(1)}")
 
 rule_files = sorted(glob.glob(".claude/rules/**/*.md", recursive=True))
 for f in rule_files:
@@ -103,6 +114,9 @@ text = open("CLAUDE.md", encoding="utf-8").read()
 if text.count("\n") > 100: bad("CLAUDE.md", f"{text.count(chr(10))} lines > 100")
 check_paths("CLAUDE.md", text)
 print(f"CLAUDE.md: {text.count(chr(10))} lines, {len(text)} chars")
+
+for f in ["docs/decisions.md"] + sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md")):
+    if os.path.exists(f): personal(f, open(f, encoding="utf-8").read())
 
 # Doc budgets (writing-rules.md § Files): reference docs ≤ 15,000 chars, the decision log ≤ 30,000. Reports and spikes
 # under docs/player/ are dated data, not reference material, so they're exempt.
