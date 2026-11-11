@@ -484,7 +484,7 @@ app.whenReady().then(async () => {
 
     // the download button's arrow is centred at rest as well as on hover: the arrow's pixel bounding box vs the button's
     // centre — at rest (the card hovered, the button not) and
-    // on the button (the bob frozen at its 0 % and 50 % keyframes). Pixels: the capture with the arrow minus without it.
+    // on the button (its one-shot drop held where it lands). Pixels: the capture with the arrow minus without it.
     await cell("look:dlCentre", async () => {
       const v = []; await load(SIGNED_OUT);
       const srcs = (await http("GET", "/sources")).json;
@@ -547,7 +547,8 @@ app.whenReady().then(async () => {
         const b0 = await page(`const e = ${btnSel}; if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
         if (!b0) { v.push(`${W0}x${H0}: no download button`); continue; }
         mv(b0.x, b0.y);
-        await measure(`${W0}x${H0}-hover0`, ".dl-btn:hover .dl-glyph { animation: none !important; transform: translateY(-1px) !important; }");
+        await sleep(100); await page(`for (const e of document.querySelectorAll(".dl-glyph *")) for (const a of e.getAnimations()) a.finish();`); // its drop, landed
+        await measure(`${W0}x${H0}-hover0`, "");
         await page(`document.getElementById("__dlc")?.remove();`);
         mv(5, 5); await sleep(300);
         if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow or ring pixels at rest`); continue; }

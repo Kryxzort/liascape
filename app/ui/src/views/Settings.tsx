@@ -1,6 +1,6 @@
 import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
+  X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
@@ -9,6 +9,7 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
+import { FolderFlap } from "../components/icons";
 import { TransitionPicker, type TransitionValue } from "../components/TransitionPicker";
 import { PlayTimeInput } from "../components/PlayTimeInput";
 import { ROT_HINT } from "../components/rotHint";
@@ -416,7 +417,7 @@ export const Settings = memo(function Settings() {
       <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
         <Row label="Workshop folder" hint="where Steam keeps your Wallpaper Engine downloads">
           <input className="text" value={g("workshopFolder", "")} onChange={(e) => set("workshopFolder", e.target.value)} />
-          <button className="btn ghost ico" onClick={() => pickInto("workshopFolder", "folder")}><FolderOpen size={14} /> Browse</button>
+          <button className="btn ghost ico" onClick={() => pickInto("workshopFolder", "folder")}><FolderFlap size={14} /> Browse</button>
         </Row>
         <Row label="Play scenes" hint="Wallpaper Engine's interactive scene wallpapers — needs Wallpaper Engine installed for its assets" rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
         <Row label="Import new Workshop wallpapers" hint="anything new in the Workshop folder lands in your library by itself" rk="autoAddWeWallpapersToLibrary"><input type="checkbox" checked={g("autoAddWeWallpapersToLibrary", false)} onChange={(e) => set("autoAddWeWallpapersToLibrary", e.target.checked)} /></Row>
@@ -495,7 +496,7 @@ export const Settings = memo(function Settings() {
               <Help>Downloads a one-off copy with steamcmd — no subscription. Needs steamcmd and a one-time sign-in.</Help>
               <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath">
                 <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />
-                <button className="btn ghost ico" onClick={() => pickInto("steamCmdPath", "file")}><FolderOpen size={14} /> Browse</button>
+                <button className="btn ghost ico" onClick={() => pickInto("steamCmdPath", "file")}><FolderFlap size={14} /> Browse</button>
               </Row>
               <Row label="Steam username"><input className="text" value={g("steamUsername", "")} onChange={(e) => set("steamUsername", e.target.value)} /></Row>
               <Row label="One-time sign-in" hint="opens a terminal; steamcmd remembers you after"><button className="btn accent" onClick={steamcmdSignin}>Sign in (one-time)</button></Row>

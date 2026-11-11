@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Save } from "lucide-react";
+import { magnetRef } from "./magnet";
 
 // Save Playlist modal — name field + click an existing name to overwrite.
 export function SavePlaylistModal({
@@ -33,7 +34,7 @@ export function SavePlaylistModal({
               )}
               <div className="modal-actions">
                 <button className="btn ghost" onClick={onClose}>Cancel</button>
-                <button className="btn accent ico" disabled={!name.trim()} onClick={commit}><Save size={15} /> Save</button>
+                <button className="btn accent ico" ref={magnetRef} disabled={!name.trim()} onClick={commit}><Save size={15} /> Save</button>
               </div>
             </div>
           </motion.div>

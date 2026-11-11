@@ -34,7 +34,7 @@ export function Select({ value, options, onChange, className = "", title, disabl
 
   return (
     <>
-      <button ref={btn} type="button" className={`sel ${className}`} title={title} disabled={disabled}
+      <button ref={btn} type="button" className={`sel${open ? " open" : ""} ${className}`} title={title} disabled={disabled}
         onClick={(e) => { e.stopPropagation(); if (disabled) return; if (open) { setOpen(false); return; } place(); setOpen(true); }}>
         <span className="sel-val">{cur?.label ?? ""}</span>
         <ChevronDown size={14} className="sel-caret" />

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Monitor, Star, Heart, Eye, HardDrive, User, ExternalLink, Copy, Download, Check, Library as LibraryIcon, Play, X, FolderOpen, Info } from "lucide-react";
+import { Monitor, Star, Heart, Eye, HardDrive, User, ExternalLink, Copy, Download, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
 import { SubToggle } from "./SubToggle";
+import { FolderFlap } from "./icons";
+import { magnetRef } from "./magnet";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -71,7 +73,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
           {fmtSize(w.fileSizeBytes) && <span className="side-pill" title="Size"><HardDrive size={13} /> {fmtSize(w.fileSizeBytes)}</span>}
           {w.authorName && <span className="side-pill" title="Author"><User size={13} /> {w.authorName}</span>}
         </div>
-        {/* the download buttons: the only way to download from here — the glyph nudges down on hover (index.css .side-cta) */}
+        {/* the download buttons: the only way to download from here — the arrow drops into its tray on hover (components/iconMotion.ts) */}
         <div className="side-cta">
           {downloading ? (
             <div className="side-dl" data-side-download>
@@ -80,10 +82,10 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
               <button className="btn ghost ico" onClick={onCancel}><X size={14} /> Cancel</button>
             </div>
           ) : libItem ? (
-            <button className="btn accent ico side-go" onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
+            <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
           ) : (
             <>
-              <button className="btn accent ico side-go" onClick={() => onDownload(true)}><span className="side-dl-ico"><Download size={16} /></span> Download &amp; Apply</button>
+              <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onDownload(true)}><span className="side-dl-ico"><Download size={16} /></span> Download &amp; Apply</button>
               <button className="btn ghost ico side-go" onClick={() => onDownload(false)}><span className="side-dl-ico"><Download size={15} /></span> Download</button>
             </>
           )}
@@ -102,7 +104,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             <button className="side-tile" data-open-steam onClick={() => openOnSteam(w.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>
           ) : (
             // the middle-click target: the page it came from, or a local folder
-            <button className="side-tile" onClick={onOpenSource}>{web ? <><span className="side-tile-ico"><ExternalLink size={15} /></span>Open page</> : <><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</>}</button>
+            <button className="side-tile" onClick={onOpenSource}>{web ? <><span className="side-tile-ico"><ExternalLink size={15} /></span>Open page</> : <><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</>}</button>
           )}
           {w.workshopId && <button className="side-tile" onClick={() => navigator.clipboard?.writeText(w.workshopId!)}><span className="side-tile-ico"><Copy size={15} /></span>Copy ID</button>}
         </div>

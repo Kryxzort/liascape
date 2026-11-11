@@ -17,6 +17,17 @@
   /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
   --glow-sm: 0 0 12px -2px var(--accent);
   --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  /* COOL: the motion springs — one set for every icon (and the magnet), read by components/iconMotion.ts too. Damped springs
+     sampled into linear(): --spring ζ ≈ 0.42 (≈ 23 % overshoot, an icon's own gesture), --spring-soft ζ ≈ 0.62 (≈ 8 %, turns and
+     returns). docs/superpowers/specs/2026-11-12-icon-motion-design.md § Physics */
+  --spring: linear(0, .074, .258, .492, .729, .936, 1.091, 1.188, 1.23, 1.228, 1.194, 1.143, 1.086, 1.034, .993, .964, .949, .946,
+    .951, .961, .974, .987, .998, 1.006, 1.011, 1.013, 1.012, 1.01, 1.007, 1.004, 1.001, .999, .998, .997, .997, .997, 1);
+  --spring-dur: .65s;
+  --spring-soft: linear(0, .048, .167, .32, .483, .638, .773, .882, .966, 1.024, 1.06, 1.078, 1.084, 1.079, 1.069, 1.057, 1.043,
+    1.03, 1.019, 1.01, 1.003, .998, .995, .993, .993, .993, .994, .995, .996, .998, 1);
+  --spring-soft-dur: .5s;
+  --ease-icon-out: cubic-bezier(.2, .9, .3, 1);
+  --press-dur: 70ms;
 }
 /* live wallpaper behind every tab → let the chrome go translucent so it shows through */
 :root.bg-live { --tr: 65%; --tr-strong: 85%; --tr-side: 0%; }
@@ -198,8 +209,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   will-change: transform; }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
 /* COOL: hovered — it lifts + grows, the chip fills with the accent,
-   an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down,
-   again and again */
+   an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow drops
+   once into its tray and lands on the spring (icon motion: progress is the only thing that loops) */
 .dl-btn::before { content: ""; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; z-index: -1;
   background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 60%, transparent), color-mix(in srgb, var(--accent) 18%, transparent) 60%, transparent);
   opacity: 0; transition: opacity .2s; }
@@ -207,8 +218,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   box-shadow: inset 0 0 0 1.5px var(--accent), var(--glow-sm), 0 3px 10px rgba(0,0,0,.4); }
 .dl-btn:active { transform: scale(.94); transition-duration: .08s; }
 .dl-btn:hover::before { opacity: 1; }
-.dl-btn:hover .dl-glyph { color: var(--accent-fg); animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
-@keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
+.dl-btn:hover .dl-glyph { color: var(--accent-fg); }
+/* the arrow falls through into its tray, a fresh one drops in from above and lands; the tray dips as it does — lucide's
+   download recipe (components/iconMotion.ts `dl-glyph`: WAAPI, since a keyframe's timing function can't read the --spring var) */
+.dl-glyph > * { transform-box: view-box; transform-origin: 12px 12px; }
 /* WHOLE-pixel sizes with EVEN margins (a percentage is off-centre at some window sizes): 58 % makes a 17.4 px
    glyph in the 30 px chip — 6.3 px margins, rounded to an off-centre arrow (measured (0.85, 0.44) px); 18 in 30 and 14 in 24 leave
    6 / 5 px each side. The path itself is centred in its viewBox (Card.tsx). Guard: probe-steam look:dlCentre. */
@@ -376,6 +389,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   /* above the row, which reaches up under it (the magnified items' headroom): only its controls take the pointer */
   position: relative; z-index: 2; pointer-events: none; }
 .playlist-bar-head > * { pointer-events: auto; }
+/* the fold chevron: one icon, turned −90° (pointing right) while the bar is folded */
+.pl-chev { display: block; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
+.pl-fold.folded .pl-chev { transform: rotate(-90deg); }
+:root.no-motion .pl-chev { transition: none; }
 .playlist-bar-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
 .playlist-bar-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
 .mini { padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
@@ -420,10 +437,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes pl-glow-in { from { opacity: 0; } to { opacity: 1; } }
 .pl-thumb { width: 100%; height: 100%; object-fit: cover; }
 .pl-item.playing { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); } /* green */
-/* "Go to playing" buttons (the Library top bar's, the playlist bar head's): the crosshair turns and glows in the accent on hover */
-.go-playing svg { transition: transform .35s cubic-bezier(.2, 1.3, .4, 1), filter .2s; }
+/* "Go to playing" buttons (the Library top bar's, the playlist bar head's): the crosshair holds a quarter turn on the spring
+   (index.css § icon motion) and its centre dot locks on (iconMotion.ts); it glows in the accent */
 .go-playing:hover:not(:disabled) { color: var(--accent); box-shadow: var(--glow-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
-.go-playing:hover:not(:disabled) svg { transform: rotate(90deg) scale(1.12); filter: drop-shadow(0 0 4px var(--accent)); }
+.go-playing:hover:not(:disabled) svg { filter: drop-shadow(0 0 4px var(--accent)); }
 .go-playing:disabled { opacity: .4; cursor: default; box-shadow: none; }
 /* COOL: …and the found item (hooks/travelToPlaying.ts locateFx): a fixed layer over its box (on <body>, above everything) — the
    window dims around a hole (one huge spread shadow, painted once; its opacity animates), the accent glow (a pre-blurred shadow
@@ -558,8 +575,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .ssection-ico { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 8px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
-  transition: box-shadow .25s, transform .2s; }
-.ssection:hover .ssection-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: scale(1.1) rotate(-4deg); }
+  transition: box-shadow .25s, transform var(--spring-dur) var(--spring); }
+/* object role: the section's emblem tilts on the spring while its card is hovered (icon motion) */
+.ssection:hover .ssection-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: rotate(-8deg) scale(1.1); }
 .srow { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 9px; margin: 0 -9px;
   border-radius: 9px; border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
   transition: background .15s, box-shadow .15s; }
@@ -662,7 +680,7 @@ input[type=range]:focus-visible { outline: none; }
 .st-head .st-step { color: var(--subtext); font-size: 12px; font-weight: 600; }
 .st-fold { margin-left: auto; }
 /* the chevron turns (folded = up) with a springy overshoot — one icon, never swapped */
-.st-chev { display: block; transition: transform .38s cubic-bezier(.34, 1.56, .64, 1); }
+.st-chev { display: block; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .steam-todo.folded .st-chev { transform: rotate(180deg); }
 :root.no-motion .st-chev { transition: none; }
 .st-body { display: flex; flex-direction: column; gap: 8px; }
@@ -684,13 +702,11 @@ input[type=range]:focus-visible { outline: none; }
 .st-use { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; padding: 9px 2px 0;
   border: 0; border-top: 1px solid var(--surface1); background: none; color: var(--accent); font: inherit; font-weight: 700;
   cursor: pointer; text-align: left; transition: color .15s, transform .18s cubic-bezier(.2, 1.3, .4, 1), filter .2s; }
-.st-use svg { transition: transform .18s; }
-.st-use:hover:not(:disabled) svg { transform: translateX(3px); }
 .st-use:hover:not(:disabled) { color: var(--accent-hover, var(--accent)); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent)); }
 .st-use:disabled { color: var(--muted); cursor: default; }
 .st-use:hover:not(:disabled) { transform: translateY(-1px); }
 .st-use:active:not(:disabled) { transform: scale(.98); }
-:root.no-motion .st-use, :root.no-motion .st-use svg { transition: none; }
+:root.no-motion .st-use { transition: none; }
 :root.no-glow .st-use:hover:not(:disabled) { filter: none; }
 
 /* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
@@ -756,6 +772,47 @@ input[type=range]:focus-visible { outline: none; }
 /* ---- icons (lucide) + shared button states ---- */
 .ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .ico svg, .mini svg, .del svg, .pl-remove svg, .pl-toggle svg { flex: none; }
+
+/* ---- icon motion: the vocabulary by role (docs/superpowers/specs/2026-11-12-icon-motion-design.md; the rule:
+   .claude/rules/ui/design.md § Icon motion). Here: the held states, the object tilt, the press squeeze, the toggle pop; the
+   one-shots (an icon acting its meaning once) are components/iconMotion.ts. Every one settles on the :root springs; transform,
+   opacity and the individual rotate / scale properties only — `scale` is the press's alone, so it composes with whatever
+   else the icon does. A host is a button or link, minus the state-glyph controls (segmented options, the stepper, the
+   filter switch). Guard: probe-icons. ---- */
+:where(svg.lucide) { transition: transform var(--spring-dur) var(--spring), rotate var(--spring-dur) var(--spring), scale var(--spring-dur) var(--spring); }
+/* the parts move in the icon's own 24-unit grid (iconMotion.ts recipes and the holds below) */
+:where(svg.lucide) > * { transform-box: view-box; transform-origin: 12px 12px; transition: transform var(--spring-dur) var(--spring); }
+/* object: an icon with no verb of its own tilts while its button is hovered (iconMotion.ts marks the acting ones data-act) */
+:where(button, a):hover:not(:disabled, .seg-opt, .ns-btn, .wf-seg) svg.lucide:not(.lucide-x, .lucide-trash-2, .lucide-folder-flap,
+  .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act]) {
+  transform: rotate(-8deg) scale(1.08); }
+/* hold: the trash lid lifts, hinged at its left end; the folder's flap falls open from its bottom edge; X turns a quarter;
+   the crosshair turns a quarter. Leaving closes them on the same spring. */
+:where(svg.lucide-trash-2) > :nth-child(n+4) { transform-origin: 4px 6px; }
+:where(button, a):hover:not(:disabled) svg.lucide-trash-2 > :nth-child(n+4) { transform: translateY(-1.5px) rotate(-18deg); }
+:where(svg.lucide-folder-flap) > :nth-child(2) { transform-origin: 2px 20px; }
+:where(button, a):hover:not(:disabled) svg.lucide-folder-flap > :nth-child(2) { transform: skewX(-18deg) scaleX(.86); }
+:where(button, a):hover:not(:disabled, .wf-seg) svg.lucide-x { rotate: 90deg; }
+:where(button, a):hover:not(:disabled) svg.lucide-locate-fixed { rotate: 90deg; transition-timing-function: var(--spring-soft); }
+/* the small cross and dot of sparkles pop from their own centres (iconMotion.ts) */
+:where(svg.lucide-sparkles) > :nth-child(n+2) { transform-box: fill-box; transform-origin: center; }
+/* press: every icon button squeezes its icon, and springs back on release */
+:where(button, a):active:not(:disabled, .seg-opt, .ns-btn) svg.lucide { scale: .82; transition-duration: var(--press-dur);
+  transition-timing-function: cubic-bezier(.3, 0, .6, 1); }
+/* toggle: the new state pops once when the user changes it (a fresh mount of `.ico-pop`; components/PlaylistToggle.tsx's
+   pop-on / pop-off — two names, so each change restarts it) */
+@keyframes icon-pop { from { transform: scale(.6); } to { transform: none; } }
+@keyframes icon-pop-b { from { transform: scale(.6); } to { transform: none; } }
+.ico-pop, .pl-toggle-svg.pop-on { animation: icon-pop var(--spring-dur) var(--spring); }
+.pl-toggle-svg.pop-off { animation: icon-pop-b var(--spring-dur) var(--spring); }
+/* status: never moves; glows (a static drop-shadow in its own colour) */
+.side-chip > svg.lucide, .side-sub-ico.subscribed > svg { filter: drop-shadow(0 0 3px currentColor); }
+/* disclosure: the select / preset carets turn over while their list is open */
+.sel-caret, .combo-caret svg { transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
+.sel.open .sel-caret, .combo-caret.open svg { transform: rotate(180deg); }
+/* the magnet (components/magnet.ts): a quick follow while the pointer is in range, home on the soft spring */
+[data-magnet]:not([data-magnet-on]) { transition: translate var(--spring-soft-dur) var(--spring-soft), transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
+[data-magnet][data-magnet-on] { transition: translate .14s var(--ease-icon-out), transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
 .btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
 .muted-status { color: var(--muted); font-style: italic; }
 
@@ -875,9 +932,8 @@ input[type=range]:focus-visible { outline: none; }
 .tr-prev-cap { position: absolute; left: 0; bottom: 0; padding: 4px 10px; font-size: 12px; font-weight: 700;
   color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.7)); border-top-right-radius: 8px; }
 .tr-refresh { position: absolute; top: 8px; right: 8px; z-index: 2; background: rgba(0,0,0,.45); color: #fff;
-  border: 0; border-radius: 8px; padding: 7px; cursor: pointer; display: flex; transition: background .15s, transform .2s; }
+  border: 0; border-radius: 8px; padding: 7px; cursor: pointer; display: flex; transition: background .15s; }
 .tr-refresh:hover:not(:disabled) { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
-.tr-refresh:active:not(:disabled) { transform: rotate(180deg); }
 /* scrollable list of category sections */
 .tr-list { overflow-y: auto; padding: 2px; max-height: 34vh; }
 .tr-sec { margin-bottom: 10px; }
@@ -912,7 +968,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }
 :root.no-glow .btn.danger.glow-stop, :root.no-glow .btn.danger.glow-stop:hover,
 :root.no-glow .btn.danger:hover, :root.no-glow .btn.danger.solid:hover { box-shadow: none; }
-/* the Browse download glyph keeps its breath (opacity + size), minus the glow */
 :root.no-glow .del:hover, :root.no-glow .pl-remove:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
 :root.no-glow .pl-toggle:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 :root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover { filter: none; }
@@ -923,7 +978,7 @@ input[type=range]:focus-visible { outline: none; }
 /* a keyboard-focused slider still shows where focus is: an outline instead of the glow (never while it's held) */
 :root.kbd-nav.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root.no-glow .mpv { box-shadow: none; }
-/* the focused card: its accent ring only; the download button: lift + nudge, no bloom; the locator: dim + edge + rings, no glow */
+/* the focused card: its accent ring only; the download button: lift + drop, no bloom; the locator: dim + edge + rings, no glow */
 :root.no-glow .card.focused { box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 :root.no-glow .dl-btn::before { display: none; }
 :root.no-glow .dl-btn:hover { box-shadow: inset 0 0 0 1.5px var(--accent), 0 3px 10px rgba(0,0,0,.4); }
@@ -938,6 +993,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
+:root.no-glow .side-chip > svg.lucide, :root.no-glow .side-sub-ico.subscribed > svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
 
@@ -951,8 +1007,11 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
 :root.no-motion .wf-open .wf-chev { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
-:root.no-motion .side-go:hover .side-dl-ico, :root.no-motion .dl-btn:hover .dl-glyph { animation: none; transform: translateY(2px); }
 :root.no-motion .app > .scroll { animation: none; }
+/* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
+:root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico) { transition: none !important; }
+:root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }
+:root.no-motion [data-magnet] { translate: none !important; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
 :root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; }
@@ -1084,7 +1143,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 :root.no-glow button.side-pill.copy:hover { box-shadow: none; }
 .side-tags { margin: 0; }
 .side-link { font-size: 12px; }
-/* the Browse sidebar's download buttons: big, the glyph nudging down on hover (like the card's download button) */
+/* the Browse sidebar's download buttons: big; the arrow drops into its tray on hover (iconMotion.ts, like the card's) */
 .side-cta { display: flex; flex-wrap: wrap; gap: 8px; }
 .side-cta > .side-go { flex: 1 1 auto; justify-content: center; padding: 10px 14px; font-size: 13.5px; border-radius: 10px;
   transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
@@ -1092,7 +1151,6 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-cta > .side-go:active { transform: scale(.97); transition-duration: .08s; }
 .side-cta > .side-go.accent:hover { box-shadow: 0 10px 22px -8px var(--accent), var(--glow); }
 .side-dl-ico { display: inline-grid; }
-.side-go:hover .side-dl-ico { animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
 .side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
 .side-dl .dl-bar { flex: 1; width: auto; }
 /* the Browse sidebar's Subscribe / Unsubscribe toggle (components/SubToggle.tsx): a card like the tiles (its own dark fill — under
@@ -1144,8 +1202,9 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-tile-ico { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
-  transition: transform .2s; }
-.side-tile:hover .side-tile-ico { transform: scale(1.1) rotate(-4deg); }
+  transition: transform var(--spring-dur) var(--spring); }
+/* a tile is a verb: its icon acts its meaning (iconMotion.ts / § icon motion) while the chip rises a little on the spring */
+.side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
 .side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }
@@ -1166,8 +1225,8 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-sec-ico { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; flex: none;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
-  transition: box-shadow .25s, transform .2s; }
-.side-sec:hover .side-sec-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: scale(1.1) rotate(-4deg); }
+  transition: box-shadow .25s, transform var(--spring-dur) var(--spring); }
+.side-sec:hover .side-sec-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: rotate(-8deg) scale(1.1); }
 .side-sec .sp-head .side-sec-title { margin: 0; }
 .side-sec .srow { flex-wrap: wrap; gap: 6px 12px; }
 /* Playback's rows: the label in a fixed column, the slider filling the rest — Volume and Speed line up at every width */
@@ -1280,7 +1339,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 @keyframes wf-glide-in-a { from { transform: translateX(calc(-1 * var(--wf-w))); } }
 @keyframes wf-glide-in-b { from { transform: translateX(calc(-1 * var(--wf-w))); } }
 /* the pill's chevron points where the column goes: left while it's out (fold it), right while folded (bring it back) */
-.wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform .28s cubic-bezier(.2, 1.3, .36, 1); }
+.wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .wf-open:not(.open) .wf-chev { transform: rotate(180deg); }
 /* the docked title IS the pill (hooks/filterMorph.ts): it carries the pill's own classes (`pill ico wf-open`) — no type or shape
    of its own — so the ghost flies between two identical buttons and never stretches or changes font (no `.wf-title` type
@@ -1323,7 +1382,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); text-align: left;
   transition: color .12s; }
 .wf-head-btn:hover { color: var(--text); }
-.wf-chev { flex: none; transition: transform .18s ease; }
+.wf-chev { flex: none; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .wf-head-btn[aria-expanded="false"] .wf-chev { transform: rotate(-90deg); }
 .wf-n { flex: none; min-width: 18px; padding: 0 6px; border-radius: 999px; line-height: 17px; text-align: center;
   font-size: 10.5px; font-weight: 800; color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }

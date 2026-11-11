@@ -25,6 +25,14 @@ the floor; a new element is designed to delight within the toggles and the frame
 - **Placement**: a fixed overlay inside a card, the playlist bar or a transformed parent portals to `<body>`; pick its z-index against the existing layers in `index.css` (bar glow / filter drawer 45, Steam to-do and drawer 46, modals 50, selection toolbar 55, locator 85, dropdowns 90/91).
 - **Proof**: a probe cell covering motion on/off (per-frame samples that pass through in-between states), `no-glow` and `bg-live`, and mid-animation screenshots you LOOKED at. Procedure: the `ui-verify` skill.
 
+## Icon motion (spec: `docs/superpowers/specs/2026-11-12-icon-motion-design.md`)
+- Give every icon its role's motion, never a one-off: act (a verb plays its meaning once on hover — `app/ui/src/components/iconMotion.ts` RECIPES by lucide class), hold (trash lid / folder flap / X / crosshair open while hovered — index.css § icon motion), direction (one nudge), disclosure (chevrons rotate), object (tilt while hovered — the default), status (glow only, never moves), progress (the only loops), toggle (the new state pops once on a user change, never on mount).
+- Time it with the `:root` springs only: `--spring` / `--spring-dur` for an icon's gesture, `--spring-soft` / `--spring-soft-dur` for turns and returns, `--press-dur` for the press; never a new cubic-bezier for an icon.
+- Every icon button squeezes on press through the `scale` property alone (it composes with the rest); a new state-glyph control (like `.seg-opt`, `.ns-btn`, `.wf-seg`) joins the exclusions in both index.css and `iconMotion.ts` SKIP.
+- A part that must move on its own (a lid, a flap) uses lucide's SVG children or a two-part icon from `createLucideIcon` (`app/ui/src/components/icons.ts`); no other icon library.
+- The magnet (`ref={magnetRef}`, `app/ui/src/components/magnet.ts`) only on a primary action, never on a list's items.
+- Guard: `--probe probe-icons.js` (a new acting icon gets an `icon:act:<name>` cell).
+
 ## Performance
 - Keep `content-visibility:auto` + `contain-intrinsic-size` on every grid card.
 - Cards are `memo`'d and read their own slice (`useStore(s => …)`); never lift per-card state into a parent that re-renders the list. Stable keys (`pageUrl` / `videoPath`).

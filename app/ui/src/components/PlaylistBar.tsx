@@ -7,8 +7,10 @@ import {
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ChevronRight, ChevronDown, SlidersHorizontal, Save, FolderOpen, Play, X, LocateFixed,
+  ChevronDown, SlidersHorizontal, Save, Play, X, LocateFixed,
 } from "lucide-react";
+import { FolderFlap } from "./icons";
+import { magnetRef } from "./magnet";
 import { useStore } from "../store";
 import { type LibraryItem } from "../api/client";
 import { SavePlaylistModal } from "./SavePlaylistModal";
@@ -205,19 +207,20 @@ export function PlaylistBar() {
   return (
     <div className="playlist-bar" ref={playlistBarRef}>
       <div className="playlist-bar-head">
-        <button className="mini" aria-label={collapsed ? "Expand" : "Collapse"}
-          onClick={() => { hv.set(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
+        {/* one chevron, turned −90° while folded (a disclosure rotates, never swaps) */}
+        <button className={`mini pl-fold${collapsed ? " folded" : ""}`} aria-label={collapsed ? "Expand" : "Collapse"} aria-expanded={!collapsed}
+          onClick={() => { hv.set(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}><ChevronDown size={16} className="pl-chev" /></button>
         <span className="playlist-bar-label">PLAYLIST</span>
         <span className="playlist-bar-count">{playlist.length}</span>
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
-        <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
+        <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderFlap size={15} /></button>
         {/* "Go to playing": glides the row to the playing item and rings it; only when it's in the playlist */}
         <button className="mini ico go-playing" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
           title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
           onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)}><LocateFixed size={15} /></button>
         <div className="spacer" />
-        <button className="play-btn ico" onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
+        <button className="play-btn ico" ref={magnetRef} onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>
 
       {!collapsed && (playlist.length === 0 ? (

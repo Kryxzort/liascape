@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, LogIn } from "lucide-react";
 import { useStore } from "../store";
+import { magnetRef } from "./magnet";
 
 // Steam sign-in with an account name + password (docs/decisions.md § "Offer a password sign-in beside the QR" — the
 // QR needs the Steam mobile app). Step 1: account name + password → POST /steam/login. Then whatever Steam asks for, over WS
@@ -87,7 +88,7 @@ export function SteamPasswordModal() {
                   {pw?.error && <p className="pw-err" role="alert" data-steam-pw-error>{pw.error}</p>}
                   <div className="modal-actions">
                     <button type="button" className="btn ghost" onClick={() => void cancel()}>Cancel</button>
-                    <button type="submit" className="btn accent ico" disabled={pw?.busy} data-steam-pw-submit>
+                    <button type="submit" className="btn accent ico" ref={magnetRef} disabled={pw?.busy} data-steam-pw-submit>
                       <LogIn size={15} /> {pw?.busy ? "Signing in…" : "Sign in"}</button>
                   </div>
                 </form>

@@ -196,7 +196,7 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
           {mode === "video" && video && vidOn === video && (
             <button className={`side-mute${vidMuted ? "" : " on"}`} data-side-mute aria-pressed={!vidMuted} aria-label={vidMuted ? "Unmute the preview" : "Mute the preview"}
               onClick={(e) => { e.stopPropagation(); setVidMuted((m) => !m); }}>
-              {vidMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+              {vidMuted ? <VolumeX size={16} className="ico-pop" /> : <Volume2 size={16} className="ico-pop" />}</button>
           )}
           {playable && (
             <button className="side-play" data-side-play aria-label={play.label} onClick={play.onPlay} />

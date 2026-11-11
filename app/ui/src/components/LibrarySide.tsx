@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check, Repeat } from "lucide-react";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check, Repeat } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
 import { SideMedia, SideSection } from "./SidePanel";
+import { FolderFlap } from "./icons";
 import { usePreview, rangeFill, useOnline } from "./sidePreview";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
@@ -190,7 +191,7 @@ export function LibrarySide({
             <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" title="Copy the Workshop ID"
               aria-label={`Workshop ID ${item.workshopId} — copy`}
               onClick={() => { navigator.clipboard?.writeText(item.workshopId!); setCopiedId(item.workshopId!); }}>
-              {copied ? <Check size={13} /> : <Hash size={13} />} {copied ? "Copied" : item.workshopId}</button>
+              {copied ? <Check size={13} className="ico-pop" /> : <Hash size={13} />} {copied ? "Copied" : item.workshopId}</button>
           )}
         </div>
         {item.tags && item.tags.length > 0 && (
@@ -198,7 +199,7 @@ export function LibrarySide({
         )}
         {/* the right-click menu's actions (all four of them), as tiles */}
         <div className="side-tiles">
-          <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</button>
+          <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</button>
           {/* a Workshop item: the Steam CLIENT (POST /steam/open-page; the browser when that couldn't open); else its page link */}
           {item.workshopId ? (
             <button className="side-tile" data-open-steam onClick={() => openOnSteam(item.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>

@@ -62,9 +62,14 @@ export const Card = memo(function Card({
         {!downloading && !inLibrary && (
           <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
             onDoubleClick={(e) => e.stopPropagation()}>
-            <svg className="dl-glyph" viewBox="0 -2.5 24 24" /* the arrow spans y 3–16: shifted so ITS centre is the box centre, not the path's box */ fill="none" aria-hidden>
-              <path d="M19 9h-4V3H9v6H5l7 7 7-7z"
+            {/* two parts, so the arrow can drop into its tray on hover (components/iconMotion.ts). The arrow + tray span y 2.6–21.1
+                (strokes included): the viewBox is shifted so THEIR centre is the box centre, not the paths' grid's.
+                Guard: probe-steam look:dlCentre, probe-sidebar look:dlHover */}
+            <svg className="dl-glyph" viewBox="0 -0.15 24 24" fill="none" aria-hidden>
+              <path className="dl-arrow" d="M19 9h-4V3H9v6H5l7 7 7-7z"
                 stroke="currentColor" strokeWidth="0.85" strokeLinejoin="round" strokeLinecap="round" />
+              <path className="dl-tray" d="M3.5 15.5v2.5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2.5"
+                fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
             </svg>
           </button>
         )}

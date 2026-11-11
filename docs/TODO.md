@@ -20,12 +20,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
        `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
        media URL, the dev proxy and the Host checks.
-12. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
-       (docs/superpowers/specs/) going past "motion by role" — spring physics, a magnetic lean toward an approaching
-       cursor, icons acting out their meaning (download drops into a tray, trash lid lifts, external-link arrow slides
-       out and back, play/pause morph, refresh spins with inertia), springy press feedback; status icons glow only; only
-       progress loops; all off under motion off. Write the vocabulary into `.claude/rules/ui/design.md`, apply it to
-       every icon, probe cells per role. Owner reviews by eye (night notes).
 
 
 ## On a real desktop session (not hermetic)

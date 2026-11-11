@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FolderOpen } from "lucide-react";
+import { FolderFlap } from "./icons";
+import { magnetRef } from "./magnet";
 
 // Load Playlist modal — pick a saved playlist; Load stays disabled until a selection;
 // "No saved playlists" empty state.
@@ -34,7 +35,7 @@ export function LoadPlaylistModal({
                 )}
               <div className="modal-actions">
                 <button className="btn ghost" onClick={onClose}>Cancel</button>
-                <button className="btn accent ico" disabled={!sel} onClick={commit}><FolderOpen size={15} /> Load</button>
+                <button className="btn accent ico" ref={magnetRef} disabled={!sel} onClick={commit}><FolderFlap size={15} /> Load</button>
               </div>
             </div>
           </motion.div>

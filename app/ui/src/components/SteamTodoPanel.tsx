@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, ExternalLink, SkipForward, Square } from "luci
 import { api, type SteamTodo } from "../api/client";
 import { useStore } from "../store";
 import { useMotion } from "./motion";
+import { magnetRef } from "./magnet";
 
 type Active = Exclude<SteamTodo, { finished: true }>;
 
@@ -101,7 +102,7 @@ export function SteamTodoPanel() {
                   <div className="dl-bar st-bar"><div className="dl-fill" style={{ width: `${Math.round((todo.index / Math.max(1, todo.total)) * 100)}%` }} /></div>
                   {todo.message && <p className="st-msg" role="alert" data-st-msg>{todo.message}</p>}
                   <div className="st-btns">
-                    <button className="btn accent ico st-next" data-st="next" disabled={!!busy} onClick={() => act("next")}>
+                    <button className="btn accent ico st-next" ref={magnetRef} data-st="next" disabled={!!busy} onClick={() => act("next")}>
                       {todo.remaining > 1 ? "Done — next" : "Done"}{todo.remaining > 1 && <ArrowRight size={14} />}</button>
                     <button className="btn ghost ico" data-st="reopen" disabled={!!busy} onClick={() => act("reopen")}><ExternalLink size={14} />Open again</button>
                     <button className="btn ghost ico" data-st="skip" disabled={!!busy} onClick={() => act("skip")}><SkipForward size={14} />Skip</button>

@@ -4,6 +4,7 @@ import { CloudCheck, CloudOff, CloudDownload, LoaderCircle } from "lucide-react"
 import { api, type WorkshopSubState } from "../api/client";
 import { useStore } from "../store";
 import { useMotion } from "./motion";
+import { magnetRef } from "./magnet";
 
 // The Browse sidebar's Subscribe / Unsubscribe toggle for a Workshop item ("Wallpaper Engine (Local)" and "Wallpaper Engine
 // (Workshop)" alike). State = POST /workshop/state (disk + the unsubscribe queue + the Steam to-do —
@@ -70,7 +71,7 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
           </AnimatePresence>
         </span>
         {!pending && (
-          <button className={`btn ico side-sub-btn ${st.subscribed ? "danger" : "accent"}`} data-side-sub-btn={st.subscribed ? "unsubscribe" : "subscribe"}
+          <button ref={magnetRef} className={`btn ico side-sub-btn ${st.subscribed ? "danger" : "accent"}`} data-side-sub-btn={st.subscribed ? "unsubscribe" : "subscribe"}
             disabled={busy} onClick={click}>
             {st.subscribed ? <CloudOff size={14} /> : <CloudDownload size={14} />}{st.subscribed ? "Unsubscribe" : "Subscribe"}
           </button>

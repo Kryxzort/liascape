@@ -1010,8 +1010,8 @@ app.whenReady().then(async () => {
       const v = [], J = JSON.stringify;
       await page(`await m.closeAll();`); await mv(5, 5, 150);
       const c = await page(`const t = m.thumb("we1"); t.scrollIntoView({ block: "center" }); await m.sleep(200); return m.rect(t);`);
-      const read = `const b = m.thumb("we1").querySelector(".dl-btn"); const g = b.querySelector(".dl-glyph"); const pb = getComputedStyle(b, "::before");
-        return { tr: getComputedStyle(b).transform, glow: pb.content !== "none" ? +pb.opacity : 0, anim: getComputedStyle(g).animationName, op: +getComputedStyle(b).opacity, r: m.rect(b) };`;
+      const read = `const b = m.thumb("we1").querySelector(".dl-btn"); const g = b.querySelector(".dl-glyph .dl-arrow"); const pb = getComputedStyle(b, "::before");
+        const an = g.getAnimations(); return { tr: getComputedStyle(b).transform, glow: pb.content !== "none" ? +pb.opacity : 0, anim: an.length, loop: an.some((a) => a.effect.getTiming().iterations === Infinity), op: +getComputedStyle(b).opacity, r: m.rect(b) };`;
       await mv(c.x + c.w * 0.3, c.y + c.h * 0.3, 450);
       const a = await page(read);
       await mv(a.r.x + a.r.w / 2, a.r.y + a.r.h / 2, 500);
@@ -1020,13 +1020,15 @@ app.whenReady().then(async () => {
       if (a.op < 0.9) v.push(`the download button doesn't show on a card hover (opacity ${a.op})`);
       if (h.tr === "none" || h.tr === a.tr) v.push(`hovered, the download button doesn't lift / grow (transform ${a.tr} → ${h.tr})`);
       if (!(h.glow > 0.5) || a.glow > 0.1) v.push(`hovered, no glow layer (${a.glow} → ${h.glow})`);
-      if (!/dl-nudge/.test(h.anim)) v.push(`hovered, the arrow doesn't nudge (animation ${h.anim})`);
+      // the arrow drops once and lands (only progress loops — docs/superpowers/specs/2026-11-12-icon-motion-design.md)
+      if (!h.anim || h.loop) v.push(`hovered, the arrow doesn't drop once (${h.anim} animations, looping ${h.loop})`);
       if (h.r) await (async () => { const img = await win.webContents.capturePage({ x: Math.max(0, Math.round(c.x - 20)), y: Math.max(0, Math.round(c.y - 20)), width: Math.round(c.w + 40), height: Math.round(c.h + 40) }); fs.writeFileSync(path.join(OUT, "side-look-dlhover.png"), img.toPNG()); })();
       // the Browse sidebar's Download & Apply
       await mv(5, 5, 150);
       await page(`m.thumb("we1").click(); await m.waitSide("browse"); await m.sleep(800);`);
-      const readS = `const b = m.sideBtn("Download & Apply"); if (!b) return null; const i = b.querySelector("svg")?.parentElement;
-        return { tr: getComputedStyle(b).transform, bs: getComputedStyle(b).boxShadow, anim: i ? getComputedStyle(i).animationName : null, r: m.rect(b) };`;
+      const readS = `const b = m.sideBtn("Download & Apply"); if (!b) return null; const i = b.querySelector("svg.lucide-download");
+        const an = i ? i.getAnimations({ subtree: true }) : [];
+        return { tr: getComputedStyle(b).transform, bs: getComputedStyle(b).boxShadow, anim: an.length, loop: an.some((a) => a.effect.getTiming().iterations === Infinity), r: m.rect(b) };`;
       const s0 = await page(readS);
       if (!s0) v.push("no Download & Apply in the Browse sidebar");
       else {
@@ -1034,7 +1036,7 @@ app.whenReady().then(async () => {
         const s1 = await page(readS);
         if (s1.tr === s0.tr) v.push(`the sidebar's Download & Apply doesn't lift on hover (${s0.tr})`);
         if (s1.bs === s0.bs) v.push("the sidebar's Download & Apply doesn't glow more on hover");
-        if (!/dl-nudge/.test(s1.anim ?? "")) v.push(`the sidebar's download glyph doesn't nudge (${s1.anim})`);
+        if (!s1.anim || s1.loop) v.push(`the sidebar's download arrow doesn't drop once (${s1.anim} animations, looping ${s1.loop})`);
         await shot("look-browse-dlhover");
       }
       await mv(5, 5, 100); await page(`await m.closeAll();`);

@@ -33,7 +33,7 @@ export function Combo({ value, options, onChange, min, max, step = 1, title }: {
     <>
       <div ref={wrap} className="combo" title={title}>
         <NumInput className="num combo-in" value={value} min={min} max={max} step={step} onChange={onChange} />
-        <button type="button" className="combo-caret" title="Presets"
+        <button type="button" className={`combo-caret${open ? " open" : ""}`} title="Presets"
           onClick={(e) => { e.stopPropagation(); if (open) { setOpen(false); return; } place(); setOpen(true); }}>
           <ChevronDown size={14} />
         </button>

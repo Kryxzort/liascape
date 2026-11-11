@@ -79,13 +79,16 @@ for f in $FILES; do
     # the grids' column fit and the cards' stable handlers (a tab switch, a sidebar focus)
     app/ui/src/hooks/useGridFit.ts|app/ui/src/hooks/useStableFn.ts)
       add "$CARD|$KEYS|browse:" "$f (+ --probe probe-layout.js — perf:tabs, perf:sidebar, resize:)" ;;
-    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover)" ;;
+    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover; --probe probe-icons.js — icon motion)" ;;
+    # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
+    app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
+      add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection)" ;;
     # the Workshop filter column: not in the matrix (Browse needs the network) — its own probe stubs /browse
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts)
       echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js)" >&2 ;;
-    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js)
+    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must
