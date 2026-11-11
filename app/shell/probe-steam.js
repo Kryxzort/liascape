@@ -478,6 +478,12 @@ app.whenReady().then(async () => {
         if (c.label !== want) v.push(`for "${status}" the card says "${c.label}" (expected "${want}")`);
         if (!c.indet || c.anim !== "dl-indet") v.push(`for "${status}" the card's bar isn't sweeping (indet ${c.indet}, animation ${c.anim})`);
       }
+      // owner 2026-11-11 ("why is the loading bar so micro"): with a short label ("1%") the bar still spans ~72 % of the card
+      await ev("download-progress", { id: dl.result.pageUrl, value: 0.01, status: "Steam is downloading it…" }); await sleep(250);
+      const bw = await page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
+        const b = c?.querySelector(".dl-bar"); return b ? { bar: b.getBoundingClientRect().width, card: c.getBoundingClientRect().width, label: c.querySelector("[data-dl-label]")?.textContent } : null;`);
+      console.log(`        bar ${J(bw)}`);
+      if (!bw || bw.bar < bw.card * 0.6) v.push(`the progress bar is ${bw?.bar.toFixed(0)} px on a ${bw?.card.toFixed(0)} px card (label "${bw?.label}")`);
       await shot("dl-status");
       await page(`[...document.querySelectorAll("[data-side-download] button")].find((b) => /Cancel/.test(b.textContent))?.click();`); await sleep(400);
       if (!(await js(`window.__st.dl.aborted`))) v.push("Cancel didn't abort the download request");

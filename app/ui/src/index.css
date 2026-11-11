@@ -287,10 +287,12 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .mini-sel:hover { color: var(--text); box-shadow: var(--glow-sm); }
 
 /* download overlay (browse) — #CC000000, label + bar + cancel-X top-right */
-.dl-overlay { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; justify-items: center;
+/* one column 72 % of the CARD wide (owner 2026-11-11: "why is the loading bar so micro" — the column was as wide as its widest
+   item, so under a "1%" label the bar's 72 % was ~15 px); the bar fills it, a long label wraps inside it */
+.dl-overlay { position: absolute; inset: 0; display: grid; grid-template-columns: 72%; place-content: center; gap: 8px; justify-items: center;
   background: rgba(0,0,0,.8); color: #fff; font-weight: 700; }
-.dl-label { font-size: 12px; font-weight: 600; }
-.dl-bar { width: 72%; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); overflow: hidden; }
+.dl-label { font-size: 12px; font-weight: 600; text-align: center; }
+.dl-bar { width: 100%; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); overflow: hidden; }
 .dl-fill { height: 100%; background: var(--accent); box-shadow: var(--glow-sm); transition: width .2s; }
 /* COOL: no percent known (a Steam-app download: phases only) → a short accent segment sweeping across, transform only */
 .dl-bar.indet .dl-fill { width: 34%; animation: dl-indet 1.15s cubic-bezier(.45,0,.55,1) infinite; }
