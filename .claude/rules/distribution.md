@@ -67,8 +67,9 @@ physical path, and enables them. Launch the app normally; `main.js` auto-detects
 them. `scripts/freeze-monitor.sh` watches for the main-thread freeze.
 **The API token in dev** (2026-11-11, web-backend.md § Local API security): the watch backend writes
 `~/.config/liascape/serve.token` and keeps it across `dotnet watch` restarts; main.js passes it to the Vite page
-(`?api=5174&token=…`). Vite's origin is admitted only because that backend serves no UI (no `LIASCAPE_UI_DIR`). A page
-opened before the backend had a token (the first restart onto this code) gets 401s — relaunch the app once. A browser tab
+(`?api=5174&token=…`). Vite's origin is admitted only because that backend serves no UI (no `LIASCAPE_UI_DIR`). A shell
+from before the token (no `?token=`: the owner's installed build loading the Vite UI) gets it from Vite's dev-only
+`/__liascape/token` on its next page load (web-backend.md § Local API security) — verified 2026-11-11: 381 requests, 0 refused. A browser tab
 without Electron needs `&token=$(cat ~/.config/liascape/serve.token)`. An app launched while Vite is down starts its own
 backend and deletes the token file first (a fresh token per launch) — the watch backend then still answers its own
 in-memory token; the next watch restart reuses the file's (the new one).
