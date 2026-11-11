@@ -25,5 +25,6 @@ scripts/gl-transitions/
 /build/
 .direnv/
 
-# Private notes to the owner (night runs): kept locally, never published
+# Personal, this checkout only: Claude instructions for one person, and their night-run notes
+CLAUDE.local.md
 docs/NIGHT-NOTES.md

@@ -27,8 +27,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - A choice that ruled out a tempting alternative → one entry in `docs/decisions.md` (see below).
 - What happened (incidents, who said what, dates, Task/Phase/R-numbers, measurements of a bug now fixed) → the commit message only. `git log -S` finds it.
 - A zero-exception ban → a hook or a permission rule, not prose.
-- Notes to the owner from a night or unattended run (status, what waits on them) → `docs/NIGHT-NOTES.md`, which is
-  gitignored: private to this machine, never cited by a tracked file.
+- One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,
+  loaded like `CLAUDE.md` for that checkout only); a tracked file never points at anything that exists only locally.
 
 ## Shape (rules)
 - One imperative bullet per rule: what to do, not only what to avoid. No CAPS, no "CRITICAL".
