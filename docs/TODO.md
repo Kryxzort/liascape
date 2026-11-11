@@ -1,7 +1,8 @@
 # liascape — TODO
 
 Running list of things found while working that aren't done yet. Newest context first within each section.
-Tick items off in the commit that does them and move them to `docs/TODO-done.md` (same heading). Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
+Delete an item in the commit that does it (the commit message is the record). Product work only — the repo is public;
+one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
 1. [ ] **UI performance, in progress** (two agents): playlist-bar hover (`useDockLift` forced layout per frame, per-item
@@ -18,27 +19,24 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
        12 px padding goes so the preview fills the panel width; one option → no strip; hover-grow, playing ring and
        YouTube unchanged; the strip a little shorter than today's pills; the whole unit grows on hover. Probe cells
        for the joined look × glow / motion, both window sizes.
-4. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random: its "every Play started on k1, proved nothing" guard is
-       wrong for resume mode (resuming from nothing legitimately returns to k1); apply it to start_over only.
+4. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
+       k1, so its own "proved nothing" guard fires. Make the first pick deterministic (seed the program's shuffle, or start
+       the session on k3 before the rounds) so it always proves something.
 
-## Waiting on owner
-- [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
-- [ ] Decide: UI-matrix randomized runs (optional).
-
-## Night runs (owner 2026-11-10: "run the soaks or battery yourself while im sleeping")
+## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
       test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
       recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
-- [x] Soak mpvpaper 1.9 on the real desktop: run 2026-11-11 01:42–04:42 (verdict under "Legacy player" below).
-- Start when the owner says they're going to sleep; report in the morning.
+- [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
+- [ ] Decide: UI-matrix randomized runs (optional).
 
-## Upstream PRs (owner 2026-11-10: in free time, once the project is done)
+## Upstream PRs (once the project is done)
 - [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.
       Drafts only: opening them publishes under the owner's name, so the owner approves each before it's sent.
 - [ ] Optional: auto-mute flapped 6× in 16 s on 2026-11-06 (Spotify + a notification, 500 ms unmute delay) — a longer
       unmute delay stops it.
 
-## Switch-over bar (queued, owner 2026-11-10)
+## Switch-over bar
 - [ ] Resume the switch-over check (design §11: liascape-player becomes the default and the legacy path goes only when
       the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
       `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
@@ -58,11 +56,7 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
-## UI — owner's Todoist, clarified 2026-11-10
-- [ ] Matrix `playlistMark:shufflePlay:resume` is flaky by design: under "Resume" every Play can land on k1 and the cell
-      FAILs its own "proved nothing" guard ("every shuffled Play started on k1") — 1 of 4 runs on the pre-sidebar UI
-      (c87376bb), 2 of 4 after it (2026-11-11; the cell never opens the sidebar). Make its first pick deterministic (seed
-      the program's shuffle, or start the session on k3 before the rounds) so it always proves something.
+## UI
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
@@ -345,10 +339,10 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       Single frame, likely invisible — check against a WE reference before porting.
 - [ ] Desktop pointer on Sway/other compositors: no global cursor source (Sway's IPC has none) → surface pointer.
 
-## Backend structure (2026-10-26, after the matrix's ~19 seam bugs)
+## Backend structure
 Two bug classes kept recurring; fix the class, not the instance:
 
-## Next up (handoff 2026-10-26, weekly limit)
+## Older backlog
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**
@@ -458,7 +452,7 @@ Two bug classes kept recurring; fix the class, not the instance:
           (GPU cost). Open: whether Liascape should offer WE's fps presets / a per-scene "match WE fps" option.
           Refs: `we-ref/3184155462/ripple-*`.
     - [ ] A 2D layer of a WE flag-0x100 image (unknown meaning) gets no last draw in ours (the genericimage3 /
-          genericimage4 half of this item is closed: the same pixels for every library layer, TODO-done).
+          genericimage4 half of this item is closed: the same pixels for every library layer).
     - [ ] A 3D scene's CursorEvent `worldPosition` (ours: scene pixels) and WE's type-5 hit branch (GH 0x1401b5600).
           The hit test itself is WE's since 2026-11-10 (the cursor's ray against the layer's quad; 3509243656's planet
           rings). Gap audit "3D scenes against WE, part 3".

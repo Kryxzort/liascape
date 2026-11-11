@@ -26,6 +26,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - How a part works now, when one read of the code won't tell you → reference material in `docs/` (see below), linked from its rule.
 - A choice that ruled out a tempting alternative → one entry in `docs/decisions.md` (see below).
 - What happened (incidents, who said what, dates, Task/Phase/R-numbers, measurements of a bug now fixed) → the commit message only. `git log -S` finds it.
+- Work not done yet → `docs/TODO.md`: product work only, agreed-but-unstarted work at the top under "Queued", in order;
+  delete an item in the commit that does it.
 - A zero-exception ban → a hook or a permission rule, not prose.
 - One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,
   loaded like `CLAUDE.md` for that checkout only); a tracked file never points at anything that exists only locally.
