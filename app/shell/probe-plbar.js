@@ -4,6 +4,7 @@
 //   bar:wheelReopen  collapse + expand the bar (the row unmounts / mounts again): the wheel still scrolls it
 //   bar:gap          pointer on item 1 → the gap → item 2: item 1 stays lifted (and glowing) in the gap, then item 2 takes over
 //   bar:leave        pointer off the row: nothing stays lifted, no glow left behind
+//   bar:bounce       the bounce on entering + on the item the pointer stops on, none on the items a fast sweep passes
 // Real input events (webContents.sendInputEvent), not synthetic DOM events: :hover and the wheel listener see them as a user's.
 // Screenshots: <LIASCAPE_OUT>/plbar-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
@@ -134,6 +135,41 @@ app.whenReady().then(async () => {
       console.log(`        sweep: ${r.n} frames, p50 ${r.p50?.toFixed(1)} ms, p95 ${r.p95?.toFixed(1)} ms, max ${r.max?.toFixed(1)} ms, long tasks [${r.long}], DOM mutations ${r.muts}`);
       if (r.long.some((d) => d > 50)) v.push(`long tasks during the sweep: [${r.long}] ms`);
       if (r.max > 50) v.push(`a ${r.max.toFixed(0)} ms frame during the sweep`);
+      return v;
+    });
+
+    // owner 2026-11-11 ("make only the initial and last playlist hover have the bounce, since when moving cursor fast it feels
+    // stuttery when all of them bounce"): the item the pointer ENTERS on overshoots (×1.16 → above it, then back); the items a
+    // fast sweep passes don't (critically damped: never past ×1.16); the item it STOPS on overshoots again.
+    // Every frame's scale per item, sampled in the page.
+    await cell("bar:bounce", async () => {
+      const v = [];
+      win.setContentSize(1000, 800); move(5, 5); await sleep(800);
+      await page(`${row}.scrollLeft = 0;`); await sleep(300);
+      const s = await state();
+      const W = await js("innerWidth");
+      const its = s.items.filter((i) => i.x + i.w < W);
+      if (its.length < 4) return [`only ${its.length} items on screen (need 4)`];
+      const y = its[0].y + its[0].h / 2, cx = (i) => its[i].x + its[i].w / 2;
+      const rec = (ms) => page(`const els = [...document.querySelectorAll(".pl-item")]; const peak = els.map(() => 1);
+        const t0 = performance.now();
+        while (performance.now() - t0 < ${ms}) { await new Promise((r) => requestAnimationFrame(r));
+          els.forEach((e, i) => { peak[i] = Math.max(peak[i], new DOMMatrixReadOnly(getComputedStyle(e).transform).m11); }); }
+        return peak;`);
+      // 1. enter onto the first item from outside the row
+      let p = rec(700); await sleep(30); move(cx(0), y);
+      const enter = await p;
+      // 2. a fast sweep (~1500 px/s) from the first item to the last on screen, then rest there
+      const last = its.length - 1;
+      p = rec(1400); await sleep(30);
+      const n = Math.round((cx(last) - cx(0)) / 25);
+      for (let i = 1; i <= n; i++) { move(cx(0) + (cx(last) - cx(0)) * (i / n), y); await sleep(16); }
+      const sweep = await p;
+      const mids = sweep.slice(1, last); // the items passed (not the start or the stop)
+      console.log(`        enter peak ×${enter[0].toFixed(4)}; sweep mids peak ×${Math.max(...mids).toFixed(4)}; stop peak ×${sweep[last].toFixed(4)}`);
+      if (!(enter[0] > 1.165)) v.push(`the entered item peaked at ×${enter[0].toFixed(4)} — no bounce on entry (expected > ×1.165)`);
+      if (mids.some((m) => m > 1.1615)) v.push(`items passed mid-sweep overshot: peaks ×[${mids.map((m) => m.toFixed(4))}] (expected ≤ ×1.16)`);
+      if (!(sweep[last] > 1.165)) v.push(`the item the sweep stopped on peaked at ×${sweep[last].toFixed(4)} — no bounce on settle`);
       return v;
     });
 
