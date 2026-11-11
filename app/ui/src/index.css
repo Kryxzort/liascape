@@ -34,7 +34,11 @@ body {
   font: 14px/1.45 Inter, system-ui, sans-serif;
   overflow: hidden;
 }
-button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+/* padding: 0 — Chromium's own button padding (1px 6px) stayed on every button that didn't restate it, squeezing a small fixed-size
+   icon button's content box below its icon, which then overflowed to the right: centring silently failed (owner 2026-11-11: "why
+   are your icons always uncentred" — the filter switches 2 px off, the playlist bar's ✕ 2.5 px). A button pads only as its own
+   rule says. Guard: probe-layout `look:iconsCentred`. */
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
 
 /* Custom scrollbar — 10px track, transparent; thumb 6px Surface1,
    8px + Surface2 on hover, Muted on press, rounded, no arrows. transparent-border trick = the
@@ -139,33 +143,33 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   opacity: 0; transform: translateY(100%); transition: opacity .15s, transform .15s; box-shadow: var(--glow);
 }
 .thumb-wrap:hover .dl { opacity: 1; transform: translateY(0); }
-/* Browse hover download button = the download icon as a thin glowing accent OUTLINE (stroke only), breathing; bottom-right
-   where the Library card's trash sits (a click on the card opens the sidebar since 2026-11-10 — it used to be a whole-card
-   overlay meaning "click downloads") */
-.dl-btn { position: absolute; right: 4px; bottom: 48px; width: 40px; height: 40px; padding: 0; border-radius: 8px;
-  display: grid; place-items: center; background: none; opacity: 0;
-  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1); }
+/* Browse hover download button, bottom-right where the Library card's trash sits (a click on the card opens the sidebar since
+   2026-11-10). A round dark CHIP with an accent ring behind a SOLID accent arrow (owner 2026-11-11: "make the download button
+   on browse wallpapers easier to see … but a smaller size"): it was a 40 px hollow outline drawn straight on the picture at 70 %
+   opacity — lost on any bright / busy thumbnail. The chip gives its own contrast; 30 px (22 on small cards). Calm at rest (no
+   per-card breathing glow — a grid of them was paint for nothing); hover is where it comes alive. */
+/* above the 44 px title strip at every card size (it was drawn over the button's lower half) and on its own layer (z 3: over
+   the strip; the bloom's z -1 stays inside the button instead of falling behind the thumbnail) */
+.dl-btn { position: absolute; right: 6px; bottom: 50px; z-index: 3; width: 30px; height: 30px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; opacity: 0;
+  background: color-mix(in srgb, var(--bg-crust) 78%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent), 0 2px 8px rgba(0,0,0,.45);
+  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1), background .15s, box-shadow .2s; }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
-/* COOL: hovered (owner 2026-11-11: "add hover effects on the download button") — it lifts + grows, an accent glow blooms behind
-   it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down, again and again */
-.dl-btn::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none;
+/* COOL: hovered (owner 2026-11-11: "add hover effects on the download button") — it lifts + grows, the chip fills with the accent,
+   an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down,
+   again and again */
+.dl-btn::before { content: ""; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; z-index: -1;
   background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 60%, transparent), color-mix(in srgb, var(--accent) 18%, transparent) 60%, transparent);
   opacity: 0; transition: opacity .2s; }
-.dl-btn:hover { transform: translateY(-2px) scale(1.12); }
+.dl-btn:hover { transform: translateY(-2px) scale(1.12); background: var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--accent), var(--glow-sm), 0 3px 10px rgba(0,0,0,.4); }
 .dl-btn:active { transform: scale(.94); transition-duration: .08s; }
 .dl-btn:hover::before { opacity: 1; }
-.dl-btn:hover .dl-glyph { opacity: 1; animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite;
-  filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 14px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
-@keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(3px); } }
-.dl-glyph { color: var(--accent); width: 88%; height: 88%; fill: none; opacity: .7; transform-origin: center;
-  animation: dl-glow 2.6s cubic-bezier(.37, 0, .63, 1) infinite; }
-/* opacity + glow + a ~5px size breath, all synced */
-@keyframes dl-glow {
-  0%, 100% { opacity: .7;  transform: scale(1);
-    filter: drop-shadow(0 0 10px var(--accent)) drop-shadow(0 0 18px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
-  50%      { opacity: .85; transform: scale(1.022); /* ≈ 3px breath at typical icon size */
-    filter: drop-shadow(0 0 22px var(--accent)) drop-shadow(0 0 40px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
-}
+.dl-btn:hover .dl-glyph { color: var(--accent-fg); animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
+@keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
+.dl-glyph { color: var(--accent); width: 58%; height: 58%; fill: currentColor; stroke: none; transform-origin: center;
+  transition: color .15s; }
 .badge {
   position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
   padding: 3px 7px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, black);
@@ -225,7 +229,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* small cards: shrink + reposition the trash, toggle, title bar and chips so they're not oversized */
 @container (max-width: 150px) {
   .del { width: 24px; height: 24px; bottom: 30px; right: 4px; }
-  .dl-btn { width: 28px; height: 28px; bottom: 28px; right: 2px; }
+  .dl-btn { width: 24px; height: 24px; bottom: 50px; right: 5px; }
   .del svg { width: 15px; height: 15px; }
   .pl-toggle { width: 16px; height: 16px; top: 4px; right: 4px; }
   .warn { bottom: 30px; left: 4px; }
@@ -737,8 +741,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .btn.danger.glow-stop, :root.no-glow .btn.danger.glow-stop:hover,
 :root.no-glow .btn.danger:hover, :root.no-glow .btn.danger.solid:hover { box-shadow: none; }
 /* the Browse download glyph keeps its breath (opacity + size), minus the glow */
-:root.no-glow .dl-glyph { animation-name: dl-breath; filter: none; }
-@keyframes dl-breath { 0%, 100% { opacity: .7; transform: scale(1); } 50% { opacity: .85; transform: scale(1.022); } }
 :root.no-glow .del:hover, :root.no-glow .pl-remove:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
 :root.no-glow .pl-toggle:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 :root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover { filter: none; }
@@ -753,7 +755,7 @@ input[type=range]:focus-visible { outline: none; }
 /* the focused card: its accent ring only; the download button: lift + nudge, no bloom; the locator: dim + edge + rings, no glow */
 :root.no-glow .card.focused { box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 :root.no-glow .dl-btn::before { display: none; }
-:root.no-glow .dl-btn:hover .dl-glyph { filter: drop-shadow(0 0 2px rgba(0,0,0,.6)); animation-name: dl-nudge; }
+:root.no-glow .dl-btn:hover { box-shadow: inset 0 0 0 1.5px var(--accent), 0 3px 10px rgba(0,0,0,.4); }
 :root.no-glow .go-playing:hover:not(:disabled) svg { filter: none; }
 :root.no-glow .locate-fx .lfx-ring { box-shadow: none; }
 :root.no-glow .side-sec::before { box-shadow: none; }

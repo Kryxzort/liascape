@@ -46,15 +46,15 @@ export const Card = memo(function Card({
         {w.isScene && <span className="badge">SCENE</span>}
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
-        {/* hover download button (bottom-right, the Library card's trash spot): the OUTLINE of a SOLID download glyph — we
-            stroke a filled silhouette with no fill, so it traces the shape's inner+outer contour (hollow), breathing + glowing.
-            It was a whole-card overlay while a click downloaded; a click now opens the sidebar. */}
+        {/* hover download button (bottom-right, the Library card's trash spot): a solid accent arrow on a dark round chip (index.css
+            `.dl-btn` — the hollow breathing outline it was got lost on bright thumbnails). It was a whole-card overlay while a click
+            downloaded; a click now opens the sidebar. */}
         {/* not on a card the library already has (owner 2026-11-11: "whats the point of a download button on the wallpapers
             … it knows is 'in library'"): it only applied the library's copy — double-click / Enter / the sidebar's Apply still do */}
         {!downloading && !inLibrary && (
           <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
             onDoubleClick={(e) => e.stopPropagation()}>
-            <svg className="dl-glyph" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <svg className="dl-glyph" viewBox="0 -2.5 24 24" /* the arrow spans y 3–16: shifted so ITS centre is the box centre (owner 2026-11-11: "why are your icons always uncentred") */ fill="none" aria-hidden>
               <path d="M19 9h-4V3H9v6H5l7 7 7-7z"
                 stroke="currentColor" strokeWidth="0.85" strokeLinejoin="round" strokeLinecap="round" />
             </svg>
