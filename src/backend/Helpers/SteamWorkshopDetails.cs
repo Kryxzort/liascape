@@ -3,22 +3,29 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Liascape.Models;
 using SteamKit2;
 using SteamKit2.Internal;
+using static Liascape.Scrapers.SteamWorkshopScraper;
 
 namespace Liascape.Helpers;
 
-// Workshop item details over Steam's own client connection (the CM protocol the Steam client — and so Wallpaper Engine —
-// talks), ANONYMOUSLY: no account, no Web API key, no web page. `PublishedFile.GetDetails` with
-// `includeadditionalpreviews` carries each item's YouTube preview ids, 100 items a request (owner 2026-11-11 asked for
-// faster trailer lookups: tested 2026-11-11 — an anonymous session returned all 6 known trailers in one 355 ms request;
-// the web API's `IPublishedFileService/GetDetails` needs a key or a signed-in token, the keyless
-// `GetPublishedFileDetails` has no previews, and reading Workshop pages trips steamcommunity.com's per-IP limit).
-// One short session per call: connect, log on anonymously, the batches (BatchSize apart by BatchGapMs), log off.
-// Returns null when Steam's servers can't be reached / refuse the logon (the caller falls back to page reading).
+// Workshop data over Steam's own client connection (the CM protocol the Steam client — and so Wallpaper Engine — talks),
+// ANONYMOUSLY: no account, no Web API key, no web page. All of it rides SteamAnonymous' one shared session.
+//   - GetTrailersAsync: `PublishedFile.GetDetails` with `includeadditionalpreviews` carries each item's YouTube preview ids,
+//     100 items a request (owner 2026-11-11 asked for faster trailer lookups: tested 2026-11-11 — an anonymous session
+//     returned all 6 known trailers in one 355 ms request; the web API's `IPublishedFileService/GetDetails` needs a key or a
+//     signed-in token, the keyless `GetPublishedFileDetails` has no previews, and reading Workshop pages trips
+//     steamcommunity.com's per-IP limit).
+//   - QueryAsync: the Workshop Browse source — `PublishedFile.QueryFiles`, one page of up to 100 items with tags, previews
+//     (YouTube ids) and descriptions inline (verified 2026-11-11: ~1 s a page; any page number answers directly, no cursor
+//     walk; search_text works with every sort). Replaces scraping steamcommunity.com's browse page (rate-limited per IP,
+//     30 items a page, AND-only tags) — that stays only as the fallback (SteamWorkshopService).
+// Both return null when Steam's servers can't be reached / refuse (the caller falls back to page reading).
 public static class SteamWorkshopDetails
 {
-    private const int BatchSize = 100, BatchGapMs = 1000, TimeoutSeconds = 60;
+    public const uint AppId = 431960;
+    private const int BatchSize = 100, BatchGapMs = 1000, RequestTimeoutSeconds = 20;
 
     // per item: Found = Steam answered for it (result 1), Youtube = its first YouTube preview id (null = none).
     // An item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false.
@@ -27,50 +34,83 @@ public static class SteamWorkshopDetails
     public static async Task<Dictionary<ulong, Trailer>?> GetTrailersAsync(IReadOnlyList<ulong> ids, CancellationToken ct = default)
     {
         if (ids.Count == 0) return [];
-        var client = new SteamClient();
-        var manager = new CallbackManager(client);
-        var user = client.GetHandler<SteamUser>()!;
-        var pub = client.GetHandler<SteamUnifiedMessages>()!.CreateService<PublishedFile>();
-        var tcs = new TaskCompletionSource<Dictionary<ulong, Trailer>?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
-
-        manager.Subscribe<SteamClient.ConnectedCallback>(_ => user.LogOnAnonymous());
-        manager.Subscribe<SteamClient.DisconnectedCallback>(_ => tcs.TrySetResult(null));
-        manager.Subscribe<SteamUser.LoggedOnCallback>(cb => { _ = OnLoggedOn(cb); });
-
-        async Task OnLoggedOn(SteamUser.LoggedOnCallback cb)
+        var all = new Dictionary<ulong, Trailer>();
+        for (int i = 0; i < ids.Count; i += BatchSize)
         {
-            try
+            if (i > 0) await Task.Delay(BatchGapMs, ct).ConfigureAwait(false);
+            var batch = ids.Skip(i).Take(BatchSize).ToList();
+            // one request per UseAsync: a Browse page waiting for the session goes between two batches
+            var got = await SteamAnonymous.UseAsync(async (pub) =>
             {
-                if (cb.Result != EResult.OK) { tcs.TrySetResult(null); return; }
-                var all = new Dictionary<ulong, Trailer>();
-                for (int i = 0; i < ids.Count; i += BatchSize)
-                {
-                    if (i > 0) await Task.Delay(BatchGapMs, timeout.Token).ConfigureAwait(false);
-                    var req = new CPublishedFile_GetDetails_Request { includeadditionalpreviews = true, appid = 431960 };
-                    req.publishedfileids.AddRange(ids.Skip(i).Take(BatchSize));
-                    var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
-                    if (resp.Result != EResult.OK) { tcs.TrySetResult(all.Count > 0 ? all : null); return; }
-                    foreach (var d in resp.Body.publishedfiledetails)
-                        all[d.publishedfileid] = d.result == (int)EResult.OK
-                            ? new Trailer(true, d.previews.FirstOrDefault(p => !string.IsNullOrEmpty(p.youtubevideoid))?.youtubevideoid)
-                            : new Trailer(false, null);
-                }
-                tcs.TrySetResult(all);
-            }
-            catch { tcs.TrySetResult(null); }
-            finally { try { user.LogOff(); client.Disconnect(); } catch { } }
+                var req = new CPublishedFile_GetDetails_Request { includeadditionalpreviews = true, appid = AppId };
+                req.publishedfileids.AddRange(batch);
+                var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
+                if (resp.Result != EResult.OK) return null;
+                return resp.Body.publishedfiledetails.ToDictionary((d) => d.publishedfileid, (d) => d.result == (int)EResult.OK
+                    ? new Trailer(true, YoutubeOf(d)) : new Trailer(false, null));
+            }, TimeSpan.FromSeconds(RequestTimeoutSeconds), ct).ConfigureAwait(false);
+            if (got == null) return all.Count > 0 ? all : null;
+            foreach (var (k, v) in got) all[k] = v;
         }
-
-        using var reg = timeout.Token.Register(() => tcs.TrySetResult(null));
-        client.Connect();
-        _ = Task.Run(() =>
-        {
-            while (!tcs.Task.IsCompleted) manager.RunWaitCallbacks(TimeSpan.FromMilliseconds(250));
-        });
-        var result = await tcs.Task.ConfigureAwait(false);
-        try { client.Disconnect(); } catch { }
-        return result;
+        return all;
     }
+
+    private static string? YoutubeOf(PublishedFileDetails d) =>
+        d.previews.FirstOrDefault((p) => !string.IsNullOrEmpty(p.youtubevideoid))?.youtubevideoid;
+
+    // Browse sort → QueryFiles query_type (EPublishedFileQueryType): the browse page's `browsesort` names, kept as the API.
+    private static uint QueryType(string sort) => sort switch
+    {
+        "mostrecent" => 1,              // RankedByPublicationDate
+        "lastupdated" => 21,            // RankedByLastUpdatedDate
+        "totaluniquesubscribers" => 9,  // RankedByTotalUniqueSubscriptions
+        "toprated" => 0,                // RankedByVote
+        _ => 3,                         // RankedByTrend (+ days)
+    };
+
+    // One QueryFiles page (1-based) of `perPage` (≤ 100) items for the plan, in Steam's order, as the details the browse
+    // mapping takes (MapToResults). null = Steam's servers unreachable / refused / timed out (→ the caller's fallback).
+    public static Task<List<PublishedFileDetail>?> QueryAsync(WorkshopFilter filter, WorkshopTags.Plan plan, string? search, int page, int perPage, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var req = new CPublishedFile_QueryFiles_Request
+        {
+            appid = AppId, query_type = QueryType(filter.Sort), page = (uint)Math.Max(1, page), numperpage = (uint)Math.Clamp(perPage, 1, 100),
+            return_tags = true, return_previews = true, return_metadata = true,
+            // the full description (it's persisted on a download and shown in the sidebar); measured 2026-11-11 no slower
+            // than the short one — a page's descriptions are a few KB
+            return_short_description = false,
+        };
+        if (req.query_type == 3) req.days = (uint)Math.Max(1, filter.TrendDays);
+        if (!string.IsNullOrWhiteSpace(search)) req.search_text = search.Trim();
+        foreach (var g in plan.TagGroups)
+        {
+            var tg = new CPublishedFile_QueryFiles_Request.TagGroup();
+            tg.tags.AddRange(g);
+            req.taggroups.Add(tg);
+        }
+        req.excludedtags.AddRange(plan.Excluded);
+        return SteamAnonymous.UseAsync(async (pub) =>
+        {
+            var resp = await pub.QueryFiles(req); // an AsyncJob (no ConfigureAwait)
+            if (resp.Result != EResult.OK) return null;
+            return resp.Body.publishedfiledetails.Where((d) => d.result == (int)EResult.OK).Select(ToDetail).ToList();
+        }, timeout, ct);
+    }
+
+    private static PublishedFileDetail ToDetail(PublishedFileDetails d) => new()
+    {
+        Id = d.publishedfileid.ToString(),
+        Title = d.title ?? "",
+        Description = !string.IsNullOrEmpty(d.file_description) ? d.file_description : d.short_description ?? "",
+        PreviewUrl = d.preview_url ?? "",
+        FileSizeBytes = (long)d.file_size,
+        CreatorId = d.creator.ToString(),
+        TimeUpdated = d.time_updated > 0 ? DateTimeOffset.FromUnixTimeSeconds(d.time_updated).UtcDateTime : DateTime.MinValue,
+        Subscriptions = (long)d.lifetime_subscriptions,
+        Favorites = (long)d.lifetime_favorited,
+        Views = (long)d.views,
+        Tags = d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).ToArray(),
+        TrailerKnown = true,
+        YoutubeId = YoutubeOf(d),
+    };
 }

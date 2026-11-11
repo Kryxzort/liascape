@@ -159,15 +159,58 @@ reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` �
 ## Steam Community rate limits (`Helpers/SteamGate.cs`)
 **Every** request to steamcommunity.com goes through `SteamGate.SendAsync(req, Kind)` (owner 2026-11-11: "make sure you obey
 the rate limits so user dont face ip issues"): Steam limits it per IP and, once tripped, refused for 30+ min — the
-owner's browser included. Request STARTS are spaced app-wide (Interactive 0.5 s — Browse pages, the Browse detail's
-trailer read, subscribe/unsubscribe; Background 4 s and ≥ 10 s behind the last interactive one — the trailer cache);
+owner's browser included. The best request is none: Workshop Browse, its detail's trailer and the trailer cache ask
+Steam's CM servers first (next section) and touch steamcommunity.com only as a fallback. Request STARTS are spaced
+app-wide (Interactive 0.5 s — fallback Browse pages, a fallback detail's trailer read, subscribe/unsubscribe;
+Background 4 s and ≥ 10 s behind the last interactive one — the trailer cache's fallback);
 a 429 (or the subscribe 403 "too many", via `Trip`) starts an app-wide cooldown — Steam's `Retry-After`, else 10 min
 doubling per repeat (cap 60), reset by a success — saved in `$XDG_CACHE_HOME/liascape/steam-cooldown.json` so a restart
 keeps honouring it. During it nothing is sent: `SteamCooldownException` ("Steam is limiting requests from this
 connection — try again in N min") → `/browse` answers 429 `{error}` (the UI's `jpost` shows a backend `{error}` in its
-own words; Browse puts it in the status bar), the unsubscribe drain stops (`SteamRateLimitException`), the trailer
+own words; Browse puts it in the status bar — only on the fallback path now), the unsubscribe drain stops (`SteamRateLimitException`), the trailer
 cache stops and re-schedules itself for the cooldown's end (`TrailerOps.ScheduleAfter`). Never call steamcommunity.com
 around it. Not gated: the Steam sign-in (once, user-driven) and api.steampowered.com (another host, its own limits).
+
+## Workshop Browse over Steam's client protocol (`Services/SteamWorkshopService.cs`, `Helpers/WorkshopTags.cs`)
+**Why** (2026-11-11): the "Wallpaper Engine (Workshop)" source scraped steamcommunity.com's browse page — 30 items a page,
+3 pages + a prefetch of 3 per scroll, AND-only tags, plus a page read per detail click for the trailer — on the host
+that locked the owner's browser out. It now asks Steam's CM servers the way the Steam client does, **anonymously**
+(SteamKit2 `PublishedFile.QueryFiles`, `SteamWorkshopDetails.QueryAsync`): one app page = one QueryFiles page of 100
+(`PageSizeHint` 100), tags / previews (YouTube ids) / full descriptions inline, any page number answered directly.
+- **`Helpers/SteamAnonymous.cs`** — ONE shared anonymous session for Browse + the trailer cache + the detail: lazily
+  connected, requests serialized, reconnected after a drop, closed after 3 idle min; every call has a deadline
+  and returns null (never throws) when the servers can't be reached / refuse — then no retry for 60 s. Measured:
+  connect 0.83–1.85 s + anonymous logon 0.38–0.8 s vs one page 0.5–1.3 s, so a session per call made a page 2.3–4 s.
+- **Filter** (`WorkshopFilter`, POST /browse `filter`): `{sort, trendDays, include[], exclude[], featureMatch, genreMatch}`; sort →
+  `query_type` (trend 3 + `days`, mostrecent 1, lastupdated 21, totaluniquesubscribers 9, toprated 0). Legacy fields
+  (`type, ageRating, resolution, genres, features`) still bind: with include AND exclude empty each becomes an include.
+- **Semantics** (`WorkshopTags.Build` → `Plan {TagGroups, Excluded, Empty}`; groups Age / Type / Resolution / Genre /
+  Features = the filter bar's lists, a tag in no group is its own group): a group's includes are ONE taggroup (OR) —
+  an item normally has one genre and exactly one age / type / resolution (500 trending: all exactly 1 genre; "Anime AND Girls" = 4
+  items in the Workshop). **Features** are ANDed, each its own taggroup — they stack (500 trending: 0→277, 1→131, 2→63,
+  3→17, 4→9, 5→3; "Audio responsive AND Customizable" 46,026 vs OR 407,685) and Steam's own page ANDs them —
+  unless `featureMatch: "any"` (owner: "what if a user wants 3D OR HDR and not 3D AND HDR"; default/unknown = all).
+  Genres mirror it: `genreMatch: "all"` = every ticked genre required (owner: "lets just have a 'all or any' option for genere
+  too"; default/unknown = any) — finds the ~2,800 multi-genre items (mostly 2016–17; Game + Music 180, Anime + Girls 4).
+  **Age**: any age include or exclude → a taggroup of the allowed ages (included, else all three, minus excluded),
+  which drops the 219 untagged 2017 items (owner: "a 'everyone' user encountering a untagged 'mature' is a tragedy");
+  other groups' excludes only go to `excludedtags` (untagged stays). **Type** always = (included or Video+Scene) minus
+  excluded, minus Scene when `AllowScenes` is off; Web / Application / Preset always excluded — pages come back full.
+  Include+exclude of one tag = excluded. Nothing left to allow → `[]` with no request.
+- **Trailer**: QueryFiles results carry `youtubeUrl` + `trailerKnown: true`; `/detail` then reads nothing (0.01 s). A
+  fallback result asks the CM session for that one item (`GetTrailersAsync`), the item page only if that fails.
+- **Prefetch**: the next page is fetched after the current one (never beside it — the session is serialized) and only
+  on the CM path; a stale one (filter change, another page) is cancelled — queued behind it, every filter change took
+  ~2 s instead of ~1 s. The filter is compared by value (`Key()`): every /browse re-sends it, and comparing by
+  reference had dropped the prefetch on each request.
+- **Fallback** (CM unreachable / refused / no answer within 10 s; `LIASCAPE_WORKSHOP_FALLBACK=1` forces it): the browse
+  page via SteamGate, 2 pages of 30 per app page, no prefetch; `requiredtags[]` = the plan's single-tag groups (a group
+  with one allowed tag, every ticked feature under "all"), the rest (OR groups, excludes, the age rule) filtered on
+  each result's tags (`WorkshopTags.Matches`). Its cooldown → 429 as above — the CM path never 429s. Log once per
+  path change: `browse: Workshop via Steam's client protocol …` / `… via Workshop page reading …`; `steam-cm: …`.
+- **Measured 2026-11-11** (isolated backend, every case 0 rule violations): first page 2.7 s (incl. the 1.4–1.5 s
+  connect), later pages / filter changes / search / sorts 0.4–1.2 s, a prefetched page 0.4 s; fallback page 2.5 s
+  (60 read → 36 kept for `[Everyone, Questionable, Video] −Girls`).
 
 ## Rules
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.

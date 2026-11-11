@@ -22,4 +22,9 @@ public class WallpaperResult
     public long? Favorites { get; init; }
     public long? Views { get; init; }
     public string[]? Tags { get; init; }
+    // Workshop results from Steam's client protocol carry the item's trailer (QueryFiles returns previews inline):
+    // TrailerKnown → YoutubeUrl is the answer (null = none), and the detail skips reading the item's Steam page.
+    // The UI posts the result back to /detail as it got it, so these ride along untouched.
+    public string? YoutubeUrl { get; init; }
+    public bool TrailerKnown { get; init; }
 }

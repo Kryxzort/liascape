@@ -61,14 +61,21 @@ Plain HTTP with Firefox User-Agent works — no browser automation needed.
 
 **5th source in `Sources` list; separate pill from "Wallpaper Engine (Local)".**
 
-**Browse/search/sort/pagination:**
+**Browse = Steam's client protocol, anonymously (since 2026-11-11)** — `PublishedFile.QueryFiles` over SteamKit2's
+anonymous CM session (`SteamWorkshopDetails.QueryAsync`, `SteamAnonymous`); 100 items a page with tags, previews
+(YouTube ids) and descriptions inline; include/exclude tag filtering by `Helpers/WorkshopTags.cs`. Details: `web-backend.md`
+§ "Workshop Browse over Steam's client protocol". The page scraping below is the **fallback** only (Steam's servers
+unreachable; `LIASCAPE_WORKSHOP_FALLBACK=1` forces it): `requiredtags[]` = the plan's single-tag groups, the rest filtered
+client-side.
+
+**Browse/search/sort/pagination (fallback):**
 - `GET https://steamcommunity.com/workshop/browse/?appid=431960&section=readytouseitems&numperpage=30`
 - `&browsesort=` (all verified valid + distinct): `trend` (+`&days=` 1/7/30/90/180/365 = Today/Week/Month/3mo/6mo/Year), `mostrecent`, `lastupdated` (Recently Updated), `totaluniquesubscribers` (Most Subscribed), `toprated` (Top Rated). UI = a "Sort by" dropdown + a "Period" dropdown shown only for Most Popular. Client-side custom sorts are NOT viable (infinite scroll only loads pages in Steam's order; would scramble).
 - `&searchtext=<query>` for search; `&p=<n>` for pagination
 - Tag filtering: `&requiredtags%5B%5D=<tag>` (AND semantics); supports Type, AgeRating, Resolution, multiple Genres simultaneously
 - **CSS classes are obfuscated/hashed** — parse IDs from `//a[contains(@href,'filedetails/?id=')]/@href` via regex, NOT by class. Child `<img>` gives preview URL and alt-text title fallback.
 
-**Metadata enrichment (keyless, no Steam API key needed):**
+**Metadata enrichment (fallback path; keyless, no Steam API key needed):**
 - Batch `POST https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/`
   - Body: `itemcount=N&publishedfileids[0]=X&publishedfileids[1]=Y…`
   - Returns: title, description, `preview_url`, `file_size` (string), `time_updated` (unix), `lifetime_subscriptions`, `lifetime_favorited`, `views`, `tags[]` (array of `{tag: string}`)

@@ -49,9 +49,13 @@ public static class SteamWorkshopScraper
         catch { return (PageCheck.Failed, null); }
     }
 
-    public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, string? query, int page, bool allowScenes)
+    // The FALLBACK Browse path (the client protocol — SteamWorkshopDetails.QueryAsync — is the first): reads one
+    // steamcommunity.com browse page (30 items; rate-limited per IP, so through SteamGate). The page only ANDs
+    // `requiredtags[]`, so it gets the plan's single-tag groups (a group with one allowed tag, every ticked feature) and
+    // the rest of the plan — OR groups, excludes, the age rule — is checked here on each result's tags (WorkshopTags.Matches).
+    public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, WorkshopTags.Plan plan, string? query, int page, bool allowScenes)
     {
-        var url = BuildUrl(filter, query, page);
+        var url = BuildUrl(filter, plan, query, page);
         string html;
         using (var req = new HttpRequestMessage(HttpMethod.Get, url))
         {
@@ -69,10 +73,11 @@ public static class SteamWorkshopScraper
         if (ids.Count == 0) return [];
 
         var details = await GetDetailsBatchAsync(ids).ConfigureAwait(false);
-        return await Task.Run(() => MapToResults(ids, details, allowScenes)).ConfigureAwait(false);
+        return await Task.Run(() => MapToResults(ids, details, allowScenes)
+            .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])).ToList()).ConfigureAwait(false);
     }
 
-    private static string BuildUrl(WorkshopFilter filter, string? query, int page)
+    private static string BuildUrl(WorkshopFilter filter, WorkshopTags.Plan plan, string? query, int page)
     {
         var sb = new StringBuilder(
             "https://steamcommunity.com/workshop/browse/?appid=431960&section=readytouseitems&numperpage=30");
@@ -95,16 +100,8 @@ public static class SteamWorkshopScraper
         if (!string.IsNullOrWhiteSpace(query))
             sb.Append($"&searchtext={Uri.EscapeDataString(query.Trim())}");
 
-        if (!string.IsNullOrEmpty(filter.Type))
-            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(filter.Type)}");
-        if (!string.IsNullOrEmpty(filter.AgeRating))
-            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(filter.AgeRating)}");
-        if (!string.IsNullOrEmpty(filter.Resolution))
-            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(filter.Resolution)}");
-        foreach (var genre in filter.Genres)
-            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(genre)}");
-        foreach (var feature in filter.Features)
-            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(feature)}");
+        foreach (var tag in plan.RequiredTags)
+            sb.Append($"&requiredtags%5B%5D={Uri.EscapeDataString(tag)}");
 
         return sb.ToString();
     }
@@ -204,8 +201,9 @@ public static class SteamWorkshopScraper
         return result;
     }
 
-    private static List<WallpaperResult> MapToResults(
-        List<string> orderedIds,
+    // Shared by both Browse paths (the client protocol's QueryFiles results and the fallback's GetPublishedFileDetails).
+    public static List<WallpaperResult> MapToResults(
+        IReadOnlyList<string> orderedIds,
         Dictionary<string, PublishedFileDetail> details,
         bool allowScenes)
     {
@@ -254,7 +252,10 @@ public static class SteamWorkshopScraper
                 Subscriptions = d.Subscriptions,
                 Favorites = d.Favorites,
                 Views = d.Views,
-                Tags = d.Tags
+                Tags = d.Tags,
+                // QueryFiles carries the previews: the detail then needs no page read for the trailer
+                TrailerKnown = d.TrailerKnown,
+                YoutubeUrl = d.YoutubeId is { } y ? $"https://www.youtube.com/watch?v={y}" : null,
             });
         }
 
@@ -274,5 +275,8 @@ public static class SteamWorkshopScraper
         public long Favorites { get; init; }
         public long Views { get; init; }
         public string[] Tags { get; init; } = [];
+        // set by the client-protocol path (its previews are inline): the YouTube id is known, null = no trailer
+        public bool TrailerKnown { get; init; }
+        public string? YoutubeId { get; init; }
     }
 }
