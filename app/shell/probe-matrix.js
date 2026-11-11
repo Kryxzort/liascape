@@ -643,7 +643,9 @@ C[cell] = { states: ["idle"], switch: true, exp: { paused: false },
     const v = [];
     for (const r of c.rounds) if (JSON.stringify(r.marks) !== JSON.stringify([r.cur])) v.push(`Play (${r.how}, from ${r.from}): ${r.cur} plays, the bar marks ${JSON.stringify(r.marks)}`);
     for (const r of c.rounds) { const odd = r.seen.filter((t) => t !== r.cur && t !== r.prev); if (odd.length) v.push(`Play (${r.how}, from ${r.prev ?? "nothing"}, to ${r.cur}): the bar marked ${JSON.stringify(odd)} on the way`); }
-    if (c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
+    // the shuffle must have moved somewhere for the start-over rounds to prove anything; under "resume" a Play coming back
+    // on the item it was on is the correct result (the marks checks above still hold for every round)
+    if (start === "start_over" && c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
     return v;
   } };
 // "travel to running wallpaper on app open" (docs/decisions.md § "Travel to the playing wallpaper once per session, spotlit

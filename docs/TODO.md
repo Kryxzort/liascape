@@ -43,9 +43,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under the glow toggle, no fade under motion off. After a box it's an ordinary selection: Ctrl+click adds / removes
        a card, Shift+click ranges from the box's first card in reading order (the new anchor). Probe cells: box-select →
        a bulk action, box then Ctrl+click add + remove, box then Shift+click, Ctrl+drag, Escape, auto-scroll.
-7. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
-       k1, so its own "proved nothing" guard fires. Make the first pick deterministic (seed the program's shuffle, or start
-       the session on k3 before the rounds) so it always proves something.
+
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
