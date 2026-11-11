@@ -18,6 +18,8 @@ import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./Motion
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
+import { useDockLift } from "../hooks/useDockLift";
+import { useMotion } from "./motion";
 import { revealCard } from "../hooks/gridKeys";
 
 // The hovered item is the ROW's state (owner 2026-11-11: "doesn't lose the hover thing in the gaps between playlist items"):
@@ -57,7 +59,11 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
     const tick = () => { write(); raf = requestAnimationFrame(tick); };
     write();
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // the dock magnification moves the item in ITS rAF callback — which may run after this one in a frame: it signals each
+    // frame it wrote, so the glow re-reads the box in that same frame (never a frame behind the growing item)
+    const row = boxRef.current?.parentElement;
+    row?.addEventListener("dockframe", write);
+    return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
   const onEnter = () => setHover(path);
   const onLeave = () => setHover((cur) => (cur === path ? null : cur));
@@ -145,12 +151,18 @@ export function PlaylistBar() {
   const rowShown = !collapsed && playlist.length > 0;
   useSmoothScroll(rowRef, "x", [rowShown]);
   const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const motion = useMotion();
+  // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
+  // the remove button, the preview — and the lift's fallback with motion off
+  useDockLift(rowRef, motion, !!dragId, [rowShown, playlist.length]);
   // the pointer on the row itself (not on an item): inside the run of items = a gap (keep), past either end = off them
+  // …and above the items' strip (the row reaches up into the head for the magnified items' headroom) = off them too
   const onRowMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const row = e.currentTarget;
     if (e.target !== row || !hoverPath) return;
     const first = row.firstElementChild?.getBoundingClientRect(), last = row.lastElementChild?.getBoundingClientRect();
-    if (!first || !last || e.clientX < first.left || e.clientX > last.right) setHoverPath(null);
+    const top = row.getBoundingClientRect().top + (parseFloat(getComputedStyle(row).paddingTop) || 0);
+    if (!first || !last || e.clientX < first.left || e.clientX > last.right || e.clientY < top) setHoverPath(null);
   };
   // …and the playlist bar's playing item (horizontal; once per session)
   useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);

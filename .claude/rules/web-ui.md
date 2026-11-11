@@ -157,20 +157,32 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `position: fixed`). No direction until the first switch (the first page doesn't slide in). `:root.no-motion` → the pill jumps,
   the page appears. Guard: `--probe probe-layout.js` `tabs:slide` / `:off` / `:reduced` (the pill's per-frame x, the page's
   animated properties = transform + opacity only; RED on the old UI: no pill).
-- **Dock-style playlist bar hover** (owner todo 2026-11-10): the hovered `.pl-item` lifts 4 px, its neighbours 2 px, the next ones
-  0.75 px — CSS only (`+` for the ones after it, `:has(+ …)` for the ones before), transform with a 260 ms ease-out, each item on its own compositor layer (`will-change: transform`: the few-px lift moves at sub-pixel steps instead of whole-pixel judder — owner 2026-11-11 "isn't very smooth"). A playing item
-  neither lifts nor lifts its neighbours (its green ring). The row has `padding-top: 6px; margin-top: -4px` (it clips vertically:
-  room for the lift, same height as before); the portal'd `.pl-hover-glow` follows the item's box (below).
-  `:root.no-motion` → the hovered item alone, 2 px, no easing; `:root.no-glow` → no glow layer, the lift stays. Guard:
-  `probe-layout.js` `dock:hover` / `:off` (computed `translateY` of the items).
+- **Dock-style playlist bar hover** (owner todo 2026-11-10; 2026-11-11: "make it smooth by detecting mouse position, not the item
+  its focused on", "more fun like more in your face", then "its like really big, so its like colliding with the top"):
+  `hooks/useDockLift.ts`. Every `.pl-item` magnifies by its distance from the pointer's x — a bell curve (σ 104 px: ½ one item
+  pitch away, ~1/16 two away) of its RESTING centre (`offsetLeft`, never the transformed box — no feedback): scale up to
+  **1.16×** from its bottom edge, lifted up to **4 px**, pushed sideways away from the pointer by a bump that is 0 under it, peaks
+  about a pitch out and is gone two out (the neighbours part around it, far items never move), the most magnified on top
+  (`z-index`). One slightly under-damped spring per item (ω 21 rad/s, ζ 0.55: a small bounce) in one rAF loop that stops at rest;
+  the result is ONE transform in the `--dock` custom property (`.pl-item { transform: var(--dock, none); transform-origin: 50%
+  100%; will-change: transform }` — dnd-kit owns the inline transform while sorting; React never touches `--dock`). An item fully on
+  screen at rest is clamped inside the row's view magnified (the first / last one never gets cut off). The playing item magnifies
+  too. While dragging everything settles flat. **Headroom:** the row has `padding-top: 34px; margin-top: -32px` (it clips
+  vertically) and reaches up under the head, which sits above it (`z-index: 2`, `pointer-events: none` but on its controls) with a
+  20 px `margin-bottom` so the risen item + its bounce never meets a control; a pointer in the head's empty space (above the
+  items' strip) doesn't count. The hovered item (below) drives the glow, the remove button and the preview; the glow re-reads the
+  item's box on the row's `dockframe` event (same frame as the dock's write). `:root.no-motion` → no `--dock`; the hovered item
+  alone, 2 px, no easing; `:root.no-glow` → no glow layer. Guards: `probe-layout.js` `dock:hover` / `:off`; `probe-plbar.js`
+  `bar:continuous` (the pointer on an item's left vs right quarter: its neighbours trade magnification), `bar:edge`,
+  `bar:headroom` (every frame of the rise: below the head's controls, inside the row).
   **The hovered item is the row's state, not CSS `:hover`** (owner 2026-11-11: "doesn't lose the hover thing in the gaps"):
-  `PlaylistBar`'s `hoverPath` — an item's `mouseenter` sets it, the 10 px gaps keep it, the row's `mouseleave` or the pointer
-  past the first / last item clears it — → `.pl-item.hov` (the lift, the remove button) and the item's preview. The glow follows
-  the hovered item's box with a rAF loop that writes a `translate3d` + size straight into its style (no React render per frame;
-  sub-pixel, so it never shimmers against the lifting item; the eased lift and the row's smooth scroll fire no mousemove). **The row's wheel
-  listener re-attaches when the row mounts** (`useSmoothScroll(rowRef, "x", [rowShown])`): attached once at the bar's mount,
-  before the playlist had loaded, the bar never scrolled. Guard: `--probe probe-plbar.js` — `bar:wheel`, `bar:wheelReopen`
-  (collapse + expand), `bar:gap` (+ the glow within 0.5 px of the item), `bar:sweep` (frame pacing / long tasks over a pointer sweep), `bar:leave`, real input events in a narrow window (RED before: 3/4).
+  `PlaylistBar`'s `hoverPath` — an item's `mouseenter` sets it, the 10 px gaps keep it, the row's `mouseleave`, the pointer past
+  the first / last item or above the items' strip clears it — → `.pl-item.hov`. The glow follows the hovered item's box with a
+  rAF loop writing a `translate3d` + size straight into its style (no React render per frame; sub-pixel). **The row's wheel
+  listener re-attaches when the row mounts** (`useSmoothScroll(rowRef, "x", [rowShown])`): attached once at the bar's mount, before
+  the playlist had loaded, the bar never scrolled. Guard: `--probe probe-plbar.js` — `bar:wheel`, `bar:wheelReopen`, `bar:gap`
+  (+ the glow within 0.5 px of the item), `bar:sweep` (frame pacing / long tasks over a pointer sweep), `bar:leave` (+ the head's
+  empty space magnifies nothing), real input events (RED before the wheel/gap fix: 3/4).
 - **Any window size** (owner todo 2026-11-10, "responsive at any tiled size"): the `.topbar` is `flex-wrap: wrap` (a second row
   instead of controls past the window's edge); `.status` = `flex: 1000 1 0; min-width: min(140px, 100%)` (fills a row's end,
   truncates, never forces a wrap by its text); `.search` = `flex: 0 1 240px; min-width: 120px` (≤ 640 px: `1 1 140px`, fills its

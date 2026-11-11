@@ -300,7 +300,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   /* fully transparent bg → the live wallpaper video shows at 100% behind the playlist bar (the scroll ends
      above it via .lib-scroll margin, so no cards are behind it). Thumbnails + chrome stay opaque/visible. */
   background: transparent; padding: 8px 12px 0; }
-.playlist-bar-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.playlist-bar-head { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; /* the magnified item's rise (+ its bounce) fits under it: probe-plbar bar:headroom */
+  /* above the row, which reaches up under it (the magnified items' headroom): only its controls take the pointer */
+  position: relative; z-index: 2; pointer-events: none; }
+.playlist-bar-head > * { pointer-events: auto; }
 .playlist-bar-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
 .playlist-bar-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
 .mini { padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
@@ -316,19 +319,21 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .playlist-bar-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 /* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
    escapes the row's clip. Side margins cancel .playlist-bar's 12px padding so items sit flush left/right. */
-/* padding-top 6 / margin-top -4: room for the dock lift (the row clips vertically) at the same height as before */
-.playlist-bar-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 6px 0 2px; margin: -4px -12px 0; }
+/* padding-top 34 / margin-top -32: room for the dock magnification (1.16× + 4 px + its overshoot — the row clips vertically)
+   at the same height as before: the row reaches up under the head (above it, pointer-events only on its controls).
+   position: relative → the items' offsetLeft is in the row's own coordinates (useDockLift reads their resting boxes). */
+.playlist-bar-row { position: relative; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 34px 0 2px; margin: -32px -12px 0; }
 .pl-item { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
   overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
-  transition: box-shadow .2s, transform .26s cubic-bezier(.22, .8, .24, 1);
-  will-change: transform; /* COOL: its own compositor layer → the few-px lift moves at sub-pixel steps (no whole-pixel judder) */ }
-/* COOL: dock-style hover (owner 2026-11-10) — the hovered item lifts most, its neighbours a little, the next ones a
-   touch; transform only (`:has()` reaches the items before it). The glow is the fixed .pl-hover-glow layer (escapes
-   the row clip). A playing item keeps its place (its green ring), as before, and a hover on it lifts no neighbour.
-   `.hov`, not :hover: the row decides the hovered item (PlaylistBar.tsx), so the gaps between items keep it. */
-.pl-item.hov:not(.playing) { transform: translateY(-4px); }
-.pl-item.hov:not(.playing) + .pl-item:not(.playing), .pl-item:not(.playing):has(+ .pl-item.hov:not(.playing)) { transform: translateY(-2px); }
-.pl-item.hov:not(.playing) + .pl-item + .pl-item:not(.playing), .pl-item:not(.playing):has(+ .pl-item + .pl-item.hov:not(.playing)) { transform: translateY(-0.75px); }
+  transition: box-shadow .2s;
+  /* COOL: the dock magnification — `--dock` (one transform: push, lift, scale from the bottom edge) is written every frame by
+     hooks/useDockLift.ts (springs over the pointer's distance, so no CSS transition on transform); its own compositor layer →
+     it moves at sub-pixel steps (no whole-pixel judder) */
+  transform: var(--dock, none); transform-origin: 50% 100%; will-change: transform; }
+/* COOL: dock-style hover (owner 2026-11-10; by pointer position + "more in your face" 2026-11-11) — every item magnifies by
+   its distance from the pointer (hooks/useDockLift.ts → --dock above): 1.16× + 4 px under it, the neighbours about half and
+   parting around it, a little bounce. The glow is the fixed .pl-hover-glow layer (escapes the row clip).
+   `.hov` (the glow, the remove button, the motion-off lift below) is the row's hovered item (PlaylistBar.tsx), kept in the gaps. */
 /* absolutely fill the box (like the animated layer) — an in-flow img leaves a 1px sub-pixel gap that
    the dark bg shows through at the top, worsened by the hover lift. */
 .pl-item .thumb { position: absolute; inset: 0; }
@@ -723,7 +728,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .app > .scroll { animation: none; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
-:root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; } /* beats the :has() rules */
+:root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; }
 
 /* ---- the item sidebar (WE-style, 2026-11-10 — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
    An <aside> beside the page under the top bar (--topbar-h, measured by App), docked from 900 px (the grid and the playlist
