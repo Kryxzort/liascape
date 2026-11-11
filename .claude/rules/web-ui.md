@@ -137,6 +137,17 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   Once per session per list (a module `Set`): a later tab visit or a switch never moves the user's scroll; a wheel / a
   pointer-down first stops it; nothing playing or the item filtered out → the next chance tries again. Guard: matrix
   `travel:appOpen` (a 560×430 window, the item last in both plays, a reload; RED on the old UI: both at scroll 0).
+- **"Go to playing" buttons** (owner 2026-11-11: "a button in library and playlist bar that takes you to the current running
+  wallpaper"): a locate icon in the Library top bar (`[data-go-playing="library"]`, beside Import; icon-only so the top bar
+  doesn't wrap sooner) and in the playlist bar's head (`[data-go-playing="bar"]`, after Load; disabled when the playing item isn't
+  in the playlist or the bar is collapsed). Both call `glideTo(container, selector, axis, motion)` (`hooks/travelToPlaying.ts`):
+  every frame it re-measures the element (content-visibility cards take their real size on the way) and closes a fraction of the
+  distance (τ 110 ms) so it ends mid-view; the browser clamps at the ends (an end item can't be centred — no own max: scrollWidth −
+  clientWidth came out 3 px short); a wheel / pointer-down in the list stops it; motion off → a jump re-aimed over 3 frames. Then
+  the element rings twice (`.locate-flash`: an accent outline, outline-offset + colour animated — not a glow, so it shows with
+  Glow effects off). Not in the view (filtered out) → the status line says so. Guard: matrix `travel:button` (the travel:appOpen
+  setup — the last item plays, out of view at 0 — both lists back to 0, each button → in view + the ring; the travel cells run at
+  480×430: one Large card fits under the bar).
 - **"In library" on Browse cards** (owner todo 2026-11-10, "mark the wallpapers already downloaded"): `Browse.tsx`
   `libraryKeys(libraryItems)` (one Set per library change: `ws:<workshopId>` and `url:<pageUrl | sourceId | videoPath>`)
   → each memo'd `Card` gets a boolean `inLibrary` (`ws:` match for Workshop and WE-local — the same item under either

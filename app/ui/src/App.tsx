@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_HINT, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
-import { RefreshCw, Square, Undo2, Upload } from "lucide-react";
+import { LocateFixed, RefreshCw, Square, Undo2, Upload } from "lucide-react";
+import { glideTo } from "./hooks/travelToPlaying";
 import { useStore } from "./store";
 import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
@@ -195,6 +196,11 @@ export default function App() {
         )}
         {tab === "library" && (
           <>
+            {/* "Go to playing" (owner 2026-11-11): glides the grid to the playing wallpaper's card and rings it */}
+            <button className="mini" data-go-playing="library" disabled={!s.playingPath}
+              title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
+              onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>
+              <LocateFixed size={16} /></button>
             <button className="btn ghost ico" title="Import a local wallpaper" onClick={() => importRef.current?.click()}><Upload size={14} /> Import</button>
             <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
               style={{ display: "none" }} onChange={onImportFile} />

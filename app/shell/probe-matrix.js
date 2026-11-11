@@ -647,7 +647,7 @@ C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, 
       await post("/settings", { ...s0, cardSize: "Large" });
       // title Z→A: the scenes first, so the last video (k1) is the grid's last card
       c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
-      win.setContentSize(480, 400); await sleep(300); await loadUi(); await sleep(400);
+      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
       const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
       const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene); // the scenes are off here (s3 crashes)
       const last = vids[vids.length - 1]?.videoPath;
@@ -676,6 +676,59 @@ C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, 
       if (!r) { v.push(`${k}: no playing element (${c.last} should play)`); continue; }
       if (!r.hiddenAtZero) v.push(`${k}: ${c.last} fits at scroll 0 — the cell proved nothing (window too big?)`);
       if (!r.inView) v.push(`${k}: on app open the playing ${c.last} is out of view (scroll ${r.scroll})`);
+    }
+    return v;
+  } };
+// "Go to playing" buttons (owner 2026-11-11: "a button in library and playlist bar that takes you to the current running wallpaper"):
+// the same setup as travel:appOpen (the last card / bar item plays, out of view at scroll 0), the open-time travel let finish,
+// then both lists scrolled back to 0 and each button clicked → the playing card / item glides into view (mid-view) and rings
+// (`.locate-flash`). RED on the old UI: no buttons.
+C["travel:button"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
+    const lib = (await http("GET", "/library")).json || [];
+    const s0 = await getSettings();
+    try {
+      await post("/settings", { ...s0, cardSize: "Large" });
+      c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
+      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
+      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
+      const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene);
+      const last = vids[vids.length - 1]?.videoPath;
+      const bar = [...lib.filter((i) => i.videoPath !== last).map((i) => i.videoPath), last];
+      c.last = TITLE(last);
+      await post("/playlist/state", { videoPaths: bar, settings: PS(), name: null });
+      await post("/playlist/play-from", { paths: bar, startIndex: bar.length - 1, settings: PS() });
+      await waitSettled(10000, last); await sleep(300);
+      await loadUi(); await sleep(1500); // the app-open travel runs and finishes first
+      await js(`document.querySelector(".lib-scroll").scrollTop = 0; document.querySelector(".playlist-bar-row").scrollLeft = 0; true`);
+      await sleep(300);
+      const look = `(() => { const at = (sc, el, ax) => { if (!sc || !el) return null; const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
+          const a = ax === "y" ? r.top - s.top : r.left - s.left, len = ax === "y" ? s.height : s.width, size = ax === "y" ? r.height : r.width;
+          return { a: Math.round(a), size: Math.round(size), len: Math.round(len), inView: a >= -1 && a + size <= len + 1, mid: Math.abs(a + size / 2 - len / 2), flash: el.classList.contains("locate-flash"),
+                   scroll: Math.round(ax === "y" ? sc.scrollTop : sc.scrollLeft) }; };
+        return { grid: at(document.querySelector(".lib-scroll"), document.querySelector(".lib-scroll .card.playing"), "y"),
+                 bar: at(document.querySelector(".playlist-bar-row"), document.querySelector(".pl-item.playing"), "x"),
+                 btn: { library: !!document.querySelector('[data-go-playing="library"]:not(:disabled)'), bar: !!document.querySelector('[data-go-playing="bar"]:not(:disabled)') } }; })()`;
+      c.before = await js(look);
+      c.flashSeen = { grid: false, bar: false };
+      for (const [k, sel] of [["grid", '[data-go-playing="library"]'], ["bar", '[data-go-playing="bar"]']]) {
+        const ok = await js(`(() => { const b = document.querySelector('${sel}'); if (!b || b.disabled) return false; b.click(); return true; })()`);
+        if (!ok) continue;
+        await waitFor(async () => { const r = await js(look); if (r[k]?.flash) c.flashSeen[k] = true; return r[k]?.inView && r[k].flash; }, 2500, 50);
+      }
+      c.r = await js(look);
+      console.log(`        travel:button before ${JSON.stringify(c.before)} after ${JSON.stringify(c.r)}`);
+    } finally {
+      await js(c.sort0 == null ? `localStorage.removeItem("liascape.libSort"); true` : `localStorage.setItem("liascape.libSort", ${JSON.stringify(c.sort0)}); true`);
+      await post("/settings", { ...(await getSettings()), cardSize: s0.cardSize }); win.setContentSize(1400, 900); await sleep(300); await loadUi(); }
+  }, check(c) {
+    const v = [];
+    for (const [k, b] of [["grid", "library"], ["bar", "bar"]]) {
+      if (!c.before?.btn?.[b]) { v.push(`no enabled "go to playing" button in the ${b === "bar" ? "playlist bar" : "Library top bar"}`); continue; }
+      const r0 = c.before?.[k], r = c.r?.[k];
+      if (!r) { v.push(`${k}: no playing element (${c.last} should play)`); continue; }
+      if (r0?.inView) v.push(`${k}: ${c.last} already in view at scroll 0 — the cell proved nothing`);
+      if (!r.inView) v.push(`${k}: after the button the playing ${c.last} is out of view (scroll ${r.scroll})`);
+      if (!c.flashSeen[k]) v.push(`${k}: the playing ${c.last} never got the locate ring`);
     }
     return v;
   } };

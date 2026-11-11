@@ -7,7 +7,7 @@ import {
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ChevronRight, ChevronDown, SlidersHorizontal, Save, FolderOpen, Play, X,
+  ChevronRight, ChevronDown, SlidersHorizontal, Save, FolderOpen, Play, X, LocateFixed,
 } from "lucide-react";
 import { useStore } from "../store";
 import { type LibraryItem } from "../api/client";
@@ -16,7 +16,7 @@ import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
 import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
 import { useAutoplayVideo } from "./autoplay";
-import { useTravelToPlaying } from "../hooks/travelToPlaying";
+import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useDockLift } from "../hooks/useDockLift";
 import { useMotion } from "./motion";
@@ -203,6 +203,10 @@ export function PlaylistBar() {
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
+        {/* "Go to playing" (owner 2026-11-11): glides the row to the playing item and rings it; only when it's in the playlist */}
+        <button className="mini ico" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
+          title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
+          onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)}><LocateFixed size={15} /></button>
         <div className="spacer" />
         <button className="play-btn ico" onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>
