@@ -516,10 +516,24 @@ app.whenReady().then(async () => {
           if (d > 90) { n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
         }
         const cx = (b.x - rect.x + b.w / 2) * sc, cy = (b.y - rect.y + b.h / 2) * sc;
-        const dx = ((x0 + x1 + 1) / 2 - cx) / sc, dy = ((y0 + y1 + 1) / 2 - cy) / sc;
+        // Judge the arrow against the RING the eye sees (the inset accent shadow, same layer as the arrow), measured from the
+        // same capture with the same kind of threshold: a fractional button position shifts both by the same snap, so it
+        // cancels. Against the layout box the pixel grid alone is ±0.5 px — the old check failed or passed by where the card
+        // happened to land (226.70 vs 227.06), not by how it looks.
+        const lum = (P, i) => P[i] + P[i + 1] + P[i + 2], ci = (Math.round(cy) * W + Math.round(cx)) * 4, fill = lum(B, ci);
+        const r0 = (b.w / 2) * sc;
+        let rx0 = Infinity, rx1 = -Infinity, ry0 = Infinity, ry1 = -Infinity, rn = 0;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const dr = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+          if (dr < r0 - 3 * sc || dr > r0 + sc) continue; // the ring's annulus only — never the thumbnail outside the circle
+          if (lum(B, (y * W + x) * 4) - fill > 90) { rn++; rx0 = Math.min(rx0, x); rx1 = Math.max(rx1, x); ry0 = Math.min(ry0, y); ry1 = Math.max(ry1, y); }
+        }
+        const ax = (x0 + x1 + 1) / 2, ay = (y0 + y1 + 1) / 2;
+        const dx = ((ax - (rx0 + rx1 + 1) / 2)) / sc, dy = ((ay - (ry0 + ry1 + 1) / 2)) / sc;
+        const lx = (ax - cx) / sc, ly = (ay - cy) / sc;
         fs.writeFileSync(path.join(OUT, `dlc-${label}.png`), withArrow.resize({ width: W * 8, quality: "good" }).toPNG());
-        console.log(`        ${label}: arrow box off the button centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px — ${n} px, button ${b.w.toFixed(1)}×${b.h.toFixed(1)} at y ${b.y.toFixed(2)}`);
-        return { dx, dy, n };
+        console.log(`        ${label}: arrow off the ring's centre by ${rn ? `(${dx.toFixed(2)}, ${dy.toFixed(2)}) css px` : "— (no ring: hovered, the chip is filled)"} (layout box: ${lx.toFixed(2)}, ${ly.toFixed(2)}) — ${n} arrow px, ${rn} ring px, button ${b.w.toFixed(1)}×${b.h.toFixed(1)} at (${b.x.toFixed(2)}, ${b.y.toFixed(2)})`);
+        return { dx, dy, n: rn ? n : 0 };
       };
       // owner: "weirdly, its not offcenter on a small window? try a 1920x1080 window" — every size (cards, and so the button's
       // position, land on fractional pixels at some sizes)
@@ -537,7 +551,7 @@ app.whenReady().then(async () => {
         await measure(`${W0}x${H0}-hover0`, ".dl-btn:hover .dl-glyph { animation: none !important; transform: translateY(-1px) !important; }");
         await page(`document.getElementById("__dlc")?.remove();`);
         mv(5, 5); await sleep(300);
-        if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow pixels at rest`); continue; }
+        if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow or ring pixels at rest`); continue; }
         if (Math.abs(rest.dx) > 0.5 || Math.abs(rest.dy) > 0.5) v.push(`${W0}x${H0}: at rest the arrow is off-centre by (${rest.dx.toFixed(2)}, ${rest.dy.toFixed(2)}) css px`);
       }
       win.setContentSize(1000, 800); await sleep(400);
