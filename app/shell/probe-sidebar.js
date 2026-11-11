@@ -12,6 +12,10 @@
 //                        "Playing now" badge instead; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
+//   lib:slide            an item switch slides like a carousel by where the new card sits: the same row, right → in from the
+//                        right (the old out left), left mirrored; a row below → rises from below, above → mirrored; the outgoing copy inert + after the live one, gone after ~0.3 s; motion off → no slide
+//   look:liveBg          live wallpaper behind the tabs → the panel fully see-through (like Settings), its section cards dark, a see-through head,
+//                        the content scrolling below it; opaque without
 //   lib:volume           its volume slider persists the item's own volume
 //   lib:still            a `library-item-changed` (two volume keybinds on the playing item) moves nothing and replays nothing;
 //                        the slider follows (the 2026-11-10 morph-replay bug's guard, kept for the sidebar)
@@ -114,6 +118,12 @@ async function setMotion(on) {
     if (!row) throw new Error("no Smooth window animations row");
     const cb = row.querySelector("input[type=checkbox]"); if (cb.checked !== ${on}) cb.click(); await m.sleep(500);`);
   await tab("Library");
+}
+// "Wallpaper behind every tab" (the live wallpaper behind the UI → :root.bg-live, the translucent chrome): an Advanced-level row,
+// hidden at the run's Standard level → set it through /settings and reload the page (a POST doesn't reach the open store)
+async function setBgLive(on) {
+  await setSettings({ liveWallpaperBehindAllTabs: on });
+  await loadUi(); await tab("Library"); await sleep(600);
 }
 const T = (p) => (p ? path.basename(p).replace(/\.[^.]+$/, "") : String(p));
 
@@ -379,6 +389,56 @@ app.whenReady().then(async () => {
     });
 
     // the picture = the Play control (owner 2026-11-11: the Play / In playlist row was "redundant clutter"); the head's toggle
+    // owner 2026-11-11: "instead of a crossfade, it slides to the next wallpaper's sidebar menu depending on where it is
+    // respective to the current one" — a later item (k3 after k1 in the grid) pushes the old content out left and slides in
+    // from the right, an earlier one mirrored; the outgoing copy is inert, after the live one, gone after ~0.3 s; motion off → none
+    const SLIDE = (t) => `m.ctx(m.thumb(${JSON.stringify(t)})); const t0 = performance.now(), out = { live: null, exit: null, exitInert: null, liveFirst: null, x0: null, y0: null, xMid: null, goneAt: null, title: null };
+      await new Promise((res) => { const f = () => { const t = performance.now() - t0; const s = m.side();
+        const live = s?.querySelector(".side-content:not(.side-exit)"), ex = s?.querySelector(".side-content.side-exit");
+        if (live && out.live == null && !live.classList.contains("opening")) out.live = [...live.classList].filter((c) => c !== "side-content").join(" ");
+        if (ex) { if (out.exit == null) { out.exit = [...ex.classList].filter((c) => c !== "side-content" && c !== "side-exit").join(" "); out.exitInert = ex.inert;
+            out.liveFirst = !!(live && (live.compareDocumentPosition(ex) & Node.DOCUMENT_POSITION_FOLLOWING)); const mx = new DOMMatrix(getComputedStyle(live).transform); out.x0 = mx.m41; out.y0 = mx.m42; }
+          if (t > 100 && t < 200 && out.xMid == null) out.xMid = new DOMMatrix(getComputedStyle(live).transform).m41; }
+        else if (out.exit != null && out.goneAt == null) out.goneAt = Math.round(t);
+        if (t < 900) requestAnimationFrame(f); else { out.title = m.sideTitle(); res(); } }; requestAnimationFrame(f); });
+      return out;`;
+    await cell("lib:slide", async () => {
+      const v = [], J = JSON.stringify;
+      await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(600);`);
+      const a = await page(SLIDE("k3")); console.log(`        k1 → k3: ${J(a)}`);
+      if (a.title !== "k3") return [`the sidebar didn't switch to k3 (${a.title})`];
+      if (a.live !== "slide-next" || a.exit !== "to-left") v.push(`k1 → k3 (later): live ${a.live}, exit ${a.exit} — expected slide-next / to-left`);
+      if (!(a.x0 > 40)) v.push(`k1 → k3: the new content doesn't start off to the right (x ${a.x0})`);
+      if (a.exitInert !== true || a.liveFirst !== true) v.push(`the outgoing copy isn't inert / after the live content (${a.exitInert}, ${a.liveFirst})`);
+      if (a.goneAt == null || a.goneAt > 600) v.push(`the outgoing copy stayed (${a.goneAt} ms)`);
+      const b = await page(SLIDE("k1")); console.log(`        k3 → k1: ${J(b)}`);
+      if (b.live !== "slide-prev" || b.exit !== "to-right") v.push(`k3 → k1 (earlier): live ${b.live}, exit ${b.exit} — expected slide-prev / to-right`);
+      if (!(b.x0 < -40)) v.push(`k3 → k1: the new content doesn't start off to the left (x ${b.x0})`);
+      if (await page(`return m.side().querySelectorAll(".side-head-tools [data-side-playlist]").length;`) !== 1) v.push("the head has more / fewer than one playlist toggle after the slides");
+      // owner 2026-11-11: "it should also slide differently based on whether the next one is above or below" — a card in a
+      // row below rises in from below (the old one leaves upwards), back up → mirrored
+      win.setContentSize(1000, 800); await sleep(300); await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(500);`); // the grid wraps (≈3 columns beside the docked panel)
+      const rows = await page(`return ["k1","k2","k3","k4","s1","s2","s3","we1"].map((t) => { const r = m.thumb(t)?.getBoundingClientRect(); return r ? [t, Math.round(r.top)] : null; }).filter(Boolean);`);
+      const top1 = rows.find((x) => x[0] === "k1")?.[1], below = rows.find((x) => x[1] > top1 + 20)?.[0];
+      if (!below) v.push(`no card in a row below k1 to test the vertical slide (${J(rows)})`);
+      else {
+        const d = await page(SLIDE(below)); console.log(`        k1 → ${below} (a row below): ${J(d)}`);
+        if (d.live !== "slide-below" || d.exit !== "to-top") v.push(`k1 → ${below} (row below): live ${d.live}, exit ${d.exit} — expected slide-below / to-top`);
+        if (!(d.y0 > 20) || Math.abs(d.x0) > 1) v.push(`k1 → ${below}: the new content doesn't start below (x ${d.x0}, y ${d.y0})`);
+        const u = await page(SLIDE("k1")); console.log(`        ${below} → k1 (a row above): ${J(u)}`);
+        if (u.live !== "slide-above" || u.exit !== "to-bottom") v.push(`${below} → k1 (row above): live ${u.live}, exit ${u.exit} — expected slide-above / to-bottom`);
+        if (!(u.y0 < -20)) v.push(`${below} → k1: the new content doesn't start above (y ${u.y0})`);
+      }
+      win.setContentSize(1400, 900); await sleep(300);
+      await setMotion(false);
+      await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(300);`);
+      const c = await page(SLIDE("k3")); console.log(`        motion off, k1 → k3: ${J(c)}`);
+      if (c.exit != null) v.push(`motion off: an outgoing copy slid (${J(c)})`);
+      await setMotion(true);
+      await page(`await m.closeAll();`);
+      return v;
+    });
+
     await cell("lib:play", async () => {
       const v = [];
       await post("/apply", { path: K[0] }); await sleep(1500);
@@ -431,7 +491,9 @@ app.whenReady().then(async () => {
         await loadUi();
         const look = (t) => page(`await m.closeAll(); await m.openSide(${JSON.stringify(t)}); await m.sleep(700); const s = m.side();
           const lay = {}; for (const e of s.querySelectorAll("[data-preview-layer]")) lay[e.dataset.previewLayer] = +m.op(e).toFixed(2);
-          return { opts: [...s.querySelectorAll("[data-preview-src]")].map((b) => b.dataset.previewSrc), mode: s.querySelector("[data-side-media]")?.dataset.previewMode, lay };`);
+          const sw = s.querySelector('[role="radiogroup"][aria-label="Preview"]'), md = s.querySelector("[data-side-media]");
+          const above = sw && md ? sw.getBoundingClientRect().bottom <= md.getBoundingClientRect().top + 0.5 && !md.contains(sw) : null;
+          return { opts: [...s.querySelectorAll("[data-preview-src]")].map((b) => b.dataset.previewSrc), mode: md?.dataset.previewMode, lay, above };`);
         const pick = (k) => page(`m.side().querySelector('[data-preview-src="${k}"]').click(); await m.sleep(700); const s = m.side();
           const lay = {}; for (const e of s.querySelectorAll("[data-preview-layer]")) lay[e.dataset.previewLayer] = +m.op(e).toFixed(2);
           const f = s.querySelector("iframe"); return { mode: s.querySelector("[data-side-media]")?.dataset.previewMode, lay, yt: f?.src ?? null,
@@ -439,6 +501,8 @@ app.whenReady().then(async () => {
         const J = JSON.stringify;
         let r = await look("k1");
         if (J(r.opts) !== J(["gif", "video"])) v.push(`k1 (a gif + its video): options ${J(r.opts)}`);
+        // owner 2026-11-11: the switch is "a attached field above the preview instead of a overlay"
+        if (r.above !== true) v.push(`k1: the preview switch isn't above the picture (it overlaps / sits inside it: ${r.above})`);
         if (r.mode !== "gif" || !(r.lay.gif > 0.9)) v.push(`k1 opens on ${r.mode} (layers ${J(r.lay)}), expected the gif`);
         if (r.opts.includes("video")) {
           const p = await pick("video");
@@ -446,10 +510,14 @@ app.whenReady().then(async () => {
           await shot("lib-preview-video");
         }
         r = await look("k2");
-        if (r.opts.length) v.push(`k2 (its video only): a switch ${J(r.opts)} — one option shows none`);
+        // owner 2026-11-11: "dont force mp4 when the preview is a still image" — no gif → it opens on the still, Video to pick
+        if (J(r.opts) !== J(["image", "video"])) v.push(`k2 (a still + its video): options ${J(r.opts)}, expected [image, video]`);
+        if (r.mode !== "video") v.push(`k2 after picking Video on k1: opened on ${r.mode} (the session's pick applies when it has it)`);
         r = await look("k1");
         if (r.mode !== "video") v.push(`back on k1 after picking Video: it opened on ${r.mode} (the pick is kept for the session)`);
         if (r.opts.includes("gif")) await pick("gif");
+        r = await look("k2");
+        if (r.mode !== "image" || r.lay.video > 0.1) v.push(`k2 with GIF picked last: opened on ${r.mode} (layers ${J(r.lay)}), expected the still, no video`);
         r = await look("s2");
         if (r.opts.length) v.push(`s2 (a scene, no trailer): a switch ${J(r.opts)}`);
         r = await look("s1");
@@ -530,6 +598,57 @@ app.whenReady().then(async () => {
         else if (out.seen != null && out.gone == null) out.gone = Math.round(t);
         if (t < 2800) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
       out.acc = m.accent(); out.left = !!document.querySelector(".locate-fx, .locate-flash"); return out;`;
+    // owner 2026-11-11: "the background is too opaque for the transparency mode" → then "make it more like the settings page":
+    // live wallpaper behind the tabs → the panel has no fill, its section cards hold the darkness; the head is see-through
+    // too, and the content scrolls below it (never under it)
+    await cell("look:liveBg", async () => {
+      const v = [];
+      const read = () => page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const p = m.side();
+        const alpha = (c) => { const x = c.match(/[0-9.]+/g)?.map(Number) ?? []; return c.includes("/") || c.startsWith("rgba") ? x[x.length - 1] : 1; };
+        const title = document.querySelector(".lib-title");
+        const sec = p.querySelector(".side-sec");
+        return { sec: sec ? alpha(getComputedStyle(sec).backgroundColor) : null, bgImg: getComputedStyle(p).backgroundImage, panel: alpha(getComputedStyle(p).backgroundColor), head: alpha(getComputedStyle(p.querySelector(".side-head")).backgroundColor),
+          name: title ? alpha(getComputedStyle(title).backgroundColor) : null, scroller: getComputedStyle(p).overflowY,
+          inner: getComputedStyle(p.querySelector(".side-scroll")).overflowY, live: document.documentElement.classList.contains("bg-live"),
+          // the title's shadow: drawn by the unclipped wrapper, never a text-shadow inside the clamped (overflow: hidden) h2
+          tShadow: getComputedStyle(p.querySelector(".side-head h2")).textShadow, wFilter: getComputedStyle(p.querySelector(".side-head-text")).filter,
+          wClip: [p.querySelector(".side-head-text"), p.querySelector(".side-head")].map((e) => getComputedStyle(e).overflow) };`);
+      const off = await read(); console.log(`        off: ${JSON.stringify(off)}`);
+      if (off.panel < 0.99) v.push(`no live wallpaper behind: the panel is see-through (${off.panel})`);
+      await setBgLive(true);
+      const on = await read(); console.log(`        on: ${JSON.stringify(on)}`);
+      if (!on.live) v.push("the Wallpaper behind every tab row didn't set bg-live");
+      else {
+        // owner 2026-11-11 (2nd): "more like the settings page, the background is 100% see-through while the actual settings
+        // section is what has the darkness"
+        if (on.panel > 0.01 || on.bgImg !== "none") v.push(`live wallpaper: the panel has a fill (alpha ${on.panel}, image ${on.bgImg.slice(0, 60)})`);
+        if (on.sec == null || on.sec < 0.4) v.push(`live wallpaper: the section cards don't hold the darkness (alpha ${on.sec}; Settings' .ssection = 0.5)`);
+        if (on.head > 0.01) v.push(`live wallpaper: the head has its own background (alpha ${on.head}) — it would read as a band`);
+        // owner 2026-11-11: "the left of the text shadow is being clipped … we hate clipping!!"
+        if (on.tShadow !== "none") v.push(`the title's shadow is a text-shadow inside the clamped h2 — its overflow clips it (${on.tShadow})`);
+        if (!/drop-shadow/.test(on.wFilter)) v.push(`no Netflix-style drop-shadow on the title's wrapper (filter ${on.wFilter})`);
+        if (on.wClip.some((o) => o !== "visible")) v.push(`something around the title clips its shadow (overflow ${on.wClip})`);
+        // owner 2026-11-11: "why does hovering 'open in file manager' and 'open on steam' makes its background transparent?" —
+        // a tile's hover tints over its dark fill, never replaces it (the danger one too: not an opaque block)
+        for (const label of ["Open in file manager", "Delete"]) {
+          const r = await page(`const t = [...m.side().querySelectorAll(".side-tile")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); return t ? m.rect(t) : null;`);
+          if (!r) { v.push(`no "${label}" tile`); continue; }
+          await mv(r.x + r.w / 2, r.y + r.h / 2, 350);
+          const h = await page(`const t = [...m.side().querySelectorAll(".side-tile")].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+            const c = getComputedStyle(t).backgroundColor, x = c.match(/[0-9.]+/g).map(Number);
+            return { hover: t.matches(":hover"), a: c.includes("/") || c.startsWith("rgba") ? x[x.length - 1] : 1, img: getComputedStyle(t).backgroundImage.slice(0, 40) };`);
+          console.log(`        ${label} hovered: ${JSON.stringify(h)}`);
+          if (!h.hover) v.push(`"${label}": the real pointer move didn't hover it`);
+          else if (h.a < 0.4 || h.a > 0.9) v.push(`"${label}" hovered: its fill alpha is ${h.a} (the tiles' dark 0.5 — not see-through, not solid)`);
+          else if (!/gradient/.test(h.img)) v.push(`"${label}" hovered: no tint layered over the fill (${h.img})`);
+        }
+        await mv(5, 5, 100);
+      }
+      if (on.scroller !== "hidden" || on.inner !== "auto") v.push(`the content must scroll below the head (panel ${on.scroller}, inner ${on.inner})`);
+      await page(`await m.closeAll();`); await setBgLive(false);
+      return v;
+    });
+
     await cell("look:locator", async () => {
       const v = [], J = JSON.stringify;
       await post("/apply", { path: K[0] }); await sleep(1500);
@@ -692,6 +811,14 @@ app.whenReady().then(async () => {
           const b = m.byText(".lib-ctx button", "Settings"); if (b) b.click(); await m.waitSide("library"); await m.sleep(900);`);
         mv(W / 3, 30); await sleep(300);
         await shot(`look-${size}-library-playing`);
+        // live-wallpaper mode: the panel as see-through as the cards' name bars (owner 2026-11-11)
+        await setBgLive(true); await sleep(1200);
+        await page(`await m.closeAll(); m.thumb("k2").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); await m.waitSide("library"); await m.sleep(900);`);
+        mv(W / 3, 30); await sleep(300);
+        await shot(`look-${size}-library-live`);
+        const head = await page(`const h = m.side()?.querySelector(".side-head"); return h ? m.rect(h) : null;`);
+        if (head) await crop(`look-${size}-head-live`, head, 6);
+        await page(`await m.closeAll();`); await setBgLive(false);
         await page(`await m.closeAll();`);
         // the locator: the grid scrolled so k1 is off (if it can scroll), then the button; captured mid-effect
         await page(`const sc = document.querySelector(".lib-scroll"); sc.scrollTop = sc.scrollHeight; await m.sleep(200);

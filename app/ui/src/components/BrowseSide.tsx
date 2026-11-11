@@ -42,7 +42,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt });
   const downloading = progress !== undefined;
   const web = w.pageUrl.startsWith("http");
-  const about = !!w.description || (w.tags && w.tags.length > 0);
+  // the About card only for a description; tags alone sit in a plain row (owner 2026-11-11: a card for one property felt strange)
+  const tagRow = w.tags && w.tags.length > 0 ? <div className="tags side-tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
 
   return (
     <>
@@ -80,14 +81,12 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             </>
           )}
         </div>
-        {about && (
+        {w.description ? (
           <SideSection icon={<Info size={15} />} title="About">
-            {w.description && <p className="desc">{w.description}</p>}
-            {w.tags && w.tags.length > 0 && (
-              <div className="tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
-            )}
+            <p className="desc">{w.description}</p>
+            {tagRow}
           </SideSection>
-        )}
+        ) : tagRow}
         <div className="side-tiles">
           {w.workshopId ? (
             <a className="side-tile" href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${w.workshopId}`} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>

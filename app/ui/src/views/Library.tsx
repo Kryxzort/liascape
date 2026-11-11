@@ -182,7 +182,7 @@ export const Library = memo(function Library() {
     {sideItem && (() => {
       const targets = targetsFor(sideItem);
       return (
-        <SidePanel kind="library" id={sideItem.videoPath} closing={shown.closing} title={sideItem.title}
+        <SidePanel kind="library" id={sideItem.videoPath} order={filtered.findIndex((i) => i.videoPath === sideItem.videoPath)} card={`lib-${sideItem.videoPath}`} closing={shown.closing} title={sideItem.title}
           sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
           <LibrarySide item={sideItem} targets={targets}
             playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}

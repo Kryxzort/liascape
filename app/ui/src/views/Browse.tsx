@@ -178,7 +178,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
       )}
     </div>
     {sideW && (
-      <SidePanel kind="browse" id={sideW.pageUrl} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
+      <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}
           onDownload={(apply) => download(activeSource, sideW, apply)} onCancel={() => cancelDownload(sideW.pageUrl)}
           onApplyLib={(p) => applyItem(p)} onShowInLibrary={onShowInLibrary}

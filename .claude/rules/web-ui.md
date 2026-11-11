@@ -314,7 +314,19 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     `cubic-bezier(.2, 1.22, .36, 1)` — a hint of overshoot, no fill) on open, the content (`.side-content.opening`) following in a
     stagger — the picture scales in (`side-pop`, 40 ms), then the body's children rise 12 px + fade 70 / 100 / 130 / 160 ms in
     (they start when `.side-body.wait` lifts) — done by ~0.4 s (matrix `appear:morphs` samples +460 ms: nothing may still run);
-    keyed by the item, a switch (`.swapping`) re-staggers faster (6 px, 25 ms steps, ~0.26 s); `.closing` + `side-out` (36 px,
+    keyed by the item, a switch **slides like a carousel** (owner 2026-11-11: "instead of a crossfade, it slides to the next
+    wallpaper's sidebar menu depending on where it is respective to the current one" + "it should also slide differently based
+    on whether the next one is above or below"): the direction is where the new card sits on screen vs the old one
+    (`SidePanel` `card` = the cards' `data-morph-id`, measured at the switch, `slideDir`): a row below (|dy| > half a card) →
+    `.slide-below` (rises in by 34 % of the content, fading) + the old `.side-exit.to-top`, a row above → `.slide-above` /
+    `.to-bottom`; the same row, right of it → `.slide-next` (in from the right, 100 %) + `.to-left`, left → mirrored. No card to
+    measure → `order` (the index in Library `filtered` / Browse `sorted`: later = from the right). 0.3 s, transform + opacity.
+    The opening stagger is the panel's first showing only (`first` cleared on the first switch — coming back to that item
+    slides too). The outgoing content keeps its key (no remount — its video keeps playing) inside `.side-track` (`overflow:
+    clip`), absolutely laid over, AFTER the live content in the DOM (lookups find the live one), `inert` + `aria-hidden`, its
+    head tools withheld (`HeadSlot` null), gone after `SIDE_SLIDE_MS`; the shown item + its last children are followed during
+    render (like `useLinger`). Order unknown (−1) → the old `.swapping` re-stagger (6 px, 25 ms steps, ~0.26 s); motion off →
+    an instant swap, no exit layer. Guard: probe-sidebar `lib:slide`; `.closing` + `side-out` (36 px,
     170 ms, ease-in) on close — kept mounted by `useLinger` (`hooks/useLinger.ts`, `SIDE_CLOSE_MS` = 170, 0 ms with motion off).
     Transform + opacity only, backwards fill (nothing stays transformed); `:root.no-motion` → no animation and no transition
     anywhere in the panel.
@@ -348,6 +360,15 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     row (`--cols`), the first arrow with nothing focused = the playing card; Enter = Play (Library) / Download & Apply or the
     library copy's Apply (Browse); Escape = close + clear the selection.
     A focused item that leaves (trashed, a source switch) closes it; a Browse reload keeps the last copy while it's away.
+  - **Panel background + scrolling**: the base is `--bg-mantle` at `--tr-side` — opaque normally; **with the live wallpaper
+    behind the tabs** (`:root.bg-live`) the panel has NO fill and no accent wash, like the Settings page: its section cards
+    (`.side-sec`, crust 50 % like `.ssection`), the stage and the tiles hold the darkness; the head's title / sub-line get a
+    Netflix-subtitle shadow (`text-shadow #000 0 0 7px`'s look) — as `filter: drop-shadow(0 0 3.5px #000)` on
+    `.side-head-text`, NOT a text-shadow on the h2 (its line clamp's `overflow: hidden` clipped the blur; drop-shadow's blur
+    is σ, text-shadow's 2σ — 3.5 px measured identical to 7 px) (owner 2026-11-11: "make it more like the settings page, the background is 100% see-through while the actual
+    settings section is what has the darkness" — it superseded a 40 % fill). So nothing reads through a see-through head, the
+    panel is a flex column that doesn't scroll: the head (no background of its own) on top, `.side-scroll` (the content
+    scroller, `scrollTo(0)` on a switch) below it. Guard: probe-sidebar `look:liveBg`; the shots' `look-<size>-library-live`.
   - **Library sidebar** (`LibrarySide`): picture (`SideMedia`: the card's still → the sharp image → the preview the switch
     picked, at the picture's own aspect — read from the card at the focus, `captureSource`, else remembered per id — height
     `--side-media-h` = `min(38vh, 320px)`), the hero (SCENE / crashed chips, duration — reserved —, resolution, age rating pills),
@@ -364,11 +385,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     `lib:play` (the button's name + tabIndex, no icon or tint before or on a real hover, the picture scaled, a real click plays k3,
     then the badge and no button; the head toggle out / back in; RED on the old UI). **The preview switch** (owner 2026-11-11: "a
     button to switch between gif preview, mp4 preview and youtube video preview"; `usePreview` in `components/sidePreview.ts`):
-    translucent chips top-left on the picture (`.side-switch` / `.side-sw`, the active one accent + glow), only the options the
+    a strip of equal segments attached to the stage's top edge above the picture — not an overlay (owner 2026-11-11) — (`.side-stage.has-switch` `.side-switch` / `.side-sw`, the active one accent + glow), only the options the
     item has — **GIF** (`animatedThumbnailPath` gif/webp; Browse: the animated URL), **Video** (the library item's own video file,
     else a video preview; a scene has none; Browse: a `previewUrl` that is a video), **YouTube** (`youtubeUrl`; Browse: the
-    detail's) and, when the trailer is all it has, **Picture** (the still — so the trailer can be turned off); one or none → no
-    switch. Default = what the picture always showed (gif, else video, else the still). The pick is kept for the session per
+    detail's) and, when there's no gif, **Picture** (the still); one or none → no switch. Default = the base the card shows:
+    the gif, else the still — **never the video** (owner 2026-11-11: "dont force mp4 when the preview is a still image"; a
+    video-only item opens on its still with Video to pick). The pick is kept for the session per
     sidebar (`store.previewPref.library|browse`): the next item opens on it when it has it, else on the default (decision: per
     sidebar, not shared — Browse items rarely have a video, so a Browse "Video" pick would otherwise mean nothing). Layers
     cross-fade on opacity (the video mounts the first time it's shown and stays, paused while hidden); the trailer

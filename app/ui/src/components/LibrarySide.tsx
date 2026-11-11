@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Copy, Clock, ExternalLink, Monitor, Shield, AudioLines, Play, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Info } from "lucide-react";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Play, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
@@ -158,7 +158,10 @@ export function LibrarySide({
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");
   const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
-  const hasDetails = (item.tags && item.tags.length > 0) || (item.workshopId && at("standard"));
+  // keyed by the ID copied, so switching items never carries "Copied" over
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  useEffect(() => { if (!copiedId) return; const t = setTimeout(() => setCopiedId(null), 1200); return () => clearTimeout(t); }, [copiedId]);
+  const copied = !!item.workshopId && copiedId === item.workshopId;
 
   return (
     <>
@@ -184,7 +187,17 @@ export function LibrarySide({
           {!item.isScene && <span className="side-pill" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={13} /> {dur || "0 seconds"}</span>}
           {item.resolution && <span className="side-pill"><Monitor size={13} /> {item.resolution}</span>}
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
+          {/* the Workshop ID: a pill that copies itself (owner 2026-11-11: a "Details" card for one property felt strange) */}
+          {item.workshopId && at("standard") && (
+            <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" title="Copy the Workshop ID"
+              aria-label={`Workshop ID ${item.workshopId} — copy`}
+              onClick={() => { navigator.clipboard?.writeText(item.workshopId!); setCopiedId(item.workshopId!); }}>
+              {copied ? <Check size={13} /> : <Hash size={13} />} {copied ? "Copied" : item.workshopId}</button>
+          )}
         </div>
+        {item.tags && item.tags.length > 0 && (
+          <div className="tags side-tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
+        )}
         {/* the right-click menu's actions (owner: "all the 4 options from the right click menu"), as tiles */}
         <div className="side-tiles">
           <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</button>
@@ -220,17 +233,6 @@ export function LibrarySide({
         </SideSection>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}
-        {hasDetails && (
-          <SideSection icon={<Info size={15} />} title="Details">
-            {item.tags && item.tags.length > 0 && (
-              <div className="tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
-            )}
-            {item.workshopId && at("standard") && (
-              <div className="side-line" data-side-row="workshop-id"><span>Workshop ID <b>{item.workshopId}</b></span>
-                <button className="mini ico" title="Copy ID" aria-label="Copy the Workshop ID" onClick={() => navigator.clipboard?.writeText(item.workshopId!)}><Copy size={13} /></button></div>
-            )}
-          </SideSection>
-        )}
       </div>
     </>
   );

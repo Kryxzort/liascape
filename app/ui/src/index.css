@@ -11,12 +11,16 @@
      see-through when the live wallpaper is actually behind the UI (.bg-live, set from the
      "Live wallpaper behind all tabs" toggle). Single knob → change .bg-live below to retune everything. */
   --tr: 100%; --tr-strong: 100%;
+  /* the item sidebar's own background: in live-wallpaper mode fully see-through, like the Settings page — its section cards,
+     stage and tiles carry the darkness (owner 2026-11-11: "make it more like the settings page, the background is 100%
+     see-through while the actual settings section is what has the darkness") */
+  --tr-side: 100%;
   /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
   --glow-sm: 0 0 12px -2px var(--accent);
   --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 /* live wallpaper behind every tab → let the chrome go translucent so it shows through */
-:root.bg-live { --tr: 65%; --tr-strong: 85%; }
+:root.bg-live { --tr: 65%; --tr-strong: 85%; --tr-side: 0%; }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
 body {
@@ -791,21 +795,36 @@ input[type=range]:focus-visible { outline: none; }
    re-stagger on an item switch, a quicker slide out (SIDE_CLOSE_MS = 170 in hooks/useLinger.ts). Done in ≤ 0.4 s. */
 .app { --side-w: clamp(300px, 26vw, 400px); --side-media-h: min(38vh, 320px); }
 .side-panel { position: absolute; top: var(--topbar-h, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
-  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  display: flex; flex-direction: column; overflow: hidden;
   background:
     radial-gradient(440px 300px at 100% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%),
     radial-gradient(380px 300px at 0% 100%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
-    color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent);
+    color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
   border-left: 1px solid color-mix(in srgb, var(--accent) 28%, var(--surface1));
   box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
   animation: side-in .32s cubic-bezier(.2, 1.22, .36, 1); }
+/* live wallpaper behind: no panel fill and no accent wash — the wallpaper shows, the cards hold the darkness; the loose text
+   (the title, the head's sub-line) gets a shadow to stay legible on a bright wallpaper */
+:root.bg-live .side-panel { background: transparent; }
+/* the loose small controls on a bright wallpaper: the head's tools and the "global" tags get the cards' dark fill */
+:root.bg-live .side-head .side-tool:not(.on):not(.accent):not(:hover), :root.bg-live .side-global { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
+:root.bg-live .side-tool.side-pl.on { background: linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)),
+  color-mix(in srgb, var(--bg-crust) 60%, transparent); }
+/* like Netflix's subtitles (owner 2026-11-11): a soft black shadow hugging the letters, no offset — Netflix's look is
+   `text-shadow: #000000 0px 0px 7px` (a fan recreation's value; Netflix doesn't publish it). NOT as a text-shadow on the h2:
+   its two-line clamp needs `overflow: hidden`, which cut the blur off at the box edge (owner: "the left of the text shadow is
+   being clipped"). A filter on the unclipped wrapper draws it around the clipped text instead; drop-shadow's blur is a
+   standard deviation (text-shadow's is 2σ), so 3.5px here = text-shadow's 7px — measured identical, pixel for pixel, in
+   Electron 42 */
+:root.bg-live .side-head-text { filter: drop-shadow(0 0 3.5px #000); }
 .side-panel.closing { animation: side-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
 @keyframes side-in { from { transform: translateX(44px); opacity: 0; } }
 @keyframes side-out { to { transform: translateX(36px); opacity: 0; } }
 
 /* the head: the title, its tools (the playlist toggle, Play while the trailer shows), close */
-.side-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: flex-start; gap: 6px; padding: 14px 12px 12px 18px;
-  background: color-mix(in srgb, var(--bg-mantle) 94%, transparent); }
+.side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.side-head { flex: none; position: relative; z-index: 5; display: flex; align-items: flex-start; gap: 6px; padding: 14px 12px 12px 18px;
+  background: transparent; } /* the panel's own background shows (nothing scrolls under it any more) */
 .side-head::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; height: 1px; pointer-events: none;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 60%, transparent), transparent 85%); }
 .side-head-text { flex: 1; min-width: 0; padding-top: 3px; }
@@ -863,13 +882,18 @@ input[type=range]:focus-visible { outline: none; }
   box-shadow: 0 0 14px -4px var(--success); }
 .side-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent), 0 0 8px var(--success); }
-/* the preview switch (GIF / Video / YouTube / Picture): translucent chips, the active one accent + glow */
-.side-switch { position: absolute; top: 8px; left: 8px; z-index: 4; display: flex; gap: 2px; padding: 3px; border-radius: 999px;
-  background: rgba(0,0,0,.58); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 4px 12px rgba(0,0,0,.3); }
-.side-sw { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 800;
-  letter-spacing: .2px; color: rgba(255,255,255,.78); transition: color .15s, background .15s, box-shadow .2s; }
-.side-sw:hover { color: #fff; background: rgba(255,255,255,.12); }
+/* the preview switch (GIF / Video / YouTube / Picture): a strip attached to the stage's top edge, above the picture (owner
+   2026-11-11: not an overlay) — it bleeds to the stage's border, a hairline under it; equal segments, the active one accent + glow */
+.side-stage.has-switch { flex-direction: column; align-items: center; padding-top: 0; }
+.side-switch { align-self: stretch; display: flex; gap: 4px; margin: 0 -12px 12px; padding: 5px;
+  border-radius: 15px 15px 0 0; background: color-mix(in srgb, var(--bg-crust) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--surface1)); }
+.side-sw { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 8px; border-radius: 10px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--subtext);
+  transition: color .15s, background .15s, box-shadow .2s; }
+.side-sw:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .side-sw.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+:root.no-glow .side-sw.on { box-shadow: none; }
 .side-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* held invisible until its asynchronous sections are in (LibrarySide READY_CAP_MS): no section pops in under the user */
@@ -890,6 +914,13 @@ input[type=range]:focus-visible { outline: none; }
   padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--surface0) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }
 .side-pill svg { color: var(--accent); opacity: .9; }
+/* the Workshop ID pill copies itself: a quiet button — accent edge + glow on hover, a green "Copied" for 1.2 s */
+button.side-pill.copy { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: border-color .15s, color .15s, box-shadow .2s; }
+button.side-pill.copy:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glow-sm); }
+button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--success); }
+:root.no-glow button.side-pill.copy:hover { box-shadow: none; }
+.side-tags { margin: 0; }
 .side-link { font-size: 12px; }
 /* the Browse sidebar's download buttons: big, the glyph nudging down on hover (like the card's download button) */
 .side-cta { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -908,7 +939,11 @@ input[type=range]:focus-visible { outline: none; }
   font-size: 12.5px; font-weight: 700; line-height: 1.2; color: var(--text); text-decoration: none;
   background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
   transition: border-color .15s, background .15s, box-shadow .2s, transform .15s; }
-.side-tile:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--surface1)); background: color-mix(in srgb, var(--accent) 9%, transparent);
+/* hover = a tint layered OVER the tile's own dark fill — never instead of it (owner 2026-11-11: hovering made the tile see-through
+   in live-wallpaper mode); danger likewise, not the opaque --danger-bg (it went solid there) */
+.side-tile:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--surface1));
+  background: linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 12%, transparent)),
+    color-mix(in srgb, var(--bg-crust) 50%, transparent);
   box-shadow: 0 6px 16px rgba(0,0,0,.3), var(--glow-sm); transform: translateY(-1px); }
 .side-tile:active { transform: scale(.97); transition-duration: .08s; }
 .side-tile-ico { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
@@ -919,7 +954,9 @@ input[type=range]:focus-visible { outline: none; }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
 .side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }
-.side-tile.danger:hover { border-color: var(--danger); background: var(--danger-bg); box-shadow: 0 6px 16px rgba(0,0,0,.3), 0 0 12px -3px var(--danger); }
+.side-tile.danger:hover { border-color: var(--danger);
+  background: linear-gradient(color-mix(in srgb, var(--danger) 14%, transparent), color-mix(in srgb, var(--danger) 14%, transparent)),
+    color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: 0 6px 16px rgba(0,0,0,.3), 0 0 12px -3px var(--danger); }
 /* section cards — the Settings page's .ssection in the sidebar's size */
 .side-sec { position: relative; overflow: hidden; padding: 12px 14px 8px; border-radius: 13px;
   background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
@@ -986,6 +1023,27 @@ input[type=range]:focus-visible { outline: none; }
 @keyframes side-pop { from { opacity: 0; transform: translateY(10px) scale(.94); } }
 @keyframes side-rise { from { opacity: 0; transform: translateY(12px); } }
 @keyframes side-swap-in { from { opacity: 0; transform: scale(.98); } }
+/* a switch slides like a carousel by where the new card sits vs the old: the same row, right of it → the old content out to
+   the left, the new in from the right (left of it: mirrored); a row below / above → vertical (below). The exit layer lies over the track's top-left (the panel scrolls back to the top on a switch) */
+.side-track { position: relative; overflow: clip; }
+.side-content.side-exit { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; z-index: 1;
+  animation: side-out-l .3s cubic-bezier(.3, .8, .25, 1) forwards; }
+.side-content.side-exit.to-right { animation-name: side-out-r; }
+.side-content.side-exit.to-top { animation-name: side-out-t; }
+.side-content.side-exit.to-bottom { animation-name: side-out-b; }
+.side-content.slide-next { animation: side-in-r .3s cubic-bezier(.3, .8, .25, 1) backwards; }
+.side-content.slide-prev { animation: side-in-l .3s cubic-bezier(.3, .8, .25, 1) backwards; }
+/* a row below / above: vertical, by a third of the content (the track clips it — the old one slides up under the head) */
+.side-content.slide-below { animation: side-in-b .3s cubic-bezier(.3, .8, .25, 1) backwards; }
+.side-content.slide-above { animation: side-in-t .3s cubic-bezier(.3, .8, .25, 1) backwards; }
+@keyframes side-out-l { to { transform: translateX(-100%); opacity: .2; } }
+@keyframes side-out-r { to { transform: translateX(100%); opacity: .2; } }
+@keyframes side-in-r { from { transform: translateX(100%); opacity: .2; } }
+@keyframes side-in-l { from { transform: translateX(-100%); opacity: .2; } }
+@keyframes side-out-t { to { transform: translateY(-34%); opacity: 0; } }
+@keyframes side-out-b { to { transform: translateY(34%); opacity: 0; } }
+@keyframes side-in-b { from { transform: translateY(34%); opacity: 0; } }
+@keyframes side-in-t { from { transform: translateY(-34%); opacity: 0; } }
 @keyframes side-rise-sm { from { opacity: 0; transform: translateY(6px); } }
 .side-scrim { display: none; }
 @media (min-width: 900px) {
