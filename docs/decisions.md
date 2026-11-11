@@ -42,6 +42,12 @@ back to running locally once the POST was sent: a doubled next skips one, a doub
 
 ## Steam & sources
 
+### Keep the 0600 file fallback for the Steam sign-in — 2026-11-11
+The tokens go to the system keyring (Secret Service); without one they go to `~/.config/liascape/steam-auth.json`
+(0600), never settings.json. Keyring-only was rejected: on a desktop with no Secret Service (bare compositors, no
+gnome-keyring/KWallet) signing in would simply not work. The file is as safe as any 0600 file in the home directory:
+Discord and Chromium-based apps do the same with their "basic" store. `.claude/rules/backend/sources-steam.md` § Secrets.
+
 ### Browse the Workshop over Steam's client protocol, anonymously — 2026-11-11
 Scraping steamcommunity.com's browse page (30 items a page, AND-only tags, a page read per detail for the trailer) trips
 Steam's per-IP limit, which locks the user's browser out for 30+ min too. `PublishedFile.QueryFiles` gives 100 items a
