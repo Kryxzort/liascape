@@ -771,7 +771,8 @@ input[type=range]:focus-visible { outline: none; }
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill { transition: none; }
-:root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim { animation: none !important; transition: none !important; }
+:root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
+:root.no-motion .wf-open .wf-chev { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .side-go:hover .side-dl-ico, :root.no-motion .dl-btn:hover .dl-glyph { animation: none; transform: translateY(2px); }
 :root.no-motion .app > .scroll { animation: none; }
@@ -1059,7 +1060,33 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
     radial-gradient(300px 240px at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
     color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
   border-right: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface0)); }
-.app:has(> .wf-col[data-mode="dock"]) > .scroll { margin-left: var(--wf-w); }
+.app:has(> .wf-col[data-mode="dock"]:not(.closing)) > .scroll { margin-left: var(--wf-w); }
+/* COOL: docked fold / unfold (Browse.tsx toggleCol): the column slides off its edge and back with a hint of overshoot; the grid
+   (its margin already flipped) plays its old offset back to 0 — transform only, no fill (a transform left on these would trap
+   their fixed-position descendants) */
+.wf-col[data-mode="dock"].entering { animation: wf-dock-in .34s cubic-bezier(.2, 1.12, .36, 1); }
+.wf-col[data-mode="dock"].closing { animation: wf-dock-out .22s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+@keyframes wf-dock-in { from { transform: translateX(-100%); opacity: .25; } }
+@keyframes wf-dock-out { to { transform: translateX(-100%); opacity: .25; } }
+.scroll.wf-shift-out-0 > *, .scroll.wf-shift-out-1 > * { animation: wf-glide-out-a .34s cubic-bezier(.2, 1, .36, 1); }
+.scroll.wf-shift-out-1 > * { animation-name: wf-glide-out-b; }
+.scroll.wf-shift-in-0 > *, .scroll.wf-shift-in-1 > * { animation: wf-glide-in-a .34s cubic-bezier(.2, 1, .36, 1); }
+.scroll.wf-shift-in-1 > * { animation-name: wf-glide-in-b; }
+@keyframes wf-glide-out-a { from { transform: translateX(var(--wf-w)); } }
+@keyframes wf-glide-out-b { from { transform: translateX(var(--wf-w)); } }
+@keyframes wf-glide-in-a { from { transform: translateX(calc(-1 * var(--wf-w))); } }
+@keyframes wf-glide-in-b { from { transform: translateX(calc(-1 * var(--wf-w))); } }
+/* the pill's chevron points where the column goes: left while it's out (fold it), right while folded (bring it back) */
+.wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform .28s cubic-bezier(.2, 1.3, .36, 1); }
+.wf-open:not(.open) .wf-chev { transform: rotate(180deg); }
+/* the docked title = the pill morphed up (hooks/filterMorph.ts): the pill's type + shape, so the ghost lands on its twin — a
+   quiet chip until a filter is on (then the pill's accent fill, like the pill) */
+.wf-title-btn { padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: var(--text); background: color-mix(in srgb, var(--surface0) 60%, transparent); transition: box-shadow .2s, background .15s; }
+.wf-title-btn:hover { box-shadow: var(--glow-sm); }
+.wf-title-btn.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
+.wf-title-btn .wf-chev { margin-left: -2px; opacity: .75; }
+.wf-morph { display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
 .wf-col[data-mode="drawer"] { width: min(280px, 88vw); z-index: 46; outline: none;
   border-right-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));
   box-shadow: 14px 0 34px rgba(0,0,0,.42), var(--glow-sm);

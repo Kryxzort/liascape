@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Card } from "../components/Card";
 import { WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
-import { WF_CLOSE_MS, useFilterDocked } from "../components/workshopFilter";
+import { LIBRARY_TAG, WF_CLOSE_MS, WF_DOCK_MS, useFilterDocked } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { type MorphSource, morph, snapshot } from "../hooks/filterMorph";
 import { BrowseSide } from "../components/BrowseSide";
 import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
@@ -64,10 +65,17 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
   const motion = useMotion();
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
-  const sorted = useMemo(() => sortBrowse(wallpapers, browseSort), [wallpapers, browseSort]);
   // PERF: one Set per library change; each memo'd card gets a boolean, so only a card whose mark flips re-renders
   const libItems = useStore((s) => s.libraryItems);
   const libKeys = useMemo(() => libraryKeys(libItems), [libItems]);
+  // the filter column's "In my library" row (UI-only, workshopFilter.ts LIBRARY_TAG): ✓ = only owned, ✕ = hide owned —
+  // filtered here, over the pages already loaded (the infinite-scroll sentinel keeps loading while a page thins out)
+  const libMode = useStore((s) => !s.isWorkshop() ? null
+    : s.browseFilter.include.includes(LIBRARY_TAG) ? "only" : s.browseFilter.exclude.includes(LIBRARY_TAG) ? "hide" : null);
+  const sorted = useMemo(() => {
+    const all = sortBrowse(wallpapers, browseSort);
+    return libMode ? all.filter((w) => inLibrary(libKeys, w) === (libMode === "only")) : all;
+  }, [wallpapers, browseSort, libMode, libKeys]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -141,6 +149,27 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
   // the Workshop filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
   const docked = useFilterDocked();
+  const colHidden = useStore((s) => s.filterColHidden);
+  const setColHidden = useStore((s) => s.setFilterColHidden);
+  // COOL: the docked column slides out / back in (WF_DOCK_MS) and the grid glides by its width instead of jumping — the margin
+  // flips at once (the grid re-fits once), `.wf-shift-*` plays the offset back to 0 on transform only (n % 2 alternates two
+  // identical keyframes so a quick re-toggle restarts it). Only on a toggle: a tab visit / a resize just shows the column.
+  const dockCol = useLinger(isWorkshop && docked && !colHidden ? true : null, WF_DOCK_MS, motion);
+  const [shift, setShift] = useState<{ dir: "in" | "out"; n: number } | null>(null);
+  useEffect(() => { if (!shift) return; const t = setTimeout(() => setShift(null), 420); return () => clearTimeout(t); }, [shift]);
+  // the pill ⇄ title morph: snapshot what's being left before the change, fly it onto its counterpart after the commit
+  const morphFrom = useRef<MorphSource | null>(null);
+  const toggleCol = () => {
+    if (motion) {
+      morphFrom.current = snapshot(document.querySelector(colHidden ? "[data-wf-open]" : "[data-wf-title]"));
+      setShift((s) => ({ dir: colHidden ? "in" : "out", n: (s?.n ?? 0) + 1 }));
+    }
+    setColHidden(!colHidden);
+  };
+  useLayoutEffect(() => {
+    const from = morphFrom.current; morphFrom.current = null;
+    if (from && shift) morph(from, document.querySelector(shift.dir === "in" ? "[data-wf-title]" : "[data-wf-open]"));
+  }, [shift]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   if (drawerOpen && (docked || !isWorkshop)) setDrawerOpen(false); // follow during render: a wider window / another source
@@ -149,9 +178,9 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
 
   return (
     <>
-    {isWorkshop && docked && <WorkshopFilterColumn mode="dock" />}
-    <div className="scroll" ref={scrollRef} onClick={onBgClick}>
-      {isWorkshop && <WorkshopSortRow drawer={!docked} onOpenFilters={() => setDrawerOpen(true)} />}
+    {isWorkshop && docked && dockCol.value && <WorkshopFilterColumn mode="dock" closing={dockCol.closing} entering={shift?.dir === "in"} onFold={toggleCol} />}
+    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={scrollRef} onClick={onBgClick}>
+      {isWorkshop && <WorkshopSortRow drawer={!docked} open={docked && !colHidden} onOpenFilters={() => docked ? toggleCol() : setDrawerOpen(true)} />}
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}

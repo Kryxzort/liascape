@@ -49,7 +49,9 @@ export const Card = memo(function Card({
         {/* hover download button (bottom-right, the Library card's trash spot): the OUTLINE of a SOLID download glyph — we
             stroke a filled silhouette with no fill, so it traces the shape's inner+outer contour (hollow), breathing + glowing.
             It was a whole-card overlay while a click downloaded; a click now opens the sidebar. */}
-        {!downloading && (
+        {/* not on a card the library already has (owner 2026-11-11: "whats the point of a download button on the wallpapers
+            … it knows is 'in library'"): it only applied the library's copy — double-click / Enter / the sidebar's Apply still do */}
+        {!downloading && !inLibrary && (
           <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
             onDoubleClick={(e) => e.stopPropagation()}>
             <svg className="dl-glyph" viewBox="0 0 24 24" fill="none" aria-hidden>

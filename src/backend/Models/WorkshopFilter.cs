@@ -36,7 +36,8 @@ public class WorkshopFilter
     public (List<string> Include, List<string> Exclude) Effective()
     {
         static List<string> Clean(IEnumerable<string>? tags) =>
-            (tags ?? []).Where((t) => !string.IsNullOrWhiteSpace(t)).Select((t) => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // "@…" = the UI's own pseudo-tags (Browse's "In my library", filtered client-side) — never Steam's
+            (tags ?? []).Where((t) => !string.IsNullOrWhiteSpace(t) && !t.TrimStart().StartsWith('@')).Select((t) => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var inc = Clean(Include);
         var exc = Clean(Exclude);
         if (inc.Count == 0 && exc.Count == 0)

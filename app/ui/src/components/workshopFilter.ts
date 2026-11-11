@@ -14,7 +14,13 @@ const t = (tag: string, label = tag): Tag => ({ tag, label });
 const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "Standard Definition"), ...rest.map((r) => t(`${p} ${r}`, r))];
 // Steam's "Miscellaneous" group (the wallpaper-relevant features). Left out: "Verified" + "Multi-monitor optimized" (Steam's
 // Hidden group — no-ops), "No Animation" (a Script Type tag), "User Shortcut" / "Asset Pack" (not playable wallpapers).
+// "In my library" (owner 2026-11-11: "there should probably be a option to exclude the wallpapers already in library from
+// showing"): a UI-only pseudo-tag in the same include / exclude sets — ✓ = only what the library has, ✕ = hide it. Never sent
+// to Steam (`wireFilter` strips it; the backend ignores "@" tags too) and filtered in Browse's render against the library
+// (`inLibrary`), so toggling it needs no request and leaves the prefetched page valid.
+export const LIBRARY_TAG = "@library";
 export const WF_GROUPS: Group[] = [
+  { id: "library", name: "Library", subs: [{ tags: [t(LIBRARY_TAG, "In my library")] }] },
   { id: "age", name: "Age", subs: [{ tags: ["Everyone", "Questionable", "Mature"].map((x) => t(x)) }] },
   // Scene stays even with scene support off: Browse doesn't know it (it's a player-side setting) and Workshop lists scenes anyway
   { id: "type", name: "Type", subs: [{ tags: ["Video", "Scene"].map((x) => t(x)) }] },
@@ -42,6 +48,7 @@ export const PERIODS: [number, string][] = [[1, "Today"], [7, "Week"], [30, "Mon
 // the column docks from this width; below it, it's a drawer. 1100: with the item sidebar docked too (≥ 900 px, 300–400 px) a
 // 1100 px window still leaves the grid ~540 px (3 Small cards); at 900–1099 the two side by side left 370–540 px.
 export const WF_DOCK_QUERY = "(min-width: 1100px)";
+export const WF_DOCK_MS = 220; // the docked column folding away (index.css `wf-dock-out`)
 export const WF_CLOSE_MS = 170; // the drawer's exit slide (index.css `wf-out`)
 const subscribeDock = (cb: () => void) => { const q = matchMedia(WF_DOCK_QUERY); q.addEventListener("change", cb); return () => q.removeEventListener("change", cb); };
 export const useFilterDocked = () => useSyncExternalStore(subscribeDock, () => matchMedia(WF_DOCK_QUERY).matches);

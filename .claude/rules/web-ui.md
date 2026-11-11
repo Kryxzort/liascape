@@ -261,8 +261,10 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   (collapsed by default); a head = chevron + name + the count of tags on (`[data-wf-count]`); collapse state in the store
   (`filterCollapsed`, localStorage `liascape.browseFilterCollapsed`); "Clear all" (`[data-wf-clear]`) in the column's head. Each
   row (`.wf-row[data-wf-tag][data-state=inc|off|exc]`): the name + a radiogroup `[✓ | · | ✕]` (aria-labels "Include X" / "Off" /
-  "Hide X", labelled by the name, roving tabindex + arrow keys, `[data-seg]`); a segment click sets it, a NAME click cycles off →
-  include → exclude → off, a right-click on the row toggles exclude. Calm (the owner: 40 switches could look "like a mixing desk"):
+  "Hide X", labelled by the name, roving tabindex + arrow keys, `[data-seg]`); a segment click sets it, a NAME click is a checkbox label —
+  it toggles INCLUDE (off ↔ ✓; an excluded tag → off), hiding is always deliberate (the ✕ segment / a right-click). Two cycles
+  came first: off → ✓ → ✕ jumped over the middle segment ("users are gonna assume based on the visuals that it toggles left to
+  right"), the left-to-right wrap made the first click hide ("kind of weird too … do what you think is better"), a right-click on the row toggles exclude. Calm (the owner: 40 switches could look "like a mixing desk"):
   an untouched switch is half-opacity, unfilled, muted; only the active ✓ (accent + `--glow-sm`) / ✕ (danger) is coloured; an
   excluded name is `--danger` struck through. **All / Any on Genre + Features only** (owner: "what if a user wants a 3D OR HDR
   and not 3D AND HDR", then "lets just have a 'all or any' option for genere too"; age / type / resolution: an item has one):
@@ -285,8 +287,28 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   head text gets the drop-shadow; the drawer floats over cards, so it keeps a `--tr-strong` fill. Guard:
   `LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js` (stubs `/browse` + `/detail` in the page —
   the stack has no network): `wf:workshopOnly` / `wf:cycle` / `wf:segments` / `wf:rightClick` / `wf:post` (one POST per burst,
-  include XOR exclude, no old keys) / `wf:match` / `wf:collapse` / `wf:clearAll` / `wf:migrate` / `wf:drawer` /
+  include XOR exclude, no old keys) / `wf:match` / `wf:collapse` / `wf:clearAll` / `wf:migrate` / `wf:library` / `wf:collapseCol` / `wf:drawer` /
   `wf:size:<w>x<h>` (probe-layout's nine sizes, + the item sidebar open) / `wf:noMotion` / `wf:noGlow` / `wf:liveBg`; shots `wf-*.png`.
+  **"In my library"** (owner 2026-11-11: "there should probably be a option to exclude the wallpapers already in library from
+  showing"): the column's first group, one row with the same switch — the UI-only pseudo-tag `@library` (`LIBRARY_TAG`) in the
+  same include / exclude sets: ✓ = only what the library has, ✕ = hide it. Never sent (`wireFilter` in the store strips "@"
+  tags; the backend's `WorkshopFilter.Effective` drops them too) and no reload for it — Browse filters the loaded pages in
+  render with `inLibrary` (the infinite-scroll sentinel keeps loading while a page thins out). **No download button on an
+  owned card** (owner: "whats the point of a download button on the wallpapers … it knows is 'in library'" — it only applied
+  the library's copy): double-click / Enter / the sidebar's Apply still apply it. **Collapsible** (owner: "the sidebar should be
+  collapsable btw", then "a clunky new button and no transition? this isn't you!", then "how about the filter button morphing
+  into the filter title area of the expanded section?"): ONE control in two places — docked and out, the column's title
+  (`[data-wf-title]`, the pill's type + shape, a chevron pointing left; `aria-expanded`) folds it; folded, the sort row's
+  "Filters · N" pill (`[data-wf-open]`, chevron right) brings it back; below the breakpoint the pill opens the drawer
+  (`filterColHidden`, localStorage `liascape.browseFilterHidden`). `hooks/filterMorph.ts`: `snapshot()` the element being left
+  before the change, `morph()` it after the commit (Browse's layout effect) — a ghost clone on `<body>` (`.wf-morph`) flies
+  translate + scale (origin 0 0) onto the counterpart's RESTING box (its box minus its ancestors' running translate), its
+  background / colour / shadow / radius easing into the target's; the target stays `visibility: hidden` until it lands
+  (`MORPH_MS` 340). Meanwhile the column slides off its edge (`.closing`, `wf-dock-out` 220 ms, `useLinger` — `WF_DOCK_MS`) or
+  in (`.entering`, `wf-dock-in` 340 ms, a hint of overshoot), and the grid's margin flips at once while `.scroll.wf-shift-*`
+  plays the children's old offset back to 0 (transform only, no fill; `n % 2` alternates two identical keyframes so a quick
+  re-toggle restarts) — same curve, all three land together. Only on a toggle — a tab visit / a resize just shows it.
+  `no-motion`: instant, no ghost.
 
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the

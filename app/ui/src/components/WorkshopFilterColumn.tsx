@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
-import { Check, ChevronDown, Dot, SlidersHorizontal, X } from "lucide-react";
+import { Check, ChevronDown, Dot, SlidersHorizontal, ChevronLeft, X } from "lucide-react";
 import { useStore, type TagState } from "../store";
 import { Select } from "./Select";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -17,7 +17,10 @@ import { PERIODS, SORTS, WF_GROUPS, useActiveTagCount, type Group, type GroupMat
 // Docked left of the grid from WF_DOCK_QUERY up (a sibling of `.scroll` in `.app`, like the item sidebar on the right — index.css
 // `.app:has(> .wf-col[data-mode=dock])`); narrower it's a drawer the sort row's "Filters · N" button opens over the grid.
 
-const NEXT: Record<string, TagState> = { off: "inc", inc: "exc", exc: null };
+// a name click is a checkbox label: it toggles INCLUDE (off ↔ ✓; an excluded tag → off). Hiding is always deliberate — the ✕
+// segment or a right-click. (Owner 2026-11-11, after off → ✓ → ✕ skipped over the middle segment and the left-to-right wrap made
+// the first click hide: "it going to exclude first is kind of weird too, no right choice ig.. do what you think is better".)
+const NEXT: Record<string, TagState> = { off: "inc", inc: null, exc: null };
 const SEGS: { st: TagState; cls: string }[] = [{ st: "inc", cls: "i" }, { st: null, cls: "o" }, { st: "exc", cls: "e" }];
 
 // a radiogroup's arrow keys (roving tabindex: only the checked segment is a Tab stop): ← ↑ / → ↓ step and select, Home / End
@@ -44,7 +47,7 @@ const TagRow = memo(function TagRow({ tag, label, st }: Tag & { st: TagState }) 
         {SEGS.map((s) => (
           <button key={s.cls} type="button" role="radio" className={`wf-seg ${s.cls}`} data-seg={s.st ?? "off"}
             aria-checked={s.st === st} tabIndex={s.st === st ? 0 : -1}
-            aria-label={s.st === "inc" ? `Include ${tag}` : s.st === "exc" ? `Hide ${tag}` : "Off"}
+            aria-label={s.st === "inc" ? `Include ${tag.startsWith("@") ? label : tag}` : s.st === "exc" ? `Hide ${tag.startsWith("@") ? label : tag}` : "Off"}
             onClick={() => setTag(tag, s.st)}>
             {s.st === "inc" ? <Check size={12} strokeWidth={3} /> : s.st === "exc" ? <X size={12} strokeWidth={3} /> : <Dot size={14} strokeWidth={3} />}
           </button>
@@ -105,7 +108,7 @@ function GroupBox({ g, states }: { g: Group; states: Map<string, TagState> }) {
   );
 }
 
-export function WorkshopFilterColumn({ mode, closing = false, onClose }: { mode: "dock" | "drawer"; closing?: boolean; onClose?: () => void }) {
+export function WorkshopFilterColumn({ mode, closing = false, entering = false, onClose, onFold }: { mode: "dock" | "drawer"; closing?: boolean; entering?: boolean; onClose?: () => void; onFold?: () => void }) {
   const f = useStore((s) => s.browseFilter);
   const clear = useStore((s) => s.clearTags);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -131,10 +134,16 @@ export function WorkshopFilterColumn({ mode, closing = false, onClose }: { mode:
   return (
     <>
       {mode === "drawer" && <div className={`wf-scrim${closing ? " closing" : ""}`} onClick={onClose} />}
-      <aside ref={panelRef} className={`wf-col${closing ? " closing" : ""}`} data-wf-col data-mode={mode} aria-label="Workshop filters"
+      <aside ref={panelRef} className={`wf-col${closing ? " closing" : ""}${entering ? " entering" : ""}`} data-wf-col data-mode={mode} aria-label="Workshop filters"
         tabIndex={mode === "drawer" ? -1 : undefined}>
         <div className="wf-top">
-          <span className="wf-title"><SlidersHorizontal size={14} /> Filters</span>
+          {/* docked: the title IS the sort row's "Filters · N" pill, morphed up here (hooks/filterMorph.ts) — a click folds the column
+              and it flies back down */}
+          {mode === "dock"
+            ? <button type="button" className={`wf-title wf-title-btn${n ? " active" : ""}`} data-wf-title aria-expanded="true" onClick={onFold}>
+                <SlidersHorizontal size={14} /> Filters{n ? ` · ${n}` : ""}<ChevronLeft className="wf-chev" size={14} aria-hidden />
+              </button>
+            : <span className="wf-title"><SlidersHorizontal size={14} /> Filters</span>}
           <button type="button" className="wf-clear" data-wf-clear disabled={!n} onClick={clear}>Clear all</button>
           {mode === "drawer" && <button type="button" className="mini wf-close" aria-label="Close filters" onClick={onClose}><X size={16} /></button>}
         </div>
@@ -147,15 +156,21 @@ export function WorkshopFilterColumn({ mode, closing = false, onClose }: { mode:
 }
 
 // the row above the grid: sort + period (as before) and — while the column is a drawer — the button that opens it
-export function WorkshopSortRow({ drawer, onOpenFilters }: { drawer: boolean; onOpenFilters: () => void }) {
+// the "Filters · N" pill: below the dock breakpoint it opens the drawer; docked and folded it brings the column back — and
+// while the column is out it isn't here at all: it morphed into the column's title (owner 2026-11-11: "the sidebar should be
+// collapsable btw", "a clunky new button and no transition?", "how about the filter button morphing into the filter title area
+// of the expanded section?") — one control, never two
+export function WorkshopSortRow({ drawer, open, onOpenFilters }: { drawer: boolean; open: boolean; onOpenFilters: () => void }) {
   const f = useStore((s) => s.browseFilter);
   const setF = useStore((s) => s.setBrowseFilter);
   const n = useActiveTagCount();
   return (
     <div className="wfilter">
-      {drawer && (
-        <button type="button" className={`pill ico wf-open${n ? " active" : ""}`} data-wf-open onClick={onOpenFilters}>
+      {(drawer || !open) && (
+        <button type="button" className={`pill ico wf-open${n ? " active" : ""}`} data-wf-open
+          aria-expanded={drawer ? undefined : false} onClick={onOpenFilters}>
           <SlidersHorizontal size={14} /> Filters{n ? ` · ${n}` : ""}
+          {!drawer && <ChevronLeft className="wf-chev" size={14} aria-hidden />}
         </button>
       )}
       <Select value={f.sort} onChange={(v) => setF({ sort: v })} options={SORTS.map(([v, l]) => ({ value: v, label: l }))} />

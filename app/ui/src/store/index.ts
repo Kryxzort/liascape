@@ -6,6 +6,9 @@ import {
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
 
+// what the backend gets: the filter without the UI-only "@" pseudo-tags (workshopFilter.ts LIBRARY_TAG)
+const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
+  ({ ...f, include: f.include.filter((t) => !t.startsWith("@")), exclude: f.exclude.filter((t) => !t.startsWith("@")) });
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -99,6 +102,7 @@ interface State {
   // the Workshop filter column (components/WorkshopFilterColumn.tsx): one tag's state (include / exclude / off), all off;
   // which groups are collapsed (remembered)
   setTagState(tag: string, st: TagState): void; clearTags(): void;
+  filterColHidden: boolean; setFilterColHidden(v: boolean): void;
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
@@ -187,6 +191,8 @@ export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
   browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
+  // the docked filter column folded away (owner 2026-11-11: "the sidebar should be collapsable btw"); remembered
+  filterColHidden: LS.get<boolean>("browseFilterHidden", false),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
@@ -227,9 +233,12 @@ export const useStore = create<State>((set, get) => ({
     const { include, exclude } = get().browseFilter;
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
     if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);
+    // "In my library" filters the list already loaded (Browse's render) — no reload for it
+    if (tag.startsWith("@")) { const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf); return; }
     get().setBrowseFilter({ include: inc, exclude: exc });
   },
   clearTags() { const f = get().browseFilter; if (f.include.length || f.exclude.length) get().setBrowseFilter({ include: [], exclude: [] }); },
+  setFilterColHidden(v) { set({ filterColHidden: v }); LS.set("browseFilterHidden", v); },
   toggleFilterGroup(id) {
     const c = get().filterCollapsed, n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id];
     set({ filterCollapsed: n }); LS.set("browseFilterCollapsed", n);
@@ -240,7 +249,7 @@ export const useStore = create<State>((set, get) => ({
   // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
     const { activeSource, query } = get();
-    const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const gen = ++browseGen;
     set({ loading: true, page: 1 });
     try {
@@ -255,7 +264,7 @@ export const useStore = create<State>((set, get) => ({
   async loadMore() {
     const { activeSource, query, page, loading, hasMore, wallpapers } = get();
     if (loading || !hasMore) return;
-    const filter = get().isWorkshop() ? get().browseFilter : undefined;
+    const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const gen = browseGen;
     set({ loading: true });
     try {
