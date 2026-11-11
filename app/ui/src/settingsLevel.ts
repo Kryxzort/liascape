@@ -12,6 +12,7 @@ export const rank = (l: Level) => LEVELS.indexOf(l);
 // "hidden but changed" note at the top of Settings counts.
 export const LEVEL_OF_KEY: Record<string, Level> = {
   // basic
+  workshopViaSteamClient: "basic",
   volume: "basic", noAudio: "basic", normalizeAudio: "basic", autoMute: "basic", pauseWhenCovered: "basic",
   globalSwitchWhenVideoEnds: "basic", globalIntervalSeconds: "basic", globalTransitionEnabled: "basic",
   cardSize: "basic", allowScenes: "basic",

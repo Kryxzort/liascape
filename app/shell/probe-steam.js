@@ -10,6 +10,7 @@
 //   steam:row:rejected    a sign-in Steam turned down: the warning (in the warn colour), both sign-in buttons, no Sign out
 //   steam:row:signedIn    "Signed in as …" + Sign out, no sign-in buttons
 //   steam:row:steamcmd    "Download via steamcmd" → no Steam row (the steamcmd rows instead)
+//   steam:row:viaClient   "Use the Steam app directly": under Subscribe via Steam, off by default, a click saves it; not under steamcmd
 //   steam:modal:email     the password button → the modal (a labelled dialog: account name autocomplete=username focused,
 //                         password type=password autocomplete=current-password); real typing + Enter → POST /steam/login once
 //                         with both, the field emptied at once, "Signing in…"; WS email step → its text + the hint, the code field
@@ -207,6 +208,23 @@ app.whenReady().then(async () => {
       if (await steamRow()) v.push("the Steam row shows under steamcmd");
       if (!(await page(`return !!document.querySelector('[placeholder="/usr/bin/steamcmd"]');`))) v.push("no steamcmd path row");
       await setSettings({ workshopDownloadMode: "subscribe" });
+      return v;
+    });
+
+    // owner 2026-11-11 ("drive steam" → "yeah, try it"): "Use the Steam app directly" — a Basic row under Subscribe via Steam,
+    // off by default, saved by a click; hidden under steamcmd
+    await cell("steam:row:viaClient", async () => {
+      const v = []; await setSettings({ workshopDownloadMode: "subscribe", workshopViaSteamClient: false }); await load(SIGNED_OUT); await tab("Settings");
+      const box = `[...document.querySelectorAll(".srow, [data-level]")].find((r) => /Use the Steam app directly/.test(r.textContent))?.querySelector('input[type="checkbox"]')`;
+      const r0 = await page(`const b = ${box}; return b ? { checked: b.checked } : null;`);
+      if (!r0) return ["no \"Use the Steam app directly\" row under Subscribe via Steam"];
+      if (r0.checked) v.push("on by default (it's opt-in)");
+      await page(`${box}.click();`); await sleep(900); // the store's debounced settings save
+      const saved = (await http("GET", "/settings")).json?.workshopViaSteamClient;
+      if (saved !== true) v.push(`a click saved workshopViaSteamClient = ${saved}`);
+      await setSettings({ workshopDownloadMode: "steamcmd" }); await load(SIGNED_OUT); await tab("Settings");
+      if (await page(`return !!(${box});`)) v.push("the row shows under steamcmd");
+      await setSettings({ workshopDownloadMode: "subscribe", workshopViaSteamClient: false });
       return v;
     });
 

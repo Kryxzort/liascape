@@ -53,6 +53,21 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
+        // Opted in: the running Steam client does it (one click, its own progress, no sign-in here); any reason it can't →
+        // the paths below, as before
+        if (settings.WorkshopViaSteamClient)
+        {
+            var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
+            if (viaClient.Folder != null)
+            {
+                WorkshopUnsubQueue.Unblock(workshopId);
+                if (TryGetMediaPath(viaClient.Folder) != null) return viaClient.Folder;
+                // Steam's folder without the media we expect (a web wallpaper, a broken item): the usual folders' poll decides
+                Console.WriteLine($"workshop: {workshopId}: Steam installed it at {viaClient.Folder} but no media file there — polling the Workshop folders");
+            }
+            else Console.WriteLine($"workshop: {workshopId}: not through the Steam app's Workshop interface — {viaClient.Fallback}");
+        }
+
         string? why = null; // set = no usable sign-in: subscribe in the Steam app, and this is why
         string? cookie = null;
         try
@@ -463,6 +478,9 @@ public static class WorkshopDownloader
 
     // Parse Steam's libraryfolders.vdf to discover all Steam library roots (users with
     // games on multiple drives). Best-effort: returns roots whose path key we can extract.
+    /// Every Steam library root (libraryfolders.vdf's paths) — SteamClientUgc looks for Valve's library in them.
+    public static System.Collections.Generic.List<string> SteamLibraryRoots() => ReadSteamLibraryRoots();
+
     private static System.Collections.Generic.List<string> ReadSteamLibraryRoots()
     {
         var roots = new System.Collections.Generic.List<string>();

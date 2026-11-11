@@ -166,6 +166,11 @@ public class AppSettings
     public bool IsPlaylistBarCollapsed { get; set; } = false;
     // "subscribe" (real Steam subscription via community endpoint) or "steamcmd" (direct download).
     public string WorkshopDownloadMode { get; set; } = "subscribe";
+    // Subscribe through the RUNNING Steam client as Wallpaper Engine (Helpers/SteamClientUgc.cs): one click, Steam's own
+    // progress, no sign-in here. Opt-in (owner 2026-11-11) — the app presents itself as WE for the download's seconds.
+    public bool WorkshopViaSteamClient { get; set; } = false;
+    // The Steam client's steamclient.so to use for it; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
+    public string SteamClientLibPath { get; set; } = "";
     // QR sign-in: refresh token (~1yr) + steamid; access token (~24h) cached + auto-minted.
     public string SteamRefreshToken { get; set; } = "";
     public ulong SteamId { get; set; } = 0;

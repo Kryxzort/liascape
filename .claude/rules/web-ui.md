@@ -803,6 +803,9 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   `cancelPwLogin` (POST `/steam/login/cancel` once a request is out); a click outside does nothing (it'd lose what was typed).
   Tab order: account → password → Cancel → Sign in. Look: `.pw-modal` (the playlist modals' `--tr-strong` panel), the key icon
   with an accent drop-shadow (`no-glow` → none).
+- **"Use the Steam app directly"** (`workshopViaSteamClient`, Basic, off by default; under Subscribe via Steam only, above the
+  Steam row): the running Steam client subscribes + downloads (sources.md § Download) — the card shows Steam's own percent.
+  Guard: probe-steam `steam:row:viaClient`.
 - **A download waiting on the Steam app**: WS `download-progress.status` → the store's `downloadStatus[pageUrl]` → the Browse
   card's label in short words (`Card.tsx` `shortDownloadStatus`, `[data-dl-label]`: "Click Subscribe in Steam" / "Steam is
   downloading…" / "Steam is finishing…" / "Subscribing…" / "Waiting for Steam…"; its own store selector) over an indeterminate

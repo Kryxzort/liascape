@@ -51,6 +51,11 @@ sealed class Program
             case "steam-selftest":
                 Environment.Exit(Liascape.Web.SteamSelfTest.Run());
                 return;
+            // hidden: the Workshop through the running Steam client as Wallpaper Engine (Helpers/SteamClientUgc.cs) — the
+            // backend's short-lived child, JSON lines on stdout; never run by hand
+            case "steam-ugc":
+                Environment.Exit(Liascape.Helpers.SteamClientUgc.RunChild(args.Skip(1).ToArray()));
+                return;
         }
 
         PlayerHelper.LoadUserMuteState();

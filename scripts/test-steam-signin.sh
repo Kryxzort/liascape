@@ -11,6 +11,11 @@
 #     (steam://url/CommunityFilePage/<id>), `download-progress` says why + "click Subscribe", the test then drops the item
 #     into the Workshop folder (like Steam would) and the download finishes into the library; an item already on disk →
 #     nothing opens; a download cancelled from the page stops waiting and imports nothing.
+#  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
+#     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
+#     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
+#     released Steam + exited; Steam refusing → the old path (the item's page in the Steam app); a cancel → the helper
+#     releases Steam + exits, nothing imported.
 # Never signs in to Steam, never subscribes anything, never talks to steamcommunity.com, never touches ~/.config/liascape
 # (temp HOME + every XDG dir), never prints settings.json. Everything it started is stopped on exit.
 #
@@ -32,10 +37,11 @@ fi
 T=$(mktemp -d /tmp/liascape-steam-XXXXXX)
 mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
 DLL=$T/backend/liascape-backend.dll
-BP=""
+BP=""; BP3=""
+stopbe() { [ -n "$1" ] && { kill "$1" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$1" 2>/dev/null || break; sleep 0.1; done; kill -9 "$1" 2>/dev/null; }; }
 cleanup() {
   trap - EXIT INT TERM HUP
-  [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
+  stopbe "$BP"; stopbe "$BP3"
   case "$T" in /tmp/liascape-steam-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
 trap cleanup EXIT
@@ -167,5 +173,29 @@ PASS=$((PASS + p)); FAIL=$((FAIL + f))
 [ $rc = 0 ] || bad "drive.mjs exited $rc"
 grep -q "steamcommunity.com/sharedfiles/subscribe\|finalizelogin" "$T/backend.log" && bad "the backend log mentions a subscribe / finalizelogin request"
 echo "== backend log (workshop lines)"; grep -E "workshop:|steam:|error:" "$T/backend.log" | sed 's/^/      /' | tail -12
+
+echo "== 3. Workshop download through the Steam client (a FAKE steamclient.so — no Steam)"
+stopbe "$BP"; BP=""
+CC=${CC:-$(command -v cc || command -v gcc || true)}
+if [ -z "$CC" ]; then bad "no C compiler for the fake steamclient.so"; else
+"$CC" -shared -fPIC -O1 -o "$T/steamclient.so" "$ROOT/scripts/test-fixtures/fake_steamclient.c" || bad "the fake steamclient.so didn't build"
+privhome "$T/h3"
+mkdir -p "$T/ws3/431960" "$T/steamlib"
+: > "$T/xdg-open.urls"
+printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"subscribe","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"WorkshopViaSteamClient":true}\n' \
+  "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
+(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
+  exec "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1) & BP3=$!
+for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP3 2>/dev/null || break; sleep 0.1; done
+U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
+for _ in $(seq 1 50); do curl -sf -m 2 "$U3/health" >/dev/null && break; sleep 0.1; done
+cp "$ROOT/scripts/test-fixtures/drive-steam-client.mjs" "$T/drive3.mjs"
+(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 120 node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
+sed 's/^/      /' "$T/drive3.log"
+p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
+PASS=$((PASS + p)); FAIL=$((FAIL + f))
+[ $rc = 0 ] || bad "drive3.mjs exited $rc"
+echo "== backend 3 log (workshop lines)"; grep -E "workshop:|error:" "$T/backend3.log" | sed 's/^/      /' | tail -8
+fi
 echo "RESULT pass=$PASS fail=$FAIL"
 [ $FAIL = 0 ]

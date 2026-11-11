@@ -113,6 +113,21 @@ Workshop wallpapers"):
     signed this app out — …", "Steam turned down the subscribe request — …"). Log `workshop: <id>: <why> — opened its page in
     the Steam app, waiting for the download`. An item already on disk with no usable sign-in opens nothing (imported at once).
     A rate limit (`SteamRateLimitException`) does NOT fall back — the app's page is steamcommunity.com from the same connection.
+  - **Through the Steam client (opt-in, `WorkshopViaSteamClient`, Settings "Use the Steam app directly"; owner 2026-11-11: "drive
+    steam" → "yeah, try it")** — tried FIRST when on: `Helpers/SteamClientUgc.cs` runs a short-lived child
+    (`liascape-backend steam-ugc subscribe <id> <steamclient.so>…`, `SteamAppId=431960` in its environment only) that loads the
+    Steam client's OWN `steamclient.so` (`~/.steam/sdk64/`, the Steam dir, Flatpak; `SteamClientLibPath` overrides) — never
+    Valve's `libsteam_api.so` (an adapter over it, not ours to ship, and only SteamVR / Proton 9 carry a copy: owner "what if
+    other users dont got steamvr?") — and calls ISteamClient `SteamClient020` / ISteamUGC `STEAMUGC_INTERFACE_VERSION018` by
+    vtable slot (read from Valve's own wrappers with objdump, the slots in the file's header). SubscribeItem, then
+    GetItemState / GetItemDownloadInfo (Steam's bytes → a real percent on the card, "Steam is downloading it…") until
+    installed; GetItemInstallInfo = the folder Steam chose (imported from there — no folder polling). Needs Steam running +
+    signed in to an account that OWNS Wallpaper Engine (installed: probably — Steam puts Workshop items in the game's library;
+    unverified); Steam shows "Playing Wallpaper Engine" while the child is connected. Steam refusing (not running / not owned
+    → `ConnectToGlobalUser` 0), no `steamclient.so` → logged `workshop: <id>: not through the Steam app's Workshop interface —
+    <why>` and the paths below run as before. Cancel closes the child's stdin → it releases its user + pipe and exits (3 s,
+    then killed). Measured live (Python prototype through `steamclient.so` + libsteam_api): subscribe 0.5 s, bytes 0.8 → 1.1 →
+    2.1 MB, installed 4.5 s. Guard: `test-steam-signin.sh` § 3 (a fake `steamclient.so`, `scripts/test-fixtures/`).
   - **Decision: automatic, no third mode.** "Subscribe via Steam" is the one mode; signing in only makes it one click. A
     third radio ("Subscribe in the Steam app") would split one behaviour in two and leave the user to work out which applies —
     instead the Settings Steam row says what happens now ("Not signed in — downloads open in the Steam app, where you click

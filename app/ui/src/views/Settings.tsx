@@ -454,6 +454,13 @@ export const Settings = memo(function Settings() {
           <input type="radio" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
         <Row label="Download via steamcmd" hint="a one-off copy, no syncing" wk="workshopDownloadMode">
           <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
+        {mode === "subscribe" && (
+          /* owner 2026-11-11 ("drive steam" → "yeah, try it"): the running Steam client subscribes + downloads, its own byte
+             progress on the card; Steam not running / Wallpaper Engine not owned → the rows below (sign-in or the Steam app's page) */
+          <Row label="Use the Steam app directly" rk="workshopViaSteamClient"
+            hint="one click, real progress, no sign-in here — Steam shows you as playing Wallpaper Engine for those seconds">
+            <input type="checkbox" checked={g("workshopViaSteamClient", false)} onChange={(e) => set("workshopViaSteamClient", e.target.checked)} /></Row>
+        )}
         {mode === "subscribe"
           /* Signing in is optional (owner 2026-11-11: "is it a dead end for users without mobile guard?"): without a usable
              sign-in a Download opens the item in the Steam app, where the user clicks Subscribe (WorkshopDownloader) — so the
