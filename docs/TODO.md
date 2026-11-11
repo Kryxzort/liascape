@@ -3,9 +3,25 @@
 Running list of things found while working that aren't done yet. Newest context first within each section.
 Tick items off in the commit that does them and move them to `docs/TODO-done.md` (same heading). Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
+## Queued (in order — the next thing to pick up)
+1. [ ] **UI performance, in progress** (two agents): playlist-bar hover (`useDockLift` forced layout per frame, per-item
+       re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
+       `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
+2. [ ] **Smooth scrolling actually on**: `useSmoothScroll` binds once at mount, but the Library (and Browse while its
+       first page loads) renders a placeholder first, so the wheel listener never attaches (0 listeners on `.lib-scroll`
+       live). Make it follow the element (callback ref / element in state); with motion off or reduced motion scroll
+       natively; pass touchpad (fine pixel) scrolling through natively, glide only notched wheels. Guard: a probe cell
+       that boots into the Library and checks the wheel glides — red on today's code first.
+3. [ ] **Sidebar preview strip**: the image / video / YouTube switcher becomes a flat strip fused to the preview's top
+       edge (one shape: rounded strip top, rounded picture bottom, no gap), equal-width options, the picked one
+       accent-filled (slides on switch; jumps with motion off); glow wraps the unit (off with glow off); the stage's
+       12 px padding goes so the preview fills the panel width; one option → no strip; hover-grow, playing ring and
+       YouTube unchanged; the strip a little shorter than today's pills; the whole unit grows on hover. Probe cells
+       for the joined look × glow / motion, both window sizes.
+4. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random: its "every Play started on k1, proved nothing" guard is
+       wrong for resume mode (resuming from nothing legitimately returns to k1); apply it to start_over only.
+
 ## Waiting on owner
-- [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random: its "every Play started on k1, proved nothing" guard is
-      wrong for resume mode (resuming from nothing legitimately returns to k1); apply it to start_over only.
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (their own eyes = the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
 
