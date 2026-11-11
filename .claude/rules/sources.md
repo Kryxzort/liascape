@@ -228,7 +228,7 @@ blocked); an Undo meanwhile drops its entry (library.md § Undo). A later drain 
 the item: click Unsubscribe there, then Next." / "… — Steam opens the 3 items one at a time: click Unsubscribe on each, then
 Next."), which the UI's status bar holds.
 
-**Sign-in** (`SteamAuthService`; both store the same way — `SaveSignIn`: refresh token, Steam ID, account name, clears
+**Sign-in** (`SteamAuthService`; both store the same way — `SaveSignIn`: the refresh token into `SecretStore` — the keyring, else `steam-auth.json`, never settings.json —, Steam ID + account name into settings, clears
 `SteamSignInRejected` + the cached cookie): **QR** (`LoginViaQrAsync`, the Steam mobile app) or **account name + password**
 (`LoginViaCredentialsAsync`: SteamKit2 `BeginAuthSessionViaCredentialsAsync`, WebBrowser platform + website "Community" like
 the QR so finalizelogin works, `IsPersistentSession` for a long-lived token; an `IAuthenticator` asks the UI for an emailed

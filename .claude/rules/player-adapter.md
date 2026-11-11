@@ -900,7 +900,7 @@ in a reconnect gap is lost. The player keeps them in its outbox until acked; the
   done, or cancelled/failed + reason); `LiascapePlayerMedia.LastCorr` / the adapter log name the corr.
   `ctl logs '{"min_level":"warn"}'` for everything that went wrong.
 - `liascape-player ctl probe '{"name":"sources"}'` — what each source really runs (mpv volume-gain, pause, …).
-- **Never print or log settings.json wholesale** — it holds `SteamRefreshToken`.
+- **Never print or log settings.json wholesale** (an older one may still hold `SteamRefreshToken` until `SecretStore` moves it), nor `steam-auth.json`.
 
 ## Integration test (`scripts/test-liascape-player-adapter.sh`)
 `scripts/test-liascape-player-adapter.sh [--no-build]` (needs `dotnet` or `DOTNET=…`, ffmpeg, jq, curl,

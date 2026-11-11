@@ -247,6 +247,7 @@ else
   (cd "$ROOT/app/ui" && node node_modules/vite/bin/vite.js build --outDir "$T/ui" --emptyOutDir --logLevel error) || { echo "vite build failed"; exit 2; }
 fi
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
+export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
 # per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }

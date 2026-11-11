@@ -50,6 +50,7 @@ mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABOR
 DLL=$T/backend/liascape-backend.dll
 mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
+export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
 # per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
@@ -109,6 +110,12 @@ cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
 snap() { curl -sf -m 5 "$U/settings" > "$T/$1.json"; }           # kept in $T, never printed
 f()    { jq -c "$1" "$T/$2.json"; }                                # one NON-secret field of a snapshot
 disk() { jq -r "$1" "$SJ"; }                                       # a boolean/non-secret test on the file
+# the Steam tokens: moved out of settings.json by the backend (Helpers/SecretStore.cs; LIASCAPE_SECRETS=file → steam-auth.json)
+AJ=$XDG_CONFIG_HOME/liascape/steam-auth.json
+tokens_kept() {   # true = in steam-auth.json (0600) with the seeded values, and settings.json has neither key
+  [ "$(jq -r '.["steam-refresh-token"] == "test-refresh-token" and .["steam-access-token"] == "test-access-token"' "$AJ" 2>/dev/null)" = true ] \
+    && [ "$(stat -c %a "$AJ")" = 600 ] && [ "$(disk 'has("SteamRefreshToken") or has("SteamAccessToken")')" = false ]
+}
 # the NAMES of the fields that differ between two snapshots, minus the ones this step changes on purpose
 changed() { jq -rn --slurpfile a "$T/$1.json" --slurpfile b "$T/$2.json" --argjson want "${3:-[]}" \
   '$a[0] as $x | $b[0] as $y | ([$x, $y] | map(keys[]) | unique | map(select($x[.] != $y[.]))) - $want | join(",")'; }
@@ -152,8 +159,8 @@ snap s1
 [ "$(f .theme s1)" = '"Nord"' ] && ok "theme → Nord" || bad "theme → $(f .theme s1)"
 c=$(changed s0 s1 '["theme"]')
 [ -z "$c" ] && ok "a partial body: no other field changed" || bad "a partial body reset $(echo "$c" | tr ',' '\n' | wc -l) other fields: $c"
-[ "$(disk '.SteamRefreshToken == "test-refresh-token" and .SteamAccessToken == "test-access-token"')" = true ] \
-  && ok "the Steam tokens survived on disk" || bad "the Steam tokens were reset on disk"
+tokens_kept && ok "the Steam tokens survived — moved from settings.json into steam-auth.json (0600)" \
+  || bad "the Steam tokens weren't moved intact into steam-auth.json"
 [ "$(disk 'has("LweSilent")')" = false ] && ok "the save dropped LweSilent from settings.json" || bad "settings.json still has LweSilent after a save"
 [ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
   && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"
@@ -264,11 +271,15 @@ echo "== parallel partial bodies all land"
 PF='["librarySortIndex","lweVolume","sceneTransitionDelayMs","fullLiveSyncOffsetMs","globalTransitionDurationMaxMs",
      "autoMuteDelayMs","autoUnmuteDelayMs","demuxerMaxBackMib","globalTransitionDurationMs","videoFpsCap"]'
 lost=$(python3 - "$U" "$PF" <<'PY'
-import http.client, json, sys, threading
+import http.client, json, os, sys, threading
 host, port = sys.argv[1].split("//")[1].split(":"); fields = json.loads(sys.argv[2]); lost = 0
+# the API token (web-backend.md § Local API security) — without it every request was a 401 ("80 of 80 lost")
+TOKEN = open(os.environ["XDG_CONFIG_HOME"] + "/liascape/serve.token").read().strip()
 def req(method, body=None):
     c = http.client.HTTPConnection(host, int(port), timeout=10)
-    c.request(method, "/settings", body, {"Content-Type": "application/json"} if body else {})
+    h = {"X-Liascape-Token": TOKEN}
+    if body: h["Content-Type"] = "application/json"
+    c.request(method, "/settings", body, h)
     r = c.getresponse(); data = r.read(); c.close(); return r.status, data
 for rnd in range(1, 9):
     want = {f: 10 * i + rnd for i, f in enumerate(fields)}   # 1..88: valid for every one of these fields
@@ -329,14 +340,14 @@ sleep 0.3; snap f1
 [ "$(f .volume f1)" = 55 ] && [ "$(f .theme f1)" = '"Dracula"' ] && ok "volume 55, theme Dracula" || bad "volume $(f .volume f1) theme $(f .theme f1)"
 same f0 f1 '["volume","theme"]' "the full body"
 near "$(cur gain.user)" "$(dB 55)" && ok "…and applied live (gain.user $(cur gain.user))" || bad "full body → gain.user $(cur gain.user), want $(dB 55)"
-[ "$(disk '.SteamRefreshToken == "test-refresh-token" and .SteamAccessToken == "test-access-token"')" = true ] \
-  && ok "a stale copy's Steam tokens don't overwrite the saved ones" || bad "the full body overwrote the Steam tokens"
+tokens_kept && ok "a stale copy's Steam tokens don't overwrite the saved ones (nor land in settings.json)" \
+  || bad "the full body overwrote the Steam tokens"
 [ "$(disk '.SteamId == 76561190000000000')" = true ] \
   && ok "a stale copy's steamId doesn't overwrite the saved one (QR sign-in sets it)" || bad "the full body overwrote SteamId"
 [ "$(jq -r --arg p "$PLAYER" '.LastSession.Paths[0] == $p' "$SJ")" = true ] \
   && ok "a stale copy's lastSession doesn't overwrite the saved one" || bad "the full body overwrote LastSession"
 post /settings '{"lastSession":null,"steamRefreshToken":"","steamId":0}' >/dev/null
-[ "$(jq -r --arg p "$PLAYER" '.LastSession.Paths[0] == $p and .SteamRefreshToken == "test-refresh-token" and .SteamId == 76561190000000000' "$SJ")" = true ] \
+[ "$(jq -r --arg p "$PLAYER" '.LastSession.Paths[0] == $p and .SteamId == 76561190000000000' "$SJ")" = true ] && tokens_kept \
   && ok "a partial body can't touch the backend-owned fields either" || bad "a partial body changed LastSession / the refresh token / SteamId"
 post /stop '{}' >/dev/null; sleep 0.6
 

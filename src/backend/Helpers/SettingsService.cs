@@ -43,34 +43,22 @@ public static class SettingsService
     // private: every write is a field-level Update or Patch (a whole copy loaded earlier reverts what changed since)
     private static void Save(AppSettings settings)
     {
-        var dir = Path.GetDirectoryName(ConfigPath)!;
-        Directory.CreateDirectory(dir);
-        // unique per writer: two saves at once must not share (and tear) one temp file
-        var tmp = Path.Combine(dir, $".settings.json.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            // 0600 from its creation (the rename keeps it): the file holds the Steam sign-in (web-backend.md § Local API security)
-#pragma warning disable CA1416 // Unix file modes: this backend is Linux-only
-            using (var fs = new FileStream(tmp, new FileStreamOptions
-            {
-                Mode = FileMode.CreateNew, Access = FileAccess.Write,
-                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
-            }))
-#pragma warning restore CA1416
-            using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
-                w.Write(JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(tmp, ConfigPath, overwrite: true);
-        }
-        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+        // the Steam sign-in's old fields: an empty one is never written again (a non-empty one only until SecretStore moves it out)
+        if (settings.LegacySteamRefreshToken == "") settings.LegacySteamRefreshToken = null;
+        if (settings.LegacySteamAccessToken == "") settings.LegacySteamAccessToken = null;
+        if (settings.LegacySteamLoginSecure == "") settings.LegacySteamLoginSecure = null;
+        // atomic + 0600 from its creation (web-backend.md § Local API security)
+        AtomicFile.WritePrivate(ConfigPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    // GET /settings: a copy without the Steam sign-in's secrets (the refresh token, the web cookie, a pasted
-    // steamLoginSecure) — the UI never reads them (/steam/status says signed in or not) and POST /settings ignores them
-    // (Patch keeps the saved ones), so the empty strings the UI posts back change nothing.
+    public static string FilePath => ConfigPath; // SecretStore watches it for an older build's secrets
+
+    // GET /settings: a copy without the Steam sign-in's secrets. They live in SecretStore now (the keyring, else
+    // steam-auth.json); only an old settings.json not yet migrated still has them (the Legacy* fields) — never shown.
     public static AppSettings Redacted(AppSettings s)
     {
         var c = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(s))!;
-        c.SteamRefreshToken = ""; c.SteamAccessToken = ""; c.SteamLoginSecure = "";
+        c.LegacySteamRefreshToken = null; c.LegacySteamAccessToken = null; c.LegacySteamLoginSecure = null;
         return c;
     }
 
@@ -133,10 +121,10 @@ public static class SettingsService
             var s = Merge(prev, body);
             s.LastSession = prev.LastSession;
             s.SteamId = prev.SteamId;
-            s.SteamRefreshToken = prev.SteamRefreshToken;
-            s.SteamAccessToken = prev.SteamAccessToken;
+            s.LegacySteamRefreshToken = prev.LegacySteamRefreshToken; // (not yet moved out by SecretStore)
+            s.LegacySteamAccessToken = prev.LegacySteamAccessToken;
+            s.LegacySteamLoginSecure = prev.LegacySteamLoginSecure;
             s.SteamAccountName = prev.SteamAccountName;
-            s.SteamLoginSecure = prev.SteamLoginSecure;
             s.SteamSignInRejected = prev.SteamSignInRejected;
             Save(s);
             return (prev, s);

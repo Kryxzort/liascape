@@ -32,6 +32,14 @@ public static class SteamSelfTest
             Console.Error.WriteLine("steam-selftest: refusing — HOME (and XDG_CONFIG_HOME) must be a private dir under /tmp");
             return 2;
         }
+        // the secret store may talk to a Secret Service: only ever a private one (dbus-run-session's bus under /tmp), never the user's
+        string? bus = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        string run = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? "";
+        if ((bus != null && !bus.Contains("/tmp/")) || (bus == null && !run.StartsWith("/tmp/", StringComparison.Ordinal)))
+        {
+            Console.Error.WriteLine("steam-selftest: refusing — DBUS_SESSION_BUS_ADDRESS (or XDG_RUNTIME_DIR) must be a private one under /tmp");
+            return 2;
+        }
         var realOut = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);
@@ -43,6 +51,8 @@ public static class SteamSelfTest
 
         string log = captured.ToString();
         if (log.Contains(Password)) Fails.Add("the password appears in the console output");
+        foreach (var v in SecretValues) if (log.Contains(v)) Fails.Add("a secret value appears in the console output");
+        foreach (var (t, j) in Events) foreach (var v in SecretValues) if (j.Contains(v)) Fails.Add($"a secret value appears in a WS event ({t})");
         foreach (var (t, j) in Events) if (j.Contains(Password)) Fails.Add($"the password appears in a WS event ({t})");
         string settingsFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape", "settings.json");
         if (File.Exists(settingsFile) && File.ReadAllText(settingsFile).Contains(Password)) Fails.Add("the password was saved in settings.json");
@@ -118,8 +128,10 @@ public static class SteamSelfTest
 
     private static async Task RunAll()
     {
+        Check(SecretStore.Backend == ExpectBackend, $"secrets: the {ExpectBackend} backend is in use ({SecretStore.Backend})");
         SteamOps.SignOut();
-        SettingsService.Update(s => { s.SteamRefreshToken = FakeJwt(76561190000000009); s.SteamId = 76561190000000009; s.SteamAccountName = "old"; s.SteamSignInRejected = true; });
+        SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));
+        SettingsService.Update(s => { s.SteamId = 76561190000000009; s.SteamAccountName = "old"; s.SteamSignInRejected = true; });
 
         // validation: nothing reaches the sign-in
         Check(SteamOps.StartPasswordLogin("someone", "") is { Length: > 0 }, "an empty password is refused before Steam");
@@ -140,9 +152,10 @@ public static class SteamSelfTest
         (t, p) = await NextEvent("steam-signed-in");
         var s = SettingsService.Load();
         Check(Bool(p, "signedIn") && Str(p, "accountName") == "tester-acct" && !Bool(p, "rejected"), $"email: steam-signed-in with the account ({p})");
-        Check(s.SteamRefreshToken == FakeJwt(76561190000000001) && s.SteamId == 76561190000000001 && s.SteamAccountName == "tester-acct",
+        Check(SecretStore.Get(SecretStore.RefreshToken) == FakeJwt(76561190000000001) && s.SteamId == 76561190000000001 && s.SteamAccountName == "tester-acct",
             "email: the refresh token, Steam ID and account name are saved");
-        Check(!s.SteamSignInRejected && s.SteamAccessToken == "", "email: a new sign-in clears SteamSignInRejected and the old cookie");
+        Check(!s.SteamSignInRejected && SecretStore.Get(SecretStore.AccessToken) == null, "email: a new sign-in clears SteamSignInRejected and the old cookie");
+        SignedInSecretChecks(FakeJwt(76561190000000001), "email");
 
         // device (authenticator) code
         SteamOps.LoginDriver = Script("device", "F00D5");
@@ -213,6 +226,162 @@ public static class SteamSelfTest
         Check(held is { } h && h.Contains("limiting") && _driverCalls == calls, $"rate limit: the next attempt is refused before Steam ({held})");
 
         await DrainTests();
+        await SecretTests();
+    }
+
+    // ---- where the secrets live (Helpers/SecretStore.cs) ----
+
+    // the backend this run must use: LIASCAPE_TEST_EXPECT_SECRETS=keyring under a private Secret Service, else the file fallback
+    private static string ExpectBackend => Environment.GetEnvironmentVariable("LIASCAPE_TEST_EXPECT_SECRETS") is "keyring" ? "keyring" : "file";
+    private static string SettingsFile => SettingsService.FilePath;
+    private static string Text(string f) => File.Exists(f) ? File.ReadAllText(f) : "";
+    private static readonly List<string> SecretValues = [];
+
+    // after a sign-in: settings.json has no token; the file fallback holds it 0600 (file) / doesn't (keyring)
+    private static void SignedInSecretChecks(string token, string label)
+    {
+        SecretValues.Add(token);
+        var st = Text(SettingsFile);
+        Check(st.Length > 0 && !st.Contains(token) && !st.Contains("SteamRefreshToken"), $"{label}: settings.json holds no token (nor the key)");
+        if (SecretStore.Backend == "file")
+        {
+            var f = SecretStore.FallbackPath;
+            Check(File.Exists(f) && Text(f).Contains(token), $"{label}: the token is in the file fallback");
+#pragma warning disable CA1416
+            Check(File.Exists(f) && File.GetUnixFileMode(f) == (UnixFileMode.UserRead | UnixFileMode.UserWrite), $"{label}: the file fallback is 0600");
+#pragma warning restore CA1416
+        }
+        else Check(!Text(SecretStore.FallbackPath).Contains(token), $"{label}: the token is in the keyring, not the file fallback");
+    }
+
+    // settings.json written the way an older build left it (temp + rename, like SettingsService)
+    private static void WriteSettingsRaw(string json)
+    {
+        File.WriteAllText(SettingsFile + ".t", json);
+        File.Move(SettingsFile + ".t", SettingsFile, overwrite: true);
+    }
+
+    private static async Task SecretTests()
+    {
+        string home = Environment.GetEnvironmentVariable("HOME")!;
+        const string Rt = "FAKE-RT-eyJzdWIiOiI3NjU2MTE5MDAwMDAwMDAwMSJ9", At = "FAKE-AT-76561190000000001%7C%7Cabc", Ls = "FAKE-LS-pasted-cookie";
+        SecretValues.AddRange([Rt, At, Ls]);
+        string Seeded(int volume) => $"{{\"Volume\":{volume},\"SteamId\":76561190000000001,\"SteamAccountName\":\"migrated\","
+            + $"\"SteamRefreshToken\":\"{Rt}\",\"SteamAccessToken\":\"{At}\",\"SteamLoginSecure\":\"{Ls}\"}}";
+        bool NoneIn(string text) => !text.Contains(Rt) && !text.Contains(At) && !text.Contains(Ls);
+
+        // migration: an older settings.json's secrets move into the store, then leave settings.json; the rest stays
+        SteamOps.SignOut();
+        WriteSettingsRaw(Seeded(37));
+        await Task.Delay(20);
+        Check(SecretStore.Get(SecretStore.RefreshToken) == Rt && SecretStore.Get(SecretStore.AccessToken) == At && SecretStore.Get(SecretStore.LoginSecure) == Ls,
+            "migration: the three secrets from settings.json are in the store");
+        var st = Text(SettingsFile);
+        var s = SettingsService.Load();
+        Check(NoneIn(st) && !st.Contains("SteamRefreshToken") && !st.Contains("SteamLoginSecure"), "migration: settings.json no longer holds them (nor their keys)");
+        Check(s.Volume == 37 && s.SteamAccountName == "migrated" && s.SteamId == 76561190000000001, "migration: the other settings are untouched");
+        Check(SteamAuthService.HasRefreshToken() && SteamOps.Status().ToString()!.Contains("signedIn = True"), "migration: /steam/status says signed in");
+        if (ExpectBackend == "file")
+            Check(Text(SecretStore.FallbackPath).Contains(Rt), "migration: …into the file fallback");
+        SecretStore.MigrateNow();
+        Check(SecretStore.Get(SecretStore.RefreshToken) == Rt, "migration: idempotent (a second pass changes nothing)");
+        var api = System.Text.Json.JsonSerializer.Serialize(SettingsService.Redacted(SettingsService.Load()));
+        Check(NoneIn(api), "GET /settings (Redacted) carries none of them");
+
+        // sign-out removes them from the store (the cache too: a fresh process view)
+        SteamOps.SignOut();
+        SecretStore.ResetForTest();
+        Check(SecretStore.Get(SecretStore.RefreshToken) == null && SecretStore.Get(SecretStore.AccessToken) == null && SecretStore.Get(SecretStore.LoginSecure) == null,
+            "sign-out: every secret is gone from the store");
+        Check(NoneIn(Text(SecretStore.FallbackPath)) && NoneIn(Text(SettingsFile)), "sign-out: none left in the file fallback or settings.json");
+        Check(!SteamAuthService.HasUsableSignIn(SettingsService.Load()), "sign-out: no usable sign-in");
+
+        if (ExpectBackend == "file")
+        {
+            // a store that fails leaves settings.json untouched (the fallback path is a directory here → its write fails)
+            Directory.CreateDirectory(SecretStore.FallbackPath);
+            WriteSettingsRaw(Seeded(38));
+            SecretStore.ResetForTest();
+            Check(SecretStore.Get(SecretStore.RefreshToken) == null, "failed store: reads as signed out, no crash");
+            Check(Text(SettingsFile).Contains(Rt) && Text(SettingsFile).Contains(Ls), "failed store: settings.json keeps the secrets (nothing lost)");
+            Directory.Delete(SecretStore.FallbackPath);
+            SecretStore.MigrateNow();
+            Check(SecretStore.Get(SecretStore.RefreshToken) == Rt && NoneIn(Text(SettingsFile)), "failed store: the next pass moves them");
+            SteamOps.SignOut();
+        }
+
+        StubKeyringTests(home);
+        SecretStore.ResetForTest();
+    }
+
+    // The Secret Service path against a STUB secret-tool (records argv + emulates store/lookup/clear in files): the value goes
+    // over stdin, never argv; a lookup the keyring refuses reads as signed out and isn't repeated. Never a real keyring.
+    private static void StubKeyringTests(string home)
+    {
+        string dir = Path.Combine(home, "stub-keyring"), tool = Path.Combine(home, "stub-bin", "secret-tool"), argv = Path.Combine(home, "secret-tool.argv");
+        Directory.CreateDirectory(dir); Directory.CreateDirectory(Path.GetDirectoryName(tool)!);
+        File.WriteAllText(tool, $$"""
+            #!/bin/sh
+            printf '%s\n' "$*" >> '{{argv}}'
+            op=$1; name=; prev=
+            for a in "$@"; do [ "$prev" = name ] && name=$a; prev=$a; done
+            [ -f '{{dir}}/deny' ] && [ "$op" = lookup ] && { echo "secret-tool: Cannot unlock the collection" >&2; exit 1; }
+            case $op in
+              store) cat > '{{dir}}'/"$name" ;;
+              lookup) [ -f '{{dir}}'/"$name" ] || exit 1; cat '{{dir}}'/"$name" ;;
+              clear) rm -f '{{dir}}'/"$name" ;;
+            esac
+            """);
+#pragma warning disable CA1416
+        File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+#pragma warning restore CA1416
+        string bus = Path.Combine(home, "stub-bus");
+        File.WriteAllText(bus, "");
+        string? oldBus = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", "unix:path=" + bus);
+        Environment.SetEnvironmentVariable("LIASCAPE_SECRET_TOOL", tool);
+        try
+        {
+            SecretStore.ResetForTest();
+            string token = FakeJwt(76561190000000002);
+            SecretValues.Add(token);
+            SteamAuthService.SaveSignIn(token, 76561190000000002, "stub-acct");
+            Check(SecretStore.Backend == "keyring", "stub keyring: secret-tool + a session bus → the Secret Service backend");
+            SecretStore.ResetForTest();
+            Check(SecretStore.Get(SecretStore.RefreshToken) == token, "stub keyring: the token stored and looked up through secret-tool");
+            Check(Text(Path.Combine(dir, SecretStore.RefreshToken)) == token, "stub keyring: secret-tool got the exact value on stdin");
+            Check(!Text(argv).Contains(token) && Text(argv).Contains("store --label=") && Text(argv).Contains("application liascape name steam-refresh-token"),
+                "stub keyring: the value never on secret-tool's command line");
+            Check(!Text(SecretStore.FallbackPath).Contains(token) && !Text(SettingsFile).Contains(token), "stub keyring: not in the file fallback or settings.json");
+            // a leftover in the file fallback (a time without a keyring) moves into the keyring when read
+            Environment.SetEnvironmentVariable("LIASCAPE_SECRETS", "file");
+            SecretStore.ResetForTest();
+            SecretStore.Set(SecretStore.LoginSecure, "FAKE-LS-leftover");
+            SecretValues.Add("FAKE-LS-leftover");
+            Environment.SetEnvironmentVariable("LIASCAPE_SECRETS", null);
+            SecretStore.ResetForTest();
+            Check(SecretStore.Get(SecretStore.LoginSecure) == "FAKE-LS-leftover" && Text(Path.Combine(dir, SecretStore.LoginSecure)) == "FAKE-LS-leftover"
+                && !Text(SecretStore.FallbackPath).Contains("FAKE-LS-leftover"), "stub keyring: a file-fallback leftover moves into the keyring");
+            // denied (a locked keyring whose prompt was dismissed): signed out, no crash, not asked again right away
+            SecretStore.Set(SecretStore.RefreshToken, token);
+            SecretStore.ResetForTest();
+            Check(SecretStore.Backend == "keyring", "stub keyring: (detected before the keyring starts refusing)");
+            File.WriteAllText(Path.Combine(dir, "deny"), "");
+            Check(SecretStore.Get(SecretStore.RefreshToken) == null, "stub keyring: a refused lookup (stored token, locked keyring) reads as signed out, no crash");
+            int calls = File.ReadAllLines(argv).Length;
+            SecretStore.Get(SecretStore.RefreshToken); SecretStore.Get(SecretStore.AccessToken);
+            Check(File.ReadAllLines(argv).Length == calls, "stub keyring: …and the keyring isn't asked again (no prompt loop)");
+            File.Delete(Path.Combine(dir, "deny"));
+            SecretStore.ResetForTest();
+            SteamOps.SignOut();
+            Check(!File.Exists(Path.Combine(dir, SecretStore.RefreshToken)) && !File.Exists(Path.Combine(dir, SecretStore.LoginSecure)),
+                "stub keyring: sign-out clears them from the keyring");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", oldBus);
+            Environment.SetEnvironmentVariable("LIASCAPE_SECRET_TOOL", null);
+        }
     }
 
     // The no-sign-in unsubscribe: every id into the Steam to-do, one page at a time (stub xdg-open records the URL).
@@ -263,7 +432,8 @@ public static class SteamSelfTest
 
         // three Steam has (+1 it hasn't — an owned steamcmd-style copy, never a subscription: no page, blocked at once): one page at
         // a time, Next / Open again / Skip / Stop
-        SettingsService.Update(x => { x.SteamRefreshToken = FakeJwt(76561190000000001); x.SteamId = 76561190000000001; x.SteamSignInRejected = true; });
+        SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000001));
+        SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = true; });
         WorkshopUnsubQueue.AddPending(["800000002", "800000099", "800000003", "800000004"]);
         r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         urls = await Urls(2);

@@ -64,6 +64,8 @@ public static class ServerHost
             !string.IsNullOrEmpty(uiDir) && Directory.Exists(uiDir) ? new(Path.GetFullPath(uiDir)) : null;
         ApiSecurity.InitToken();
         ApiSecurity.InitOrigins(servesUi: uiFiles != null);
+        // an older settings.json's Steam secrets → the keyring / steam-auth.json (off the startup path: a keyring may prompt)
+        _ = Task.Run(() => { try { SecretStore.MigrateNow(); } catch (Exception e) { Console.WriteLine($"secrets: migration failed ({e.GetType().Name})"); } });
         app.Use((ctx, next) => ApiSecurity.Guard(ctx, () => next(ctx), uiFiles));
         // An endpoint that THROWS must still answer as itself (owner 2026-11-11: a Workshop download showed only "Download failed:
         // Failed to fetch"). Unhandled, Kestrel answered a bare 500 with the response's headers reset — CORS's

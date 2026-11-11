@@ -46,7 +46,7 @@ Packages `ui`, `backend` (`buildDotnetModule`, `executables = [ "liascape-backen
 `lib/liascape/{ui,shell}` symlinked to the `ui` / shell-source derivations, `transitions` copied, `libexec/liascape/*`
 symlinked to the component packages' binaries, `bin/liascape` = `scripts/liascape` (`patchShebangs` +
 `wrapProgram --set-default LIASCAPE_ELECTRON ${electron_42}/bin/electron --prefix PATH : <ffmpeg, mpvpaper,
-linux-wallpaperengine, mpv>`; the launcher's `readlink -f` lands on `.liascape-wrapped` in the same `bin/`).
+linux-wallpaperengine, mpv, libsecret>`; the launcher's `readlink -f` lands on `.liascape-wrapped` in the same `bin/`).
 `liascape-player` gets `wrapProgram … --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib --suffix PATH : ffmpeg` (R86:
 libmpv's nvdec needs NVIDIA's `libcuda.so.1`, which on NixOS lives outside the store); its scene worker sits next to
 it in the same `bin/` (`paths::scene_worker_bin` finds it by `/proc/self/exe`). The devShell (`inputsFrom` the
@@ -76,4 +76,6 @@ in-memory token; the next watch restart reuses the file's (the new one).
 
 ### Runtime deps
 libmpv, Wayland + EGL/GLES, `libxkbcommon`, PipeWire (the player's audio bus), `ffmpeg` (thumbnails, frame grabs),
-`wl-clipboard`; legacy engine: `mpvpaper`, `libpulse` (`liascape-audio`), `linux-wallpaperengine` for scenes.
+`wl-clipboard`, `secret-tool` (libsecret — the Steam sign-in in the system keyring, `Helpers/SecretStore.cs`; flake: on the
+wrapper PATH, AUR: `depends`, install.sh: a NOTE only — without it or a Secret Service the sign-in is kept in
+`~/.config/liascape/steam-auth.json`, 0600); legacy engine: `mpvpaper`, `libpulse` (`liascape-audio`), `linux-wallpaperengine` for scenes.

@@ -28,6 +28,7 @@
         mpvpaper # video wallpapers (spawned via setsid)
         linux-wallpaperengine # Wallpaper Engine scene playback
         mpv # mpvpaper dep + still frames
+        libsecret # secret-tool: the Steam sign-in in the system keyring (Helpers/SecretStore.cs; no keyring → a 0600 file)
       ];
 
       # 1) React UI → static dist/.

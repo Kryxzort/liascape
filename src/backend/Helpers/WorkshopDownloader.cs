@@ -529,7 +529,7 @@ public static class WorkshopDownloader
     }
 
     private static string Why(AppSettings s) =>
-        !string.IsNullOrWhiteSpace(s.SteamRefreshToken) && s.SteamSignInRejected ? "Steam signed this app out" : "Not signed in to Steam here";
+        s.SteamSignInRejected && SteamAuthService.HasRefreshToken() ? "Steam signed this app out" : "Not signed in to Steam here";
 
     /// The no-sign-in unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
     /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (the subscriptions list of

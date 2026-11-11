@@ -82,12 +82,26 @@ the first middleware (before the error handler — a refusal never runs an endpo
   digits (`WorkshopSubOps.ValidId`, else **400**, nothing opened); the only URL it can open is
   `steam://url/CommunityFilePage/<digits>` (`OpenInSteamApp`: one `xdg-open` argument via `setsid sh -c 'exec xdg-open "$0"'`).
   `/open` still refuses `steam://` (400). `/workshop/subscribe|unsubscribe|state` take digits-only ids the same way.
-- **Secrets out of the API**: `GET /settings` returns `SettingsService.Redacted` — `SteamRefreshToken`,
-  `SteamAccessToken`, `SteamLoginSecure` empty (the UI never read them; `/steam/status` says signed in or not; POST
-  `/settings` keeps the saved ones whatever the body says, so the UI posting its copy back changes nothing). `settings.json`
-  is written 0600 (its temp file is created 0600; the rename keeps it — an older 0644 file turns 0600 at its next save).
-  The secrets stay in settings.json (not a separate file / the keyring): with the file 0600 a second file adds nothing
-  against another user or a web page, and every Steam call site reads them from `AppSettings`. No log line prints them.
+- **Secrets out of the API and out of settings.json** (owner 2026-11-11: "steam token is kept in plaintext??" → "system
+  keyring and then fallback to some file other than settings.json"). The Steam sign-in's secrets — refresh token, cached web
+  cookie, pasted `steamLoginSecure` — live in **`Helpers/SecretStore.cs`** (`Get` / `Set` / `Delete` / `Clear`; names
+  `steam-refresh-token`, `steam-access-token`, `steam-login-secure`); every reader / writer goes through `SteamAuthService`
+  (`SaveSignIn`, `HasRefreshToken`, `HasUsableSignIn`, `GetCookieAsync`, `SignOut`, `RefreshTokenDaysRemaining`) → SecretStore.
+  - **Primary: the freedesktop Secret Service** (GNOME Keyring / KWallet / KeePassXC) via libsecret's `secret-tool`, attributes
+    `application=liascape name=<name>`; the value on stdin / stdout, never argv. Used when `secret-tool` is on PATH, a session
+    bus is reachable (`FeatureHealth.SessionBusReachable` — no X11 autolaunch) and a probe lookup answers (exit 1, empty
+    stderr = "not found"). A failed / denied lookup (a dismissed unlock prompt; also "not found" after > 2 s) = signed out,
+    and the keyring isn't asked again for 10 min (no prompt loop); values cached 5 s (absent: 30 s).
+  - **Fallback: `$XDG_CONFIG_HOME/liascape/steam-auth.json`** (`{name: value}`, 0600 from creation via
+    `AtomicFile.WritePrivate`, its own flock) — no `secret-tool`, no bus, no Secret Service, a failed keyring store, or
+    `LIASCAPE_SECRETS=file`. A value left there is moved into the keyring when one answers later.
+  - Log once per process: `secrets: Secret Service (…)` / `secrets: file fallback (<why>)`; never a value.
+  - **Migration**: `AppSettings` keeps the old JSON keys only for reading (`LegacySteamRefreshToken` etc., `[JsonPropertyName]`
+    + `WhenWritingNull`; an empty one is nulled at save). Whenever settings.json changed (mtime + size), the next SecretStore
+    call (and `serve` startup, in the background) moves non-empty ones into the store, then nulls them with a field-level
+    `SettingsService.Update` (only the values it moved). A failed store leaves settings.json untouched (retried next time).
+  - `GET /settings` (`SettingsService.Redacted`) never carries them; `Patch` keeps a not-yet-migrated file's values whatever
+    the body says. `settings.json` and `steam-auth.json` are 0600. `/steam/status` `signedIn` = a refresh token in the store.
 - **Command lines**: the steamcmd sign-in terminal's `sh -c` script takes the steamcmd path, the install dir and the
   username as `$1..$3` (were pasted in quotes — a `"; …` in the username ran); `TransitionService`'s ffmpeg calls (legacy
   transitions) take an argument array (were one string with quoted paths — a Workshop item names its own media file in
@@ -334,11 +348,11 @@ both: this, and Workshop downloads through the Steam app with no sign-in at all 
 - Log lines (never the password, never the account name): `steam: password sign-in started`, `… Steam asks for the code it
   emailed` / `the authenticator's code` / `waiting for the approval in the Steam app`, `steam: signed in with a password`,
   `steam: password sign-in failed — <message>`.
-- Secrets stay behind `SteamAuthService` (`SaveSignIn`, `HasUsableSignIn`, `GetCookieAsync`) so moving them out of
-  settings.json later is one place. `GetCookieAsync` no longer asks finalizelogin again once Steam rejected the sign-in.
+- Secrets stay behind `SteamAuthService` → `SecretStore` (the keyring / steam-auth.json — § Local API security), never
+  settings.json. `GetCookieAsync` no longer asks finalizelogin again once Steam rejected the sign-in.
 - Hidden **`liascape-backend steam-selftest`** (needs HOME under /tmp): a scripted sign-in in place of SteamKit2 (the
   `SteamOps.LoginDriver` seam) through every step above + the no-sign-in unsubscribe with a stub `xdg-open`; fails if the
-  password appears in any WS event, the console or settings.json. Wrapped with a private-backend download test in
+  password appears in any WS event, the console or settings.json, or a token in settings.json (+ the secret store: file fallback 0600, migration, sign-out, a stub `secret-tool` — never argv). `LIASCAPE_TEST_EXPECT_SECRETS=keyring` under a private Secret Service (§ 4 of the script). Wrapped with a private-backend download test in
   `scripts/test-steam-signin.sh`.
 
 ## Steam Community rate limits (`Helpers/SteamGate.cs`)

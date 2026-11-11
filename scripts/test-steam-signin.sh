@@ -27,6 +27,13 @@
 #     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
 #     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one.
+#  Where the sign-in's secrets live (Helpers/SecretStore.cs; owner 2026-11-11 "steam token is kept in plaintext??"): § 1 also
+#     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), the migration of an
+#     older settings.json (and a failed store leaving it untouched), sign-out, and the keyring path against a STUB secret-tool
+#     (the value on stdin, never argv; a refused lookup → signed out, not asked again); § 2 the migration in a running backend.
+#  4. The selftest again against a PRIVATE Secret Service: dbus-run-session + gnome-keyring-daemon in the test's HOME /
+#     XDG_RUNTIME_DIR (skipped when either is missing). The session's bus and keyring are never reached (DBUS_SESSION_BUS_ADDRESS
+#     is a dead path everywhere else).
 # Never signs in to Steam, never subscribes anything, never talks to steamcommunity.com, never touches ~/.config/liascape
 # (temp HOME + every XDG dir), never prints settings.json. Everything it started is stopped on exit.
 #
@@ -58,6 +65,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT LIASCAPE_PLAYER_SOCKET
+unset LIASCAPE_SECRETS LIASCAPE_SECRET_TOOL LIASCAPE_TEST_EXPECT_SECRETS
+# the Steam secrets (Helpers/SecretStore.cs) must never reach the session's keyring: a dead bus → the file fallback here;
+# § 4 starts its own private Secret Service
+export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
@@ -152,7 +163,8 @@ async function viaSteam(id, why, label) {
 
 await viaSteam("700000001", "Not signed in", "no sign-in");
 // a sign-in Steam turned down (the flag the cookie mint sets): no request to Steam, straight to the app — written the way
-// SettingsService writes (temp + rename), the settings themselves never printed
+// an OLDER build wrote it (the token in settings.json, temp + rename), the settings themselves never printed: the running
+// backend moves it into its secret store (no keyring here → steam-auth.json, 0600) and out of settings.json
 const sf = `${process.env.XDG_CONFIG_HOME}/liascape/settings.json`;
 const s = JSON.parse(fs.readFileSync(sf, "utf8"));
 const fakeJwt = "e30." + Buffer.from(JSON.stringify({ sub: "76561190000000001", exp: Math.floor(Date.now() / 1000) + 9e6 })).toString("base64url") + ".c2ln";
@@ -160,6 +172,17 @@ Object.assign(s, { SteamRefreshToken: fakeJwt, SteamId: 76561190000000001, Steam
 fs.writeFileSync(sf + ".t", JSON.stringify(s)); fs.renameSync(sf + ".t", sf);
 const st = await (await fetch(U + "/steam/status")).json();
 out(st.signedIn && st.rejected, "/steam/status: signedIn + rejected");
+const af = `${process.env.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
+const sNow = fs.readFileSync(sf, "utf8");
+out(!sNow.includes(fakeJwt) && !sNow.includes("SteamRefreshToken") && JSON.parse(sNow).SteamSignInRejected === true,
+  "migration in a running backend: settings.json lost the token (the rest kept)");
+out(fs.existsSync(af) && (fs.statSync(af).mode & 0o777) === 0o600 && fs.readFileSync(af, "utf8").includes(fakeJwt),
+  "migration: the token is in steam-auth.json, 0600 (no Secret Service here)");
+const gs = await (await fetch(U + "/settings")).text();
+out(!gs.includes(fakeJwt), "GET /settings carries no token");
+const bl = fs.readFileSync(`${T}/backend.log`, "utf8");
+out(bl.includes("secrets: file fallback") && bl.includes("secrets: moved the Steam sign-in out of settings.json") && !bl.includes(fakeJwt),
+  "backend log: says which store + the move, never the token");
 await viaSteam("700000002", "Steam signed this app out", "sign-in rejected");
 
 // already on disk, no usable sign-in: nothing to click
@@ -215,6 +238,33 @@ p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))
 [ $rc = 0 ] || bad "drive3.mjs exited $rc"
 echo "== backend 3 log (workshop lines)"; grep -E "workshop:|error:" "$T/backend3.log" | sed 's/^/      /' | tail -8
+fi
+
+echo "== 4. steam-selftest against a PRIVATE Secret Service (dbus-run-session + gnome-keyring-daemon — never the session's)"
+if command -v secret-tool >/dev/null && command -v gnome-keyring-daemon >/dev/null && command -v dbus-run-session >/dev/null \
+   && command -v dbus-send >/dev/null; then
+  privhome "$T/h4"; chmod 700 "$XDG_RUNTIME_DIR"
+  # its own bus (dbus-run-session's, under /tmp) and its own keyring daemon (HOME / XDG_RUNTIME_DIR private: its keyrings and
+  # control socket are this test's); the login keyring created + unlocked with a throwaway password (an empty one makes none)
+  (unset DBUS_SESSION_BUS_ADDRESS GNOME_KEYRING_CONTROL SSH_AUTH_SOCK; cd /tmp && timeout 240 dbus-run-session -- bash -c '
+    printf "hermetic-test-pw" | gnome-keyring-daemon --foreground --unlock --components=secrets > "$HOME/gkd.log" 2>&1 & K=$!
+    for _ in $(seq 1 50); do
+      dbus-send --session --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.NameHasOwner string:org.freedesktop.secrets 2>/dev/null \
+        | grep -q "boolean true" && break; sleep 0.1
+    done
+    LIASCAPE_TEST_EXPECT_SECRETS=keyring "$0" "$1" steam-selftest; rc=$?
+    # after the selftest signed out: nothing of ours left in the keyring
+    for n in steam-refresh-token steam-access-token steam-login-secure; do
+      secret-tool lookup application liascape name $n >/dev/null 2>&1 && { echo "LEFT IN KEYRING: $n"; rc=1; }
+    done
+    kill $K; wait $K 2>/dev/null; exit $rc' "$DOTNET" "$DLL") > "$T/selftest4.log" 2>&1; rc=$?
+  grep -E "^(ok|FAIL)|LEFT IN KEYRING|secrets:" "$T/selftest4.log" | grep -iE "secret|keyring|FAIL|migration|sign-out|stub" | sed 's/^/      /'
+  [ $rc = 0 ] && grep -q "STEAM-SELFTEST PASS" "$T/selftest4.log" && grep -q "secrets: Secret Service" "$T/selftest4.log" \
+    && ok "steam-selftest on a private Secret Service (gnome-keyring)" || { bad "steam-selftest on a private Secret Service (rc $rc)"; tail -8 "$T/selftest4.log"; }
+  [ -f "$T/h4/.local/share/keyrings/login.keyring" ] && ok "…the private keyring was the one used (\$HOME/.local/share/keyrings/login.keyring)" \
+    || bad "…no private login.keyring was created"
+else
+  echo "      SKIP — needs secret-tool (libsecret), gnome-keyring-daemon, dbus-run-session, dbus-send (the stub-secret-tool part of § 1 still ran)"
 fi
 echo "RESULT pass=$PASS fail=$FAIL"
 [ $FAIL = 0 ]

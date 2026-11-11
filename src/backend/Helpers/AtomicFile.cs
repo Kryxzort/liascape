@@ -29,6 +29,30 @@ public static class AtomicFile
         finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
     }
 
+    // Like WriteAllText, but the file is the user's alone (0600) from the moment it exists: the temp file is created 0600
+    // and the rename keeps that mode — never a window where another user could read it (settings.json, the secret
+    // store's fallback file: web-backend.md § Local API security).
+    public static void WritePrivate(string path, string text)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        Directory.CreateDirectory(dir);
+        var tmp = Path.Combine(dir, $".{Path.GetFileName(path)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+#pragma warning disable CA1416 // Unix file modes: this backend is Linux-only
+            using (var fs = new FileStream(tmp, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            }))
+#pragma warning restore CA1416
+            using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+                w.Write(text);
+            File.Move(tmp, path, overwrite: true);
+        }
+        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+    }
+
     // Deserialize `path`, retrying a file that doesn't parse (torn by an in-place writer) a few times.
     // Missing → default. Still unparsable → throws the last JsonException (the caller decides the fallback).
     public static T? ReadJson<T>(string path, JsonSerializerOptions? opts = null)

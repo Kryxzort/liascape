@@ -15,6 +15,7 @@
 - Wayland compositor (Hyprland, Sway, GNOME on Wayland)
 - `pactl` / `parec` (libpulse) — Auto-Mute stream detection (+ live LWE scene volume via `pactl`)
 - `ffmpeg` — thumbnail extraction (Import) + frozen-frame grabs + transition frame capture (→ raw RGBA)
+- `secret-tool` (libsecret) — the Steam sign-in's tokens in the system keyring (`Helpers/SecretStore.cs`); without it / a keyring they go to `~/.config/liascape/steam-auth.json` (0600), never settings.json
 - `wl-clipboard` — `wl-copy` for keybind Copy buttons (renderer uses `navigator.clipboard`, falls back to `wl-copy`)
 - `linux-wallpaperengine` *(optional)* — WE **scene** support under the legacy engine (Settings → "Allow scene support"). Under `liascape-player` scenes need no installed binary — only Wallpaper Engine's own `assets/` (its Steam install, auto-found in the Steam libraries; else `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`)
 - *(build-time, REQUIRED)* Rust toolchain (`cargo`/`rustc`, edition 2024) + `libclang` (bindgen) + wayland/EGL/GLES/`mpv`/`libpipewire`/`libxkbcommon` dev — build `liascape-player` and its `liascape-scene-worker` (`install.sh` preflights them; the flake handles it)

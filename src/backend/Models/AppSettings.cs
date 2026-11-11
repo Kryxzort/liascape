@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 
 namespace Liascape.Models;
 
@@ -171,13 +172,18 @@ public class AppSettings
     public string WorkshopDownloadMode { get; set; } = "subscribe";
     // The Steam client's steamclient.so for "steamapp"; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
     public string SteamClientLibPath { get; set; } = "";
-    // QR sign-in: refresh token (~1yr) + steamid; access token (~24h) cached + auto-minted.
-    public string SteamRefreshToken { get; set; } = "";
+    // The Steam sign-in's SECRETS (refresh token, cached web cookie, pasted steamLoginSecure) live in Helpers/SecretStore.cs —
+    // the system keyring, else ~/.config/liascape/steam-auth.json (owner 2026-11-11: "steam token is kept in plaintext??").
+    // These three only read an older settings.json (same JSON keys); SecretStore moves their values out and nulls them,
+    // and a null is never written. Nothing else reads them.
+    [JsonPropertyName("SteamRefreshToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySteamRefreshToken { get; set; }
+    [JsonPropertyName("SteamAccessToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySteamAccessToken { get; set; }
+    [JsonPropertyName("SteamLoginSecure"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySteamLoginSecure { get; set; }
     public ulong SteamId { get; set; } = 0;
-    public string SteamAccessToken { get; set; } = "";
     public string SteamAccountName { get; set; } = "";
-    // Manual cookie paste (fallback / advanced; used only when no refresh token is stored).
-    public string SteamLoginSecure { get; set; } = "";
     // Steam refused the stored refresh token (finalizelogin AccessDenied — signed out on Steam's side: a password change, "sign
     // out of all devices"). Backend-owned (SettingsService.Patch keeps it); cleared by a new QR sign-in or a sign-out.
     public bool SteamSignInRejected { get; set; }

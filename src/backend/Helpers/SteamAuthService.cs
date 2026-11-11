@@ -249,14 +249,16 @@ public static class SteamAuthService
     /// token is stored. Returns null if no auth is configured. Persists the refreshed cookie.
     public static async Task<string?> GetCookieAsync(AppSettings settings, CancellationToken ct = default)
     {
+        // the secrets live in SecretStore (the keyring, else steam-auth.json) — never in AppSettings / settings.json
+        var rt = SecretStore.Get(SecretStore.RefreshToken);
         // A sign-in whose SteamId was zeroed (owner 2026-11-11: Settings said "Signed in as …" — it reads the refresh token — while a
         // Workshop download failed "Not signed in to Steam"): an old settings save wrote the UI's stale `SteamId: 0` back before
         // `SettingsService.Patch` kept it (d12ab993), and since then the guard has faithfully kept the 0. The id is the refresh
         // token's own `sub` claim, so restore it from there instead of sending the user through the QR sign-in again.
-        if (!string.IsNullOrWhiteSpace(settings.SteamRefreshToken) && settings.SteamId == 0)
+        if (!string.IsNullOrWhiteSpace(rt) && settings.SteamId == 0)
         {
             ulong id = 0;
-            try { id = SteamIdFromJwt(settings.SteamRefreshToken); } catch { /* not a readable token → the paths below */ }
+            try { id = SteamIdFromJwt(rt); } catch { /* not a readable token → the paths below */ }
             if (id != 0)
             {
                 settings.SteamId = id;
@@ -265,8 +267,11 @@ public static class SteamAuthService
             }
         }
         // No QR sign-in → use manual cookie paste if present (back-compat / advanced).
-        if (string.IsNullOrWhiteSpace(settings.SteamRefreshToken) || settings.SteamId == 0)
-            return string.IsNullOrWhiteSpace(settings.SteamLoginSecure) ? null : settings.SteamLoginSecure.Trim();
+        if (string.IsNullOrWhiteSpace(rt) || settings.SteamId == 0)
+        {
+            var pasted = SecretStore.Get(SecretStore.LoginSecure);
+            return string.IsNullOrWhiteSpace(pasted) ? null : pasted.Trim();
+        }
 
         // Steam already turned this sign-in down: asking again only costs a request (it stays refused until a new sign-in)
         if (settings.SteamSignInRejected) throw new SteamSignInRejectedException();
@@ -275,26 +280,27 @@ public static class SteamAuthService
         try
         {
             // Reuse cached cookie until ~5 min before the embedded token's expiry.
-            if (!string.IsNullOrEmpty(settings.SteamAccessToken)
-                && JwtExpiryUtc(TokenPart(settings.SteamAccessToken)) is DateTime exp
+            var cached = SecretStore.Get(SecretStore.AccessToken);
+            if (!string.IsNullOrEmpty(cached)
+                && JwtExpiryUtc(TokenPart(cached)) is DateTime exp
                 && exp > DateTime.UtcNow.AddMinutes(5))
             {
-                return settings.SteamAccessToken;
+                return cached;
             }
 
             string cookie;
-            try { cookie = await GetWebCookieAsync(settings.SteamRefreshToken, settings.SteamId, ct); }
+            try { cookie = await GetWebCookieAsync(rt, settings.SteamId, ct); }
             catch (SteamSignInRejectedException)
             {
                 // remembered, so Settings stops saying "Signed in as …" (/steam/status `rejected`)
                 settings.SteamSignInRejected = true;
-                SettingsService.Update(s => { s.SteamSignInRejected = true; s.SteamAccessToken = ""; });
+                SettingsService.Update(s => s.SteamSignInRejected = true);
+                SecretStore.Delete(SecretStore.AccessToken);
                 Console.WriteLine("steam: Steam turned down the saved sign-in — the user has to sign in again");
                 throw;
             }
-            settings.SteamAccessToken = cookie; // full steamLoginSecure value (steamid||webtoken)
-            SettingsService.Update(s => s.SteamAccessToken = cookie);
-            MaybeRenewRefreshTokenInBackground(settings);
+            SecretStore.Set(SecretStore.AccessToken, cookie); // full steamLoginSecure value (steamid||webtoken)
+            MaybeRenewRefreshTokenInBackground(rt, settings.SteamId, settings.SteamAccountName);
             return cookie;
         }
         finally { _mintGate.Release(); }
@@ -302,26 +308,43 @@ public static class SteamAuthService
 
     /// Is there a sign-in a subscribe / unsubscribe can use without asking the user — a refresh token Steam hasn't turned down,
     /// or a pasted cookie? (Without one, Workshop downloads go through the Steam app: WorkshopDownloader.)
-    public static bool HasUsableSignIn(AppSettings s) =>
-        (!string.IsNullOrWhiteSpace(s.SteamRefreshToken) && !s.SteamSignInRejected)
-        || (string.IsNullOrWhiteSpace(s.SteamRefreshToken) && !string.IsNullOrWhiteSpace(s.SteamLoginSecure));
+    public static bool HasUsableSignIn(AppSettings s)
+    {
+        if (HasRefreshToken()) return !s.SteamSignInRejected;
+        return !string.IsNullOrWhiteSpace(SecretStore.Get(SecretStore.LoginSecure));
+    }
 
-    /// Stores a fresh sign-in (QR or password) — the one place a sign-in's tokens are written.
-    public static void SaveSignIn(string refreshToken, ulong steamId, string accountName) =>
+    /// A refresh token is stored (signed in — or signed out by Steam: AppSettings.SteamSignInRejected).
+    public static bool HasRefreshToken() => !string.IsNullOrWhiteSpace(SecretStore.Get(SecretStore.RefreshToken));
+
+    /// Stores a fresh sign-in (QR or password) — the one place a sign-in's tokens are written. Throws when no store took it.
+    public static void SaveSignIn(string refreshToken, ulong steamId, string accountName)
+    {
+        if (!SecretStore.Set(SecretStore.RefreshToken, refreshToken))
+            throw new InvalidOperationException("Couldn't save the Steam sign-in (neither the system keyring nor ~/.config/liascape took it).");
+        SecretStore.Delete(SecretStore.AccessToken); // the previous sign-in's cookie
         SettingsService.Update(s =>
         {
-            s.SteamRefreshToken = refreshToken;
             s.SteamId = steamId;
             s.SteamAccountName = accountName;
-            s.SteamSignInRejected = false; s.SteamAccessToken = "";
+            s.SteamSignInRejected = false;
         });
+    }
+
+    /// Signs out: every secret out of the store, the account fields out of settings.json.
+    public static void SignOut()
+    {
+        SecretStore.Clear();
+        SettingsService.Update(s => { s.SteamId = 0; s.SteamAccountName = ""; s.SteamSignInRejected = false; });
+    }
 
     /// Days until the stored refresh token expires (null if unknown / not signed in). When this hits
     /// 0 the user must re-sign-in; renewal below tries to keep it well above 0.
-    public static int? RefreshTokenDaysRemaining(AppSettings settings)
+    public static int? RefreshTokenDaysRemaining()
     {
-        if (string.IsNullOrEmpty(settings.SteamRefreshToken)) return null;
-        if (JwtExpiryUtc(settings.SteamRefreshToken) is not DateTime exp) return null;
+        var rt = SecretStore.Get(SecretStore.RefreshToken);
+        if (string.IsNullOrEmpty(rt)) return null;
+        if (JwtExpiryUtc(rt) is not DateTime exp) return null;
         return Math.Max(0, (int)Math.Ceiling((exp - DateTime.UtcNow).TotalDays));
     }
 
@@ -331,21 +354,21 @@ public static class SteamAuthService
     /// log on with it and ask Steam for a renewed one (rolls the ~200-day window forward). Validated
     /// before adoption (later expiry, same SteamID) and fully swallows errors — if Steam won't renew
     /// (or won't log on a WebBrowser token), nothing changes and normal expiry + re-login applies.
-    private static void MaybeRenewRefreshTokenInBackground(AppSettings settings)
+    private static void MaybeRenewRefreshTokenInBackground(string refreshToken, ulong steamId, string accountName)
     {
-        if (JwtExpiryUtc(settings.SteamRefreshToken) is not DateTime exp) return;
+        if (JwtExpiryUtc(refreshToken) is not DateTime exp) return;
         if (exp > DateTime.UtcNow.AddDays(90)) return;
         if (Interlocked.CompareExchange(ref _renewing, 1, 0) != 0) return;
 
         _ = Task.Run(async () =>
         {
-            try { await TryRenewAsync(settings); }
+            try { await TryRenewAsync(refreshToken, steamId, accountName); }
             catch { }
             finally { Interlocked.Exchange(ref _renewing, 0); }
         });
     }
 
-    private static async Task TryRenewAsync(AppSettings settings)
+    private static async Task TryRenewAsync(string refreshToken, ulong steamId, string accountName)
     {
         var steamClient = new SteamClient();
         var manager = new CallbackManager(steamClient);
@@ -354,7 +377,7 @@ public static class SteamAuthService
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         manager.Subscribe<SteamClient.ConnectedCallback>(cb =>
-            steamUser.LogOn(new SteamUser.LogOnDetails { Username = settings.SteamAccountName, AccessToken = settings.SteamRefreshToken }));
+            steamUser.LogOn(new SteamUser.LogOnDetails { Username = accountName, AccessToken = refreshToken }));
         manager.Subscribe<SteamClient.DisconnectedCallback>(cb => tcs.TrySetResult(null));
         manager.Subscribe<SteamUser.LoggedOnCallback>(cb => { _ = OnLoggedOn(cb); });
 
@@ -364,7 +387,7 @@ public static class SteamAuthService
             {
                 if (cb.Result != EResult.OK) { tcs.TrySetResult(null); return; }
                 var res = await steamClient.Authentication.GenerateAccessTokenForAppAsync(
-                    cb.ClientSteamID, settings.SteamRefreshToken, allowRenewal: true);
+                    cb.ClientSteamID, refreshToken, allowRenewal: true);
                 tcs.TrySetResult(string.IsNullOrEmpty(res.RefreshToken) ? null : res.RefreshToken);
             }
             catch { tcs.TrySetResult(null); }
@@ -383,14 +406,14 @@ public static class SteamAuthService
         finally { try { steamUser.LogOff(); steamClient.Disconnect(); } catch { } }
         if (newRt == null) return;
 
-        // Adopt only if the renewed token is genuinely better and ours.
+        // Adopt only if the renewed token is genuinely better and ours — and the stored one is still the one renewed (no sign-out
+        // or other account meanwhile).
         var newExp = JwtExpiryUtc(newRt);
-        var oldExp = JwtExpiryUtc(settings.SteamRefreshToken);
+        var oldExp = JwtExpiryUtc(refreshToken);
         if (newExp == null || (oldExp != null && newExp <= oldExp)) return;
-        if (SteamIdFromJwt(newRt) != settings.SteamId) return;
-
-        settings.SteamRefreshToken = newRt;
-        SettingsService.Update(s => s.SteamRefreshToken = newRt);
+        if (SteamIdFromJwt(newRt) != steamId) return;
+        if (SecretStore.Get(SecretStore.RefreshToken) != refreshToken) return;
+        SecretStore.Set(SecretStore.RefreshToken, newRt);
     }
 
     // The token portion of a `steamid||token` (or url-encoded) steamLoginSecure value.

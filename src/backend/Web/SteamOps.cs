@@ -17,12 +17,13 @@ public static class SteamOps
     public static object Status()
     {
         var s = SettingsService.Load();
+        bool hasRt = SteamAuthService.HasRefreshToken(); // in SecretStore (the keyring / steam-auth.json), not settings.json
         return new
         {
-            signedIn = !string.IsNullOrEmpty(s.SteamRefreshToken),
-            rejected = !string.IsNullOrEmpty(s.SteamRefreshToken) && s.SteamSignInRejected, // Steam ended it: sign in again
+            signedIn = hasRt,
+            rejected = hasRt && s.SteamSignInRejected, // Steam ended it: sign in again
             accountName = s.SteamAccountName,
-            daysLeft = SteamAuthService.RefreshTokenDaysRemaining(s),
+            daysLeft = SteamAuthService.RefreshTokenDaysRemaining(),
             mode = s.WorkshopDownloadMode,
         };
     }
@@ -199,14 +200,7 @@ public static class SteamOps
         }
     }
 
-    public static void SignOut()
-    {
-        SettingsService.Update(s =>
-        {
-            s.SteamRefreshToken = ""; s.SteamId = 0; s.SteamAccessToken = "";
-            s.SteamAccountName = ""; s.SteamLoginSecure = ""; s.SteamSignInRejected = false;
-        });
-    }
+    public static void SignOut() => SteamAuthService.SignOut();
 
     // The drain modal is a view onto this; dismissing it doesn't stop the drain. One drain at a time. Without a usable
     // sign-in the drain opens the item (or the subscriptions list) in the Steam app instead — `openedInSteam` + `message`

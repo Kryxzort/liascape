@@ -181,6 +181,13 @@ if [ -z "${LIASCAPE_ELECTRON:-}" ] && ! command -v electron >/dev/null 2>&1; the
   echo "          or set LIASCAPE_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
 fi
 
+# OPTIONAL: secret-tool (libsecret) keeps the Steam sign-in in the system keyring (Helpers/SecretStore.cs); without it (or
+# without a keyring) the sign-in goes to ~/.config/liascape/steam-auth.json (0600). Only a note.
+if ! command -v secret-tool >/dev/null 2>&1; then
+  echo "    NOTE: no 'secret-tool' — install libsecret (Arch: libsecret / Debian: libsecret-tools / Fedora: libsecret) to keep"
+  echo "          the Steam sign-in in the system keyring; without it it is kept in ~/.config/liascape/steam-auth.json (0600)."
+fi
+
 echo "==> installing 'liascape' (bare = the app; 'liascape help' = the CLI)"
 install -Dm755 "$ROOT/scripts/liascape" "$S_BIN/liascape"
 
