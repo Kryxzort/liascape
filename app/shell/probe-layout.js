@@ -33,6 +33,12 @@
 //   perf:dockRepaint      on a heavy Library (long playlist, autoplaying video thumbnails, live wallpaper, a playing card) a
 //                         dock sweep doesn't repaint the whole playlist bar every frame, and its items stack exactly as they
 //                         magnify; prints the layer tree (element + Chromium's compositing reasons) and what repainted most
+//   grid:boot[:wide]      booted straight into a Square (1:1) / widescreen (16:9) Library (its items and the settings arrive
+//                         after mount): the column fit binds (the grid has a fitted --cols, a resize refits it) and the first
+//                         column count painted with cards is the final one (no stylesheet default, no other aspect's fit first)
+//   grid:panel:<w>x<h>    1920×1080 / 1100×700: opening the docked item sidebar changes the column count, not the card size
+//                         (within 5 %, or the closest column count's where none is), no edge gap wider than the grid's gap;
+//                         closing it restores the grid
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -135,6 +141,40 @@ const RC_HOOK = `(() => {
     } };
 })();`;
 const dbg = () => { const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3"); return d; };
+// grid:boot — from the document's start, each frame's first look at the Library grid: its element, its card count, the
+// --cols the fit wrote on it ("" = none, the stylesheet's default)
+const GRID_REC = `(() => {
+  const r = window.__gb = { frames: [], on: true, stop() { this.on = false; } }; let id = 0;
+  const tick = () => { if (!r.on || r.frames.length > 3000) return;
+    const s = document.querySelector(".lib-scroll");
+    if (s) { s.__gb ??= ++id; r.frames.push({ el: s.__gb, cards: s.querySelectorAll(".card.lib").length, cols: s.style.getPropertyValue("--cols") }); }
+    requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+})();`;
+// a grid's first row: the card width, the column count, the gaps between the row's ends and the scroll box's inner edges
+// (its padding is one gap), the side margins the docked panels gave it
+const GRID_GEO = (sel) => `const s = document.querySelector(${JSON.stringify(sel)}); if (!s) return null;
+  const cs = getComputedStyle(s), sb = s.getBoundingClientRect();
+  const cards = [...s.querySelectorAll(".grid > .card")].slice(0, 80).filter((c) => c.offsetWidth > 0);
+  if (!cards.length) return null;
+  const row = cards.filter((c) => Math.abs(c.offsetTop - cards[0].offsetTop) < 2).map((c) => c.getBoundingClientRect());
+  const L = sb.left + s.clientLeft, R = L + s.clientWidth;
+  return { w: row[0].width, cols: row.length, lgap: row[0].left - L, rgap: R - row[row.length - 1].right,
+    gap: parseFloat(cs.getPropertyValue("--gap")) || 14, ml: parseFloat(cs.marginLeft), mr: parseFloat(cs.marginRight),
+    cw: s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) };`;
+// card width with a panel open vs without: within GRID_TOL, or — where no whole column count gets that close (a narrow grid:
+// 1fr columns, each count's width a step apart) — the closest count's
+const GRID_TOL = 0.05;
+const gridBest = (g, target) => { let b = Infinity; for (let c = 1; c <= 60; c++) { const w = (g.cw - (c - 1) * g.gap) / c; if (w <= 0) break; b = Math.min(b, Math.abs(w / target - 1)); } return b; };
+function gridSame(what, g0, g1) {
+  const v = [], d = g1.w / g0.w - 1, best = gridBest(g1, g0.w), tol = Math.max(GRID_TOL, best + 0.002);
+  if (tol > GRID_TOL) console.log(`        ${what}: no column count within ±${GRID_TOL * 100} % in a ${g1.cw.toFixed(0)} px grid — the closest is ${(best * 100).toFixed(1)} % off`);
+  if (Math.abs(d) > tol) v.push(`${what}: cards ${g0.w.toFixed(1)} → ${g1.w.toFixed(1)} px (${(d * 100).toFixed(1)} %, within ±${(tol * 100).toFixed(1)} %) — ${g0.cols} → ${g1.cols} columns`);
+  for (const [g, k] of [[g0, "no panel"], [g1, what]]) {
+    if (Math.max(g.lgap, g.rgap) > g.gap + 1) v.push(`${k}: an edge gap of ${Math.max(g.lgap, g.rgap).toFixed(1)} px beside the row (≤ the ${g.gap} px gap)`);
+  }
+  return v;
+}
 let perfReady = false;
 async function perfSetup() {
   if (perfReady) return; perfReady = true;
@@ -720,6 +760,77 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
       return v;
     });
+
+    // ---- the grid's column fit (hooks/useGridFit.ts) ----
+    for (const [name, aspect] of [["grid:boot", "1:1"], ["grid:boot:wide", "16:9"]]) await cell(name, async () => {
+      const v = [];
+      await setSettings({ thumbnailAspect: aspect, cardSize: "Medium", autoPlayVideoThumbs: false, liveWallpaperBehindAllTabs: false });
+      await perfSetup();
+      await resize(1400, 900);
+      const d = dbg(); await d.sendCommand("Page.enable");
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: GRID_REC });
+      try {
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.lib-scroll .card.lib').length`) >= PERF_N) break; await sleep(100); }
+        await sleep(1500);
+      } finally { await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier }); }
+      await js(PAGE);
+      const f = await js(`window.__gb.stop(); window.__gb.frames`);
+      // a count is painted when two frames in a row start with it (one that a frame's ResizeObserver replaced never was)
+      const painted = [];
+      for (let i = 1; i < f.length; i++) {
+        const a = f[i - 1], b = f[i];
+        if (a.cards && b.cards && a.el === b.el && a.cols === b.cols && painted.at(-1) !== a.cols) painted.push(a.cols);
+      }
+      const fin = await js(`document.querySelector(".lib-scroll")?.style.getPropertyValue("--cols") ?? null`);
+      console.log(`        ${f.length} frames sampled; column counts painted with cards: ${JSON.stringify(painted.map((c) => c || "(stylesheet default)"))}; final inline --cols ${JSON.stringify(fin)}`);
+      if (!painted.length) return ["no frame painted the grid with cards — proved nothing"];
+      if (!fin) v.push("the Library's grid has no fitted --cols after boot — the fit never bound");
+      if (painted.includes("")) v.push("the grid painted with the stylesheet's default column count before any fit");
+      if (painted.length > 1) v.push(`the first painted column count isn't the final one: ${painted.map((c) => c || "default").join(" → ")}`);
+      // bound: a resize refits it (two sizes whose fits differ: one of them may equal the boot size's)
+      const cols = () => js(`document.querySelector(".lib-scroll")?.style.getPropertyValue("--cols") ?? null`);
+      await resize(1920, 1080); const wide = await cols();
+      await resize(800, 600); const narrow = await cols();
+      console.log(`        after a resize: 1920×1080 → --cols ${JSON.stringify(wide)}, 800×600 → ${JSON.stringify(narrow)}`);
+      if (!wide || !narrow || wide === narrow) v.push(`resizing to 1920×1080 and 800×600 left --cols at ${JSON.stringify(wide)} / ${JSON.stringify(narrow)} (the fit isn't observing the grid)`);
+      await resize(1400, 900);
+      await setSettings({ thumbnailAspect: "1:1" });
+      return v;
+    });
+    // A docked item sidebar takes columns, not card size: the card width with it open stays within GRID_TOL of the width
+    // without it, and the cards still fill the row (no edge gap wider than the grid's gap). (The Workshop filter column:
+    // probe-filters wf:cardSize.)
+    if (!ONLY || ONLY.test("grid:panel")) { // a fresh page on the Square settings (the open page doesn't see a /settings POST)
+      await win.loadURL(withToken(U + "/"));
+      for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.lib-scroll .card.lib').length`) >= 8) break; await sleep(100); }
+      await js(PAGE); await sleep(800);
+    }
+    for (const [w, h] of [[1920, 1080], [1100, 700]]) {
+      await cell(`grid:panel:${w}x${h}`, async () => {
+        const v = [];
+        await resize(w, h); await tab("Library");
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 }); await sleep(300);
+        const geo = () => page(GRID_GEO(".lib-scroll"));
+        const g0 = await geo();
+        if (!g0) return ["no Library grid — proved nothing"];
+        if (!(await js(`document.querySelector(".lib-scroll").style.getPropertyValue("--cols")`))) return ["the grid has no fitted --cols (see grid:boot) — proved nothing"];
+        await page(`const c = document.querySelector(".card.lib .thumb-wrap"); const r = c.getBoundingClientRect();
+          c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));`);
+        await sleep(800);
+        const g1 = await geo();
+        const open = await js(`!!document.querySelector(".side-panel:not(.closing)")`);
+        await page(`document.querySelector(".side-panel [data-side-close]")?.click();`); await sleep(700);
+        const g2 = await geo();
+        const show = (g) => `${g.cols} × ${g.w.toFixed(1)} px (margins ${g.ml}/${g.mr}, edge gaps ${g.lgap.toFixed(1)}/${g.rgap.toFixed(1)})`;
+        console.log(`        no panel ${show(g0)}; item sidebar ${show(g1)}; closed again ${show(g2)}`);
+        if (!open || !(g1.mr > 0)) return [`the item sidebar didn't dock (open ${open}, grid margin-right ${g1.mr}) — proved nothing`];
+        v.push(...gridSame("item sidebar", g0, g1));
+        if (g2.cols !== g0.cols || Math.abs(g2.w - g0.w) > 0.5) v.push(`closing the sidebar left ${show(g2)}, not the ${show(g0)} it started at`);
+        return v;
+      });
+    }
+    await resize(1400, 900);
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });
     console.log(`ERROR setup: ${e.message}`);

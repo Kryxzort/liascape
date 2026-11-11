@@ -8,14 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-5. [ ] **Panels reflow the grid, never resize its cards**: `useGridFit` keeps the visible COUNT constant, so the item
-       sidebar (300–400 px) shrinks every card (measured live at 1920 px: 9 × 197 px → 8 × 173 px, −12 %) while the
-       240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
-       panel open pick the column count whose card width is closest to it (≈ ±4 %, no edge gap). Same for both panels.
-       Probe: card width with / without each panel within 5 %, at 1920 and 1100 px. Also check `useGridFit` binds at boot
-       (it's a layout effect on a RefObject; the Library shows a placeholder first — the bug smooth scrolling had). Same pass: the grid's pre-settings
-       fallback is 16:9 (`useGridFit` `?? "16:9"`, `App.tsx`'s aspect map) while every real default is 1:1 (backend,
-       store, Settings) — a Square user likely gets a 16:9 fit, then a refit, at launch; make the fallbacks 1:1.
 8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
        (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
        `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.
@@ -27,6 +19,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
        mid-pulse frames look slightly different (crossfade, not blur interpolation).
+13. [ ] UI matrix `idle × browse:inLibrary` fails alone too, on f03e7156 and later ("weIn (in the library as s1): badge
+       null, expected In library"): the WE-local Browse card of an item already in the library lost its "In library"
+       badge. Find the cause (Browse's libraryMatch / the card's badge), fix, rerun the cell.
 12. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
        (docs/superpowers/specs/) going past "motion by role" — spring physics, a magnetic lean toward an approaching
        cursor, icons acting out their meaning (download drops into a tray, trash lid lifts, external-link arrow slides

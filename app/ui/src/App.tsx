@@ -147,7 +147,8 @@ export default function App() {
   // ThumbnailAspect drives thumb aspect-ratio. Column count is per-container (useGridFit:
   // derived from window size + CardSize target count + aspect → constant visible count on resize).
   useEffect(() => {
-    const aspect = ({ "1:1": "1 / 1", "16:9": "16 / 9", Default: "16 / 9" } as Record<string, string>)[(s.settings?.thumbnailAspect as string)] ?? "16 / 9";
+    // only an explicit 16:9 is widescreen; before the settings load it's the real default, 1:1 (useGridFit's rule)
+    const aspect = s.settings?.thumbnailAspect === "16:9" ? "16 / 9" : "1 / 1";
     document.documentElement.style.setProperty("--thumb-aspect", aspect);
   }, [s.settings?.thumbnailAspect]);
 

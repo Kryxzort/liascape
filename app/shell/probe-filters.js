@@ -29,6 +29,9 @@
 //   wf:noGlow         Glow effects off → an included segment has no glow
 //   wf:liveBg         live wallpaper behind the tabs → the docked column has no fill, its groups carry the darkness; the drawer
 //                     keeps a fill
+//   wf:cardSize:<w>x<h> 1920×1080 / 1100×700: the docked column — and the item sidebar opened beside it — changes the column
+//                     count, not the card size (within 5 % of the folded column's, or the closest column count's where none
+//                     is), no edge gap wider than the grid's gap
 // Screenshots: <LIASCAPE_OUT>/wf-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -630,6 +633,53 @@ app.whenReady().then(async () => {
       await page(`document.querySelector("[data-wf-clear]")?.click();`);
       return v;
     });
+
+    // the docked column (and the item sidebar beside it) takes columns, not card size (hooks/useGridFit.ts)
+    for (const [w, h] of [[1920, 1080], [1100, 700]]) {
+      await cell(`wf:cardSize:${w}x${h}`, async () => {
+        const v = [];
+        await resize(w, h); await toWorkshop();
+        send({ type: "mouseMove", x: 2, y: 2 }); await sleep(300);
+        const geo = () => page(`const s = document.querySelector(".scroll"), cs = getComputedStyle(s), sb = s.getBoundingClientRect();
+          const cards = [...s.querySelectorAll(".grid > .card")].slice(0, 80).filter((c) => c.offsetWidth > 0);
+          if (!cards.length) return null;
+          const row = cards.filter((c) => Math.abs(c.offsetTop - cards[0].offsetTop) < 2).map((c) => c.getBoundingClientRect());
+          const L = sb.left + s.clientLeft, R = L + s.clientWidth;
+          return { w: row[0].width, cols: row.length, lgap: row[0].left - L, rgap: R - row[row.length - 1].right,
+            gap: parseFloat(cs.getPropertyValue("--gap")) || 14, ml: parseFloat(cs.marginLeft), mr: parseFloat(cs.marginRight),
+            cw: s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) };`);
+        const show = (g) => `${g.cols} × ${g.w.toFixed(1)} px (margins ${g.ml}/${g.mr}, edge gaps ${g.lgap.toFixed(1)}/${g.rgap.toFixed(1)})`;
+        // within 5 %, or — where no whole column count gets that close (a narrow grid: 1fr columns, each count's width a step
+        // apart) — the closest count's
+        const same = (what, g0, g1) => {
+          let best = Infinity;
+          for (let c = 1; c <= 60; c++) { const x = (g1.cw - (c - 1) * g1.gap) / c; if (x <= 0) break; best = Math.min(best, Math.abs(x / g0.w - 1)); }
+          const d = g1.w / g0.w - 1, tol = Math.max(0.05, best + 0.002);
+          if (tol > 0.05) console.log(`        ${what}: no column count within ±5 % in a ${g1.cw.toFixed(0)} px grid — the closest is ${(best * 100).toFixed(1)} % off`);
+          if (Math.abs(d) > tol) v.push(`${what}: cards ${g0.w.toFixed(1)} → ${g1.w.toFixed(1)} px (${(d * 100).toFixed(1)} %, within ±${(tol * 100).toFixed(1)} %) — ${g0.cols} → ${g1.cols} columns`);
+          if (Math.max(g1.lgap, g1.rgap) > g1.gap + 1) v.push(`${what}: an edge gap of ${Math.max(g1.lgap, g1.rgap).toFixed(1)} px beside the row (≤ the ${g1.gap} px gap)`);
+        };
+        if (!(await page(`return !!document.querySelector(".wf-col[data-mode=dock]:not(.closing)");`))) {
+          await page(`document.querySelector("[data-wf-open]")?.click(); await m.sleep(700);`);
+        }
+        const gCol = await geo();
+        if (!gCol || !(gCol.ml > 0)) return [`no docked column at ${w}×${h} (grid margin-left ${gCol?.ml}) — proved nothing`];
+        await page(`document.querySelector("[data-wf-title]").click(); await m.sleep(700);`);
+        const g0 = await geo();
+        await page(`document.querySelector("[data-wf-open]").click(); await m.sleep(700);`);
+        if (!g0 || g0.ml > 1) return [`folding the column left the grid ${g0 ? `a ${g0.ml} px margin` : "empty"} — proved nothing`];
+        await page(`document.querySelector(".scroll .card .thumb-wrap")?.click(); await m.sleep(800);`);
+        const gBoth = await geo();
+        await page(`document.querySelector(".side-panel [data-side-close]")?.click(); await m.sleep(600);`);
+        console.log(`        no panel ${show(g0)}; filter column ${show(gCol)}; column + item sidebar ${show(gBoth)}`);
+        if (Math.max(g0.lgap, g0.rgap) > g0.gap + 1) v.push(`no panel: an edge gap of ${Math.max(g0.lgap, g0.rgap).toFixed(1)} px beside the row`);
+        same("filter column", g0, gCol);
+        if (!(gBoth?.mr > 0)) v.push(`the item sidebar didn't dock beside the column (margin-right ${gBoth?.mr})`);
+        else same("filter column + item sidebar", g0, gBoth);
+        return v;
+      });
+    }
+    await resize(1400, 900);
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });
     console.log(`ERROR setup: ${e.message}`);

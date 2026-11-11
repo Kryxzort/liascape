@@ -171,7 +171,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.5), var(--glow); } /* DESIGN CHOICE: lift+glow */
 /* --thumb-aspect kept: respects the ThumbnailAspect setting (genuine, not design). */
-.thumb-wrap { position: relative; aspect-ratio: var(--thumb-aspect, 16 / 9); background: var(--bg-crust); cursor: pointer; }
+.thumb-wrap { position: relative; aspect-ratio: var(--thumb-aspect, 1 / 1); background: var(--bg-crust); cursor: pointer; }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Hover slide-up Download & Apply. */
@@ -354,7 +354,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { to { transform: translateX(100%); } }
 .skel-card { pointer-events: none; }
-.skel-card .thumb-wrap.skel { aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 10px 10px 0 0; }
+.skel-card .thumb-wrap.skel { aspect-ratio: var(--thumb-aspect, 1 / 1); border-radius: 10px 10px 0 0; }
 .skel-line { height: 11px; border-radius: 5px; } .skel-line.w1 { width: 70%; }
 .err-modal { width: min(460px, 90vw); padding: 22px 24px; }
 .err-modal h2 { margin: 0 0 8px; font-size: 17px; color: var(--danger); }
@@ -397,7 +397,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .playlist-bar-row { position: relative; display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 34px 0 2px; margin: -32px -12px 0; }
 /* as tall as a Square item at every Thumbnail shape, the width follows the shape (Widescreen ≈ 199 × 112): the bar keeps its
    height and a widescreen item isn't a strip. Guard: probe-plbar bar:shape, bar:shapes */
-.pl-item { position: relative; flex: 0 0 auto; height: 112px; aspect-ratio: var(--thumb-aspect, 16 / 9); border-radius: 8px;
+.pl-item { position: relative; flex: 0 0 auto; height: 112px; aspect-ratio: var(--thumb-aspect, 1 / 1); border-radius: 8px;
   overflow: hidden; cursor: pointer; background: var(--bg-crust); box-shadow: 0 1px 4px rgba(0,0,0,.4);
   transition: box-shadow .2s;
   /* COOL: the dock magnification — `--dock` (one transform: push, lift, scale from the bottom edge) is written every frame by
