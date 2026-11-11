@@ -18,7 +18,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        sidebar (300–400 px) shrinks every card (measured live at 1920 px: 9 × 197 px → 8 × 173 px, −12 %) while the
        240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
        panel open pick the column count whose card width is closest to it (≈ ±4 %, no edge gap). Same for both panels.
-       Probe: card width with / without each panel within 5 %, at 1920 and 1100 px. Same pass: the grid's pre-settings
+       Probe: card width with / without each panel within 5 %, at 1920 and 1100 px. Also check `useGridFit` binds at boot
+       (it's a layout effect on a RefObject; the Library shows a placeholder first — the bug smooth scrolling had). Same pass: the grid's pre-settings
        fallback is 16:9 (`useGridFit` `?? "16:9"`, `App.tsx`'s aspect map) while every real default is 1:1 (backend,
        store, Settings) — a Square user likely gets a 16:9 fit, then a refit, at launch; make the fallbacks 1:1.
 6. [ ] **Box (marquee) selection in Library and Browse**: a drag that starts on empty grid space draws a rectangle and
