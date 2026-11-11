@@ -98,8 +98,10 @@ from the app's Workshop browser stores it, but items auto-imported from WE subsc
 the item's public Workshop page (`SteamWorkshopScraper.CheckYoutubeAsync`: `YOUTUBE_VIDEO_ID`). **Cached per item**:
 found → `youtubeUrl` (never looked up again); page read, none → `trailerCheckedAt` (unix s; re-checked after 30 days);
 couldn't check (no connection, an error page) → nothing stored, retried next start — never "can't tell" saved as "none"
-(WE's own offline-mode bug). Steam rate-limits page reads (429 after ~100+ quick ones): back off 1 min doubling (×5) and
-retry the same item; 3 real failures in a row = offline → stop. One page per 1.5 s, single-flight; run after the
+(WE's own offline-mode bug). Steam rate-limits steamcommunity.com per IP for a long while once tripped (a burst of ~150 quick reads → 429s for 30+
+min, the owner's browser included): one page per 4 s (a ONE-TIME fill — cached after), a 429 waits 5 min (×3) then the
+run stops and the next start continues; 3 real failures in a row = offline → stop. (Faster routes need a Web API key or a
+signed-in access token — `IPublishedFileService/GetDetails`; the keyless `GetPublishedFileDetails` has no previews.) single-flight; run after the
 startup WE sync and `/library/sync`; each find → WS `library-item-changed {path, youtubeUrl}`. The sidebar's preview
 switch offers YouTube only while online (`useOnline`).
 

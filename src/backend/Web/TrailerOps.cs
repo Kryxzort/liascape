@@ -17,14 +17,18 @@ namespace Liascape.Web;
 //   - the page read, no trailer → `trailerCheckedAt` (unix s), re-checked after RecheckDays (an author may add one);
 //   - couldn't check (offline, Steam down, an error page) → NOTHING stored, tried again at the next start. Wallpaper
 //     Engine's own offline-mode bug is reporting "can't tell" as "nothing there"; a failed check is never a "no".
-// One page at a time, PaceMs apart. Steam rate-limits page reads (429 after ~100+ quick ones — the first run, 2026-11-11,
-// took that for "offline" and stopped): a 429 waits (1 min, doubling, up to MaxBackoffs) and retries the same item; only
-// real failures (no connection, timeouts, error pages) count toward MaxFailsInARow, which ends the run (offline).
+// One page at a time, PaceMs apart — gentle on purpose: this is a ONE-TIME fill (cached after), and Steam rate-limits
+// steamcommunity.com per IP for a long while once tripped (2026-11-11: a burst of ~150 quick reads → 429s for 30+ min,
+// for the owner's own browser too). A 429 waits BackoffMin minutes (MaxBackoffs times), then the run stops and the next
+// start continues; only real failures (no connection, timeouts, error pages) count toward MaxFailsInARow (offline).
+// Faster routes, checked 2026-11-11: IPublishedFileService/GetDetails (100 items a request, with additional previews)
+// needs a Web API key or a signed-in access token (401 without); the keyless ISteamRemoteStorage/GetPublishedFileDetails
+// has no previews at all.
 // Single-flight; started after the startup WE sync and after /library/sync. Each find → WS `library-item-changed
 // {path, youtubeUrl}` (the grid / sidebar merge it). Adapter log: `trailers: …`.
 public static class TrailerOps
 {
-    private const int PaceMs = 1500, MaxFailsInARow = 3, RecheckDays = 30, MaxBackoffs = 5;
+    private const int PaceMs = 4000, MaxFailsInARow = 3, RecheckDays = 30, MaxBackoffs = 3, BackoffMin = 5;
     private static int _running;
 
     public static void Kick(string why) => _ = Task.Run(async () => { try { await RunAsync(why).ConfigureAwait(false); } catch { } });
@@ -47,7 +51,7 @@ public static class TrailerOps
                 var (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!).ConfigureAwait(false);
                 while (r == SteamWorkshopScraper.PageCheck.RateLimited && backoffs < MaxBackoffs)
                 {
-                    var wait = TimeSpan.FromMinutes(1 << backoffs++);
+                    var wait = TimeSpan.FromMinutes(BackoffMin); backoffs++;
                     Console.WriteLine($"trailers: Steam rate limit — waiting {wait.TotalMinutes:0} min");
                     await Task.Delay(wait).ConfigureAwait(false);
                     (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!).ConfigureAwait(false);
