@@ -34,6 +34,12 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
 - Measuring must not cause what it measures: a `requestAnimationFrame` meter forces a frame every refresh. Sample on
   demand, count callbacks, or read Chromium's own metrics (`Performance.getMetrics`, a trace).
 
+## Performance: counts in the matrix, time on real hardware
+- Gate performance in the UI matrix with refresh- and GPU-independent COUNTS (layers, forced layouts per frame, renders per
+  interaction, rAF callbacks when idle): software GL on a 60 Hz Xvfb makes its milliseconds meaningless.
+- Judge real smoothness with `scripts/bench-live-ui.mjs` on the running app: before and after a change, same scenario,
+  same refresh rate, same build (Vite dev vs packaged), same tab. Report `overBudget` / `over2Frames`, not averages.
+
 ## Changing behaviour changes the test
 - A deliberate behaviour change rewrites the old assertion to the new behaviour in the same commit; never delete it or
   loosen it into something that passes either way.

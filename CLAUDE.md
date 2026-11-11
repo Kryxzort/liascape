@@ -17,6 +17,7 @@ Every command below is hermetic unless marked; run anything over ~30 s in the ba
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
+- Live UI benchmark (NOT hermetic — drives the running debug app): `node scripts/bench-live-ui.mjs <scenario>` — real frame times at the real refresh rate
 - Inspect a running player (read-only): `liascape ctl state|logs|probe` (skill `player-debug`)
 
 ## Hard rules
