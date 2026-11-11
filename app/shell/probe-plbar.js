@@ -34,7 +34,8 @@ const row = `document.querySelector(".playlist-bar-row")`;
 // each item's lift (the dock transform's translateY; the sortable's own transform is none at rest) + whether a glow is up
 const state = () => page(`return { items: [...document.querySelectorAll(".pl-item")].map((e) => { const r = e.getBoundingClientRect();
     const m = new DOMMatrixReadOnly(getComputedStyle(e).transform); return { x: r.x, y: r.y, w: r.width, h: r.height, lift: +m.m42.toFixed(2) }; }),
-  glow: !!document.querySelector(".pl-hover-glow"), scroll: ${row}?.scrollLeft ?? null, max: ${row} ? ${row}.scrollWidth - ${row}.clientWidth : null };`);
+  glow: !!document.querySelector(".pl-hover-glow"), glowBox: (() => { const g = document.querySelector(".pl-hover-glow"); if (!g) return null;
+    const r = g.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(), scroll: ${row}?.scrollLeft ?? null, max: ${row} ? ${row}.scrollWidth - ${row}.clientWidth : null };`);
 const move = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
 const wheel = (x, y, dy) => win.webContents.sendInputEvent({ type: "mouseWheel", x: Math.round(x), y: Math.round(y), deltaX: 0, deltaY: dy, canScroll: true });
 async function shot(name) { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(OUT, `plbar-${name}.png`), img.toPNG()); }
@@ -101,10 +102,36 @@ app.whenReady().then(async () => {
       await shot("gap");
       if (!(s.items[0].lift < -3)) v.push(`in the gap item 1 dropped to ${s.items[0].lift} px (it should stay lifted)`);
       if (!s.glow) v.push("in the gap the hover glow went away");
+      else { const g = s.glowBox, i = s.items[0]; const off = Math.max(Math.abs(g.x - i.x), Math.abs(g.y - i.y), Math.abs(g.w - i.w), Math.abs(g.h - i.h));
+        if (off > 0.5) v.push(`the glow sits ${off.toFixed(2)} px off item 1 (glow ${JSON.stringify(g)}, item ${JSON.stringify(i)})`); }
       move(b.x + 6, y); await sleep(120); move(b.x + b.w / 2, y); await sleep(350);
       s = await state();
       if (!(s.items[1].lift < -3)) v.push(`on item 2 its lift is ${s.items[1].lift} px (expected −4)`);
       if (s.items[0].lift < -3) v.push(`item 1 still fully lifted (${s.items[0].lift}) with the pointer on item 2`);
+      return v;
+    });
+
+    // a pointer sweep across the bar, ~60 moves/s: frame pacing + long tasks + React commits (the hover must stay smooth)
+    await cell("bar:sweep", async () => {
+      const v = [];
+      win.setContentSize(1000, 800); await sleep(800); // every item on screen
+      await page(`${row}.scrollLeft = 0;`); await sleep(300);
+      const s = await state();
+      const W = await js("innerWidth");
+      const its = s.items.filter((i) => i.x + i.w < W);
+      if (its.length < 3) return ["fewer than 3 items on screen"];
+      const y = its[0].y + its[0].h / 2, x0 = its[0].x + 4, x1 = its[its.length - 1].x + its[its.length - 1].w - 4;
+      await page(`window.__sw = { gaps: [], long: [], last: 0, on: true, muts: 0 };
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__sw.long.push(Math.round(e.duration)); }).observe({ type: "longtask" });
+        new MutationObserver((ms) => { window.__sw.muts += ms.length; }).observe(document.body, { subtree: true, attributes: true, childList: true });
+        const f = (t) => { const w = window.__sw; if (!w.on) return; if (w.last) w.gaps.push(t - w.last); w.last = t; requestAnimationFrame(f); }; requestAnimationFrame(f);`);
+      for (let k = 0; k < 2; k++) for (let i = 0; i <= 60; i++) { const t = k ? 1 - i / 60 : i / 60; move(x0 + (x1 - x0) * t, y); await sleep(16); }
+      await sleep(300);
+      const r = await page(`const w = window.__sw; w.on = false; const g = w.gaps.slice().sort((a, b) => a - b);
+        return { n: g.length, p50: g[Math.floor(g.length * .5)], p95: g[Math.floor(g.length * .95)], max: g[g.length - 1], long: w.long, muts: w.muts };`);
+      console.log(`        sweep: ${r.n} frames, p50 ${r.p50?.toFixed(1)} ms, p95 ${r.p95?.toFixed(1)} ms, max ${r.max?.toFixed(1)} ms, long tasks [${r.long}], DOM mutations ${r.muts}`);
+      if (r.long.some((d) => d > 50)) v.push(`long tasks during the sweep: [${r.long}] ms`);
+      if (r.max > 50) v.push(`a ${r.max.toFixed(0)} ms frame during the sweep`);
       return v;
     });
 

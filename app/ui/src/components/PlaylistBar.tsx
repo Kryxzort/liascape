@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors,
@@ -36,25 +36,28 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   const [menu, setMenu] = useState<{ x: number; y: number; el: HTMLElement } | null>(null);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
-  // a position:fixed layer portal'd to <body> at the item's rect → it floats OVER the playlist bar chrome with
-  // zero row padding. rAF-throttled rect tracking so it follows the item while the row scrolls.
+  // a position:fixed layer portal'd to <body> at the item's box → it floats OVER the playlist bar chrome with
+  // zero row padding. While hovered a rAF loop writes the item's box straight into the glow's style — a transform, so it
+  // sits at the same sub-pixel position as the lifting item (left/top would snap to whole pixels and shimmer against it),
+  // and no React render per frame. The first write happens before paint (layout effect): no frame at 0,0.
   const boxRef = useRef<HTMLDivElement | null>(null);
-  const [glow, setGlow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  // While hovered, a rAF loop follows the item's box (the eased dock lift, the row's smooth scroll — neither fires a
-  // mousemove); state is only set when the box moved. getBoundingClientRect already includes the lift: don't offset.
-  useEffect(() => {
+  const glowRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
     if (!hover) return;
-    let raf = 0, last = "";
-    const tick = () => {
-      const el = boxRef.current;
-      if (el) {
-        const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
-        if (k !== last) { last = k; setGlow({ x: r.left, y: r.top, w: r.width, h: r.height }); }
-      }
-      raf = requestAnimationFrame(tick);
+    let raf = 0, last = "", lastG: HTMLDivElement | null = null;
+    const write = () => {
+      const el = boxRef.current, g = glowRef.current;
+      if (!el || !g) return;
+      const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
+      if (k === last && g === lastG) return; // a glow mounted later (glows / drag toggled) gets its first write too
+      last = k; lastG = g;
+      g.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`;
+      g.style.width = `${r.width}px`; g.style.height = `${r.height}px`;
     };
+    const tick = () => { write(); raf = requestAnimationFrame(tick); };
+    write();
     raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); setGlow(null); }; // no stale box shown on the next hover
+    return () => cancelAnimationFrame(raf);
   }, [hover]);
   const onEnter = () => setHover(path);
   const onLeave = () => setHover((cur) => (cur === path ? null : cur));
@@ -83,8 +86,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {hover && glow && glows && !playing && !isDragging && createPortal(
-        <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
+      {hover && glows && !playing && !isDragging && createPortal(<div className="pl-hover-glow" ref={glowRef} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
         // onClick (playFrom) / sortable listeners — a menu click must stop here.
