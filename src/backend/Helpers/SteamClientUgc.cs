@@ -60,6 +60,12 @@ public static class SteamClientUgc
 
     public sealed record Result(string? Folder, string? Fallback);
 
+    /// What the user reads when the Steam app couldn't do it — the mode FAILS there, it never switches to the sign-in or the
+    /// page (owner 2026-11-11: "instead of fallbacks for when direct steam connection fails, i want failures there").
+    public static string FailureMessage(string? why) =>
+        $"Couldn't use the Steam app: {(string.IsNullOrWhiteSpace(why) ? "Steam didn't answer" : why)}. Start Steam (signed in to an " +
+        "account that owns Wallpaper Engine), or pick another way under Settings → Getting Workshop wallpapers.";
+
     /// Subscribe + wait for Steam to install it. Folder = done; Fallback = why this route couldn't be used (the caller
     /// carries on the old way). Throws only for cancellation and for failures AFTER Steam took the subscribe.
     public static async Task<Result> SubscribeAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)

@@ -63,19 +63,21 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
-        // "Use the Steam app": the running Steam client does it (one click, its own progress, no sign-in here); any reason it
-        // can't → the paths below, as before
+        // "Use the Steam app": the running Steam client does it (one click, its own progress, no sign-in here). It FAILS when the
+        // Steam client can't do it — never a quiet switch to the sign-in or the page (owner 2026-11-11: "instead of fallbacks for
+        // when direct steam connection fails, i want failures there")
         if (settings.WorkshopDownloadMode == "steamapp")
         {
             var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
-            if (viaClient.Folder != null)
+            if (viaClient.Folder == null)
             {
-                WorkshopUnsubQueue.Unblock(workshopId);
-                if (TryGetMediaPath(viaClient.Folder) != null) return viaClient.Folder;
-                // Steam's folder without the media we expect (a web wallpaper, a broken item): the usual folders' poll decides
-                Console.WriteLine($"workshop: {workshopId}: Steam installed it at {viaClient.Folder} but no media file there — polling the Workshop folders");
+                Console.WriteLine($"workshop: {workshopId}: the Steam app couldn't subscribe it — {viaClient.Fallback}");
+                throw new InvalidOperationException(SteamClientUgc.FailureMessage(viaClient.Fallback));
             }
-            else Console.WriteLine($"workshop: {workshopId}: not through the Steam app's Workshop interface — {viaClient.Fallback}");
+            WorkshopUnsubQueue.Unblock(workshopId);
+            if (TryGetMediaPath(viaClient.Folder) != null) return viaClient.Folder;
+            Console.WriteLine($"workshop: {workshopId}: Steam installed it at {viaClient.Folder} but there's no video or scene in it");
+            throw new InvalidOperationException("Steam installed it, but there's no video or scene in it — a web or application wallpaper can't play here.");
         }
 
         string? why = null; // set = no usable sign-in: subscribe in the Steam app, and this is why
@@ -351,7 +353,8 @@ public static class WorkshopDownloader
                 Console.WriteLine($"workshop: {workshopId}: subscribed through the Steam client (Subscribe, no download)");
                 return new(true, "Subscribed — Steam has it");
             }
-            Console.WriteLine($"workshop: {workshopId}: not subscribed through the Steam client — {r.Fallback}");
+            Console.WriteLine($"workshop: {workshopId}: the Steam app couldn't subscribe it — {r.Fallback}");
+            return new(false, SteamClientUgc.FailureMessage(r.Fallback)); // a failure, never the sign-in / the to-do instead
         }
         if (mode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
         {
@@ -449,9 +452,13 @@ public static class WorkshopDownloader
                 if (!WorkshopUnsubQueue.MarkBlocked(id)) lock (undone) undone.Add(id);
                 progress?.Report((++n, total0, id));
             }, ct);
-            if (fallback != null) Console.WriteLine($"workshop: unsubscribe not through the Steam app's Workshop interface — {fallback}");
             pending = pending.Where(id => !confirmed.Contains(id)).ToList();
             if (pending.Count == 0 || ct.IsCancellationRequested) return new DrainResult();
+            // a failure, never the sign-in / the to-do instead: what's left stays queued for the next drain
+            Console.WriteLine($"workshop: unsubscribe {string.Join(", ", pending)}: the Steam app couldn't — {fallback ?? "Steam didn't confirm it"}");
+            return new DrainResult(0, fallback != null
+                ? SteamClientUgc.FailureMessage(fallback) + " The unsubscribe stays queued."
+                : $"Steam didn't confirm unsubscribing {pending.Count} item{(pending.Count == 1 ? "" : "s")} — they stay queued; try again.");
         }
         if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
         if (!SteamAuthService.HasUsableSignIn(settings)) return UnsubscribeInSteamApp(settings, pending, Why(settings));
@@ -498,6 +505,7 @@ public static class WorkshopDownloader
     {
         if (settings.WorkshopDownloadMode == "steamcmd" || ids.Count == 0) return null;
         var toPage = new System.Collections.Generic.List<string>();
+        string? failedViaApp = null;
         foreach (var id in ids)
         {
             try
@@ -505,8 +513,11 @@ public static class WorkshopDownloader
                 if (settings.WorkshopDownloadMode == "steamapp")
                 {
                     var r = await SteamClientUgc.SubscribeAsync(id, settings, null, ct);
-                    if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam client (undo)"); continue; }
-                    Console.WriteLine($"workshop: {id}: not re-subscribed through the Steam client — {r.Fallback}");
+                    if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam app (undo)"); continue; }
+                    // a failure, never the sign-in / the to-do instead
+                    Console.WriteLine($"workshop: {id}: the Steam app couldn't subscribe it again — {r.Fallback}");
+                    failedViaApp ??= r.Fallback ?? "Steam didn't answer";
+                    continue;
                 }
                 if (settings.WorkshopDownloadMode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
                 {
@@ -518,6 +529,7 @@ public static class WorkshopDownloader
             catch (Exception e) { Console.WriteLine($"workshop: {id}: re-subscribing failed ({e.Message}) — opening it in the Steam app"); }
             toPage.Add(id);
         }
+        if (failedViaApp != null) return "Undone, but " + char.ToLowerInvariant(SteamClientUgc.FailureMessage(failedViaApp)[0]) + SteamClientUgc.FailureMessage(failedViaApp)[1..];
         if (toPage.Count == 0) return null;
         // the Steam to-do: one page at a time, Next moves on (it used to open up to 5 pages at once, the rest never)
         foreach (var id in toPage)

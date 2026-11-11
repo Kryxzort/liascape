@@ -470,7 +470,7 @@ export const Settings = memo(function Settings() {
           <input type="radio" data-wsmode="steamcmd" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "steamapp" && (
           <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated —
-            nothing to sign in to here. If Steam can't be reached, the item's page opens in Steam instead.</Help>
+            nothing to sign in to here. If Steam can't be reached, it says so — it never switches to another way by itself.</Help>
         )}
         {mode === "subscribe"
           /* Signing in is optional (owner 2026-11-11: "is it a dead end for users without mobile guard?"): without a usable

@@ -50,7 +50,8 @@ Wallpaper Engine (Local), Wallpaper Engine (Workshop). Selectors, URLs, the tag 
 - Log lines name the step, never the account name.
 
 ## Workshop downloads (`Helpers/WorkshopDownloader.cs`, `WorkshopDownloadMode`)
-- Modes: `steamapp` (the running Steam client through `Helpers/SteamClientUgc.cs`), `steampage` (always the item's page in the Steam app), `subscribe` (the sign-in; without a usable one it falls back to the page), `steamcmd`. A download must never be a dead end.
+- Modes: `steamapp` (the running Steam client through `Helpers/SteamClientUgc.cs`), `steampage` (always the item's page in the Steam app), `subscribe` (the sign-in; without a usable one it falls back to the page), `steamcmd`.
+- `steamapp` never switches method: when the Steam client can't do it (download, Subscribe, unsubscribe drain, undo's re-subscribe) it fails with `SteamClientUgc.FailureMessage` and leaves unsubscribes queued. Only the to-do's "Let the Steam app do all N" is the user's explicit switch. Guard: `test-steam-signin.sh` § 3.
 - `SteamClientUgc` loads the Steam client's own `steamclient.so` in a short-lived child (`liascape-backend steam-ugc …`); never ship or load Valve's `libsteam_api.so`. One child at a time app-wide (`SteamClientUgc.Turn`); `ProbeAsync` is exempt.
 - Every Steam page the user must click goes through ONE app-wide queue, one page at a time: the Steam to-do (`Web/SteamTodo.cs`). Never open several pages at once or the subscriptions list.
 - A to-do subscribe entry ends by itself only when its item was absent at its turn and its files then appear (`ItemOnDisk`, `WatchDisk`); otherwise it waits for the user's Next. Unsubscribe entries always wait for Next.

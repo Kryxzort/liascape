@@ -42,18 +42,16 @@ await sleep(500);
 let rel = released();
 out(!alive(childPid()) && rel.includes("user") && rel.includes("pipe"), "the helper released its Steam user + pipe and exited", `pid ${childPid()} alive ${alive(childPid())}, released [${rel}]`);
 
-// b. Steam refuses (not running / WE not owned) → the old way: the item's page in the Steam app
+// b. Steam refuses (not running / WE not owned) → the download FAILS with the reason; it never switches to the page / the
+// to-do / a sign-in (owner 2026-11-11: "instead of fallbacks for when direct steam connection fails, i want failures there")
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
-const p = download("710000002");
-let u = null;
-for (let i = 0; i < 100 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes("710000002")) ?? null; }
-out(u === "steam://url/CommunityFilePage/710000002", "Steam refused the helper → the item's page opens in the Steam app (the old path)", u ?? "nothing opened");
-const d = `${T}/ws3/431960/710000002`; fs.mkdirSync(d, { recursive: true });
-fs.copyFileSync(`${T}/clip.mp4`, `${d}/v.mp4`); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000002" }));
-r = await Promise.race([p, sleep(20000).then(() => null)]);
-out(r?.status === 200, "…and still finishes once Steam has it", r ? String(r.status) : "timed out");
-await post("/steam-todo/next"); // its Steam to-do entry waits for the user's Next even after Steam delivered
+r = await Promise.race([download("710000002"), sleep(20000).then(() => null)]);
+body = r ? await r.json().catch(() => null) : null;
+const todoB = await (await fetch(U + "/steam-todo")).json();
+out(r?.status === 500 && /Couldn't use the Steam app/.test(body?.error ?? "") && urls().length === n0 && todoB.finished === true,
+  "Steam refused the helper → the download fails with the reason, nothing opened, nothing in the to-do",
+  `${r?.status} ${JSON.stringify(body)?.slice(0, 160)} | opened ${urls().length - n0} | to-do ${JSON.stringify(todoB).slice(0, 80)}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
 
 // c. cancel from the page mid-download: the child releases Steam and exits, nothing imported
@@ -71,7 +69,7 @@ await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "appli
 const pidBefore = childPid();
 n0 = urls().length;
 const pd = download("710000004");
-u = null;
+let u = null;
 for (let i = 0; i < 100 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes("710000004")) ?? null; }
 out(u === "steam://url/CommunityFilePage/710000004" && childPid() === pidBefore, "Open in the Steam app: the page opens, the Steam-client helper isn't used", `${u ?? "nothing opened"}, helper pid ${childPid() === pidBefore ? "unchanged" : "NEW"}`);
 const st4 = (ev[pageUrl("710000004")] ?? []).map((e) => e.status).filter(Boolean);
@@ -110,24 +108,26 @@ const ok5 = await dropAndDrain("710000005");
 out(ok5 && had && !fs.existsSync(`${T}/steamlib/sub-710000005`) && urls().length === n0 && !(await queue()).includes("710000005"),
   "Delete from source under Use the Steam app: Steam unsubscribes it, nothing opens, the queue is empty",
   `was subscribed ${had}, still ${fs.existsSync(`${T}/steamlib/sub-710000005`)}, opened ${urls().length - n0}, finished ${JSON.stringify(unsub.at(-1) ?? null)}`);
-// Steam unreachable → the old path for it: the item's page in the Steam app (no sign-in here)
+// Steam unreachable → the unsubscribe FAILS with the reason and stays queued; nothing opens
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
 const ok1 = await dropAndDrain("710000001");
-const opened = urls().slice(n0);
-out(ok1 && opened.some((x) => x.includes("710000001")), "…Steam unreachable: the unsubscribe falls back to the item's page in the Steam app", opened.join(" ") || "nothing opened");
+const failMsg = unsub.find((e) => e.message)?.message ?? "";
+out(ok1 && urls().length === n0 && (await queue()).includes("710000001") && /Couldn't use the Steam app/.test(failMsg) && /stays queued/.test(failMsg),
+  "…Steam unreachable: the unsubscribe fails with the reason, stays queued, nothing opens", `opened ${urls().length - n0} | ${failMsg}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
+// Steam reachable again → the next drain finishes it through the Steam client
+unsub.length = 0;
+await fetch(U + "/workshop/drain", { method: "POST" });
+for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100);
+out(!fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001"),
+  "…and the next drain (Steam back) unsubscribes it through the Steam client", `still subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}`);
 
 // g. owner 2026-11-11 ("what if i unsubscribe + undo / does it resubscribe? it doesn't right?"): Undo after Steam already
-// unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (its page route — Steam was
-// unreachable), 710000005 the one before (the Steam client unsubscribed it).
+// unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (the Steam client unsubscribed
+// it on the second drain), 710000005 the one before (the Steam client unsubscribed it).
 const undo = async () => (await (await fetch(U + "/library/undo", { method: "POST" })).json());
-// 710000001: Steam is reachable again → the Steam client subscribes it again. Its unsubscribe went through the PAGE route (the
-// Steam to-do), so the fake never saw it: play the user's click on that page (drop the fake's subscription) + their Next in the
-// to-do (only Next marks it unsubscribed) — else the check proves nothing
-fs.rmSync(`${T}/steamlib/sub-710000001`, { force: true });
-await post("/steam-todo/next");
-await sleep(200);
+// 710000001: Steam reachable → the Steam client subscribes it again
 const relBefore = released().length;
 await undo();
 for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-710000001`); i++) await sleep(100);
@@ -136,15 +136,15 @@ for (let i = 0; i < 100 && released().length < relBefore + 2; i++) await sleep(1
 out(fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001") && !!(await item("710000001")),
   "Undo after Steam unsubscribed it: subscribed again through the Steam client, back in the library, off the queue",
   `subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}, in library ${!!(await item("710000001"))}`);
-// 710000005 with Steam unreachable → its page opens for the user to click Subscribe, the status bar says so
+// 710000005 with Steam unreachable → the undo happens (back in the library) but the re-subscribe FAILS with the reason; nothing
+// opens, the status bar says so
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length; unsub.length = 0;
 await undo();
-for (let i = 0; i < 100 && !urls().slice(n0).some((x) => x.includes("710000005")); i++) await sleep(100);
-await sleep(300);
+for (let i = 0; i < 100 && !unsub.some((e) => e.message); i++) await sleep(100);
 const msg = unsub.find((e) => e.message)?.message ?? "";
-out(urls().slice(n0).join() === "steam://url/CommunityFilePage/710000005" && /click Subscribe/.test(msg) && !!(await item("710000005")),
-  "…Steam unreachable: the item's page opens to subscribe again, the status bar says so", `${urls().slice(n0).join(" ") || "nothing opened"} | ${msg}`);
+out(urls().length === n0 && /^Undone, but couldn't use the Steam app/.test(msg) && !!(await item("710000005")),
+  "…Steam unreachable: back in the library, the re-subscribe fails with the reason, nothing opens", `opened ${urls().length - n0} | ${msg}`);
 await post("/steam-todo/stop");
 fs.rmSync(`${T}/steamlib/fail-init`);
 
