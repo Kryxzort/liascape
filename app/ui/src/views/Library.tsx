@@ -10,6 +10,7 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useStableFn } from "../hooks/useStableFn";
+import { useMarquee } from "../hooks/useMarquee";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
@@ -162,6 +163,8 @@ export const Library = memo(function Library() {
   const cardTrash = useStableFn((it: LibraryItem) => doTrash(targetsFor(it)));
   const cardToggle = useStableFn(doToggle);
   const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath));
+  // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
+  const onMarquee = useMarquee(scrollRef, { prefix: "lib-", sel, setSel, anchor });
 
   // the sidebar: the focused item (kept for its exit slide after the focus clears)
   const shown = useLinger(libFocus, SIDE_CLOSE_MS, motion);
@@ -171,7 +174,7 @@ export const Library = memo(function Library() {
 
   return (
     <>
-    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick}>
+    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}

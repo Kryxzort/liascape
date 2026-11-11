@@ -1348,6 +1348,25 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   .topbar { padding: 8px 10px; gap: 6px 8px; }
   .tab { padding: 6px 10px; }
   .pill { padding: 5px 10px; }
+  .seg.row :is(.seg-opt, .seg-ghost) { padding: 5px 10px; }
   .search { flex: 1 1 140px; width: auto; }
   .btn.ico { white-space: nowrap; }
 }
+
+/* ---- box (marquee) selection in the Library / Browse grids (hooks/useMarquee.ts) ---- */
+/* the overlay sits on <body>, clipped to the grid's scroll box (z 35: over the cards and the playlist bar's row, under the
+   floating sidebar's scrim 39); pointer-free. COOL: softly rounded, a faint accent wash that deepens as the box catches cards
+   (`--mq` 0 → 1 drives the inner layer's opacity — no colour animation), a thin accent edge with the small glow */
+.marquee-clip { position: fixed; z-index: 35; overflow: hidden; pointer-events: none; contain: strict; }
+.marquee { position: absolute; left: 0; top: 0; border-radius: 7px; will-change: transform;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 78%, transparent);
+  box-shadow: var(--glow-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+  animation: mq-in .12s ease-out backwards; transition: opacity .16s ease-out; }
+.marquee::before { content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: var(--mq, 0); transition: opacity .18s ease-out; }
+.marquee.out { opacity: 0; }
+@keyframes mq-in { from { opacity: 0; } }
+:root.no-motion .marquee, :root.no-motion .marquee::before { animation: none; transition: none; }
+/* while a box is drawn the cards take no pointer: no hover lift or preview under the sweep */
+.marquee-on > .grid { pointer-events: none; }

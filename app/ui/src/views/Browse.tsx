@@ -12,6 +12,7 @@ import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "..
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useStableFn } from "../hooks/useStableFn";
+import { useMarquee } from "../hooks/useMarquee";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper } from "../api/client";
@@ -138,6 +139,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const cardClick = useStableFn(onCardClick);
   const cardDownload = useStableFn(dlApply);
   const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl)); // right-click → the sidebar too
+  // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
+  const onMarquee = useMarquee(scrollRef, { prefix: "br-", sel, setSel, anchor });
   const cardMiddle = useStableFn((x: Wallpaper) => x.pageUrl.startsWith("http") // middle-click → open source page/location
     ? openExternal({ url: x.pageUrl })
     : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId }));
@@ -175,7 +178,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   return (
     <>
     {isWorkshop && docked && dockCol.value && <WorkshopFilterColumn mode="dock" closing={dockCol.closing} entering={shift?.dir === "in"} onFold={toggleCol} />}
-    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={smoothRef} onClick={onBgClick}>
+    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {isWorkshop && <WorkshopSortRow drawer={!docked} open={docked && !colHidden} onOpenFilters={() => docked ? toggleCol() : setDrawerOpen(true)} />}
       <div className="grid">
           {sorted.map((w) => (

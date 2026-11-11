@@ -16,14 +16,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (it's a layout effect on a RefObject; the Library shows a placeholder first — the bug smooth scrolling had). Same pass: the grid's pre-settings
        fallback is 16:9 (`useGridFit` `?? "16:9"`, `App.tsx`'s aspect map) while every real default is 1:1 (backend,
        store, Settings) — a Square user likely gets a 16:9 fit, then a refit, at launch; make the fallbacks 1:1.
-6. [ ] **Box (marquee) selection in Library and Browse**: a drag that starts on empty grid space draws a rectangle and
-       selects the cards it touches — the SAME selection Ctrl/Shift-click build, so every bulk action applies unchanged.
-       Plain drag replaces, Ctrl+drag adds, Escape cancels (restores the previous selection); cards light up live (the
-       existing selected look); auto-scroll near the top / bottom edge; a drag under ~4 px is a click (clears as today);
-       a drag starting on a card keeps today's card drag. Look: accent-tinted translucent fill + thin accent border, glow
-       under the glow toggle, no fade under motion off. After a box it's an ordinary selection: Ctrl+click adds / removes
-       a card, Shift+click ranges from the box's first card in reading order (the new anchor). Probe cells: box-select →
-       a bulk action, box then Ctrl+click add + remove, box then Shift+click, Ctrl+drag, Escape, auto-scroll.
 8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
        (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
        `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.
