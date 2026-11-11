@@ -59,7 +59,13 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
 
 - **Videos:** `ffmpeg loudnorm` pass 1, once per item in the background (`LibraryService.EnsureLoudnessAsync` /
   `BackfillLoudnessAsync`) → all four `loudnessI/TP/LRA/Thresh` (`ReadLoudness` requires all four) or
-  `loudnessSkip` (no audio track / silent); applied as mpv's `af` loudnorm (`LoudnormAf`).
+  `loudnessSkip` (no audio track / silent); applied as ONE fixed gain for the whole play (`LoudnormAf` →
+  `lavfi=[volume=<g>dB]`), **Spotify's rule** (owner 2026-11-11): `g = target − I`, but a boost only as far as the
+  true peak allows with 1 dB of headroom (`min(target − I, −1 − TP)`) — a quiet item with big peaks plays under the
+  target rather than be limited. **Never ffmpeg's `loudnorm` at playback**: even `linear=true` with the measurements
+  falls back to its DYNAMIC mode (a 3 s look-ahead volume rider — ramps, pumping, a lurch at the loop) when the gain
+  would cross its TP or LRA > its target LRA; 62 of the owner's 189 videos did (3019725456: +3 dB hot at the start,
+  climbing to +4.4 dB over its last 4 s). `loudnorm` stays only as the pass-1 MEASUREMENT.
 - **Scenes (liascape-player only), per audio configuration** (2026-10-29, docs/TODO.md "Offline scene loudness →
   integration"): `sceneLoudness` = `{<fingerprint>: {estimate, live}}` + `sceneLoudnessFp` (the CURRENT configuration).
   The fingerprint is the offline estimator's (`liascape-player scene-loudness`) of the scene's sound under its user

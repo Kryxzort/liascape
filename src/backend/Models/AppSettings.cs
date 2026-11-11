@@ -28,13 +28,13 @@ public class AppSettings
     }
     // EBU R128 loudness normalization between videos: each clip is measured once (cached in the library
     // index) and gain-matched to NormalizeTargetLufs at playback. Per-item/global Volume stacks ON TOP
-    // (applied after the loudnorm filter). Target in LUFS (dB-referenced loudness); -14 = streaming std.
+    // (applied after the normalization gain). Target in LUFS (dB-referenced loudness); -14 = streaming std.
     public bool NormalizeAudio { get; set; } = false;
     private double _normTarget = -14.0;
     public double NormalizeTargetLufs
     {
         get => _normTarget;
-        // 0 (loudest) … -100 (near-silent). Even at 0, loudnorm's -1.5 dBTP limiter + volume capped at
+        // 0 (loudest) … -100 (near-silent). Even at 0, the gain only boosts into a -1 dBTP headroom + volume capped at
         // unity (≤100) mean the output can't clip — extremes just land very loud-but-limited or silent.
         set => _normTarget = Math.Clamp(value, -100.0, 0.0);
     }

@@ -105,21 +105,32 @@ public static class LibraryService
         return null;
     }
 
-    // The loudnorm audio-filter string to gain-match a measured item to targetLufs (linear, true-peak
-    // limited at -1.5 dBTP). Null if the item isn't measured yet. Used by both mpvpaper (PlayerHelper)
-    // and the transition overlay (TransitionService → liascape-transition --from-af/--to-af) so both level.
+    // The audio-filter string that gain-matches a measured item to targetLufs: ONE fixed gain for the whole play, the way
+    // Spotify normalizes (owner 2026-11-11 chose it): turned down as far as needed, turned UP only as far as the item's
+    // true peak allows with 1 dB of headroom (PeakCeilingDb) — the sound itself is never altered, no limiter, no rider.
+    // Null if the item isn't measured yet. Used by the player (LiascapePlayerMedia), mpvpaper (PlayerHelper) and the
+    // transition overlay (TransitionService → liascape-transition --from-af/--to-af).
+    // NOT ffmpeg's loudnorm (owner: "it fades in … when its coming to an end it keeps getting louder and louder and a
+    // click right at the end — as if its doing loudness normalization real time"; "i dont think anyone would like it"):
+    // even with `linear=true` and the pass-1 measurements it silently falls back to its DYNAMIC mode whenever the linear
+    // gain would put the true peak over its TP or the measured LRA is over its target LRA — a 3 s look-ahead rider that
+    // made 3019725456 start +3 dB hot and climb to +4.4 dB over its last 4 s (old/new rendered + measured offline).
+    // 62 of the owner's 189 measured videos took that path. A quiet item with big peaks now plays a little under the
+    // target instead (49 of 189; most 1–3 dB) — Spotify's own trade-off (its example: −20 LUFS with −5 dBTP peaks is
+    // lifted to −16, not −14). The rejected alternative: the full gain + a peak limiter (Spotify's "Loud" mode) — it
+    // audibly flattened the hits on the worst items (up to 14 dB of limiting).
     public static string? LoudnormAf(string mediaPath, double targetLufs)
     {
         var m = ReadLoudness(mediaPath);
-        if (m == null) return null;
-        var inv = System.Globalization.CultureInfo.InvariantCulture; var v = m.Value;
-        // ffmpeg's loudnorm takes I in −70…−5 only; outside it the filter fails and mpv drops the item's audio
-        // altogether (owner 2026-11-06: a target of 0 silenced every video), so a stored target out of range is clamped.
-        targetLufs = Math.Clamp(double.IsFinite(targetLufs) ? targetLufs : -14, -70, -5);
-        return "loudnorm=I=" + targetLufs.ToString(inv) + ":TP=-1.5:LRA=11" +
-               ":measured_I=" + v.I.ToString(inv) + ":measured_TP=" + v.TP.ToString(inv) +
-               ":measured_LRA=" + v.LRA.ToString(inv) + ":measured_thresh=" + v.Thresh.ToString(inv) + ":linear=true";
+        if (m == null || !double.IsFinite(m.Value.I)) return null;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        targetLufs = Math.Clamp(double.IsFinite(targetLufs) ? targetLufs : -14, -70, 0);
+        var gainDb = targetLufs - m.Value.I;
+        if (double.IsFinite(m.Value.TP)) gainDb = Math.Min(gainDb, PeakCeilingDb - m.Value.TP); // boost only into headroom
+        return "lavfi=[volume=" + Math.Round(gainDb, 2).ToString(inv) + "dB]";
     }
+    // the highest a boosted item's true peak may go (dBTP) — Spotify's 1 dB headroom
+    private const double PeakCeilingDb = -1.0;
 
     // ---- a WE scene's loudness, per audio configuration: estimated offline, learned live (liascape-player) ----
     // LibMeta.SceneLoudness[fingerprint] = {estimate, live} (library.md § Loudness). The fingerprint is the offline
