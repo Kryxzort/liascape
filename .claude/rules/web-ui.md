@@ -804,7 +804,10 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   Tab order: account → password → Cancel → Sign in. Look: `.pw-modal` (the playlist modals' `--tr-strong` panel), the key icon
   with an accent drop-shadow (`no-glow` → none).
 - **A download waiting on the Steam app**: WS `download-progress.status` → the store's `downloadStatus[pageUrl]` → the Browse
-  sidebar's progress line (`[data-side-download-status]`, instead of "Downloading…") and the status bar (untimed — it waits on
+  card's label in short words (`Card.tsx` `shortDownloadStatus`, `[data-dl-label]`: "Click Subscribe in Steam" / "Steam is
+  downloading…" / "Steam is finishing…" / "Subscribing…" / "Waiting for Steam…"; its own store selector) over an indeterminate
+  sweep (`.dl-bar.indet`, `dl-indet`, transform only; `no-motion` → a still faint fill) whenever no percent is known, the
+  sidebar's progress line (`[data-side-download-status]`, the whole sentence) and the status bar (untimed — it waits on
   the user; replaced by the next status / the end). A late `download-progress` for a download that already ended is dropped
   (`setDownload` — it used to re-add a stuck progress row). The no-sign-in unsubscribe's `unsub-progress.message` → the status
   bar (untimed).
@@ -812,7 +815,7 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   `/steam/*`, `/browse`, `/download` and wraps the page's WebSocket to push fake events — no Steam anywhere):
   `steam:row:signedOut|rejected|signedIn|steamcmd`, `steam:modal:email|device|confirm|error|cancel|keys` (real typing; the
   password checked absent from the DOM, input values, storage, console, every other request body, WS sends, the status bar),
-  `steam:dlStatus`; shots `steam-*.png`. Backend side: `scripts/test-steam-signin.sh`.
+  `steam:dlStatus` (+ the card's label + sweep per phase); shots `steam-*.png`. Backend side: `scripts/test-steam-signin.sh`.
 
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).

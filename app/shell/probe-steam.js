@@ -23,7 +23,8 @@
 //   steam:modal:cancel    Escape on a code step → closed + POST /steam/login/cancel; a click outside doesn't close it; Cancel
 //   steam:modal:keys      Tab order account → password → Cancel → Sign in; nothing in the modal has a title (tooltip)
 //   steam:dlStatus        a Workshop download from the Browse sidebar while the backend waits on the Steam app: the sidebar and the
-//                         status bar show download-progress's status ("…click Subscribe in Steam…"); Cancel aborts the request
+//                         status bar show download-progress's status ("…click Subscribe in Steam…"); the card the step in short
+//                         words over a sweeping bar (each phase); Cancel aborts the request
 // Screenshots: <LIASCAPE_OUT>/steam-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -352,6 +353,18 @@ app.whenReady().then(async () => {
       console.log(`        ${J(r)}`);
       if (r.side !== STATUS) v.push(`the sidebar says "${r.side}"`);
       if (!(r.bar ?? "").includes("click Subscribe in Steam")) v.push(`the status bar says "${r.bar}"`);
+      // owner 2026-11-11 (a 458 MB item: "Downloading…" over an empty bar for a minute, like a hang): the CARD says the step in
+      // short words, over a sweeping (indeterminate) bar — each phase the backend reports, in order
+      const card = (sel) => page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
+        const l = c?.querySelector("[data-dl-label]"), bar = c?.querySelector(".dl-bar"), f = bar?.querySelector(".dl-fill");
+        return { label: l?.textContent ?? null, indet: !!bar?.classList.contains("indet"), anim: f ? getComputedStyle(f).animationName : null };`);
+      for (const [status, want] of [[STATUS, "Click Subscribe in Steam"], ["Steam is downloading it…", "Steam is downloading…"], ["Steam is finishing…", "Steam is finishing…"]]) {
+        await ev("download-progress", { id: dl.result.pageUrl, value: 0, status }); await sleep(250);
+        const c = await card();
+        console.log(`        card: ${J(c)}`);
+        if (c.label !== want) v.push(`for "${status}" the card says "${c.label}" (expected "${want}")`);
+        if (!c.indet || c.anim !== "dl-indet") v.push(`for "${status}" the card's bar isn't sweeping (indet ${c.indet}, animation ${c.anim})`);
+      }
       await shot("dl-status");
       await page(`[...document.querySelectorAll("[data-side-download] button")].find((b) => /Cancel/.test(b.textContent))?.click();`); await sleep(400);
       if (!(await js(`window.__st.dl.aborted`))) v.push("Cancel didn't abort the download request");

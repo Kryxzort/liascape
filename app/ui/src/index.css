@@ -292,6 +292,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .dl-label { font-size: 12px; font-weight: 600; }
 .dl-bar { width: 72%; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); overflow: hidden; }
 .dl-fill { height: 100%; background: var(--accent); box-shadow: var(--glow-sm); transition: width .2s; }
+/* COOL: no percent known (a Steam-app download: phases only) → a short accent segment sweeping across, transform only */
+.dl-bar.indet .dl-fill { width: 34%; animation: dl-indet 1.15s cubic-bezier(.45,0,.55,1) infinite; }
+@keyframes dl-indet { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+:root.no-motion .dl-bar.indet .dl-fill { animation: none; width: 100%; opacity: .45; }
 .dl-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 6px; color: #fff;
   font-size: 13px; display: grid; place-items: center; }
 .dl-x:hover { background: rgba(255,255,255,.15); }

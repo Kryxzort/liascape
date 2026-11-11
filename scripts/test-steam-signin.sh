@@ -111,8 +111,15 @@ async function viaSteam(id, why, label) {
   await sleep(300);
   const st = (status[pageUrl(id)] ?? []).join(" | ");
   out(st.includes(why) && st.includes("click Subscribe"), `${label}: download-progress says why + "click Subscribe"`, st);
-  drop(id);
+  // Steam's staging folder (<workshop>/downloads/431960/<id>; this test's content root is $T/ws/431960 → <workshop> = $T): the
+  // card's "Steam is downloading…" phase, then "Steam is finishing…" once the files are in but not yet steady
+  const stage = `${T}/downloads/431960/${id}`; fs.mkdirSync(stage, { recursive: true });
+  await sleep(900);
+  drop(id); fs.rmSync(stage, { recursive: true });
   const r = await Promise.race([p, sleep(20000).then(() => null)]);
+  const phases = (status[pageUrl(id)] ?? []);
+  const iD = phases.indexOf("Steam is downloading it…"), iF = phases.indexOf("Steam is finishing…");
+  out(iD >= 0 && iF > iD, `${label}: the phases "Steam is downloading it…" then "Steam is finishing…"`, phases.join(" | "));
   const body = r ? await r.json() : null;
   out(r?.status === 200 && body?.workshopId === id, `${label}: once Steam has it, the download finishes into the library`, r ? `${r.status} ${JSON.stringify(body).slice(0, 160)}` : "timed out");
   out(await inLib(id), `${label}: /library has it`);

@@ -101,19 +101,27 @@ public static class WorkshopDownloader
         // ~/.local/share/Steam/…/content/431960 a symlink to another library's — both paths polled), and one shared
         // "last" slot then alternated between them every poll, so the size never matched twice → a 10-min hang
         var lastSize = new System.Collections.Generic.Dictionary<string, long>(StringComparer.Ordinal);
+        // the step the card shows (owner 2026-11-11: a 458 MB item said "Downloading…" for a minute with nothing moving —
+        // the same look as a hang). Phases only, no percent: Steam may reserve a staged file's full size before writing it.
+        string? shown = null;
+        void Phase(string s) { if (s != shown) { shown = s; progress?.Report((-1, s)); } }
         while (waited < maxWaitMs)
         {
             ct.ThrowIfCancellationRequested();
+            bool arrived = false;
             foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
             {
                 var media = TryGetMediaPath(dir);
                 if (media == null) continue;
+                arrived = true;
                 long size = SafeLen(media);
                 // only accept once the media file has stopped growing (size stable across two polls)
                 // AND is non-empty — guards against importing a still-downloading partial file.
                 if (size > 0 && lastSize.TryGetValue(media, out var prev) && prev == size) return dir;
                 lastSize[media] = size;
             }
+            if (arrived) Phase(SteamFinishing);
+            else if (SteamStaging(settings.WorkshopFolder, workshopId)) Phase(SteamDownloading);
             await Task.Delay(pollMs, ct);
             waited += pollMs;
         }
@@ -122,6 +130,23 @@ public static class WorkshopDownloader
             ? $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. Make sure Steam is running and signed in."
             : $"Steam didn't download {workshopId} within 10 minutes. Click Subscribe on the page Steam opened (Steam has to be " +
               "running and signed in), then download it again — or sign in under Settings → Getting Workshop wallpapers.");
+    }
+
+    public const string SteamDownloading = "Steam is downloading it…";
+    public const string SteamFinishing = "Steam is finishing…";
+
+    // Is Steam downloading this item now? It stages a Workshop download in <library>/steamapps/workshop/downloads/431960/<id>
+    // and moves it to content/431960/<id> at the end (Steam's content_log: "starting commit from …downloads/431960 to
+    // …content/431960"). Each content root's sibling — a symlinked root's textual parent may not exist, the real library's does.
+    private static bool SteamStaging(string workshopBasePath, string workshopId)
+    {
+        foreach (var root in WorkshopContentRoots(workshopBasePath))
+        {
+            var content = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(root)); // …/workshop/content
+            var workshop = content == null ? null : Path.GetDirectoryName(content);       // …/workshop
+            if (workshop != null && Directory.Exists(Path.Combine(workshop, "downloads", "431960", workshopId))) return true;
+        }
+        return false;
     }
 
     // The poll interval (3 s); LIASCAPE_WORKSHOP_POLL_MS shortens it for the hermetic test.

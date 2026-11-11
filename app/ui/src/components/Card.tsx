@@ -1,6 +1,20 @@
 import { memo, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
+import { useStore } from "../store";
+
+// The card's short words for a Workshop download's step (WS download-progress `status`, the store's downloadStatus — the
+// sidebar shows the whole sentence). Owner 2026-11-11: a 458 MB item said "Downloading…" over an empty bar for a minute,
+// the same look as a hang — the card now says whose turn it is.
+export function shortDownloadStatus(status: string | undefined): string {
+  if (!status) return "Downloading…";
+  if (status.includes("click Subscribe")) return "Click Subscribe in Steam";
+  if (status.startsWith("Steam is downloading")) return "Steam is downloading…";
+  if (status.startsWith("Steam is finishing")) return "Steam is finishing…";
+  if (status.startsWith("Subscribing")) return "Subscribing…";
+  if (status.includes("waiting for Steam")) return "Waiting for Steam…";
+  return "Downloading…";
+}
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (WE-style sidebar, 2026-11-10): click / right-click → focus (the Browse sidebar shows it:
@@ -27,6 +41,7 @@ export const Card = memo(function Card({
   const staticSrc = remoteAnim ? still(w.animatedThumbnailUrl!, CARD_STILL_W) : thumb(w.thumbnailUrl);
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
   const downloading = progress !== undefined;
+  const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]); // PERF: this card's own slice
   return (
     <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}`}>
       <div className="thumb-wrap" data-morph-id={`br-${w.pageUrl}`}
@@ -62,8 +77,9 @@ export const Card = memo(function Card({
         )}
         {downloading && (
           <div className="dl-overlay">
-            <span className="dl-label">{progress! > 0 ? `${Math.round(progress! * 100)}%` : "Downloading…"}</span>
-            <div className="dl-bar"><div className="dl-fill" style={{ width: `${Math.round((progress || 0) * 100)}%` }} /></div>
+            <span className="dl-label" data-dl-label>{progress! > 0 ? `${Math.round(progress! * 100)}%` : shortDownloadStatus(dlStatus)}</span>
+            {/* no percent → an indeterminate sweep, so a long wait never looks frozen */}
+            <div className={`dl-bar${progress! > 0 ? "" : " indet"}`}><div className="dl-fill" style={progress! > 0 ? { width: `${Math.round(progress! * 100)}%` } : undefined} /></div>
             <button className="dl-x" aria-label="Cancel the download" onClick={(e) => { e.stopPropagation(); onCancel(w); }}><X size={14} /></button>
           </div>
         )}
