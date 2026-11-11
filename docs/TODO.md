@@ -19,7 +19,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        12 px padding goes so the preview fills the panel width; one option → no strip; hover-grow, playing ring and
        YouTube unchanged; the strip a little shorter than today's pills; the whole unit grows on hover. Probe cells
        for the joined look × glow / motion, both window sizes.
-4. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
+4. [ ] **Panels reflow the grid, never resize its cards**: `useGridFit` keeps the visible COUNT constant, so the item
+       sidebar (300–400 px) shrinks every card (measured live at 1920 px: 9 × 197 px → 8 × 173 px, −12 %) while the
+       240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
+       panel open pick the column count whose card width is closest to it (≈ ±4 %, no edge gap). Same for both panels.
+       Probe: card width with / without each panel within 5 %, at 1920 and 1100 px.
+5. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
        k1, so its own "proved nothing" guard fires. Make the first pick deterministic (seed the program's shuffle, or start
        the session on k3 before the rounds) so it always proves something.
 
