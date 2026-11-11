@@ -155,6 +155,12 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Make the UI itself a work of art — 2026-11-12
+The goal is an interface people would open just to interact with. Every control is designed, not defaulted: motion has
+physics (springs, overshoot that settles), icons act out their meaning, the cursor gets a response before the click, and
+nothing is the browser's stock look. "Correct and consistent" is the floor, not the bar. Every effect still follows the
+motion / glow / translucency toggles and the frame budget (`.claude/rules/testing.md`). Checklist: `.claude/rules/ui/design.md`.
+
 ### Show tooltips only for what can't be seen — 2026-11-11
 Owner: "the tooltips everywhere is really annoying and redundant, not everything needs a tooltip".
 `.claude/rules/ui/design.md` § Interaction rules.

@@ -43,6 +43,18 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under the glow toggle, no fade under motion off. After a box it's an ordinary selection: Ctrl+click adds / removes
        a card, Shift+click ranges from the box's first card in reading order (the new anchor). Probe cells: box-select →
        a bulk action, box then Ctrl+click add + remove, box then Shift+click, Ctrl+drag, Escape, auto-scroll.
+7. [ ] **One segmented control with the tabs' sliding pill**: the settings complexity switch (`.seg`/`.segbtn`), the
+       sidebar preview switch and any future one share a component whose highlight glides like `.tab-pill` (jumps
+       under motion off). Probe: the pill moves on transform, both motion states.
+8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
+       (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
+       `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.
+9. [ ] **Icon motion vocabulary** (docs/decisions.md § "Make the UI itself a work of art"): write a short design spec
+       (docs/superpowers/specs/) going past "motion by role" — spring physics, a magnetic lean toward an approaching
+       cursor, icons acting out their meaning (download drops into a tray, trash lid lifts, external-link arrow slides
+       out and back, play/pause morph, refresh spins with inertia), springy press feedback; status icons glow only; only
+       progress loops; all off under motion off. Write the vocabulary into `.claude/rules/ui/design.md`, apply it to
+       every icon, probe cells per role. Owner reviews by eye (night notes).
 
 
 ## On a real desktop session (not hermetic)
