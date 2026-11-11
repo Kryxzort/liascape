@@ -205,7 +205,17 @@ function gridCells(cell, G) {
     await drag(a, b);
     if (!same(await sel(), want)) return [`the box selected ${fmt(await sel(), g)}, want ${fmt(want, g)}`];
     const extra = g.cards[2 * g.cols + 4].id, drop = g.cards[2].id;
-    const at = async (id) => mid((await geo()).cards.find((c) => c.id === id)); // the sidebar re-fits the grid after a click
+    // the card's centre, scrolled into view first: the first click docks the sidebar, the grid re-fits its columns and
+    // keepCardInView (hooks/gridKeys.ts) holds the clicked card under the pointer — which can scroll row 0 above the
+    // container. A press there lands on the top bar and toggles nothing, so the point must hit the card itself.
+    const at = async (id) => {
+      const p = await page(`const c = m.cards().find((x) => x.firstElementChild.dataset.morphId === ${J(id)}); if (!c) return null;
+        c.scrollIntoView({ block: "nearest" }); await m.sleep(400);
+        const r = c.getBoundingClientRect(), x = Math.round((r.left + r.right) / 2), y = Math.round((r.top + r.bottom) / 2);
+        return { x, y, hit: c.contains(document.elementFromPoint(x, y)) };`);
+      if (!p?.hit) throw new Error(`card ${fmt([id], g)} can't be clicked (${J(p)}): the Ctrl+click would prove nothing`);
+      return p;
+    };
     await press(await at(extra), { ctrl: true });
     const s1 = await sel(), w1 = [...want, extra];
     if (!same(s1, w1)) v.push(`Ctrl+click on card ${2 * g.cols + 4} after the box: ${fmt(s1, g)}, want ${fmt(w1, g)}`);
