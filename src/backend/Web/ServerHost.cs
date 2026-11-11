@@ -136,6 +136,7 @@ public static class ServerHost
             // every scene without an offline loudness estimate for its current configuration (new since the last run,
             // incomplete then, or a run cancelled / cut short by a restart) — one nice'd child at a time
             SceneLoudnessOps.AfterImport("startup");
+            TrailerOps.Kick("startup"); // the library's Workshop items without a cached YouTube trailer answer
         });
 
         // While the app is open, measure any un-measured library audio in the background so loudness
@@ -502,6 +503,7 @@ public static class ServerHost
             var added = LibraryService.SyncWallpaperEngine(s.WorkshopFolder, s.AllowScenes, s.CopyFilesInsteadOfSymlinking);
             EventBus.Broadcast("library-synced", new { count = added.Count });
             SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
+            TrailerOps.Kick("sync");
             return Results.Json(new { added });
         });
         // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; web-backend.md § Scene loudness):

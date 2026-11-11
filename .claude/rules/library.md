@@ -36,7 +36,7 @@ One `index.json` per source folder, keyed by `<key>` (`<id>` for workshop/local,
 ```
 SourceUrl, Title, IsScene, WorkshopId, Volume?, Speed?, LoudnessI/TP/LRA/Thresh?, LoudnessSkip?,
 SceneLoudness? {<fingerprint>: {estimate?, live?}}, SceneLoudnessFp?, Crashed, Whitelist, SceneProps?,
-Resolution, AgeRating, YoutubeUrl, PageUrl, AuthorName, Description,
+Resolution, AgeRating, YoutubeUrl, TrailerCheckedAt?, PageUrl, AuthorName, Description,
 FileSizeBytes?, Subscriptions?, Favorites?, Views?, Tags[]
 ```
 
@@ -89,6 +89,19 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
   next play only (player-adapter.md § Scenes → "Loudness" → "Set once per play"). No
   estimate (not estimable / failed) = learn on first play as before (unity until the window lands). The flat `loudnessState/Seconds/Partial` of
   before were moved by a one-off script (no migration code). Legacy LWE scenes: not normalized.
+
+## YouTube trailers (`youtubeUrl` + `trailerCheckedAt` — `Web/TrailerOps.cs`)
+
+A trailer is part of the Workshop LISTING, not the downloaded files (`project.json` has no field for it): a download
+from the app's Workshop browser stores it, but items auto-imported from WE subscriptions never had one (owner
+2026-11-11). Wallpaper Engine gets it from the Steam client's UGC API (an item's additional previews); this app reads
+the item's public Workshop page (`SteamWorkshopScraper.CheckYoutubeAsync`: `YOUTUBE_VIDEO_ID`). **Cached per item**:
+found → `youtubeUrl` (never looked up again); page read, none → `trailerCheckedAt` (unix s; re-checked after 30 days);
+couldn't check (no connection, an error page) → nothing stored, retried next start — never "can't tell" saved as "none"
+(WE's own offline-mode bug). Steam rate-limits page reads (429 after ~100+ quick ones): back off 1 min doubling (×5) and
+retry the same item; 3 real failures in a row = offline → stop. One page per 1.5 s, single-flight; run after the
+startup WE sync and `/library/sync`; each find → WS `library-item-changed {path, youtubeUrl}`. The sidebar's preview
+switch offers YouTube only while online (`useOnline`).
 
 ## Scene properties (a WE scene's own options — `Helpers/SceneProperties.cs`)
 

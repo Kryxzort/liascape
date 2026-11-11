@@ -46,6 +46,9 @@ public sealed class LibMeta
     public string? Resolution { get; set; }
     public string? AgeRating { get; set; }
     public string? YoutubeUrl { get; set; }
+    // Unix seconds the item's Steam page was last READ and showed no trailer (Web/TrailerOps — re-checked after 30 days, an
+    // author may add one); absent = never checked, or every check so far failed (offline …) → tried again next start.
+    public long? TrailerCheckedAt { get; set; }
     public string? PageUrl { get; set; }
     public string? AuthorName { get; set; }
     public string? Description { get; set; }

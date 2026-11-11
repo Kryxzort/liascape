@@ -17,22 +17,39 @@ public static class SteamWorkshopScraper
     private static readonly Regex _resolutionRegex = new(@"^\d+ x \d+$", RegexOptions.Compiled);
     private static readonly Regex _youtubeRegex = new(@"YOUTUBE_VIDEO_ID:\s*""([A-Za-z0-9_-]{11})""", RegexOptions.Compiled);
 
-    // Returns the YouTube trailer URL for a workshop item if its Steam page has one, else null.
-    // The item page exposes it as a JS var `YOUTUBE_VIDEO_ID: "<id>"`.
-    public static async Task<string?> GetYoutubeUrlAsync(string workshopId)
+    // Returns the YouTube trailer URL for a workshop item if its Steam page has one, else null (also when the page
+    // couldn't be read). The item page exposes it as a JS var `YOUTUBE_VIDEO_ID: "<id>"`.
+    public static async Task<string?> GetYoutubeUrlAsync(string workshopId) => (await TryGetYoutubeUrlAsync(workshopId).ConfigureAwait(false)).Url;
+
+    public enum PageCheck { Ok, Failed, RateLimited }
+
+    // The same, telling "checked: no trailer" (Ok, Url null) from "couldn't check" (!Ok — offline, Steam down, an error
+    // page, a removed item): the trailer cache (Web/TrailerOps) stores the first and retries the second. `Ok` needs the
+    // page to BE an item page (its title block), not just a 200 — Steam answers some errors with a 200 page. `RateLimited`
+    // = Steam's 429 (it limits page reads: ~100+ quick reads in a row trip it) — wait and retry, it isn't "offline".
+    public static async Task<(bool Ok, string? Url)> TryGetYoutubeUrlAsync(string workshopId)
+    {
+        var (r, url) = await CheckYoutubeAsync(workshopId).ConfigureAwait(false);
+        return (r == PageCheck.Ok, url);
+    }
+
+    public static async Task<(PageCheck Result, string? Url)> CheckYoutubeAsync(string workshopId)
     {
         try
         {
             using var req = new HttpRequestMessage(
                 HttpMethod.Get, $"https://steamcommunity.com/sharedfiles/filedetails/?id={workshopId}");
             req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-            using var resp = await HttpClientProvider.Client.SendAsync(req).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode) return null;
-            var html = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var resp = await HttpClientProvider.Client.SendAsync(req, cts.Token).ConfigureAwait(false);
+            if ((int)resp.StatusCode == 429) return (PageCheck.RateLimited, null);
+            if (!resp.IsSuccessStatusCode) return (PageCheck.Failed, null);
+            var html = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            if (!html.Contains("workshopItemTitle")) return (PageCheck.Failed, null);
             var m = _youtubeRegex.Match(html);
-            return m.Success ? $"https://www.youtube.com/watch?v={m.Groups[1].Value}" : null;
+            return (PageCheck.Ok, m.Success ? $"https://www.youtube.com/watch?v={m.Groups[1].Value}" : null);
         }
-        catch { return null; }
+        catch { return (PageCheck.Failed, null); }
     }
 
     public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, string? query, int page, bool allowScenes)
