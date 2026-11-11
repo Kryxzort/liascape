@@ -56,7 +56,9 @@ public static class ServerHost
         builder.Services.AddCors(); // loopback-only; lets `vite dev` (other port) talk to us
         var app = builder.Build();
 
-        app.UseCors(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+        // STOPGAP (2026-11-11, until the local-API hardening lands): any website could read this API's answers (AllowAnyOrigin —
+        // /settings carried the Steam sign-in token). Only the dev UI's origin (Vite :5173) may now; production is same-origin.
+        app.UseCors(p => p.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173").AllowAnyHeader().AllowAnyMethod());
         // An endpoint that THROWS must still answer as itself (owner 2026-11-11: a Workshop download showed only "Download failed:
         // Failed to fetch"). Unhandled, Kestrel answered a bare 500 with the response's headers reset — CORS's
         // Access-Control-Allow-Origin included — so a UI on another origin (Vite :5173 in dev) got a network error instead of the
