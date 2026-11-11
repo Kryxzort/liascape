@@ -8,25 +8,30 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [ ] **UI performance, in progress** (two agents): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-2. [ ] **Smooth scrolling actually on**: `useSmoothScroll` binds once at mount, but the Library (and Browse while its
+2. [ ] **Playlist-bar items as tall as the squares at every shape**: `.pl-item` is `width: 112px; aspect-ratio:
+       var(--thumb-aspect)`, so Widescreen items are 112 × 63 (small) and the bar's height changes with the shape. Fix the
+       height at 112 px and let the width follow the shape (Square 112 × 112, Widescreen ≈ 199 × 112). `useDockLift`'s
+       bell is tuned to a 122 px pitch (SIGMA 104, PUSH, REACH): derive them from the measured pitch so the dock feels
+       the same at both shapes. Probe-plbar bounce/sweep cells at both shapes; the bar's height equal at both.
+3. [ ] **Smooth scrolling actually on**: `useSmoothScroll` binds once at mount, but the Library (and Browse while its
        first page loads) renders a placeholder first, so the wheel listener never attaches (0 listeners on `.lib-scroll`
        live). Make it follow the element (callback ref / element in state); with motion off or reduced motion scroll
        natively; pass touchpad (fine pixel) scrolling through natively, glide only notched wheels. Guard: a probe cell
        that boots into the Library and checks the wheel glides — red on today's code first.
-3. [ ] **Sidebar preview strip**: the image / video / YouTube switcher becomes a flat strip fused to the preview's top
+4. [ ] **Sidebar preview strip**: the image / video / YouTube switcher becomes a flat strip fused to the preview's top
        edge (one shape: rounded strip top, rounded picture bottom, no gap), equal-width options, the picked one
        accent-filled (slides on switch; jumps with motion off); glow wraps the unit (off with glow off); the stage's
        12 px padding goes so the preview fills the panel width; one option → no strip; hover-grow, playing ring and
        YouTube unchanged; the strip a little shorter than today's pills; the whole unit grows on hover. Probe cells
        for the joined look × glow / motion, both window sizes.
-4. [ ] **Panels reflow the grid, never resize its cards**: `useGridFit` keeps the visible COUNT constant, so the item
+5. [ ] **Panels reflow the grid, never resize its cards**: `useGridFit` keeps the visible COUNT constant, so the item
        sidebar (300–400 px) shrinks every card (measured live at 1920 px: 9 × 197 px → 8 × 173 px, −12 %) while the
        240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
        panel open pick the column count whose card width is closest to it (≈ ±4 %, no edge gap). Same for both panels.
        Probe: card width with / without each panel within 5 %, at 1920 and 1100 px. Same pass: the grid's pre-settings
        fallback is 16:9 (`useGridFit` `?? "16:9"`, `App.tsx`'s aspect map) while every real default is 1:1 (backend,
        store, Settings) — a Square user likely gets a 16:9 fit, then a refit, at launch; make the fallbacks 1:1.
-5. [ ] **Box (marquee) selection in Library and Browse**: a drag that starts on empty grid space draws a rectangle and
+6. [ ] **Box (marquee) selection in Library and Browse**: a drag that starts on empty grid space draws a rectangle and
        selects the cards it touches — the SAME selection Ctrl/Shift-click build, so every bulk action applies unchanged.
        Plain drag replaces, Ctrl+drag adds, Escape cancels (restores the previous selection); cards light up live (the
        existing selected look); auto-scroll near the top / bottom edge; a drag under ~4 px is a click (clears as today);
@@ -34,7 +39,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under the glow toggle, no fade under motion off. After a box it's an ordinary selection: Ctrl+click adds / removes
        a card, Shift+click ranges from the box's first card in reading order (the new anchor). Probe cells: box-select →
        a bulk action, box then Ctrl+click add + remove, box then Shift+click, Ctrl+drag, Escape, auto-scroll.
-6. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
+7. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
        k1, so its own "proved nothing" guard fires. Make the first pick deterministic (seed the program's shuffle, or start
        the session on k3 before the rounds) so it always proves something.
 
