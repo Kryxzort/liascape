@@ -402,9 +402,9 @@ export const Settings = memo(function Settings() {
           <Select value={g("cardSize", "Medium")} onChange={(v) => set("cardSize", v)}
             options={["Small", "Medium", "Large"].map((x) => ({ value: x, label: x }))} />
         </Row>
-        <Row label="Card shape" rk="thumbnailAspect">
+        <Row label="Thumbnail shape" rk="thumbnailAspect">
           <Select value={g("thumbnailAspect", "1:1")} onChange={(v) => set("thumbnailAspect", v)}
-            options={[{ value: "1:1", label: "Square" }, { value: "16:9", label: "Widescreen" }]} />
+            options={[{ value: "1:1", label: "Square (1:1)" }, { value: "16:9", label: "Widescreen (16:9)" }]} />
         </Row>
         <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things — off keeps everything readable, just without the glow" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
         <Row label="Smooth window animations" hint="cards morph into their settings window — off simply fades it in" rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>

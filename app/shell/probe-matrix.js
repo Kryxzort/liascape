@@ -1819,7 +1819,7 @@ function untouched(c) {
 }
 const APPEAR = {
   "appear:theme": { states: ["idle", "single", "effect", "pending", "paused", "pausedEffect", "muted"], drive: (c) => `await m.select("Theme", ${JSON.stringify(c.theme)});`, saved: (c) => c.after.s.theme === c.theme },
-  "appear:aspect": { drive: () => `await m.select("Card shape", "Widescreen");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
+  "appear:aspect": { drive: () => `await m.select("Thumbnail shape", "Widescreen (16:9)");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
   "appear:gifs": { drive: () => `m.setCheck(m.input("Animate GIF previews"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
   "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Wallpaper behind every tab"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
