@@ -97,7 +97,10 @@ public static class WorkshopDownloader
         const int maxWaitMs = 600_000;
         int pollMs = PollMs;
         int waited = 0;
-        string? lastMedia = null; long lastSize = -1;
+        // the last size seen PER media path: the roots can name one folder twice (owner 2026-11-11: Steam's
+        // ~/.local/share/Steam/…/content/431960 a symlink to another library's — both paths polled), and one shared
+        // "last" slot then alternated between them every poll, so the size never matched twice → a 10-min hang
+        var lastSize = new System.Collections.Generic.Dictionary<string, long>(StringComparer.Ordinal);
         while (waited < maxWaitMs)
         {
             ct.ThrowIfCancellationRequested();
@@ -108,8 +111,8 @@ public static class WorkshopDownloader
                 long size = SafeLen(media);
                 // only accept once the media file has stopped growing (size stable across two polls)
                 // AND is non-empty — guards against importing a still-downloading partial file.
-                if (size > 0 && media == lastMedia && size == lastSize) return dir;
-                lastMedia = media; lastSize = size;
+                if (size > 0 && lastSize.TryGetValue(media, out var prev) && prev == size) return dir;
+                lastSize[media] = size;
             }
             await Task.Delay(pollMs, ct);
             waited += pollMs;

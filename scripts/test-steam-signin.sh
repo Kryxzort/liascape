@@ -144,6 +144,13 @@ for (let i = 0; i < 50 && urls().length === n0; i++) await sleep(100);
 ac.abort(); await p; await sleep(800);
 drop("700000004"); await sleep(1500);
 out(urls().length === n0 + 1 && !(await inLib("700000004")), "cancelled: its page had opened, nothing imported after Steam delivers");
+
+// owner 2026-11-11 (a download "Downloading…" forever): Steam's own Workshop folder a SYMLINK to another library's — the
+// standard ~/.local/share/Steam root and the WE folder setting name one folder, both polled; one shared "last size" slot
+// alternated between the two paths and never matched twice. Now: per path.
+const std = `${process.env.HOME}/.local/share/Steam/steamapps/workshop/content`;
+fs.mkdirSync(std, { recursive: true }); fs.symlinkSync(`${T}/ws/431960`, `${std}/431960`);
+await viaSteam("700000005", "Steam signed this app out", "Workshop folder reached through a symlink");
 ws.close();
 EOF
 (cd "$T" && U=$U T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 120 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
