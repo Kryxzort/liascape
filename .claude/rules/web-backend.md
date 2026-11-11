@@ -213,6 +213,12 @@ that locked the owner's browser out. It now asks Steam's CM servers the way the 
   (60 read → 36 kept for `[Everyone, Questionable, Video] −Girls`).
 
 ## Rules
+- **A throwing endpoint still answers** (`ServerHost` middleware right after `UseCors`; owner 2026-11-11: a Workshop download
+  showed only "Download failed: Failed to fetch"): unhandled, Kestrel sent a bare 500 with the headers reset — CORS's
+  `Access-Control-Allow-Origin` too — so the dev UI (Vite :5173, another origin) saw a network error, and with the loggers
+  cleared nothing was written. Now: `error: <METHOD> <path>: <Type>: <message>` on stdout, and a JSON `{error}` 500
+  (`SteamCooldownException` → 429) over the same response, which `jpost` shows word for word. A request the page abandoned
+  (`OperationCanceledException` + `RequestAborted`) is dropped quietly. Check with `curl -i -H 'Origin: http://localhost:5173'`.
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.
 - `SettingsService.Load()` per request (no cached singleton) — daemons may have changed the file.
 - Never bind a whole `AppSettings` from a request body — a partial body resets what it leaves out.

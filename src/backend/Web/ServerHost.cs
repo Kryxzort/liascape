@@ -57,6 +57,23 @@ public static class ServerHost
         var app = builder.Build();
 
         app.UseCors(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+        // An endpoint that THROWS must still answer as itself (owner 2026-11-11: a Workshop download showed only "Download failed:
+        // Failed to fetch"). Unhandled, Kestrel answered a bare 500 with the response's headers reset — CORS's
+        // Access-Control-Allow-Origin included — so a UI on another origin (Vite :5173 in dev) got a network error instead of the
+        // reason, and with the loggers cleared above nothing was written anywhere. Here: logged, and a JSON {error} 500 written
+        // over the same response (the CORS header stays), which the UI shows word for word (api/client.ts jpost).
+        app.Use(async (ctx, next) =>
+        {
+            try { await next(ctx); }
+            catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) { /* the page went away */ }
+            catch (Exception e)
+            {
+                Console.WriteLine($"error: {ctx.Request.Method} {ctx.Request.Path}: {e.GetType().Name}: {e.Message}");
+                if (ctx.Response.HasStarted) return;
+                ctx.Response.StatusCode = e is SteamCooldownException ? 429 : 500;
+                await ctx.Response.WriteAsJsonAsync(new { error = e.Message });
+            }
+        });
         app.UseWebSockets();
         EventBus.WirePlayer();
 
