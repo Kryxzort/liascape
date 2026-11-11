@@ -8,12 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-4. [ ] **Sidebar preview strip**: the image / video / YouTube switcher becomes a flat strip fused to the preview's top
-       edge (one shape: rounded strip top, rounded picture bottom, no gap), equal-width options, the picked one
-       accent-filled (slides on switch; jumps with motion off); glow wraps the unit (off with glow off); the stage's
-       12 px padding goes so the preview fills the panel width; one option → no strip; hover-grow, playing ring and
-       YouTube unchanged; the strip a little shorter than today's pills; the whole unit grows on hover. Probe cells
-       for the joined look × glow / motion, both window sizes.
 5. [ ] **Panels reflow the grid, never resize its cards**: `useGridFit` keeps the visible COUNT constant, so the item
        sidebar (300–400 px) shrinks every card (measured live at 1920 px: 9 × 197 px → 8 × 173 px, −12 %) while the
        240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
@@ -30,9 +24,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under the glow toggle, no fade under motion off. After a box it's an ordinary selection: Ctrl+click adds / removes
        a card, Shift+click ranges from the box's first card in reading order (the new anchor). Probe cells: box-select →
        a bulk action, box then Ctrl+click add + remove, box then Shift+click, Ctrl+drag, Escape, auto-scroll.
-7. [ ] **One segmented control with the tabs' sliding pill**: the settings complexity switch (`.seg`/`.segbtn`), the
-       sidebar preview switch and any future one share a component whose highlight glides like `.tab-pill` (jumps
-       under motion off). Probe: the pill moves on transform, both motion states.
 8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
        (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
        `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.

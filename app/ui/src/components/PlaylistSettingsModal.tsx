@@ -7,6 +7,7 @@ import { TransitionPicker } from "./TransitionPicker";
 import { PlayTimeInput } from "./PlayTimeInput";
 import { ROT_HINT } from "./rotHint";
 import { WarnIcon } from "./FeatureWarn";
+import { Segmented } from "./Segmented";
 import { HealthCtx, useFeatureWarnings } from "./featureHealth";
 
 // Playlist Settings overlay. Centered modal:
@@ -45,10 +46,8 @@ export function PlaylistSettingsModal({
               <h2>Playlist Settings</h2>
 
               <div className="field-label">ORDER</div>
-              <div className="seg">
-                <button className={`segbtn${ps.order === 0 ? " on" : ""}`} onClick={() => setPS({ order: 0 })}>Sequential</button>
-                <button className={`segbtn${ps.order === 1 ? " on" : ""}`} onClick={() => setPS({ order: 1 })}>Shuffle</button>
-              </div>
+              <Segmented<0 | 1> fill label="Order" value={ps.order === 1 ? 1 : 0} onChange={(order) => setPS({ order })}
+                options={[{ value: 0, label: "Sequential" }, { value: 1, label: "Shuffle" }]} />
 
               <label className="ck"><input type="checkbox" checked={autoAdd} onChange={(e) => setAutoAdd(e.target.checked)} /> Auto-add newly added library items to playlist</label>
               <label className="ck"><input type="checkbox" checked={ovr} onChange={(e) => setPS({ overrideGlobalSettings: e.target.checked })} /> Override global rotation settings</label>
@@ -75,10 +74,9 @@ export function PlaylistSettingsModal({
                 </>}
 
                 <div className="field-label" title={ROT_HINT.startOver + " · " + ROT_HINT.startResume}>WHEN THE PLAYLIST STARTS AGAIN</div>
-                <div className="seg" data-playlist-start={start}>
-                  <button className={`segbtn${start === "start_over" ? " on" : ""}`} disabled={!ovr} onClick={() => setPS({ playlistStart: "start_over" })}>Start over</button>
-                  <button className={`segbtn${start === "resume" ? " on" : ""}`} disabled={!ovr} onClick={() => setPS({ playlistStart: "resume" })}>Resume where it left off</button>
-                </div>
+                <Segmented fill label="When the playlist starts again" disabled={!ovr} attrs={{ "data-playlist-start": start }}
+                  value={start} onChange={(playlistStart) => setPS({ playlistStart })}
+                  options={[{ value: "start_over", label: "Start over" }, { value: "resume", label: "Resume where it left off" }]} />
                 <div className="shint" data-playlist-start-hint>
                   {ovr ? (start === "resume" ? ROT_HINT.startResume : ROT_HINT.startOver) : `Global setting: ${startLabel(globalStart)}`}
                   {ovr ? ` · global: ${startLabel(globalStart)}` : ""}{playing ? ` · ${ROT_HINT.startLive}` : ""}

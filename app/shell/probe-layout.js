@@ -75,7 +75,7 @@ const PAGE = `window.__ly = {
   // the top bar's visible controls (what a user sees and clicks), leaves of its flex rows
   topbarParts() {
     const tb = document.querySelector(".topbar");
-    const parts = [...tb.querySelectorAll(".tab, .pill, .mini, .search, .sel, .btn, .status")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== "hidden"; });
+    const parts = [...tb.querySelectorAll(".tab, .pill, .seg, .mini, .search, .sel, .btn, .status")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== "hidden"; });
     return { tb: this.rect(tb), parts: parts.map((e) => ({ k: e.className.split(" ")[0] + (e.textContent ? ":" + e.textContent.trim().slice(0, 14) : ""), ...this.rect(e), clipped: e.scrollWidth > e.clientWidth + 1 && !e.classList.contains("status") })) };
   },
 }; true`;
@@ -386,6 +386,90 @@ app.whenReady().then(async () => {
     await cell("tabs:slide", () => slide("on"));
     await cell("tabs:slide:off", () => slide("off"));
     await cell("tabs:slide:reduced", () => slide("reduced"));
+    // ---- the segmented control (components/Segmented.tsx), on the Settings level picker in the top bar ----
+    // seg:glide: Basic → Expert, the highlight moves on transform through in-between frames (a spring: it passes the end a
+    // little and settles), lands centred on Expert at its width; :off / :reduced it jumps. Both window sizes.
+    const LV = (l) => `document.querySelector('[data-settings-level] [data-level="${l}"]')`;
+    const segGlide = async (mode, W, H) => {
+      await resize(W, H);
+      await setMotion(mode !== "off"); await reducedMotion(mode === "reduced"); await sleep(300);
+      await page(`${LV("basic")}?.click(); await m.sleep(800);`);
+      try { return await segGlideAt(mode, W, H); } finally { await page(`${LV("standard")}?.click(); await m.sleep(600);`); await reducedMotion(false); }
+    };
+    const segGlideAt = async (mode, W, H) => {
+      const r = await page(`const g = document.querySelector("[data-settings-level]"), hl = g?.querySelector(".seg-hl"); if (!hl) return null;
+        const X = () => new DOMMatrixReadOnly(getComputedStyle(hl).transform === "none" ? undefined : getComputedStyle(hl).transform).m41;
+        const x0 = X(); ${LV("expert")}.click(); const xs = [], props = new Set(); const t0 = performance.now();
+        await new Promise((res) => { const f = () => { xs.push(X());
+          for (const a of hl.getAnimations()) props.add(a.transitionProperty ?? Object.keys(a.effect?.getKeyframes?.()[0] ?? {}).join());
+          if (performance.now() - t0 < 800) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+        const on = g.querySelector('[aria-checked="true"]'), h = hl.getBoundingClientRect(), o = on.getBoundingClientRect();
+        return { x0, xs, props: [...props], on: on.dataset.level, dc: (h.x + h.width / 2) - (o.x + o.width / 2), dw: h.width - o.width,
+          inTopbar: !!g.closest(".topbar") };`);
+      const v = [];
+      if (!r) return ["no segmented level picker ([data-settings-level] .seg-hl)"];
+      const x1 = r.xs[r.xs.length - 1], peak = Math.max(...r.xs);
+      const n = r.xs.filter((x) => Math.abs(x - r.x0) > 1 && Math.abs(x - x1) > 1).length;
+      console.log(`        ${W}x${H} highlight ${r.x0.toFixed(1)} → ${x1.toFixed(1)} (peak ${peak.toFixed(1)}), ${n} frames between, animates [${r.props}]`);
+      if (!r.inTopbar) v.push("the level picker isn't in the top bar");
+      if (r.on !== "expert") v.push(`the checked option is ${r.on}, not expert`);
+      if (!(x1 > r.x0 + 30)) v.push(`the highlight didn't move to Expert (${r.x0} → ${x1})`);
+      if (Math.abs(r.dc) > 1 || Math.abs(r.dw) > 1) v.push(`the highlight landed ${r.dc.toFixed(2)} px off Expert's centre, ${r.dw.toFixed(2)} px off its width`);
+      if (mode === "on") {
+        if (n < 3) v.push(`the highlight jumped (${n} frames between)`);
+        if (!(peak > x1 + 0.5)) v.push(`no spring: the highlight never passes its end (peak ${peak.toFixed(2)}, end ${x1.toFixed(2)})`);
+        const bad = r.props.filter((p) => p && p !== "transform");
+        if (bad.length) v.push(`it animates ${bad.join(", ")} (transform only)`);
+      } else if (n) v.push(`${mode}: the highlight still glides (${n} frames between)`);
+      // a picture mid-glide (motion on): back to Basic, captured on the way
+      await page(`${LV("basic")}.click();`); await sleep(mode === "on" ? 120 : 30); await shot(`seg-${W}x${H}-${mode}-midglide`);
+      await sleep(700);
+      return v;
+    };
+    for (const [W, H] of [[1920, 1080], [1100, 700]]) {
+      await cell(`seg:glide:${W}x${H}`, () => segGlide("on", W, H));
+      await cell(`seg:jump:${W}x${H}`, () => segGlide("off", W, H));
+    }
+    await cell("seg:jump:reduced", () => segGlide("reduced", 1400, 900));
+    await setMotion(true); await resize(1400, 900);
+    // seg:keys: a radiogroup — only the checked option is a Tab stop; → / ← / End / Home move the choice and the focus (and
+    // the setting saves); the key never reaches anything else (default prevented)
+    await cell("seg:keys", async () => {
+      const v = [];
+      await tab("Settings"); await page(`${LV("standard")}?.click(); await m.sleep(500);`);
+      const step = (k) => page(`const g = document.querySelector("[data-settings-level]"); const f = g.querySelector('[aria-checked="true"]'); f.focus();
+        const e = new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }); document.activeElement.dispatchEvent(e); await m.sleep(400);
+        const on = g.querySelector('[aria-checked="true"]');
+        return { on: on?.dataset.level, focus: document.activeElement?.dataset.level ?? null, prevented: e.defaultPrevented,
+          stops: [...g.querySelectorAll("[role=radio]")].filter((b) => b.tabIndex === 0).map((b) => b.dataset.level) };`);
+      for (const [k, want] of [["ArrowRight", "advanced"], ["ArrowLeft", "standard"], ["End", "expert"], ["Home", "basic"], ["ArrowLeft", "expert"]]) {
+        const r = await step(k);
+        if (r.on !== want || r.focus !== want) v.push(`${k}: checked ${r.on}, focused ${r.focus} (want ${want})`);
+        if (!r.prevented) v.push(`${k}: the key wasn't taken (default not prevented)`);
+        if (r.stops.join() !== want) v.push(`${k}: Tab stops ${JSON.stringify(r.stops)} (only the checked option)`);
+      }
+      const saved = (await http("GET", "/settings")).json?.settingsLevel;
+      if (saved !== "expert") v.push(`the keyboard choice didn't save (settingsLevel ${saved})`);
+      await page(`${LV("standard")}?.click(); await m.sleep(500);`);
+      return v;
+    });
+    // seg:glow: the highlight glows (brighter while its option is hovered), none under no-glow; under bg-live the track goes
+    // translucent like the other chrome
+    await cell("seg:glow", async () => {
+      const v = [];
+      await tab("Settings");
+      const r = await page(`const root = document.documentElement, g = document.querySelector("[data-settings-level]"), hl = g?.querySelector(".seg-hl");
+        if (!hl) return null; const out = { on: getComputedStyle(hl).boxShadow };
+        root.classList.add("no-glow"); await m.sleep(50); out.off = getComputedStyle(hl).boxShadow; root.classList.remove("no-glow");
+        const had = root.classList.contains("bg-live"); out.solid = getComputedStyle(g).backgroundColor;
+        root.classList.add("bg-live"); await m.sleep(50); out.live = getComputedStyle(g).backgroundColor; if (!had) root.classList.remove("bg-live");
+        return out;`);
+      if (!r) return ["no segmented level picker"];
+      if (!r.on || r.on === "none") v.push(`glows on: the highlight has no glow (${r.on})`);
+      if (r.off !== "none") v.push(`no-glow: the highlight still glows (${r.off})`);
+      if (r.solid === r.live) v.push(`bg-live: the track's fill doesn't go translucent (${r.live})`);
+      return v;
+    });
     // An idle page asks for no frames: a requestAnimationFrame loop that never stops (a frame counter, a "watch the box"
     // tick) makes Chromium render every refresh — 144 fps of style, layout and IntersectionObserver work, a third of a
     // core, with nothing on screen changing. CSS animations don't call rAF, so a shimmer or a spinner can't trip this.

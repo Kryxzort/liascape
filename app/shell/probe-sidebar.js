@@ -11,6 +11,12 @@
 //                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
+//   look:strip:<w>x<h>   the preview switch is the segmented control's strip fused to the picture: 0 px gap, the same left /
+//                        right edges, the unit as wide as the content (full width at 16:9), rounded strip top + picture bottom,
+//                        shorter than the old pills; the highlight glides (per frame) and lands centred, jumps with motion off;
+//                        the glow wraps the unit (gone under no-glow); hovering a playable picture grows the whole unit; one
+//                        option → no strip, the picture rounded all round; the strip keeps its dark fill under bg-live
+//                        (sizes 1920x1080 and 1100x700: run with LIASCAPE_MATRIX_SCREEN=2560x1440). Screenshots side-strip-*.png
 //   lib:slide            an item switch slides like a carousel by where the new card sits: the same row, right → in from the
 //                        right (the old out left), left mirrored; a row below → rises from below, above → mirrored; the outgoing copy inert + after the live one, gone after ~0.3 s; motion off → no slide
 //   look:plCheck         a card's CHECKED playlist box, hovered: still accent, with a dark visible tick (pixels)
@@ -458,7 +464,7 @@ app.whenReady().then(async () => {
       if (r0.icon || (r0.bg && r0.bg !== "none")) v.push(`the picture shows a Play icon / tint (owner: no icon; ${r0.icon} icons, bg ${r0.bg})`);
       const cx = r0.media.x + r0.media.w / 2, cy = r0.media.y + r0.media.h / 2;
       await mv(cx - 20, cy, 80); await mv(cx, cy, 500);
-      const r1 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); return { icon: b.querySelectorAll("svg, img").length, tr: getComputedStyle(s.querySelector(".side-frame")).transform };`);
+      const r1 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); return { icon: b.querySelectorAll("svg, img").length, tr: getComputedStyle(s.querySelector(".side-stage")).transform };`);
       if (r1.icon) v.push(`hovering the picture: a Play icon appears (owner: no icon)`);
       if (r1.tr === "none") v.push("hovering the picture: it doesn't scale");
       await shot("lib-play-hover");
@@ -469,7 +475,7 @@ app.whenReady().then(async () => {
       let r2 = null;
       // playing → the green frame only (no "Playing now" pill — the card and the frame say it);
       // "looping this one" is a hero chip, shown only while loop-current is on
-      for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); const f = s.querySelector(".side-frame");
+      for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); const f = s.querySelector(".side-stage");
           return { play: !!s.querySelector("[data-side-play]"), frame: !!f?.matches(".is-playing[data-side-playing]"),
             pill: !!s.querySelector("[data-side-media] .side-badge, [data-side-media] [data-side-playing]") || /Playing now/.test(s.querySelector("[data-side-media]")?.textContent ?? ""),
             looping: !!s.querySelector("[data-side-looping]") };`); if (r2.frame) break; await sleep(100); }
@@ -625,6 +631,120 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+
+    // the preview switch: the segmented control's strip fused to the picture's top edge (components/SidePanel.tsx SideMedia,
+    // components/Segmented.tsx). k2 gets a trailer so it offers all three (still, video, YouTube); s2 has one option.
+    for (const [W, H] of [[1920, 1080], [1100, 700]]) {
+      await cell(`look:strip:${W}x${H}`, async () => {
+        const v = [], J = JSON.stringify, tag = `${W}x${H}`;
+        win.setContentSize(W, H);
+        let fit = false, got = null; for (let i = 0; i < 60 && !fit; i++) { got = await js(`[innerWidth, innerHeight]`); fit = Math.abs(got[0] - W) <= 4 && Math.abs(got[1] - H) <= 4; if (!fit) await sleep(50); }
+        console.log(`        window ${got.join("x")}`); // (the private Xvfb has no window manager: a few px off the asked size)
+        if (!fit) { win.setContentSize(1400, 900); return [`the window is ${got.join("x")}, not ${tag} — run with LIASCAPE_MATRIX_SCREEN=2560x1440 (proved nothing)`]; }
+        const INDEX = path.join(path.dirname(path.dirname(K[1])), "index.json"), idx0 = fs.readFileSync(INDEX, "utf8");
+        const j = JSON.parse(idx0); j[path.basename(path.dirname(K[1]))].youtubeUrl = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"; fs.writeFileSync(INDEX, JSON.stringify(j));
+        win.webContents.session.webRequest.onBeforeRequest({ urls: ["*://*.youtube.com/*", "*://*.ytimg.com/*", "*://*.googlevideo.com/*", "*://*.youtube-nocookie.com/*"] }, (d, cb) => cb({ cancel: true }));
+        const M = () => page(`const s = m.side(), st = s.querySelector(".side-stage"), sw = s.querySelector('[role="radiogroup"][aria-label="Preview"]');
+          const md = s.querySelector("[data-side-media]"), gl = s.querySelector(".side-glow"), ct = s.querySelector(".side-content"), cs = getComputedStyle(ct);
+          const R = (e) => e ? m.rect(e) : null;
+          const rad = (e) => { const c = getComputedStyle(e); return [c.borderTopLeftRadius, c.borderTopRightRadius, c.borderBottomRightRadius, c.borderBottomLeftRadius].map(parseFloat); };
+          const alpha = (c) => { const a = c.match(/\\/\\s*([\\d.]+)\\s*\\)/) ?? c.match(/rgba\\([^)]*,\\s*([\\d.]+)\\)/); return a ? +a[1] : (c === "transparent" ? 0 : 1); };
+          const contentW = ct.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+          const shape = +s.querySelector(".side-frame").dataset.shape;
+          const hl = sw?.querySelector(".seg-hl"), on = sw?.querySelector('[aria-checked="true"]');
+          return { st: R(st), sw: R(sw), md: R(md), gl: R(gl), contentW, want: Math.min(contentW, Math.min(innerHeight * .38, 320) * shape), shape,
+            strip: !!s.querySelector(".seg.strip"), swRad: sw ? rad(sw) : null, mdRad: rad(md), mode: md.dataset.previewMode,
+            opts: sw ? [...sw.querySelectorAll("[data-preview-src]")].map((b) => b.dataset.previewSrc) : [], hl: R(hl), on: R(on),
+            glOp: +getComputedStyle(gl).opacity, glBs: getComputedStyle(gl).boxShadow, swA: sw ? alpha(getComputedStyle(sw).backgroundColor) : null,
+            tr: getComputedStyle(st).transform };`);
+        const near = (a, b, t = 0.5) => Math.abs(a - b) <= t;
+        // the joined look: one shape, as wide as the content allows, no gap
+        const joined = (r, what) => {
+          if (!r.strip) v.push(`${what}: the switch isn't the segmented strip (.seg.strip)`);
+          if (!r.sw) return;
+          const gap = r.md.y - (r.sw.y + r.sw.h);
+          if (!near(gap, 0)) v.push(`${what}: ${gap.toFixed(2)} px between the strip and the picture (want 0)`);
+          if (!near(r.sw.x, r.md.x) || !near(r.sw.x + r.sw.w, r.md.x + r.md.w)) v.push(`${what}: the strip (${r.sw.x.toFixed(1)}–${(r.sw.x + r.sw.w).toFixed(1)}) and the picture (${r.md.x.toFixed(1)}–${(r.md.x + r.md.w).toFixed(1)}) don't share their edges`);
+          if (!near(r.st.w, r.want, 1)) v.push(`${what}: the unit is ${r.st.w.toFixed(1)} px wide, want ${r.want.toFixed(1)} (content ${r.contentW.toFixed(1)}, shape ${r.shape})`);
+          if (!(r.swRad[0] > 4 && r.swRad[1] > 4 && r.swRad[2] === 0 && r.swRad[3] === 0)) v.push(`${what}: the strip's corners ${J(r.swRad)} (rounded top, square bottom)`);
+          if (!(r.mdRad[0] === 0 && r.mdRad[1] === 0 && r.mdRad[2] > 4 && r.mdRad[3] > 4)) v.push(`${what}: the picture's corners ${J(r.mdRad)} (square top, rounded bottom)`);
+          if (!(r.sw.h >= 18 && r.sw.h <= 24.5)) v.push(`${what}: the strip is ${r.sw.h.toFixed(1)} px tall (a little shorter than the old 25 px pills)`);
+          if (!r.hl || !r.on || !near(r.hl.x + r.hl.w / 2, r.on.x + r.on.w / 2, 1) || !near(r.hl.w, r.on.w, 1)) v.push(`${what}: the highlight ${J(r.hl)} isn't on the chosen option ${J(r.on)}`);
+          if (!near(r.gl.y, r.sw.y) || !near(r.gl.h, r.st.h) || !near(r.gl.w, r.st.w)) v.push(`${what}: the glow ${J(r.gl)} doesn't wrap the unit ${J(r.st)}`);
+        };
+        // per-frame x of the strip's highlight across a pick
+        const glide = (k) => page(`const sw = m.side().querySelector('[role="radiogroup"][aria-label="Preview"]'), hl = sw?.querySelector(".seg-hl");
+          if (!hl) return null; const X = () => new DOMMatrixReadOnly(getComputedStyle(hl).transform === "none" ? undefined : getComputedStyle(hl).transform).m41;
+          const x0 = X(); sw.querySelector('[data-preview-src="${k}"]').click(); const xs = []; const t0 = performance.now();
+          await new Promise((res) => { const f = () => { xs.push(X()); if (performance.now() - t0 < 700) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+          return { x0, xs };`);
+        const between = (g) => { const x1 = g.xs[g.xs.length - 1]; return g.xs.filter((x) => Math.abs(x - g.x0) > 1 && Math.abs(x - x1) > 1).length; };
+        try {
+          await loadUi(); await setMotion(true); await mv(5, 5);
+          await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(800);`);
+          let r = await M();
+          if (J(r.opts) !== J(["image", "video", "youtube"])) v.push(`k2 (still + video + trailer): options ${J(r.opts)}`);
+          if (r.mode !== "image") await page(`m.side().querySelector('[data-preview-src="image"]')?.click(); await m.sleep(700);`);
+          r = await M(); joined(r, "k2 on its still");
+          await shot(`strip-${tag}-three`);
+          // the whole unit grows while the (playable) picture is hovered — the strip with it
+          await mv(r.md.x + r.md.w / 2, r.md.y + r.md.h / 2, 80); await mv(r.md.x + r.md.w / 2 + 2, r.md.y + r.md.h / 2, 500);
+          const hv = await M();
+          if (hv.tr === "none" || !(hv.sw && hv.sw.w > r.sw.w * 1.015)) v.push(`hovering the picture: the unit doesn't grow (transform ${hv.tr}, strip ${r.sw?.w.toFixed(1)} → ${hv.sw?.w.toFixed(1)})`);
+          if (!(hv.glOp > r.glOp)) v.push(`hovering the picture: the glow doesn't brighten (${r.glOp} → ${hv.glOp})`);
+          await shot(`strip-${tag}-hover`);
+          await mv(5, 5, 400);
+          // the highlight glides to YouTube (two options over) on transform, through in-between frames, and lands centred
+          const g = await glide("youtube");
+          if (!g) v.push("no strip highlight (.seg-hl)");
+          else {
+            const n = between(g), x1 = g.xs[g.xs.length - 1];
+            console.log(`        ${tag} strip highlight ${g.x0.toFixed(1)} → ${x1.toFixed(1)}, ${n} frames between, peak ${Math.max(...g.xs).toFixed(1)}`);
+            if (!(x1 > g.x0 + 10)) v.push(`the highlight didn't move to YouTube (${g.x0} → ${x1})`);
+            if (n < 3) v.push(`motion on: the highlight jumped (${n} frames between)`);
+          }
+          await sleep(300);
+          r = await M(); joined(r, "k2 on YouTube");
+          if (!near(r.st.w, r.contentW, 1)) v.push(`k2 on YouTube (16:9): the unit is ${r.st.w.toFixed(1)} px, not the content's full ${r.contentW.toFixed(1)}`);
+          await shot(`strip-${tag}-youtube`);
+          // a mid-glide picture (back to the still)
+          await page(`m.side().querySelector('[data-preview-src="image"]').click();`); await sleep(110); await shot(`strip-${tag}-midglide`); await sleep(600);
+          // glow: wraps the unit; Glow effects off → none; under bg-live the strip keeps its own dark fill
+          const ng = await page(`const root = document.documentElement, gl = m.side().querySelector(".side-glow"), sw = m.side().querySelector(".seg.strip");
+            root.classList.add("no-glow"); await m.sleep(350); const out = { op: +getComputedStyle(gl).opacity }; root.classList.remove("no-glow");
+            const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(50); out.bg = getComputedStyle(sw).backgroundColor; if (!had) root.classList.remove("bg-live");
+            return out;`);
+          if (!(r.glOp > 0.3) || r.glBs === "none") v.push(`glows on: no glow around the unit (opacity ${r.glOp}, ${r.glBs})`);
+          if (ng.op !== 0) v.push(`no-glow: the unit still glows (opacity ${ng.op})`);
+          const a = /\/\s*([\d.]+)\s*\)/.exec(ng.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(ng.bg)?.[1] ?? "1";
+          if (+a < 0.5) v.push(`bg-live: the strip has no dark fill of its own (${ng.bg})`);
+          // one option → no strip, the picture rounded all round, as wide as the content allows
+          await page(`await m.closeAll(); await m.openSide("s2"); await m.sleep(800);`);
+          const o = await M();
+          if (o.sw || o.strip) v.push(`s2 (one option): a strip shows (${J(o.opts)})`);
+          if (!o.mdRad.every((x) => x > 4)) v.push(`s2 (one option): the picture's corners ${J(o.mdRad)} (rounded all round)`);
+          if (!near(o.st.w, o.want, 1)) v.push(`s2: the unit is ${o.st.w.toFixed(1)} px wide, want ${o.want.toFixed(1)}`);
+          if (!near(o.gl.y, o.md.y) || !near(o.gl.h, o.md.h)) v.push(`s2: the glow ${J(o.gl)} doesn't wrap the picture ${J(o.md)}`);
+          await shot(`strip-${tag}-one`);
+          // motion off: the highlight jumps
+          await setMotion(false); await mv(5, 5);
+          await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500);`);
+          const r0 = await M();
+          const g0 = await glide(r0.mode === "youtube" ? "image" : "youtube");
+          if (!g0) v.push("motion off: no strip highlight");
+          else if (between(g0)) v.push(`motion off: the highlight still glides (${between(g0)} frames between)`);
+          await sleep(100);
+          const r1 = await M();
+          if (r1.hl && r1.on && !near(r1.hl.x + r1.hl.w / 2, r1.on.x + r1.on.w / 2, 1)) v.push(`motion off: the highlight ${J(r1.hl)} isn't on the chosen option ${J(r1.on)}`);
+        } finally {
+          fs.writeFileSync(INDEX, idx0);
+          win.webContents.session.webRequest.onBeforeRequest(null);
+          await page(`await m.closeAll();`); await setMotion(true);
+          win.setContentSize(1400, 900); await sleep(300); await loadUi();
+        }
+        return v;
+      });
+    }
 
     for (const mode of ["on", "off", "reduced"]) {
       await cell(`motion:${mode}`, async () => {

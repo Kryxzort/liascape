@@ -14,6 +14,7 @@ import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { Select } from "./components/Select";
+import { Segmented } from "./components/Segmented";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -189,12 +190,9 @@ export default function App() {
         </div>
 
         {tab === "settings" && (
-          <div className="pills level-pills" data-settings-level={levelOf(s.settings?.settingsLevel)}>
-            {LEVELS.map((l) => (
-              <button key={l} className={`pill${levelOf(s.settings?.settingsLevel) === l ? " active" : ""}`} data-level={l}
-                onClick={() => s.setSetting("settingsLevel", l)}>{LEVEL_LABEL[l]}</button>
-            ))}
-          </div>
+          <Segmented className="level-pills" label="Settings level" attrs={{ "data-settings-level": levelOf(s.settings?.settingsLevel) }}
+            value={levelOf(s.settings?.settingsLevel)} onChange={(l) => s.setSetting("settingsLevel", l)}
+            options={LEVELS.map((l) => ({ value: l, label: LEVEL_LABEL[l], attrs: { "data-level": l } }))} />
         )}
         {tab === "browse" && (
           <div className="pills">

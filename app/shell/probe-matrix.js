@@ -1173,7 +1173,7 @@ C["plAdvanceRelabel"] = { states: ["playlist"], async run(c) {
   } };
 // order → Shuffle: no switch now; the session keeps what plays; an armed switch still goes to a playlist item
 C["plShuffle"] = { states: ["playlist", "pending", "programArmed"], async run(c) {
-    await ui(`${plOpen} m.click(m.byText(".pl-modal .segbtn", "Shuffle"), "Shuffle"); ${plClose}`); await sleep(900);
+    await ui(`${plOpen} m.click(m.byText(".pl-modal .seg-opt", "Shuffle"), "Shuffle"); ${plClose}`); await sleep(900);
   }, check(c) {
     const v = [...noSwitchNow(c), ...keptShown(c)];
     if (c.after.ps?.settings?.order !== 1) v.push(`playlist order ${c.after.ps?.settings?.order}, expected 1 (shuffle)`);
@@ -2206,7 +2206,7 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
 // every item of the playlist once, in a fresh random order; a new cycle never starts with the item the last one ended
 // on (no immediate repeat); turning Shuffle on mid-session keeps what plays and plays the REST once (in random order)
 // before the first full cycle; previous walks back through what actually played. Sequential = the playlist bar's order.
-const plSeg = (label) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(label)}), ${JSON.stringify(label)}); ${plClose}`;
+const plSeg = (label) => `${plOpen} m.click(m.byText(".pl-modal .seg-opt", ${JSON.stringify(label)}), ${JSON.stringify(label)}); ${plClose}`;
 // `n` next keybinds, each settled: the item each one put on screen
 async function nexts(c, n, a = "next") {
   const out = [];
@@ -3324,7 +3324,7 @@ alsoIn("restart:backend", "programArmed");
 
 // --- plStart: "When the playlist starts again" (§ Playlist start)
 const START_LABEL = { start_over: "Start over", resume: "Resume where it left off" };
-const pickStart = (mode) => `${plOpen} m.click(m.byText(".pl-modal .segbtn", ${JSON.stringify(START_LABEL[mode])}), "start choice"); ${plClose}`;
+const pickStart = (mode) => `${plOpen} m.click(m.byText(".pl-modal .seg-opt", ${JSON.stringify(START_LABEL[mode])}), "start choice"); ${plClose}`;
 const startMode = async () => (await ctl.call("get", { path: "prog:main.start_mode" }).catch(() => ({}))).value;
 const curPath = async () => (await http("GET", "/current")).json?.path;
 const playBtn = `m.click(document.querySelector(".play-btn"), "Play");`;

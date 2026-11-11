@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
     await cell("Standard (default): the picker in the top bar, no Advanced / Expert row", async () => {
       const v = [];
       const p = await js(`const el = document.querySelector("[data-settings-level]");
-        return el ? { inTopbar: !!el.closest(".topbar"), pills: [...el.querySelectorAll("[data-level]")].map((b) => [b.textContent.trim(), b.classList.contains("active")]) } : null`);
+        return el ? { inTopbar: !!el.closest(".topbar"), pills: [...el.querySelectorAll("[data-level]")].map((b) => [b.textContent.trim(), b.getAttribute("aria-checked") === "true"]) } : null`);
       if (!p) return ["no level picker ([data-settings-level])"];
       if (!p.inTopbar) v.push("the level picker isn't in the top bar beside the tabs");
       if (JSON.stringify(p.pills.map((x) => x[0])) !== JSON.stringify(["Basic", "Standard", "Advanced", "Expert"])) v.push(`pills ${JSON.stringify(p.pills)}`);
@@ -180,17 +180,17 @@ app.whenReady().then(async () => {
       if (!/Global setting: Resume where it left off/.test(m.hint ?? "")) v.push(`without the override the modal should name the global value: ${JSON.stringify(m.hint)}`);
       if (!m.btns.every((b) => b.dis)) v.push(`the choice is enabled without the override: ${JSON.stringify(m.btns)}`);
       await js(`[...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.includes("Override global rotation"))?.querySelector("input")?.click(); await window.__x.sleep(400);
-        [...document.querySelectorAll(".pl-modal .segbtn")].find((b) => b.textContent.trim() === "Start over")?.click(); await window.__x.sleep(500); return true`);
+        [...document.querySelectorAll(".pl-modal .seg-opt")].find((b) => b.textContent.trim() === "Start over")?.click(); await window.__x.sleep(500); return true`);
       const m2 = await js(`return { hint: document.querySelector(".pl-modal [data-playlist-start-hint]")?.textContent ?? null, on: document.querySelector(".pl-modal [data-playlist-start]")?.dataset.playlistStart }`);
       if (m2.on !== "start_over") v.push(`after choosing Start over the modal shows ${m2.on}`);
       if (!/global: Resume where it left off/.test(m2.hint ?? "") || !/shuffle shuffles anew/.test(m2.hint ?? "")) v.push(`under the override the hint should give the choice's text and the global value: ${JSON.stringify(m2.hint)}`);
       const saved = async () => (await http("GET", "/playlist/state")).json?.settings;
       if (!(await waitFor(async () => { const s = await saved(); return s?.overrideGlobalSettings === true && s?.playlistStart === "start_over"; }, 5000)))
         v.push(`the playlist's settings ${JSON.stringify(await saved())}: want override on + playlistStart start_over`);
-      await js(`[...document.querySelectorAll(".pl-modal .segbtn")].find((b) => b.textContent.trim() === "Resume where it left off")?.click(); await window.__x.sleep(500); return true`);
+      await js(`[...document.querySelectorAll(".pl-modal .seg-opt")].find((b) => b.textContent.trim() === "Resume where it left off")?.click(); await window.__x.sleep(500); return true`);
       if (!(await waitFor(async () => (await saved())?.playlistStart === "resume", 5000))) v.push(`playlistStart ${(await saved())?.playlistStart}, want resume`);
       // leave it as found
-      await js(`[...document.querySelectorAll(".pl-modal .segbtn")].find((b) => b.textContent.trim() === "Start over")?.click(); await window.__x.sleep(300);
+      await js(`[...document.querySelectorAll(".pl-modal .seg-opt")].find((b) => b.textContent.trim() === "Start over")?.click(); await window.__x.sleep(300);
         [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.includes("Override global rotation"))?.querySelector("input")?.click(); await window.__x.sleep(400);
         [...document.querySelectorAll(".pl-modal button")].find((b) => b.textContent.trim() === "Close")?.click(); await window.__x.sleep(300); return true`);
       return v;

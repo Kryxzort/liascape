@@ -112,6 +112,41 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .pill.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
 .pill.active:hover { box-shadow: var(--glow); }
 
+/* ---- the segmented control (components/Segmented.tsx): every "pick one of a few" switch ----
+   COOL: equal-width options in a grid, so the one accent highlight (`.seg-hl`) moves on transform alone — 1/n of the track
+   wide, translated by its own width + the gap per option (--seg-i = the chosen index, --seg-n = the count); no width/left
+   animation. A spring ease (a damped spring, ζ ≈ 0.78, sampled into linear()) that overshoots ~2 % and settles; under
+   :root.no-motion it jumps. The track never clips the pill row (the glow would go with it): the overshoot stays within the
+   track's padding but for the longest jump (~2 px). */
+.seg { --seg-pad: 3px; --seg-gap: 2px; position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  gap: var(--seg-gap); padding: var(--seg-pad); flex-shrink: 0; }
+/* a stretched row: strictly equal columns (`1fr` alone would let a longer label widen its own column) */
+.seg.fill, .seg.strip { grid-auto-columns: minmax(0, 1fr); }
+.seg-hl { position: absolute; top: var(--seg-pad); bottom: var(--seg-pad); left: var(--seg-pad); pointer-events: none;
+  width: calc((100% - 2 * var(--seg-pad) - (var(--seg-n) - 1) * var(--seg-gap)) / var(--seg-n));
+  transform: translateX(calc(var(--seg-i) * (100% + var(--seg-gap))));
+  z-index: 1; overflow: hidden; border-radius: 999px; background: var(--accent); box-shadow: var(--glow-sm);
+  transition: transform .5s linear(0, .066, .213, .385, .55, .691, .804, .887, .945, .982, 1.004, 1.015, 1.02, 1.019, 1.017,
+    1.014, 1.01, 1.007, 1.005, 1.003, 1.002, 1.001, 1), opacity .2s; }
+/* the labels again, in the "on" colour, the row's full width, counter-translated on the highlight's own transition */
+.seg-hl-in { position: absolute; top: 0; bottom: 0; left: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  gap: var(--seg-gap); width: calc(var(--seg-n) * 100% + (var(--seg-n) - 1) * var(--seg-gap));
+  transform: translateX(calc(var(--seg-i) * -1 * (100% + var(--seg-gap)) / var(--seg-n))); transition: inherit; }
+.seg-hl-in > .seg-ghost { color: var(--accent-fg); }
+.seg[data-seg="none"] .seg-hl { opacity: 0; }
+.seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: var(--glow); }
+/* the option and its copy on the highlight share their box (`.seg-ghost`: not a control, never matched by `.seg-opt`) */
+:is(.seg-opt, .seg-ghost) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0;
+  overflow: hidden; white-space: nowrap; border-radius: 999px; color: var(--subtext); font-weight: 600;
+  transition: color .2s, background .15s; }
+.seg-opt:not(.on):not(:disabled):hover { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.seg-opt:disabled { cursor: default; }
+.seg[aria-disabled] { opacity: .55; }
+.seg[aria-disabled] .seg-hl { box-shadow: none; }
+/* the pill row (`row`): a translucent track (--tr) holding pills */
+.seg.row { border-radius: 999px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
+.seg.row :is(.seg-opt, .seg-ghost) { padding: 5px 13px; font-size: 13px; }
+
 /* ---- grid ---- */
 .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--gap); }
 /* library scroll sits BEHIND the overlaid playlist bar — pad the bottom so the collapsed bar
@@ -729,12 +764,8 @@ input[type=range]:focus-visible { outline: none; }
 .pl-name:hover { background: var(--surface1); box-shadow: var(--glow-sm); }
 .pl-name.sel { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
 
-/* playlist settings overlay controls */
-.seg { display: flex; gap: 8px; margin-bottom: 6px; }
-.segbtn { flex: 1; padding: 8px; border-radius: 8px; background: var(--surface0); color: var(--subtext); font-weight: 600;
-  border: 1px solid transparent; transition: background .12s, border-color .12s, box-shadow .15s, color .12s; }
-.segbtn:hover:not(.on) { border-color: var(--accent); color: var(--text); box-shadow: var(--glow-sm); }
-.segbtn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); box-shadow: var(--glow-sm); }
+/* playlist settings overlay controls (its switches are `.seg.row.fill`, below) */
+.pl-modal .seg { margin-bottom: 6px; }
 .ck { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); margin: 8px 0; }
 /* custom checkbox + radio — a dark rounded box / circle, accent-filled with a tick / an accent dot when on, glow on hover/on.
    EVERY checkbox and radio the app draws (`.ck` labels, Settings, the item sidebar — its whitelist box, scene properties):
@@ -879,6 +910,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .tr-live { box-shadow: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
+:root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -886,7 +918,7 @@ input[type=range]:focus-visible { outline: none; }
 /* ---- "Smooth window animations" OFF or prefers-reduced-motion (<html class="no-motion">, App.tsx) ----
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
-:root.no-motion .tab-pill { transition: none; }
+:root.no-motion .tab-pill, :root.no-motion .seg-hl { transition: none; }
 :root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
 :root.no-motion .wf-open .wf-chev { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
@@ -955,31 +987,30 @@ input[type=range]:focus-visible { outline: none; }
 
 .side-content { padding: 4px 16px 22px; }
 
-/* the picture: a framed stage (an accent pool behind it), the picture with a soft accent glow (a pre-blurred layer — its opacity
-   brightens on hover), the preview switch top-left, the Play overlay / the Playing now badge */
-.side-stage { position: relative; display: flex; justify-content: center; margin: 6px 0 14px; padding: 12px; border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--surface1));
-  background:
-    radial-gradient(75% 85% at 50% 45%, color-mix(in srgb, var(--accent) 17%, transparent), transparent 75%),
-    color-mix(in srgb, var(--bg-crust) 55%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent), 0 6px 18px rgba(0,0,0,.25); }
-.side-frame { position: relative; max-width: 100%; border-radius: 12px; transition: transform .26s cubic-bezier(.2, 1.1, .35, 1); }
+/* the picture with its preview switch: ONE shape — the strip's rounded top fused to the picture's rounded bottom, no gap
+   (no strip → the picture rounded all round) — as wide as the content (the picture's aspect, capped in height by
+   --side-media-h; SidePanel sets the width). The unit carries the drop shadow, the soft accent glow (a static shadow on
+   its own layer — its opacity brightens on hover), the playing ring, and the Play hover cue: the whole unit grows 1.025×
+   while the picture is hovered. The glow is tight (≈ 13 px) so the content's 16 px side padding holds it even grown. */
+.side-stage { position: relative; display: flex; flex-direction: column; max-width: 100%; margin: 6px auto 14px; border-radius: 14px;
+  box-shadow: 0 10px 26px rgba(0,0,0,.45); transition: transform .26s cubic-bezier(.2, 1.1, .35, 1); }
+.side-frame { position: relative; width: 100%; border-radius: 14px; }
+.side-stage.has-switch .side-frame { border-radius: 0 0 14px 14px; }
 .side-glow { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  box-shadow: 0 0 30px -4px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 0 18px -5px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
   opacity: .55; transition: opacity .25s; }
-.side-frame.is-playing .side-glow { box-shadow: 0 0 26px -4px var(--success), 0 0 0 2px var(--success); opacity: .9; }
-.side-frame.playable:hover, .side-frame.playable:focus-within { transform: scale(1.025); }
-.side-frame.playable:hover .side-glow, .side-frame.playable:focus-within .side-glow { opacity: 1; }
-.side-media { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; background: var(--bg-crust);
-  box-shadow: 0 10px 26px rgba(0,0,0,.45); }
+.side-stage.is-playing .side-glow { box-shadow: 0 0 18px -4px var(--success), 0 0 0 2px var(--success); opacity: .9; }
+.side-stage.playable:has(.side-frame:hover, .side-frame:focus-within) { transform: scale(1.025); }
+.side-stage.playable:has(.side-frame:hover, .side-frame:focus-within) .side-glow { opacity: 1; }
+.side-media { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; background: var(--bg-crust); }
 .side-media > img, .side-media > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 /* the layers cross-fade on opacity (the preview switch): the sharp image once loaded, the gif / the video while picked */
 .side-media > .sm-full, .side-media > .sm-anim { opacity: 0; transition: opacity .28s ease; }
 .side-media > .sm-full.on, .side-media > .sm-anim.on { opacity: 1; }
-.side-media > .yt-stage { border-radius: 12px; animation: side-fade .28s ease; }
+.side-media > .yt-stage { border-radius: inherit; animation: side-fade .28s ease; }
 @keyframes side-fade { from { opacity: 0; } }
 /* the picture itself is the Play control (docs/decisions.md § "Make the sidebar's picture the Play control" — no icon);
-   the hover cue is the frame's lift + glow above; keyboard focus gets the accent edge */
+   the hover cue is the unit's lift + glow (`.side-stage.playable`, above); keyboard focus gets the accent edge */
 .side-play { position: absolute; inset: 0; z-index: 3; padding: 0; border: 0; border-radius: inherit; background: none; cursor: pointer; }
 .side-play:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* the Video preview's mute toggle: a round dark chip in the picture's corner, above the click-to-play layer; on = sound */
@@ -989,19 +1020,14 @@ input[type=range]:focus-visible { outline: none; }
 .side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .side-mute.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 :root.no-glow .side-mute:hover { box-shadow: none; }
-/* the preview switch (GIF / Video / YouTube / Picture): a strip attached to the stage's top edge, above the picture (not an
-   overlay) — it bleeds to the stage's border, a hairline under it; equal segments, the active one accent + glow */
-.side-stage.has-switch { flex-direction: column; align-items: center; padding-top: 0; }
-.side-switch { align-self: stretch; display: flex; gap: 4px; margin: 0 -12px 12px; padding: 5px;
-  border-radius: 15px 15px 0 0; background: color-mix(in srgb, var(--bg-crust) 70%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--surface1)); }
-.side-sw { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 8px; border-radius: 10px;
-  font-size: 11.5px; font-weight: 700; letter-spacing: .2px; color: var(--subtext);
-  transition: color .15s, background .15s, box-shadow .2s; }
-.side-sw:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.side-sw.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
-:root.no-glow .side-sw.on { box-shadow: none; }
-.side-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the preview switch (GIF / Video / YouTube / Picture): the segmented control's flat strip, fused to the picture's top edge
+   (not an overlay, not tabs) — a little shorter than a pill row; its highlight is clipped to the strip's rounded top, and
+   the unit's glow stands in for its own */
+.seg.strip { --seg-gap: 3px; overflow: clip; border-radius: 14px 14px 0 0; background: color-mix(in srgb, var(--bg-crust) 78%, transparent); }
+.seg.strip .seg-hl { border-radius: 8px; box-shadow: none; }
+.seg.strip :is(.seg-opt, .seg-ghost) { height: 18px; padding: 0 8px; border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .2px; }
+/* the strip clips: its focus ring is drawn inside the highlight, which covers the focused (= checked) option */
+:root.kbd-nav .seg.strip:has(.seg-opt:focus-visible) .seg-hl { outline: 2px solid var(--accent-fg); outline-offset: -3px; }
 
 /* held invisible until its asynchronous sections are in (LibrarySide READY_CAP_MS): no section pops in under the user */
 .side-body { transition: opacity .14s ease-out; }

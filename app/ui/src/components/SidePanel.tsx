@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { captureSource, sourceEl, useMotion } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
+import { Segmented } from "./Segmented";
 import { useStore, type PreviewKind } from "../store";
 import { type usePreview } from "./sidePreview";
 
@@ -136,9 +137,9 @@ const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, vide
 // animation), the video (from where the card's hover video was) or the YouTube trailer (muted — the desktop owns the sound;
 // unmounted on a switch / close, which stops it). Layers cross-fade on opacity. At the picture's own aspect: read from the
 // card's loaded image when the item is focused, else from an earlier visit, else 16:9 until the still loads — capped in
-// height (index.css `.side-media`). `play`: the Library sidebar's picture is its Play control (docs/decisions.md § "Make
-// the sidebar's picture the Play control") — no icon, the hover cue is the frame lifting 1.025× with its glow; already
-// playing → the green frame (no badge: the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
+// height (index.css `.side-stage`). `play`: the Library sidebar's picture is its Play control (docs/decisions.md § "Make
+// the sidebar's picture the Play control") — no icon, the hover cue is the picture with its strip lifting 1.025× with their
+// glow; already playing → the green frame (no badge: the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
 export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, play }: {
   id: string; cardId: string | null; base: string; full: string | null; gif: string | null; video: string | null; youtube: string | null;
@@ -170,18 +171,16 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const yt = mode === "youtube" && youtube;
   const playable = !!play && !play.playing && !yt;
   return (
-    <div className={`side-stage${options.length > 0 ? " has-switch" : ""}`}>
-      {/* the preview switch: a strip attached to the stage's top edge, above the picture — not an overlay on it */}
+    // one shape: the strip's rounded top, the picture's rounded bottom, no gap; the glow, the playing ring and the
+    // hover grow wrap the whole unit (index.css `.side-stage`). Guard: probe-sidebar look:strip, lib:play.
+    <div className={`side-stage${options.length > 0 ? " has-switch" : ""}${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`}
+      data-side-playing={play?.playing ? "" : undefined} style={{ width: `min(100%, calc(var(--side-media-h) * ${shape}))` }}>
+      <div className="side-glow" aria-hidden />
       {options.length > 0 && (
-        <div className="side-switch" role="radiogroup" aria-label="Preview">
-          {options.map((k) => (
-            <button key={k} role="radio" aria-checked={mode === k} className={`side-sw${mode === k ? " on" : ""}`} data-preview-src={k}
-              onClick={() => pick(k)}>{ICON[k]}{LABEL[k]}</button>
-          ))}
-        </div>
+        <Segmented variant="strip" label="Preview" value={mode} onChange={pick}
+          options={options.map((k) => ({ value: k, label: LABEL[k], icon: ICON[k], attrs: { "data-preview-src": k } }))} />
       )}
-      <div className={`side-frame${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`} data-side-playing={play?.playing ? "" : undefined} data-shape={shape.toFixed(3)} style={{ aspectRatio: String(shape), width: `min(100%, calc(var(--side-media-h) * ${shape}))` }}>
-        <div className="side-glow" aria-hidden />
+      <div className="side-frame" data-shape={shape.toFixed(3)} style={{ aspectRatio: String(shape) }}>
         <div className="side-media" data-side-media data-preview-mode={mode}>
           {base && <img src={base} alt="" data-preview-layer="image" onLoad={(e) => known(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />}
           {full && <img className={`sm-full${fullOn === full ? " on" : ""}`} src={full} alt=""
