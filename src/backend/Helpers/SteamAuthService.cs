@@ -92,7 +92,12 @@ public static class SteamAuthService
         using var doc = JsonDocument.Parse(finalizeJson);
         var root = doc.RootElement;
         if (root.TryGetProperty("error", out var err) && err.GetInt32() != 0)
+        {
+            // AccessDenied (15) / Revoked (26) / Expired (27) on a well-formed, unexpired WebBrowser token = Steam ended that sign-in
+            // (owner 2026-11-11: a June token, aud web, never renewed — "Steam finalizelogin failed (EResult 15)"): say what to do
+            if (err.GetInt32() is 15 or 26 or 27) throw new SteamSignInRejectedException();
             throw new InvalidOperationException($"Steam finalizelogin failed (EResult {err.GetInt32()}).");
+        }
         if (!root.TryGetProperty("transfer_info", out var transfers))
             throw new InvalidOperationException("Steam finalizelogin returned no transfer_info.");
 
@@ -158,7 +163,16 @@ public static class SteamAuthService
                 return settings.SteamAccessToken;
             }
 
-            var cookie = await GetWebCookieAsync(settings.SteamRefreshToken, settings.SteamId, ct);
+            string cookie;
+            try { cookie = await GetWebCookieAsync(settings.SteamRefreshToken, settings.SteamId, ct); }
+            catch (SteamSignInRejectedException)
+            {
+                // remembered, so Settings stops saying "Signed in as …" (/steam/status `rejected`)
+                settings.SteamSignInRejected = true;
+                SettingsService.Update(s => { s.SteamSignInRejected = true; s.SteamAccessToken = ""; });
+                Console.WriteLine("steam: Steam turned down the saved sign-in — the user has to sign in again");
+                throw;
+            }
             settings.SteamAccessToken = cookie; // full steamLoginSecure value (steamid||webtoken)
             SettingsService.Update(s => s.SteamAccessToken = cookie);
             MaybeRenewRefreshTokenInBackground(settings);
@@ -284,3 +298,7 @@ public static class SteamAuthService
         return JsonDocument.Parse(json).RootElement.Clone();
     }
 }
+
+public sealed class SteamSignInRejectedException() : Exception(
+    "Steam has signed this app out (a password change or \"sign out of all devices\" on Steam does that). " +
+    "Sign in again: Settings → Getting Workshop wallpapers → Sign in with QR.");

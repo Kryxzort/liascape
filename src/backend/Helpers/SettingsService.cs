@@ -118,6 +118,7 @@ public static class SettingsService
             s.SteamAccessToken = prev.SteamAccessToken;
             s.SteamAccountName = prev.SteamAccountName;
             s.SteamLoginSecure = prev.SteamLoginSecure;
+            s.SteamSignInRejected = prev.SteamSignInRejected;
             Save(s);
             return (prev, s);
         }

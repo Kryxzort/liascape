@@ -455,7 +455,12 @@ export const Settings = memo(function Settings() {
           <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "subscribe"
           ? <Row label="Steam">
-              {steam?.signedIn
+              {steam?.signedIn && steam.rejected
+                /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) — it
+                   used to keep saying "Signed in as …" while every download failed (owner 2026-11-11) */
+                ? <div className="hms" data-steam-rejected><span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again</span>
+                    <button className="btn accent" onClick={startQr}>Sign in with QR</button></div>
+                : steam?.signedIn
                 ? <div className="hms"><span className="shint">Signed in as <b>{steam.accountName}</b> · ~{steam.daysLeft}d left</span>
                     <button className="btn ghost" onClick={signoutSteam}>Sign out</button></div>
                 : <button className="btn accent" onClick={startQr}>Sign in with QR</button>}

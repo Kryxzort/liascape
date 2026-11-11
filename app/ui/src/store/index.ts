@@ -71,7 +71,7 @@ interface State {
   // playlist
   playlist: string[]; playlistSettings: PlaylistSettings; playlistName: string | null; playlistNames: string[];
   // steam / workshop
-  steam: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } | null;
+  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string } | null;
   qrOpen: boolean; qrPng: string | null;
   unsub: { done: number; total: number; currentId: string; active: boolean } | null;
   // the background scene-loudness queue's progress (WS scene-loudness-progress; null = idle)

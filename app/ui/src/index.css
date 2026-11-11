@@ -602,6 +602,8 @@ input[type=range]:focus-visible { outline: none; }
 
 /* settings: help text + disabled rows + monitor name + native-picker browse */
 /* a feature a missing build piece / tool breaks (Settings → WarnIcon, /health/features): amber, the reason as tooltip */
+/* a Settings line that needs the user (the Steam row when Steam ended the sign-in) — the warning icon's amber */
+.s-warn-text { color: var(--warn, #f9e2af); }
 .s-warn { display: inline-flex; margin-left: 6px; color: var(--warn, #f9e2af); cursor: help; vertical-align: -2px;
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn, #f9e2af) 60%, transparent)); }
 .health-sum { margin: 4px 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.45;

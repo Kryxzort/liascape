@@ -173,6 +173,9 @@ public class AppSettings
     public string SteamAccountName { get; set; } = "";
     // Manual cookie paste (fallback / advanced; used only when no refresh token is stored).
     public string SteamLoginSecure { get; set; } = "";
+    // Steam refused the stored refresh token (finalizelogin AccessDenied — signed out on Steam's side: a password change, "sign
+    // out of all devices"). Backend-owned (SettingsService.Patch keeps it); cleared by a new QR sign-in or a sign-out.
+    public bool SteamSignInRejected { get; set; }
     public string SteamCmdPath { get; set; } = "";
     public string SteamUsername { get; set; } = "";
     public LastSession? LastSession { get; set; }

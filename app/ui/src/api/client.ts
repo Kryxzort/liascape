@@ -205,7 +205,7 @@ export const api = {
     jpost<{ message: string }>("/playlist/play", { paths, settings }),
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
-  steamStatus: () => jget<{ signedIn: boolean; accountName: string; daysLeft: number | null; mode: string }>("/steam/status"),
+  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string }>("/steam/status"),
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),

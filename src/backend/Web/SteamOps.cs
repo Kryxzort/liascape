@@ -18,6 +18,7 @@ public static class SteamOps
         return new
         {
             signedIn = !string.IsNullOrEmpty(s.SteamRefreshToken),
+            rejected = !string.IsNullOrEmpty(s.SteamRefreshToken) && s.SteamSignInRejected, // Steam ended it: sign in again
             accountName = s.SteamAccountName,
             daysLeft = SteamAuthService.RefreshTokenDaysRemaining(s),
             mode = s.WorkshopDownloadMode,
@@ -47,6 +48,7 @@ public static class SteamOps
                     s.SteamRefreshToken = refreshToken;
                     s.SteamId = steamId;
                     s.SteamAccountName = accountName;
+                    s.SteamSignInRejected = false; s.SteamAccessToken = "";
                 });
                 EventBus.Broadcast("steam-signed-in", Status());
             }
@@ -62,7 +64,7 @@ public static class SteamOps
         SettingsService.Update(s =>
         {
             s.SteamRefreshToken = ""; s.SteamId = 0; s.SteamAccessToken = "";
-            s.SteamAccountName = ""; s.SteamLoginSecure = "";
+            s.SteamAccountName = ""; s.SteamLoginSecure = ""; s.SteamSignInRejected = false;
         });
     }
 
