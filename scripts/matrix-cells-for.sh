@@ -73,8 +73,11 @@ for f in $FILES; do
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe)" ;;
-    app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column)" ;;
+    # the Workshop filter column: not in the matrix (Browse needs the network) — its own probe stubs /browse
+    app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts)
+      echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js)" >&2 ;;
+    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must

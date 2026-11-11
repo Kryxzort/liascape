@@ -6,7 +6,7 @@ import {
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
 
-const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, type: "", ageRating: "", resolution: "", genres: [], features: [] };
+const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
 // (survives in Electron) rather than the backend settings.json.
@@ -14,6 +14,31 @@ const LS = {
   get<T>(k: string, d: T): T { try { const v = localStorage.getItem("liascape." + k); return v == null ? d : (JSON.parse(v) as T); } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem("liascape." + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
+
+// the saved Workshop filter. The 2026-11-11 filter column replaced the one-of dropdowns (type / ageRating / resolution) and
+// the genre / feature chips with include / exclude tag sets: an old saved filter's picks all become includes, once (the
+// migrated filter is written back). Anything malformed -> the default.
+export type TagState = "inc" | "exc" | null;
+type OldFilter = Partial<WorkshopFilter> & { type?: string; ageRating?: string; resolution?: string; genres?: string[]; features?: string[] };
+export function loadBrowseFilter(): WorkshopFilter {
+  const raw = LS.get<OldFilter | null>("browseFilter", null);
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_FILTER };
+  const strs = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string" && x !== "") : []);
+  const sort = typeof raw.sort === "string" && raw.sort ? raw.sort : DEFAULT_FILTER.sort;
+  const trendDays = typeof raw.trendDays === "number" && raw.trendDays > 0 ? raw.trendDays : DEFAULT_FILTER.trendDays;
+  const featureMatch = raw.featureMatch === "any" ? "any" : "all";
+  const genreMatch = raw.genreMatch === "all" ? "all" : "any";
+  if (Array.isArray(raw.include) || Array.isArray(raw.exclude)) {
+    const include = [...new Set(strs(raw.include))];
+    const exclude = [...new Set(strs(raw.exclude))].filter((t) => !include.includes(t)); // include XOR exclude
+    return { sort, trendDays, include, exclude, featureMatch, genreMatch };
+  }
+  const include = [...new Set([raw.type, raw.ageRating, raw.resolution, ...strs(raw.genres), ...strs(raw.features)]
+    .filter((x): x is string => typeof x === "string" && x !== ""))];
+  const f: WorkshopFilter = { sort, trendDays, include, exclude: [], featureMatch, genreMatch };
+  LS.set("browseFilter", f);
+  return f;
+}
 
 // Applies a theme's 16 colors to :root as CSS vars (ThemeService color keys).
 // COOL: --accent also drives every glow in the app.
@@ -71,6 +96,10 @@ interface State {
   // browse
   setSource(i: number): void; setQuery(q: string): void; reload(): Promise<void>; loadMore(): Promise<void>;
   setBrowseFilter(p: Partial<WorkshopFilter>): void; isWorkshop(): boolean; setBrowseSort(i: number): void;
+  // the Workshop filter column (components/WorkshopFilterColumn.tsx): one tag's state (include / exclude / off), all off;
+  // which groups are collapsed (remembered)
+  setTagState(tag: string, st: TagState): void; clearTags(): void;
+  filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
   setDownload(id: string, v: number): void;
@@ -156,7 +185,8 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
-  browseFilter: { ...DEFAULT_FILTER, ...LS.get<Partial<WorkshopFilter>>("browseFilter", {}) }, browseSort: LS.get("browseSort", 0),
+  browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
+  filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
@@ -192,6 +222,18 @@ export const useStore = create<State>((set, get) => ({
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
+  // a tag is in include XOR exclude; the same debounced reload as every filter change
+  setTagState(tag, st) {
+    const { include, exclude } = get().browseFilter;
+    const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
+    if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);
+    get().setBrowseFilter({ include: inc, exclude: exc });
+  },
+  clearTags() { const f = get().browseFilter; if (f.include.length || f.exclude.length) get().setBrowseFilter({ include: [], exclude: [] }); },
+  toggleFilterGroup(id) {
+    const c = get().filterCollapsed, n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id];
+    set({ filterCollapsed: n }); LS.set("browseFilterCollapsed", n);
+  },
   // API: every Browse list read carries the generation it started in (`browseGen`): a source switch / search / refresh
   // starts a new one, and a reply from an older one is dropped — a slow online source's page used to land AFTER the
   // source the user switched to and replace (or extend) its list, under the new source's pill (seen 2026-11-10 in the

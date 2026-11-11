@@ -62,9 +62,15 @@ async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSigna
 // ---- types (mirror the C# camelCase DTOs) ----
 export interface FeatureHealth { id: string; label: string; ok: boolean | null; reason: string | null; affects: string[]; inUse?: boolean }
 
+// API: POST /browse `filter` (Workshop only). `include` / `exclude` are Steam tag names (age rating, type, resolution, genre,
+// feature — one flat set each; a tag is in at most one of them). The backend owns the semantics: within a group any included
+// tag matches (Genre / Features: per genreMatch / featureMatch), across groups all must; an excluded tag hides; any age filter hides items
+// without an age rating (WorkshopFilterColumn.tsx, 2026-11-11).
 export interface WorkshopFilter {
-  sort: string; trendDays: number; type: string;
-  ageRating?: string; resolution?: string; genres: string[]; features: string[];
+  sort: string; trendDays: number; include: string[]; exclude: string[];
+  // the included features: every one must match ("all", the default) or any of them ("any"); the same for genres, whose
+  // default is "any" (owner 2026-11-11) — only these two groups have the choice
+  featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
 export interface Source {
   index: number; name: string; supportsSearch: boolean; supportsPagination: boolean;
@@ -75,6 +81,8 @@ export interface Wallpaper {
   resolution: string | null; isScene: boolean; workshopId: string | null; addedAt: string | null;
   description: string | null; authorName: string | null; fileSizeBytes: number | null;
   subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
+  // Workshop results: the item's YouTube trailer when known, and whether the backend looked it up (none ≠ not checked)
+  youtubeUrl?: string | null; trailerKnown?: boolean;
 }
 export interface Detail {
   title: string; previewUrl: string; downloadUrl: string; needsReferrer: boolean;

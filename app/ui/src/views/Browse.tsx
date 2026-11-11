@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Card } from "../components/Card";
-import { WorkshopFilterBar } from "../components/WorkshopFilterBar";
+import { WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
+import { WF_CLOSE_MS, useFilterDocked } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
@@ -138,12 +139,19 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
   };
 
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
+  // the Workshop filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
+  const docked = useFilterDocked();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  if (drawerOpen && (docked || !isWorkshop)) setDrawerOpen(false); // follow during render: a wider window / another source
+  const drawer = useLinger(isWorkshop && !docked && drawerOpen ? true : null, WF_CLOSE_MS, motion);
   const sideW = shown.value && kept?.pageUrl === shown.value ? kept : null;
 
   return (
     <>
+    {isWorkshop && docked && <WorkshopFilterColumn mode="dock" />}
     <div className="scroll" ref={scrollRef} onClick={onBgClick}>
-      {isWorkshop && <WorkshopFilterBar />}
+      {isWorkshop && <WorkshopSortRow drawer={!docked} onOpenFilters={() => setDrawerOpen(true)} />}
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
@@ -177,6 +185,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
         </div>
       )}
     </div>
+    {!docked && drawer.value && <WorkshopFilterColumn mode="drawer" closing={drawer.closing} onClose={closeDrawer} />}
     {sideW && (
       <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}

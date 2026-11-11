@@ -557,15 +557,9 @@ input[type=range]:focus-visible { outline: none; }
   box-shadow: var(--glow-sm); animation: drain-ind 1.1s ease-in-out infinite; }
 @keyframes drain-ind { 0% { margin-left: -45%; } 100% { margin-left: 100%; } }
 
-/* ---- workshop filter bar ---- */
+/* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
 .wfilter { position: relative; display: flex; gap: 8px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
-.wfilter select { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
-  border-radius: 8px; padding: 6px 10px; outline: none; }
-.wfilter select:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
-.wfilter-pop { position: absolute; top: 110%; left: 0; z-index: 20; width: min(640px, 90vw);
-  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); /* +0.1 over chrome */
-  border: 1px solid var(--surface1); border-radius: 12px; padding: 14px;
-  box-shadow: 0 16px 40px rgba(0,0,0,.5), var(--glow-sm); }
+.wf-open { display: inline-flex; align-items: center; gap: 6px; }
 /* ---- custom dropdown (Select.tsx) — app-controlled, translucent ---- */
 .sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1);
@@ -593,14 +587,6 @@ input[type=range]:focus-visible { outline: none; }
   transition: background .12s; }
 .sel-opt:hover { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
 .sel-opt.on { background: var(--accent); color: var(--accent-fg); }
-.wf-group { font-size: 11px; font-weight: 800; letter-spacing: .5px; color: var(--muted); margin: 6px 0 8px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);
-  transition: all .12s, box-shadow .2s; }
-.chip:hover { color: var(--text); box-shadow: var(--glow-sm); }
-.chip.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); } /* COOL */
-.chip.on:hover { box-shadow: var(--glow); }
-.wf-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 /* ---- icons (lucide) + shared button states ---- */
 .ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -776,6 +762,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
+:root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, web-ui.md § "Settings levels") */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -784,6 +771,7 @@ input[type=range]:focus-visible { outline: none; }
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill { transition: none; }
+:root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .side-go:hover .side-dl-ico, :root.no-motion .dl-btn:hover .dl-glyph { animation: none; transform: translateY(2px); }
 :root.no-motion .app > .scroll { animation: none; }
@@ -1058,6 +1046,96 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
     animation: side-fade .2s ease-out; }
   .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 }
+
+/* ---- the Workshop filter column (components/WorkshopFilterColumn.tsx; owner 2026-11-11: Wallpaper Engine's left column, a
+   three-way switch per tag + click-to-cycle names). Docked left of the grid from 1100 px (WF_DOCK_QUERY — the grid gets a
+   margin-left, its columns re-fit, like the item sidebar's margin-right), a drawer over the grid with a scrim below that.
+   Calm by design (the owner: 40 switches could look "like a mixing desk"): an untouched row's switch is faint — no fill, muted
+   glyphs, half opacity — and only the active segment of an include / exclude row is coloured (accent / danger). */
+.app { --wf-w: 240px; }
+.wf-col { position: absolute; top: var(--topbar-h, 56px); left: 0; bottom: 0; width: var(--wf-w); z-index: 30;
+  display: flex; flex-direction: column; overflow: hidden;
+  background:
+    radial-gradient(300px 240px at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
+    color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
+  border-right: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface0)); }
+.app:has(> .wf-col[data-mode="dock"]) > .scroll { margin-left: var(--wf-w); }
+.wf-col[data-mode="drawer"] { width: min(280px, 88vw); z-index: 46; outline: none;
+  border-right-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));
+  box-shadow: 14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
+  animation: wf-in .3s cubic-bezier(.2, 1.15, .36, 1); }
+.wf-col[data-mode="drawer"].closing { animation: wf-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+.wf-scrim { position: absolute; inset: var(--topbar-h, 56px) 0 0 0; z-index: 45; background: rgba(0,0,0,.4); animation: side-fade .2s ease-out; }
+.wf-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
+@keyframes wf-in { from { transform: translateX(-40px); opacity: 0; } }
+@keyframes wf-out { to { transform: translateX(-32px); opacity: 0; } }
+.wf-top { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 8px 9px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+.wf-title { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 800; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--accent); }
+.wf-clear { margin-left: auto; padding: 4px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; color: var(--subtext);
+  transition: color .12s, background .12s, box-shadow .2s; }
+.wf-clear:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--surface0) 70%, transparent); box-shadow: var(--glow-sm); }
+.wf-clear:disabled { opacity: .4; cursor: default; }
+.wf-close { flex: none; }
+.wf-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 10px 8px 16px; }
+/* a group: a soft card; one with active tags gets an accent edge */
+.wf-grp { position: relative; padding: 2px 4px 5px; border-radius: 11px;
+  background: color-mix(in srgb, var(--bg-crust) 30%, transparent); border: 1px solid color-mix(in srgb, var(--surface1) 45%, transparent);
+  transition: border-color .2s; }
+.wf-grp + .wf-grp { margin-top: 8px; }
+.wf-grp.has-active { border-color: color-mix(in srgb, var(--accent) 32%, var(--surface1)); }
+.wf-grp::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; pointer-events: none;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent); opacity: 0; transition: opacity .2s; }
+.wf-grp.has-active::before { opacity: .8; }
+.wf-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 0; }
+.wf-head-btn { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 6px 6px; border-radius: 7px;
+  font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); text-align: left;
+  transition: color .12s; }
+.wf-head-btn:hover { color: var(--text); }
+.wf-chev { flex: none; transition: transform .18s ease; }
+.wf-head-btn[aria-expanded="false"] .wf-chev { transform: rotate(-90deg); }
+.wf-n { flex: none; min-width: 18px; padding: 0 6px; border-radius: 999px; line-height: 17px; text-align: center;
+  font-size: 10.5px; font-weight: 800; color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
+.wf-sub { margin: 6px 8px 1px; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; color: var(--muted); }
+.wf-subgrp + .wf-subgrp { margin-top: 2px; }
+.wf-body { animation: wf-rows .18s ease-out; }
+@keyframes wf-rows { from { opacity: 0; transform: translateY(-4px); } }
+/* a row: the name (click = cycle) + the switch; right-click = exclude */
+.wf-row { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 2px 3px 2px 8px; border-radius: 7px;
+  font-size: 12.5px; color: var(--subtext); user-select: none; transition: background .12s, color .12s; }
+.wf-row:hover { background: color-mix(in srgb, var(--surface0) 55%, transparent); color: var(--text); }
+.wf-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.wf-row.inc .wf-name { color: var(--text); font-weight: 600; }
+.wf-row.exc .wf-name { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.wf-sw { flex: none; display: inline-flex; gap: 1px; padding: 2px; border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-crust) 40%, transparent); opacity: .5; transition: opacity .15s; }
+.wf-row:hover .wf-sw, .wf-row.inc .wf-sw, .wf-row.exc .wf-sw, .wf-sw:focus-within { opacity: 1; }
+.wf-seg { width: 20px; height: 17px; display: grid; place-items: center; border-radius: 5px; color: var(--muted);
+  transition: background .12s, color .12s, box-shadow .2s; }
+.wf-seg.i:hover { color: var(--accent); }
+.wf-seg.e:hover { color: var(--danger); }
+.wf-seg.o:hover { color: var(--text); }
+.wf-seg.o[aria-checked="true"] { color: var(--subtext); }
+.wf-seg.i[aria-checked="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); } /* COOL */
+.wf-seg.e[aria-checked="true"] { background: var(--danger); color: var(--accent-fg); box-shadow: 0 0 10px -3px var(--danger); }
+/* Features: All / Any (only meaningful with ≥ 2 included features — muted until then) */
+.wf-fm { flex: none; display: inline-flex; gap: 1px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--bg-crust) 40%, transparent);
+  transition: opacity .15s; }
+.wf-fm.idle { opacity: .45; }
+.wf-fm.idle:hover, .wf-fm.idle:focus-within { opacity: .8; }
+.wf-fm-seg { padding: 0 6px; height: 17px; border-radius: 5px; font-size: 10.5px; font-weight: 700; color: var(--muted);
+  transition: background .12s, color .12s, box-shadow .2s; }
+.wf-fm-seg:hover { color: var(--text); }
+.wf-fm-seg[aria-checked="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.wf-fm.idle .wf-fm-seg[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); box-shadow: none; }
+/* live wallpaper behind the tabs: like the item sidebar — the docked column has no fill (--tr-side 0 %), its groups hold the
+   darkness and the head's title gets the subtitle shadow; the drawer floats over cards, so it keeps a fill */
+:root.bg-live .wf-col[data-mode="dock"] { background: transparent; border-right-color: transparent; }
+:root.bg-live .wf-grp { background: color-mix(in srgb, var(--bg-crust) 72%, transparent); border-color: var(--surface1); }
+:root.bg-live .wf-col[data-mode="dock"] .wf-top { border-bottom-color: transparent; }
+:root.bg-live .wf-title, :root.bg-live .wf-clear { filter: drop-shadow(0 0 3.5px #000); }
+:root.bg-live .wf-col[data-mode="drawer"] { background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); }
 
 /* ---- narrow windows (owner 2026-11-10: "any tiled size") ---- */
 /* below 760 px the source pills join the top bar's own rows (each wraps on its own, the search fills a row's end)

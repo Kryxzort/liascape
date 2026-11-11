@@ -252,6 +252,41 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   search, sort, filters, refresh) and both `reload` and `loadMore` drop a reply from an older one (and leave `loading` to the
   newer request). Before, a slow online source still loading when the user switched let its late page replace the new
   source's list — MotionBgs' cards under the "Wallpaper Engine (Local)" pill (probe-morph's Browse cells caught it).
+- **Workshop filter column** (owner 2026-11-11, picking from mockups: "the 2nd feels most natural (im probably used to wallpaper
+  engine's design lol…)" = Wallpaper Engine's left column, + "3 way switch + click cycle would be good imo"; it replaced
+  `WorkshopFilterBar`'s type / age / resolution dropdowns + genre / feature chip popover). `components/WorkshopFilterColumn.tsx`
+  (data + hooks in `workshopFilter.ts`: `WF_GROUPS`, `WF_DOCK_QUERY`, `useFilterDocked`), Workshop source only (`isWorkshop()`).
+  Groups Age · Type (Scene always listed — Browse doesn't know scene support) · Resolution (sub-headings Standard / Ultrawide /
+  Dual / Triple / Portrait / Other; a label drops its sub-heading's prefix, the tag + aria-labels stay whole) · Genre · Features
+  (collapsed by default); a head = chevron + name + the count of tags on (`[data-wf-count]`); collapse state in the store
+  (`filterCollapsed`, localStorage `liascape.browseFilterCollapsed`); "Clear all" (`[data-wf-clear]`) in the column's head. Each
+  row (`.wf-row[data-wf-tag][data-state=inc|off|exc]`): the name + a radiogroup `[✓ | · | ✕]` (aria-labels "Include X" / "Off" /
+  "Hide X", labelled by the name, roving tabindex + arrow keys, `[data-seg]`); a segment click sets it, a NAME click cycles off →
+  include → exclude → off, a right-click on the row toggles exclude. Calm (the owner: 40 switches could look "like a mixing desk"):
+  an untouched switch is half-opacity, unfilled, muted; only the active ✓ (accent + `--glow-sm`) / ✕ (danger) is coloured; an
+  excluded name is `--danger` struck through. **All / Any on Genre + Features only** (owner: "what if a user wants a 3D OR HDR
+  and not 3D AND HDR", then "lets just have a 'all or any' option for genere too"; age / type / resolution: an item has one):
+  one `MatchSwitch` per group, bound by `WF_GROUPS[].match` to `genreMatch` (default any) / `featureMatch` (default all) — a
+  two-segment radiogroup in the head (`.wf-fm[data-wf-match]`, `[data-fm=all|any]`, aria-labels "Must have all ticked genres" /
+  "Any ticked genre", "… features" / "… feature"), muted (`.idle`) until ≥ 2 of its tags are included; the group's aria-label
+  says "(all of)" / "(any of)". **Contract** (`// API:` `WorkshopFilter`): `{ sort, trendDays, include[], exclude[],
+  featureMatch, genreMatch }` — a tag in include XOR exclude (`store.setTagState`); the backend owns the semantics (any of
+  within a group, Genre / Features per their match, all groups at once, any age filter hides unrated items). Every change
+  goes through `setBrowseFilter` (the 280 ms debounced reload, `browseGen`). An old saved `liascape.browseFilter` (type / ageRating
+  / resolution / genres / features) migrates once to includes (`loadBrowseFilter`, written back). **Layout**: docked from 1100 px
+  (`WF_DOCK_QUERY`) as a sibling of `.scroll` in `.app` (`.wf-col[data-wf-col][data-mode=dock]`, 240 px, `.app:has(> .wf-col
+  [data-mode=dock]) > .scroll { margin-left }` — the grid re-fits; with the item sidebar docked too a 1100 px window keeps the grid
+  ~540 px). Below 1100 it's a drawer: "Filters · N" (`[data-wf-open]`) in the sort row (sort + period stay there,
+  `WorkshopSortRow`) opens it over the grid from the left with a `.wf-scrim` (z 45 / 46, above the item sidebar); Escape (capture,
+  before the grid's Escape), the scrim or `.wf-close` close it; widening closes it. Own smooth scroll (`.wf-scroll`). Motion:
+  the drawer slides in / out (`wf-in` / `wf-out`, transform + opacity, `useLinger` `WF_CLOSE_MS`), a group's rows fade in, the
+  chevron turns; `:root.no-motion` → none. `:root.no-glow` → no glow on ✓ / ✕ / the active group's edge. **Live wallpaper behind**
+  (`:root.bg-live`): the docked column has no fill (like the item sidebar), its group cards (crust 72 % — 55 % left row names hard to read on a bright wallpaper) carry the darkness, the
+  head text gets the drop-shadow; the drawer floats over cards, so it keeps a `--tr-strong` fill. Guard:
+  `LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js` (stubs `/browse` + `/detail` in the page —
+  the stack has no network): `wf:workshopOnly` / `wf:cycle` / `wf:segments` / `wf:rightClick` / `wf:post` (one POST per burst,
+  include XOR exclude, no old keys) / `wf:match` / `wf:collapse` / `wf:clearAll` / `wf:migrate` / `wf:drawer` /
+  `wf:size:<w>x<h>` (probe-layout's nine sizes, + the item sidebar open) / `wf:noMotion` / `wf:noGlow` / `wf:liveBg`; shots `wf-*.png`.
 
 ## Round-3 patterns (live wallpaper bg, translucency, app dropdowns, drag-preview)
 - **`WallpaperBg.tsx`** — the LIVE wallpaper played behind the UI (`position:fixed`, z-0), gated by the
@@ -266,8 +301,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   decode/animate while `!appActive`.
 - **Translucency = two CSS vars** `--tr` / `--tr-strong` (`--tr-strong` = `--tr` + 0.1). Applied via
   `color-mix(… P%)` where the percentage **is** the alpha (so a higher number = *more* opaque). `--tr`:
-  topbar, search, sort, "wallpapers in playlist" counter, Browse filters. `--tr-strong`: filter dropdown,
-  Settings / More-info modal, playlist-settings menu, debug overlay, the item sidebar. **The playlist bar
+  topbar, search, sort, "wallpapers in playlist" counter, the Workshop sort row. `--tr-strong`: dropdown lists,
+  Settings / More-info modal, the Workshop filter drawer under the live wallpaper, playlist-settings menu, debug overlay, the item sidebar. **The playlist bar
   itself has 0% bg** — it shows the live `WallpaperBg` directly (cards must NOT be visible behind it). No
   `backdrop-filter: blur` (removed — paint cost + by request).
 - **`Select.tsx`** — app-controlled dropdown, **not native `<select>`**: a `.sel` button + a portal'd
