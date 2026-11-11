@@ -8,9 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-8. [ ] **Themed number stepper**: `NumInput` still shows the browser's spinner arrows. Replace with app-styled − / +
-       (press-and-hold repeats with acceleration, wheel over the field steps, keyboard arrows step, clamp kept via
-       `clampNum`), hide the native spin buttons. Probe: stepping, hold-repeat, clamp, both themes.
 10. [ ] **Tab switch still drops frames in production** (bench-live-ui, 2026-11-12, 240 Hz: 23 double-frame misses over 5
        switches, ~62 ms each; typical profile ~340 ms each): the page remount (~1,000 components for 160 cards) plus the
        first style/layout/paint of every card. Investigate grid virtualisation (cards only near the viewport; probes that

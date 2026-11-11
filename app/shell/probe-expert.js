@@ -9,6 +9,9 @@
 //   4. "When the playlist starts again": Settings (a Select + a hint per value) and the playlist modal (beside the global
 //      value it overrides; the playlist's own choice only matters under "Override global rotation settings")
 //   5. "Pause behind windows": the Playback row (liascape-player), default "A fullscreen or maximized window", saved + live
+//   6. the number stepper (components/NumInput.tsx): no native spin arrows, − / + step and clamp, hold repeats and speeds up,
+//      ↑ / ↓ and the wheel on a focused field, typing as before, the digit roll (motion on / off), its look (glow, no-glow,
+//      bg-live, Latte); pictures stepper-*.png (1920×1080 when the screen fits: LIASCAPE_MATRIX_SCREEN=1920x1080)
 // Exit 1 on any FAIL.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -213,6 +216,263 @@ app.whenReady().then(async () => {
       if (!r?.reset) v.push("no reset icon on a non-default value");
       await js(`window.__x.row(${JSON.stringify(L)}).querySelector(".s-reset")?.click(); await window.__x.sleep(500); return true`);
       if (!(await waitFor(async () => (await field("pauseWhenCovered")) === "maximized", 4000))) v.push(`the reset left pauseWhenCovered ${await field("pauseWhenCovered")}`);
+      return v;
+    });
+
+    // ---- the number stepper (components/NumInput.tsx) on "Video frame rate cap" (0–480): a real mouse, keys and wheel
+    // (sendInputEvent), the saved value read back. The page's own state (level, theme, toggles) is put back after each cell.
+    const FPS = "Video frame rate cap";
+    const SI = (ev) => win.webContents.sendInputEvent(ev);
+    const R = JSON.stringify(FPS);
+    const IN = `window.__x.row(${R})?.querySelector("input.num")`;
+    const st = () => js(`const r = window.__x.row(${R}), s = r?.querySelector("[data-num-step]"), i = ${IN};
+      const box = (e) => { if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), l: b.x, t: b.y, w: b.width, h: b.height }; };
+      const b = (d) => s?.querySelector('[data-step="' + d + '"]');
+      return { has: !!s, field: i?.value ?? null, input: box(i), wrap: box(s), dec: box(b(-1)), inc: box(b(1)), decDis: b(-1)?.disabled ?? null, incDis: b(1)?.disabled ?? null,
+        focused: !!i && document.activeElement === i }`);
+    const show = () => js(`window.__x.row(${R})?.scrollIntoView({ block: "center" }); await window.__x.sleep(500); return true`);
+    // an unfocused field commits a script-set value at once, clamped (NumInput's onChange)
+    const setField = async (v) => { await js(`const i = ${IN}; i.blur(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(String(v))});
+      i.dispatchEvent(new Event("input", { bubbles: true })); await window.__x.sleep(80); return true`); await waitFor(async () => (await field("videoFpsCap")) === v, 3000); };
+    const move = async (p) => { SI({ type: "mouseMove", x: p.x, y: p.y }); await sleep(60); };
+    const press = async (p, ms = 40) => { await move(p); SI({ type: "mouseDown", x: p.x, y: p.y, button: "left", clickCount: 1 }); await sleep(ms); SI({ type: "mouseUp", x: p.x, y: p.y, button: "left", clickCount: 1 }); await sleep(150); };
+    const key = async (keyCode, modifiers = []) => { SI({ type: "keyDown", keyCode, modifiers }); SI({ type: "keyUp", keyCode, modifiers }); await sleep(120); };
+    const savedIs = (v) => waitFor(async () => (await field("videoFpsCap")) === v, 3000);
+    const stepperStart = async () => {
+      await http("POST", "/settings", { settingsLevel: "standard", videoFpsCap: 24, morphs: true, glows: true });
+      await loadSettings(); await show();
+      for (let i = 0; i < 20 && (await st()).field !== "24"; i++) await sleep(100);
+    };
+    const shots = async (name, rect) => {
+      const img = await win.webContents.capturePage(rect);
+      fs.writeFileSync(path.join(OUT, `stepper-${name}.png`), img.toPNG());
+    };
+
+    await cell("stepper: no native spin arrows; themed − / + (lucide) around a typeable field", async () => {
+      await stepperStart();
+      const s = await st();
+      if (!s.input) return [`no "${FPS}" field`];
+      const v = [];
+      if (!s.has) v.push("no stepper ([data-num-step]) on the row — the field is still a bare <input type=number>");
+      const look = await js(`const s = window.__x.row(${R}).querySelector("[data-num-step]"), i = ${IN};
+        return { app: getComputedStyle(i).appearance, btns: [...(s?.querySelectorAll(".ns-btn") ?? [])].map((b) => ({ svg: !!b.querySelector("svg.lucide"), aria: b.getAttribute("aria-label"), tab: b.tabIndex })) }`);
+      if (look.app !== "textfield") v.push(`the input's appearance is ${look.app} (want textfield: no spin buttons)`);
+      if (look.btns.length !== 2 || !look.btns.every((b) => b.svg && b.aria && b.tab === -1)) v.push(`buttons ${JSON.stringify(look.btns)}: want two lucide icon buttons with an aria-label, out of the tab order`);
+      // the outcome: hover the field (Chromium paints its spin arrows on hover), hide the digits, count bright pixels in it
+      await move(s.input); await sleep(300);
+      await js(`const i = ${IN}; i.style.color = "transparent"; i.style.caretColor = "transparent"; return true`); await sleep(100);
+      const img = await win.webContents.capturePage({ x: Math.round(s.input.l) + 1, y: Math.round(s.input.t) + 1, width: Math.round(s.input.w) - 2, height: Math.round(s.input.h) - 2 });
+      await js(`const i = ${IN}; i.style.color = ""; i.style.caretColor = ""; return true`);
+      const bmp = img.toBitmap(); let bright = 0; // BGRA
+      for (let p = 0; p < bmp.length; p += 4) if (Math.min(bmp[p], bmp[p + 1], bmp[p + 2]) > 150) bright++;
+      if (bright > 6) v.push(`${bright} bright pixels inside the hovered field with its digits hidden — the native spin arrows still show`);
+      return v;
+    });
+
+    await cell("stepper: − / + step by one and save; a bound disables its button and holds", async () => {
+      await stepperStart();
+      let s = await st();
+      if (!s.inc) return ["no + button"];
+      const v = [];
+      await press(s.inc);
+      if ((s = await st()).field !== "25") v.push(`+ from 24 shows ${s.field}, want 25`);
+      await press(s.dec); await press(s.dec);
+      if ((s = await st()).field !== "23") v.push(`− − from 25 shows ${s.field}, want 23`);
+      if (!(await savedIs(23))) v.push(`videoFpsCap ${await field("videoFpsCap")} after the clicks, want 23`);
+      if (s.focused) v.push("a click on − / + moved the focus into the field");
+      await setField(479); s = await st();
+      if (s.incDis) v.push("+ is disabled at 479 (max 480)");
+      await press(s.inc); s = await st();
+      if (s.field !== "480" || !s.incDis || s.decDis) v.push(`at the max: field ${s.field}, + disabled ${s.incDis}, − disabled ${s.decDis} (want 480, true, false)`);
+      await press(s.inc);
+      if ((s = await st()).field !== "480" || !(await savedIs(480))) v.push(`+ past the max: field ${s.field}, saved ${await field("videoFpsCap")}`);
+      await setField(1); s = await st();
+      await press(s.dec); s = await st();
+      if (s.field !== "0" || !s.decDis || s.incDis) v.push(`at the min: field ${s.field}, − disabled ${s.decDis}, + disabled ${s.incDis} (want 0, true, false)`);
+      if (!(await savedIs(0))) v.push(`videoFpsCap ${await field("videoFpsCap")} at the min, want 0`);
+      return v;
+    });
+
+    await cell("stepper: press-and-hold repeats and speeds up (gaps shrink, then ×10 jumps); release stops it", async () => {
+      await stepperStart(); await setField(0);
+      const s = await st();
+      if (!s.inc) return ["no + button"];
+      await js(`const i = ${IN}; let last = i.value; window.__hv = []; clearInterval(window.__hp);
+        window.__hp = setInterval(() => { if (i.value !== last) { last = i.value; window.__hv.push([performance.now(), +last]); } }, 4); return true`);
+      await move(s.inc);
+      const t0 = await js(`return performance.now()`);
+      SI({ type: "mouseDown", x: s.inc.x, y: s.inc.y, button: "left", clickCount: 1 });
+      await sleep(2600);
+      SI({ type: "mouseUp", x: s.inc.x, y: s.inc.y, button: "left", clickCount: 1 });
+      const tUp = await js(`return performance.now()`);
+      await sleep(700);
+      const hv = await js(`clearInterval(window.__hp); return window.__hv`);
+      const v = [];
+      if (hv.length < 3) return [`the hold changed the field ${hv.length} time(s) — proved nothing (${JSON.stringify(hv)})`];
+      if (hv[0][0] - t0 > 200) v.push(`the first step came ${Math.round(hv[0][0] - t0)} ms after the press (want at once)`);
+      if (hv.length < 25) v.push(`only ${hv.length} steps in a 2.6 s hold`);
+      const gaps = hv.slice(1).map((x, i) => x[0] - hv[i][0]);
+      const early = (gaps[1] + gaps[2] + gaps[3]) / 3, late = gaps.slice(-6, -1).reduce((a, b) => a + b, 0) / 5;
+      if (!(early >= 2 * late)) v.push(`repeat gaps don't shrink: early ${early.toFixed(0)} ms vs late ${late.toFixed(0)} ms`);
+      const incs = hv.slice(1).map((x, i) => x[1] - hv[i][1]);
+      if (!incs.slice(0, 5).every((d) => d === 1)) v.push(`the first repeats step ${JSON.stringify(incs.slice(0, 5))}, want 1 each`);
+      if (!incs.slice(-3).every((d) => d === 10)) v.push(`a long hold's last steps are ${JSON.stringify(incs.slice(-3))}, want ×10 (10 each)`);
+      const after = hv.filter((x) => x[0] > tUp + 80);
+      if (after.length) v.push(`the field kept changing after the release: ${JSON.stringify(after.map((x) => x[1]))}`);
+      const end = hv.at(-1)[1];
+      if (!(await savedIs(end))) v.push(`saved ${await field("videoFpsCap")}, the field ended at ${end}`);
+      return v;
+    });
+
+    await cell("stepper: ↑ / ↓ step a focused field, Shift ×10; typing still commits only a complete in-range value", async () => {
+      await stepperStart(); await setField(100);
+      const v = [];
+      await js(`${IN}.focus(); return true`); await sleep(100);
+      await key("Up"); let s = await st();
+      if (s.field !== "101") v.push(`↑ from 100 shows ${s.field}`);
+      await key("Up", ["shift"]); s = await st();
+      if (s.field !== "111") v.push(`Shift+↑ from 101 shows ${s.field}, want 111`);
+      await key("Down"); s = await st();
+      if (s.field !== "110") v.push(`↓ from 111 shows ${s.field}`);
+      if (!(await savedIs(110))) v.push(`saved ${await field("videoFpsCap")} after the keys, want 110`);
+      await js(`${IN}.select(); return true`); win.webContents.insertText("37"); await sleep(150);
+      if ((s = await st()).field !== "37" || !(await savedIs(37))) v.push(`typed 37: field ${s.field}, saved ${await field("videoFpsCap")}`);
+      await js(`${IN}.select(); return true`); win.webContents.insertText("999"); await sleep(600);
+      if ((s = await st()).field !== "999") v.push(`typed 999 shows ${s.field} while focused`);
+      if ((await field("videoFpsCap")) !== 37) v.push(`an out-of-range draft was saved: ${await field("videoFpsCap")}`);
+      await key("Return"); s = await st();
+      if (s.field !== "480" || !(await savedIs(480))) v.push(`Enter on 999: field ${s.field}, saved ${await field("videoFpsCap")} (want 480)`);
+      await js(`${IN}.select(); return true`); win.webContents.insertText("50"); await sleep(150);
+      if (s.inc) await press(s.inc); s = await st();
+      if (s.field !== "51" || !s.focused) v.push(`+ on a typed 50: field ${s.field}, focused ${s.focused} (want 51, still focused)`);
+      await js(`${IN}.blur(); return true`);
+      if (!(await savedIs(51))) v.push(`saved ${await field("videoFpsCap")} after the blur, want 51`);
+      return v;
+    });
+
+    await cell("stepper: the wheel steps a focused field and the page stays; over an unfocused one the page glides on", async () => {
+      await stepperStart(); await setField(200);
+      const v = [];
+      const top = () => js(`return window.__x.row(${R}).closest(".scroll")?.scrollTop ?? null`);
+      const room = await js(`const e = window.__x.row(${R}).closest(".scroll"); return e ? e.scrollHeight - e.clientHeight : 0`);
+      if (room < 200) return [`the Settings scroller has ${room} px to scroll — proved nothing`];
+      const NOTCH = (dir) => ({ type: "mouseWheel", deltaX: 0, deltaY: -120 * dir, wheelTicksX: 0, wheelTicksY: -dir, hasPreciseScrollingDeltas: false, canScroll: true });
+      // a window listener runs after the page's own: defaultPrevented = the smooth scroller took the notch (it glides)
+      await js(`window.__wdp = []; if (!window.__wdpOn) { window.__wdpOn = true; addEventListener("wheel", (e) => window.__wdp.push(e.defaultPrevented), { passive: true }); } return true`);
+      let s = await st(); await move(s.input);
+      let t0 = await top(); SI({ ...NOTCH(1), x: s.input.x, y: s.input.y }); await sleep(800);
+      let t1 = await top(); s = await st();
+      if (s.field !== "200") v.push(`a wheel over the unfocused field changed it to ${s.field}`);
+      if (Math.abs(t1 - t0) < 20) v.push(`a wheel over the unfocused field didn't scroll the page (${t0} → ${t1})`);
+      const dp = await js(`return window.__wdp`);
+      if (dp[0] !== true) v.push(`over the unfocused field the notch scrolled natively (defaultPrevented ${JSON.stringify(dp)}), not the page's smooth glide`);
+      await show(); s = await st();
+      await js(`${IN}.focus(); return true`); await move(s.input);
+      t0 = await top(); SI({ ...NOTCH(1), x: s.input.x, y: s.input.y }); await sleep(800);
+      t1 = await top(); s = await st();
+      if (s.field !== "199") v.push(`a wheel down over the focused field shows ${s.field}, want 199`);
+      if (Math.abs(t1 - t0) > 1) v.push(`the page scrolled ${t1 - t0} px under a wheel over the focused field`);
+      const up = s.inc ?? s.input; SI({ ...NOTCH(-1), x: up.x, y: up.y }); await sleep(500);
+      if ((s = await st()).field !== "200") v.push(`a wheel up over the focused stepper's + shows ${s.field}, want 200`);
+      await js(`${IN}.blur(); return true`);
+      if (!(await savedIs(200))) v.push(`saved ${await field("videoFpsCap")}, want 200`);
+      return v;
+    });
+
+    // per-frame samples of the input (rolling in) and its ghost (the old digits rolling out) over one + click
+    const rollRun = async () => {
+      const s = await st();
+      if (!s.inc) return null;
+      await js(`const i = ${IN}, g = i.parentElement.querySelector(".ns-ghost"); window.__rs = []; const t0 = performance.now();
+        const ty = (e) => { const m = getComputedStyle(e).transform; return m === "none" ? 0 : new DOMMatrix(m).m42; };
+        const tick = () => { window.__rs.push({ t: performance.now() - t0, iy: ty(i), io: +getComputedStyle(i).opacity, gy: g ? ty(g) : 0, go: g ? +getComputedStyle(g).opacity : 0 });
+          if (performance.now() - t0 < 500) requestAnimationFrame(tick); };
+        requestAnimationFrame(tick); return true`);
+      await press(s.inc, 20); await sleep(450);
+      return js(`return window.__rs`);
+    };
+    await cell("stepper: a step rolls the digits (motion on: in-between frames); motion off: no roll", async () => {
+      await stepperStart(); await setField(10);
+      const v = [];
+      const on = await rollRun();
+      if (!on) return ["no + button"];
+      const midIn = on.filter((f) => Math.abs(f.iy) > 1 || (f.io > 0.05 && f.io < 0.95)).length;
+      const midOut = on.filter((f) => f.go > 0.05 && f.go < 0.95).length;
+      if (midIn < 2 || midOut < 2) v.push(`motion on: ${midIn} frames of the new digits rolling in, ${midOut} of the old rolling out (want ≥ 2 each) — ${JSON.stringify(on.slice(0, 8))}`);
+      const last = on.at(-1);
+      if (Math.abs(last.iy) > 0.5 || last.io < 0.99 || last.go > 0.01) v.push(`the roll didn't settle: ${JSON.stringify(last)}`);
+      if ((await st()).field !== "11") v.push(`the step shows ${(await st()).field}, want 11`);
+      await js(`window.__x.row("Smooth window animations").querySelector("input[type=checkbox]").click(); await window.__x.sleep(400); return true`);
+      if (!(await waitFor(async () => (await field("morphs")) === false, 3000))) v.push("couldn't turn motion off");
+      await show();
+      const off = await rollRun();
+      const moved = off.filter((f) => Math.abs(f.iy) > 0.5 || f.io < 0.99 || f.go > 0.01);
+      if (moved.length) v.push(`motion off: ${moved.length} frames still roll (${JSON.stringify(moved.slice(0, 3))})`);
+      if ((await st()).field !== "12") v.push(`the motion-off step shows ${(await st()).field}, want 12`);
+      await js(`window.__x.row("Smooth window animations").querySelector("input[type=checkbox]").click(); await window.__x.sleep(300); return true`);
+      return v;
+    });
+
+    await cell("stepper: look — hover glow, a springy press, no-glow, bg-live, Latte", async () => {
+      await stepperStart();
+      const { screen } = require("electron");
+      const d = screen.getPrimaryDisplay().size, big = d.width >= 1920 && d.height >= 1080;
+      if (big) { win.setContentSize(1920, 1080); await sleep(600); await show(); }
+      console.log(`        pictures at ${win.getContentSize().join("×")} (screen ${d.width}×${d.height})`);
+      const v = [];
+      const C = (expr) => js(`const p = document.createElement("i"); p.style.color = ${JSON.stringify(expr)}; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c`);
+      const read = () => js(`const s = window.__x.row(${R}).querySelector("[data-num-step]"), b = s.querySelector('[data-step="1"]'), cs = getComputedStyle(s), bb = getComputedStyle(b, "::before");
+        return { border: cs.borderColor, shadow: cs.boxShadow, bg: cs.backgroundColor, btn: getComputedStyle(b).color, discO: +bb.opacity, discShadow: bb.boxShadow,
+          held: b.classList.contains("held"), svgT: getComputedStyle(b.querySelector("svg")).transform }`);
+      // a box-shadow with any visible colour (no-glow's --glow-sm is "0 0 #0000": transparent)
+      const lit = (sh) => !!sh && sh !== "none" && sh.split(/,(?![^(]*\))/).some((part) => {
+        const m = /rgba?\(([^)]*)\)/.exec(part); if (!m) return false; const c = m[1].split(",").map(Number); return c.length < 4 || c[3] > 0; });
+      let s = await st();
+      if (!s.wrap || !s.inc) return ["no stepper ([data-num-step]) to look at"];
+      const pad = 40, rect = { x: Math.max(0, Math.round(s.wrap.l - 360)), y: Math.max(0, Math.round(s.wrap.t - pad)), width: Math.round(s.wrap.w + 360 + pad), height: Math.round(s.wrap.h + 2 * pad) };
+      await move({ x: 5, y: 5 }); await sleep(300);
+      const rest = await read();
+      if (rest.btn !== await C("var(--subtext)")) v.push(`the buttons at rest are ${rest.btn}, want --subtext`);
+      const off = await js(`return [...window.__x.row(${R}).querySelectorAll(".ns-btn")].map((b) => { const r = b.getBoundingClientRect(), i = b.querySelector("svg").getBoundingClientRect();
+        return [+(i.x + i.width / 2 - r.x - r.width / 2).toFixed(2), +(i.y + i.height / 2 - r.y - r.height / 2).toFixed(2)]; })`);
+      if (off.some(([dx, dy]) => Math.abs(dx) > 0.6 || Math.abs(dy) > 0.6)) v.push(`− / + icons off their buttons' centre by ${JSON.stringify(off)} px`);
+      await shots("rest", rect); await win.webContents.capturePage().then((img) => fs.writeFileSync(path.join(OUT, "stepper-rest-full.png"), img.toPNG()));
+      await move(s.inc); await sleep(500);
+      const hov = await read();
+      if (hov.border !== await C("var(--accent)")) v.push(`hovered border ${hov.border}, want --accent`);
+      if (!lit(hov.shadow) || !lit(hov.discShadow) || hov.discO < 0.99) v.push(`hovered: pill glow ${hov.shadow}, + disc ${hov.discO} / ${hov.discShadow} (want both glowing)`);
+      if (hov.btn !== await C("var(--accent)")) v.push(`hovered + is ${hov.btn}, want --accent`);
+      await shots("hover", rect); await win.webContents.capturePage().then((img) => fs.writeFileSync(path.join(OUT, "stepper-hover-full.png"), img.toPNG()));
+      // a held press squeezes the icon; mid-roll picture: the roll's animations paused part-way
+      SI({ type: "mouseDown", x: s.inc.x, y: s.inc.y, button: "left", clickCount: 1 }); await sleep(150);
+      const held = await read();
+      await js(`for (const a of document.getAnimations()) if (a.effect?.target?.closest?.("[data-num-step]")) { a.pause(); a.currentTime = 70; } return true`);
+      await sleep(100); await shots("midroll", rect);
+      SI({ type: "mouseUp", x: s.inc.x, y: s.inc.y, button: "left", clickCount: 1 });
+      await js(`for (const a of document.getAnimations()) if (a.effect?.target?.closest?.("[data-num-step]")) a.finish(); return true`);
+      if (!held.held || !/matrix\(0\.[0-9]/.test(held.svgT)) v.push(`held +: class held ${held.held}, icon transform ${held.svgT} (want squeezed)`);
+      await sleep(300);
+      {
+        await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300);
+        const ng = await read();
+        if (lit(ng.shadow) || lit(ng.discShadow)) v.push(`no-glow: still glowing (pill ${ng.shadow}, disc ${ng.discShadow})`);
+        await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
+        // color-mix computes to color(srgb r g b / a), a plain fill to rgb()/rgba()
+        const bl = await read(), a = /\/\s*([0-9.]+)\s*\)$/.exec(bl.bg)?.[1] ?? /rgba\([^)]*,\s*([0-9.]+)\)/.exec(bl.bg)?.[1] ?? 1;
+        if (!(+a < 1)) v.push(`bg-live: the pill's fill ${bl.bg} is opaque (want --tr translucency)`);
+        await js(`document.documentElement.classList.remove("bg-live"); return true`);
+      }
+      const theme0 = await js(`return window.__x.row("Theme")?.querySelector(".sel")?.textContent?.trim() ?? null`);
+      await js(`await window.__x.select("Theme", "Catppuccin Latte"); await window.__x.sleep(400); return true`);
+      await show(); s = await st(); await move(s.inc); await sleep(500);
+      const lt = await read();
+      if (lt.border !== await C("var(--accent)") || lt.btn !== await C("var(--accent)")) v.push(`Latte hovered: border ${lt.border}, + ${lt.btn}, want its --accent ${await C("var(--accent)")}`);
+      const latteBg = await C("color-mix(in srgb, var(--surface1) var(--tr), transparent)");
+      if (lt.bg !== latteBg) v.push(`Latte fill ${lt.bg}, want its --surface1 ${latteBg}`);
+      await shots("latte-hover", { ...rect, y: Math.max(0, Math.round(s.wrap.t - pad)) });
+      if (theme0) await js(`await window.__x.select("Theme", ${JSON.stringify(theme0)}); return true`);
+      await move({ x: 5, y: 5 });
+      if (big) win.setContentSize(1400, 900);
       return v;
     });
   } catch (e) {

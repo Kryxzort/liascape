@@ -58,7 +58,7 @@ for f in $FILES; do
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
-    app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f" ;;
+    app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f (+ --probe probe-expert.js — the stepper: − / +, hold, wheel, keys, roll, look)" ;;
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe

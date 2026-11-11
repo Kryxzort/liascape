@@ -77,9 +77,10 @@ function bind(el: HTMLElement, axis: "y" | "x", motionOn: () => boolean): () => 
 
   const onWheel = (e: WheelEvent) => {
     if (e.ctrlKey) return; // zoom / pinch: not a scroll
-    // let sliders/number inputs handle their own wheel
+    // let sliders handle their own wheel; a number stepper (components/NumInput.tsx) takes the wheel only while focused
+    // and stops it there, so over an unfocused one the page glides on. Guard: probe-expert "stepper: wheel"
     const tgt = e.target as HTMLElement | null;
-    if (tgt?.closest("input,select,textarea,[role=slider]")) return;
+    if (tgt?.closest("input:not([type=number]),select,textarea,[role=slider]")) return;
     const delta = axis === "x" ? (e.deltaX || e.deltaY) : (e.deltaY || e.deltaX);
     if (!delta) return;
     // motion off (the toggle or prefers-reduced-motion) or a touchpad: the browser scrolls; a running glide yields to it
