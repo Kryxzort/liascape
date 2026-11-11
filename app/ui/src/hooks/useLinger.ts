@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-// the item sidebar's exit slide (index.css `side-out`)
-export const SIDE_CLOSE_MS = 160;
+// the item sidebar's exit slide (index.css `side-out`, .17 s)
+export const SIDE_CLOSE_MS = 170;
 
 // the last non-null value for `ms` after it went null (a panel's exit animation), `closing` meanwhile; motion off → gone
 // on the next tick

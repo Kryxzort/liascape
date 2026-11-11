@@ -193,8 +193,9 @@ const PAGE = `window.__mx = {
   playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
-  async cardMenu(t, label) { this.ctx(this.card(t)?.querySelector(".thumb-wrap"), "card " + t); await this.sleep(250); this.click(this.byText(".lib-ctx button", label), label); },
-  async playlistBarMenu(t, label) { this.ctx(this.playlistBar(t), "playlistBar " + t); await this.sleep(250); this.click(this.byText(".pl-ctx button", label), label); },
+  // a right-click on a card / a playlist bar item = the item's Library sidebar, nothing applied (owner 2026-11-11: "no context menu anywhere")
+  async openSideBar(t) { this.ctx(this.playlistBar(t), "playlistBar " + t); await this.sleep(250);
+    if (this.side()?.querySelector(".side-head h2")?.textContent.trim() !== t) throw new Error("no sidebar for the bar's " + t); },
   // a real drag: many input events over time (the throttled preview + debounced persist interleave)
   async drag(el, from, to, steps, ms, what) { for (let i = 1; i <= steps; i++) { this.setValue(el, +(from + (to - from) * i / steps).toFixed(2), what); await this.sleep(ms); } },
   setValue(el, v, what) { if (!el) throw new Error("not found: " + what); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
@@ -204,9 +205,9 @@ const PAGE = `window.__mx = {
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
   // the item sidebar (WE-style, 2026-11-10 — it replaced the per-card settings modal): focus a card without applying it
-  // (the right-click menu's "Settings"), its volume (0) / speed (1) sliders and resets, its close
+  // (a right-click), its volume (0) / speed (1) sliders and resets, its close
   side() { return document.querySelector(".side-panel:not(.closing)"); },
-  async openSide(t) { await this.cardMenu(t, "Settings"); await this.sleep(250);
+  async openSide(t) { this.ctx(this.card(t)?.querySelector(".thumb-wrap"), "card " + t); await this.sleep(400);
     if (this.side()?.querySelector(".side-head h2")?.textContent.trim() !== t) throw new Error("no sidebar for " + t); },
   modalRange(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] input[type=range]'); },
   modalReset(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] button'); },
@@ -462,7 +463,7 @@ for (const t of itemTargets) {
     c.target = pick(c, t);
     const inPlaylistBar = await ui(`return !!m.playlistBar(${JSON.stringify(TITLE(c.target))});`);
     if (!c.target || !inPlaylistBar) return c.skip = "target not in the playlist bar";
-    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Settings"); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
+    await ui(`await m.openSideBar(${JSON.stringify(TITLE(c.target))}); await m.sleep(500); m.setValue(m.modalRange(0), 42, "volume slider");`);
     await sleep(700); await ui(`m.closeModal();`);
   }, check(c) {
     const ov = (c.after.lib || []).find((i) => i.videoPath === c.target)?.volumeOverride;
@@ -763,34 +764,38 @@ C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
     if (c.badges.weOut != null) v.push(`weOut (not in the library): badge ${JSON.stringify(c.badges.weOut)}, expected none`);
     return v;
   } };
-// a right click on a card or bar item whose hover preview plays: the same <video> keeps playing under the menu (the menu's
-// backdrop takes the pointer off the card), and through a dismiss with the pointer still on it; off the item it stops
-for (const [name, find, menu] of [["card", `m.card("k3")?.querySelector(".thumb-wrap")`, ".lib-ctx"], ["bar", `m.playlistBar("k3")`, ".pl-ctx"]]) {
+// a right click on a card or bar item whose hover preview plays (2026-11-11: a right-click opens the item's sidebar — no menu):
+// the same <video> keeps playing while the pointer stays on the item, nothing applies; off the item it stops. The card's case
+// right-clicks with the sidebar already open (no grid re-fit under the pointer — opening it from closed re-fits the columns and
+// may move the card away, `lib:reflow` in probe-sidebar); the bar item's from closed (the bar's items stay where they are).
+for (const [name, find] of [["card", `m.card("k3")?.querySelector(".thumb-wrap")`], ["bar", `m.playlistBar("k3")`]]) {
   C[`hoverPreview:rightClick:${name}`] = { states: ["idle"], noSwitch: true,
     async pre() { await post("/playlist/state", { videoPaths: [K[2], K[0]], settings: PS(), name: null }); },
     async run(c) {
+      if (name === "card") await ui(`await m.openSide("k1"); await m.sleep(300);`);
       const r = await ui(`const e = ${find}; if (!e) throw new Error("no ${name}"); e.scrollIntoView({ block: "center" }); await m.sleep(200); const b = e.getBoundingClientRect(); window.__mxE = e; return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
       const send = (e) => win.webContents.sendInputEvent(e);
       const move = async (x, y) => { send({ type: "mouseMove", x, y }); await sleep(400); };
-      const right = async () => { send({ type: "mouseDown", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(40); send({ type: "mouseUp", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(400); };
-      const left = async (x, y) => { send({ type: "mouseDown", x, y, button: "left", clickCount: 1 }); await sleep(40); send({ type: "mouseUp", x, y, button: "left", clickCount: 1 }); await sleep(400); };
+      const right = async () => { send({ type: "mouseDown", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(40); send({ type: "mouseUp", x: r.x, y: r.y, button: "right", clickCount: 1 }); await sleep(500); };
       const look = () => ui(`const v = window.__mxE.querySelector("video.thumb.anim"), was = window.__mxV; const t0 = v?.currentTime; await m.sleep(350);
-        return { video: !!v, same: !!v && v === was, paused: v?.paused ?? null, moved: v ? v.currentTime !== t0 : null, menu: !!document.querySelector(${JSON.stringify(menu)}) };`);
+        return { video: !!v, same: !!v && v === was, paused: v?.paused ?? null, moved: v ? v.currentTime !== t0 : null, menu: !!document.querySelector(".ctx-menu, .lib-ctx, .pl-ctx"),
+          side: m.side()?.querySelector(".side-head h2")?.textContent.trim() ?? null };`);
       await move(r.x, r.y);
       for (let i = 0; i < 30 && !(await ui(`return (window.__mxV = window.__mxE.querySelector("video.thumb.anim"))?.currentTime > 0;`)); i++) await sleep(100);
       c.hover = await look();
-      await right();                   c.open = await look();     // the menu is up, the pointer hasn't moved
-      await left(r.x, r.y);            c.closedOn = await look(); // dismissed with the pointer still on the item
-      await right(); await move(4, 4); c.openOff = await look();  // the menu up, pointer gone: still the menu's preview
-      await left(4, 4);                c.closedOff = await look(); // dismissed off the item: it stops
+      c.cur0 = (await http("GET", "/current")).json?.path ?? null;
+      await right();                 c.open = await look();   // the sidebar on it, the pointer hasn't moved
+      c.cur1 = (await http("GET", "/current")).json?.path ?? null;
+      await move(4, 4);              c.off = await look();    // the pointer gone: it stops
+      await ui(`m.closeModal(); await m.sleep(300);`);
     }, check(c) {
       const v = [];
       if (!c.hover.video || c.hover.paused || !c.hover.moved) v.push(`hovering: no playing preview ${JSON.stringify(c.hover)} (the cell proves nothing)`);
-      const playing = (l, s, menu) => { if (!s.same || s.paused || !s.moved) v.push(`${l}: the preview stopped or restarted ${JSON.stringify(s)}`); if (s.menu !== menu) v.push(`${l}: menu ${s.menu}, expected ${menu}`); };
-      playing("right-clicked", c.open, true);
-      playing("dismissed on the item", c.closedOn, false);
-      playing("menu open, pointer off the item", c.openOff, true);
-      if (c.closedOff.video) v.push(`dismissed off the item: the preview still plays ${JSON.stringify(c.closedOff)}`);
+      if (!c.open.same || c.open.paused || !c.open.moved) v.push(`right-clicked, the pointer on it: the preview stopped or restarted ${JSON.stringify(c.open)}`);
+      if (c.open.menu) v.push("right-clicked: a context menu opened");
+      if (c.open.side !== "k3") v.push(`right-clicked: the sidebar shows ${c.open.side}, not k3`);
+      if (c.cur1 !== c.cur0) v.push(`the right-click applied something (${TITLE(c.cur0)} → ${TITLE(c.cur1)})`);
+      if (c.off.video && !c.off.paused) v.push(`the pointer off the item: the preview still plays ${JSON.stringify(c.off)}`);
       return v;
     } };
 }
@@ -1044,8 +1049,9 @@ function afterRemove(c) {
 for (const t of ["shown", "other", "off"]) {
   if (t === "off") C["playlistBarRemove:off"] = { states: PL_STATES, async run(c) { c.target = playlistBarOff(c); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); }, check: afterRemove };
-  C[`playlistBarRemoveMenu:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
-    await ui(`await m.playlistBarMenu(${JSON.stringify(TITLE(c.target))}, "Remove from playlist");`); await sleep(900); }, check: afterRemove };
+  // the bar's right-click menu ("Remove from playlist") is gone (2026-11-11): its twin is the item sidebar's playlist toggle
+  C[`playlistBarRemoveSide:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
+    await ui(`await m.openSideBar(${JSON.stringify(TITLE(c.target))}); m.click(m.side()?.querySelector("[data-side-playlist]"), "the sidebar's playlist toggle"); await m.sleep(300); m.closeModal();`); await sleep(900); }, check: afterRemove };
 }
 // remove what plays (or is incoming), then next: the rotation goes on from the removed item's place in the playlist bar
 for (const t of ["shown", "other"]) C[`seq:playlistBarRemove+next:${t}`] = { states: t === "shown" ? PL_STATES : ["effect"], switch: true, async run(c) {
@@ -1921,8 +1927,8 @@ const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-
   return { anims: run.length, props, opacity: +cs.opacity, rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
 async function sideOpen(c, via, { full = false, esc = false } = {}) {
   const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
-  const open = via === "bar" ? `await m.playlistBarMenu(${JSON.stringify(t)}, "Settings");`
-    : `m.ctx(m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"), "card"); await m.sleep(150); m.click(m.byText(".lib-ctx button", "Settings"), "Settings");`;
+  const open = via === "bar" ? `m.ctx(m.playlistBar(${JSON.stringify(t)}), "playlistBar");`
+    : `m.ctx(m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"), "card");`;
   const r = {};
   await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(60);`);
   r.early = await js(SIDE_SAMPLE);
@@ -3802,7 +3808,7 @@ const FUZZ_RULES = [
   [/^plAdvanceOff$/, { when: (x) => x.ps.overrideGlobalSettings !== false }], // the modal's checkbox is disabled while the playlist follows the globals
   [/^(selToggle:add|cardToggle:add)$/, { when: notInPlaylistBar }], // adds an item the playlist bar doesn't hold
   [/^selToggle:remove$/, { when: notInPlaylistBar, shrinks: true, removes: (x) => x.other }],
-  [/^(playlistBarRemove|playlistBarRemoveMenu):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
+  [/^(playlistBarRemove|playlistBarRemoveSide):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both

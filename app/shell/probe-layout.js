@@ -131,10 +131,9 @@ app.whenReady().then(async () => {
       }
       await cell(`resize:side:${w}x${h}`, async () => {
         await tab("Library");
-        // focus the first card without applying it (its right-click menu's Settings)
+        // focus the first card without applying it (a right-click)
         await page(`const c = document.querySelector(".card.lib .thumb-wrap"); const r = c.getBoundingClientRect();
-          c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); await m.sleep(250);
-          m.byText(".lib-ctx button", "Settings")?.click();`);
+          c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));`);
         await sleep(700);
         const r = await page(`const p = document.querySelector(".side-panel"); if (!p) return null; const b = m.rect(p);
           const close = p.querySelector("[data-side-close]"); const cb = close ? m.rect(close) : null;

@@ -6,7 +6,7 @@ import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
 import { useMotion } from "../components/motion";
-import { gridCols, gridOwnsKey, revealCard, stepIndex } from "../hooks/gridKeys";
+import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
@@ -110,8 +110,13 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
   }); // eslint-disable-line
 
   // a click focuses (the sidebar shows it) — it no longer downloads: double-click, Enter or a download button does
+  // a pointer focus with the sidebar closed: the card stays where it was while the docked sidebar re-fits the grid (gridKeys.ts)
+  const focusFromCard = (pageUrl: string) => {
+    if (!useStore.getState().browseFocus) keepCardInView(scrollRef.current, `br-${pageUrl}`);
+    focusBrowse(pageUrl);
+  };
   const onCardClick = (e: React.MouseEvent, w: Wallpaper) => {
-    focusBrowse(w.pageUrl);
+    focusFromCard(w.pageUrl);
     if (e.shiftKey && anchor.current) {
       const ids = sorted.map((x) => x.pageUrl);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(w.pageUrl);
@@ -148,7 +153,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
               onCancel={(x) => cancelDownload(x.pageUrl)}
               onClick={onCardClick}
               onDownload={dlApply}
-              onContext={(x) => focusBrowse(x.pageUrl)} /* right-click → the sidebar too */
+              onContext={(x) => focusFromCard(x.pageUrl)} /* right-click → the sidebar too */
               onMiddle={(x) => x.pageUrl.startsWith("http") /* middle-click → open source page/location */
                 ? openExternal({ url: x.pageUrl })
                 : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId })} />

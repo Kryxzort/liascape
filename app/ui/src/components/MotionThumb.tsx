@@ -8,13 +8,6 @@ export function hasGifAsset(item: LibraryItem): boolean {
   return !!item.animatedThumbnailPath && !VIDEO_RE.test(item.animatedThumbnailPath);
 }
 
-// Whether a mouse event happened over `el`. A context menu's backdrop covers the window, so at its close the browser's hover
-// state is stale (the card's mouseleave came when the menu opened; a bar item, the menu's React parent, never got one).
-export function pointerOver(el: HTMLElement, e: React.MouseEvent): boolean {
-  const r = el.getBoundingClientRect();
-  return e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
-}
-
 // True when the item's only preview is a VIDEO (no gif/webp asset; a scene has none) — what "Autoplay video thumbnails"
 // plays without a hover (components/autoplay.ts).
 export function hasVideoPreview(item: LibraryItem): boolean {

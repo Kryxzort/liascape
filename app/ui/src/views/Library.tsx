@@ -5,7 +5,7 @@ import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { LibrarySide } from "../components/LibrarySide";
 import { useMotion } from "../components/motion";
-import { gridCols, gridOwnsKey, revealCard, stepIndex } from "../hooks/gridKeys";
+import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
@@ -129,9 +129,16 @@ export const Library = memo(function Library() {
     return () => removeEventListener("keydown", h);
   }); // eslint-disable-line
 
-  // a click focuses the card (the sidebar shows it) — a plain click also applies it, as before (and as WE does)
+  // a pointer focus (a click, a right-click): when the sidebar wasn't open, the docked one re-fits the grid's columns — the card
+  // stays where it was in the view instead of sliding away from under the pointer (gridKeys.ts keepCardInView)
+  const focusFromCard = (path: string) => {
+    if (!useStore.getState().libFocus) keepCardInView(scrollRef.current, `lib-${path}`);
+    focusLib(path);
+  };
+  // a click focuses the card (the sidebar shows it) — a plain click also applies it, as before (and as WE does); a right-click
+  // (LibraryCard) focuses it without applying (owner 2026-11-11: "no context menu anywhere")
   const onCardClick = (it: LibraryItem, e: React.MouseEvent) => {
-    focusLib(it.videoPath);
+    focusFromCard(it.videoPath);
     if (e.shiftKey && anchor.current) {
       const ids = filtered.map((x) => x.videoPath);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(it.videoPath);
@@ -164,15 +171,11 @@ export const Library = memo(function Library() {
             selected={sel.has(it.videoPath)}
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
-            showDeleteFromSource={!!it.workshopId && !autoImport}
             autoPlayGifs={autoPlayGifs}
             onClick={(e) => onCardClick(it, e)}
             onTrash={() => doTrash(targetsFor(it))}
             onToggle={() => doToggle(it)}
-            onDeleteSource={() => deleteFromSource(targetsFor(it).filter((i) => i.workshopId))}
-            onReveal={() => openExternal({ path: it.videoPath, reveal: true, isScene: it.isScene, workshopId: it.workshopId, copiedSceneDir: it.copiedSceneDir })}
-            onSettings={() => focusLib(it.videoPath)}
-            onContextFocus={() => { if (useStore.getState().libFocus) focusLib(it.videoPath); }} />
+            onContextFocus={() => focusFromCard(it.videoPath)} />
         ))}
       </div>
     </div>

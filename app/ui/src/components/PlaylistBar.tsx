@@ -14,7 +14,7 @@ import { type LibraryItem } from "../api/client";
 import { SavePlaylistModal } from "./SavePlaylistModal";
 import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
-import { MotionThumb, hasGifAsset, hasVideoPreview, pointerOver } from "./MotionThumb";
+import { MotionThumb, hasGifAsset, hasVideoPreview } from "./MotionThumb";
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -31,12 +31,10 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
-  const openExternal = useStore((s) => s.openExternal);
   const focusLib = useStore((s) => s.focusLib);
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
-  const [menu, setMenu] = useState<{ x: number; y: number; el: HTMLElement } | null>(null);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
   // a position:fixed layer portal'd to <body> at the item's box → it floats OVER the playlist bar chrome with
   // zero row padding. While hovered a rAF loop writes the item's box straight into the glow's style — a transform, so it
@@ -66,17 +64,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
     return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
   const onEnter = () => setHover(path);
-  const onLeave = () => setHover((cur) => (cur === path ? null : cur));
-  // The portal'd menu is this item's React child, so going from it to elsewhere fires no leave here: closing off the item is the leave.
-  const closeMenu = (e: React.MouseEvent) => { if (menu && !pointerOver(menu.el, e)) onLeave(); setMenu(null); };
-  useEffect(() => {
-    if (!menu) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(null); onLeave(); } };
-    addEventListener("keydown", h);
-    return () => removeEventListener("keydown", h);
-  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
-  // an open menu holds the preview, as on a library card
-  const active = !!item && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
+  const active = !!item && (hover || (autoPlayGifs && hasGifAsset(item)));
   // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
   const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
@@ -86,28 +74,15 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
     <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
       onMouseEnter={onEnter}
-      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
+      // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (owner 2026-11-11: "no
+      // context menu anywhere" — the sidebar has the playlist toggle, Open in file manager, Delete)
+      onContextMenu={(e) => { e.preventDefault(); focusLib(path); revealCard(`lib-${path}`); }}>
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
       {hover && glows && !playing && !isDragging && createPortal(<div className="pl-hover-glow" ref={glowRef} />, document.body)}
-      {menu && item && createPortal(
-        // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
-        // onClick (playFrom) / sortable listeners — a menu click must stop here.
-        <div style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}>
-          <div className="ctx-backdrop" onClick={closeMenu} onContextMenu={(e) => { e.preventDefault(); closeMenu(e); }} />
-          {/* portal'd: the playlist bar's backdrop-filter would otherwise trap position:fixed */}
-          <div className="ctx-menu pl-ctx" style={{ left: menu.x, top: menu.y }} onClick={closeMenu}>
-            <button onClick={() => removeFromPlaylist(path)}>Remove from playlist</button>
-            {/* the item's settings live in the Library sidebar: focus it there (the grid scrolls its card into view) */}
-            <button onClick={() => { focusLib(path); revealCard(`lib-${path}`); }}>Settings</button>
-            <button onClick={() => openExternal({ path: item.videoPath, reveal: true, isScene: item.isScene, workshopId: item.workshopId, copiedSceneDir: item.copiedSceneDir })}>Open in file manager</button>
-          </div>
-        </div>, document.body)}
     </div>
   );
 });
@@ -204,7 +179,7 @@ export function PlaylistBar() {
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
         {/* "Go to playing" (owner 2026-11-11): glides the row to the playing item and rings it; only when it's in the playlist */}
-        <button className="mini ico" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
+        <button className="mini ico go-playing" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
           title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
           onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)}><LocateFixed size={15} /></button>
         <div className="spacer" />

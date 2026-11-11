@@ -1,8 +1,8 @@
-// Regression probe: the playlist bar's right-click menu must never start playback.
-// The menu is portal'd to document.body, but React bubbles a portal's events through the
-// React tree — up to the .pl-item's onClick (playFrom). Loads the UI offscreen, stubs the
-// playback endpoints (nothing reaches the backend, so the live wallpaper is never touched),
-// right-clicks a playlist item and clicks each menu entry / the backdrop, and reports which
+// Regression probe: a right-click on a playlist bar item must never start playback. Since 2026-11-11 (owner: "right-click opens
+// the sidebar on that item without applying it — no context menu anywhere") it opens the item's Library sidebar and no menu;
+// the menu it replaced was portal'd to document.body and React bubbled its clicks up to the .pl-item's onClick (playFrom).
+// Loads the UI offscreen, stubs the playback endpoints (nothing reaches the backend, so the live wallpaper is never touched),
+// right-clicks a playlist item, then clicks the sidebar's playlist toggle twice and its picture's switch area, and reports which
 // playback requests the UI tried to send. `/open` is stubbed as well (no real file manager).
 // Usage: electron app/shell/probe-plmenu.js "http://127.0.0.1:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");
@@ -42,26 +42,26 @@ app.whenReady().then(async () => {
   if (!n) { console.log("PROBE_PLMENU SKIP: no playlist items"); app.exit(0); return; }
 
   const results = {};
-  for (const target of ["Settings", "Open in file manager", "__backdrop__"]) {
-    await js(`window.__sent = []; (() => {
-      const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
-      it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));
-    })()`);
-    await new Promise((r) => setTimeout(r, 300));
-    await js(`(() => {
-      const t = ${JSON.stringify(target)};
-      const el = t === "__backdrop__" ? document.querySelector('.ctx-backdrop')
-        : [...document.querySelectorAll('.pl-ctx button')].find(b => b.textContent === t);
-      el && el.click();
-    })()`);
+  await js(`window.__sent = []; (() => {
+    const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
+    it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));
+  })()`);
+  await new Promise((r) => setTimeout(r, 600));
+  const opened = await js(`({ side: document.querySelector('.side-panel[data-side="library"]')?.dataset.sideId ?? null,
+    item: document.querySelector('.pl-item')?.dataset.morphId?.replace(/^pl-/, '') ?? null, menu: !!document.querySelector('.ctx-menu, .pl-ctx') })`);
+  results.rightClick = await js(`window.__sent.slice()`);
+  // the sidebar's own controls that a portal'd menu used to bubble through: the playlist toggle (twice: back as it was)
+  for (const k of ["toggle", "toggleBack"]) {
+    await js(`window.__sent = []; document.querySelector('.side-panel [data-side-playlist]')?.click()`);
     await new Promise((r) => setTimeout(r, 400));
-    results[target] = await js(`window.__sent.slice()`);
-    // close whatever opened (the item sidebar) before the next round
-    await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
-    await new Promise((r) => setTimeout(r, 400));
+    results[k] = await js(`window.__sent.slice()`);
   }
+  await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await new Promise((r) => setTimeout(r, 400));
+  if (opened.menu) results.menu = ["a context menu opened"];
+  if (!opened.side || opened.side !== opened.item) results.sidebar = [`the right-click opened ${opened.side ?? "no sidebar"} (the item: ${opened.item})`];
   const bad = Object.entries(results).filter(([, v]) => v.length);
   console.log("PROBE_PLMENU " + JSON.stringify(results));
-  console.log(bad.length ? "PROBE_PLMENU FAIL: menu clicks started playback" : "PROBE_PLMENU PASS");
+  console.log(bad.length ? "PROBE_PLMENU FAIL: " + bad.map(([k]) => k).join(", ") : "PROBE_PLMENU PASS");
   app.exit(bad.length ? 1 : 0);
 });

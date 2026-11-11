@@ -135,9 +135,20 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    where the Library card's trash sits (a click on the card opens the sidebar since 2026-11-10 — it used to be a whole-card
    overlay meaning "click downloads") */
 .dl-btn { position: absolute; right: 4px; bottom: 48px; width: 40px; height: 40px; padding: 0; border-radius: 8px;
-  display: grid; place-items: center; background: none; opacity: 0; transition: opacity .15s ease; }
+  display: grid; place-items: center; background: none; opacity: 0;
+  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1); }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
-.dl-btn:hover .dl-glyph { opacity: 1; }
+/* COOL: hovered (owner 2026-11-11: "add hover effects on the download button") — it lifts + grows, an accent glow blooms behind
+   it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down, again and again */
+.dl-btn::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 60%, transparent), color-mix(in srgb, var(--accent) 18%, transparent) 60%, transparent);
+  opacity: 0; transition: opacity .2s; }
+.dl-btn:hover { transform: translateY(-2px) scale(1.12); }
+.dl-btn:active { transform: scale(.94); transition-duration: .08s; }
+.dl-btn:hover::before { opacity: 1; }
+.dl-btn:hover .dl-glyph { opacity: 1; animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite;
+  filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 14px var(--accent)) drop-shadow(0 0 2px rgba(0,0,0,.6)); }
+@keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(3px); } }
 .dl-glyph { color: var(--accent); width: 88%; height: 88%; fill: none; opacity: .7; transform-origin: center;
   animation: dl-glow 2.6s cubic-bezier(.37, 0, .63, 1) infinite; }
 /* opacity + glow + a ~5px size breath, all synced */
@@ -243,24 +254,17 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    transition (not keyframe) so the browse opacity-toggle fades without remount → no gif restart. */
 .thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
 .card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
-/* the card the item sidebar shows (keyboard / click focus): a light ring off the card — WE's selected tile; distinct from the
-   selection's accent outline */
-.card.focused { outline: 2px solid color-mix(in srgb, var(--text) 85%, transparent); outline-offset: 3px; }
+/* the card the item sidebar shows (keyboard / click focus): an accent ring OFF the card (3 px gap) + the hover's accent glow — the
+   theme colour, like hover (owner 2026-11-11: "not just plain white"); distinct from the selection's flush outline. Focused
+   inside a selection: both (the flush ring as a shadow). Glow effects off → the ring alone. */
+.card.focused { outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
+.card.focused.selected { box-shadow: 0 0 0 2px var(--accent), 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
   display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
   border-radius: 12px; padding: 10px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); }
 .check { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; border-radius: 999px;
   background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-weight: 800;
   box-shadow: var(--glow-sm); }
-
-/* card right-click context menu */
-.ctx-backdrop { position: fixed; inset: 0; z-index: 70; }
-.ctx-menu { position: absolute; z-index: 71; top: 36px; right: 8px; min-width: 190px; padding: 5px;
-  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border: 1px solid var(--surface1); border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(0,0,0,.5), var(--glow-sm); display: flex; flex-direction: column; }
-.ctx-menu button { text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 13px; color: var(--text); }
-.ctx-menu button:hover { background: var(--surface0); }
-.ctx-menu .danger-item { color: var(--danger); }
 
 /* playlist settings popup + load select */
 .pl-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 8px 2px 10px; }
@@ -343,11 +347,37 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes pl-glow-in { from { opacity: 0; } to { opacity: 1; } }
 .pl-thumb { width: 100%; height: 100%; object-fit: cover; }
 .pl-item.playing { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); } /* green */
-/* "Go to playing" (hooks/travelToPlaying.ts glideTo): the found card / bar item rings twice — an outline (not a glow, so it shows
-   with "Glow effects" off too), animated outline-offset + opacity only */
-.locate-flash { outline: 3px solid var(--accent); outline-offset: 2px; animation: locate-flash .5s ease-out 2; }
-@keyframes locate-flash { from { outline-offset: 10px; outline-color: transparent; } to { outline-offset: 2px; outline-color: var(--accent); } }
-:root.no-motion .locate-flash { animation: none; }
+/* "Go to playing" buttons (the Library top bar's, the playlist bar head's): the crosshair turns and glows in the accent on hover */
+.go-playing svg { transition: transform .35s cubic-bezier(.2, 1.3, .4, 1), filter .2s; }
+.go-playing:hover:not(:disabled) { color: var(--accent); box-shadow: var(--glow-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.go-playing:hover:not(:disabled) svg { transform: rotate(90deg) scale(1.12); filter: drop-shadow(0 0 4px var(--accent)); }
+.go-playing:disabled { opacity: .4; cursor: default; box-shadow: none; }
+/* COOL: …and the found item (hooks/travelToPlaying.ts locateFx): a fixed layer over its box (on <body>, above everything) — the
+   window dims around a hole (one huge spread shadow, painted once; its opacity animates), the accent glow (a pre-blurred shadow
+   layer, opacity only), an accent edge, three rings rippling out (transform: scale by --sx/--sy, the px-exact factors locateFx
+   computes, + opacity), all gone after 1.5 s. Its own composited layers: nothing in the grid repaints. The element keeps a static
+   accent outline meanwhile (`.locate-flash`). */
+.locate-flash { outline: 3px solid var(--accent); outline-offset: 3px; }
+.locate-fx { position: fixed; left: 0; top: 0; z-index: 85; pointer-events: none; will-change: transform; }
+.locate-fx > div { position: absolute; inset: 0; border-radius: var(--r, 10px); }
+.locate-fx > .lfx-dim { inset: -10px; border-radius: calc(var(--r, 10px) + 10px); box-shadow: 0 0 0 150vmax rgba(0,0,0,.58);
+  animation: lfx-dim 1.5s ease both; }
+.locate-fx > .lfx-glow { box-shadow: 0 0 34px 4px var(--accent), 0 0 90px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: lfx-glow 1.5s ease both; }
+.locate-fx > .lfx-edge { inset: -6px; border-radius: calc(var(--r, 10px) + 6px); border: 3px solid var(--accent);
+  animation: lfx-dim 1.5s ease both; }
+.locate-fx > .lfx-ring { inset: -6px; border-radius: calc(var(--r, 10px) + 6px); border: 2px solid var(--accent);
+  box-shadow: 0 0 14px -2px var(--accent), inset 0 0 14px -4px var(--accent); opacity: 0;
+  animation: lfx-ring .85s cubic-bezier(.2, .7, .3, 1) both; }
+.locate-fx > .lfx-ring + .lfx-ring { animation-delay: .36s; }
+.locate-fx > .lfx-ring + .lfx-ring + .lfx-ring { animation-delay: .6s; }
+.locate-fx > .lfx-edge + .lfx-ring { animation-delay: .12s; }
+@keyframes lfx-dim { 0% { opacity: 0; } 14% { opacity: 1; } 72% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lfx-glow { 0% { opacity: 0; } 16% { opacity: 1; } 38% { opacity: .65; } 58% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lfx-ring { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(var(--sx, 1.2), var(--sy, 1.2)); } }
+/* motion off / reduced: the same picture standing still for 1.2 s — the dim, the edge, one ring a little further out */
+.locate-fx.still > div { animation: none; }
+.locate-fx.still > .lfx-ring { inset: -13px; border-radius: calc(var(--r, 10px) + 13px); opacity: .65; }
 .pl-remove { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border-radius: 999px;
   background: none; color: #fff; opacity: 0; transition: opacity .12s, color .15s, filter .2s;
   filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); display: grid; place-items: center; }
@@ -356,8 +386,6 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* #99000000 playlist-bar-item title bar */
 .pl-title { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 5px; background: rgba(0,0,0,.6);
   color: #fff; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-/* playlistBar context menu — fixed at cursor, opens upward (playlistBar sits at the bottom) */
-.pl-ctx { position: fixed; top: auto; right: auto; transform: translateY(-100%); }
 
 /* ---- preview modal ---- */
 /* #B2000000 solid overlay — NO backdrop-filter. A full-viewport blur recomposites over the
@@ -383,9 +411,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; transition: background .15s, box-shadow .2s; }
 .yt-close:hover { background: var(--danger); box-shadow: var(--glow-sm); }
 /* the Library sidebar's "Scene properties" (components/ScenePropsEditor.tsx) */
-.scene-props { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--surface0); }
 .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-.sp-title { font-size: 14px; font-weight: 600; }
 .sp-note { margin-bottom: 6px; }
 .sp-group { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin: 12px 0 2px; }
 .sp-text { margin: 6px 0; white-space: pre-line; overflow-wrap: anywhere; }
@@ -616,10 +642,6 @@ input[type=range]:focus-visible { outline: none; }
 /* a rotation duration (PlayTimeInput, h/m/s): "none" / "off" next to it while it is 0 */
 .hms .playtime-zero { margin-left: 4px; font-style: italic; }
 
-/* context menus are portal'd to <body> → fixed at the cursor (escape card/playlistBar containment) */
-.lib-ctx, .pl-ctx { position: fixed; top: auto; right: auto; }
-.pl-ctx { transform: translateY(-100%); }
-
 /* persistent status header — top of content, under the tabs */
 .statushdr { display: flex; align-items: center; gap: 12px; padding: 9px 16px; font-size: 13px;
   color: var(--muted); background: color-mix(in srgb, var(--bg-crust) 45%, transparent);
@@ -719,6 +741,22 @@ input[type=range]:focus-visible { outline: none; }
 /* a keyboard-focused slider still shows where focus is: an outline instead of the glow (never while it's held) */
 :root.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root.no-glow .mpv { box-shadow: none; }
+/* the focused card: its accent ring only; the download button: lift + nudge, no bloom; the locator: dim + edge + rings, no glow */
+:root.no-glow .card.focused { box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+:root.no-glow .card.focused.selected { box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0,0,0,.4); }
+:root.no-glow .dl-btn::before { display: none; }
+:root.no-glow .dl-btn:hover .dl-glyph { filter: drop-shadow(0 0 2px rgba(0,0,0,.6)); animation-name: dl-nudge; }
+:root.no-glow .go-playing:hover:not(:disabled) svg { filter: none; }
+:root.no-glow .locate-fx > .lfx-ring { box-shadow: none; }
+:root.no-glow .side-sec::before { box-shadow: none; }
+:root.no-glow .side-glow { opacity: 0 !important; }
+:root.no-glow .side-play-ring { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent), 0 8px 20px rgba(0,0,0,.4); }
+:root.no-glow .side-sec-ico, :root.no-glow .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+:root.no-glow .side-tile.danger .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+:root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
+:root.no-glow .side-badge, :root.no-glow .side-dot { box-shadow: none; }
+:root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+:root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, web-ui.md § "Settings levels") */
@@ -728,8 +766,8 @@ input[type=range]:focus-visible { outline: none; }
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill { transition: none; }
-:root.no-motion .side-panel, :root.no-motion .side-content, :root.no-motion .side-scrim { animation: none; }
-:root.no-motion .side-body { transition: none; }
+:root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
+:root.no-motion .side-go:hover .side-dl-ico, :root.no-motion .dl-btn:hover .dl-glyph { animation: none; transform: translateY(2px); }
 :root.no-motion .app > .scroll { animation: none; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
@@ -738,48 +776,219 @@ input[type=range]:focus-visible { outline: none; }
 /* ---- the item sidebar (WE-style, 2026-11-10 — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
    An <aside> beside the page under the top bar (--topbar-h, measured by App), docked from 900 px (the grid and the playlist
    bar end at its edge — the grid re-fits its columns), floating over the page below that with a scrim. It scrolls on its
-   own; the head (title + close) stays. Slide in / out + a content cross-fade: transform + opacity only. */
+   own; the head (title + tools + close) stays. Look (owner 2026-11-11: "very untasteful compared to the rest of the app"):
+   the Settings page's language — an accent pool in its corner, the picture in a framed stage with a soft accent glow,
+   action tiles with glowing icon chips, section cards (`.side-sec`, like `.ssection`), accent-filled sliders.
+   COOL motion (transform + opacity only): a slightly springy slide in (an overshooting curve), the content following in a
+   quick stagger (picture → hero → actions → rows, ~30 ms apart, a small rise + fade, the picture scaling in), a faster
+   re-stagger on an item switch, a quicker slide out (SIDE_CLOSE_MS = 170 in hooks/useLinger.ts). Done in ≤ 0.4 s. */
 .app { --side-w: clamp(300px, 26vw, 400px); --side-media-h: min(38vh, 320px); }
 .side-panel { position: absolute; top: var(--topbar-h, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border-left: 1px solid var(--surface1);
-  box-shadow: -12px 0 30px rgba(0,0,0,.35), var(--glow-sm);
-  animation: side-in .22s cubic-bezier(.25, .8, .25, 1); }
-.side-panel.closing { animation: side-out .16s ease-in forwards; pointer-events: none; }
-@keyframes side-in { from { transform: translateX(24px); opacity: 0; } }
-@keyframes side-out { to { transform: translateX(24px); opacity: 0; } }
-.side-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: flex-start; gap: 8px; padding: 12px 10px 10px 16px;
+  background:
+    radial-gradient(440px 300px at 100% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%),
+    radial-gradient(380px 300px at 0% 100%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
+    color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent);
+  border-left: 1px solid color-mix(in srgb, var(--accent) 28%, var(--surface1));
+  box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
+  animation: side-in .32s cubic-bezier(.2, 1.22, .36, 1); }
+.side-panel.closing { animation: side-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+@keyframes side-in { from { transform: translateX(44px); opacity: 0; } }
+@keyframes side-out { to { transform: translateX(36px); opacity: 0; } }
+
+/* the head: the title, its tools (the playlist toggle, Play while the trailer shows), close */
+.side-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: flex-start; gap: 6px; padding: 14px 12px 12px 18px;
   background: color-mix(in srgb, var(--bg-mantle) 94%, transparent); }
-.side-head-text { flex: 1; min-width: 0; }
-.side-head h2 { margin: 2px 0 0; font-size: 17px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
+.side-head::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 60%, transparent), transparent 85%); }
+.side-head-text { flex: 1; min-width: 0; padding-top: 3px; }
+.side-head h2 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: .1px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .side-sub { display: block; margin-top: 3px; }
-.side-close { flex: none; }
-.side-content { padding: 0 16px 18px; animation: side-swap .14s ease-out; }
-@keyframes side-swap { from { opacity: 0; } }
-.side-stage { position: relative; display: flex; justify-content: center; margin: 2px 0 12px; }
-.side-media { position: relative; max-width: 100%; border-radius: 12px; overflow: hidden; background: var(--bg-crust);
-  box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.side-head-tools { display: flex; gap: 6px; }
+.side-head-tools:empty { display: none; }
+.side-tool { flex: none; width: 32px; height: 32px; padding: 0; border-radius: 9px; display: grid; place-items: center; color: var(--subtext);
+  background: color-mix(in srgb, var(--surface0) 80%, transparent); border: 1px solid color-mix(in srgb, var(--surface1) 80%, transparent);
+  transition: color .15s, border-color .15s, background .15s, box-shadow .2s, transform .12s; }
+.side-tool:hover { color: var(--text); border-color: var(--accent); box-shadow: var(--glow-sm); }
+.side-tool:active { transform: scale(.92); }
+.side-tool.accent { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.side-tool.accent:hover { box-shadow: var(--glow); }
+.side-tool.accent svg { margin-left: 2px; }
+.side-tool.side-pl { color: var(--accent); }
+.side-tool.side-pl:hover { color: var(--accent-hover); }
+.side-tool.side-pl.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.side-tool.side-pl .pl-toggle-svg { width: 16px; height: 16px; }
+.side-close:hover { color: var(--danger); border-color: var(--danger); box-shadow: 0 0 12px -3px var(--danger); }
+
+.side-content { padding: 4px 16px 22px; }
+
+/* the picture: a framed stage (an accent pool behind it), the picture with a soft accent glow (a pre-blurred layer — its opacity
+   brightens on hover), the preview switch top-left, the Play overlay / the Playing now badge */
+.side-stage { position: relative; display: flex; justify-content: center; margin: 6px 0 14px; padding: 12px; border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--surface1));
+  background:
+    radial-gradient(75% 85% at 50% 45%, color-mix(in srgb, var(--accent) 17%, transparent), transparent 75%),
+    color-mix(in srgb, var(--bg-crust) 55%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent), 0 6px 18px rgba(0,0,0,.25); }
+.side-frame { position: relative; max-width: 100%; border-radius: 12px; transition: transform .26s cubic-bezier(.2, 1.1, .35, 1); }
+.side-glow { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 30px -4px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+  opacity: .55; transition: opacity .25s; }
+.side-frame.is-playing .side-glow { box-shadow: 0 0 26px -4px var(--success), 0 0 0 2px var(--success); opacity: .9; }
+.side-frame.playable:hover, .side-frame.playable:focus-within { transform: scale(1.025); }
+.side-frame.playable:hover .side-glow, .side-frame.playable:focus-within .side-glow { opacity: 1; }
+.side-media { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; background: var(--bg-crust);
+  box-shadow: 0 10px 26px rgba(0,0,0,.45); }
 .side-media > img, .side-media > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.side-media > .sm-full, .side-media > video.sm-anim { opacity: 0; transition: opacity .25s ease; }
-.side-media > .sm-full.on, .side-media > video.sm-anim.on { opacity: 1; }
+/* the layers cross-fade on opacity (the preview switch): the sharp image once loaded, the gif / the video while picked */
+.side-media > .sm-full, .side-media > .sm-anim { opacity: 0; transition: opacity .28s ease; }
+.side-media > .sm-full.on, .side-media > .sm-anim.on { opacity: 1; }
+.side-media > .yt-stage { border-radius: 12px; animation: side-fade .28s ease; }
+@keyframes side-fade { from { opacity: 0; } }
+.side-play { position: absolute; inset: 0; z-index: 3; padding: 0; display: grid; place-items: center; border-radius: inherit;
+  background: radial-gradient(closest-side, rgba(0,0,0,.28), rgba(0,0,0,.12) 70%, transparent);
+  opacity: 0; transition: opacity .2s; }
+.side-frame.playable:hover .side-play, .side-play:focus-visible { opacity: 1; }
+.side-play:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.side-play-ring { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-fg);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent), 0 0 32px -2px var(--accent), 0 8px 20px rgba(0,0,0,.4);
+  transform: scale(.8); transition: transform .26s cubic-bezier(.2, 1.5, .4, 1); }
+.side-play-ring svg { margin-left: 4px; }
+.side-frame.playable:hover .side-play-ring, .side-play:focus-visible .side-play-ring { transform: scale(1); }
+.side-play:hover .side-play-ring { transform: scale(1.08); }
+.side-play:active .side-play-ring { transform: scale(.94); transition-duration: .08s; }
+.side-badge { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; letter-spacing: .2px;
+  background: rgba(0,0,0,.66); color: #fff; border: 1px solid color-mix(in srgb, var(--success) 60%, transparent);
+  box-shadow: 0 0 14px -4px var(--success); }
+.side-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent), 0 0 8px var(--success); }
+/* the preview switch (GIF / Video / YouTube / Picture): translucent chips, the active one accent + glow */
+.side-switch { position: absolute; top: 8px; left: 8px; z-index: 4; display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+  background: rgba(0,0,0,.58); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+.side-sw { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 800;
+  letter-spacing: .2px; color: rgba(255,255,255,.78); transition: color .15s, background .15s, box-shadow .2s; }
+.side-sw:hover { color: #fff; background: rgba(255,255,255,.12); }
+.side-sw.on { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.side-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* held invisible until its asynchronous sections are in (LibrarySide READY_CAP_MS): no section pops in under the user */
 .side-body { transition: opacity .14s ease-out; }
 .side-body.wait { opacity: 0; transition: none; }
-.side-state { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
-.side-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 3px 9px;
+.side-body > * + * { margin-top: 12px; }
+/* the hero line: chips (what it is) and pills (its numbers) */
+.side-hero { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.side-hero:empty { display: none; }
+.side-state { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.side-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .5px; padding: 3px 9px;
   border-radius: 999px; background: var(--surface0); color: var(--subtext); }
-.side-chip.playing { background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); }
+.side-chip.accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 10px -4px var(--accent); }
 .side-chip.inlib { background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
-.side-chip.danger { background: var(--danger-bg); color: var(--danger); }
-.side-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 12px; }
-.side-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
-.side-actions.primary > .btn { flex: 1 1 auto; justify-content: center; }
-.side-actions .btn:disabled { opacity: .6; cursor: default; transform: none; }
-.side-pl .pl-toggle-svg { width: 16px; height: 16px; color: var(--accent); }
+.side-chip.danger { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
+.side-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--subtext);
+  padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--surface0) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }
+.side-pill svg { color: var(--accent); opacity: .9; }
+.side-link { font-size: 12px; }
+/* the Browse sidebar's download buttons: big, the glyph nudging down on hover (like the card's download button) */
+.side-cta { display: flex; flex-wrap: wrap; gap: 8px; }
+.side-cta > .side-go { flex: 1 1 auto; justify-content: center; padding: 10px 14px; font-size: 13.5px; border-radius: 10px;
+  transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
+.side-cta > .side-go:hover { transform: translateY(-2px); }
+.side-cta > .side-go:active { transform: scale(.97); transition-duration: .08s; }
+.side-cta > .side-go.accent:hover { box-shadow: 0 10px 22px -8px var(--accent), var(--glow); }
+.side-dl-ico { display: inline-grid; }
+.side-go:hover .side-dl-ico { animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
 .side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
 .side-dl .dl-bar { flex: 1; width: auto; }
-.side-wl { display: flex; margin: 4px 0 8px; }
+/* action tiles (the old right-click menu's actions + the source links): an icon chip + the label; danger = red */
+.side-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.side-tile { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 7px 10px; border-radius: 11px; text-align: left;
+  font-size: 12.5px; font-weight: 700; line-height: 1.2; color: var(--text); text-decoration: none;
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
+  transition: border-color .15s, background .15s, box-shadow .2s, transform .15s; }
+.side-tile:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--surface1)); background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: 0 6px 16px rgba(0,0,0,.3), var(--glow-sm); transform: translateY(-1px); }
+.side-tile:active { transform: scale(.97); transition-duration: .08s; }
+.side-tile-ico { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
+  transition: transform .2s; }
+.side-tile:hover .side-tile-ico { transform: scale(1.1) rotate(-4deg); }
+.side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
+.side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }
+.side-tile.danger:hover { border-color: var(--danger); background: var(--danger-bg); box-shadow: 0 6px 16px rgba(0,0,0,.3), 0 0 12px -3px var(--danger); }
+/* section cards — the Settings page's .ssection in the sidebar's size */
+.side-sec { position: relative; overflow: hidden; padding: 12px 14px 8px; border-radius: 13px;
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
+  box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: border-color .2s, box-shadow .25s; }
+.side-sec:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--surface1)); box-shadow: 0 8px 22px rgba(0,0,0,.35), var(--glow-sm); }
+.side-sec::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2; pointer-events: none;
+  background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
+  box-shadow: 0 0 12px -1px var(--accent); opacity: .55; transition: opacity .25s; }
+.side-sec:hover::before { opacity: 1; }
+.side-sec-title { display: flex; align-items: center; gap: 9px; margin: 0 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--accent); }
+.side-sec-ico { display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; flex: none;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
+  transition: box-shadow .25s, transform .2s; }
+.side-sec:hover .side-sec-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: scale(1.1) rotate(-4deg); }
+.side-sec .sp-head .side-sec-title { margin: 0; }
+.side-sec .srow { flex-wrap: wrap; gap: 6px 12px; }
+/* Playback's rows: the label in a fixed column, the slider filling the rest — Volume and Speed line up at every width */
+.side-sec[data-sec="playback"] .srow { display: grid; grid-template-columns: 106px minmax(0, 1fr); gap: 4px 10px; }
+.side-sec[data-sec="playback"] .srow > .sctl { justify-content: flex-end; }
+.side-sec[data-sec="playback"] input[type=range] { max-width: none; min-width: 60px; }
+.side-sec .srow:first-of-type { border-top: 0; }
+.side-panel .sctl { flex: 1 1 auto; justify-content: flex-end; min-width: 0; }
+.side-sec .slabel .slabel-row { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.side-global { font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 0 5px; border-radius: 4px;
+  line-height: 15px; color: var(--muted); border: 1px solid var(--surface2); }
+.side-val { font-size: 12px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.side-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 7px 0 4px; font-size: 12.5px; color: var(--subtext); }
+.side-line svg { color: var(--accent); }
+.side-line b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.side-note { margin: 0 0 6px; }
+.side-sec .desc { margin: 0 0 8px; }
+.side-sec .tags { margin: 4px 0 8px; }
+.side-wl { display: flex; margin: 2px 0 6px; }
+/* sliders: an accent-filled track up to the value (--fill, set inline: SidePanel.tsx rangeFill), a thumb that grows and glows on
+   hover — never a `filter` on the input (matrix keys:sliderHeld reads it: a held slider must show no glow after a key) */
+.side-panel input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 90px; max-width: 190px; height: 20px;
+  margin: 0; background: transparent; cursor: pointer; }
+.side-panel input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0 var(--fill, 0%), color-mix(in srgb, var(--surface1) 85%, transparent) var(--fill, 0%) 100%);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
+.side-panel input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -5px;
+  border-radius: 50%; background: var(--accent); border: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent), 0 0 10px -2px var(--accent);
+  transition: transform .15s cubic-bezier(.2, 1.4, .4, 1), box-shadow .2s; }
+.side-panel input[type=range]:hover::-webkit-slider-thumb, .side-panel input[type=range]:active::-webkit-slider-thumb {
+  transform: scale(1.18); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent), 0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 16px var(--accent); }
+.side-panel input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* the stagger (open) and the quicker re-stagger (an item switch) — transform + opacity, backwards fill only: nothing is left
+   transformed once it landed. The body's children start when its `.wait` (no pop-in) lifts. */
+.side-content.opening > .side-stage { animation: side-pop .32s cubic-bezier(.2, 1.15, .35, 1) .04s backwards; }
+.side-content.opening > .side-body:not(.wait) > * { animation: side-rise .24s cubic-bezier(.2, .9, .3, 1.05) backwards; }
+.side-content.opening > .side-body:not(.wait) > :nth-child(1) { animation-delay: .07s; }
+.side-content.opening > .side-body:not(.wait) > :nth-child(2) { animation-delay: .1s; }
+.side-content.opening > .side-body:not(.wait) > :nth-child(3) { animation-delay: .13s; }
+.side-content.opening > .side-body:not(.wait) > :nth-child(n+4) { animation-delay: .16s; }
+.side-content.swapping > .side-stage { animation: side-swap-in .2s ease-out backwards; }
+.side-content.swapping > .side-body:not(.wait) > * { animation: side-rise-sm .18s ease-out backwards; }
+.side-content.swapping > .side-body:not(.wait) > :nth-child(2) { animation-delay: .025s; }
+.side-content.swapping > .side-body:not(.wait) > :nth-child(3) { animation-delay: .05s; }
+.side-content.swapping > .side-body:not(.wait) > :nth-child(n+4) { animation-delay: .075s; }
+@keyframes side-pop { from { opacity: 0; transform: translateY(10px) scale(.94); } }
+@keyframes side-rise { from { opacity: 0; transform: translateY(12px); } }
+@keyframes side-swap-in { from { opacity: 0; transform: scale(.98); } }
+@keyframes side-rise-sm { from { opacity: 0; transform: translateY(6px); } }
 .side-scrim { display: none; }
 @media (min-width: 900px) {
   .app:has(> .side-panel:not(.closing)) > .scroll { margin-right: var(--side-w); }
@@ -788,7 +997,7 @@ input[type=range]:focus-visible { outline: none; }
 @media (max-width: 899.98px) {
   .app { --side-w: min(360px, 100vw); }
   .side-scrim { display: block; position: absolute; inset: var(--topbar-h, 56px) 0 0 0; z-index: 39; background: rgba(0,0,0,.4);
-    animation: side-swap .2s ease-out; }
+    animation: side-fade .2s ease-out; }
   .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 }
 

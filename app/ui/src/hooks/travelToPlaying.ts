@@ -47,7 +47,7 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
 // element sits mid-view: every frame it re-measures where the element is (the grid's `content-visibility` cards take their real
 // size as they come into view, so a target computed once would land off) and closes a fraction of the remaining distance
 // (exponential, ~0.5 s), stopping when it's there, after 1.5 s, or the moment the user wheels / presses in the container.
-// Motion off → one jump, re-aimed over 3 frames like the app-open travel. Then the element gets `.locate-flash` (a ring, 1 s).
+// Motion off → one jump, re-aimed over 3 frames like the app-open travel. Then `locateFx` spotlights it (below).
 // Returns false when the element isn't in the list (nothing playing, the item filtered out / not in the playlist).
 export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y", smooth: boolean): boolean {
   if (!sc || !sc.querySelector(selector)) return false;
@@ -58,13 +58,7 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
     stopped = true; cancelAnimationFrame(raf);
     sc.removeEventListener("wheel", stop); sc.removeEventListener("pointerdown", stop);
   };
-  const flash = () => {
-    const el = sc.querySelector<HTMLElement>(selector);
-    if (!el) return;
-    el.classList.remove("locate-flash"); void el.offsetWidth; // restart the ring if it's still on
-    el.classList.add("locate-flash");
-    setTimeout(() => el.classList.remove("locate-flash"), 1000);
-  };
+  const flash = () => { const el = sc.querySelector<HTMLElement>(selector); if (el) locateFx(el, smooth); };
   const step = (t: number) => {
     if (stopped) return;
     const el = sc.querySelector<HTMLElement>(selector);
@@ -89,4 +83,43 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
   sc.addEventListener("pointerdown", stop);
   raf = requestAnimationFrame(step);
   return true;
+}
+
+// COOL: the "here it is" after a glide (owner 2026-11-11: "do some cool design to make the go-to-playing more apparent of where's
+// the wallpaper"). A fixed layer on <body> — above everything, never clipped by the grid / the bar's row — over the element's
+// box: the rest of the window dims (a hole: one huge spread shadow around the box, painted once), the element glows in the
+// accent (a pre-blurred shadow layer whose OPACITY animates), three accent rings ripple out of it (each scaled by its own
+// px-exact factors so a wide card and a small bar item ring out the same 26 px), then it all fades back — 1.5 s. Only
+// transform + opacity animate, on its own composited layers: nothing in the grid repaints. The layer follows the element every
+// frame (the bar's dock magnification moves it; a scroll). The element itself carries `.locate-flash` meanwhile: a static
+// accent outline (shows with "Glow effects" off; the matrix's travel:button reads it). Glow effects off → no glow layer, the
+// spotlight + rings stay; motion off → no animation: the dim, the outline and one still ring for 1.2 s, then gone at once.
+let fxCleanup: (() => void) | null = null;
+export const LOCATE_FX_MS = 1500, LOCATE_STATIC_MS = 1200;
+export function locateFx(el: HTMLElement, motion: boolean) {
+  fxCleanup?.();
+  const glow = !document.documentElement.classList.contains("no-glow");
+  const fx = document.createElement("div");
+  fx.className = `locate-fx${motion ? "" : " still"}${glow ? "" : " flat"}`;
+  fx.setAttribute("aria-hidden", "true");
+  const radius = getComputedStyle(el).borderRadius || "10px";
+  const r0 = el.getBoundingClientRect(), D = 26;
+  fx.style.setProperty("--r", radius);
+  fx.style.setProperty("--sx", String((r0.width + 2 * D) / Math.max(1, r0.width)));
+  fx.style.setProperty("--sy", String((r0.height + 2 * D) / Math.max(1, r0.height)));
+  fx.innerHTML = `<div class="lfx-dim"></div>${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
+    (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`);
+  let raf = 0, last = "";
+  const place = () => {
+    const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
+    if (k !== last) { last = k; fx.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`; fx.style.width = `${r.width}px`; fx.style.height = `${r.height}px`; }
+  };
+  const tick = () => { if (!el.isConnected) { done(); return; } place(); raf = requestAnimationFrame(tick); };
+  place();
+  document.body.appendChild(fx);
+  el.classList.add("locate-flash");
+  raf = requestAnimationFrame(tick);
+  const t = setTimeout(() => done(), motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
+  const done = () => { cancelAnimationFrame(raf); clearTimeout(t); fx.remove(); el.classList.remove("locate-flash"); if (fxCleanup === done) fxCleanup = null; };
+  fxCleanup = done;
 }

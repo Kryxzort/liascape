@@ -3,6 +3,9 @@ import {
   api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter,
 } from "../api/client";
 
+// what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
+export type PreviewKind = "gif" | "video" | "youtube" | "image";
+
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, type: "", ageRating: "", resolution: "", genres: [], features: [] };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -54,6 +57,9 @@ interface State {
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
   libFocus: string | null; browseFocus: string | null;
+  // the sidebar picture's preview switch (GIF / Video / YouTube / the still): the last pick per sidebar, for the session — the
+  // next item opens on it when it has one (components/SidePanel.tsx SideMedia)
+  previewPref: { library: PreviewKind | null; browse: PreviewKind | null };
   // PERF/FREEZE: false when the window is hidden OR unfocused (you fullscreened another app over it).
   // On X11 an occluded window often never fires visibilitychange, so Chromium keeps decoding all the
   // autoplay gifs for hours → ThreadPool decode backlog saturates → main thread stalls (futex_wait) →
@@ -94,6 +100,7 @@ interface State {
   setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
   focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
+  setPreviewPref(side: "library" | "browse", k: PreviewKind): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
   refreshPlayingStatus(): void;
@@ -154,7 +161,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
-  libFocus: null, browseFocus: null, appActive: true,
+  libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -389,6 +396,7 @@ export const useStore = create<State>((set, get) => ({
   // closing re-reads the library (the modal did too: what its edits saved, whatever the optimistic patches missed)
   focusLib(path) { const was = get().libFocus; set({ libFocus: path }); if (was && !path) get().loadLibrary().catch(() => {}); },
   focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); },
+  setPreviewPref(side, k) { set((s) => ({ previewPref: { ...s.previewPref, [side]: k } })); },
 
   // ---- shared ----
   applyTheme(name) {

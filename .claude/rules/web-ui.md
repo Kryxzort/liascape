@@ -36,8 +36,9 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `store.applyThemeVars` from `/themes` (32 themes, ThemeService color keys).
 - Glow = **static `box-shadow`/`drop-shadow` toggled by state** (hover/playing/selected), never
   animated blur radius (paint storms). Pulsing glow animates opacity/box-shadow on a composited layer.
-- The item sidebar (Library + Browse, "Item sidebar" below) slides in / cross-fades / slides out on transform + opacity —
-  the card → modal morphs it replaced are gone (2026-11-10; the WAAPI flight code is in git history, last in `c87376bb`).
+- The item sidebar (Library + Browse, "Item sidebar" below) slides in (springy) / staggers its content / re-staggers on a
+  switch / slides out on transform + opacity — the card → modal morphs it replaced are gone (2026-11-10; the WAAPI flight code
+  is in git history, last in `c87376bb`).
   framer-motion: `AnimatePresence` enter/exit on other modals/toasts, spring drag (dnd-kit) on the playlist bar.
 - Re-bench Browse/Library at ≥120 visible after glow/motion changes (the `demos/` harness still works).
 - **Appearance toggles (Settings → Appearance; `AppSettings` `Glows` / `Morphs` / `AutoPlayVideoThumbs`, UI-only).**
@@ -64,11 +65,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Icons = `lucide-react`**, never emoji. Size 14–16px, `fill/stroke=currentColor` so theme
   accent/danger + glow flow through. Helper class `.ico` (inline-flex, gap) for icon+label buttons;
   `.mini` already centers an icon-only button. Probe asserts `svg.lucide` count + `emojiInBody==false`.
-- **The item sidebar's focus is in the store** (`libFocus` / `browseFocus`, `focusLib` / `focusBrowse`): Library cards, the
-  playlist-bar menu's "Settings" and Browse's "Show in Library" all focus through it. Don't re-add local panel state.
-- **Strip context menu = `position:fixed` at cursor coords** (`{x,y}` from the `contextmenu` event):
-  the `.pl-item` clips overflow, so an absolutely-positioned menu would be hidden. `.pl-ctx` opens
-  upward (`translateY(-100%)`) since the playlist bar sits at the bottom.
+- **The item sidebar's focus is in the store** (`libFocus` / `browseFocus`, `focusLib` / `focusBrowse`): Library cards (click,
+  right-click), a playlist-bar item's right-click and Browse's "Show in Library" all focus through it. Don't re-add local panel state.
+- **No item context menus** (owner 2026-11-11: "right-click opens the sidebar on that item without applying it — no context
+  menu anywhere"): the Library card's `.lib-ctx` and the playlist bar's `.pl-ctx` are gone, with their CSS. A right-click on a
+  card = `focusLib(path)`, nothing applied; on a bar item = `focusLib(path)` + `revealCard` (the grid's card into view). The
+  sidebar holds what the menus had: the playlist toggle (its head), Open in file manager, Delete, Delete from source.
 - **`PlaylistToggle.tsx`** = inline SVG of `PlaylistToggleGeometry` (unchecked = accent ring;
   checked = accent fill with checkmark cut out via `fillRule=evenodd`). currentColor → hover brightens.
 - **Library card = compact title-overlay fork** (`.lib-title`, no below-thumb `.title`); trash + toggle
@@ -90,17 +92,15 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `AutoPlayGifs` setting.
 
 ## Round-2 patterns (regression fixes)
-- **Context menus must portal to `document.body`** (`createPortal`) + `position:fixed` at the cursor
-  `{x,y}`. A grid card has `contain:content` (paint containment) and the playlist bar has `backdrop-filter` —
-  both create containing blocks that otherwise trap `position:fixed` inside them. Same reason the
-  playlist Save/Load/Settings modals are portal'd out of `.playlist-bar` (they were landing off-screen).
-  **A portal still bubbles through the React tree:** a menu declared inside a clickable element
-  (the `.pl-item`, whose `onClick` is `playFrom`) receives every menu click too — opening
-  "Settings" from the playlist bar restarted playback from that item. Wrap the portal
-  content in a `display: contents` element that `stopPropagation`s click/contextmenu/pointerdown/
-  keydown, or declare the portal outside the clickable element (`LibraryCard` does). Guard:
-  `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback +
-  `/open`, so it never touches the live wallpaper or opens a window).
+- **Popovers / modals inside a card or the playlist bar must portal to `document.body`** (`createPortal`) + `position:fixed`.
+  A grid card has `contain:content` (paint containment) and the playlist bar has `backdrop-filter` — both create containing
+  blocks that otherwise trap `position:fixed` inside them: the playlist Save/Load/Settings modals are portal'd out of
+  `.playlist-bar` (they were landing off-screen); the locator layer and the bar's hover glow live on `<body>`.
+  **A portal still bubbles through the React tree:** one declared inside a clickable element (the `.pl-item`, whose `onClick` is
+  `playFrom`) receives its clicks too — the old bar menu's "Settings" restarted playback from that item. Wrap the portal content in
+  a `display: contents` element that `stopPropagation`s click/contextmenu/pointerdown/keydown, or declare it outside the clickable
+  element. Guard (now: a right-click on a bar item opens its sidebar, no menu; the sidebar's playlist toggle twice — no playback
+  request either way): `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback + `/open`).
 - **`useSmoothScroll(ref, axis)`** (`hooks/`) — smooth wheel scrolling (wheel→velocity, rAF ease,
   friction 0.85). Wire on every `.scroll` container + the horizontal `.playlist-bar-row` (`"x"`).
 - **Never set `scrollbar-width`/`scrollbar-color`** — Chromium ≥121 then ignores `::-webkit-scrollbar`
@@ -119,10 +119,11 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Open-in-FM + duration** are backend (need FS): `AppOps.RevealLibraryItem` (resolve symlink/scene
   dir) + `GET /library/duration` (ffprobe). Frontend passes `isScene/workshopId/copiedSceneDir`.
 
-- **A context menu holds its item's hover preview** (`LibraryCard`, `PlItem`): `active` includes the open menu (its
-  backdrop takes the pointer off a card, `mouseleave`), and closing sets the hover from the closing click's coordinates
-  (`pointerOver`) — on the item the same `<video>` goes on, off it, it stops (a bar item, the menu's React parent, gets no
-  leave of its own). Guard: matrix `hoverPreview:rightClick:card|bar`, real input events.
+- **A right-click keeps its item's hover preview** (`LibraryCard`, `PlItem`): with the menus gone (2026-11-11) nothing covers the
+  item, so the hover is plain `mouseenter` / `mouseleave` again (the menus' `active`-holds-the-preview and `pointerOver` code went
+  with them): the pointer still on it → the same `<video>` keeps playing; off it → it stops. Guard: matrix
+  `hoverPreview:rightClick:card|bar` (real input events; the card with the sidebar already open — no re-fit under the pointer —,
+  the bar item from closed: the sidebar on it, nothing applied, no menu).
 - **The UI never guesses which playlist item plays** (`markPlayingAfterPlay`): the bar's border and the card's mark come from
   `wallpaper-changed` (the player's `program.current`, at B's start: until then the old item stays marked) and, for the Play
   that switches nothing, `/current` — dropped if an event landed meanwhile, which is newer. It used to set item 1 after the
@@ -144,10 +145,21 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   every frame it re-measures the element (content-visibility cards take their real size on the way) and closes a fraction of the
   distance (τ 110 ms) so it ends mid-view; the browser clamps at the ends (an end item can't be centred — no own max: scrollWidth −
   clientWidth came out 3 px short); a wheel / pointer-down in the list stops it; motion off → a jump re-aimed over 3 frames. Then
-  the element rings twice (`.locate-flash`: an accent outline, outline-offset + colour animated — not a glow, so it shows with
-  Glow effects off). Not in the view (filtered out) → the status line says so. Guard: matrix `travel:button` (the travel:appOpen
-  setup — the last item plays, out of view at 0 — both lists back to 0, each button → in view + the ring; the travel cells run at
-  480×430: one Large card fits under the bar).
+  the element is spotlit (owner 2026-11-11: "you didnt really add glow to the new stuff … do some cool design to make the
+  go-to-playing more apparant of where's the wallpaper"): `locateFx(el, motion)` puts ONE fixed layer on `<body>` (`.locate-fx`,
+  z 85, above the sidebar and the bar, never clipped by the grid / the bar's row) over the element's box, re-placed every frame
+  (`translate3d` + size: the dock magnification or a scroll moves it): `.lfx-dim` (the rest of the window dims — a hole made of one
+  `0 0 0 150vmax` spread shadow — enough from any corner, painted once, opacity-animated), `.lfx-glow` (a pre-blurred accent shadow layer, opacity only),
+  `.lfx-edge` (an accent border) and three `.lfx-ring`s rippling out (`transform: scale(var(--sx), var(--sy))` — px-exact factors
+  so a wide card and a small bar item ring out the same 26 px — + opacity, 120 / 360 / 600 ms apart), all gone after 1.5 s
+  (`LOCATE_FX_MS`); the element carries `.locate-flash` meanwhile (a static accent outline; matrix `travel:button` reads it).
+  Glow effects off (`:root.no-glow`, read at the call) → no glow layer, the dim + edge + rings stay; motion off → `.still`: no
+  animation at all, the dim + edge + one ring for 1.2 s (`LOCATE_STATIC_MS`), then gone at once. The buttons themselves
+  (`.go-playing`): the crosshair turns 90° and glows in the accent on hover. Not in the view (filtered out) → the status line says
+  so. Guards: matrix `travel:button` (the travel:appOpen setup — the last item plays, out of view at 0 — both lists back to 0, each
+  button → in view + the ring; the travel cells run at 480×430: one Large card fits under the bar); probe-sidebar `look:locator`
+  (grid + bar: the spotlight appears, dims ≥ 0.8, 3 rings scale past 1.05, the glow layer, the accent outline, gone within
+  1–2 s; glow off: no glow layer; motion off: `.still`, 0 animations, gone after ~1.2 s — RED on the old UI: no spotlight).
 - **"In library" on Browse cards** (owner todo 2026-11-10, "mark the wallpapers already downloaded"): `Browse.tsx`
   `libraryKeys(libraryItems)` (one Set per library change: `ws:<workshopId>` and `url:<pageUrl | sourceId | videoPath>`)
   → each memo'd `Card` gets a boolean `inLibrary` (`ws:` match for Workshop and WE-local — the same item under either
@@ -226,7 +238,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Translucency = two CSS vars** `--tr` / `--tr-strong` (`--tr-strong` = `--tr` + 0.1). Applied via
   `color-mix(… P%)` where the percentage **is** the alpha (so a higher number = *more* opaque). `--tr`:
   topbar, search, sort, "wallpapers in playlist" counter, Browse filters. `--tr-strong`: filter dropdown,
-  Settings / More-info modal, right-click menu, playlist-settings menu, debug overlay. **The playlist bar
+  Settings / More-info modal, playlist-settings menu, debug overlay, the item sidebar. **The playlist bar
   itself has 0% bg** — it shows the live `WallpaperBg` directly (cards must NOT be visible behind it). No
   `backdrop-filter: blur` (removed — paint cost + by request).
 - **`Select.tsx`** — app-controlled dropdown, **not native `<select>`**: a `.sel` button + a portal'd
@@ -284,9 +296,22 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     a ResizeObserver) to the bottom, `--side-w` = `clamp(300px, 26vw, 400px)`. **≥ 900 px docked**: `.app:has(> .side-panel:not(.closing))`
     gives `.scroll` a `margin-right` and the playlist bar a `right` of `--side-w` (the grid re-fits its columns); **below**, it
     floats (`min(360px, 100vw)`) with a `.side-scrim` that closes it. Its own scroll; a sticky head (title, "applies to N
-    selected", `[data-side-close]`). Motion: `side-in` (24 px + opacity, 220 ms, no fill) on open, the content keyed by the
-    item → `side-swap` cross-fade on a switch, `.closing` + `side-out` (160 ms) on close — kept mounted by `useLinger`
-    (`hooks/useLinger.ts`, a timer, 0 ms with motion off). Transform + opacity only; `:root.no-motion` → none.
+    selected", the tool slot `.side-head-tools` — the content portals its tools there with `<SideHeadTools>` —, `[data-side-close]`).
+    **Look** (owner 2026-11-11: "very untasteful compared to the rest of the app"): the Settings page's language — an accent pool
+    in the panel's corners, an accent hairline under the head, the picture in a framed stage (`.side-stage` → `.side-frame`: a
+    pre-blurred accent glow layer `.side-glow` whose opacity brightens on hover; green while the item plays), a hero line of chips
+    (`.side-chip`: SCENE accent, crashed, In your library) + number pills (`.side-pill`), action tiles (`.side-tiles` /
+    `.side-tile`: a glowing icon chip + the label — the probes find them by their text —, danger tiles red), section cards
+    (`SideSection` → `.side-sec` with `.side-sec-ico` chips, like `.ssection`: Playback, Scene properties, Details / About),
+    sliders with an accent fill up to the value (`--fill`, inline from `rangeFill()` in `components/sidePreview.ts`; the thumb
+    grows + glows on hover; never a `filter` on the input — `keys:sliderHeld`). **Motion**: `side-in` (44 px + opacity, 320 ms,
+    `cubic-bezier(.2, 1.22, .36, 1)` — a hint of overshoot, no fill) on open, the content (`.side-content.opening`) following in a
+    stagger — the picture scales in (`side-pop`, 40 ms), then the body's children rise 12 px + fade 70 / 100 / 130 / 160 ms in
+    (they start when `.side-body.wait` lifts) — done by ~0.4 s (matrix `appear:morphs` samples +460 ms: nothing may still run);
+    keyed by the item, a switch (`.swapping`) re-staggers faster (6 px, 25 ms steps, ~0.26 s); `.closing` + `side-out` (36 px,
+    170 ms, ease-in) on close — kept mounted by `useLinger` (`hooks/useLinger.ts`, `SIDE_CLOSE_MS` = 170, 0 ms with motion off).
+    Transform + opacity only, backwards fill (nothing stays transformed); `:root.no-motion` → no animation and no transition
+    anywhere in the panel.
   - **Identity, not objects** (the 2026-11-10 morph-replay bug: "the morph animation plays again and again every like 1-2
     minutes"): the store holds the PATH / page URL (`libFocus` / `browseFocus`), the views resolve the live item from their
     lists, and everything per-open (the content key, the duration fetch, the scene properties, the trailer, `SideMedia`'s
@@ -294,40 +319,80 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     updates the values in place and replays nothing. Guard: probe-sidebar `lib:still` (k1 plays, VolumeKeyTarget "item", two
     `/volume` keybinds: the picture doesn't move, nothing animates, the slider follows).
   - **Focus.** Library: a plain click = focus + apply (as before; WE applies on click), Ctrl/Shift-click = the selection +
-    focus, **right-click = the context menu** (**Settings** = the sidebar on that card without applying it, Open in file
-    manager, Delete, Delete from source — WE keeps a context menu beside its details panel too); with the sidebar already
-    open a right-click also moves it to that card. A right-click doesn't open it by itself: the docked sidebar re-fits the
-    grid, which slid the card out from under the menu and the pointer (matrix `hoverPreview:rightClick:card` caught it). Browse: click /
-    right-click = focus (nothing downloads any more), **double-click = download & apply**, the hover **download button**
-    (`.dl-btn`, bottom-right — the old whole-card glyph overlay meant "click downloads") too, middle-click unchanged. The
-    playlist bar's menu "Settings" = `focusLib` + the card scrolled into view. The focused card is `.focused` (a light ring
-    off the card, distinct from the selection's accent outline). **Keys** (`hooks/gridKeys.ts` `gridOwnsKey` — never with a
+    focus, **right-click = the sidebar on that card without applying it** (owner 2026-11-11 — no context menu; it used to be a menu
+    whose Settings opened it). A pointer focus (click / right-click, Library and Browse) while the sidebar is closed keeps the card where it was: the docked sidebar re-fits
+    the grid's columns a frame or two later and used to slide the card away from under the pointer — `keepCardInView(scroll,
+    morphId)` (`hooks/gridKeys.ts`) holds its top at the same offset in the view for 12 frames (the re-fit lands within them), then
+    makes sure it's whole in view; a wheel / pointer-down hands the scroll back (guard: probe-sidebar `lib:reflow` — 24 extra items,
+    Large cards, 1000×560, the grid scrolled to its middle, a real right-click on the lowest visible card: 8 → 6 columns, the card
+    in view within half a card of where it was; RED on the old UI: a menu, no sidebar). Browse: click / right-click = focus
+    (nothing downloads any more), **double-click = download & apply**, the hover **download button** (`.dl-btn`, bottom-right —
+    the old whole-card glyph overlay meant "click downloads") too, middle-click unchanged. **The download button's hover** (owner
+    2026-11-11: "add hover effects on the download button"): it lifts 2 px + grows 1.12× (a springy transition), a pre-blurred
+    radial accent layer (`::before`) fades in behind it, the arrow nudges down on a loop (`dl-nudge`, transform) with a stronger
+    drop-shadow; Glow effects off → no bloom, the lift + nudge stay; motion off → the arrow sits 2 px down, no loop. Guard:
+    probe-sidebar `look:dlHover` (a real pointer: on the card, then on the button — transform, the `::before` opacity and the
+    glyph's animation change; the Browse sidebar's Download & Apply too; RED on the old UI). A right-click on a playlist bar
+    item = `focusLib` + the card scrolled into view, nothing plays. **The focused card** is `.focused`: an accent outline 3 px OFF
+    the card + the hover's accent glow (owner 2026-11-11: "the theme color like hover color, not just plain white"), distinct from
+    the selection's flush outline (focused + selected: both — the flush ring as a box-shadow); Glow effects off → the ring alone
+    (guard: probe-sidebar `look:focus` — the outline colour = the computed `--accent`, offset ≥ 2 px, the accent in its
+    box-shadow; with `no-glow` not; RED on the old UI: a light ring). **Keys** (`hooks/gridKeys.ts` `gridOwnsKey` — never with a
     menu / dropdown / modal open, a slider held, or — for arrows / Enter — a field or button focused): ← → one card, ↑ ↓ one
     row (`--cols`), the first arrow with nothing focused = the playing card; Enter = Play (Library) / Download & Apply or the
-    library copy's Apply (Browse); Escape = close + clear the selection (a card's / bar item's open menu takes the first Escape).
+    library copy's Apply (Browse); Escape = close + clear the selection.
     A focused item that leaves (trashed, a source switch) closes it; a Browse reload keeps the last copy while it's away.
-  - **Library sidebar** (`LibrarySide`): picture (`SideMedia`: the card's still → the sharp image → gif / video from where the
-    card's hover video was, at the picture's own aspect — read from the card at the focus, `captureSource`, else remembered
-    per id — height `--side-media-h` = `min(38vh, 320px)`; YouTube over it), "Playing now · looping this one" (`keepCurrent`) /
-    SCENE / crashed chips, **Play** · **Add to playlist / In playlist**, the meta (duration — row reserved —, resolution, age
-    rating, the loudness line + note), **Open in file manager · Delete · Delete from source** (Workshop items, auto-import off),
-    the crash whitelist, Volume, Speed, Scene properties, tags, Workshop ID, Play YouTube, Open on Steam. **Settings levels**
+  - **Library sidebar** (`LibrarySide`): picture (`SideMedia`: the card's still → the sharp image → the preview the switch
+    picked, at the picture's own aspect — read from the card at the focus, `captureSource`, else remembered per id — height
+    `--side-media-h` = `min(38vh, 320px)`), the hero (SCENE / crashed chips, duration — reserved —, resolution, age rating pills),
+    tiles **Open in file manager · Open on Steam · Delete · Delete from source** (Workshop items, auto-import off), **Playback**
+    (the crash whitelist, Volume, Speed, the loudness line + note), Scene properties, **Details** (tags, Workshop ID).
+    **The picture is the Play control** (owner 2026-11-11: the Play / In playlist row was "redundant clutter" — gone): on hover
+    a round accent Play button (`.side-play` `[data-side-play]`, a `<button>` over the whole picture, `aria-label` "Play
+    <title>", keyboard-reachable) over a picture scaled 1.025× with its glow up; a click applies the item. Already playing → no
+    overlay, the "Playing now · looping this one" badge on the picture (`[data-side-playing]`, `keepCurrent`) and a green frame.
+    On the YouTube trailer the embed takes the clicks: Play moves to the head (`.side-tool.accent` `[data-side-play]`). Enter
+    still plays. **In playlist** = the head's `PlaylistToggle` (`.side-tool.side-pl` `[data-side-playlist]`, `aria-pressed`,
+    tooltip "Add to playlist" / "Remove from playlist"; a selection's targets like the card's toggle). Guard: probe-sidebar
+    `lib:play` (the button's name + tabIndex, hidden until a real hover then shown + the picture scaled, a real click plays k3,
+    then the badge and no button; the head toggle out / back in; RED on the old UI). **The preview switch** (owner 2026-11-11: "a
+    button to switch between gif preview, mp4 preview and youtube video preview"; `usePreview` in `components/sidePreview.ts`):
+    translucent chips top-left on the picture (`.side-switch` / `.side-sw`, the active one accent + glow), only the options the
+    item has — **GIF** (`animatedThumbnailPath` gif/webp; Browse: the animated URL), **Video** (the library item's own video file,
+    else a video preview; a scene has none; Browse: a `previewUrl` that is a video), **YouTube** (`youtubeUrl`; Browse: the
+    detail's) and, when the trailer is all it has, **Picture** (the still — so the trailer can be turned off); one or none → no
+    switch. Default = what the picture always showed (gif, else video, else the still). The pick is kept for the session per
+    sidebar (`store.previewPref.library|browse`): the next item opens on it when it has it, else on the default (decision: per
+    sidebar, not shared — Browse items rarely have a video, so a Browse "Video" pick would otherwise mean nothing). Layers
+    cross-fade on opacity (the video mounts the first time it's shown and stays, paused while hidden); the trailer
+    (`YouTubeEmbed`, `autoplay=1&mute=1` — never audible on its own, the desktop owns the sound) mounts only while picked, so a
+    switch / an item change / closing stops it; its × goes back to the default. Hooks: `[data-preview-src=gif|video|youtube|image]`
+    (the chips), `[data-preview-layer=…]` (the layers), `[data-side-media][data-preview-mode]`. Guard: probe-sidebar `lib:preview`
+    (k1 GIF + Video, Video → its layer shown + the gif hidden, kept for k1's next open; k2 none; s2 none; s1 with a trailer —
+    written into its index — Picture + YouTube: the embed muted, Play in the head; youtube.com requests cancelled). **Settings levels**
     (`settingsLevel.ts`): Volume / scene properties / the actions = Basic, Speed / the loudness line / Workshop ID = Standard
     (their Settings rows' levels); a row the level hides still shows when the item has its own value for it (a speed
     override). `[data-side-row=volume|speed|loudness|workshop-id]`. **No pop-in**: `.side-body.wait` (opacity 0) until the
-    scene's properties are in (`onReady`; cached per path; `READY_CAP_MS` = 450 ms at most), then one fade — the "scene config
+    scene's properties are in (`onReady`; cached per path; `READY_CAP_MS` = 450 ms at most), then the stagger — the "scene config
     pops in when the settings grow" item, closed by this. Guard: probe-sidebar `lib:popin` (every frame: never shown without
     its properties, never grows after it showed; measured: shown at ~70 ms with them).
-  - **Browse sidebar** (`BrowseSide`): picture (above), In your library + Show in Library, **Download & Apply** · **Download**
-    (or **Apply** for an item the library has; the progress + Cancel while it downloads), the numbers, description, tags, Play
-    YouTube, Open on Steam / Open page / Open in file manager (the middle-click target), Copy ID.
-  - Guard: `scripts/test-ui-matrix.sh --probe probe-sidebar.js` — `lib:click` / `lib:rightClick` / `lib:fourOptions`
-    (`/open` stubbed; Delete + Undo; Delete from source on s1) / `lib:volume` / `lib:still` / `lib:keys` / `lib:selection` /
-    `bar:settings` / `lib:levels` / `lib:popin` / `motion:on|off|reduced` / `browse:click` / `browse:inLibrary` /
-    `browse:dblclick`; screenshots `side-*.png`. RED on the old UI 15/16 (`browse:dblclick` held: a click downloaded then);
-    + probe-layout `resize:side:*`; the matrix cells that opened the modal (`itemVol*`, `itemSpd*`, `selVol`, `keys:sliderHeld`,
-    `cli:volume-up:modalOpen`, `sceneProp:*`, `appear:morphs`, `appear:videoThumbs`, …) open the sidebar (`m.openSide(t)`: a
-    the menu's Settings) and read `[data-side-row]` sliders.
+  - **Browse sidebar** (`BrowseSide`): picture (above, the same switch), the hero (In your library + Show in Library, SCENE, the
+    numbers as pills), **Download & Apply** · **Download** (`.side-cta` `.side-go`: big, a lift + more glow on hover, the glyph
+    nudging down like the card's button — the only way to download from there; or **Apply** for an item the library has; the
+    progress + Cancel while it downloads), **About** (description, tags), tiles Open on Steam / Open page / Open in file manager
+    (the middle-click target), Copy ID. ("Play YouTube" buttons are gone from both sidebars: the switch has the trailer.)
+  - Guard: `scripts/test-ui-matrix.sh --probe probe-sidebar.js` — `lib:click` / `lib:rightClick` (the sidebar, no menu, nothing
+    applied) / `lib:reflow` / `lib:fourOptions` (the sidebar's tiles: `/open` stubbed; Delete + Undo; Delete from source on s1) /
+    `lib:volume` / `lib:still` / `lib:keys` / `lib:selection` / `bar:settings` (a right-click on a bar item: its sidebar, nothing
+    plays) / `lib:levels` / `lib:popin` / `lib:play` / `lib:preview` / `motion:on|off|reduced` / `look:focus` / `look:locator` /
+    `browse:click` / `browse:inLibrary` / `look:dlHover` / `browse:dblclick`; screenshots `side-*.png`;
+    `LIASCAPE_SIDE_SHOTS=1920x1080,1100x700` (+ `LIASCAPE_MATRIX_SCREEN=2560x1440`) adds `shots:<size>` cells — the Library sidebar
+    with the pointer on its picture, the playing item's, a focused card close-up, the locator mid-effect on the grid and the bar,
+    the Browse sidebar, a download button hovered (`side-look-<size>-*.png`). + probe-layout `resize:side:*`; the matrix cells that
+    opened the modal (`itemVol*`, `itemSpd*`, `selVol`, `keys:sliderHeld`, `cli:volume-up:modalOpen`, `sceneProp:*`,
+    `appear:morphs`, `appear:videoThumbs`, …) open the sidebar (`m.openSide(t)`: a right-click on the card; `m.openSideBar(t)`: on
+    the bar item) and read `[data-side-row]` sliders; `playlistBarRemoveSide:*` (was `…RemoveMenu:*`) removes through the
+    sidebar's playlist toggle.
 
 ## Hardware GL on NVIDIA (2026-10-28 — now the DEFAULT: ANGLE `gles-egl`)
 The owner ran `LIASCAPE_HWGL=1 LIASCAPE_ANGLE=gles-egl liascape` in the real Wayland session: the window shows, stays up, the

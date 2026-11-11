@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Wand2 } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
 import { Select } from "./Select";
 import { scenePropsCache as cache } from "./scenePropsCache";
+import { rangeFill } from "./sidePreview";
 
 // "Scene properties" in the item sidebar (LibrarySide): a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
@@ -102,7 +103,7 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
       const min = p.min ?? 0, max = p.max ?? 1;
       const step = p.step ?? (p.fraction ? (max - min) / 100 || 0.01 : 1);
       ctl = <><span className="shint sp-num">{fmtNum(p, v)}</span>
-        <input type="range" min={min} max={max} step={step} value={Number(v)} onChange={(e) => drag(p.name, +e.target.value)} /></>;
+        <input type="range" min={min} max={max} step={step} value={Number(v)} style={rangeFill(Number(v), min, max)} onChange={(e) => drag(p.name, +e.target.value)} /></>;
     } else if (p.type === "color")
       ctl = <input type="color" className="sp-color" value={toHex(v)} onChange={(e) => drag(p.name, e.target.value)} />;
     else if (p.type === "combo")
@@ -117,13 +118,13 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
   };
 
   return (
-    <div className="scene-props" data-scene-props>
+    <section className="scene-props side-sec" data-scene-props>
       <div className="sp-head">
-        <span className="sp-title">Scene properties</span>
+        <h3 className="side-sec-title sp-title"><span className="side-sec-ico"><Wand2 size={15} /></span>Scene properties</h3>
         {anyOverridden && <button className="mini ico" title="Every property back to the scene's default" onClick={() => reset()}><RotateCcw size={13} /> Reset all</button>}
       </div>
       {data.note && <div className="shint sp-note">{data.note}</div>}
       {data.props.map(row)}
-    </div>
+    </section>
   );
 }

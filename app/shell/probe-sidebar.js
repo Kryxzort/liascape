@@ -3,21 +3,35 @@
 // of a settings menu when clicking right click and settings, it should open a sidebar when you focus a card and thats what
 // has all the 4 options from the right click menu. same for the browse tab" (docs/superpowers/specs/2026-11-10-we-sidebar-design.md).
 //   lib:click            a plain click focuses the card AND applies it (WE); the sidebar shows it — volume, speed, the actions
-//   lib:rightClick       right-click = the menu (its Settings opens the sidebar, nothing applies); with the sidebar open it moves to the card
+//   lib:rightClick       right-click = the sidebar on that card, nothing applies, no menu (owner 2026-11-11: "no context menu
+//                        anywhere"); with the sidebar open it moves to the card; Escape closes it
+//   lib:reflow           a right-click on a card in a scrolled grid while the sidebar is closed: the docked sidebar re-fits the
+//                        grid's columns, the card stays in view near where it was (real input events)
 //   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete from source (a Workshop item)
+//   lib:play             the picture is the Play control: a hover shows the round Play button, a click applies the item, then the
+//                        "Playing now" badge instead; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
+//   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
+//                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
 //   lib:volume           its volume slider persists the item's own volume
 //   lib:still            a `library-item-changed` (two volume keybinds on the playing item) moves nothing and replays nothing;
 //                        the slider follows (the 2026-11-10 morph-replay bug's guard, kept for the sidebar)
 //   lib:keys             ← → ↑ ↓ move the focus between cards, Enter applies, Escape closes
 //   lib:selection        a focused card inside a Ctrl-selection: the sidebar says how many it applies to
-//   bar:settings         the playlist bar's "Settings" opens the sidebar on that item
+//   bar:settings         a right-click on a playlist bar item opens the sidebar on it; nothing applies, no menu
 //   lib:levels           Basic hides Speed; an item with its own speed shows it anyway
 //   lib:popin            a scene's sidebar shows its body once, with its scene properties in it — nothing pops in later
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
 //   motion:on|off|reduced the open slides/fades (transform + opacity only); animations off / reduced motion → nothing animates
+//   look:focus           the focused card's ring is the accent (outline colour), off the card, with the accent glow; Glow effects
+//                        off → the ring without the glow
+//   look:locator         "go to playing" (grid + bar): the spotlight (dim + rings + glow) appears, the rings ripple, all gone in
+//                        ≤ 2 s; Glow effects off → no glow layer, still dim + rings; animations off → a still highlight, no animation
+//   look:dlHover         a Browse card's download button under a real pointer: it lifts, its glow layer shows, the arrow nudges;
+//                        the Browse sidebar's Download & Apply the same (computed styles differ from the un-hovered ones)
 // Screenshots: <LIASCAPE_OUT>/side-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
+// LIASCAPE_SIDE_SHOTS="1920x1080,1100x700": the `shots:<size>` cells (pictures only — run with LIASCAPE_MATRIX_SCREEN=2560x1440).
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
 const path = require("path");
@@ -52,6 +66,7 @@ const PAGE = `window.__sb = {
   bar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
   ctx(el) { if (!el) throw new Error("no element to right-click"); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
+  menu() { return document.querySelector(".ctx-menu, .lib-ctx, .pl-ctx"); },
   key(k) { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); },
   side(kind) { return document.querySelector(kind ? '.side-panel[data-side="' + kind + '"]:not(.closing)' : ".side-panel:not(.closing)"); },
   sideTitle() { return this.side()?.querySelector(".side-head h2")?.textContent.trim() ?? null; },
@@ -59,9 +74,15 @@ const PAGE = `window.__sb = {
   sideRow(name) { return this.side()?.querySelector('[data-side-row="' + name + '"]'); },
   setValue(el, v) { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(el, String(v)); el.dispatchEvent(new Event("input", { bubbles: true })); },
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; },
-  // the right-click menu's "Settings": the sidebar on that card, without applying it
-  async openSide(t) { this.ctx(this.thumb(t)); await this.sleep(150); const b = this.byText(".lib-ctx button", "Settings"); if (!b) throw new Error("no Settings in the menu of " + t); b.click(); await this.waitSide("library"); await this.sleep(150); },
+  // a right-click: the sidebar on that card, without applying it
+  // (the old UI's menu "Settings" is followed too — only so a RED run against it measures the cell's own contract; lib:rightClick
+  // is the one that fails on a menu)
+  async openSide(t) { this.ctx(this.thumb(t)); await this.sleep(150); this.byText(".lib-ctx button", "Settings")?.click();
+    if (!await this.waitSide("library")) throw new Error("no sidebar after a right-click on " + t); await this.sleep(150);
+    if (this.sideTitle() !== t) throw new Error("the sidebar shows " + this.sideTitle() + ", not " + t); },
   async closeAll() { for (let i = 0; i < 3; i++) { if (!document.querySelector(".side-panel, .ctx-menu")) return; this.key("Escape"); await this.sleep(300); } },
+  accent() { const d = document.createElement("div"); d.style.color = "var(--accent)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; },
+  op(el) { let o = 1; for (let e = el; e && e !== document.body; e = e.parentElement) o *= +getComputedStyle(e).opacity; return o; },
   async waitSide(kind, ms = 2000) { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (this.side(kind)) return true; await this.sleep(30); } return false; },
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__sb; ${code} })()`);
@@ -75,6 +96,10 @@ async function loadUi() {
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
   await js(PAGE); await sleep(400);
 }
+const send = (e) => win.webContents.sendInputEvent(e);
+const mv = async (x, y, ms = 0) => { send({ type: "mouseMove", x: Math.round(x), y: Math.round(y) }); if (ms) await sleep(ms); };
+const rightAt = async (x, y) => { send({ type: "mouseDown", x: Math.round(x), y: Math.round(y), button: "right", clickCount: 1 }); await sleep(40);
+  send({ type: "mouseUp", x: Math.round(x), y: Math.round(y), button: "right", clickCount: 1 }); };
 async function shot(name) { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(OUT, `side-${name}.png`), img.toPNG()); }
 async function tab(name) { await page(`m.byText(".tab", ${JSON.stringify(name)}).click();`); await sleep(700); }
 async function reducedMotion(on) {
@@ -114,13 +139,14 @@ app.whenReady().then(async () => {
       const open = await page(`return await m.waitSide("library");`);
       if (!open) return ["no Library sidebar after a click on k2"];
       const r = await page(`await m.sleep(400); return { title: m.sideTitle(), ranges: m.side().querySelectorAll("input[type=range]").length,
-        btns: ["Play", "Playing", "Open in file manager", "Delete"].filter((t) => m.sideBtn(t)), modal: !!document.querySelector(".modal-backdrop"),
+        btns: ["Open in file manager", "Delete"].filter((t) => m.sideBtn(t)), play: !!m.side().querySelector("[data-side-play], [data-side-playing]"),
+        modal: !!document.querySelector(".modal-backdrop"),
         focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.title) };`);
       const v = [];
       if (r.title !== "k2") v.push(`the sidebar shows "${r.title}", not k2`);
       if (r.ranges < 2) v.push(`${r.ranges} sliders in the sidebar (volume + speed)`);
       for (const b of ["Open in file manager", "Delete"]) if (!r.btns.includes(b)) v.push(`no "${b}" button`);
-      if (!r.btns.includes("Play") && !r.btns.includes("Playing")) v.push(`no Play button`);
+      if (!r.play) v.push(`no Play control / Playing now badge on the picture`);
       if (r.modal) v.push("a modal opened too");
       if (r.focused.join() !== "k2") v.push(`focused cards: [${r.focused}]`);
       let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== K[1]; i++) await sleep(100);
@@ -132,26 +158,65 @@ app.whenReady().then(async () => {
     await cell("lib:rightClick", async () => {
       const v = [];
       const before = await current();
-      await page(`await m.closeAll(); m.ctx(m.thumb("k3")); await m.sleep(300);`);
-      let r = await page(`return { side: !!m.side(), menu: [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent.trim()) };`);
-      // closed: the menu alone (a docked sidebar opening would re-fit the grid under the menu and the pointer)
-      if (r.side) v.push("a right-click opened the sidebar by itself");
-      for (const t of ["Settings", "Open in file manager", "Delete"]) if (!r.menu.includes(t)) v.push(`the menu has no "${t}" ([${r.menu}])`);
-      await page(`m.byText(".lib-ctx button", "Settings").click();`);
-      if (!await page(`return await m.waitSide("library");`)) return [...v, "the menu's Settings didn't open the sidebar"];
-      if (await page(`return m.sideTitle();`) !== "k3") v.push(`Settings → the sidebar shows "${await page(`return m.sideTitle();`)}"`);
+      await page(`await m.closeAll(); m.ctx(m.thumb("k3")); await m.waitSide("library"); await m.sleep(250);`);
+      let r = await page(`return { side: !!m.side(), title: m.sideTitle(), menu: !!m.menu() };`);
+      if (r.menu) v.push("a right-click opened a context menu");
+      if (!r.side) return [...v, "a right-click didn't open the sidebar"];
+      if (r.title !== "k3") v.push(`the right-click opened the sidebar on "${r.title}", not k3`);
       await shot("lib-rightclick");
-      // open: a right-click on another card moves the sidebar to it (and shows the menu)
+      // open: a right-click on another card moves the sidebar to it
       await page(`m.ctx(m.thumb("k4")); await m.sleep(300);`);
-      r = await page(`return { title: m.sideTitle(), menu: !!document.querySelector(".ctx-menu") };`);
+      r = await page(`return { title: m.sideTitle(), menu: !!m.menu() };`);
       if (r.title !== "k4") v.push(`with the sidebar open, a right-click on k4 left it on "${r.title}"`);
-      if (!r.menu) v.push("no menu on that right-click");
-      await page(`m.key("Escape"); await m.sleep(300);`);
-      const after = await page(`return { menu: !!document.querySelector(".ctx-menu"), side: !!m.side() };`);
-      if (after.menu) v.push("Escape didn't close the menu");
-      if (!after.side) v.push("the first Escape closed the sidebar along with the menu");
-      await sleep(600);
+      if (r.menu) v.push("a context menu on that right-click");
+      await page(`m.key("Escape"); await m.sleep(400);`);
+      if (await page(`return !!m.side();`)) v.push("Escape didn't close the sidebar");
+      await sleep(400);
       if ((await current()) !== before) v.push(`a right-click applied (${T(before)} → ${T(await current())})`);
+      return v;
+    });
+
+    await cell("lib:reflow", async () => {
+      const v = [];
+      const s0 = await getSettings();
+      // 24 more items (hard links of k1, "x01".."x24") so the grid scrolls: the library holds only 7 and fits any window
+      const INDEX = path.join(path.dirname(path.dirname(K[0])), "index.json"), idx0 = fs.readFileSync(INDEX, "utf8");
+      const k1key = path.basename(path.dirname(K[0])), extra = [];
+      const idx = JSON.parse(idx0);
+      for (let i = 1; i <= 24; i++) {
+        const key = `x${String(i).padStart(2, "0")}`, d = path.join(path.dirname(path.dirname(K[0])), key);
+        fs.mkdirSync(d, { recursive: true }); fs.linkSync(K[0], path.join(d, key + path.extname(K[0]))); extra.push(d);
+        idx[key] = { ...(idx[k1key] || {}), title: key, addedAt: new Date(Date.UTC(2020, 0, i)).toISOString() };
+      }
+      fs.writeFileSync(INDEX, JSON.stringify(idx));
+      try {
+        await setSettings({ cardSize: "Large" });
+        win.setContentSize(1000, 560); await sleep(300); await loadUi(); await sleep(800);
+        await page(`await m.closeAll(); const sc = document.querySelector(".lib-scroll"); sc.scrollTop = (sc.scrollHeight - sc.clientHeight) / 2; await m.sleep(400);`);
+        // the lowest fully visible card that isn't playing
+        const t = await page(`const sc = document.querySelector(".lib-scroll").getBoundingClientRect(); const cur = ${JSON.stringify(T(await current()))};
+          const vis = [...document.querySelectorAll(".card.lib")].filter((c) => { const b = c.getBoundingClientRect(); return b.top >= sc.top && b.bottom <= sc.bottom; })
+            .map((c) => c.querySelector(".lib-title")?.title).filter((x) => x && x !== cur);
+          return vis[vis.length - 1] ?? null;`);
+        if (!t) return ["no fully visible card in the scrolled grid"];
+        const b0 = await page(`const sc = document.querySelector(".lib-scroll"); return { r: m.rect(m.card(${JSON.stringify(t)})), top: sc.getBoundingClientRect().top, h: sc.clientHeight, scroll: sc.scrollTop, cols: getComputedStyle(sc).getPropertyValue("--cols") };`);
+        await mv(b0.r.x + b0.r.w / 2, b0.r.y + b0.r.h / 2, 300);
+        await rightAt(b0.r.x + b0.r.w / 2, b0.r.y + b0.r.h / 2);
+        await sleep(700);
+        const b1 = await page(`const sc = document.querySelector(".lib-scroll"); const s = sc.getBoundingClientRect(); return { r: m.rect(m.card(${JSON.stringify(t)})), top: s.top, bottom: s.bottom, title: m.sideTitle(), menu: !!m.menu(), cols: getComputedStyle(sc).getPropertyValue("--cols") };`);
+        console.log(`        ${t}: y ${b0.r.y.toFixed(0)} (cols ${b0.cols}, scroll ${b0.scroll.toFixed(0)}) → ${b1.r.y.toFixed(0)} (cols ${b1.cols}), view ${b1.top.toFixed(0)}–${b1.bottom.toFixed(0)}`);
+        if (b1.title !== t) v.push(`the right-click opened "${b1.title}", not ${t}`);
+        if (b1.menu) v.push("a context menu opened");
+        if (b0.cols === b1.cols) v.push(`the grid kept ${b0.cols} columns — the cell proves nothing (the sidebar didn't dock?)`);
+        if (b1.r.y < b1.top - 1 || b1.r.y + b1.r.h > b1.bottom + 1) v.push(`after the re-fit ${t} is out of view (${b1.r.y.toFixed(0)}–${(b1.r.y + b1.r.h).toFixed(0)} vs ${b1.top.toFixed(0)}–${b1.bottom.toFixed(0)})`);
+        else if (Math.abs(b1.r.y - b0.r.y) > Math.max(48, b1.r.h * 0.5)) v.push(`${t} jumped ${(b1.r.y - b0.r.y).toFixed(0)} px vertically (it should stay near where it was)`);
+        await shot("lib-reflow");
+      } finally {
+        await mv(5, 5); await page(`await m.closeAll();`);
+        fs.writeFileSync(INDEX, idx0); for (const d of extra) fs.rmSync(d, { recursive: true, force: true }); // the stack's own temp library
+        await setSettings({ cardSize: s0.cardSize });
+        win.setContentSize(1400, 900); await sleep(300); await loadUi();
+      }
       return v;
     });
 
@@ -260,10 +325,15 @@ app.whenReady().then(async () => {
     });
 
     await cell("bar:settings", async () => {
-      await page(`m.ctx(m.bar("k2")); await m.sleep(300); const b = [...document.querySelectorAll(".pl-ctx button")].find((x) => /^Settings/.test(x.textContent.trim())); if (!b) throw new Error("no Settings in the playlist bar's menu"); b.click();`);
+      const before = await current();
+      await page(`await m.closeAll(); m.ctx(m.bar("k2"));`);
       const open = await page(`return await m.waitSide("library");`);
-      const t = await page(`return m.sideTitle();`);
-      return open && t === "k2" ? [] : [`the bar's Settings → sidebar ${open ? `"${t}"` : "closed"}`];
+      const r = await page(`await m.sleep(300); return { t: m.sideTitle(), menu: !!m.menu() };`);
+      const v = open && r.t === "k2" ? [] : [`a right-click on the bar's k2 → sidebar ${open ? `"${r.t}"` : "closed"}`];
+      if (r.menu) v.push("a context menu opened");
+      await sleep(500);
+      if ((await current()) !== before) v.push(`the right-click played something (${T(before)} → ${T(await current())})`);
+      return v;
     });
 
     await cell("lib:levels", async () => {
@@ -290,7 +360,7 @@ app.whenReady().then(async () => {
     });
 
     await cell("lib:popin", async () => {
-      const r = await page(`m.ctx(m.thumb("s1")); await m.sleep(120); m.byText(".lib-ctx button", "Settings").click(); const out = []; const t0 = performance.now();
+      const r = await page(`m.ctx(m.thumb("s1")); const out = []; const t0 = performance.now();
         await new Promise((res) => { const f = () => { const s = m.side("library"); const b = s?.querySelector(".side-body");
           if (b) { let op = 1; for (let e = b; e && e !== document.body; e = e.parentElement) op *= +getComputedStyle(e).opacity;
             out.push({ t: performance.now() - t0, op, props: b.querySelectorAll("[data-scene-prop]").length, h: b.getBoundingClientRect().height, title: m.sideTitle() }); }
@@ -308,10 +378,105 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // the picture = the Play control (owner 2026-11-11: the Play / In playlist row was "redundant clutter"); the head's toggle
+    await cell("lib:play", async () => {
+      const v = [];
+      await post("/apply", { path: K[0] }); await sleep(1500);
+      await page(`await m.closeAll(); await m.openSide("k3"); await m.sleep(600);`);
+      const r0 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); const f = s.querySelector("[data-side-media]");
+        return { btn: !!b, inMedia: !!b?.closest("[data-side-media]"), tag: b?.tagName, label: b?.getAttribute("aria-label"), tab: b ? b.tabIndex : null, media: f ? m.rect(f) : null,
+          old: [...s.querySelectorAll("button")].filter((x) => /^(Play|Playing|In playlist|Add to playlist)$/.test(x.textContent.trim())).length,
+          op: b ? +getComputedStyle(b).opacity : null, pl: s.querySelector(".side-head [data-side-playlist]")?.getAttribute("aria-pressed") ?? null };`);
+      if (!r0.btn || !r0.inMedia) return [`no Play control on k3's picture (${JSON.stringify(r0)})`];
+      if (r0.label !== "Play k3") v.push(`its accessible name is "${r0.label}", not "Play k3"`);
+      if (r0.tag !== "BUTTON" || r0.tab < 0) v.push(`it isn't keyboard-reachable (${r0.tag}, tabIndex ${r0.tab})`);
+      if (r0.old) v.push(`the old Play / In playlist buttons are still there (${r0.old})`);
+      if (r0.pl !== "true") v.push(`the head's playlist toggle says aria-pressed=${r0.pl} for k3 (in the playlist)`);
+      if (r0.op > 0.1) v.push(`the Play overlay shows without a hover (opacity ${r0.op})`);
+      const cx = r0.media.x + r0.media.w / 2, cy = r0.media.y + r0.media.h / 2;
+      await mv(cx - 20, cy, 80); await mv(cx, cy, 500);
+      const r1 = await page(`const s = m.side(); return { op: +getComputedStyle(s.querySelector("[data-side-play]")).opacity, tr: getComputedStyle(s.querySelector(".side-frame")).transform };`);
+      if (r1.op < 0.9) v.push(`hovering the picture: the Play overlay at opacity ${r1.op}`);
+      if (r1.tr === "none") v.push("hovering the picture: it doesn't scale");
+      await shot("lib-play-hover");
+      send({ type: "mouseDown", x: Math.round(cx), y: Math.round(cy), button: "left", clickCount: 1 }); await sleep(40);
+      send({ type: "mouseUp", x: Math.round(cx), y: Math.round(cy), button: "left", clickCount: 1 });
+      let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== K[2]; i++) await sleep(100);
+      if (cur !== K[2]) v.push(`a click on the picture didn't play k3 (/current ${T(cur)})`);
+      let r2 = null;
+      for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); return { play: !!s.querySelector("[data-side-play]"), badge: s.querySelector("[data-side-media] [data-side-playing]")?.textContent ?? null };`); if (r2.badge) break; await sleep(100); }
+      if (!r2.badge || !/Playing now/.test(r2.badge)) v.push(`playing: no "Playing now" badge on the picture (${JSON.stringify(r2)})`);
+      if (r2.play) v.push("playing: the Play overlay is still there");
+      // the head's playlist toggle takes k3 out of the playlist and puts it back
+      await page(`m.side().querySelector("[data-side-playlist]").click(); await m.sleep(500);`);
+      const out = await page(`return { pressed: m.side().querySelector("[data-side-playlist]").getAttribute("aria-pressed"), bar: !!m.bar("k3") };`);
+      if (out.pressed !== "false" || out.bar) v.push(`the head's toggle didn't take k3 out of the playlist (${JSON.stringify(out)})`);
+      await page(`m.side().querySelector("[data-side-playlist]").click(); await m.sleep(500);`);
+      const back = await page(`return { pressed: m.side().querySelector("[data-side-playlist]").getAttribute("aria-pressed"), bar: !!m.bar("k3") };`);
+      if (back.pressed !== "true" || !back.bar) v.push(`the head's toggle didn't put k3 back (${JSON.stringify(back)})`);
+      await mv(5, 5);
+      await post("/playlist/state", { videoPaths: K.slice(0, 4), settings: null, name: null });
+      await post("/apply", { path: K[0] }); await sleep(1200);
+      return v;
+    });
+
+    // the picture's preview switch (owner 2026-11-11: "a button to switch between gif preview, mp4 preview and youtube video preview")
+    await cell("lib:preview", async () => {
+      const v = [];
+      // s1 gets a YouTube trailer (its index entry); the embed never reaches the network (no network in the stack anyway)
+      const idx = path.join(path.dirname(SC[0]), "index.json"), idx0 = fs.readFileSync(idx, "utf8");
+      const j = JSON.parse(idx0); j["900000001"].youtubeUrl = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"; fs.writeFileSync(idx, JSON.stringify(j));
+      win.webContents.session.webRequest.onBeforeRequest({ urls: ["*://*.youtube.com/*", "*://*.ytimg.com/*", "*://*.googlevideo.com/*", "*://*.youtube-nocookie.com/*"] }, (d, cb) => cb({ cancel: true }));
+      try {
+        await loadUi();
+        const look = (t) => page(`await m.closeAll(); await m.openSide(${JSON.stringify(t)}); await m.sleep(700); const s = m.side();
+          const lay = {}; for (const e of s.querySelectorAll("[data-preview-layer]")) lay[e.dataset.previewLayer] = +m.op(e).toFixed(2);
+          return { opts: [...s.querySelectorAll("[data-preview-src]")].map((b) => b.dataset.previewSrc), mode: s.querySelector("[data-side-media]")?.dataset.previewMode, lay };`);
+        const pick = (k) => page(`m.side().querySelector('[data-preview-src="${k}"]').click(); await m.sleep(700); const s = m.side();
+          const lay = {}; for (const e of s.querySelectorAll("[data-preview-layer]")) lay[e.dataset.previewLayer] = +m.op(e).toFixed(2);
+          const f = s.querySelector("iframe"); return { mode: s.querySelector("[data-side-media]")?.dataset.previewMode, lay, yt: f?.src ?? null,
+            headPlay: !!s.querySelector(".side-head [data-side-play]"), picPlay: !!s.querySelector("[data-side-media] [data-side-play]") };`);
+        const J = JSON.stringify;
+        let r = await look("k1");
+        if (J(r.opts) !== J(["gif", "video"])) v.push(`k1 (a gif + its video): options ${J(r.opts)}`);
+        if (r.mode !== "gif" || !(r.lay.gif > 0.9)) v.push(`k1 opens on ${r.mode} (layers ${J(r.lay)}), expected the gif`);
+        if (r.opts.includes("video")) {
+          const p = await pick("video");
+          if (p.mode !== "video" || !(p.lay.video > 0.9) || !(p.lay.gif < 0.1)) v.push(`k1 → Video: mode ${p.mode}, layers ${J(p.lay)}`);
+          await shot("lib-preview-video");
+        }
+        r = await look("k2");
+        if (r.opts.length) v.push(`k2 (its video only): a switch ${J(r.opts)} — one option shows none`);
+        r = await look("k1");
+        if (r.mode !== "video") v.push(`back on k1 after picking Video: it opened on ${r.mode} (the pick is kept for the session)`);
+        if (r.opts.includes("gif")) await pick("gif");
+        r = await look("s2");
+        if (r.opts.length) v.push(`s2 (a scene, no trailer): a switch ${J(r.opts)}`);
+        r = await look("s1");
+        if (J(r.opts) !== J(["image", "youtube"])) v.push(`s1 (a scene with a trailer): options ${J(r.opts)}, expected [image, youtube]`);
+        if (r.opts.includes("youtube")) {
+          const p = await pick("youtube");
+          if (p.mode !== "youtube" || !p.yt || !/youtube\.com\/embed\//.test(p.yt)) v.push(`s1 → YouTube: no embed (${J(p)})`);
+          else if (!/[?&]mute=1/.test(p.yt)) v.push(`the YouTube embed isn't muted (${p.yt})`);
+          if (!(p.lay.youtube > 0.5)) v.push(`the YouTube layer isn't shown (${J(p.lay)})`);
+          if (!p.headPlay || p.picPlay) v.push(`on the trailer, Play belongs in the head (head ${p.headPlay}, picture ${p.picPlay})`);
+          await shot("lib-preview-youtube");
+          const q = await pick("image");
+          if (q.yt) v.push("Picture: the YouTube embed is still mounted");
+          if (q.mode !== "image") v.push(`s1 → Picture: mode ${q.mode}`);
+        }
+      } finally {
+        fs.writeFileSync(idx, idx0);
+        win.webContents.session.webRequest.onBeforeRequest(null);
+        await page(`await m.closeAll();`); await loadUi();
+      }
+      return v;
+    });
+
     for (const mode of ["on", "off", "reduced"]) {
       await cell(`motion:${mode}`, async () => {
         await setMotion(mode !== "off"); await reducedMotion(mode === "reduced"); await sleep(300);
-        const r = await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(120); m.byText(".lib-ctx button", "Settings").click();
+        const r = await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2"));
           const props = new Set(); let n = 0; const t0 = performance.now();
           await new Promise((res) => { const f = () => { const s = document.querySelector(".side-panel");
             if (s) for (const a of s.getAnimations({ subtree: true })) { if (a.effect?.target?.matches?.("img, video")) continue; n++;
@@ -329,6 +494,77 @@ app.whenReady().then(async () => {
       });
     }
     await reducedMotion(false); await setMotion(true);
+
+    // the focused card: the accent ring off the card + the accent glow (owner 2026-11-11: "the theme color like hover color, not
+    // just plain white"); Glow effects off → the ring alone
+    await cell("look:focus", async () => {
+      const v = [];
+      await mv(5, 5, 100);
+      const r = await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const c = document.querySelector(".card.lib.focused"); if (!c) return null;
+        const cs = getComputedStyle(c); const out = { acc: m.accent(), oc: cs.outlineColor, os: cs.outlineStyle, ow: parseFloat(cs.outlineWidth), off: parseFloat(cs.outlineOffset), bs: cs.boxShadow };
+        document.documentElement.classList.add("no-glow"); await m.sleep(60); const c2 = getComputedStyle(c); out.ng = { oc: c2.outlineColor, bs: c2.boxShadow };
+        document.documentElement.classList.remove("no-glow"); return out;`);
+      if (!r) return ["no focused card"];
+      if (r.oc !== r.acc || r.os === "none" || !(r.ow >= 1.5)) v.push(`the focused card's ring: ${r.os} ${r.ow}px ${r.oc}, expected the accent ${r.acc}`);
+      if (!(r.off >= 2)) v.push(`the ring sits on the card (offset ${r.off}px) — the selection's outline does`);
+      if (!r.bs.includes(r.acc)) v.push(`no accent glow on the focused card (box-shadow ${r.bs})`);
+      if (r.ng.oc !== r.acc) v.push(`Glow effects off: the ring is ${r.ng.oc}`);
+      if (r.ng.bs.includes(r.acc)) v.push(`Glow effects off: the focused card still glows (${r.ng.bs})`);
+      await shot("look-focus");
+      return v;
+    });
+
+    // "go to playing": the spotlight (owner 2026-11-11: "make the go-to-playing more apparant of where's the wallpaper")
+    const LOCATE = (btn) => `await m.closeAll(); await m.sleep(200); const b = document.querySelector('[data-go-playing="${btn}"]'); if (!b || b.disabled) return { btn: false };
+      b.click(); const t0 = performance.now(); const out = { btn: true, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null };
+      await new Promise((res) => { const f = () => { const t = performance.now() - t0; const fx = document.querySelector(".locate-fx");
+        if (fx) { if (out.seen == null) out.seen = Math.round(t); out.still = fx.classList.contains("still");
+          const d = fx.querySelector(".lfx-dim"); if (d) out.dim = Math.max(out.dim, +getComputedStyle(d).opacity);
+          const rs = [...fx.querySelectorAll(".lfx-ring")]; out.rings = Math.max(out.rings, rs.length);
+          for (const r of rs) { const tf = getComputedStyle(r).transform; if (tf && tf !== "none") { const mm = new DOMMatrix(tf); out.scale = Math.max(out.scale, mm.a, mm.d); } }
+          if (fx.querySelector(".lfx-glow")) out.glow = true;
+          out.anims = Math.max(out.anims, fx.getAnimations({ subtree: true }).length);
+          const el = document.querySelector(".locate-flash"); if (el) out.outline = getComputedStyle(el).outlineColor; }
+        else if (out.seen != null && out.gone == null) out.gone = Math.round(t);
+        if (t < 2800) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+      out.acc = m.accent(); out.left = !!document.querySelector(".locate-fx, .locate-flash"); return out;`;
+    await cell("look:locator", async () => {
+      const v = [], J = JSON.stringify;
+      await post("/apply", { path: K[0] }); await sleep(1500);
+      await mv(5, 5, 100);
+      const run = async (label, btn) => { const r = await page(LOCATE(btn)); console.log(`        ${label}: ${J(r)}`); if (!r.btn) v.push(`${label}: no enabled [data-go-playing="${btn}"]`); return r.btn ? r : null; };
+      for (const btn of ["library", "bar"]) {
+        const r = await run(`${btn}`, btn);
+        if (!r) continue;
+        if (r.seen == null) { v.push(`${btn}: no spotlight after the button`); continue; }
+        if (r.gone == null || r.left) v.push(`${btn}: the spotlight never went away`);
+        else if (r.gone - r.seen > 2000 || r.gone - r.seen < 1000) v.push(`${btn}: the spotlight lasted ${r.gone - r.seen} ms (1–2 s)`);
+        if (r.dim < 0.8) v.push(`${btn}: the rest never dimmed (dim opacity ${r.dim})`);
+        if (r.rings < 3 || r.scale < 1.05) v.push(`${btn}: no rippling rings (${r.rings} rings, scale ≤ ${r.scale.toFixed(2)})`);
+        if (!r.glow) v.push(`${btn}: no glow layer`);
+        if (r.outline !== r.acc) v.push(`${btn}: the item's outline ${r.outline}, not the accent ${r.acc}`);
+      }
+      // Glow effects off: still the spotlight and the rings, no glow
+      await page(`document.documentElement.classList.add("no-glow");`);
+      const ng = await run("library, glow off", "library");
+      await page(`document.documentElement.classList.remove("no-glow");`);
+      if (ng) {
+        if (ng.glow) v.push("glow off: the glow layer is there");
+        if (ng.dim < 0.8 || ng.rings < 3 || ng.scale < 1.05) v.push(`glow off: no spotlight / rings (${J(ng)})`);
+      }
+      // animations off: a still highlight for ~1.2 s, nothing animates
+      await setMotion(false); await mv(5, 5, 100);
+      for (const btn of ["library", "bar"]) {
+        const st = await run(`${btn}, animations off`, btn);
+        if (!st) continue;
+        if (st.seen == null) { v.push(`${btn}, animations off: no highlight`); continue; }
+        if (!st.still || st.anims) v.push(`${btn}, animations off: it animates (${st.anims} animations, still ${st.still})`);
+        if (st.dim < 0.9 || st.rings < 1) v.push(`${btn}, animations off: no dim / ring (${J(st)})`);
+        if (st.gone == null || st.gone - st.seen > 1600 || st.gone - st.seen < 900) v.push(`${btn}, animations off: shown ${st.gone == null ? "for ever" : st.gone - st.seen + " ms"} (~1.2 s)`);
+      }
+      await setMotion(true);
+      return v;
+    });
 
     // ---- Browse: a local Wallpaper Engine folder: we1 (not in the library) + 900000001 (= s1's Workshop id: in the library)
     const we = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-side");
@@ -381,12 +617,102 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // the download button under a real pointer (owner 2026-11-11: "add hover effects on the download button"), and the sidebar's
+    await cell("look:dlHover", async () => {
+      const v = [], J = JSON.stringify;
+      await page(`await m.closeAll();`); await mv(5, 5, 150);
+      const c = await page(`const t = m.thumb("we1"); t.scrollIntoView({ block: "center" }); await m.sleep(200); return m.rect(t);`);
+      const read = `const b = m.thumb("we1").querySelector(".dl-btn"); const g = b.querySelector(".dl-glyph"); const pb = getComputedStyle(b, "::before");
+        return { tr: getComputedStyle(b).transform, glow: pb.content !== "none" ? +pb.opacity : 0, anim: getComputedStyle(g).animationName, op: +getComputedStyle(b).opacity, r: m.rect(b) };`;
+      await mv(c.x + c.w * 0.3, c.y + c.h * 0.3, 450);
+      const a = await page(read);
+      await mv(a.r.x + a.r.w / 2, a.r.y + a.r.h / 2, 500);
+      const h = await page(read);
+      console.log(`        card hover ${J(a)} → button hover ${J(h)}`);
+      if (a.op < 0.9) v.push(`the download button doesn't show on a card hover (opacity ${a.op})`);
+      if (h.tr === "none" || h.tr === a.tr) v.push(`hovered, the download button doesn't lift / grow (transform ${a.tr} → ${h.tr})`);
+      if (!(h.glow > 0.5) || a.glow > 0.1) v.push(`hovered, no glow layer (${a.glow} → ${h.glow})`);
+      if (!/dl-nudge/.test(h.anim)) v.push(`hovered, the arrow doesn't nudge (animation ${h.anim})`);
+      if (h.r) await (async () => { const img = await win.webContents.capturePage({ x: Math.max(0, Math.round(c.x - 20)), y: Math.max(0, Math.round(c.y - 20)), width: Math.round(c.w + 40), height: Math.round(c.h + 40) }); fs.writeFileSync(path.join(OUT, "side-look-dlhover.png"), img.toPNG()); })();
+      // the Browse sidebar's Download & Apply
+      await mv(5, 5, 150);
+      await page(`m.thumb("we1").click(); await m.waitSide("browse"); await m.sleep(800);`);
+      const readS = `const b = m.sideBtn("Download & Apply"); if (!b) return null; const i = b.querySelector("svg")?.parentElement;
+        return { tr: getComputedStyle(b).transform, bs: getComputedStyle(b).boxShadow, anim: i ? getComputedStyle(i).animationName : null, r: m.rect(b) };`;
+      const s0 = await page(readS);
+      if (!s0) v.push("no Download & Apply in the Browse sidebar");
+      else {
+        await mv(s0.r.x + s0.r.w / 2, s0.r.y + s0.r.h / 2, 500);
+        const s1 = await page(readS);
+        if (s1.tr === s0.tr) v.push(`the sidebar's Download & Apply doesn't lift on hover (${s0.tr})`);
+        if (s1.bs === s0.bs) v.push("the sidebar's Download & Apply doesn't glow more on hover");
+        if (!/dl-nudge/.test(s1.anim ?? "")) v.push(`the sidebar's download glyph doesn't nudge (${s1.anim})`);
+        await shot("look-browse-dlhover");
+      }
+      await mv(5, 5, 100); await page(`await m.closeAll();`);
+      return v;
+    });
+
     await cell("browse:dblclick", async () => {
       await page(`await m.closeAll(); m.thumb("we1").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));`);
       let got = false;
       for (let i = 0; i < 100 && !got; i++) { got = ((await http("GET", "/library")).json || []).some((x) => x.title === "we1"); if (!got) await sleep(150); }
       return got ? [] : ["a double-click didn't download we1"];
     });
+    // LIASCAPE_SIDE_SHOTS="1920x1080,1100x700": the look at each size (the Xvfb screen must fit it: LIASCAPE_MATRIX_SCREEN) —
+    // the Library sidebar (pointer on its picture), the playing item's, a focused card close-up, the "go to playing" locator
+    // mid-effect (grid + bar), the Browse sidebar and a Browse card's download button hovered. Pictures only, no checks.
+    for (const size of (E.LIASCAPE_SIDE_SHOTS || "").split(",").filter(Boolean)) {
+      await cell(`shots:${size}`, async () => {
+        const [W, H] = size.split("x").map(Number);
+        const mv = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
+        const crop = async (name, r, pad = 24) => { const x = Math.max(0, Math.floor(r.x - pad)), y = Math.max(0, Math.floor(r.y - pad));
+          const img = await win.webContents.capturePage({ x, y, width: Math.min(W - x, Math.ceil(r.w + 2 * pad)), height: Math.min(H - y, Math.ceil(r.h + 2 * pad)) });
+          fs.writeFileSync(path.join(OUT, `side-${name}.png`), img.toPNG()); };
+        win.setContentSize(W, H); await sleep(300);
+        await post("/apply", { path: K[0] }); await sleep(1200);
+        await loadUi(); await tab("Library"); await sleep(600);
+        mv(W - 5, H / 2); await sleep(200);
+        await page(`await m.closeAll(); m.thumb("k2").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); await m.sleep(200);
+          const b = m.byText(".lib-ctx button", "Settings"); if (b) b.click(); await m.waitSide("library"); await m.sleep(900);`);
+        const media = await page(`const e = m.side()?.querySelector("[data-side-media]"); return e ? m.rect(e) : null;`);
+        if (media) { mv(media.x + media.w / 2, media.y + media.h / 2); await sleep(500); }
+        await shot(`look-${size}-library`);
+        const card = await page(`const c = m.card("k2"); return c ? m.rect(c) : null;`);
+        if (card) await crop(`look-${size}-focused`, card, 30);
+        await page(`await m.closeAll(); m.thumb("k1").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); await m.sleep(200);
+          const b = m.byText(".lib-ctx button", "Settings"); if (b) b.click(); await m.waitSide("library"); await m.sleep(900);`);
+        mv(W / 3, 30); await sleep(300);
+        await shot(`look-${size}-library-playing`);
+        await page(`await m.closeAll();`);
+        // the locator: the grid scrolled so k1 is off (if it can scroll), then the button; captured mid-effect
+        await page(`const sc = document.querySelector(".lib-scroll"); sc.scrollTop = sc.scrollHeight; await m.sleep(200);
+          document.querySelector('[data-go-playing="library"]')?.click();`);
+        await sleep(700); await shot(`look-${size}-locator-grid`);
+        await sleep(2200);
+        await page(`const r = document.querySelector(".playlist-bar-row"); if (r) r.scrollLeft = r.scrollWidth; await m.sleep(200);
+          document.querySelector('[data-go-playing="bar"]')?.click();`);
+        await sleep(650); await shot(`look-${size}-locator-bar`);
+        await sleep(2200);
+        // Browse: the we-side folder (set up above), we1's sidebar, then a card's download button under the pointer
+        await tab("Browse");
+        await page(`m.byText(".pill", ${JSON.stringify(weName)})?.click();`);
+        for (let i = 0; i < 60; i++) { if (await page(`return !!m.card("we1");`)) break; await sleep(150); }
+        await page(`await m.closeAll(); m.thumb("we1").click(); await m.waitSide("browse"); await m.sleep(1400);`);
+        await shot(`look-${size}-browse`);
+        await page(`await m.closeAll(); await m.sleep(300);`);
+        const dl = await page(`const t = m.thumb("we1"); if (!t) return null; t.scrollIntoView({ block: "center" }); await m.sleep(200); return m.rect(t);`);
+        if (dl) {
+          mv(dl.x + dl.w / 2, dl.y + dl.h / 2); await sleep(300);
+          const b = await page(`const e = m.thumb("we1")?.querySelector(".dl-btn"); return e ? m.rect(e) : null;`);
+          if (b) { mv(b.x + b.w / 2, b.y + b.h / 2); await sleep(450); }
+          await crop(`look-${size}-dl-hover`, dl, 30);
+        }
+        mv(W - 5, 5); await tab("Library");
+        win.setContentSize(1400, 900); await sleep(300);
+        return [];
+      });
+    }
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });
     console.log(`ERROR setup: ${e.message}`);

@@ -197,7 +197,7 @@ export default function App() {
         {tab === "library" && (
           <>
             {/* "Go to playing" (owner 2026-11-11): glides the grid to the playing wallpaper's card and rings it */}
-            <button className="mini" data-go-playing="library" disabled={!s.playingPath}
+            <button className="mini go-playing" data-go-playing="library" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>
               <LocateFixed size={16} /></button>

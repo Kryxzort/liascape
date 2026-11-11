@@ -39,9 +39,7 @@ app.whenReady().then(async () => {
 
   await js(`(() => { const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
     it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); })()`);
-  await wait(300);
-  await js(`[...document.querySelectorAll('.pl-ctx button')].find(b => b.textContent === "Settings")?.click()`); // → the item sidebar
-  await wait(900);
+  await wait(1200); // a right-click on a bar item = its Library sidebar (no menu since 2026-11-11)
   const sliders = await js(`document.querySelectorAll('.side-panel [data-side-row] input[type=range]').length`);
   if (!sliders) { console.log("PROBE_PREVIEW FAIL: the item sidebar didn't open"); app.exit(1); return; }
   await js(`window.__sent = []`);

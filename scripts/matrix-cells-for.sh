@@ -62,7 +62,7 @@ for f in $FILES; do
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
-    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts)
+    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts)
       add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts)
       add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:)" ;;

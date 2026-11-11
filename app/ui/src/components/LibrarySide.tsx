@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Copy, Clock, PlayCircle, ExternalLink, Monitor, Shield, AudioLines, Play, FolderOpen, Trash2, CloudOff, Repeat, AlertTriangle } from "lucide-react";
+import { RotateCcw, Copy, Clock, ExternalLink, Monitor, Shield, AudioLines, Play, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Info } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
-import { YouTubeEmbed } from "./YouTubeEmbed";
-import { SideMedia } from "./SidePanel";
+import { SideMedia, SideHeadTools, SideSection } from "./SidePanel";
+import { usePreview, rangeFill } from "./sidePreview";
 import { PlaylistToggle } from "./PlaylistToggle";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
@@ -38,8 +38,10 @@ const READY_CAP_MS = 450;
 
 // The Library sidebar's content (components/SidePanel.tsx is the shell): everything the per-card settings modal had —
 // volume / speed (drag-preview live, persist on release), the scene's properties, its loudness line, the crash
-// whitelist, the trailer, Workshop / Steam — plus the right-click menu's actions (Open in file manager, Delete, Delete
-// from source) and Play / the playlist toggle. Mounted per item (`key` = its path, SidePanel): its state is that item's.
+// whitelist, the trailer (the picture's preview switch), Workshop / Steam — plus the old right-click menu's actions (Open in
+// file manager, Delete, Delete from source) as tiles, Play (the picture itself — owner 2026-11-11: the Play / In playlist row
+// was "redundant clutter") and the playlist toggle (in the head). Mounted per item (`key` = its path, SidePanel): its state is
+// that item's.
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
 // `targets` = the multi-selection it's part of (volume / speed / delete repeat to it), else [item].
 export function LibrarySide({
@@ -56,7 +58,6 @@ export function LibrarySide({
   const [spdOv, setSpdOv] = useState(false);
   const [wl, setWl] = useState(false);
   const [dur, setDur] = useState("");
-  const [ytPlaying, setYtPlaying] = useState(false);
   const patchItem = useStore((s) => s.patchLibraryItem);
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
@@ -149,84 +150,86 @@ export function LibrarySide({
   const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : null;
   const anim = item.animatedThumbnailPath;
   const gifSrc = anim && !VIDEO_RE.test(anim) ? animUrl(anim) : null;
-  const vidSrc = item.isScene ? null : anim && VIDEO_RE.test(anim) ? media(anim) : !anim && VIDEO_RE.test(p) ? media(p) : null;
+  // the preview switch's "Video": the item's own video file (a scene has none); else a video preview the source shipped
+  const vidSrc = item.isScene ? null : VIDEO_RE.test(p) ? media(p) : anim && VIDEO_RE.test(anim) ? media(anim) : null;
+  const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl });
   const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
+  const showLoud = !!loud && at("standard");
+  const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
+  const hasDetails = (item.tags && item.tags.length > 0) || (item.workshopId && at("standard"));
 
   return (
     <>
-      <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc}
-        overlay={ytPlaying && item.youtubeUrl ? <YouTubeEmbed url={item.youtubeUrl} onClose={() => setYtPlaying(false)} /> : null} />
+      {/* the head's tools (SidePanel's slot, before close): the playlist toggle — the card's own look — and, while the picture
+          shows the trailer (the embed takes the picture's clicks), Play */}
+      <SideHeadTools>
+        {preview.mode === "youtube" && !playing && (
+          <button className="side-tool accent" data-side-play aria-label={`Play ${item.title}`} title="Play it now (Enter)" onClick={onPlay}>
+            <Play size={15} fill="currentColor" /></button>
+        )}
+        <button className={`side-tool side-pl${inPlaylist ? " on" : ""}`} data-side-playlist aria-pressed={inPlaylist}
+          aria-label={inPlaylist ? "Remove from playlist" : "Add to playlist"} title={inPlaylist ? "Remove from playlist" : "Add to playlist"}
+          onClick={onToggle}><PlaylistToggle on={inPlaylist} /></button>
+      </SideHeadTools>
+      <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc} youtube={item.youtubeUrl}
+        preview={preview} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
       <div className={`side-body${ready ? "" : " wait"}`}>
-        {(playing || item.isScene || item.hasCrashed) && (
-          <div className="side-state">
-            {playing && <span className="side-chip playing" data-side-playing>Playing now{keepCurrent && <><Repeat size={12} /> looping this one</>}</span>}
-            {item.isScene && <span className="side-chip">SCENE</span>}
-            {item.hasCrashed && <span className="side-chip danger"><AlertTriangle size={12} /> Crashed — won't be played</span>}
-          </div>
-        )}
-        <div className="side-actions primary">
-          <button className="btn accent ico" disabled={playing} onClick={onPlay} title={playing ? "This one is playing" : "Play it now (Enter)"}>
-            <Play size={14} fill="currentColor" /> {playing ? "Playing" : "Play"}</button>
-          <button className={`btn ghost ico side-pl${inPlaylist ? " on" : ""}`} onClick={onToggle}>
-            <PlaylistToggle on={inPlaylist} /> {inPlaylist ? "In playlist" : "Add to playlist"}</button>
-        </div>
-        <div className="meta">
+        {/* the hero line: what it is (chips) and its numbers (pills) */}
+        <div className="side-hero">
+          {item.isScene && <span className="side-chip accent">SCENE</span>}
+          {item.hasCrashed && <span className="side-chip danger"><AlertTriangle size={12} /> Crashed — won't be played</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}
-          {!item.isScene && <span className="mrow" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={14} /> {dur || "0 seconds"}</span>}
-          {item.resolution && <span className="mrow"><Monitor size={14} /> {item.resolution}</span>}
-          {item.ageRating && <span className="mrow"><Shield size={14} /> {item.ageRating}</span>}
-          {loud && at("standard") && (
-            <span className="mrow" data-scene-loudness-line data-side-row="loudness" title="the scene's loudness under its current properties — normalization matches it to the target">
-              <AudioLines size={14} /> {loud}</span>
-          )}
+          {!item.isScene && <span className="side-pill" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={13} /> {dur || "0 seconds"}</span>}
+          {item.resolution && <span className="side-pill"><Monitor size={13} /> {item.resolution}</span>}
+          {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
         </div>
-        {loud && at("standard") && item.loudnessEstimated && item.loudnessNote && (
-          <div className="meta"><span className="shint" data-scene-loudness-note>Estimate may be off: {item.loudnessNote}</span></div>
-        )}
-        {/* the right-click menu's actions (owner: "all the 4 options from the right click menu" — Settings is this sidebar) */}
-        <div className="side-actions">
-          <button className="btn ghost ico" onClick={onReveal}><FolderOpen size={14} /> Open in file manager</button>
-          <button className="btn danger ico" onClick={onTrash}><Trash2 size={14} /> Delete</button>
+        {/* the right-click menu's actions (owner: "all the 4 options from the right click menu"), as tiles */}
+        <div className="side-tiles">
+          <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</button>
+          {steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
+          <button className="side-tile danger" onClick={onTrash}><span className="side-tile-ico"><Trash2 size={15} /></span>Delete</button>
           {showDeleteFromSource && (
-            <button className="btn danger ico" title="Unsubscribe on Steam and delete — Delete from source (unsubscribe)" onClick={onDeleteSource}>
-              <CloudOff size={14} /> Delete from source</button>
+            <button className="side-tile danger" title="Unsubscribe on Steam and delete — Delete from source (unsubscribe)" onClick={onDeleteSource}>
+              <span className="side-tile-ico"><CloudOff size={15} /></span>Delete from source</button>
           )}
         </div>
-        {item.hasCrashed && (
-          <label className="inline side-wl">
-            <input type="checkbox" checked={wl} onChange={(e) => toggleWl(e.target.checked)} /> Keep in playlist despite crash (whitelist)
-          </label>
-        )}
-        <div className="srow" data-side-row="volume"><div className="slabel">Volume {volOv ? "" : "(global)"}<span className="shint">{vol}</span></div>
-          <div className="sctl"><input type="range" min={0} max={100} value={vol} onChange={(e) => setVolume(+e.target.value)} />
-            {volOv && <button className="mini ico" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
-        {/* legacy scenes render at 1× (linux-wallpaperengine has no speed control) → no no-op slider there */}
-        {showSpeed && (
-          <div className="srow" data-side-row="speed"><div className="slabel">Speed {spdOv ? "" : "(global)"}<span className="shint">{spd}×</span></div>
-            <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} onChange={(e) => setSpeed(+e.target.value)} />
-              {spdOv && <button className="mini ico" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
-        )}
+        <SideSection icon={<SlidersHorizontal size={15} />} title="Playback" data-sec="playback">
+          {item.hasCrashed && (
+            <label className="inline side-wl">
+              <input type="checkbox" checked={wl} onChange={(e) => toggleWl(e.target.checked)} /> Keep in playlist despite crash (whitelist)
+            </label>
+          )}
+          <div className="srow" data-side-row="volume"><div className="slabel"><span className="slabel-row">Volume{!volOv && <span className="side-global">global</span>}</span><span className="side-val">{vol}</span></div>
+            <div className="sctl"><input type="range" min={0} max={100} value={vol} style={rangeFill(vol, 0, 100)} onChange={(e) => setVolume(+e.target.value)} />
+              {volOv && <button className="mini ico" title="Back to the global volume" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
+          {/* legacy scenes render at 1× (linux-wallpaperengine has no speed control) → no no-op slider there */}
+          {showSpeed && (
+            <div className="srow" data-side-row="speed"><div className="slabel"><span className="slabel-row">Speed{!spdOv && <span className="side-global">global</span>}</span><span className="side-val">{spd}×</span></div>
+              <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} style={rangeFill(spd, 0.1, 4)} onChange={(e) => setSpeed(+e.target.value)} />
+                {spdOv && <button className="mini ico" title="Back to the global speed" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
+          )}
+          {showLoud && (
+            <div className="side-line" data-scene-loudness-line data-side-row="loudness" title="the scene's loudness under its current properties — normalization matches it to the target">
+              <AudioLines size={14} /> {loud}</div>
+          )}
+          {showLoud && item.loudnessEstimated && item.loudnessNote && (
+            <div className="shint side-note" data-scene-loudness-note>Estimate may be off: {item.loudnessNote}</div>
+          )}
+        </SideSection>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}
-        {item.tags && item.tags.length > 0 && (
-          <div className="tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
-        )}
-        {item.workshopId && at("standard") && (
-          <div className="meta" data-side-row="workshop-id"><span>Workshop ID: {item.workshopId}</span>
-            <button className="mini ico" title="Copy ID" onClick={() => navigator.clipboard?.writeText(item.workshopId!)}><Copy size={13} /></button></div>
-        )}
-        {(item.youtubeUrl || item.pageUrl || item.workshopId) && (
-          <div className="side-actions">
-            {item.youtubeUrl && (
-              <button className="btn ghost ico" onClick={() => setYtPlaying((x) => !x)}><PlayCircle size={15} /> {ytPlaying ? "Hide trailer" : "Play YouTube"}</button>
+        {hasDetails && (
+          <SideSection icon={<Info size={15} />} title="Details">
+            {item.tags && item.tags.length > 0 && (
+              <div className="tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
             )}
-            {(item.pageUrl || item.workshopId) && (
-              <a className="btn ghost ico" href={item.pageUrl ?? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}`}
-                target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open on Steam</a>
+            {item.workshopId && at("standard") && (
+              <div className="side-line" data-side-row="workshop-id"><span>Workshop ID <b>{item.workshopId}</b></span>
+                <button className="mini ico" title="Copy ID" aria-label="Copy the Workshop ID" onClick={() => navigator.clipboard?.writeText(item.workshopId!)}><Copy size={13} /></button></div>
             )}
-          </div>
+          </SideSection>
         )}
       </div>
     </>
