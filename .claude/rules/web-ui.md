@@ -224,7 +224,7 @@ http(s) only); the window never navigates away from the app's origin.
   pitch away, ~1/16 two away) of its RESTING centre (`offsetLeft`, never the transformed box — no feedback): scale up to
   **1.16×** from its bottom edge, lifted up to **4 px**, pushed sideways away from the pointer by a bump that is 0 under it, peaks
   about a pitch out and is gone two out (the neighbours part around it, far items never move), the most magnified on top
-  (`z-index`). One spring per item (ω 21 rad/s) in one rAF loop that stops at rest — slightly under-damped (ζ 0.55: a small bounce) only where the eye rests: entering the row (220 ms), the item the pointer stops on (no move for 60 ms) and leaving; while it sweeps faster than 450 px/s it's critically damped (ζ 1: no overshoot — owner 2026-11-11: "only the initial and last playlist hover have the bounce, since when moving cursor fast it feels stuttery when all of them bounce"; guard `bar:bounce`);
+  (`z-index`). One spring per item (ω 21 rad/s) in one rAF loop that stops at rest — slightly under-damped (ζ 0.55: a small bounce) only where the eye rests: entering the row (220 ms), the item the pointer stops on (no move for 60 ms) and leaving; while it moves, at any speed, it's critically damped (ζ 1: no overshoot — owner 2026-11-11: "only the initial and last playlist hover have the bounce, since when moving cursor fast it feels stuttery when all of them bounce", then "remove the hover bounce on slow too"; guard `bar:bounce`);
   the result is ONE transform in the `--dock` custom property (`.pl-item { transform: var(--dock, none); transform-origin: 50%
   100%; will-change: transform }` — dnd-kit owns the inline transform while sorting; React never touches `--dock`). An item fully on
   screen at rest is clamped inside the row's view magnified (the first / last one never gets cut off). The playing item magnifies
@@ -242,7 +242,7 @@ http(s) only); the window never navigates away from the app's origin.
   rAF loop writing a `translate3d` + size straight into its style (no React render per frame; sub-pixel). **The row's wheel
   listener re-attaches when the row mounts** (`useSmoothScroll(rowRef, "x", [rowShown])`): attached once at the bar's mount, before
   the playlist had loaded, the bar never scrolled. Guard: `--probe probe-plbar.js` — `bar:wheel`, `bar:wheelReopen`, `bar:gap`
-  (+ the glow within 0.5 px of the item), `bar:sweep` (frame pacing / long tasks over a pointer sweep), `bar:bounce` (entry + stop overshoot, a fast sweep's items don't), `bar:leave` (+ the head's
+  (+ the glow within 0.5 px of the item), `bar:sweep` (frame pacing / long tasks over a pointer sweep), `bar:bounce` (entry + stop overshoot, the items a fast or slow sweep passes don't), `bar:leave` (+ the head's
   empty space magnifies nothing), real input events (RED before the wheel/gap fix: 3/4).
 - **Any window size** (owner todo 2026-11-10, "responsive at any tiled size"): the `.topbar` is `flex-wrap: wrap` (a second row
   instead of controls past the window's edge); `.status` = `flex: 1000 1 0; min-width: min(140px, 100%)` (fills a row's end,

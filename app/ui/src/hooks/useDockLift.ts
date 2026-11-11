@@ -26,13 +26,12 @@ const REACH = 3 * SIGMA;
 const OMEGA = 21;      // rad/s, the spring's natural frequency (~3.3 Hz)
 const ZETA = 0.55;     // damping ratio: < 1 → a small overshoot (~12 %) — the bounce
 // The bounce only where the eye rests (owner 2026-11-11: "only the initial and last playlist hover … when moving cursor fast
-// it feels stuttery when all of them bounce"): on entering the row, and on the item the pointer settles on (or leaves from).
-// While the pointer sweeps across, the springs are critically damped — they follow without overshooting, so the items it
-// passes don't each wobble. The damping changes the spring's force, never its position or velocity, so the hand-over is
+// it feels stuttery when all of them bounce", then "remove the hover bounce on slow too"): on entering the row, and on the
+// item the pointer settles on (or leaves from). While the pointer moves across, at any speed, the springs are critically
+// damped — they follow without overshooting, so the items it passes don't each wobble. The damping changes the spring's force, never its position or velocity, so the hand-over is
 // seamless.
 const ZETA_GLIDE = 1;
 const ENTER_MS = 220;   // the entry window: the first item bounces even if the pointer came in moving
-const GLIDE_PX_S = 450; // pointer speed above which it's a sweep, not a hover (≈ 3.7 item pitches a second)
 const STILL_MS = 60;    // no pointermove for this long → the pointer has stopped
 
 type Body = { a: number; v: number };
@@ -46,7 +45,7 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     if (!enabled) { clear(); return; }
     const body = new WeakMap<HTMLElement, Body>();
     let px: number | null = null, raf = 0, last = 0;
-    let enteredAt = -Infinity, movedAt = 0, prevX = 0, speed = 0; // speed: px/s, smoothed
+    let enteredAt = -Infinity, movedAt = 0;
     // the row reaches up into the bar's head for the magnified items' headroom: a pointer up there counts only on an item
     // (a magnified one), not in the empty space — hovering the header must not magnify the items under it
     const padTop = parseFloat(getComputedStyle(row).paddingTop) || 0;
@@ -64,7 +63,7 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
       const viewL = row.scrollLeft, viewR = row.scrollLeft + row.clientWidth;
       let moving = false;
       const now = performance.now();
-      const sweeping = px !== null && now - enteredAt > ENTER_MS && now - movedAt < STILL_MS && speed > GLIDE_PX_S;
+      const sweeping = px !== null && now - enteredAt > ENTER_MS && now - movedAt < STILL_MS;
       const zeta = sweeping ? ZETA_GLIDE : ZETA;
       els.forEach((el, i) => {
         const d = x === null ? Infinity : centres[i] - x;
@@ -101,12 +100,8 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
       const was = px;
       px = onItem || e.clientY >= row.getBoundingClientRect().top + padTop ? e.clientX : null;
       const t = e.timeStamp || performance.now();
-      if (px !== null && was === null) { enteredAt = t; speed = 0; }
-      else if (px !== null) {
-        const dt = Math.max(1, t - movedAt);
-        speed = speed * 0.6 + (Math.abs(px - prevX) / dt) * 1000 * 0.4; // a little smoothing over jittery events
-      }
-      if (px !== null) { prevX = px; movedAt = t; }
+      if (px !== null && was === null) enteredAt = t;
+      if (px !== null) movedAt = t;
       kick();
     };
     const onLeave = () => { px = null; kick(); };

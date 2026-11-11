@@ -4,7 +4,7 @@
 //   bar:wheelReopen  collapse + expand the bar (the row unmounts / mounts again): the wheel still scrolls it
 //   bar:gap          pointer on item 1 → the gap → item 2: item 1 stays lifted (and glowing) in the gap, then item 2 takes over
 //   bar:leave        pointer off the row: nothing stays lifted, no glow left behind
-//   bar:bounce       the bounce on entering + on the item the pointer stops on, none on the items a fast sweep passes
+//   bar:bounce       the bounce on entering + on the item the pointer stops on, none on the items a sweep (fast or slow) passes
 // Real input events (webContents.sendInputEvent), not synthetic DOM events: :hover and the wheel listener see them as a user's.
 // Screenshots: <LIASCAPE_OUT>/plbar-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
@@ -139,8 +139,9 @@ app.whenReady().then(async () => {
     });
 
     // owner 2026-11-11 ("make only the initial and last playlist hover have the bounce, since when moving cursor fast it feels
-    // stuttery when all of them bounce"): the item the pointer ENTERS on overshoots (×1.16 → above it, then back); the items a
-    // fast sweep passes don't (critically damped: never past ×1.16); the item it STOPS on overshoots again.
+    // stuttery when all of them bounce", then "remove the hover bounce on slow too"): the item the pointer ENTERS on overshoots
+    // (×1.16 → above it, then back); the items a sweep passes — fast or slow — don't (critically damped: never past ×1.16);
+    // the item it STOPS on overshoots again.
     // Every frame's scale per item, sampled in the page.
     await cell("bar:bounce", async () => {
       const v = [];
@@ -166,9 +167,18 @@ app.whenReady().then(async () => {
       for (let i = 1; i <= n; i++) { move(cx(0) + (cx(last) - cx(0)) * (i / n), y); await sleep(16); }
       const sweep = await p;
       const mids = sweep.slice(1, last); // the items passed (not the start or the stop)
+      // 3. a slow drift (~300 px/s) back to the first item
+      await sleep(400);
+      const m = Math.round((cx(last) - cx(0)) / 5);
+      p = rec(m * 17 + 900); await sleep(30);
+      for (let i = 1; i <= m; i++) { move(cx(last) + (cx(0) - cx(last)) * (i / m), y); await sleep(16); }
+      const slow = await p;
+      const slowMids = slow.slice(1, last);
       console.log(`        enter peak ×${enter[0].toFixed(4)}; sweep mids peak ×${Math.max(...mids).toFixed(4)}; stop peak ×${sweep[last].toFixed(4)}`);
       if (!(enter[0] > 1.165)) v.push(`the entered item peaked at ×${enter[0].toFixed(4)} — no bounce on entry (expected > ×1.165)`);
       if (mids.some((m) => m > 1.1615)) v.push(`items passed mid-sweep overshot: peaks ×[${mids.map((m) => m.toFixed(4))}] (expected ≤ ×1.16)`);
+      console.log(`        slow drift mids peak ×${Math.max(...slowMids).toFixed(4)}`);
+      if (slowMids.some((m) => m > 1.1615)) v.push(`items passed in a slow drift overshot: peaks ×[${slowMids.map((m) => m.toFixed(4))}] (expected ≤ ×1.16)`);
       if (!(sweep[last] > 1.165)) v.push(`the item the sweep stopped on peaked at ×${sweep[last].toFixed(4)} — no bounce on settle`);
       return v;
     });
