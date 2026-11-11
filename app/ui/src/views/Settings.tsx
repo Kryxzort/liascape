@@ -84,8 +84,7 @@ function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onRe
   const reset = onReset ?? (() => { if (rk !== undefined) set(rk, d); });
   const tag = own === "advanced" || own === "expert";
   // a row whose ONLY control is a checkbox / radio is a <label>: a click anywhere on it (the name, the hint, the space
-  // between) ticks it (owner 2026-11-11: "do you think clicking on name or the entire box of a specific setting should
-  // tick/untick it?" — yes, like the filter column's names). The reset button inside still only resets (a click on
+  // between) ticks it, like the filter column's names. The reset button inside still only resets (a click on
   // interactive content never activates a label). Rows with sliders, fields, selects or buttons stay plain.
   const toggle = isValidElement<{ type?: string }>(children) && children.type === "input" && (children.props.type === "checkbox" || children.props.type === "radio");
   const Tag = toggle ? "label" : "div";
@@ -457,9 +456,8 @@ export const Settings = memo(function Settings() {
       )}
 
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
-        {/* four ways, one radio group (owner 2026-11-11 "why is this a checkbox" — the Steam app route had been a switch inside
-            Subscribe via Steam; then "should have 4 options not 3, the 4th being the one which opens the wallpaper in your app" —
-            opening the page had only been Subscribe's silent fallback) */}
+        {/* four ways, one radio group (docs/decisions.md § "Offer four Workshop download modes, the user's choice") — each
+            route its own radio, never a switch inside another or a silent fallback */}
         <Row label="Use the Steam app" hint="one click, real progress — Steam shows you as playing Wallpaper Engine for those seconds" wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
         <Row label="Open in the Steam app" hint="the wallpaper's page opens in Steam — click Subscribe there and it downloads">
@@ -473,7 +471,7 @@ export const Settings = memo(function Settings() {
             nothing to sign in to here. If Steam can't be reached, it says so — it never switches to another way by itself.</Help>
         )}
         {mode === "subscribe"
-          /* Signing in is optional (owner 2026-11-11: "is it a dead end for users without mobile guard?"): without a usable
+          /* Signing in is optional: without a usable
              sign-in a Download opens the item in the Steam app, where the user clicks Subscribe (WorkshopDownloader) — so the
              row says what happens either way. Sign in with QR (the Steam mobile app) or with a password (SteamPasswordModal). */
           ? <Row label="Steam">
@@ -483,7 +481,7 @@ export const Settings = memo(function Settings() {
                 : <div className="hms" data-steam-state={steam?.signedIn ? "rejected" : "signed-out"} data-steam-rejected={steam?.signedIn ? "" : undefined}>
                     {steam?.signedIn
                       /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) —
-                         it used to keep saying "Signed in as …" while every download failed (owner 2026-11-11) */
+                         else the row says "Signed in as …" while every download fails */
                       ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again. Until then, downloads open in the Steam app.</span>
                       : <span className="shint">Not signed in — until you are, downloads open in the Steam app, where you click Subscribe.</span>}
                     <span className="steam-row-btns">

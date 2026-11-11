@@ -1,4 +1,4 @@
-//! The `frames` probe (Task 13): per output, a rolling window of **present intervals** —
+//! The `frames` probe: per output, a rolling window of **present intervals** —
 //! the time between two consecutive presents — so frame pacing is measured, not guessed.
 //!
 //! Two windows per output, both the last [`WINDOW`]:
@@ -12,13 +12,13 @@
 //!
 //! `idle: true` = the output can take a frame (no callback outstanding) but has nothing new
 //! to show (redraw policy, `crate::redraw`). `args: {"reset": true}` clears the windows
-//! and the `missed` total after reading (like `loop`'s reset). Failed presents (Task 16):
+//! and the `missed` total after reading (like `loop`'s reset). Failed presents:
 //! `totals.present_failed`, `last_present_error`, and `retry_in_ms` while the backend backs
 //! off (`crate::wl::present_backoff`).
 //!
 //! **The seam probe** (design §11 "zero visible seams"): `totals.seam_frames` / `seam_runs`
 //! count composed frames where the visible main layer pointed at a source that had no
-//! texture (drawn transparent, R19) — see [`FrameStats::on_composed`]; `last_seam` names
+//! texture (drawn transparent) — see [`FrameStats::on_composed`]; `last_seam` names
 //! what was missing. Never cleared by `reset`. Each run is also an `output.seam` event
 //! (warn) and `output.seam_end {frames}` (info).
 
@@ -64,7 +64,7 @@ pub struct FrameStats {
     pub presents: u64,
     pub missed_total: u64,
     pub idle_gaps: u64,
-    /// Presents that returned an error, and the last error (Task 16, review item c).
+    /// Presents that returned an error, and the last error.
     pub present_failed: u64,
     pub last_present_error: Option<String>,
     /// The seam probe (§11): composed frames with a hole — a source the visible main layer
@@ -230,7 +230,7 @@ impl FrameStats {
     }
 }
 
-/// The GPU budget's miss rate (Phase 2 Task 14): the worst paced miss percentage over
+/// The GPU budget's miss rate: the worst paced miss percentage over
 /// **every** output's 2 s window — not only the outputs showing a scene. The GPU is shared:
 /// on-machine, a ~6 ms/frame worker on DP-1 cost DP-2 (a 240 Hz video, no scene) 71 missed
 /// frames in 2 s while the budget, reading DP-1 alone, saw none and eased the cap back up.
@@ -346,7 +346,7 @@ pub fn frames(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
             st.reset(now);
         }
     }
-    // Task 20e: NVIDIA explicit sync for this process and the default-queue drain.
+    // NVIDIA explicit sync for this process and the default-queue drain.
     let default_queue = rt
         .backend
         .as_wayland_mut()

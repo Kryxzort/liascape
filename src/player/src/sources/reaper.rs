@@ -1,9 +1,9 @@
-//! R51 — mpv core teardown off the render thread. `MpvSource::drop` frees its render
+//! mpv core teardown off the render thread. `MpvSource::drop` frees its render
 //! context on the GL thread (it must: GL current, before the core) and hands the core
 //! here; one background thread runs `mpv_terminate_destroy` (measured 30–240 ms for a
 //! playing 1080p clip — never on the loop). `quit` calls [`shutdown`] with a bounded wait
 //! and logs any straggler. After each batch of destroyed cores it runs
-//! `mem::trim_after_reap` (Task 20b: `malloc_trim(0)`, the allocator policy's second half)
+//! `mem::trim_after_reap` (`malloc_trim(0)`, the allocator policy's second half)
 //! — never once shutdown has started, and a straggler is a core not destroyed yet, never a
 //! trim still running (TODO "Reaper trim at shutdown").
 
@@ -33,7 +33,7 @@ unsafe impl Send for Doomed {}
 /// The mpv cores' reaper (started on first use).
 static REAPER: Reaper<Doomed> = Reaper::new("lia-mpv-reaper", trim_batch);
 
-/// Task 20b: give the pages a batch of destroyed cores freed back (`mem::apply_policy`).
+/// Give the pages a batch of destroyed cores freed back (`mem::apply_policy`).
 fn trim_batch() {
     if let Some((released, ms)) = crate::mem::trim_after_reap() {
         log::event(
@@ -210,9 +210,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(400));
     }
 
-    /// TODO "Reaper trim at shutdown": a core already destroyed whose batch trim is still
-    /// running when `quit` waits is not a straggler (RED before: `pending` dropped only
-    /// after the trim, so the wait reported 1).
+    /// A core already destroyed whose batch trim is still
+    /// running when `quit` waits is not a straggler (`pending` must drop before the trim,
+    /// else the wait reports 1).
     #[test]
     fn a_trim_in_flight_at_shutdown_is_no_straggler() {
         let r = leak(slow_trim_in_flight);

@@ -1,4 +1,4 @@
-//! A held still copy of another source's frame (R34): what reveal/frozen transitions show
+//! A held still copy of another source's frame: what reveal/frozen transitions show
 //! as their outgoing side while it is held. A shared A must keep playing on its other
 //! output, and even a paused mpv source still presents queued frames after the pause
 //! (measured 2–3 frames, ~100 ms late) — a copy is the only picture guaranteed not to move.
@@ -7,7 +7,7 @@
 //! node id whose texture is copied. [`super::SourceHost`] builds it the moment it first
 //! sees the node, by copying `of`'s current texture (`glBlitFramebuffer`, GL 3.3 core) —
 //! the copy keeps texture row order, so it's image-top-at-`t = 0` like every source
-//! (R25). `Ready` immediately; never changes, never ends, no audio (gains are stored and do
+//! . `Ready` immediately; never changes, never ends, no audio (gains are stored and do
 //! nothing).
 
 use std::collections::BTreeMap;
@@ -29,7 +29,7 @@ pub struct SnapshotSource {
 
 impl SnapshotSource {
     /// Copy `from` (the current texture of source `of`, if it has one yet) through `gfx`'s
-    /// context. `from = None` gives a snapshot with no texture (draws transparent, R19).
+    /// context. `from = None` gives a snapshot with no texture (draws transparent).
     pub fn new(gfx: &Gfx, of: &str, from: Option<&Tex>) -> SnapshotSource {
         let mut props = BTreeMap::new();
         for (name, pd) in props::schema_for_kind(NodeKind::Source) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """liascape-audiowatch — continuous sink-monitor capture, correlated with liascape-transition handoff events.
 
-The legacy-engine monitor (2026-10-20): the reference-based half of this (`refcheck`,
-below) is what `liascape-player`'s native `probe dropout` (Task 15, `src/player/src/probe/
+The legacy-engine monitor: the reference-based half of this (`refcheck`,
+below) is what `liascape-player`'s native `probe dropout` (`src/player/src/probe/
 dropout.rs`) ports — see `docs/player/debugging.md` for the bugs it originally found
 (cubic volume sag, a speed-step micro-gap, ready-timeout silence, paused-after-kill
 silence) and the native tool's own usage. This script stays as the external monitor for

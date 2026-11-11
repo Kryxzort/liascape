@@ -5,9 +5,8 @@ import { api, type WorkshopSubState } from "../api/client";
 import { useStore } from "../store";
 import { useMotion } from "./motion";
 
-// The Browse sidebar's Subscribe / Unsubscribe toggle for a Workshop item (owner 2026-11-11: "make it so browse > wallpaper
-// engine (local) has option to unsubscribe / same for browse > workshop / it needs to be in the sidebar / probably a button that
-// lets you subscribe/unsubscribe in the sidebar"). State = POST /workshop/state (disk + the unsubscribe queue + the Steam to-do —
+// The Browse sidebar's Subscribe / Unsubscribe toggle for a Workshop item ("Wallpaper Engine (Local)" and "Wallpaper Engine
+// (Workshop)" alike). State = POST /workshop/state (disk + the unsubscribe queue + the Steam to-do —
 // never the Steam client), re-read on every event that can change it (the store's wsStateTick) and every 4 s while something is
 // still moving (pending, or an unsubscribed folder Steam hasn't deleted yet). Unsubscribe (danger) = the Library's Delete from
 // source for an item the library has (trash + unsubscribe, undoable — the sub-line says so), else the unsubscribe alone; Subscribe

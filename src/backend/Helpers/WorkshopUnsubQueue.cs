@@ -99,7 +99,7 @@ public static class WorkshopUnsubQueue
     }
 
     // Undo of a Delete from source: wanted again → out of both lists. True = Steam had ALREADY unsubscribed it (blocked, no
-    // longer pending): the caller re-subscribes it (owner 2026-11-11: "what if i unsubscribe + undo / does it resubscribe?").
+    // longer pending): the caller re-subscribes it, so an Undo restores the subscription as well as the item.
     public static bool Restore(string id)
     {
         lock (_gate)

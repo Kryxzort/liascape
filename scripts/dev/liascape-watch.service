@@ -20,8 +20,8 @@ Environment=WAYLAND_DISPLAY=wayland-1
 Environment=XDG_SESSION_TYPE=wayland
 # NixOS: run inside the flake devShell so dotnet + native build env are present (login shell = `nix` on PATH).
 # --no-hot-reload: every .cs change is a full rebuild + restart. A hot-reload delta never runs a NEW static
-# field's initializer (a merge left POST /settings on a null map, 2026-10-26) and one with a new static once
-# crashed the process (2026-09-22); the owner prefers restarts over staleness anyway.
+# field's initializer (POST /settings can be left on a null map) and one with a new static can crash the
+# process; a restart beats staleness.
 ExecStart=/bin/bash -lc 'exec nix develop @ROOT@ -c dotnet watch --no-hot-reload --project src/backend -- serve'
 Restart=on-failure
 RestartSec=2

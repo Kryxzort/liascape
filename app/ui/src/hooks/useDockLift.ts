@@ -1,8 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
-// COOL: dock-style magnification driven by the POINTER'S POSITION, not by which item it's on (owner 2026-11-11: "make it
-// smooth by detecting mouse position, not the item its focused on — so the surrounding stuff moves even if you move the
-// mouse on the same playlist item"; then "make it more fun like more in your face").
+// COOL: dock-style magnification driven by the POINTER'S POSITION, not by which item it's on — so the neighbours move
+// even while the pointer moves within one playlist item.
 //
 // Each `.pl-item` gets an amount a ∈ [0, 1] from a bell curve of the distance between the pointer's x and the item's
 // resting centre (1 under the pointer, ½ one item pitch away, ~1/16 two away). From it:
@@ -18,15 +17,15 @@ import { useEffect, type RefObject } from "react";
 // (offsetLeft, unaffected by transforms), so the motion never feeds back into itself.
 // While dragging, everything settles flat. `enabled` false ("Smooth window animations" off / reduced motion) → --dock is
 // cleared and the CSS fallback applies (the hovered item alone, 2 px).
-const MAG = 0.16;      // the extra scale right under the pointer (1.16× — 1.3× collided with the header, owner 2026-11-11)
+const MAG = 0.16;      // the extra scale right under the pointer (1.16× — 1.3× collides with the header)
 const LIFT = 4;        // px
 const PUSH = 14;       // px — the sideways push's strength (a neighbour moves ~8 px)
 const SIGMA = 104;     // px — the bell's width: ½ at one item pitch (122 px)
 const REACH = 3 * SIGMA;
 const OMEGA = 21;      // rad/s, the spring's natural frequency (~3.3 Hz)
 const ZETA = 0.55;     // damping ratio: < 1 → a small overshoot (~12 %) — the bounce
-// The bounce only where the eye rests (owner 2026-11-11: "only the initial and last playlist hover … when moving cursor fast
-// it feels stuttery when all of them bounce", then "remove the hover bounce on slow too"): on entering the row, and on the
+// The bounce only where the eye rests (docs/decisions.md § "Bounce the playlist bar's dock only when entering, stopping or
+// leaving" — every item bouncing as the pointer crosses looks stuttery): on entering the row, and on the
 // item the pointer settles on (or leaves from). While the pointer moves across, at any speed, the springs are critically
 // damped — they follow without overshooting, so the items it passes don't each wobble. The damping changes the spring's force, never its position or velocity, so the hand-over is
 // seamless.

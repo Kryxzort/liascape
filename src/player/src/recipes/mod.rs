@@ -4,8 +4,8 @@
 //! what it writes into pictures and sound.
 //!
 //! - [`transition`] — A→B with an effect (or a cut), three hold methods, `align: end`,
-//!   interrupt/cancel/failure handling (Task 11).
-//! - [`program`] — rotations (Phase 3): a `program` node's items, order and timing turned
+//!   interrupt/cancel/failure handling.
+//! - [`program`] — rotations: a `program` node's items, order and timing turned
 //!   into `transition` requests on the player clock.
 
 pub mod program;

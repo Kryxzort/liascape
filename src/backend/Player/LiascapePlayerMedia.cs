@@ -72,13 +72,13 @@ public static class LiascapePlayerMedia
     // - BATCHED (`QueueBatch`, keyed by kind, with a MEMBER — an item path): a coalescible pass whose
     //   targets are a set of items (`override` — /library/volume|speed; `sceneloudness`): a new member
     //   joins the pending batch of its key (since the last barrier), which moves to the tail like a
-    //   replaced set, and the pass runs ONCE over every member. Before (speed storm re-run, 2026-11-03),
-    //   each item was its own key (`override:<path>`) — clearing 315 items' overrides queued 315 passes,
-    //   reached the cap with the player answering in ms, and dropped an item's pass (any item's: the
-    //   playing one's too).
+    //   replaced set, and the pass runs ONCE over every member. One key per item (`override:<path>`)
+    //   would not do: clearing 315 items' overrides queues 315 passes, reaches the cap with the player
+    //   answering in ms, and drops an item's pass (any item's: the playing one's too). Guard: the
+    //   self-test's speed storm section.
     // - anything else (`Queue`) — unknown semantics, so a barrier for coalescing, and refused at the cap.
-    // The cap (item 6) still bounds memory: at MaxQueueDepth a command that can't coalesce and isn't
-    // essential is logged and dropped. R81 re-applies settings when a stalled player answers again.
+    // The cap still bounds memory: at MaxQueueDepth a command that can't coalesce and isn't
+    // essential is logged and dropped. ReapplyAll re-applies settings when a stalled player answers again.
     private static readonly object _qLock = new();
 
     private sealed class QItem
@@ -159,7 +159,7 @@ public static class LiascapePlayerMedia
     private static bool Enqueue(Action run, string? key, bool essential, string? caller) => Admit(MakeItem(run, key, essential, caller));
 
     // the cap: drops counted, the pending kinds logged at most every CapLogEveryMs (what filled it — a
-    // drop said only "dropping a queued command", and the 2026-11-03 re-run couldn't tell which)
+    // bare "dropping a queued command" can't tell which)
     private const long CapLogEveryMs = 5000;
     private static long _capLoggedAt = -CapLogEveryMs;
     private static long _runningSince;
@@ -248,12 +248,12 @@ public static class LiascapePlayerMedia
 
     public static void QueueStop() => QueueEssential(Stop);
 
-    // ---- scene fps per monitor (Phase 2 Task 11) ---------------------------------------------------
+    // ---- scene fps per monitor -----------------------------------------------------------------------
     // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
-    // under liascape-player it is no longer the launch-only exception). `/settings` diffs prev → cur: a new or
-    // changed entry sets its fps, a removed one goes back to the player's default (15, WE's own default fps;
-    // 30 before 2026-11-06). Coalescible
-    // per output. Every entry is (re)asserted once per player process (`Switch`, R81's reapply), so a
+    // under liascape-player it is not launch-only). `/settings` diffs prev → cur: a new or
+    // changed entry sets its fps, a removed one goes back to the player's default (15, WE's own default fps).
+    // Coalescible
+    // per output. Every entry is (re)asserted once per player process (`Switch`, the reapply), so a
     // fresh or restarted player runs them too. `IsPrimary` has no liascape-player meaning (one worker per scene,
     // every output shows it; its audio is one stream on the bus) — the UI hides it there.
     public const double DefaultSceneFps = 15;
@@ -301,7 +301,7 @@ public static class LiascapePlayerMedia
         _sceneFpsGen = client.Generation;
     }
 
-    // ---- scene GPU budget + VRAM (Phase 2 Task 8) ---------------------------------------------------
+    // ---- scene GPU budget + VRAM ---------------------------------------------------------------------
     // Three player-level props, all live (docs/player/modules/scene-gpu-budget.md):
     // `player.scene_throttle` ← AutoThrottleScenes, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
     // LimitVramPerScene (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
@@ -320,7 +320,7 @@ public static class LiascapePlayerMedia
             if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
     }
 
-    // Pause when covered (Phase 3 Task 10): `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new
+    // Pause when covered: `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new
     // player process gets it from AssertSceneFps (the prop's own default is off).
     public static void ApplyCoverSetting(AppSettings prev, AppSettings cur)
     {
@@ -328,7 +328,7 @@ public static class LiascapePlayerMedia
             QueuePlayerProp("pause_when_covered", AppSettings.CoverMode(cur.PauseWhenCovered));
     }
 
-    // The in-player auto-mute (Phase 3 Task 14, behind AudioMonitor.AutoMuteInPlayer): the AutoMute settings → the player's
+    // The in-player auto-mute (behind AudioMonitor.AutoMuteInPlayer): the AutoMute settings → the player's
     // five props, live (coalescible per prop); a new player process gets them from AssertSceneFps. The player keeps them in
     // its snapshot, so they hold with the app closed and across a crash restart.
     public static IReadOnlyList<(string prop, object value)> AutoMuteProps(AppSettings s) =>
@@ -377,7 +377,7 @@ public static class LiascapePlayerMedia
     {
         if (kind.StartsWith("program.", StringComparison.Ordinal))
         {
-            // the player's rotation (Task 7): the mirror + what the UI is told — no source changed
+            // the player's rotation: the mirror + what the UI is told — no source changed
             LiascapePlayerProgram.OnEvent(kind, e);
             return;
         }
@@ -409,7 +409,7 @@ public static class LiascapePlayerMedia
         }
         if (kind == "scene.vram_exceeded")
         {
-            // the VRAM guard stopped a scene's worker (Task 8): like a broken scene for playback (a rotation
+            // the VRAM guard stopped a scene's worker: like a broken scene for playback (a rotation
             // advances), but never marked crashed — the UI says why
             var stopped = Str(e, "path");
             double used = e.TryGetProperty("used_mib", out var u) && u.ValueKind == JsonValueKind.Number ? u.GetDouble() : 0;
@@ -432,7 +432,7 @@ public static class LiascapePlayerMedia
             _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
     }
 
-    // A live outbox fact (Phase 3 Task 9): stored off the event thread, its `outbox_seq` acked only once that returned.
+    // A live outbox fact: stored off the event thread, its `outbox_seq` acked only once that returned.
     private static void StoreLive(JsonElement e, string what, Action store) =>
         _ = Task.Run(() =>
         {
@@ -453,7 +453,7 @@ public static class LiascapePlayerMedia
         return new LoudnessReport(lp, Str(e, "key"), lufs, Num("peak_dbfs"), secs, complete, state);
     }
 
-    // Phase 3 Task 9: an entry of the player's outbox — a fact it recorded while no backend listened (or one this backend
+    // An entry of the player's outbox — a fact it recorded while no backend listened (or one this backend
     // also saw live: every handler here is idempotent), drained on (re)subscribing, on the drain's thread. It is acked
     // once this returns, so it stores synchronously. The player already did what playback needed (a rotation advanced);
     // only what the library keeps is done here: `source.broken` → marked crashed (+ the UI told, the program's item
@@ -481,7 +481,7 @@ public static class LiascapePlayerMedia
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —
     // MergeSceneLoudness) — the value the scene's NEXT play starts with. A play in progress keeps its normalization
-    // (owner 2026-11-06: "not real-time … checks for 60s and calculates rest of the scene for future"), except once: the
+    // (docs/decisions.md § "Set scene normalization once per play"), except once: the
     // report that completes the configuration's first window (`WindowReached`) sets the live sources' `gain.normalize`
     // (LandSceneNormalize — a 500 ms ramp, the same worker keeps playing).
     private static void OnSceneLoudness(string path, string key, double lufs, double? peak, double seconds, bool complete, JsonElement? state)
@@ -505,7 +505,7 @@ public static class LiascapePlayerMedia
 
     // The player restarted: its corr counter starts over, so every recorded outcome and pending wait
     // belongs to the dead process → forget them (the waits end as failed → the caller's fallback).
-    // R81: the new process's graph starts from its own snapshot (which may be stale — a save that
+    // The new process's graph starts from its own snapshot (which may be stale — a save that
     // hadn't caught up before the crash — or, from the 4th restart in a 60 s window, not restored at
     // all, docs/player/modules/persistence.md § Supervisor) — never from what the backend's MODEL says should be
     // showing. Re-apply every current effective setting through the ordered queue so neither gap can
@@ -530,11 +530,11 @@ public static class LiascapePlayerMedia
         LiascapePlayerProgram.OnRestarted();
     }
 
-    // ---- what the screen should show: the backend's model of it (R81 for the wallpaper) ----------
+    // ---- what the screen should show: the backend's model of it (the reapply for the wallpaper) ----------
     // A restarted player shows what its snapshot holds, and that can be behind the backend: every write is
-    // fsync'ed (2.4 s under I/O load once), so a crash right after a switch brought back the wallpaper
-    // BEFORE it — and R81 only re-applied settings, so the screen kept it while the backend and every UI
-    // said otherwise. The player can't close that window itself (a switch's reply can't wait for an
+    // fsync'ed (2.4 s measured under I/O load), so a crash right after a switch brings back the wallpaper
+    // BEFORE it — and the settings reapply alone would leave it on screen while the backend and every UI
+    // say otherwise. The player can't close that window itself (a switch's reply can't wait for an
     // fsync), so the backend, the one authority on WHAT plays, puts it back.
     // `_intent` = what this backend last put on screen: an align:now switch's B from its request (it
     // shows within ms, or its switch fails), an aligned switch's B from its effect's start (until then A
@@ -579,11 +579,11 @@ public static class LiascapePlayerMedia
         var intent = _intent;
         var client = C;
         if (intent == null || !client.SocketExists) return;
-        // a rotation: the player owns what shows (its program restored with the snapshot, R81 re-loads one it lost —
+        // a rotation: the player owns what shows (its program restored with the snapshot, the reapply re-loads one it lost —
         // LiascapePlayerProgram.Reapply); a backend switch from before the program must not be put back
         if (LiascapePlayerProgram.Owns) return;
         var shown = ShownOrIncoming(client, parked: true);
-        if (shown == null) return; // no answer: R81's reapply logs it; the next switch catches up anyway
+        if (shown == null) return; // no answer: the reapply logs it; the next switch catches up anyway
         if (intent.Path == null)
         {
             if (shown.Count == 0) return;
@@ -603,7 +603,7 @@ public static class LiascapePlayerMedia
     // how many times a restart's screen was put back to the backend's last switch — self-test/IT evidence
     public static int Reconciles => Volatile.Read(ref _reconciles);
 
-    // R81, the other half: a mutation made while the stall breaker was open is dropped, not queued
+    // The reapply, the other half: a mutation made while the stall breaker was open is dropped, not queued
     // (LiascapePlayerClient.QuickMs + the breaker — see the "Threading" section of player-adapter.md) and
     // never replayed on its own. The breaker closing (the player answered again) is exactly the moment
     // to catch up — same fire-and-forget Queue, same reasoning as OnRestarted above.
@@ -615,12 +615,12 @@ public static class LiascapePlayerMedia
         LiascapePlayerProgram.Reapply();
     }
 
-    // ---- a switch / stop the stall swallowed (2026-11-07) -------------------------------------------------
-    // The queue's worker meets a stalled player (SIGSTOPped, a 13–34 s loop stall in the owner's log, a machine at
+    // ---- a switch / stop the stall swallowed -------------------------------------------------------------
+    // The queue's worker meets a stalled player (SIGSTOPped, a 13–34 s loop stall seen in the field, a machine at
     // load 90): `Ready` finds no answer (hello 1 s + the supervisor wait 2 s, the breaker opens) or the `transition`
-    // request times out — and the switch was DROPPED: no log line, never retried. R81 above re-applied settings
-    // only, so the screen kept the old wallpaper for good while the UI named the new one (every click in a stall
-    // lost; the adapter IT's "two clicks on a stalled player"). Now such a switch is the backend's intent all the
+    // request times out — dropped silently, the switch would be lost for good: the settings reapply above doesn't
+    // carry it, so the screen would keep the old wallpaper while the UI names the new one (Guard: the adapter IT's
+    // "two clicks on a stalled player"). So such a switch is the backend's intent all the
     // same (`_intent`, what a restart puts back too) and `_lostToStall` is set; a probe pings the player until it
     // answers (nothing else may call it for minutes: the UI closed, no rotation), and the breaker closing queues
     // `ReconcileAfterStall` — `ReconcileShown`'s check: the intent shown or incoming (the timed-out request may have
@@ -677,10 +677,10 @@ public static class LiascapePlayerMedia
     }
 
     private static int _reapplyCount;
-    // how many times ReapplyAllNow has actually run — self-test/IT evidence that R81 fired.
+    // how many times ReapplyAllNow has actually run — self-test/IT evidence that the reapply fired.
     public static int ReapplyCount => Volatile.Read(ref _reapplyCount);
 
-    // R81: put every current effective setting back onto the live graph — the resolver's full pass
+    // Put every current effective setting back onto the live graph — the resolver's full pass
     // (every live source its own value of every setting, the layer fit; diffed against a fresh `state`)
     // — through the SAME ordered queue as every other mutation (so this can never race or reorder
     // against a concurrent switch/set). Not the player-level pause (I3, below).
@@ -802,7 +802,7 @@ public static class LiascapePlayerMedia
             ["kind"] = scene ? "scene" : IsImagePath(path) ? "image" : "video",
             ["loop"] = s.Loop,
         };
-        // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,
+        // what the player shows while no worker frame exists (a crash before the first frame,
         // a broken scene — docs/player/modules/scene-crash-policy.md); the video-only props are stored, no effect
         if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
         // the scene's loudness measured over its earlier plays of its current audio configuration (`loudness_key`, a
@@ -814,7 +814,7 @@ public static class LiascapePlayerMedia
         return props;
     }
 
-    // A program's `defaults` (plan 2026-10-29 Task 7, designer call 2): what every new B of a rotation runs unless its
+    // A program's `defaults`: what every new B of a rotation runs unless its
     // item says otherwise — the resolver's values with no item (the globals: volume, speed, decode/buffer settings, the
     // mute; no `af` — loudnorm is per item) + kind `video` and the Loop setting. `DesiredItem(path)` = what a new source
     // of `path` gets (SourceProps minus `path`); the program carries only the entries that differ from these.
@@ -834,9 +834,9 @@ public static class LiascapePlayerMedia
 
     private static string HwDec(AppSettings s) => string.IsNullOrWhiteSpace(s.HwDec) ? "no" : s.HwDec.Trim();
 
-    // ---- a scene's normalization is set ONCE per play (owner 2026-11-06) --------------------------------------
-    // "make scene audio normalization not do the real-time normalization where it just changes every second and just
-    // make it how you said where it checks for 60s and calculates rest of the scene for future". Each live scene
+    // ---- a scene's normalization is set ONCE per play ---------------------------------------------------------
+    // docs/decisions.md § "Set scene normalization once per play": no real-time normalization that changes every
+    // second; measure 60 s and use that for the rest of the scene. Each live scene
     // source keeps the `gain.normalize` it started with — its pin (`_normPins`, by source id; the queue's worker) —
     // through every resolver pass: a refinement of the stored loudness (the reports every further 60 s, an estimate
     // landing) moves the index, i.e. the NEXT play's value, never this one's. A pin changes only on:
@@ -917,7 +917,7 @@ public static class LiascapePlayerMedia
         });
     }
 
-    // Phase 3 Task 7: a rotation program switches inside the player, and under advance-on-end its next end-of-video
+    // A rotation program switches inside the player, and under advance-on-end its next end-of-video
     // switch is armed right after each handoff — the 10 s check never finds a quiet moment. So at each program commit
     // (`program.current`): once its effect handed off — only an ARMED switch left, which the program's snapshot re-arms
     // for A's end after the restart (docs/player/modules/programs.md § Persistence) — a stale player is upgraded.
@@ -955,7 +955,7 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return true; }
     }
 
-    // any transition not yet done (armed, waiting, running, handing off), or (Task 8) a program armed for its end or
+    // any transition not yet done (armed, waiting, running, handing off), or a program armed for its end or
     // switching; unknown → treated as yes
     private static bool Switching(LiascapePlayerClient client)
     {
@@ -1080,8 +1080,8 @@ public static class LiascapePlayerMedia
         // M2 (final review): an aligned wait is bounded too — A's remaining play time + slack (the
         // player's own fallback, `transition.align_fallback`, fires 10 s after A's end; ours is a
         // backstop behind it), re-derived each time it runs out (`AlignedWaitCheck`: A's speed may
-        // have changed, the player may be paused). While no output exists (R60 parked) the player
-        // holds an aligned switch until one shows it (I4) — then the backstop keeps waiting too.
+        // have changed, the player may be paused). While no output exists (parked) the player
+        // holds an aligned switch until one shows it — then the backstop keeps waiting too.
         var remaining = alignEnd ? await Task.Run(TimeRemaining).ConfigureAwait(false) : null;
         double? lastPos = alignEnd ? await Task.Run(() => Query("time_pos")).ConfigureAwait(false) : null; // A when armed
         var corr = await QueueEssential(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets; never dropped
@@ -1155,7 +1155,7 @@ public static class LiascapePlayerMedia
         return (true, BackstopMs(rem), pos);
     }
 
-    // Whether the player has any output (false = R60 parked: monitors off / unplugged).
+    // Whether the player has any output (false = parked: monitors off / unplugged).
     private static bool HasOutputs(LiascapePlayerClient client)
     {
         try
@@ -1257,13 +1257,13 @@ public static class LiascapePlayerMedia
     //   never a broadcast — and gain.mute as `animate` over 30 ms (never a step; a setting slot, so it
     //   lands while paused too). A gain.mute mid-ramp can read as its old value, so a mute CHANGE always
     //   sends (`Force`). A source gone meanwhile (`no_such_node`) → the map is re-read once; no answer →
-    //   the pass gives up (R81 re-applies when the player answers again).
+    //   the pass gives up (ReapplyAll re-applies when the player answers again).
     // CALLERS — queue key → what they pass (every one coalescible: the newest pass per key wins):
     //   /settings (`PlayerHelper.ApplyEffectiveLive`), the volume key on the global, normalization, a
     //     video's loudness measurement landing → `ApplyEffective()`: "resolve", every source, every prop, Fresh.
     //   a scene's window landing (its configuration's first complete loudness report) → `LandSceneNormalize(path)`:
     //     batch "normland", its sources only, gain.normalize re-pinned from the index, Fresh.
-    //   R81 (a restart / the stall breaker closing) → `ReapplyAll()`: "reapply", the same + log + count.
+    //   a restart / the stall breaker closing → `ReapplyAll()`: "reapply", the same + log + count.
     //   /library/volume|speed, the volume key on an item's own volume (`ApplyOverrideLive`) →
     //     `ApplyOverride(path)`: batch "override" (every item queued since the pending one ran), those
     //     items' sources only, gain.user + speed, cached.
@@ -1404,8 +1404,8 @@ public static class LiascapePlayerMedia
 
     // /preview (drag twin, no persist), literal values → the source(s) of `paths` — the item(s) the modal
     // edits, wherever they are: on screen, the outgoing A or incoming B of an effect, a pending B. No
-    // paths → the playing item (`cur:*`, which mid-transition is the incoming side: a drag on A used to
-    // land on B there and stay, since the persist that follows targets A by path).
+    // paths → the playing item (`cur:*`, which mid-transition is the incoming side — so a drag on A must
+    // name its paths, or it lands on B and stays there, since the persist that follows targets A by path).
     // Coalescible per edited selection + property: a drag's newest value replaces a still-pending one.
     public static void Preview(int? volume, double? speed, IReadOnlyCollection<string>? paths = null)
     {
@@ -1422,7 +1422,7 @@ public static class LiascapePlayerMedia
 
     // The Settings page's global Volume/Speed drag (`/preview {global:true}`): the dragged value is the
     // transient GLOBAL — each live source whose item has no override for that field takes it, an
-    // overridden one keeps its own (override ?? global, R61). Only the dragged prop (a volume drag keeps
+    // overridden one keeps its own (override ?? global). Only the dragged prop (a volume drag keeps
     // a speed the previous drag left). Coalescible per property; no `state` read while the map is cached,
     // no settings write (the UI's debounced /settings persists).
     public static void PreviewGlobal(int? volume, double? speed)
@@ -1555,7 +1555,7 @@ public static class LiascapePlayerMedia
                             object seed = LibraryService.SceneLoudnessSeed(path) is JsonElement sd ? sd : new Dictionary<string, object>();
                             if (Send(client, id, "loudness_seed", seed) == Sent.Ok) have["loudness_seed"] = seed;
                         }
-                        else if (sent == Sent.Stalled) return covered; // the rest would fail fast too; R81 catches up
+                        else if (sent == Sent.Stalled) return covered; // the rest would fail fast too; the reapply catches up
                         else if (sent == Sent.Gone) { stale = true; break; } // retired meanwhile: its other props too
                     }
                 }
@@ -1621,9 +1621,9 @@ public static class LiascapePlayerMedia
     }
 
     // A property OUTSIDE the resolver: a layer prop → `lay:*:main`; mpv's `pause` → the player-level
-    // pause (M7, R75 — never a node's own `paused`); anything else (`loop`, a decode/buffer literal no path
-    // sends any more) → `srcs:*` (on-screen sources + an in-flight transition's pending B, R61).
-    // item 6: QuickMs — a queued property set, never the 2000 ms default.
+    // pause (never a node's own `paused`); anything else (`loop`, a decode/buffer literal no path
+    // sends) → `srcs:*` (on-screen sources + an in-flight transition's pending B).
+    // QuickMs — a queued property set, never the 2000 ms default.
     private static List<string> Set(string prop, object value)
     {
         var client = C;
@@ -1713,7 +1713,7 @@ public static class LiascapePlayerMedia
     // ---- queries -----------------------------------------------------------------------------------
     public static bool IsPlaying() => CurrentPath() != null;
 
-    // Task 8 (`restore`): anything on screen, coming or parked (no output: what the next one shows) — a restored
+    // `restore`: anything on screen, coming or parked (no output: what the next one shows) — a restored
     // snapshot's content. null = no answer.
     public static bool? ShowsAnything()
     {
@@ -1927,7 +1927,7 @@ public static class LiascapePlayerMedia
     private static string Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
-    // ---- auto-mute ownership (R69) ----------------------------------------------------------------
+    // ---- auto-mute ownership ----------------------------------------------------------------------
     // A `pactl list sink-inputs` block belongs to liascape-player when its process is the player (pid from
     // `hello`), its node is one of the player's (`liascape-player-bus*`, a scene worker's `liascape-player-scene.<id>`),
     // it targets the `liascape-player-bus` sink, or its application.name is `liascape-player` (the player's own mpv
@@ -1938,7 +1938,7 @@ public static class LiascapePlayerMedia
         {
             var t = raw.Trim();
             if (playerPid is int pid && Quoted(t, "application.process.id") == pid.ToString()) return true;
-            // the bus (`liascape-player-bus*`) and, Phase 2, every scene worker's stream (`liascape-player-scene.<id>` —
+            // the bus (`liascape-player-bus*`) and every scene worker's stream (`liascape-player-scene.<id>` —
             // its own process, so the pid check above misses it)
             if (Quoted(t, "node.name") is { } node && node.StartsWith("liascape-player-", StringComparison.Ordinal)) return true;
             if (Quoted(t, "target.object") == "liascape-player-bus") return true;

@@ -1,4 +1,4 @@
-//! The desktop pointer (audit C6, 2026-11-06): where the cursor is on the whole desktop, over
+//! The desktop pointer: where the cursor is on the whole desktop, over
 //! windows and other monitors too — what WE's render loop reads every frame with `GetCursorPos`
 //! (FUN_140141520 → `ScreenToClient` of the wallpaper's window ÷ its size; a point off the
 //! window is outside 0..1). A Wayland client sees the pointer only over its own surface, so

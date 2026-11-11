@@ -94,11 +94,11 @@ export interface FeatureHealth { id: string; label: string; ok: boolean | null; 
 // API: POST /browse `filter` (Workshop only). `include` / `exclude` are Steam tag names (age rating, type, resolution, genre,
 // feature — one flat set each; a tag is in at most one of them). The backend owns the semantics: within a group any included
 // tag matches (Genre / Features: per genreMatch / featureMatch), across groups all must; an excluded tag hides; any age filter hides items
-// without an age rating (WorkshopFilterColumn.tsx, 2026-11-11).
+// without an age rating (WorkshopFilterColumn.tsx).
 export interface WorkshopFilter {
   sort: string; trendDays: number; include: string[]; exclude: string[];
   // the included features: every one must match ("all", the default) or any of them ("any"); the same for genres, whose
-  // default is "any" (owner 2026-11-11) — only these two groups have the choice
+  // default is "any" (docs/decisions.md § "AND Workshop features, OR genres, each switchable") — only these two groups have the choice
   featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
 export interface Source {

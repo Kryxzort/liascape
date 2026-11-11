@@ -1,6 +1,6 @@
-//! Task 11: the transition recipe on the real GPU + libmpv, driven by the loop harness
-//! (`tests/common/harness.rs`: SteppedClock paced by wall time — R33 — virtual outputs
-//! `VIRTUAL-n` at 640×360, every source `ao: "null"` — R26).
+//! The transition recipe on the real GPU + libmpv, driven by the loop harness
+//! (`tests/common/harness.rs`: SteppedClock paced by wall time, virtual outputs
+//! `VIRTUAL-n` at 640×360, every source `ao: "null"`).
 //!
 //! Gain/progress assertions sample at exact virtual instants (`tick_to`) and are exact;
 //! playback-coupled ones (align End, frame-index corners) allow ± 1 frame (33 ms) / ± 1
@@ -60,9 +60,9 @@ fn idx(frames: u32) -> PathBuf {
         ClipSpec::FrameIndex { frames },
     )
 }
-/// R92 review: [`idx`]'s exact visual pattern, with a real audio track — for a B whose
+/// [`idx`]'s exact visual pattern, with a real audio track — for a B whose
 /// onset-wait (`b_has_audio`) must still hold (a plain [`idx`] clip genuinely has no
-/// audio stream, so R92's fix correctly skips the wait for it now).
+/// audio stream, so the recipe skips the wait for it).
 fn idx_with_audio(frames: u32) -> PathBuf {
     ensure_clip(
         &format!("tr_frame_index_audio_{frames}"),
@@ -110,7 +110,7 @@ fn full_live_gains() {
         "fx.progress at 500 ms",
     );
     assert!(!h.bool(&format!("{a}.paused")) && !h.bool(&format!("{b}.paused")));
-    // R85 (Task 16c): B's own xfade-in is held until real audio confirms (bounded by
+    // B's own xfade-in is held until real audio confirms (bounded by
     // `ONSET_TIMEOUT` = 150 ms) — its exact midpoint value now depends on when mpv's
     // audio-out actually restarted (measured ~19 ms on the owner's machine), not t0, so
     // only assert it is genuinely under way rather than the exact equal-power value: even
@@ -194,9 +194,9 @@ fn frozen_silent_then_b_starts() {
         return;
     };
     let a = h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]);
-    // R92 review: B must genuinely have an audio track for this test's onset-wait
-    // assertions to mean anything — a plain `idx(300)` (no audio at all) now correctly
-    // skips the wait entirely (`b_has_audio`), which is the fix this test's sibling,
+    // B must genuinely have an audio track for this test's onset-wait
+    // assertions to mean anything — a plain `idx(300)` (no audio at all)
+    // skips the wait entirely (`b_has_audio`), which this test's sibling,
     // `tests/api.rs::r92_transition_onto_video_with_no_audio_skips_onset_wait`, covers.
     let corr = h.start(json!({
         "outputs": "out:*", "to": {"path": s(&idx_with_audio(300)), "loop": true},
@@ -237,7 +237,7 @@ fn frozen_silent_then_b_starts() {
 
     let th = from_ms(h.wait_event(&corr, "transition.handoff", MS(2000)).at_ms);
     assert!(!h.bool(&format!("{b}.paused")), "B starts at the end");
-    // R85 (Task 16c): this is the exact bug the owner reported — B un-pauses at handoff
+    // This is the audible failure to avoid — B un-pauses at handoff
     // with essentially no lead time, so its anti-click ramp-in now waits for real audio
     // (`SourceEvent::AudioFlowing`) instead of starting at the un-pause instant. Right at
     // the 30 ms mark it must still be silent (never an unramped/early onset); it must
@@ -293,7 +293,7 @@ fn align_end_full_live() {
     // Ground truth for "A's end" is A's own `Ended`. The start instant is fixed now; show
     // A on VIRTUAL-2 too, so the handoff keeps it alive (a source still shown elsewhere is
     // never destroyed) and its end can be observed.
-    // A's end = its `Ended`, or — once the handoff has restored its loop (R43, below) —
+    // A's end = its `Ended`, or — once the handoff has restored its loop (below) —
     // the wrap into its next iteration: whichever comes first marks the boundary.
     h.show("VIRTUAL-2", &a);
     let mut last_tp = h.f64(&format!("{a}.time_pos"));
@@ -329,7 +329,7 @@ fn align_end_full_live() {
         (progress_one - ended).abs() <= 33.4,
         "fx.progress reaches 1 at {progress_one:.1} ms, A's end at {ended:.1} ms"
     );
-    // R43: A is still shown on VIRTUAL-2, so the handoff gives it back — playing, audible,
+    // A is still shown on VIRTUAL-2, so the handoff gives it back — playing, audible,
     // its own loop — instead of leaving it faded out with the End's loop change.
     let th = from_ms(handoff.at_ms);
     h.tick_to(th + MS(30));
@@ -526,8 +526,8 @@ fn rapid_interrupt_chain() {
         json!({"kind": "color", "color": [0, 255, 0]}),
         json!({"path": s(&green10()), "loop": true}),
     ];
-    // Offset so the 10th (the one left to finish) is a held method (reveal): R38's
-    // "paused only while held" is exercised through a natural handoff too.
+    // Offset so the 10th (the one left to finish) is a held method (reveal): the
+    // "paused only while held" rule is exercised through a natural handoff too.
     let methods = ["full-live", "reveal", "frozen"];
 
     let check = |h: &Harness, when: &str| {
@@ -826,7 +826,7 @@ fn shared_a_untouched() {
     );
 }
 
-/// R35: cancel mid-effect → snap back to A (A's gains back to 0 dB within 30 ms, B ramped
+/// Cancel mid-effect → snap back to A (A's gains back to 0 dB within 30 ms, B ramped
 /// out and destroyed).
 #[test]
 fn cancel_running_snaps_back() {
@@ -869,7 +869,7 @@ fn cancel_running_snaps_back() {
     assert_eq!(h.sources(), vec![a]);
 }
 
-/// R35 exact restore: a transition waiting on `End` (A's loop turned off) that is
+/// Exact restore: a transition waiting on `End` (A's loop turned off) that is
 /// cancelled — or superseded — puts A's loop back.
 #[test]
 fn cancel_waiting_restores_a() {
@@ -911,7 +911,7 @@ fn cancel_waiting_restores_a() {
     assert_eq!(h.cur("*"), vec![h.to_of(&second)]);
 }
 
-/// R41 (fix round 1 #1): a restore puts a gain back to the TARGET of the animation that
+/// A restore puts a gain back to the TARGET of the animation that
 /// was moving it when it was recorded, never to the mid-ramp value. T1 (frozen) hands off
 /// — B1's anticlick ramps −96 → 0 dB over 30 ms — and 5 ms later T2 (a colour, ready in
 /// one tick; a cut, which records B1's anticlick before ramping it down) begins; T2 is
@@ -956,7 +956,7 @@ fn restore_targets_not_mid_ramp() {
     assert_eq!(h.cur("VIRTUAL-1"), vec![b1]);
 }
 
-/// R34 (fix round 1 #2a): `align: end` on a shared looping A (VIRTUAL-1 + VIRTUAL-2),
+/// `align: end` on a shared looping A (VIRTUAL-1 + VIRTUAL-2),
 /// transition on VIRTUAL-1 only. full-live ends — frozen starts — at A's iteration
 /// boundary (± 1 frame); A's loop never changes; A is never paused, silenced or destroyed
 /// and stays current (and audible) on VIRTUAL-2. Frozen holds A's last frame.
@@ -1047,7 +1047,7 @@ fn shared_a_align_end_boundary() {
     }
 }
 
-/// Invariant #6 (fix round 1 #2b): a start on an output whose transition is Running
+/// Invariant #6: a start on an output whose transition is Running
 /// commits it, for every method — T1's B unpaused at once, its xfade/anticlick at 0 dB
 /// within 30 ms (rising monotonically), a frozen B released from its hold (advances); T1's
 /// A ramped out from where it was (monotone, no jump) and destroyed. T2 waits on B's end
@@ -1137,7 +1137,7 @@ fn commit_running_each_method() {
     }
 }
 
-/// R35 (fix round 1 #2c): B fails mid-effect → snap back to A with `transition.failed`.
+/// B fails mid-effect → snap back to A with `transition.failed`.
 /// Deterministic failure: B's `path` is swapped live for a missing file mid-effect, so
 /// mpv reports that load's error as B's `Error` (`path` in the event is B's requested
 /// path; `reason` names the file that failed).
@@ -1195,7 +1195,7 @@ fn b_error_mid_effect_snaps_back() {
     }
 }
 
-/// R35 (fix round 1 #2d): cancelling reveal / frozen mid-effect → A unpaused, its
+/// Cancelling reveal / frozen mid-effect → A unpaused, its
 /// anticlick back to 0 dB over 30 ms (monotone), no snapshot left alive, B gone.
 #[test]
 fn cancel_held_methods_restore_a() {
@@ -1254,7 +1254,7 @@ fn cancel_held_methods_restore_a() {
     }
 }
 
-/// R42 (fix round 1 #3): with `duration_ms: 0` the picture may cut, but no gain moves
+/// With `duration_ms: 0` the picture may cut, but no gain moves
 /// faster than a 30 ms ramp — sampled every 5 ms, the linear amplitude of every source
 /// never changes faster than a sin ramp over 30 ms ((π/2)/30 per ms).
 #[test]
@@ -1300,7 +1300,7 @@ fn zero_duration_gains_still_ramp_30ms() {
     }
 }
 
-/// R45 (fix round 1 #8): a property B refuses mid-transition (`af` mpv rejects
+/// A property B refuses mid-transition (`af` mpv rejects
 /// asynchronously; a live `kind` change MpvSource refuses at once) is a `Rejected` event,
 /// not a failure — the transition completes.
 #[test]
@@ -1347,12 +1347,12 @@ fn rejected_prop_on_b_keeps_transition() {
     assert_eq!(h.cur("VIRTUAL-1"), vec![b]);
 }
 
-// ------------------------------------------------- Phase 2 Task 9: transitions with scenes
+// ------------------------------------------------- transitions with scenes
 //
 // Every switch combo with a scene (V→S, S→V, S→S) × full-live / reveal / frozen, align: end,
 // a shared scene A, B failures (a load error, a worker crash, a broken worker) and an
 // interrupt chain of mixed kinds. Scenes are the worker's synthetic `frame_index` pattern
-// (D7 — the harness's base opts allow it), without sound unless a test says otherwise, and
+// (the harness's base opts allow it), without sound unless a test says otherwise, and
 // the videos are frame-index clips without audio: no B onset waits, so every gain is exact.
 
 use glow::HasContext;
@@ -1797,9 +1797,9 @@ fn align_end_video_a_to_scene_b() {
                 .into_iter()
                 .chain(wrapped_at)
                 .fold(f64::INFINITY, f64::min);
-            // F3 (2026-11-04): the effect ends when A's last frame has had its time — one clip
+            // The effect ends when A's last frame has had its time — one clip
             // frame after `Ended` (presented) or the wrap (`time_pos` drops while that frame
-            // still shows). Before, aimed half a frame early, it ended ~at `Ended` and cut the
+            // still shows); aiming half a frame early would end it ~at `Ended` and cut the
             // frame short. This harness ticks at wall pace up to one 60 Hz frame, and both the
             // end estimate's samples and the `Ended` reference carry up to a tick of that, so
             // two ticks here (measured −17…−7 ms); the precise bound is
@@ -1837,7 +1837,7 @@ fn align_end_video_a_to_scene_b() {
     }
 }
 
-/// Task 9's align rule: a lead A that is a scene never ends, so `align: end` is `Now` —
+/// The align rule for scenes: a lead A that is a scene never ends, so `align: end` is `Now` —
 /// every method (and a cut) starts within the ticks it needs once B is ready (+ the
 /// snapshot copy for reveal/frozen), never after ALIGN_SLACK; A's (inert) loop untouched.
 /// Counted in ticks, not time: load can't move it.
@@ -1894,7 +1894,7 @@ fn scene_a_align_end_starts_at_once() {
     }
 }
 
-/// R34 with a scene A shown on VIRTUAL-2 outside the request: never paused, ramped,
+/// A shared A that is a scene, shown on VIRTUAL-2 outside the request: never paused, ramped,
 /// loop-changed or destroyed, its worker keeps rendering; reveal/frozen hold VIRTUAL-1's
 /// picture with a snapshot (constant), full-live shows A itself.
 #[test]
@@ -2072,8 +2072,8 @@ fn scene_b_load_error_keeps_a() {
 /// Corpus under load: a scene B whose load outlasts `READY_TIMEOUT` (10 s — a heavy scene on a
 /// busy CPU took 13–20 s) is waited for while its worker reports it loading (`loading`
 /// observed), and the switch happens at its first frame: no `transition.failed`, A untouched
-/// meanwhile, no restart. RED before: `transition.failed` "no first frame within 10 s" and the
-/// switch dropped.
+/// meanwhile, no restart (not `transition.failed` "no first frame within 10 s" with the
+/// switch dropped).
 #[test]
 fn slow_loading_scene_b_is_waited_for() {
     let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {

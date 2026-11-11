@@ -1,9 +1,8 @@
-// Keys while a slider is held (owner: "make F not do yellow outline when holding slider").
-// A key pressed during a pointer drag on an <input type=range> did two things: Chromium switches to
-// keyboard modality on any keydown, so the held (mouse-focused) slider started matching :focus-visible and
-// got the system focus ring (the yellow outline — F only because that's the key that got pressed; nothing in
-// the app is bound to F), and the app's own shortcuts (Delete trashes the library selection, Escape closes
-// the modal, Ctrl+A selects all, arrows step the slider under the pointer) fired mid-drag.
+// Keys while a slider is held.
+// Unhandled, a key pressed during a pointer drag on an <input type=range> does two things: Chromium switches to
+// keyboard modality on any keydown, so the held (mouse-focused) slider starts matching :focus-visible and
+// gets the system focus ring (the yellow outline), and the app's own shortcuts (Delete trashes the library
+// selection, Escape closes the modal, Ctrl+A selects all, arrows step the slider under the pointer) fire mid-drag.
 // While a range drag is in progress every keydown/keyup is swallowed (capture phase on window, installed
 // before any other listener — nothing else sees it), and a slider that got a key during its drag is blurred
 // on release so it doesn't keep the keyboard-modality ring afterwards. CSS (index.css) replaces the system

@@ -97,7 +97,7 @@
         '';
       };
 
-      # 3b') LWE (linux-wallpaperengine) `next-v2` core — the scene worker's renderer (Phase 2).
+      # 3b') LWE (linux-wallpaperengine) `next-v2` core — the scene worker's renderer.
       # third_party/lwe/PIN is the single source of truth: the owner's fork at `rev` = upstream's
       # pinned `next-v2` commit (`base`) + our patches as commits (patches/lwe/*.patch is the same set
       # as `git format-patch`; `scripts/lwe.sh verify` proves it). Fetched by hash, submodules
@@ -159,11 +159,9 @@
         '';
       };
 
-      # 3c) liascape-player (Rust): the "utopia player" compositor that will replace mpvpaper +
+      # 3c) liascape-player (Rust): the compositor that plays wallpapers in place of mpvpaper +
       # liascape-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
-      # .claude/rules/player/core.md. bindgenHook + pkg-config are wired now even though this
-      # task doesn't bindgen anything yet, so Task 10 (libmpv FFI) doesn't have to touch the
-      # flake again.
+      # .claude/rules/player/core.md. bindgenHook + pkg-config: the libmpv FFI.
       liascape-player = pkgs.rustPlatform.buildRustPackage {
         pname = "liascape-player";
         inherit version;
@@ -186,7 +184,7 @@
         nativeCheckInputs = [ pkgs.ffmpeg ];
         # feature `lwe` (default): liascape-scene-worker links LWE's core (build.rs; RUNPATH = this)
         LIASCAPE_LWE_CORE_DIR = "${lwe-core}";
-        # R86: libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
+        # libmpv's nvdec hwdec needs the NVIDIA proprietary driver's libcuda.so.1, which on
         # NixOS lives outside the Nix store at /run/opengl-driver/lib (the standard impure
         # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
         # (not --set) so a caller's own LD_LIBRARY_PATH is extended, not clobbered; harmless on

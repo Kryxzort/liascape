@@ -8,14 +8,14 @@ import { useMotion } from "./motion";
 
 type Active = Exclude<SteamTodo, { finished: true }>;
 
-// The "Steam to-do" (owner 2026-11-11, "Guided" — the mockup he picked; backend Web/SteamTodo.cs): the Workshop pages the user
-// has to click in the Steam app, ONE at a time — a bulk download / bulk Delete from source used to open every page at once (Steam
-// showed one) or the whole subscriptions list. Floating bottom-right (portal'd to <body>, above the item sidebar), it says which
+// The "Steam to-do" (docs/decisions.md § "Queue the Steam pages the user must click, one at a time, advanced by Next";
+// backend Web/SteamTodo.cs): the Workshop pages the user has to click in the Steam app, ONE at a time — given every page at
+// once, Steam shows one. Floating bottom-right (portal'd to <body>, above the item sidebar), it says which
 // step ("Subscribe in Steam · 2 of 5"), the item, a bar, and the user's buttons: Done — next, Open again, Skip, Stop; a subscribe
 // entry whose files weren't on disk when its page opened also moves on by itself once Steam delivers them (`autoNext`); "Let the
 // Steam app do all N" while two or more are left (the remaining ones through the Steam client — that batch only, the saved mode
-// stays), with what that means under it (owner: "should mention that it needs WE and it will show you as playing").
-// Motion (owner 2026-11-11: "why does to-do panel have no morph and stuff or a smooth movement when switching tabs"): the dock
+// stays), with what that means under it (it needs WE owned, and Steam shows the user as playing it).
+// Motion: the dock
 // GLIDES over the playlist bar (`.steam-todo-dock`'s translateY, eased — the bar showing / folding / a tab switch / a resize);
 // fold ⇄ unfold MORPHS the panel's box (framer `layout`: size + corners; the head rides with `layout="position"`, the body fades
 // out first / in after) with the chevron ROTATING 0 ↔ 180° on a springy curve; a new current entry (Next / Skip / auto) SLIDES

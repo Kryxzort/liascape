@@ -33,9 +33,10 @@ app.commandLine.appendSwitch("ozone-platform", process.env.LIASCAPE_OZONE || (on
 // the hardware GPU and render via SwiftShader — stable window + instant WebGL, at the cost of a
 // CPU-composited UI (the wallpaper itself is mpvpaper/LWE, not the Electron GPU, so no wallpaper hit).
 // AMD/Intel keep hardware GL (mesa is stable) → native Wayland, full accel — no penalty.
-// 2026-10-28: on NVIDIA, ANGLE on NVIDIA's EGL (`--use-angle=gles-egl`) brings up hardware GPU compositing with
-// no GPU-process crash — confirmed in the owner's real Wayland session (Electron 42+), so it's the NVIDIA default
-// now (the morph went from ~13.6 ms of CPU a frame under SwiftShader to GPU work). The "--ozone-platform=wayland is
+// On NVIDIA, ANGLE on NVIDIA's EGL (`--use-angle=gles-egl`) brings up hardware GPU compositing with
+// no GPU-process crash — confirmed in a real Wayland session (Electron 42+), so it's the NVIDIA default
+// (docs/decisions.md § "Default NVIDIA to hardware GL through ANGLE on EGL"; a morph costs ~13.6 ms of CPU a frame
+// under SwiftShader, GPU work here). The "--ozone-platform=wayland is
 // not compatible with Vulkan" log line is harmless (ANGLE uses EGL, not Vulkan).
 // Overrides: LIASCAPE_SOFTGL=1 forces the old SwiftShader path; LIASCAPE_ANGLE=<backend> picks another ANGLE backend.
 const isNvidia = fs.existsSync("/proc/driver/nvidia") || fs.existsSync("/dev/nvidia0");

@@ -1,15 +1,15 @@
-//! Which playback streams the in-player auto-mute (Phase 3 Task 14, `crate::signal::automute`)
+//! Which playback streams the in-player auto-mute (`crate::signal::automute`)
 //! **counts** — pure rules on registry data, no PipeWire calls (`audio::sysmon` feeds them).
 //!
-//! - **Ownership, never names** (spec §4.4; owner 2026-10-29: "no default exclusions"): a stream is
+//! - **Ownership, never names** (spec §4.4; no default exclusions): a stream is
 //!   the player's own when its process is the player or one of its descendants (the scene workers),
 //!   when it targets the bus (`target.object` / `node.target` = `liascape-player-bus` or its serial)
 //!   or when it is linked into the bus sink. Everything else is **foreign** and counts: a user-run
 //!   `mpv`, voice chat, notifications. `application.name = liascape-player` alone proves nothing.
 //! - **The process** of a stream: the node's own `application.process.id`, else its Client's
 //!   (`client.id` → the Client object: a native PipeWire node carries no pid). **Never
-//!   `pipewire.sec.pid`**: for pipewire-pulse clients it is the pulse server's pid (measured on the
-//!   owner's machine 2026-10-29, `scripts/probe-mpris-streams.py`).
+//!   `pipewire.sec.pid`**: for pipewire-pulse clients it is the pulse server's pid (measured with
+//!   `scripts/probe-mpris-streams.py`).
 //! - **"Only if an MPRIS player is active"** hears only a Playing player's own streams
 //!   ([`match_player`]): the stream's pid is the player's pid or a descendant (a browser's audio
 //!   service is a child of the process owning the MPRIS name), else its Flatpak app id equals the

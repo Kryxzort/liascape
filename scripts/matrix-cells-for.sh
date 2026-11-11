@@ -29,12 +29,12 @@ SET='set:|g[A-Z]|globalDrag|appear|noop|race:settings|cli:volume|autoMute|normal
 AUTOMUTE='autoMute|mute'
 MODAL='itemVol|itemSpd|playlistBarVol|selVol|previewDrag|globalDrag|cli:volume-up:modalOpen'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'
-# the scene cells (Phase 2 Task 12): every control on a scene, the scene switches, the GPU / VRAM settings
+# the scene cells: every control on a scene, the scene switches, the GPU / VRAM settings
 SCENE='[sS]cene|vram|next:[sv]→[sv]'
 # keys while a slider is held (hooks/rangeDrag.ts) / numeric fields that snap on blur (components/NumInput.tsx)
 KEYS='keys:'
 NUM='num:|plTr'
-# Phase 3 Task 11 — programs at the seams: the cover Signal, the start choice, parked rotation, the expert tier, a backend
+# programs at the seams: the cover Signal, the start choice, parked rotation, the expert tier, a backend
 # that comes and goes, the keybinds (program/ = the states programArmed / programHeld / coverHeld)
 PROG='program|cover|plStart|parked|expert|restart:backend|cli:'
 

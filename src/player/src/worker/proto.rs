@@ -28,13 +28,13 @@ pub enum ToWorker {
     /// `max_size` = the largest output showing it (the ring is sized by `scene::cover_size`);
     /// `synthetic` = render `liascape-synthetic.json` instead of LWE (tests only — the worker also
     /// requires `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` in its environment). `assets_dir` = WE's
-    /// `assets/` (Task 7: resolved by the compositor, `scene::assets`); `steam_dir` = the
+    /// `assets/` (resolved by the compositor, `scene::assets`); `steam_dir` = the
     /// Steam library the item lives in (`scene::assets::steam_root_of_item`), if any.
     /// `properties` = the scene's user properties (`project.json` `general.properties` name →
     /// value) applied right after the load, before the first frame — every live
     /// `SetProperty` is folded in here too, so a restarted worker comes back with them.
     ///
-    /// Task 6 (audio): `paused` = play no audio (the scene's own pause, or a stepped clock);
+    /// Audio: `paused` = play no audio (the scene's own pause, or a stepped clock);
     /// `gain_db` / `no_audio` / `speed` = the stream's starting state — every live `Gain`,
     /// `NoAudio` and `Speed` is folded in here too, so a restarted worker resumes at the same
     /// level (faded in by its own 30 ms gate) and speed. `id` = the source id (the stream's
@@ -93,7 +93,7 @@ pub enum ToWorker {
     Route {
         audio: AudioRoute,
     },
-    /// The scene clock's rate (Task 6): the audio is time-stretched to it, pitch kept
+    /// The scene clock's rate: the audio is time-stretched to it, pitch kept
     /// (bit-exact passthrough at exactly 1×).
     Speed {
         speed: f64,
@@ -190,11 +190,11 @@ pub enum FromWorker {
     HasAudio {
         on: bool,
     },
-    /// Task 6: the scene's sound reaches its stream again after an arming change (a start
+    /// The scene's sound reaches its stream again after an arming change (a start
     /// that plays, an un-pause, `no_audio` off, a route change) — sent from the first stream
     /// callback after it that pulled the scene's samples.
     AudioFlowing,
-    /// Task 6: the scene's sound before the gain (after the worker's own fade gate), as 1 ms
+    /// The scene's sound before the gain (after the worker's own fade gate), as 1 ms
     /// max-channel RMS dBFS blocks (floor −96), `t0_ms` = the first block's time on
     /// `CLOCK_MONOTONIC` (ms) — the dropout detector's reference for a scene. Batched (~50
     /// blocks per message).
@@ -202,7 +202,7 @@ pub enum FromWorker {
         t0_ms: f64,
         dbfs_1ms: Vec<f32>,
     },
-    /// Scene loudness learning (Phase 2, `audio::loudness`): the K-weighted 100 ms segments of
+    /// Scene loudness learning (`audio::loudness`): the K-weighted 100 ms segments of
     /// the sound the scene really played (pre-gain; paused, `no_audio` and fade-outs add
     /// none), oldest first — sent as they complete.
     Loudness {
@@ -254,7 +254,7 @@ pub const AUDIO_INPUT_MAX_FRAMES: usize = 4096;
 /// System audio for a scene's visualiser (B8 "feed stereo"): consecutive frames of 16-bit
 /// interleaved stereo (left, right) at `rate` Hz, little-endian, base64 in `s16` (JSON carries a
 /// 4 KiB tick's worth of floats badly). WE analyses each channel of its float loopback capture
-/// apart (`g_AudioSpectrum*Left` / `*Right`, the gap audit's A1); 16 bits keep 96 dB of it.
+/// apart (`g_AudioSpectrum*Left` / `*Right`); 16 bits keep 96 dB of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioInput {
     pub rate: u32,

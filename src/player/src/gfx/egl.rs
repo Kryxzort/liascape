@@ -6,20 +6,18 @@
 //! There are two ways to build one:
 //!
 //! - [`Gfx::new_offscreen`] — surfaceless (no window, no compositor): used by every GPU
-//!   test and by any worker that renders into FBOs only. This is the path exercised by
-//!   this task's test.
+//!   test and by any worker that renders into FBOs only (`tests/gfx_basic.rs`).
 //! - [`Gfx::new_wayland`] + [`Gfx::window_target`] — a real `wl_surface` on a real Wayland
-//!   compositor, driven by the Wayland backend (`crate::wl`, Task 13) — exercised
+//!   compositor, driven by the Wayland backend (`crate::wl`) — exercised
 //!   on-machine by `tests/onmachine/outputs.sh` (no automated test can reach a compositor).
 //!
 //! Both paths request the same context: EGL 1.5, desktop OpenGL (`eglBindAPI
 //! (EGL_OPENGL_API)`, not OpenGL ES), core profile, version 3.3 — matched to what LWE
-//! core's own glad loader expects and to what this machine's NVIDIA 595.84 driver was
-//! proven to hand out in the Phase 0 spike.
+//! core's own glad loader expects and to what NVIDIA 595.84 was measured to hand out
+//! (`docs/player/spikes/lwe-core.md`).
 //!
-//! **Static linking, not dynamic (deviation from the brief's first-choice).** The brief
-//! asked for `khronos-egl`'s `dynamic` feature (`dlopen("libEGL.so.1")` at runtime) with
-//! `static` as the documented fallback "if dynamic causes trouble". It did: a bare-name
+//! **Static linking, not dynamic.** Don't switch to `khronos-egl`'s `dynamic` feature
+//! (`dlopen("libEGL.so.1")` at runtime): a bare-name
 //! `dlopen` only searches a binary's own RPATH/RUNPATH (plus `LD_LIBRARY_PATH` and the
 //! system cache) — and on this Nix setup, a library that's merely a `buildInputs` /
 //! dev-shell `-L` entry never ends up on that RPATH *unless something actually links
@@ -27,14 +25,14 @@
 //! linker invocation was actually given, not by ambient `NIX_LDFLAGS`. Measured: with
 //! `dynamic`, `cargo test --test gfx_basic` under exactly the documented command
 //! (`env -u LD_LIBRARY_PATH nix develop -c …`) failed to even `dlopen` `libEGL.so.1` —
-//! "SKIP: no EGL device" — and only started working after manually exporting
+//! "SKIP: no EGL device" — and only works after manually exporting
 //! `LD_LIBRARY_PATH=<libglvnd store path>` *and* `__EGL_VENDOR_LIBRARY_DIRS=/run/
 //! opengl-driver/share/glvnd/egl_vendor.d`, neither of which the documented command (or
-//! the owner's real login/systemd-user session, checked directly) sets. `static` instead
+//! a real login/systemd-user session) sets. `static` instead
 //! goes through `khronos-egl`'s `build.rs`, which calls the `pkg-config` crate's
 //! `probe("egl")` — the same mechanism `wayland-egl`/`wayland-sys` already use in this
 //! crate's dependency tree (and the reason *their* libraries, unlike EGL under `dynamic`,
-//! already showed up correctly in the test binary's `RUNPATH`). That `probe()` call emits
+//! show up correctly in the test binary's `RUNPATH`). That `probe()` call emits
 //! real `cargo:rustc-link-lib=EGL` + `cargo:rustc-link-search` directives, which *do* flow
 //! into the actual link invocation, which *does* get auto-rpath'd. Net effect: the test
 //! binary carries a correct RPATH to the exact `libglvnd` store path with no extra env
@@ -72,7 +70,7 @@ pub(crate) type EglInstance = egl::Instance<egl::Static>;
 /// `EGL_CONTEXT_PRIORITY_LEVEL_IMG` and its levels (`EGL_IMG_context_priority`).
 const CONTEXT_PRIORITY_LEVEL_IMG: egl::Int = 0x3100;
 
-/// GPU scheduling priority asked for a context (`EGL_IMG_context_priority`; Phase 2 Task 4:
+/// GPU scheduling priority asked for a context (`EGL_IMG_context_priority`:
 /// scene workers ask for `Low`; compositor contexts keep the driver default — see
 /// [`OffscreenOpts`]). The driver may grant less
 /// (or ignore it); [`Gfx::context_priority`] says what was granted. NVIDIA 595 grants both
@@ -117,13 +115,14 @@ impl Priority {
 /// render worker's `tests/api.rs::render_worker_never_composes_a_torn_frame` delivered 13–72
 /// capture rounds (3 of 4 runs under its bound), without the attribute 21–53 (1 of 3) — on a
 /// machine at load average ~21, so not distinguishable from load; the spike saw no effect
-/// either. Raising every compositor context (and so the Phase 1 render worker's neighbour)
-/// for no measured gain wasn't worth the risk: the compositor keeps the driver default
+/// either. Raising every compositor context (and so the render worker's neighbour)
+/// for no measured gain isn't worth the risk (`docs/decisions.md` § Lower only the scene
+/// worker's GL context priority): the compositor keeps the driver default
 /// (`Medium` on NVIDIA) and only the scene worker is lowered — the ordering the spike wanted.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OffscreenOpts {
     pub priority: Option<Priority>,
-    /// Phase 2 Task 10: ask for a context that **reports** a GPU reset instead of rendering
+    /// Ask for a context that **reports** a GPU reset instead of rendering
     /// garbage after one — robust buffer access + `LOSE_CONTEXT_ON_RESET` (EGL 1.5 /
     /// `EGL_KHR_create_context`, else `EGL_EXT_create_context_robustness`), plus
     /// `EGL_GENERATE_RESET_ON_VIDEO_MEMORY_PURGE_NV` where listed (NVIDIA purges VRAM on
@@ -212,11 +211,10 @@ impl Drop for Shared {
 }
 
 /// Held across "initialize + count a user" and across "uncount + terminate", so the two never
-/// interleave: before, a `Gfx` dropped on one thread could `eglTerminate` the shared display
+/// interleave: otherwise a `Gfx` dropped on one thread can `eglTerminate` the shared display
 /// between another thread's `eglInitialize` and its `display_acquire` — that thread's display
-/// was then uninitialized under it (`EGL_NOT_INITIALIZED` at its next `eglCreateContext`;
-/// found by the Phase 2 render-worker tests, one test's teardown overlapping the next one's
-/// setup — the "latent race between parallel GPU tests" Task 10 noted).
+/// is then uninitialized under it (`EGL_NOT_INITIALIZED` at its next `eglCreateContext`;
+/// seen as one GPU test's teardown overlapping the next one's setup).
 static DISPLAY_LIFECYCLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn display_lifecycle() -> std::sync::MutexGuard<'static, ()> {
@@ -250,10 +248,9 @@ fn terminate_display(egl: &EglInstance, d: egl::Display) {
 /// Live [`Shared`]s per EGL display handle. **Every surfaceless `Gfx` in a process gets the
 /// same `EGLDisplay`** (`EGL_DEFAULT_DISPLAY` on one platform), and `eglInitialize` is not
 /// reference-counted (EGL 1.5), so an unconditional `eglTerminate` in one `Gfx`'s drop
-/// tore the display down under every other live `Gfx` on it: their non-current contexts
-/// were destroyed and any later `eglMakeCurrent` failed with `EGL_NOT_INITIALIZED` (found
-/// in Task 10's fix round, when a source first switched contexts with a second `Gfx`
-/// alive — `tests/gfx_basic.rs::two_gfx_on_one_display_survive_each_others_drop`).
+/// would tear the display down under every other live `Gfx` on it: their non-current contexts
+/// destroyed and any later `eglMakeCurrent` failing with `EGL_NOT_INITIALIZED`. Guard:
+/// `tests/gfx_basic.rs::two_gfx_on_one_display_survive_each_others_drop`.
 static DISPLAY_USERS: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
 
 fn display_acquire(d: egl::Display) {
@@ -302,7 +299,7 @@ pub struct Gfx {
     shared: Rc<Shared>,
     config: egl::Config,
     /// Which EGL display-selection path produced the display — surfaced for diagnostics
-    /// (logged by callers, asserted on by nothing) and spelled out exactly as the brief's
+    /// (logged by callers, asserted on by nothing) and spelled out exactly as the
     /// reference spike (`host.cpp`) labels its own two paths.
     pub path: String,
     /// Lazily-created, reused VAO (core profile requires *some* VAO bound even for a
@@ -392,7 +389,7 @@ impl Gfx {
         self.priority
     }
 
-    /// Phase 2 Task 10: this context reports a GPU reset (its reset notification strategy is
+    /// This context reports a GPU reset (its reset notification strategy is
     /// `LOSE_CONTEXT_ON_RESET` — [`OffscreenOpts::robust`] was granted), so
     /// [`reset_status`](Self::reset_status) means something. Reads GL state: call with this
     /// context current.
@@ -404,7 +401,7 @@ impl Gfx {
         }
     }
 
-    /// Phase 2 Task 10: `glGetGraphicsResetStatus` (GL 4.5 / `KHR`/`ARB_robustness`, looked up
+    /// `glGetGraphicsResetStatus` (GL 4.5 / `KHR`/`ARB_robustness`, looked up
     /// once): `0` (`GL_NO_ERROR`) while the context is fine, else the reset it suffered
     /// (`GUILTY`/`INNOCENT`/`UNKNOWN_CONTEXT_RESET`, or `PURGED_CONTEXT_RESET_NV` after an
     /// NVIDIA video-memory purge) — the context is lost then and must be recreated. `None`
@@ -425,7 +422,7 @@ impl Gfx {
         Some(unsafe { f() })
     }
 
-    /// This context's EGL instance, display and context (Phase 2 `gfx::dmabuf`).
+    /// This context's EGL instance, display and context (for `gfx::dmabuf`).
     pub(crate) fn egl_parts(&self) -> (&EglInstance, egl::Display, egl::Context) {
         (&self.shared.egl, self.shared.display, self.shared.context)
     }
@@ -454,7 +451,7 @@ impl Gfx {
     ///
     /// The context starts current with no surface, so the default framebuffer's draw buffer
     /// is `GL_NONE` until set: a caller drawing to a window must `glDrawBuffer(GL_BACK)`
-    /// (the Wayland backend does, in `present`). Wired up by `crate::wl` (Task 13).
+    /// (the Wayland backend does, in `present`). Wired up by `crate::wl`.
     pub fn new_wayland(display_ptr: *mut c_void) -> Result<Gfx, String> {
         let egl = load_egl()?;
 
@@ -497,7 +494,7 @@ impl Gfx {
     }
 
     /// Make this context current with no surface — e.g. before destroying a window target
-    /// that may be the current draw surface (Task 13: a removed `wl_output`), so its
+    /// that may be the current draw surface (a removed `wl_output`), so its
     /// `eglDestroySurface` is immediate and GL deletes still have a context. Needs
     /// `EGL_KHR_surfaceless_context` (present on NVIDIA's Wayland platform too).
     pub fn make_current_surfaceless(&self) -> Result<(), String> {
@@ -517,7 +514,7 @@ impl Gfx {
     /// owns one `Gfx` and one `WindowTarget`) and dropped in whichever order the owning
     /// struct's fields happen to drop in, safely either way.
     ///
-    /// First exercised by Task 13's Wayland backend (`crate::wl`, on-machine
+    /// Used by the Wayland backend (`crate::wl`; on-machine test
     /// `tests/onmachine/outputs.sh`).
     pub fn window_target(
         &self,
@@ -540,7 +537,7 @@ impl Gfx {
                 self.config,
                 egl_window.ptr().cast_mut(),
                 // khronos-egl requires an ATTRIB_NONE-terminated list (an empty slice is
-                // rejected as EGL_BAD_PARAMETER — found when Task 13 first ran this).
+                // rejected as EGL_BAD_PARAMETER).
                 &[egl::ATTRIB_NONE],
             )
         }
@@ -567,7 +564,7 @@ impl Gfx {
 /// from it; both are released on `Drop`, in the order EGL requires (surface, then the
 /// `wl_egl_window` through `WlEglSurface`'s own `Drop` — which per that crate's contract
 /// must happen *before* the underlying `wl_surface` is destroyed, a constraint owned by
-/// whoever holds the `wl_surface`, i.e. Task 13's output code, not this struct).
+/// whoever holds the `wl_surface`, i.e. the Wayland output code, not this struct).
 pub struct WindowTarget {
     shared: Rc<Shared>,
     surface: egl::Surface,
@@ -599,7 +596,7 @@ impl WindowTarget {
     /// `eglSwapInterval` for this surface (made current first). `0` = `eglSwapBuffers`
     /// never blocks on the compositor: the Wayland backend paces every output with its own
     /// frame callbacks instead, so a 144 Hz output's swap can't hold up a 240 Hz one on the
-    /// same thread (Task 13).
+    /// same thread.
     pub fn set_swap_interval(&self, gfx: &Gfx, interval: i32) -> Result<(), String> {
         self.make_current(gfx)?;
         gfx.shared
@@ -635,7 +632,7 @@ impl Drop for WindowTarget {
 /// [`WindowTarget`]) and lets a `Drop` impl — which never gets a `&Gfx` — make that
 /// context current and delete GL objects in it. Built by [`Gfx::keep_alive`].
 ///
-/// Exists for Task 10's libmpv sources: `mpv_render_context_free` must run with the GL
+/// Exists for the libmpv sources: `mpv_render_context_free` must run with the GL
 /// context it was created on current (liascape-transition gotcha, spec §5.1), and the source's
 /// FBO/texture must be deleted in that context too — regardless of whether the owning
 /// `Gfx` was dropped first. Holding this makes the drop order irrelevant: the EGL context
@@ -761,8 +758,8 @@ impl Gfx {
         }
     }
 
-    /// Phase 2 (render worker): a second desktop-GL 3.3 core context in **this** context's
-    /// share group — same `EGLDisplay` (one per process: NVIDIA, § GFX / EGL; the display's
+    /// For the render worker: a second desktop-GL 3.3 core context in **this** context's
+    /// share group — same `EGLDisplay` (one per process: NVIDIA, `docs/player/modules/gfx-egl.md`; the display's
     /// user count goes up, so `eglTerminate` waits for it too), same config,
     /// `share_context` = this one — for another thread to make current **surfaceless**
     /// ([`SharedContext::make_current`]). Textures and sync objects made in either context
@@ -867,7 +864,7 @@ fn has_ext(list: &str, ext: &str) -> bool {
     list.split_whitespace().any(|tok| tok == ext)
 }
 
-/// Implements the brief's exact fallback order. See [`Gfx::new_offscreen`]'s doc comment.
+/// Implements this fallback order. See [`Gfx::new_offscreen`]'s doc comment.
 fn pick_offscreen_display(
     egl: &EglInstance,
     client_ext: &str,
@@ -1064,7 +1061,7 @@ fn choose_config(
 /// Request desktop OpenGL (`eglBindAPI(EGL_OPENGL_API)` — not OpenGL ES) and create a
 /// core-profile 3.3 context. `EGL_CONTEXT_MAJOR_VERSION`/`MINOR_VERSION` 3/3 +
 /// `EGL_CONTEXT_OPENGL_PROFILE_MASK` = `EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT`, matching the
-/// Phase 0 spike's proven-working attribs exactly (`host.cpp`, `egl_init`).
+/// spike's proven-working attribs exactly (`host.cpp`, `egl_init`; `docs/player/spikes/lwe-core.md`).
 fn create_core_3_3_context(
     egl: &EglInstance,
     display: egl::Display,
@@ -1187,7 +1184,7 @@ fn robustness_attribs(egl: &EglInstance, display: egl::Display, ext: &str) -> Ve
     a
 }
 
-/// [`create_prioritized_context`] with the robustness attributes (Task 10, the scene worker):
+/// [`create_prioritized_context`] with the robustness attributes (the scene worker):
 /// tried with the priority, then robust without the NV purge reset, then without robustness
 /// (the plain priority path) — a driver that refuses any of it still gets a context.
 /// `gfx.context_robust {requested, attribs, granted_attribs, path}` (info).
@@ -1275,12 +1272,12 @@ fn load_gl(egl: &EglInstance) -> glow::Context {
 mod tests {
     use super::*;
 
-    /// Covers the reviewed finding: `WindowTarget` must keep `Gfx`'s EGL display/context
+    /// `WindowTarget` must keep `Gfx`'s EGL display/context
     /// alive by holding a real `Rc<Shared>` clone, not a borrow or a copied `Display`
     /// value, so dropping the `Gfx` first never tears down a display a `WindowTarget`
     /// still needs. `WindowTarget` itself needs a real `wl_surface` to construct (not
     /// available in a unit test — same reasoning as every other test touching the
-    /// Wayland path, R16), so this test exercises the ownership mechanism `WindowTarget`
+    /// Wayland path), so this test exercises the ownership mechanism `WindowTarget`
     /// relies on directly: clone `Gfx`'s `shared` field exactly as `window_target` does,
     /// drop the `Gfx`, and prove the shared EGL display is still genuinely usable through
     /// the surviving clone — not merely that `Rc::strong_count` arithmetic looks right.

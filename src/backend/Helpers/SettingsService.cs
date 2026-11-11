@@ -14,11 +14,11 @@ public static class SettingsService
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "liascape", "settings.json");
 
-    // Every request, the tick, the adapter and the daemons load + save this file concurrently. A save used to
-    // truncate it and write in place, so a load that landed mid-write parsed nothing and got the C# defaults
+    // Every request, the tick, the adapter and the daemons load + save this file concurrently. A save that
+    // truncates it and writes in place lets a load landing mid-write parse nothing and get the C# defaults
     // (NoAudio on, volume 100, the legacy engine) — applied live, and saved back over everything by whoever
-    // saved next (`/settings` itself: its `prev` became the defaults → an engine "switch", the Steam tokens
-    // gone). The UI matrix's race:settingsSaveLoad cell caught 6/240. Now a save writes a temp file and renames
+    // saves next (`/settings` itself: its `prev` becomes the defaults → an engine "switch", the Steam tokens
+    // gone). Guard: the UI matrix's race:settingsSaveLoad cell. So a save writes a temp file and renames
     // it over (atomic: a reader sees the old file or the new one), and a load that still can't parse (a writer
     // that isn't this code — an older build's daemon) retries before falling back to the defaults.
     public static AppSettings Load()
@@ -62,8 +62,8 @@ public static class SettingsService
         return c;
     }
 
-    // POST /settings has PATCH semantics. Its body used to be bound as the whole AppSettings, so a partial
-    // one ({"Volume": 50} from an agent) reset every field it left out to its C# default — ~15 once,
+    // POST /settings has PATCH semantics. Bound as the whole AppSettings, a partial body
+    // ({"Volume": 50} from an agent) would reset every field it left out to its C# default —
     // SceneMonitors and PlayerEngine among them (→ a live engine switch). The API's own binding options
     // (web defaults: camelCase or PascalCase keys, numbers in strings) bind each key it does have.
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);

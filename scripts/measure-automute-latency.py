@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Auto-mute latency and delay accuracy, both engines in ONE hermetic harness (Phase 3 Task 14,
+"""Auto-mute latency and delay accuracy, both engines in ONE hermetic harness (the auto-mute
 parity criteria 3 + 4).
 
 Usage:
   scripts/measure-automute-latency.py [--engine signal|audiomonitor|both] [--scenario onset|new]
       [--delays 0,500,2000] [--trials 30] [--quantum FRAMES] [--out results.json]
-  scripts/measure-automute-latency.py --parec-first-data [trials]   (the 2026-10-25 measurement)
+  scripts/measure-automute-latency.py --parec-first-data [trials]   (parec's time to first data)
 
 The default mode runs `src/player/tests/automute.rs::measure_automute_latency` (cargo, ignored test)
 once per engine. Each run starts a PRIVATE PipeWire + WirePlumber (+ pipewire-pulse for the legacy

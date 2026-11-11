@@ -9,7 +9,7 @@
 //      LIASCAPE_TRANSITIONS_DIR = a catalogue that doesn't load, and a PATH without pactl/parec/playerctl/ffmpeg/ffprobe:
 //      the endpoint reports each one not ok with its reason, every affected row shows the icon (its tooltip = the
 //      reason), the control itself is still there and enabled, and the summary lists them. Auto-mute under liascape-player
-//      is the player's Signal (Task 14): pactl / parec / playerctl gone must NOT warn it; with the stack's player at
+//      is the player's Signal: pactl / parec / playerctl gone must NOT warn it; with the stack's player at
 //      `--ao null` (LIASCAPE_MATRIX_AUTOMUTE=audiomonitor: no audio bus) it warns that auto-mute works only with the app open
 //   3. the player's PipeWire audio bus (`audio-bus`): up → ok; the stack's player at `--ao null` (no bus) → ok=false with the
 //      reason (sources on mpv's default device); no player running → not false (unknown). It marks no Settings row — the

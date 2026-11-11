@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test of POST /settings's merge (PATCH) semantics under PlayerEngine=liascape-player: the body's keys
-# overwrite the saved settings, every key it leaves out keeps its saved value. It used to replace the whole
-# AppSettings — a partial body (an agent's {"Volume": 50}) reset every other field to its C# default (~15
-# fields incl. SceneMonitors and the engine, which then switched the player away). Checks: a partial body
+# overwrite the saved settings, every key it leaves out keeps its saved value. Replacing the whole
+# AppSettings, a partial body (an agent's {"Volume": 50}) would reset every other field to its C# default
+# (SceneMonitors and the engine among them, which then switches the player away). Checks: a partial body
 # changes only its own fields (camelCase and PascalCase keys), a provided array replaces the whole array,
 # an explicit null sets null, unknown keys (incl. the removed LweSilent) are ignored, a bad value is a 400
 # that saves nothing, parallel partial bodies all land, a full body (the UI's whole copy) behaves as
 # before incl. the backend-owned fields kept from disk, and a partial body still applies live: Volume /
 # Speed / NoAudio / VideoScale on the playing wallpaper, override ?? global, a running rotation's
 # interval, the engine switch. Also: a settings.json that still carries LweSilent loads.
-# Phase 3 Task 10: PauseWhenCovered (default maximized) / GlobalPlaylistStart (start_over) / RotateWhileParked (true) /
+# PauseWhenCovered (default maximized) / GlobalPlaylistStart (start_over) / RotateWhileParked (true) /
 # SettingsLevel ("standard") — the defaults on a file without the keys, partial bodies keep them, bad values are
 # normalized, an old file's ResumeFromLast loads and is gone from GET and the next save, each is live on the player
 # (`player.pause_when_covered`, `prog:main.start_mode` / `.while_parked`, the current play untouched), and a playlist's
@@ -132,22 +132,22 @@ snap s0
 [ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.sceneMonitors|length' s0)" = 2 ] \
   && ok "loaded the file, not the defaults (volume 80, theme, 2 SceneMonitors)" || bad "loaded volume $(f .volume s0) theme $(f .theme s0)"
 [ "$(f 'has("lweSilent")' s0)" = false ] && ok "GET /settings has no lweSilent" || bad "GET /settings still has lweSilent"
-# the rotation redesign (2026-10-28): "Wait for video to end after interval" is gone and the separate minimum merged
-# into the interval field (= the minimum under advance-on-end) — an old file's keys load as unknown ones, no migration
+# no "Wait for video to end after interval", and no separate minimum: it is the interval field (= the minimum under
+# advance-on-end; docs/decisions.md § "Use one interval field: "Switch every" or "Minimum play time"") — an old file's
+# keys load as unknown ones, no migration (§ "Drop removed settings without migration code")
 [ "$(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")] | any' s0)" = false ] \
   && ok "GET /settings has no globalWaitForVideoEnd / playlistWaitForVideoEnd / globalMinPlaySeconds (removed)" \
   || bad "GET /settings still has a removed rotation key: $(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")]' s0)"
 [ "$(f '[.globalIntervalSeconds, .globalSwitchWhenVideoEnds, .globalMaxPlaySeconds]' s0)" = '[600,false,0]' ] \
   && ok "the rotation fields that stay loaded from the old file as they were (interval 600, advance off, max 0)" \
   || bad "rotation fields after loading an old file: $(f '[.globalIntervalSeconds, .globalSwitchWhenVideoEnds, .globalMaxPlaySeconds]' s0)"
-# "Separate timing for scenes" (2026-10-28): a file written before it loads its defaults — on, 30 min (the one-off
-# migration script writes both keys into the owner's files, so this default never decides an existing rotation)
+# "Separate timing for scenes": a file without its keys loads the defaults — on, 30 min
 [ "$(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)" = '[true,1800]' ] \
   && ok "a file without the scene-timing keys: globalSeparateSceneTiming true, globalSwitchScenesAfterSeconds 1800 (the defaults)" \
   || bad "scene-timing fields after loading a file without them: $(f '[.globalSeparateSceneTiming, .globalSwitchScenesAfterSeconds]' s0)"
 
-# Phase 3 Task 10: a file without the new keys loads their defaults; the folded-in ResumeFromLast (designer call 13) is
-# an unknown key now — no migration, gone from GET and from the next save
+# a file without the cover / playlist start / parked / level keys loads their defaults; the folded-in ResumeFromLast is
+# an unknown key — no migration, gone from GET and from the next save
 [ "$(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' s0)" = '["maximized","start_over",true,"standard"]' ] \
   && ok "a file without the Task 10 keys: pauseWhenCovered maximized, globalPlaylistStart start_over, rotateWhileParked true, settingsLevel standard" \
   || bad "Task 10 defaults after loading an old file: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' s0)"
@@ -304,7 +304,7 @@ post /apply "{\"path\":\"$PLAYER\"}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$PLAYER" ] && break; sleep 0.1; done
 [ "$(cur path)" = "$PLAYER" ] && ok "/apply → playing" || bad "/apply → cur $(cur path)"
 [ "$(engine)" = liascape-player ] || { bad "not on liascape-player any more — stopping"; echo "RESULT pass=$pass fail=$fail"; exit 1; }
-# Phase 3 Task 10: the cover setting is a player prop — asserted on this fresh player (its own default is off), then live
+# the cover setting is a player prop — asserted on this fresh player (its own default is off), then live
 pcov() { ctl get '{"path":"player.pause_when_covered"}' | jq -r .value; }
 for _ in $(seq 1 30); do [ "$(pcov)" = maximized ] && break; sleep 0.1; done
 [ "$(pcov)" = maximized ] && ok "a fresh player was given player.pause_when_covered = maximized (the setting's default)" || bad "player.pause_when_covered = $(pcov) on a fresh player, want maximized"

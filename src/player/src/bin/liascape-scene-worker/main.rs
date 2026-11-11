@@ -17,19 +17,19 @@
 //! hold the newest tick while the host has them all — the renderer's slot starvation),
 //! `freeze_after_ms:N` + `freeze_ms:M` (N ms after `Hello` stop reading for M ms, then carry on).
 //!
-//! Without `--stub`: the renderer (Task 4) — a surfaceless EGL context at LOW priority, a
+//! Without `--stub`: the renderer — a surfaceless EGL context at LOW priority, a
 //! 3-slot ring exported as dmabufs (`ring.rs`), one frame per `Tick` into a free slot, an
 //! acquire fence (`sync: fence`) or a CPU wait on its own `sync_file` (`sync: fdpoll`, env
 //! `LIASCAPE_SCENE_SYNC=fdpoll` or no `EGL_ANDROID_native_fence_sync`). It renders a real WE scene
-//! through LWE's core (`render.rs`, feature `lwe` — Task 7) or, in tests, the synthetic pattern
+//! through LWE's core (`render.rs`, feature `lwe`) or, in tests, the synthetic pattern
 //! (`synthetic.rs`, gated by `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`).
 //!
-//! Two threads (Task 7): the renderer (this one — GL, the ring, LWE) and `lia-scene-proto`, which
+//! Two threads: the renderer (this one — GL, the ring, LWE) and `lia-scene-proto`, which
 //! reads the socket and hands messages over; while the renderer is inside a load + build (up to
 //! seconds for a cold LWE build) the protocol thread answers `Ping`s itself, so a slow load is
 //! never read as a hang (bounded: `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
 //!
-//! Task 6 adds a third, `lia-scene-audio` (`audio.rs`; started only once the loaded scene turns
+//! A third, `lia-scene-audio` (`audio.rs`; started only once the loaded scene turns
 //! out to have a sound — a soundless scene has none): the scene's sound as a PipeWire stream
 //! on the player bus — pulled from LWE (or the synthetic tone), time-stretched to the scene's
 //! speed (`stretch.rs`), gated and gained in dB. The protocol thread applies `Gain`, `Paused`,
@@ -184,8 +184,8 @@ fn hello(sock: &OwnedFd, features: &[&str], sync: &str) {
 /// A scene that crashes LWE is an expected, handled event (the host restarts it, then marks it
 /// broken with a crash record + log tail) — not a desktop crash alert. Soft `RLIMIT_CORE` 1
 /// (never above the hard limit) makes the kernel skip a piped `core_pattern`: no
-/// systemd-coredump, no DrKonqi notification per crash (Task 13's corpus: 16 of them for 4
-/// broken scenes). `LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the inherited limit (debugging LWE).
+/// systemd-coredump, no DrKonqi notification per crash (a few broken scenes can crash
+/// many times). `LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the inherited limit (debugging LWE).
 fn skip_core_handler() {
     if std::env::var("LIASCAPE_SCENE_WORKER_COREDUMP").is_ok_and(|v| v == "1") {
         return;
@@ -368,7 +368,7 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
     }
 }
 
-/// Slots in the ring (spike §2: 3 never stalled below GPU saturation).
+/// Slots in the ring (`docs/player/spikes/dmabuf.md` §2: 3 never stalled below GPU saturation).
 const RING_SLOTS: u8 = 3;
 
 /// How long a load + build is covered unconditionally while the reader thread answers pings
@@ -380,7 +380,7 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Past [`LOAD_TIMEOUT`] a load is covered while the renderer thread got CPU time within the
 /// last `timeout / LOAD_PROGRESS_DIV` (10 s by default), up to `LOAD_TIMEOUT_MAX_FACTOR ×
-/// timeout` (120 s) in all. Corpus under load (2026-11-03): a heavy scene's build is this one
+/// timeout` (120 s) in all. Measured on a corpus under load: a heavy scene's build is this one
 /// thread on the CPU (3.5–4.9 s of it, whatever the load); with the CPU saturated it waits in
 /// the run queue — LWE's core alone took 21 s at 3 runnable threads per CPU and 28 s at 5
 /// (13.9 s queued) — a load starved, not hung, which a fixed 30 s kills as hung, restarts (from
@@ -488,7 +488,7 @@ impl LoadGate {
 
 type Inbox = mpsc::Receiver<(ToWorker, Vec<OwnedFd>)>;
 
-/// The protocol thread (Task 7): reads the socket, hands messages to the renderer, and while
+/// The protocol thread: reads the socket, hands messages to the renderer, and while
 /// the renderer is inside a load (an LWE build blocks it for up to seconds) answers `Ping`s
 /// itself — so the compositor's heartbeat never reads a slow load as a hang, and nothing
 /// latches before the first real frame. A `Quit` or EOF during a load ends the process at
@@ -499,7 +499,7 @@ fn reader(
     gate: Arc<LoadGate>,
     audio: Arc<audio::Control>,
 ) {
-    // Task 6: the stream's controls apply here, the moment they arrive — never behind a
+    // The stream's controls apply here, the moment they arrive — never behind a
     // frame being rendered or a load. A quit fades an audible stream out first.
     let quit_now = |audio: &audio::Control| -> ! {
         audio.quit(QUIT_FADE_MAX);
@@ -533,7 +533,7 @@ fn reader(
     }
 }
 
-/// The scene being rendered: the synthetic test pattern (D7) or a real WE scene (Task 7).
+/// The scene being rendered: the synthetic test pattern or a real WE scene.
 enum SceneImpl {
     Synthetic(synthetic::Synthetic),
     #[cfg(feature = "lwe")]
@@ -545,7 +545,7 @@ struct Renderer {
     sock: OwnedFd,
     inbox: Inbox,
     gate: Arc<LoadGate>,
-    /// Task 6: the scene's audio stream (its thread starts when a sound is installed).
+    /// The scene's audio stream (its thread starts when a sound is installed).
     audio: Arc<audio::Control>,
     audio_started: bool,
     gfx: Gfx,
@@ -574,9 +574,9 @@ struct Renderer {
     exit_code: Option<i32>,
     /// The scene's native size (a `resize` re-exports at its cover size).
     native: (u32, u32),
-    /// Task 8: `GL_TIME_ELAPSED` per frame, read back later without waiting (`Frame.gpu_ms`).
+    /// `GL_TIME_ELAPSED` per frame, read back later without waiting (`Frame.gpu_ms`).
     timer: gputimer::GpuTimer,
-    /// Task 10: the context reports GPU resets (`OffscreenOpts::robust` granted) — polled
+    /// The context reports GPU resets (`OffscreenOpts::robust` granted) — polled
     /// after every frame.
     robust: bool,
     /// The synthetic `context_lost_after_ms` (tests): when to act as if the context was lost.
@@ -590,7 +590,7 @@ struct Renderer {
     stall_fences: Vec<OwnedFd>,
 }
 
-/// Task 10: a worker whose context is lost waits this long for the compositor's kill, then
+/// A worker whose context is lost waits this long for the compositor's kill, then
 /// exits (code `LOST_EXIT_CODE`) — never a worker idling forever on a dead context.
 const LOST_EXIT_AFTER: Duration = Duration::from_secs(5);
 const LOST_EXIT_CODE: i32 = 4;
@@ -734,7 +734,7 @@ impl Renderer {
             Err(e) => return self.fatal(format!("synthetic scene {}: {e}", file.display())),
         };
         if spec.load_ms > 0 {
-            // A slow "load + build" (Task 7): the reader thread answers pings meanwhile.
+            // A slow "load + build": the reader thread answers pings meanwhile.
             self.gate.set(true);
             let total = Duration::from_millis(spec.load_ms);
             if spec.load_busy {
@@ -792,7 +792,7 @@ impl Renderer {
             return self.fatal(format!("export the frame ring: {e}"));
         }
         if spec_audio.0 {
-            // D7: the synthetic scene's sound is a tone (Task 6).
+            // The synthetic scene's sound is a tone.
             self.install_audio(Box::new(audio::Tone::new(spec_audio.1, spec_audio.2)));
         }
         self.scene = Some(SceneImpl::Synthetic(scene));
@@ -832,7 +832,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// `resize {max_size}` (Task 5): the largest output showing the scene changed — re-export
+    /// `resize {max_size}`: the largest output showing the scene changed — re-export
     /// the ring at the new cover size (nothing to do if that size is the current one).
     fn resize(&mut self, max_size: [u32; 2]) {
         let Some(r) = self.ring.as_ref() else {
@@ -957,7 +957,7 @@ impl Renderer {
         std::process::exit(0)
     }
 
-    /// Task 10: the GL context is gone (a GPU reset, an NVIDIA video-memory purge — or the
+    /// The GL context is gone (a GPU reset, an NVIDIA video-memory purge — or the
     /// synthetic knob): report `ContextLost` and render nothing more. The compositor kills
     /// and restarts us through its crash budget; the stream is faded first (bounded).
     fn context_lost(&mut self, why: &str) {
@@ -1021,7 +1021,7 @@ impl Renderer {
             }
         }
         self.timer.end(&self.gfx.gl);
-        // Task 10: a reset during this frame (robust contexts report it; nothing rendered
+        // A reset during this frame (robust contexts report it; nothing rendered
         // since can be trusted) — no `Frame`, a restart instead.
         if self.robust
             && let Some(st) = self.gfx.reset_status().filter(|st| *st != 0)
@@ -1169,7 +1169,7 @@ struct StartArgs {
     properties: serde_json::Map<String, serde_json::Value>,
 }
 
-/// The real renderer (Task 4: synthetic; Task 7: LWE).
+/// The real renderer (synthetic, or LWE).
 fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     let mut features = vec!["synthetic"];
     if cfg!(feature = "lwe") {
@@ -1177,7 +1177,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     }
     let gfx = match Gfx::new_offscreen_with(OffscreenOpts {
         priority: Some(Priority::Low),
-        // Task 10: a GPU reset / video-memory purge is reported (→ `ContextLost`, a restart).
+        // A GPU reset / video-memory purge is reported (→ `ContextLost`, a restart).
         robust: true,
     }) {
         Ok(g) => g,

@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { KeyRound, LogIn } from "lucide-react";
 import { useStore } from "../store";
 
-// Steam sign-in with an account name + password (owner 2026-11-11: "is it a dead end for users without mobile guard?" — the
+// Steam sign-in with an account name + password (docs/decisions.md § "Offer a password sign-in beside the QR" — the
 // QR needs the Steam mobile app). Step 1: account name + password → POST /steam/login. Then whatever Steam asks for, over WS
 // steam-login-code: the code Steam emailed (`email`, the address's domain as the hint), the mobile authenticator's code
 // (`device`), or approval in the Steam app (`confirm`, or type the app's code) → POST /steam/login/code. steam-signed-in

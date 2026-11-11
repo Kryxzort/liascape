@@ -67,9 +67,9 @@ public static class ServerHost
         // an older settings.json's Steam secrets → the keyring / steam-auth.json (off the startup path: a keyring may prompt)
         _ = Task.Run(() => { try { SecretStore.MigrateNow(); } catch (Exception e) { Console.WriteLine($"secrets: migration failed ({e.GetType().Name})"); } });
         app.Use((ctx, next) => ApiSecurity.Guard(ctx, () => next(ctx), uiFiles));
-        // An endpoint that THROWS must still answer as itself (owner 2026-11-11: a Workshop download showed only "Download failed:
-        // Failed to fetch"). Unhandled, Kestrel answered a bare 500 with the response's headers reset — CORS's
-        // Access-Control-Allow-Origin included — so a UI on another origin (Vite :5173 in dev) got a network error instead of the
+        // An endpoint that THROWS must still answer as itself (else the UI shows only "Failed to fetch"). Unhandled, Kestrel
+        // answers a bare 500 with the response's headers reset — CORS's
+        // Access-Control-Allow-Origin included — so a UI on another origin (Vite :5173 in dev) gets a network error instead of the
         // reason, and with the loggers cleared above nothing was written anywhere. Here: logged, and a JSON {error} 500 written
         // over the same response (the CORS header stays), which the UI shows word for word (api/client.ts jpost).
         app.Use(async (ctx, next) =>
@@ -114,7 +114,7 @@ public static class ServerHost
         // BOTH own mpvpaper and the daemon keeps cycling its own (stale) playlist over ours ("creep") —
         // and CLAIM ownership (WriteGuiTimerPid) so SpawnTimerDaemon's IsGuiTimerAlive guard skips while we
         // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
-        // liascape-player (Phase 3 Task 8): the player's program rotates by itself — no timer to own (no gui_timer.pid),
+        // liascape-player: the player's program rotates by itself — no timer to own (no gui_timer.pid),
         // only a timer-daemon / restart-daemon a legacy session left behind to stop.
         // (This also loads the engine NOW, cached: /settings compares against what actually runs when it changes.)
         if (Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.KillLegacyDaemons();
@@ -128,7 +128,7 @@ public static class ServerHost
         // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
         // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
         // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
-        // liascape-player (Phase 3 Task 7): the rotation is the player's program — the mirror is seeded from it (it never
+        // liascape-player: the rotation is the player's program — the mirror is seeded from it (it never
         // stopped), and a legacy session still in timed_state.json moves into it
         if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
         else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
@@ -147,7 +147,7 @@ public static class ServerHost
             // (Kestrel waits for open WebSockets), and two owners supersede each other's switches.
             // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
             // liascape-player: the player rotates on its own with the app closed — nothing to release or hand over
-            // (Tasks 7–8). Our own gui_timer.pid claim goes either way (a serve started on legacy, switched live).
+            // Our own gui_timer.pid claim goes either way (a serve started on legacy, switched live).
             if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.ReleaseTimer();
             PlayerHelper.ClearGuiTimerPid();
             if (!Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
@@ -508,9 +508,9 @@ public static class ServerHost
         app.MapPost("/preview", (PreviewReq r) =>
         {
             // the Settings page's global Volume/Speed drag: every live wallpaper that follows the global
-            // (no override of its own for that field — override ?? global, R61); never an overridden one
+            // (no override of its own for that field — override ?? global); never an overridden one
             if (r.Global == true) { PlayerHelper.PreviewGlobal(r.Volume, r.Speed); return Results.Ok(); }
-            // liascape-player: a per-item value → the EDITED item's source(s), not srcs:* (R61) — mid-transition
+            // liascape-player: a per-item value → the EDITED item's source(s), not srcs:* — mid-transition
             // `cur:*` is the incoming side, so "what's playing" would move the other wallpaper.
             if (Liascape.Player.PlayerEngine.IsLiascapePlayer) { Liascape.Player.LiascapePlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
             if (r.Paths is { Count: > 0 } && !r.Paths.Contains(PlayerHelper.QueryCurrentPath() ?? "")) return Results.Ok();
@@ -519,7 +519,7 @@ public static class ServerHost
         app.MapPost("/library/whitelist", (WhitelistReq r) =>
         {
             LibraryService.SetWhitelisted(r.Path, r.Value);
-            Liascape.Player.LiascapePlayerProgram.PushItem(r.Path); // a rotation's skip flag follows (Task 7)
+            Liascape.Player.LiascapePlayerProgram.PushItem(r.Path); // a rotation's skip flag follows
             return Results.Ok();
         });
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
@@ -552,7 +552,7 @@ public static class ServerHost
         app.MapGet("/library/duration", (string path) => ApiSecurity.MediaAllowed(path)
             ? Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }) : Results.Json(new { error = "not a library path" }, statusCode: 403));
 
-        // ---- download (web sources; workshop-acquire = Phase 5) ---------------------------
+        // ---- download (web sources) --------------------------------------------------------
         app.MapPost("/download", async (DownloadReq r, HttpContext ctx) =>
         {
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
@@ -642,7 +642,7 @@ public static class ServerHost
         });
         app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items) }));
         app.MapPost("/workshop/drain", () => { SteamOps.StartDrain(); return Results.Ok(); });
-        // "Open on Steam" → the item's page in the Steam CLIENT (owner 2026-11-11: "open on steam doesn't open in real steam") — its
+        // "Open on Steam" → the item's page in the Steam CLIENT, not the browser — its
         // own route, never /open (http(s) only): a digits-only id becomes steam://url/CommunityFilePage/<id>, nothing else.
         // {ok: false} = the Steam app couldn't be opened → the UI opens the https page in the browser instead.
         app.MapPost("/steam/open-page", (WorkshopIdReq r) =>

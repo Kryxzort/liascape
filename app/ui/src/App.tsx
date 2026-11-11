@@ -99,7 +99,7 @@ export default function App() {
       s.setStatus(`${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
     }
     // a scene broke for good (liascape-player: past its restart budget) — the backend marked it crashed in its index:
-    // its card shows it at once (it used to wait for the next library reload)
+    // its card shows it at once, not at the next library reload
     else if (e.type === "scene-crashed") s.itemChangedByBackend(e.payload.path, { hasCrashed: true });
     // another client (a script, a second window) saved the playlist: a stale playlistBar would save itself back over it
     else if (e.type === "playlist-changed" && e.payload.client !== CLIENT_ID) s.syncPlaylist();
@@ -213,7 +213,7 @@ export default function App() {
         )}
         {tab === "library" && (
           <>
-            {/* "Go to playing" (owner 2026-11-11): glides the grid to the playing wallpaper's card and rings it */}
+            {/* "Go to playing": glides the grid to the playing wallpaper's card and rings it */}
             <button className="mini go-playing" data-go-playing="library" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>

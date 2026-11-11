@@ -59,7 +59,8 @@ public class AppSettings
     public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
     // UI: how much of Settings shows — basic | standard (default) | advanced | expert (.claude/rules/ui/state-and-api.md § Settings page). Hidden
-    // rows keep their values and stay live; nothing here reads it. Replaced AdvancedSettings + ShowExpertOptions (2026-11-06).
+    // rows keep their values and stay live; nothing here reads it (docs/decisions.md § "Use four settings levels,
+    // Standard by default, and never reset a hidden value").
     public string SettingsLevel { get => _settingsLevel; set => _settingsLevel = Level(value); }
     private string _settingsLevel = "standard";
     public static string Level(string? v) => v?.Trim().ToLowerInvariant() switch { "basic" => "basic", "advanced" => "advanced", "expert" => "expert", _ => "standard" };
@@ -96,7 +97,8 @@ public class AppSettings
     private int _globalSwitchScenesAfterSeconds = 1800;
     public int GlobalSwitchScenesAfterSeconds { get => _globalSwitchScenesAfterSeconds; set => _globalSwitchScenesAfterSeconds = PlayLimit(value); }
     public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
-    // "When the playlist starts again" (plan 2026-10-29 § Playlist start, O4; liascape-player — the program's
+    // "When the playlist starts again" (docs/decisions.md § "Fold "Resume from last" into the playlist start setting";
+    // liascape-player — the program's
     // `start_mode`): "start_over" (default — sequential from the first wallpaper, shuffle shuffles anew) | "resume"
     // (the exact item, time and play time). A playlist's own PlaylistSettings.PlaylistStart beats it under its
     // override. Read at the next start only (a change never jumps the current play). Folds in the old
@@ -105,7 +107,7 @@ public class AppSettings
     public string GlobalPlaylistStart { get => _globalPlaylistStart; set => _globalPlaylistStart = PlaylistStartMode(value); }
     public static string PlaylistStartMode(string? v) => v?.Trim().ToLowerInvariant() is "resume" ? "resume" : "start_over";
     public const int MaxPlayLimitSeconds = 359999; // 99:59:59, the UI's h/m/s fields
-    // Pause when covered (Phase 3 Task 6/10; liascape-player — `player.pause_when_covered`, live): the wallpaper (picture and
+    // Pause when covered (liascape-player — `player.pause_when_covered`, live): the wallpaper (picture and
     // sound) pauses while every monitor showing it is covered. "off" | "fullscreen" (a fullscreen window) | "maximized"
     // (default — a fullscreen or maximized window). An unknown value reads as the default. The player prop's own default
     // is off; the backend asserts this one on every player process.
@@ -132,7 +134,7 @@ public class AppSettings
     // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
     public int FullLiveSyncOffsetMs { get; set; } = -30;
     // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE) or "liascape-player" (the
-    // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
+    // Rust player). Switching applies
     // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/backend/player-adapter.md.
     public string PlayerEngine { get; set; } = "legacy";
     // What the volume keybinds (`liascape volume up|down`, `/volume {delta}`) move — Advanced setting:
@@ -140,7 +142,7 @@ public class AppSettings
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own
     // volume doesn't move). PlayerHelper.AdjustVolume.
     public string VolumeKeyTarget { get; set; } = "auto";
-    // liascape-player GPU / VRAM (Phase 2 Task 8 — all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
+    // liascape-player GPU / VRAM (all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
     // AutoThrottleScenes: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
     // scene at its fixed fps) → `player.scene_throttle`.
     public bool AutoThrottleScenes { get; set; } = true;
@@ -165,15 +167,16 @@ public class AppSettings
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoAddWeWallpapersToLibrary { get; set; } = false;
     public bool IsPlaylistBarCollapsed { get; set; } = false;
-    // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs; owner 2026-11-11:
-    // one click, Steam's own progress; it falls back to "subscribe"'s paths when Steam can't be reached), "subscribe" (real
+    // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one click, Steam's
+    // own progress; it FAILS when Steam can't be reached, never a fallback — WorkshopDownloader), "subscribe" (real
     // Steam subscription via the community endpoint with the sign-in, or the item's page in the Steam app without one),
     // "steampage" (always the item's page in the Steam app — the user clicks Subscribe there) or "steamcmd" (direct download).
     public string WorkshopDownloadMode { get; set; } = "subscribe";
     // The Steam client's steamclient.so for "steamapp"; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
     public string SteamClientLibPath { get; set; } = "";
     // The Steam sign-in's SECRETS (refresh token, cached web cookie, pasted steamLoginSecure) live in Helpers/SecretStore.cs —
-    // the system keyring, else ~/.config/liascape/steam-auth.json (owner 2026-11-11: "steam token is kept in plaintext??").
+    // the system keyring, else ~/.config/liascape/steam-auth.json (docs/decisions.md § "Keep Steam tokens in the system
+    // keyring, a 0600 file as fallback").
     // These three only read an older settings.json (same JSON keys); SecretStore moves their values out and nulls them,
     // and a null is never written. Nothing else reads them.
     [JsonPropertyName("SteamRefreshToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

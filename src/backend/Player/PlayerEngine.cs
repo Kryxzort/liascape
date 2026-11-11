@@ -7,8 +7,8 @@ using Liascape.Models;
 namespace Liascape.Player;
 
 // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE, the default) or
-// "liascape-player" (the Rust player, experimental: videos/images, and scenes when its scene worker + WE's
-// assets resolve — Phase 2). PlayerHelper dispatches
+// "liascape-player" (the Rust player: videos/images, and scenes when its scene worker + WE's
+// assets resolve). PlayerHelper dispatches
 // at its media primitives on IsLiascapePlayer; every legacy branch is untouched when it's false.
 public static class PlayerEngine
 {
@@ -52,7 +52,7 @@ public static class PlayerEngine
         "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape-backend, <prefix>/libexec/liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
 
     // Can a scene item play right now? Scene support on, and the engine that runs can play one: liascape-player
-    // (Phase 2) when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
+    // when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
     // resolve (`LiascapePlayerClient.ScenesAvailable`); legacy when linux-wallpaperengine is on PATH.
     public static bool ScenesPlayable(AppSettings s) =>
         ScenesPlayableFor(s.AllowScenes, IsLiascapePlayer, () => LiascapePlayerClient.Shared.ScenesAvailable, PlayerHelper.IsLweAvailable);

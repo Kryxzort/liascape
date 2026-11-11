@@ -1,8 +1,10 @@
-//! Task 20b — process memory: what the kernel says (`/proc/self/status`) and what glibc
+//! Process memory: what the kernel says (`/proc/self/status`) and what glibc
 //! malloc says (`mallinfo2` + `malloc_info`), so "RSS grows" can be split into *in use*
 //! (a leak: something still owns it) vs *retained* (freed, but kept by the allocator).
 //! The `memory` probe (`probe/memory.rs`) reports both and can `malloc_trim(0)` on demand.
-//! Also the allocator policy itself ([`apply_policy`]: why RSS used to grow per switch).
+//! Also the allocator policy itself ([`apply_policy`]: why RSS would otherwise grow per
+//! switch; `docs/decisions.md` § Fix glibc's mmap threshold at 128 KiB and trim after each
+//! reaper batch).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
@@ -125,7 +127,7 @@ pub fn trim() -> bool {
 /// chunk of its arena fits gets its own mapping, which `free` returns to the kernel at once
 /// (instead of growing the arena).
 ///
-/// **Why (Task 20b, measured).** glibc starts at 128 KiB but raises the threshold to the
+/// **Why (measured).** glibc starts at 128 KiB but raises the threshold to the
 /// size of any mmapped chunk that is freed (up to 32 MiB). Once the first mpv core is
 /// destroyed, its 1080p frame-pool buffers (~3 MiB each) and demuxer blocks are above
 /// the old threshold but below the new one, so every later core allocates them from
@@ -153,7 +155,7 @@ static TRIMS: AtomicU64 = AtomicU64::new(0);
 static TRIM_US_TOTAL: AtomicU64 = AtomicU64::new(0);
 static TRIM_US_MAX: AtomicU64 = AtomicU64::new(0);
 
-/// The allocator policy (Task 20b). `serve` calls it first thing (it needs no log yet; the
+/// The allocator policy. `serve` calls it first thing (it needs no log yet; the
 /// outcome is emitted by [`log_policy`] once the log is up): (1) the mmap threshold is fixed at [`MMAP_THRESHOLD`] — unless the caller's
 /// environment already chose one (`MALLOC_MMAP_THRESHOLD_`, or
 /// `glibc.malloc.mmap_threshold` in `GLIBC_TUNABLES`), which then wins; (2) the mpv

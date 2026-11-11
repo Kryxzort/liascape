@@ -3,14 +3,13 @@ import { useEffect, useRef, useState } from "react";
 // Shared between the Browse and the Library item sidebars (1:1 — the only fully-duplicate
 // bit). Overlays the thumbnail stage with a 16:9 YouTube player (the video's own aspect), centered. The picture's preview
 // switch shows it (SidePanel.tsx SideMedia). Unmounting it (a switch, the item changing, the sidebar closing) stops it. No
-// close button of its own (owner 2026-11-11): the preview switch above the picture leaves it like any other preview. It LOOPS
-// like the other previews (owner: "make the yt video keep looping instead of ending"), and WE loop it: when the player
-// reports it ended (state 0 — `onStateChange` / `infoDelivery.playerState`), we send `seekTo(0)` + `playVideo`. YouTube's
-// own loop (`loop=1&playlist=<its id>`, a one-item playlist) restarted it before its real end ("the video loops
-// prematurely"). `data-yt-loops` counts our restarts (the probe's hook).
+// close button of its own: the preview switch above the picture leaves it like any other preview. It LOOPS
+// like the other previews, and WE loop it (docs/decisions.md § "Loop trailers on the player's "ended", not YouTube's
+// `loop=1`"): when the player reports it ended (state 0 — `onStateChange` / `infoDelivery.playerState`), we send
+// `seekTo(0)` + `playVideo`. YouTube's own loop (`loop=1&playlist=<its id>`, a one-item playlist) restarts it before its
+// real end. `data-yt-loops` counts our restarts (the probe's hook).
 //
-// Its mute state and volume are REMEMBERED (owner 2026-11-11: "is it possible to make youtube mode remember whether it was
-// muted or not?" + "same for volume then?"): muted by default — the desktop's wallpaper owns the sound — and after that whatever the player's own button was
+// Its mute state and volume are REMEMBERED: muted by default — the desktop's wallpaper owns the sound — and after that whatever the player's own button was
 // last set to, across trailers and restarts (localStorage `liascape_yt_muted`). The player reports it through YouTube's
 // embed messaging (`enablejsapi=1`, the channel its IFrame Player API uses): once the iframe loads we post `listening`,
 // and it answers with `infoDelivery` messages carrying `info.muted` whenever it changes. Only messages from THIS iframe

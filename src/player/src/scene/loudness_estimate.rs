@@ -1,5 +1,5 @@
 //! The OFFLINE loudness estimate of a Wallpaper Engine scene: what the live learner
-//! (`audio::loudness`, § Scene worker → "Scene loudness") would measure, computed from the
+//! (`audio::loudness`, `docs/player/modules/scene-loudness.md`) would measure, computed from the
 //! scene's files before it ever plays — so a scene can be normalized from its first second.
 //! `docs/player/modules/scene-loudness.md` § Offline estimate.
 //!

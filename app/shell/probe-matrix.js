@@ -101,8 +101,9 @@ function readIndex() { try { return JSON.parse(fs.readFileSync(INDEX, "utf8")); 
 const keyOf = (p) => path.basename(path.dirname(p));
 const LOUD = ["loudnessI", "loudnessTP", "loudnessLRA", "loudnessThresh"];
 const measured = (idx, p) => { const m = p && idx[keyOf(p)]; return m && LOUD.every((k) => typeof m[k] === "number") ? m : null; };
-// LibraryService.LoudnormAf — ONE fixed gain, Spotify's rule (owner 2026-11-11; ffmpeg's loudnorm fell back to its dynamic
-// rider): target − I, a boost only into −1 dBTP of headroom; Math.Round(…, 2) is half-to-even in C#; C#'s invariant double
+// LibraryService.LoudnormAf — ONE fixed gain, Spotify's rule (docs/decisions.md § "Normalize video loudness with one fixed
+// gain capped by the true peak"; ffmpeg's loudnorm falls back to its dynamic rider): target − I, a boost only into −1 dBTP
+// of headroom; Math.Round(…, 2) is half-to-even in C#; C#'s invariant double
 // formatting is the shortest round-trip, like JS's
 const roundEven2 = (x) => { const y = x * 100, f = Math.floor(y), d = y - f; const r = Math.abs(d - 0.5) < 1e-9 ? (f % 2 === 0 ? f : f + 1) : Math.round(y); return r / 100; };
 const loudnormAf = (m, target) => {
@@ -201,7 +202,7 @@ const PAGE = `window.__mx = {
   playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.dataset.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
-  // a right-click on a card / a playlist bar item = the item's Library sidebar, nothing applied (owner 2026-11-11: "no context menu anywhere")
+  // a right-click on a card / a playlist bar item = the item's Library sidebar, nothing applied (no context menu)
   async openSideBar(t) { this.ctx(this.playlistBar(t), "playlistBar " + t); await this.sleep(250);
     if (this.side()?.querySelector(".side-head h2")?.textContent.trim() !== t) throw new Error("no sidebar for the bar's " + t); },
   // a real drag: many input events over time (the throttled preview + debounced persist interleave)
@@ -212,7 +213,7 @@ const PAGE = `window.__mx = {
   row(label) { return [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === label); },
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
-  // the item sidebar (WE-style, 2026-11-10 — it replaced the per-card settings modal): focus a card without applying it
+  // the item sidebar (WE-style): focus a card without applying it
   // (a right-click), its volume (0) / speed (1) sliders and resets, its close
   side() { return document.querySelector(".side-panel:not(.closing)"); },
   async openSide(t) { this.ctx(this.card(t)?.querySelector(".thumb-wrap"), "card " + t); await this.sleep(400);
@@ -251,8 +252,8 @@ async function waitFor(pred, ms = 8000, step = 100) {
 const live = async () => (await ctl.call("state")).transitions || [];
 // settled = no switch requested/starting/running (an aligned one armed for A's end is fine) — twice, 150 ms
 // apart (a request still in the backend's queue shows up in between) — and, with `want`, /current says it.
-// ("scheduled" used to count as settled: /apply returns before its switch runs, so "single" cells ran
-// mid-fade-in and "effect" was a fade from NOTHING.)
+// ("scheduled" doesn't count as settled: /apply returns before its switch runs, so "single" cells would run
+// mid-fade-in and "effect" would be a fade from NOTHING.)
 async function waitSettled(ms = 12000, want) {
   const quiet = async () => (await live()).every((t) => t.phase === "waiting_start" || t.phase === "done")
     && (want === undefined || (await http("GET", "/current")).json?.path === want);
@@ -299,7 +300,7 @@ async function reset(pl) {
   await post("/playlist/state", { videoPaths: pl?.paths ?? [K[0], K[1], K[2]], settings: pl?.settings ?? PS(), name: null });
   await waitSettled(4000);
 }
-// ---------------------------------------------------------------- scenes (Phase 2 Task 12)
+// ---------------------------------------------------------------- scenes
 // The scene items live in the library's `workshop` source (index.json there: their titles). Scene support is OFF in the
 // baseline settings (library stepping / random would otherwise land on them — s3 crashes); every scene state and
 // scene control turns it on before the UI loads. Each cell starts with the items as seeded: no crash mark, no
@@ -344,7 +345,7 @@ function sceneShown(c, p) {
 
 // advance-on-end with no minimum (the interval field IS the minimum there): k4's switch is armed for its end at once
 const PENDING_PL = () => ({ paths: [K[3], K[0], K[1]], settings: PS({ switchWhenVideoEnds: true, intervalSeconds: 0, transitionDurationMs: 600 }) });
-// Phase 3 Task 11 helpers: the player's rotation program (`prog:main`, state.programs[]) and the covered Signal's fake source
+// helpers: the player's rotation program (`prog:main`, state.programs[]) and the covered Signal's fake source
 const progOf = (st) => (st.programs || []).find((p) => p.id === "prog:main") ?? (st.programs || [])[0] ?? null;
 const cover = (state, out = "*") => ctl.call("headless.cover", { output: out, state });
 const heldNow = async () => (await ctl.call("get", { path: "player.cover_hold_active" }).catch(() => ({}))).value === true;
@@ -391,7 +392,7 @@ const STATES = {
   playlist4: { optIn: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => ({ paths: [K[0], K[1], K[2], K[3]], settings: PS({ transitionDurationMs: 300 }) }),
     async enter(c) { c.playlist = true; c.fresh = true;
       await post("/playlist/play", STATES.playlist4.playlist()); c.ok = await waitSettled(12000, K[0]); } },
-  // Phase 2 scenes (opt-in: only the scene controls run here; scene support on before the UI loads)
+  // scenes (opt-in: only the scene controls run here; scene support on before the UI loads)
   // a single scene (s1) on screen
   scene: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], async pre() { await scenesOn(); },
     async enter(c) { await withGlobalMs(ENTRY_MS, async () => { await post("/apply", { path: SC[0] }); c.ok = await waitSettled(12000, SC[0]); }); } },
@@ -407,8 +408,8 @@ const STATES = {
   sceneSGlobal: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS({ overrideGlobalSettings: false }) }),
     async pre() { await scenesOn({ globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
     async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS({ overrideGlobalSettings: false })); } },
-  // Phase 3 Task 11 — programs at the seams (opt-in; `prog`: afterControl also checks the player's program against /current
-  // and the armed switch). All rotation runs inside the player's `prog:main` now.
+  // programs at the seams (opt-in; `prog`: afterControl also checks the player's program against /current
+  // and the armed switch). All rotation runs inside the player's `prog:main`.
   // an advance-on-end program armed for the end of k1 (30 s: the cells have time, a backend restart too) over [k1..k4]
   programArmed: { optIn: true, prog: true, exp: { paused: false }, roles: () => [K[0], K[1]], playlist: () => PROG_ARMED(),
     async enter(c) { c.playlist = true; c.fresh = true; await post("/playlist/play", PROG_ARMED());
@@ -479,8 +480,8 @@ for (const t of itemTargets) {
   }, noSwitch: true };
 }
 // A REAL drag on an item's slider (40 steps over ~1.6 s), every source sampled every 40 ms meanwhile:
-// no source of another item may move — even for a moment (owner: "A's speed leaks into B while it changes
-// during a transition"; the single-step cells above only looked at the target, and only once)
+// no source of another item may move — even for a moment (A's speed must not leak into B during a
+// transition; the single-step cells above only look at the target, and only once)
 const effectiveOf = (c, p, field, global) => (c.before.lib || []).find((i) => i.videoPath === p)?.[field] ?? global;
 for (const [kind, idx, field, from, to] of [["Spd", 1, "speedOverride", 1.0, 2.6], ["Vol", 0, "volumeOverride", 80, 20]]) for (const t of ["shown", "other"]) {
   C[`item${kind}Drag:${t}`] = { async run(c) {
@@ -517,7 +518,7 @@ const setting = (name, key, value, drive) => {
 // every 40 ms: a wallpaper that follows the global (no override of its own for that field) follows the drag
 // LIVE — through the values in between, during the drag (RED before: the global sliders only saved 250 ms
 // after the last tick; nothing moved while dragging) — and one with its own override never moves, not even
-// for a moment (override ?? global, R61). The persisted value afterwards is the drag's last one.
+// for a moment (override ?? global). The persisted value afterwards is the drag's last one.
 for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "volumeOverride", "volume", 90, 20, 30, 0.02], ["Spd", "Playback speed", "speedOverride", "speed", 1.0, 2.5, 0.8, 0.001]]) {
   C[`globalDrag${kind}`] = {
     async pre(c) { if (c.other) await post(kind === "Vol" ? "/library/volume" : "/library/speed", kind === "Vol" ? { path: c.other, intValue: own } : { path: c.other, doubleValue: own }); },
@@ -557,8 +558,8 @@ setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video frame rate cap"),
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
 setting("noCache", "disableCache", true, `m.setCheck(m.input("Disable video cache"), true, "Disable video cache");`);
 setting("demux64", "demuxerMaxMib", 64, `m.setValue(m.input("Read-ahead buffer (MiB)"), 64, "demuxer");`);
-// numeric settings fields type freely and snap on blur (owner: "everything should let you empty out the field
-// entirely and only snap back to minimum when you focus out" — components/NumInput.tsx): focused, the field keeps
+// numeric settings fields type freely and snap on blur (docs/decisions.md § "Let numeric fields be emptied while
+// focused" — components/NumInput.tsx): focused, the field keeps
 // exactly what was typed (empty / past the max) and nothing is saved; blur → clamped to min / max, saved
 for (const [name, label, key, start, typed, want, adv] of [["clearToMin", "Read-ahead buffer (MiB)", "demuxerMaxMib", 40, "", 1, true],
   ["overToMax", "Video frame rate cap", "videoFpsCap", 24, "999", 480, false]]) {
@@ -591,8 +592,8 @@ C["playlistBarClick"] = { switch: true, async run(c) {
   exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: !!c.before.cur?.path }), ...psKept(c)] };
 C["playlistBarPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.after.ps?.videoPaths?.[0], { effect: !!c.before.cur?.path }), ...psKept(c)] };
-// a wallpaper starting from nothing just appears: a card, the Play button, a stop in between. No effect (owner's list: "it
-// probably shouldn't do transition when there was no wallpaper playing before"); the switch after it, over a real A, has its effect
+// a wallpaper starting from nothing just appears: a card, the Play button, a stop in between. No effect (no transition
+// when no wallpaper played before); the switch after it, over a real A, has its effect
 C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
     c.steps = [];
     const step = async (label, drive, wantEffect) => {
@@ -645,7 +646,8 @@ C[cell] = { states: ["idle"], switch: true, exp: { paused: false },
     if (c.rounds.every((r) => r.cur === "k1")) v.push("every shuffled Play started on k1: the cell proved nothing");
     return v;
   } };
-// "travel to running wallpaper on app open" (owner todo 2026-11-10): a small window (the grid and the playlist bar overflow),
+// "travel to running wallpaper on app open" (docs/decisions.md § "Travel to the playing wallpaper once per session, spotlit
+// in the playing green"): a small window (the grid and the playlist bar overflow),
 // the item LAST in both plays, the page reloads (= the app opens): the playing card sits inside the Library's scroll view
 // and the playing bar item inside the bar's row, without a wheel or a click. RED on the old UI: both stayed at 0.
 C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
@@ -656,7 +658,7 @@ C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, 
       await post("/settings", { ...s0, cardSize: "Large" });
       // title Z→A: the scenes first, so the last video (k1) is the grid's last card
       c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
-      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
+      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap leaves room for the dock magnification)
       const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.dataset.title)`);
       const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene); // the scenes are off here (s3 crashes)
       const last = vids[vids.length - 1]?.videoPath;
@@ -688,7 +690,7 @@ C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, 
     }
     return v;
   } };
-// "Go to playing" buttons (owner 2026-11-11: "a button in library and playlist bar that takes you to the current running wallpaper"):
+// "Go to playing" buttons (the Library's and the playlist bar's):
 // the same setup as travel:appOpen (the last card / bar item plays, out of view at scroll 0), the open-time travel let finish,
 // then both lists scrolled back to 0 and each button clicked → the playing card / item glides into view (mid-view) and rings
 // (`.locate-flash`). RED on the old UI: no buttons.
@@ -698,7 +700,7 @@ C["travel:button"] = { states: ["idle"], switch: true, exp: { paused: false }, a
     try {
       await post("/settings", { ...s0, cardSize: "Large" });
       c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
-      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
+      win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap leaves room for the dock magnification)
       const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.dataset.title)`);
       const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene);
       const last = vids[vids.length - 1]?.videoPath;
@@ -741,7 +743,7 @@ C["travel:button"] = { states: ["idle"], switch: true, exp: { paused: false }, a
     }
     return v;
   } };
-// "mark the wallpapers already downloaded in Browse" (owner todo 2026-11-10): a local Wallpaper Engine folder with two video
+// "mark the wallpapers already downloaded in Browse": a local Wallpaper Engine folder with two video
 // items — "900000001" (the Workshop id of the library's s1: the same item, whatever its type there) and "9002" (not in the
 // library) — Browse → that source: the first card says "In library", the second doesn't. RED on the old UI: no badge.
 C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
@@ -772,7 +774,7 @@ C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
     if (c.badges.weOut != null) v.push(`weOut (not in the library): badge ${JSON.stringify(c.badges.weOut)}, expected none`);
     return v;
   } };
-// a right click on a card or bar item whose hover preview plays (2026-11-11: a right-click opens the item's sidebar — no menu):
+// a right click on a card or bar item whose hover preview plays (a right-click opens the item's sidebar — no menu):
 // the same <video> keeps playing while the pointer stays on the item, nothing applies; off the item it stops. The card's case
 // right-clicks with the sidebar already open (no grid re-fit under the pointer — opening it from closed re-fits the columns and
 // may move the card away, `lib:reflow` in probe-sidebar); the bar item's from closed (the bar's items stay where they are).
@@ -885,7 +887,7 @@ action("volume-down", (c) => volKeyAuto(c, "volume-down"));
 // the same keybinds by VolumeKeyTarget (Advanced → "Volume keys change"): "auto" (default) moves the playing
 // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own (giving it
 // one); "global" always the global (an overridden one keeps its own). Every other item keeps its own, and every
-// source runs override ?? global (the general oracle, R61). `cur` = the playing item (mid-effect: the incoming).
+// source runs override ?? global (the general oracle). `cur` = the playing item (mid-effect: the incoming).
 const volKey = (a, base) => (a === "volume-up" ? Math.min(100, base + 5) : Math.max(0, base - 5));
 const ovOf = (c, p) => (c.after.lib || []).find((i) => i.videoPath === p)?.volumeOverride ?? null;
 const VKS = ["single", "playlist", "effect", "pending", "paused"];
@@ -949,7 +951,7 @@ function pausedSwitch(c) {
   return [];
 }
 // a fresh playlist session at its first item has nothing before it: previous leaves it — and an armed
-// aligned switch — alone (it used to relaunch the playing item and cancel the armed switch)
+// aligned switch — alone (never relaunches the playing item or cancels the armed switch)
 function prevCheck(c) {
   if (!c.before.cur?.path) return [];
   if (!c.fresh) return [...stayed(c, "previous"), ...pausedSwitch(c)];
@@ -1057,8 +1059,8 @@ function afterRemove(c) {
 for (const t of ["shown", "other", "off"]) {
   if (t === "off") C["playlistBarRemove:off"] = { states: PL_STATES, async run(c) { c.target = playlistBarOff(c); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); }, check: afterRemove };
-  // the bar's right-click menu ("Remove from playlist") is gone (2026-11-11), and so is the item sidebar's playlist toggle
-  // (owner: "remove the playlist checkmark from title area"): the twin is the Library card's own playlist checkbox
+  // the bar has no right-click menu ("Remove from playlist"), and the item sidebar's head no playlist toggle:
+  // the twin is the Library card's own playlist checkbox
   C[`playlistBarRemoveCard:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
     await ui(`if (!m.card(${JSON.stringify(TITLE(c.target))})) { m.tab("Library"); await m.sleep(600); } m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "the card's playlist checkbox");`); await sleep(900); }, check: afterRemove };
 }
@@ -1187,7 +1189,7 @@ const TR = {
     saved: (s) => s?.transitionEnabled === false, want: (e) => e.effect_id == null, what: "a cut" },
   Duration: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 1200, "duration");`,
     saved: (s) => s?.transitionDurationMs === 1200, want: (e) => e.duration_ms === 1200, what: "1200 ms" },
-  // under the old 50 ms floor (owner QOL): a 20 ms effect runs as 20 ms; 0 ms is a plain cut (no effect requested)
+  // under 50 ms (no floor): a 20 ms effect runs as 20 ms; 0 ms is a plain cut (no effect requested)
   Short: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 20, "duration");`,
     saved: (s) => s?.transitionDurationMs === 20, want: (e) => e.effect_id != null && e.duration_ms === 20, what: "a 20 ms effect" },
   Zero: { drive: `m.setValue(document.querySelector(".tr-modal .tr-row input.num"), 0, "duration");`,
@@ -1514,7 +1516,7 @@ C["selVol:shown+other"] = { states: ["effect", "pending"], async run(c) {
     }
     return v;
   } };
-// keys pressed while a slider is HELD (owner: "make F not do yellow outline when holding slider"): a real mouse
+// keys pressed while a slider is HELD (no focus ring, no app shortcut — hooks/rangeDrag.ts): a real mouse
 // press on the card settings modal's volume slider (two library cards selected), then F, Delete, Escape and an arrow key
 // while it's held. Nothing may react — no focus ring / outline on the held slider (Chromium flips a mouse-focused
 // control to keyboard focus on any key: the system ring), the selection isn't trashed, the modal stays open, the
@@ -1925,8 +1927,8 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx — it replaced the card → modal flight,
-// 2026-11-10), opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
+// "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx),
+// opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
 // in (transform + opacity animations only, nothing else animated), and closes (its close button, or Escape) by sliding out.
 // Off: nothing animates — it's there at once and gone at once (≤ 100 ms) — also after a page reload; back on: it slides.
 const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-panel"); if (!p) return null;
@@ -2038,7 +2040,7 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
 
 // --- Settings → Auto-Mute, against the stack's PRIVATE audio server (test-ui-matrix.sh: its own PulseAudio at
 // $XDG_RUNTIME_DIR/pulse/native with one null sink `mx_null`, no device): the backend's AudioMonitor (pactl subscribe +
-// parec) and these synthetic streams only ever meet there — the owner's audio server is never seen or touched.
+// parec) and these synthetic streams only ever meet there — the desktop's own audio server is never seen or touched.
 const PULSE = E.LIASCAPE_PULSE === "1";
 let TONE = null;
 const tones = new Set();
@@ -2146,7 +2148,7 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     await ui(amEnable); c.ready = await amReady();
     tone(2500, "mpv"); const stop = sampler(c, 40); await waitFor(() => tones.size === 0, 5000, 50); await stop();
   }, check(c) { const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => amLevel(n) < -1));
-    // the one intended difference under the Signal (plan Task 14 criterion 2, owner 2026-10-29): a user's mpv is heard
+    // the one intended difference under the Signal (by design): a user's mpv is heard
     if (AM_SIGNAL) return [...amReadyCheck(c), ...(m.length ? [] : ["an mpv stream never auto-muted under the Signal"])];
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
@@ -2372,7 +2374,7 @@ C["seq3:pause+trash:shown+undo"] = { states: ["playlist", "pending"], switch: tr
     return [...v, ...expectShownN(c, c.want, 1), ...armedCheck(c)];
   } };
 // random (keybind), then next / previous: the rotation goes on from the random pick's place in the playlist bar — next =
-// the item after it (it used to keep the rotation's old position: next replayed the pick itself, or the item after
+// the item after it (not the rotation's old position: next must not replay the pick itself, or the item after
 // what played before), and an advance-on-end session re-arms to that item; previous = back to what played before
 // (the pick replaced the pre-fetched, never-played next — previous went to that instead) and the next after that
 // is the pick again (history forward, like next after any previous). Random excludes what plays, so it's repeated
@@ -2482,7 +2484,7 @@ function notTargeted(c, p, { gone } = {}) {
   return v;
 }
 
-// ---------------------------------------------------------------- scene controls (Phase 2 Task 12)
+// ---------------------------------------------------------------- scene controls
 // Every one runs only in the states it lists (the scene states are opt-in) and checks the player itself: the general
 // oracle covers a scene source like a video's (gain.user / speed / no_audio / gain.mute / … are resolved per source),
 // plus what each control is about — the worker (`state.workers[]`: pid, fps_target, audio.gain_db / no_audio / speed),
@@ -2564,7 +2566,7 @@ C["volume:scene"] = { states: ["scene"], async run(c) {
   } };
 
 // the scene's own volume / speed (its settings modal): its source only, persisted, live on the same worker — a
-// scene's speed scales its animation and its pitch-kept sound under liascape-player (owner decision), so the slider shows
+// scene's speed scales its animation and its pitch-kept sound under liascape-player (by design), so the slider shows
 for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["itemSpd", 1, 1.7, "speedOverride"]]) {
   C[`${k}:scene`] = { states: ["scene"], async run(c) {
       await ui(`await m.openSide("s1"); await m.sleep(500); m.setValue(m.modalRange(${idx}), ${val}, "${k} slider");`);
@@ -2842,7 +2844,8 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 0 }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
-    // the scene rule said plainly while the toggle is off (owner 2026-11-10: the one set, the minimum if both are)
+    // the scene rule said plainly while the toggle is off (the one set, the minimum if both are — docs/decisions.md §
+    // "A scene's minimum play time beats its maximum")
     if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.hint0 ?? "")) v.push(`"Separate timing for scenes" (off) hint doesn't state the scene rule: ${JSON.stringify(c.hint0)}`);
     if (!c.rows0?.includes("Separate timing for scenes") || c.rows0?.includes("Switch scenes after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes after"`);
     if (!c.rows1?.includes("Switch scenes after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes after"`);
@@ -2886,9 +2889,9 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// The backend restarted UNDER AN OPEN PAGE (the owner's incident: `dotnet watch` restarted the dev backend on a
-// cherry-pick while the app stayed open, and Vite's HMR of the same change re-ran the store's init into the outage —
-// the Library tab said "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
+// The backend restarted UNDER AN OPEN PAGE (e.g. `dotnet watch` restarts the dev backend on a source change while the
+// app stays open, and Vite's HMR of the same change re-runs the store's init into the outage — without a retry the
+// Library tab says "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
 // up everything it mirrors from the backend by itself — no reload: the library (cards), the playlist bar, the settings
 // (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
 const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/liascape (settings.json, playlist_state.json)
@@ -3051,7 +3054,7 @@ C["sceneProp:switch"] = { states: ["scene"], switch: true,
     if (JSON.stringify(spColor(liveSp(c.after.st, SC[0]))) !== "[0,1,0]") v.push(`s1's new source scene_props ${JSON.stringify(liveSp(c.after.st, SC[0]))}`);
     return v;
   } };
-// a player crash (its compositor killed → supervised restart from the snapshot, then R81's re-apply): still applied
+// a player crash (its compositor killed → supervised restart from the snapshot, then the settings re-apply): still applied
 C["sceneProp:restart"] = { states: ["scene"],
   async pre() { await spSet("color", "0 1 0"); },
   async run(c) {
@@ -3083,7 +3086,7 @@ C["sceneProp:reset"] = { states: ["scene"],
     return [...v, ...samePid(c, SC[0])];
   } };
 
-// ================================================================ Phase 3 Task 11 — programs at the seams
+// ================================================================ programs at the seams
 // Every rotation runs inside the player's `prog:main` (state.programs[]); the backend only feeds it. These cells put the UI
 // through the seams a program adds: its clocks standing still (a user pause, the cover hold, no monitor), an armed
 // switch under edits, a backend that comes and goes, the start choice, the expert tier. The Signal's fake source is
@@ -3554,7 +3557,7 @@ C["cli:next:backendDown"] = { states: ["playlist"], switch: true, async run(c) {
     return v;
   } };
 
-// `liascape loop-current` (owner todo 2026-11-10, "keybind toggle to infinite loop current wallpaper"): a 3 s timed playlist;
+// `liascape loop-current` (a keybind toggle that loops the current wallpaper): a 3 s timed playlist;
 // the keybind → prog:main.keep, no switch for 7 s, the topbar says so, /current.keep; again → the rotation resumes (a switch
 // within ~4.5 s); with the backend stopped (the app closed) the CLI toggles it on the player itself and the new backend
 // reports it; a Play of the playlist lifts it.
@@ -3681,7 +3684,7 @@ function progCheck(c) {
 }
 async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }) {
   // fuzz: what the page sent is answered, and a keybind's switch the program hasn't taken yet (no `program.current` since the
-  // step began and prog:main.path unmoved — before Phase 3 Task 8 this waited on the timer daemon's pending_action.txt, which
+  // step began and prog:main.path unmoved — never the timer daemon's pending_action.txt, which
   // liascape-player never writes) is taken, before the step settles and before it looks — a cell's fixed waits assume an
   // unloaded box; a chain runs long enough to meet a loaded one (a debounced persist still in flight, a next that "stayed")
   const pageQuiet = () => (fuzz ? waitFor(async () => (await keybindTaken(c, ctlName, t0)) && (await js("window.__mxInflight || 0")) === 0, 4000, 50) : null);
@@ -3727,7 +3730,7 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
-  // load-dependent (the owner's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
+  // load-dependent (the user's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`the command took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
   lap("post");
   // a failed switch: the player's own story of it (ctl logs {corr}) + what each source was doing, while the stack lives

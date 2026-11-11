@@ -1,5 +1,5 @@
 //! dmabuf scene-frame transport (`docs/player/modules/scene-frame-transport.md`; evidence `docs/player/spikes/dmabuf.md`). GPU: each test
-//! drives a [`SceneSource`] whose `liascape-scene-worker` renders `liascape-synthetic.json` (D7) into a
+//! drives a [`SceneSource`] whose `liascape-scene-worker` renders `liascape-synthetic.json` into a
 //! 3-slot ring of exported `GL_RGBA8` textures; the source imports them once and latches
 //! only frames whose acquire fence already signalled. SKIP without EGL (`LIASCAPE_REQUIRE_GPU=1`
 //! fails instead). One test at a time (`GPU`): their frame-rate and timing assertions must
@@ -85,7 +85,7 @@ fn run(
     false
 }
 
-/// Read a `w`×`h` RGBA block at GL `(x, y)` (bottom-left origin = image top, R25).
+/// Read a `w`×`h` RGBA block at GL `(x, y)` (bottom-left origin = image top).
 fn read_block(gfx: &Gfx, tex: &Tex, x: u32, y: u32, w: u32, h: u32) -> Vec<u8> {
     let mut px = vec![0u8; (w * h * 4) as usize];
     unsafe {
@@ -261,7 +261,8 @@ fn killed_worker_keeps_last_frame() {
     assert!(src.pid().is_none(), "no restart with a zero budget");
 }
 
-/// The suspend false-hang (2026-10-29, `docs/player/reports/phase2.md` § 8): while the GPU
+/// The suspend false-hang (`docs/player/modules/scene-crash-policy.md` § A suspend is not a
+/// hang): while the GPU
 /// finishes nothing — NVIDIA saving VRAM before a suspend, the GPU waking after it — the
 /// worker's frames' acquire fences don't signal, so the compositor latches none, releases
 /// none, and soon holds all three slots; the worker then can't render the next tick and waits
@@ -270,11 +271,11 @@ fn killed_worker_keeps_last_frame() {
 /// is held back (a stand-in signalled at the end) — > 3 × the 600 ms hang timeout. After it
 /// the frames flow again from the same worker, never restarted.
 ///
-/// Load-proof (2026-11-05, switch-over checklist): the latch series is recorded from the
-/// open, not from "10 frames latched" — under a loaded suite the worker's start-up took long
-/// enough that the stall (timed from the worker's start) had begun before the old window
-/// opened, so part of its gap fell outside the measurement. The gap is any ≥ 1.6 s pause
-/// after a first latch (never the start-up), and the timeout is 600 ms (was 300: a CPU-starved
+/// Load-proof: the latch series is recorded from the
+/// open, not from "10 frames latched" — under a loaded suite the worker's start-up can take long
+/// enough that the stall (timed from the worker's start) begins before such a window
+/// opens, so part of its gap would fall outside the measurement. The gap is any ≥ 1.6 s pause
+/// after a first latch (never the start-up), and the timeout is 600 ms (at 300 a CPU-starved
 /// normal frame could pass for a hang).
 #[test]
 fn gpu_stall_that_starves_the_worker_is_not_a_hang() {
@@ -332,7 +333,7 @@ fn gpu_stall_that_starves_the_worker_is_not_a_hang() {
     check_frame(&gfx, src.texture().unwrap(), src.latched_seq().unwrap()).unwrap();
 }
 
-/// A scene the VRAM guard stops (Task 8, `stop_for_vram`) gives its ring back — the worker's
+/// A scene the VRAM guard stops (`stop_for_vram`) gives its ring back — the worker's
 /// exported slots stay alive while the compositor holds their imports (~3 × the export size
 /// of GPU memory, for a scene stopped *because* it used too much) — keeping exactly the slot
 /// on screen: the last frame stays shown, unchanged, from one imported slot.
@@ -469,7 +470,7 @@ fn scene_texture_holds_image_top_at_t0() {
         .latched
         >= 2));
     let tex = src.texture().unwrap();
-    // R25: image top at texture row 0 = GL's low y — no flip in the worker.
+    // Image top at texture row 0 = GL's low y — no flip in the worker.
     assert_eq!(read_block(&gfx, tex, 960, 10, 1, 1), vec![255, 0, 0, 255]);
     assert_eq!(read_block(&gfx, tex, 960, 1070, 1, 1), vec![0, 0, 255, 255]);
 }
@@ -987,7 +988,7 @@ fn worker_context_is_low_priority() {
     );
 }
 
-// ---------------------------------------------------------------- Task 5: the `scene` Source kind
+// ---------------------------------------------------------------- the `scene` Source kind
 
 use common::harness::Harness;
 use liascape_player::anim::PropPath;
@@ -1136,7 +1137,7 @@ fn pause_freezes_picture_exactly() {
     );
 }
 
-/// `time_pos` advances at `speed` (owner decision: speed scales a scene's animation), a
+/// `time_pos` advances at `speed` (speed scales a scene's animation), a
 /// live `position` set jumps the clock.
 #[test]
 fn scene_clock_follows_speed_and_position() {
@@ -1201,7 +1202,7 @@ fn scene_tick_rate_follows_demand() {
     assert_eq!(h.scene_src(&id).tick_hz(), 60.0);
 }
 
-/// Task 8: the worker GPU budget, live on one worker. A scene whose worker reports 20 ms of
+/// The worker GPU budget, live on one worker. A scene whose worker reports 20 ms of
 /// GPU per frame (the synthetic `report_gpu_ms` knob — 600 ms/s at 30 fps) is throttled to
 /// half its latched rate when its outputs miss 10 % of their frames, steps back up × 1.25 after
 /// 5 s calm (a virtual budget clock), and `auto` off lifts the cap at once — the tick rate
@@ -1373,7 +1374,7 @@ fn demand_change_reexports_without_black() {
     check_frame(&h.gfx, tex, seq).expect("a whole frame at the new size");
 }
 
-// ---------------------------------------------------------------- Task 7: real scenes
+// ---------------------------------------------------------------- real scenes
 
 use std::path::{Path, PathBuf};
 
@@ -1492,8 +1493,8 @@ fn slow_scene_load_keeps_the_heartbeat() {
 /// Corpus under load: a load slowed by a saturated CPU outlasts the worker's base load bound
 /// (`LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, here 1 s) but keeps getting CPU time — it is covered
 /// (Ready, no restart) up to the cap (4 × the bound); one asleep past the bound (a deadlock) is
-/// still a hang, and so is one still busy at the cap. RED before (a fixed bound): the busy load
-/// was killed as hung at ~1.3 s and restarted, from scratch, every time.
+/// still a hang, and so is one still busy at the cap. With a fixed bound the busy load
+/// would be killed as hung at ~1.3 s and restarted, from scratch, every time.
 #[test]
 fn starved_scene_load_outlasts_the_load_timeout() {
     let _g = gpu_lock();
@@ -1555,7 +1556,7 @@ fn starved_scene_load_outlasts_the_load_timeout() {
 /// Corpus under load: the observed `loading` (what the transition recipe waits on past its 10 s)
 /// is true exactly while a live worker loads — from the open to the first frame — and false
 /// once the scene shows a frame or its load failed (a B whose load failed must fail its switch
-/// at once, not after `LOADING_READY_TIMEOUT`). RED before: no `loading` (the read is `None`).
+/// at once, not after `LOADING_READY_TIMEOUT`).
 #[test]
 fn scene_loading_spans_the_load_only() {
     use liascape_player::graph::PropValue;
@@ -1641,7 +1642,7 @@ fn min_scene_renders_through_the_worker() {
 
 /// A scene whose renderer build fails (`fail-scene`: an object with a missing parent — the
 /// same outcome as WE's assets missing) is a fatal error: no restart, no crash record, the
-/// worker idles until stopped and then exits on its own (never a SIGSEGV loop, spike §4.4).
+/// worker idles until stopped and then exits on its own (never a SIGSEGV loop, `docs/player/spikes/lwe-core.md` §4.4).
 #[test]
 fn renderer_build_failure_is_broken_not_a_segfault() {
     let _g = gpu_lock();
@@ -1738,7 +1739,7 @@ fn missing_or_half_downloaded_scene_fails_cleanly() {
     }
 }
 
-/// On-machine (D7): real Workshop scenes with the owner's WE assets, `LIASCAPE_PLAYER_TEST_SCENES=<the
+/// On-machine: real Workshop scenes with the owner's WE assets, `LIASCAPE_PLAYER_TEST_SCENES=<the
 /// 431960 folder>` (SFW: `~/.local/share/Steam/steamapps/workshop/content/431960`), else SKIP
 /// (FAIL under `LIASCAPE_REQUIRE_SCENES=1`). Each: Ready ≤ 3 s (incl. the cold build), frames at 1 s
 /// and 3 s of scene time non-blank, opaque and different, exported at the cover size (never
@@ -1850,13 +1851,13 @@ fn real_scenes_render_and_animate() {
     }
 }
 
-// ---------------------------------------------------------------- Task 10: the crash policy
+// ---------------------------------------------------------------- the crash policy
 
 /// A crashed worker's restart resumes at the scene time of the frame it left on screen —
 /// exactly that `t`, not the compositor's clock moved on by the outage; the picture is held
 /// (identical) from the restart until the new worker's first frame, and `time_pos` never
-/// jumps (the scene clock stops while no worker renders). RED before: the first frame of the
-/// restarted worker was the outage past the held one (the clock ran through the restart).
+/// jumps (the scene clock stops while no worker renders) — the restarted worker's first frame
+/// is never the outage past the held one.
 #[test]
 fn crash_holds_last_frame_and_resumes_at_position() {
     let Some((_g, mut h)) = harness(&["VIRTUAL-1"]) else {
@@ -2126,8 +2127,8 @@ fn loud(s: &SceneSource, k: &str) -> serde_json::Value {
 }
 
 /// A source dropped without its teardown (`Drop`) still leaves its path: the older source of
-/// the path measures on (RED without the `Drop`: the dropped one stays the head and nothing is
-/// measured any more). Also: the newer source measures only from its first segment.
+/// the path measures on (without the `Drop`, the dropped one would stay the head and nothing
+/// would be measured any more). Also: the newer source measures only from its first segment.
 #[test]
 fn dropped_scene_source_hands_its_loudness_over() {
     let _g = gpu_lock();
@@ -2156,8 +2157,8 @@ fn dropped_scene_source_hands_its_loudness_over() {
 }
 
 /// A meter switched off at the cap comes back on once the path's measurement isn't capped
-/// any more (here: a second source adopts a seed with room under its own cap) — RED before:
-/// `update` never asked again, `a` stayed silent to the book for good.
+/// any more (here: a second source adopts a seed with room under its own cap) — `update` must
+/// ask again, else `a` stays silent to the book for good.
 #[test]
 fn scene_meter_comes_back_on_when_the_path_is_no_longer_capped() {
     let _g = gpu_lock();

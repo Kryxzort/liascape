@@ -9,13 +9,13 @@ using Liascape.Scrapers;
 
 namespace Liascape.Web;
 
-// The YouTube trailer cache for library items (owner 2026-11-11: "find me a video with a youtube trailer in my library" —
-// none had one stored: a trailer link is part of the Workshop LISTING, not the downloaded files, and only a download from
-// the app's own Workshop browser saved it; everything auto-imported from WE subscriptions never got one). Wallpaper Engine
+// The YouTube trailer cache for library items (docs/decisions.md § "Ask Steam's servers for trailers and never cache
+// "can't tell" as "none""). A trailer link is part of the Workshop LISTING, not the downloaded files: only a download from
+// the app's own Workshop browser saves it; anything auto-imported from WE subscriptions has none. Wallpaper Engine
 // gets it from the Steam client's UGC API (an item's "additional previews"); this app asks the same servers ANONYMOUSLY over
-// the client protocol (SteamWorkshopDetails — 100 items a request; tested 2026-11-11, all known trailers in 355 ms), and
+// the client protocol (SteamWorkshopDetails — 100 items a request; measured: all known trailers in 355 ms), and
 // only falls back to reading the item's public Workshop page (rate-gated) for what they don't answer.
-// Cached in the item's index entry (owner: "we should probably cache the youtube link right?"):
+// Cached in the item's index entry:
 //   - a trailer found → `youtubeUrl`, never looked up again;
 //   - the page read, no trailer → `trailerCheckedAt` (unix s), re-checked after RecheckDays (an author may add one);
 //   - couldn't check (offline, Steam down, an error page) → NOTHING stored, tried again at the next start. Wallpaper
@@ -24,7 +24,7 @@ namespace Liascape.Web;
 // user's own browsing; a 429 starts an app-wide cooldown that survives restarts. This lookup is a ONE-TIME fill (cached
 // after). On a cooldown it stops and re-schedules itself for when the cooldown ends (no waiting loop, no request sent);
 // only real failures (no connection, timeouts, error pages) count toward MaxFailsInARow (offline → stop, next start).
-// Faster routes, checked 2026-11-11: IPublishedFileService/GetDetails (100 items a request, with additional previews)
+// Other routes, checked: IPublishedFileService/GetDetails (100 items a request, with additional previews)
 // needs a Web API key or a signed-in access token (401 without); the keyless ISteamRemoteStorage/GetPublishedFileDetails
 // has no previews at all.
 // Single-flight; started after the startup WE sync and after /library/sync. Each find → WS `library-item-changed

@@ -53,7 +53,7 @@
 #   reruns exactly that sequence on one stack. --jobs defaults to 2 here (LIASCAPE_FUZZ_JOBS), capped at the run count.
 #   Results: <out>/fuzz.jsonl, one record per run (seed, run, start, sequence, replay, per-step phases + violations).
 # LIASCAPE_MATRIX_AUTOMUTE=signal (the default) | audiomonitor: the auto-mute engine. signal = the shipped one, the player's
-# Signal (plan Phase 3 Task 14): the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse and its player plays
+# Signal: the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse and its player plays
 # audio (no `--ao null`). audiomonitor = the backend's AudioMonitor (what runs while the player has no `automute`
 # capability): a private PulseAudio, the player at `--ao null` (no bus). Without pipewire / wireplumber / pipewire-pulse the
 # default falls back to audiomonitor (printed).
@@ -257,7 +257,7 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_TEST_ALIGN_BACKSTO
 # sends Origin "null" on its fetches, "file://" on its WebSocket); a backend that serves its own UI admits no other
 # origin unless told (.claude/rules/backend/api.md § Security)
 export LIASCAPE_DEV_ORIGINS=null,file://
-# Phase 2 scenes: the private player (and any the backend starts) plays synthetic scene folders with this build's worker,
+# scenes: the private player (and any the backend starts) plays synthetic scene folders with this build's worker,
 # and measures VRAM through a fake probe the scene cells drive (healthy by default: 6000 of 8192 MiB free — the
 # low-VRAM rule never engages; never this machine's GPU) with short holds (interval, enter, resume, settle, scene hold)
 export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=${B%/*}/liascape-scene-worker
@@ -325,7 +325,7 @@ if [ "$AMX" = signal ] && ! { command -v pipewire && command -v wireplumber && c
 fi
 export LIASCAPE_MATRIX_AUTOMUTE=$AMX
 if [ "$AMX" = signal ]; then
-  # The auto-mute cells with the player's Signal as the engine (plan Phase 3 Task 14; `--only autoMute`): it hears PipeWire
+  # The auto-mute cells with the player's Signal as the engine (`--only autoMute`): it hears PipeWire
   # streams only, so here the stack's audio is a private PipeWire + WirePlumber + pipewire-pulse (no device, no D-Bus; the
   # same null sink name, so the probe's paplay is unchanged). No session bus: lia-mpris never reads the machine's players.
   unset LIASCAPE_PLAYER_AUTOMUTE; export DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent

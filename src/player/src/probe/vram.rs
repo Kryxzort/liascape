@@ -1,4 +1,4 @@
-//! `vram` (Phase 2 Task 8): what the VRAM rules see and do — the sampler (`probe` nvml | drm |
+//! `vram`: what the VRAM rules see and do — the sampler (`probe` nvml | drm |
 //! nvidia-smi | fake | none, or null while no rule needs it), the newest sample (`total_mib`,
 //! `free_mib`, `used_mib`, our `procs`), the low-VRAM rule (`mode`, `state` normal | pending |
 //! low | recovering, `low_mib`, `resume_mib`, `reserve_mib`, the holds), the hold (`phase`,

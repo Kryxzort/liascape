@@ -3,7 +3,8 @@ import { AlertTriangle } from "lucide-react";
 import { api, type FeatureHealth } from "../api/client";
 
 // API: /health/features — a feature a missing build piece / tool breaks here puts a warning icon (its reason as the
-// tooltip) on every row whose settings key it `affects` (owner: "make missing libraries fail loudly"). The control
+// tooltip) on every row whose settings key it `affects` (docs/decisions.md § "Report a missing dependency with a warning,
+// never hide the control"). The control
 // itself stays visible and usable; only `ok === false` warns (null = not known yet). Shared by Settings (every row)
 // and the playlist settings modal (its Transitions field).
 type Warn = { label: string; reason: string };

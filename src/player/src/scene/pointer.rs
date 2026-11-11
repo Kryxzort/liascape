@@ -1,4 +1,4 @@
-//! The pointer over an output → a scene's own coordinates (Phase 2 Task 7, mouse on): the
+//! The pointer over an output → a scene's own coordinates (mouse on): the
 //! inverse of [`fit_rect`](crate::gfx::compose::fit_rect) for a plain source layer, so a
 //! scene filled (cropped) or fitted (letterboxed) onto an output still sees the cursor where
 //! it is drawn. Pure.
@@ -6,7 +6,7 @@
 use crate::gfx::compose::UvRect;
 
 /// Output surface pixel `(px, py)` (origin top-left, like `out:<c>.pointer`) → the source's
-/// normalised `(u, v)` (origin = the image's top-left, R25), or `None` when the point is
+/// normalised `(u, v)` (origin = the image's top-left), or `None` when the point is
 /// outside the drawn rectangle (a letterbox bar).
 ///
 /// `rect` is [`fit_rect`](crate::gfx::compose::fit_rect)'s result for that layer. Its `dst`

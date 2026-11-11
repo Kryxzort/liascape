@@ -58,7 +58,7 @@ use pw::stream::StreamRc;
 use crate::stretch::{CH, Pull, Stretch};
 
 pub const RATE: u32 = 48_000;
-/// The stream's `node.latency` request (plan Task 6).
+/// The stream's `node.latency` request.
 pub const QUANTUM: u32 = 256;
 /// The worker's own anti-click fade (invariant #4: ≤ 30 ms).
 pub const ANTICLICK_FRAMES: usize = 1440;
@@ -70,9 +70,9 @@ const NULL_PERIOD: Duration = Duration::from_millis(5);
 const RETRY: Duration = Duration::from_secs(1);
 /// The loop's wake-up period (commands, outbox).
 const ITERATE: Duration = Duration::from_millis(5);
-/// F7: the longest a quit waits for the server to drop the disconnected stream.
+/// The longest a quit waits for the server to drop the disconnected stream.
 const CLOSE_MAX: Duration = Duration::from_millis(200);
-/// F7: how long a quitting stream stays connected but inactive before it disconnects.
+/// How long a quitting stream stays connected but inactive before it disconnects.
 const SETTLE_INACTIVE: Duration = Duration::from_millis(20);
 
 /// A dB gain as the stream's amplitude: ≤ −96 dB is exactly 0.
@@ -84,7 +84,7 @@ pub fn gain_lin(db: f64) -> f32 {
     }
 }
 
-/// The synthetic scene's sound (D7): a stereo sine at `hz`, peak `10^(dbfs/20)` (so a −20
+/// The synthetic scene's sound: a stereo sine at `hz`, peak `10^(dbfs/20)` (so a −20
 /// dBFS tone reads −23 on the bus meter, like `bus.sh`'s clip).
 pub struct Tone {
     phase: f64,
@@ -125,7 +125,7 @@ pub struct Control {
     /// Bumped on every arming change (see the module doc).
     arm: AtomicU64,
     quitting: AtomicBool,
-    /// F7: the quit's second half — the audio thread disconnects its PipeWire stream and waits
+    /// The quit's second half — the audio thread disconnects its PipeWire stream and waits
     /// for the server to answer (`closed`) before the process exits.
     close_req: AtomicBool,
     closed: AtomicBool,
@@ -241,7 +241,7 @@ impl Control {
     /// until its level is exactly 0, at most `max`: the process may then exit without
     /// cutting an audible stream.
     ///
-    /// **F7:** then the stream leaves the graph before the caller exits — deactivated, given
+    /// Then the stream leaves the graph before the caller exits — deactivated, given
     /// [`SETTLE_INACTIVE`], disconnected, each step answered by a server roundtrip (all ≤
     /// [`CLOSE_MAX`]). A process that exited with its stream still active in the graph cost
     /// the player bus (`liascape-player-bus`, a loopback in the compositor) whole graph cycles:

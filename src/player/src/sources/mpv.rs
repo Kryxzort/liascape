@@ -36,7 +36,7 @@ pub const MAX_TEXTURE_EDGE: u32 = 4096;
 const POSITION_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The AO used when `opts` names none (spec §5.3). `serve` routes it into the player bus
-/// (`audio_device` = `audio::bus::DEVICE`, Task 14).
+/// (`audio_device` = `audio::bus::DEVICE`).
 pub const DEFAULT_AO: &str = "pipewire";
 
 // Observed-property ids (`mpv_observe_property` reply_userdata).
@@ -48,9 +48,9 @@ const OBS_EOF: u64 = 5;
 const OBS_PAUSE: u64 = 6;
 const OBS_IMAGE: u64 = 7;
 const OBS_IDLE: u64 = 8;
-/// Task 16c (R85): "real audio flowing" detector — see `MpvSource::arm_audio_flowing`.
+/// "real audio flowing" detector — see `MpvSource::arm_audio_flowing`.
 const OBS_AUDIO_PTS: u64 = 9;
-/// R92 (review of Task 16c/16d): does the *file* actually have an audio track mpv
+/// Does the *file* actually have an audio track mpv
 /// selected? See `MpvSource::has_audio`'s doc.
 const OBS_AUDIO_SELECTED: u64 = 10;
 /// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
@@ -196,7 +196,7 @@ fn yes_no(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
 }
 
-/// Task 20d (R107): the hardware decoders `auto` tries, in order, ahead of mpv's own copy
+/// The hardware decoders `auto` tries, in order, ahead of mpv's own copy
 /// list. mpv 0.41's own order is `vulkan, nvdec, vaapi, vulkan-copy, nvdec-copy, …` — with no
 /// GL interop (below) `auto` would pick `vulkan-copy`, which on NVIDIA costs more CPU than
 /// `nvdec-copy` (1080p30: 14.4 vs 9.8 %, 4K60: 80 vs 56 % of a core), shows its first frame
@@ -221,9 +221,9 @@ fn zero_copy_decoders(interop: Option<&str>) -> &'static [&'static str] {
 }
 
 /// The mpv `hwdec` value for a graph `hwdec`, given the `gpu-hwdec-interop` the source's
-/// render context loaded (`interop`; § Sources "Hardware decoding").
+/// render context loaded (`interop`; `docs/player/modules/sources.md` § Hardware decoding).
 ///
-/// **`interop: None` — copy modes only (Task 20d, R107).** A render context on the LOOP
+/// **`interop: None` — copy modes only.** A render context on the LOOP
 /// (render worker off, stepped mode, a synchronous open) runs `gpu-hwdec-interop=no`: mpv's
 /// render context runs every hwdec interop's init inside the render thread, and with
 /// `gpu-hwdec-interop=auto` it loads the CUDA interop (a CUDA context) in
@@ -233,7 +233,7 @@ fn zero_copy_decoders(interop: Option<&str>) -> &'static [&'static str] {
 /// `auto-copy-unsafe` → [`AUTO_COPY`] + mpv's `auto-copy[-safe|-unsafe]`; an interop name
 /// (every mpv 0.41 decoder with a `-copy` twin: `nvdec`, `cuda`, `vaapi`, `vdpau`, `vulkan`,
 /// `amf`, `v4l2m2m`) → its `-copy` twin; anything else (a `-copy` mode, a name mpv doesn't
-/// know — mpv rejects it and the prop reverts, R45) passes through unchanged.
+/// know — mpv rejects it and the prop reverts) passes through unchanged.
 ///
 /// **`interop: Some(i)` — zero-copy on the render worker.** The render context lives on the
 /// `lia-render` thread, so the interop's init costs that thread, not the loop. A decoder the
@@ -404,7 +404,7 @@ struct StepSeek {
 /// One FBO-backed render target.
 type Target = (Tex, Fbo);
 
-/// I5 (final review): an mpv core created, configured and initialized by
+/// An mpv core created, configured and initialized by
 /// [`MpvSource::prepare_core`] — on any thread — and not yet given a render context or a
 /// file. [`MpvSource::open_with_core`] turns it into a source on the loop thread; dropped
 /// unused (its node went away while it was being prepared), its wakeup callback is cleared
@@ -412,7 +412,7 @@ type Target = (Tex, Fbo);
 pub struct PreparedCore {
     handle: Option<Handle>,
     wake: Option<OwnedFd>,
-    /// Phase 2: its render context already lives on the render worker
+    /// Its render context already lives on the render worker
     /// ([`PreparedCore::attach_render`]).
     render: Option<Attached>,
     /// The `gpu-hwdec-interop` that render context loaded (zero-copy hwdec; `None` = copy
@@ -426,14 +426,14 @@ pub struct PreparedCore {
 unsafe impl Send for PreparedCore {}
 
 impl PreparedCore {
-    /// Phase 2 (render worker): give this core's rendering to `worker` — it creates the render
+    /// Render worker: give this core's rendering to `worker` — it creates the render
     /// context on its own context (`RenderWorker::attach`, which this waits for — call it on
     /// an `lia-open` thread, never the loop). A worker that can't leaves the core as it was:
     /// the source then renders on the loop. Only a timed-out attach (the core stayed with
     /// the worker, which reaps it) is an error.
     ///
     /// `interop`: load the worker's hwdec GL interop (`RenderWorker::hwdec_interop`) into
-    /// the render context — zero-copy hardware decoding (§ Sources "Hardware decoding"). Its
+    /// the render context — zero-copy hardware decoding (`docs/player/modules/sources.md` § Hardware decoding). Its
     /// init (a CUDA context on NVIDIA, 85–220 ms) runs in `mpv_render_context_create`, i.e. on
     /// the worker; so only an attach the LOOP doesn't wait for may ask (the `lia-open` job —
     /// never a synchronous open, which waits for this reply on the loop), and only for a
@@ -463,7 +463,7 @@ impl PreparedCore {
                 Ok(self)
             }
             Err(Some(h)) => {
-                // Rendering on the loop after all: no interop init there (Task 20d).
+                // Rendering on the loop after all: no interop init there.
                 if interop.is_some() {
                     let _ = h.set_option("gpu-hwdec-interop", "no");
                 }
@@ -522,7 +522,7 @@ pub struct MpvSource {
     /// `back` holds a frame of the current load, rendered after its FILE_LOADED.
     back_valid: bool,
 
-    // Phase 2 (render worker, § Sources "Render worker"): `Some` = the render context lives
+    // Render worker (`docs/player/modules/sources.md` § Render worker): `Some` = the render context lives
     // on the worker; `render`/`front`/`back` above stay `None` and these hold the textures
     // the worker handed over (it owns their FBOs and deletes them).
     worker: Option<Attached>,
@@ -603,13 +603,13 @@ pub struct MpvSource {
     /// The current load failed (cleared by the next load): stepped mode doesn't wait on it.
     load_failed: Option<String>,
 
-    /// Stepped (deterministic headless) mode, R48: mpv itself stays paused for good;
+    /// Stepped (deterministic headless) mode: mpv itself stays paused for good;
     /// `paused`/`position` are stored (logical, what the graph says) but not sent — the
     /// runtime shows each step's frame with [`MpvSource::step_seek`].
     stepped: bool,
     step: Option<StepSeek>,
 
-    // Two-phase teardown (R51, `Source::begin_teardown`).
+    // Two-phase teardown (`Source::begin_teardown`).
     /// A START_FILE was ever seen (a VO may exist).
     started_any: bool,
     /// mpv reported `idle-active` = true after the last file ended (its VO is gone).
@@ -623,17 +623,17 @@ pub struct MpvSource {
     /// won't wait on the playloop.
     idle_after_stop: bool,
     /// Seconds ADDED to every `audio_delay` the graph sets before it reaches mpv's
-    /// `audio-delay` (opt `audio_delay_bias`; `serve` passes −bus latency, Task 14).
+    /// `audio-delay` (opt `audio_delay_bias`; `serve` passes −bus latency).
     /// `read("audio_delay")` stays the graph's value.
     audio_delay_bias: f64,
-    /// Task 16c (R85): armed by `apply("paused", false)` on a source that was paused —
+    /// Armed by `apply("paused", false)` on a source that was paused —
     /// waiting for `audio-pts` to actually move before reporting [`SourceEvent::AudioFlowing`].
     /// `audio-pts` ("Current audio playback position... takes into account the audio
     /// driver delay", man mpv) only changes once samples are really flowing — unlike
     /// `time-pos`, it does not move while held/paused, so the very next change after
     /// arming is the real thing, not a stale carry-over.
     ///
-    /// **Measured on-machine (review fix round, 4 runs): not quite true.** `audio-pts`'s
+    /// **Measured on-machine (4 runs): not quite true.** `audio-pts`'s
     /// *first* change after an un-pause lands anywhere from ~4 ms to ~65 ms later (highly
     /// variable), and — regardless of how long that itself took — the bus meter then
     /// shows a further ~12–33 ms of true digital silence *after* that change before any
@@ -642,7 +642,8 @@ pub struct MpvSource {
     /// `audio-pts` changing reflects the decoder/demuxer position catching up, not the AO
     /// actually emitting samples yet — a ramp gated on the first change alone (or even a
     /// minimum delay since *arming*, tried first and also measured insufficient here)
-    /// still reproduces the exact bug R85 exists to fix. Fixed by requiring
+    /// still ramps in over silence (the onset ramp is wasted before sound arrives). Hence
+    /// requiring
     /// [`FLOWING_CONFIRM_MARGIN`] of real time *since that first change itself* (see its
     /// own doc) before trusting it — `audio-pts` changing at all is still required (a
     /// never-playing/stuck core must never falsely confirm), it just isn't trusted the
@@ -652,7 +653,7 @@ pub struct MpvSource {
     /// When `audio-pts` was *first* seen to change since arming (`Instant`, paired with
     /// [`FLOWING_CONFIRM_MARGIN`]) — `None` until that first change.
     flowing_confirmed_at: Option<Instant>,
-    /// M4: `audio-pts` is observed (only while `awaiting_flowing`), and the value of its
+    /// `audio-pts` is observed (only while `awaiting_flowing`), and the value of its
     /// first notification since observing — mpv reports the current value right away on
     /// `observe`, which is not a change.
     pts_observed: bool,
@@ -663,7 +664,7 @@ pub struct MpvSource {
     /// [`NO_AUDIO_MEDIA_ADVANCE`]'s "the picture plays on without any audio" confirmation.
     flowing_arm_pos: Option<f64>,
     audio_pts_unavailable: bool,
-    /// R92 (review of Task 16c/16d): whether the *current load* actually has an audio
+    /// Whether the *current load* actually has an audio
     /// track mpv selected — unlike `no_audio` (our own request to disable it) or
     /// `kind == "video"` (just "this isn't a still image"), this is what mpv itself
     /// resolved after the file loaded: the observed `aid` property (`OBS_AUDIO_SELECTED`
@@ -673,10 +674,9 @@ pub struct MpvSource {
     /// seen yet for this load) — every caller treats that as "has audio" (the
     /// conservative default: never falsely skip a ramp/wait a real stream needs).
     /// Without this, a video file with literally no audio stream (common for subtly
-    /// silent wallpapers) made every onset (R85) and R88 pause/resume wait the full
-    /// `ONSET_TIMEOUT` and log a warning, forever, since the old check
-    /// (`kind == "video" && !no_audio`) can't tell "disabled" apart from "never had
-    /// one". Reset to `None` on every new load (`StartFile`); set from `on_prop`.
+    /// silent wallpapers) would make every onset and pause/resume wait the full
+    /// `ONSET_TIMEOUT` and log a warning, forever, since `kind == "video" && !no_audio`
+    /// alone can't tell "disabled" apart from "never had one". Reset to `None` on every new load (`StartFile`); set from `on_prop`.
     has_audio: Option<bool>,
     /// Whether the current load is a still (TODO "An fps cap stalls a still image"): the
     /// `kind` at open, `infer_kind` of a new `path`, then mpv's `current-tracks/video/image`
@@ -687,7 +687,7 @@ pub struct MpvSource {
     vf_sent: Option<String>,
 }
 
-/// Task 16c (R85 review fix round): the real time required *after* `audio-pts`'s first
+/// The real time required *after* `audio-pts`'s first
 /// post-un-pause change before it's trusted as "audio is really flowing" — see
 /// `awaiting_flowing`'s doc for the measurement (observed 12–33 ms of continued silence
 /// after that first change, across 4 on-machine runs; a 25 ms margin still left a ~2.6 ms
@@ -720,12 +720,12 @@ impl MpvSource {
     /// `speed`, `gain.<slot>`, `hwdec`, …; `position` becomes the start time) — every
     /// writable property not given is applied at its **schema default**, so `read` and
     /// mpv agree from the start — plus:
-    /// - `ao` — mpv audio output, default [`DEFAULT_AO`] (tests pass `"null"`, R26);
-    /// - `audio_device` — mpv `audio-device` (the player bus, Task 14);
+    /// - `ao` — mpv audio output, default [`DEFAULT_AO`] (tests pass `"null"`);
+    /// - `audio_device` — mpv `audio-device` (the player bus);
     /// - `audio_delay_bias` — seconds added to every `audio_delay` before it reaches mpv's
-    ///   `audio-delay` (the bus's latency compensation: −`Bus::latency()`, Task 14);
+    ///   `audio-delay` (the bus's latency compensation: −`Bus::latency()`);
     /// - `kind` — `"video"` | `"image"`; default inferred from the extension;
-    /// - `stepped` — `true`: deterministic stepped mode (R48; mpv stays paused, frames come
+    /// - `stepped` — `true`: deterministic stepped mode (mpv stays paused, frames come
     ///   from [`MpvSource::step_seek`] — see the field doc).
     ///
     /// `path` in `opts` is ignored (the argument wins); read-only and unknown names are
@@ -736,7 +736,7 @@ impl MpvSource {
         MpvSource::open_with_core(gfx, path, opts, core)
     }
 
-    /// I5 (final review): the part of [`open`](Self::open) that needs no GL context and no
+    /// The part of [`open`](Self::open) that needs no GL context and no
     /// node props — the eventfd, `mpv_create`, the fixed options, `mpv_initialize`, the
     /// property observers and the wakeup callback — measured 2–8 ms per source, so the
     /// runtime runs it on a worker thread (`SourceHost`'s async open) and only the render
@@ -753,7 +753,7 @@ impl MpvSource {
         };
         let ao = opt_str("ao")?.unwrap_or(DEFAULT_AO).to_string();
         let audio_device = opt_str("audio_device")?.map(str::to_string);
-        // I5: mpv's GL shader cache — the first render of a new render context compiles
+        // mpv's GL shader cache — the first render of a new render context compiles
         // its shaders; with a cache dir the program binaries are reused across sources.
         let shader_cache_dir = opt_str("shader_cache_dir")?.map(str::to_string);
 
@@ -791,12 +791,12 @@ impl MpvSource {
             ("ytdl", "no"),
             ("input-default-bindings", "no"),
             ("audio-client-name", "liascape-player"),
-            // I5: the default `fruit` dither builds its blue-noise matrix on the CPU in
+            // The default `fruit` dither builds its blue-noise matrix on the CPU in
             // the first render of every render context — measured ~25–30 ms on the loop
             // per switch (with it: first `update` 33–65 ms; `ordered`: 6–19 ms). Ordered
             // dithering of the same 8-bit target is visually equivalent for wallpapers.
             ("dither", "ordered"),
-            // Task 20d (R107): no hwdec GL interop. mpv's default (`auto`) loads the CUDA
+            // No hwdec GL interop. mpv's default (`auto`) loads the CUDA
             // interop — a CUDA context — inside `mpv_render_context_create`, on the loop:
             // 65–90 ms per switch whenever libcuda is loadable (the flake wrapper's
             // LD_LIBRARY_PATH, or once libavutil loaded it for nvdec-copy), even with
@@ -851,7 +851,7 @@ impl MpvSource {
             (OBS_IMAGE, "current-tracks/video/image", Format::Flag),
             (OBS_IDLE, "idle-active", Format::Flag),
             // `audio-pts` (OBS_AUDIO_PTS) is observed only while an `AudioFlowing`
-            // confirmation is armed (M4): it changes at the audio-buffer rate, and every
+            // confirmation is armed: it changes at the audio-buffer rate, and every
             // change wakes the loop.
             (OBS_AUDIO_SELECTED, "aid", Format::Str),
         ] {
@@ -912,7 +912,7 @@ impl MpvSource {
             match k.as_str() {
                 "ao" | "audio_device" | "audio_delay_bias" | "kind" | "path" | "stepped"
                 | "shader_cache_dir" => {}
-                // `SourceHost`'s base opts for scene sources (Phase 2) — not an mpv's.
+                // `SourceHost`'s base opts for scene sources — not an mpv's.
                 "scene_worker" | "scene_crash_dir" | "scene_assets" | "scene_assets_error"
                 | "allow_synthetic" => {}
                 "position" => {
@@ -931,7 +931,7 @@ impl MpvSource {
         // (and its wakeup callback) is gone.
         let wake = core.wake.take().expect("a prepared core has its eventfd");
         let handle = core.handle.take().expect("a prepared core has its handle");
-        // Phase 2: a render context made on the render worker (nothing to create here; from
+        // A render context made on the render worker (nothing to create here; from
         // now on `MpvSource::drop` hands it back to the worker).
         let worker = core.render.take();
         let hwdec_interop = core.interop.filter(|_| worker.is_some());
@@ -1066,7 +1066,7 @@ impl MpvSource {
         Ok(src)
     }
 
-    /// I7 (final review): live re-route of this source's audio — `device` = mpv
+    /// Live re-route of this source's audio — `device` = mpv
     /// `audio-device` (`None` = `auto`, mpv's default device: the bus is down), `bias` =
     /// the new `audio_delay_bias` (−bus latency). mpv reloads its audio output on an
     /// `audio-device` change; async, like every live apply.
@@ -1097,7 +1097,7 @@ impl MpvSource {
         Ok(())
     }
 
-    /// The eventfd the runtime polls (Task 12): it becomes readable whenever mpv has a new
+    /// The eventfd the runtime polls: it becomes readable whenever mpv has a new
     /// event or a new frame. On readability call [`Source::poll_events`] and
     /// [`Source::update`] — each drains the fd first, so a signal arriving mid-call is
     /// never lost.
@@ -1133,7 +1133,7 @@ impl MpvSource {
         self.ready
     }
 
-    /// Stepped mode (R48): show the frame at media time `t` — `seek <t> absolute exact`
+    /// Stepped mode: show the frame at media time `t` — `seek <t> absolute exact`
     /// with mpv paused. [`MpvSource::step_status`] says when that frame is the texture.
     /// Only call once the source [`is_ready`](Self::is_ready).
     pub fn step_seek(&mut self, t: f64) -> Result<(), ApiError> {
@@ -1311,7 +1311,7 @@ impl MpvSource {
     }
 
     /// Send [`Self::want_vf`] when it differs from what mpv runs. A rejection reverts
-    /// `fps_cap` (R45) — to the previous value for an `apply`, to the current one (a no-op)
+    /// `fps_cap` — to the previous value for an `apply`, to the current one (a no-op)
     /// for a push of our own (a load, the image flag).
     fn push_vf(&mut self) -> Result<(), ApiError> {
         let vf = self.want_vf();
@@ -1383,14 +1383,14 @@ impl MpvSource {
         self.step = None;
         self.disarm_audio_flowing();
         // A load that plays (not paused) starts audio too: arm so a caller holding a ramp
-        // on it (a restored source's fade-in, I6) learns when its audio really flows.
+        // on it (a restored source's fade-in) learns when its audio really flows.
         if !matches!(self.props.get("paused"), Some(PropValue::Bool(true))) {
             self.arm_audio_flowing();
         }
         Ok(())
     }
 
-    /// Stop waiting for `AudioFlowing` and stop observing `audio-pts` (M4).
+    /// Stop waiting for `AudioFlowing` and stop observing `audio-pts`.
     fn disarm_audio_flowing(&mut self) {
         self.awaiting_flowing = false;
         self.flowing_confirmed_at = None;
@@ -1405,8 +1405,7 @@ impl MpvSource {
         }
     }
 
-    /// mpv couldn't build the audio filter chain (TODO "A rejected `af` silences the
-    /// video", owner 2026-11-06): a filter with an argument ffmpeg rejects — `loudnorm=I=0`
+    /// mpv couldn't build the audio filter chain: a filter with an argument ffmpeg rejects — `loudnorm=I=0`
     /// (its `I` takes −70…−5) — passes mpv's own option check (the filter exists), so the
     /// `af` set succeeds and only building the chain fails. At the file's audio init mpv then
     /// plays NO audio at all ("Audio: no audio": the track is deselected, `current-ao`
@@ -1473,11 +1472,11 @@ impl MpvSource {
         self.af_refused.as_ref()
     }
 
-    /// R85: arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
+    /// Arm the wait for [`SourceEvent::AudioFlowing`] — called right after an
     /// un-pause request is queued. Nothing to wait for (fires at once) when: stepped mode
-    /// (mpv stays paused for good there — audio is always silent, § Sources "Stepped
-    /// mode"), no audio track (`no_audio` asked for `aid=no`), an image (no audio
-    /// concept at all), or — R92 — the file itself genuinely has no audio track to begin
+    /// (mpv stays paused for good there — audio is always silent,
+    /// `docs/player/modules/runtime.md` § Stepped clock), no audio track (`no_audio` asked for `aid=no`), an image (no audio
+    /// concept at all), or the file itself genuinely has no audio track to begin
     /// with (`self.has_audio == Some(false)`; `None`/unknown still waits, the
     /// conservative default). Otherwise armed — `audio-pts`'s first change starts a
     /// [`FLOWING_CONFIRM_MARGIN`] countdown (`on_prop`) before it fires; the caller (a
@@ -1777,9 +1776,8 @@ impl MpvSource {
     ///   audio playing, mpv's clock is the audio, so the picture doesn't run ahead of it).
     ///   Nothing will ever be heard, so the ramp may start: there is nothing to cut off.
     ///
-    /// Before, only a LATER `audio-pts` change could confirm, so every onset on such a
-    /// source waited out `ONSET_TIMEOUT` and logged `transition.onset_timeout` (TODO, the
-    /// Task 20 re-run's 85). A core that never plays (no change, position stuck) still
+    /// Without this, only a LATER `audio-pts` change could confirm, so every onset on such a
+    /// source would wait out `ONSET_TIMEOUT` and log `transition.onset_timeout`. A core that never plays (no change, position stuck) still
     /// never confirms — the caller's timeout stays the backstop.
     fn confirm_flowing_by_time(&mut self) {
         if !self.awaiting_flowing {
@@ -1860,7 +1858,7 @@ impl MpvSource {
                     let _ = self.push_vf();
                 }
             }
-            // R92: `aid` (the *resolved* audio track selection — "manpage: the special
+            // `aid` (the *resolved* audio track selection — "manpage: the special
             // value `no` means no track is selected") always has a real textual value
             // ("auto" pre-resolution, then either a track number or `no`), unlike
             // `current-tracks/audio/id`'s sub-path (tried first: a genuinely audio-less
@@ -1871,7 +1869,7 @@ impl MpvSource {
             // "auto" once mpv decides, for every load, including the very first.
             //
             // **Must not conflate with our own `no_audio` request** (which also drives
-            // `aid` to `"no"`, § `apply`'s `"no_audio" => self.set(prop, "aid", …)`):
+            // `aid` to `"no"`, see `apply`'s `"no_audio" => self.set(prop, "aid", …)`):
             // while `no_audio` is on, an observed `"no"` here says nothing about the
             // *file's* own content, so it's ignored — `has_audio` keeps whatever it last
             // genuinely knew (or stays `None`/unknown) until `no_audio` is off again and
@@ -1886,7 +1884,7 @@ impl MpvSource {
                     }
                 }
             }
-            // R85 (review fix round): the *first* change confirms something resumed
+            // The *first* change confirms something resumed
             // (decode/demux), but not reliably that the AO itself has yet — record it and
             // only fire once `FLOWING_CONFIRM_MARGIN` has passed *since that change*
             // (`awaiting_flowing`'s doc: real output measured arriving a further 12-20 ms
@@ -1900,7 +1898,7 @@ impl MpvSource {
             }
             (OBS_AUDIO_PTS, PropData::F64(v)) if live && self.awaiting_flowing => {
                 self.audio_pts_unavailable = false;
-                // M4: the first notification after `observe` is its current value, not a
+                // The first notification after `observe` is its current value, not a
                 // change — remember it; only a different value counts.
                 let Some(last) = self.flowing_last_pts.replace(v) else {
                     return;
@@ -1918,7 +1916,7 @@ impl MpvSource {
         }
     }
 
-    /// Phase 2 (render worker): `update`'s GL half when the render context lives on the
+    /// Render worker: `update`'s GL half when the render context lives on the
     /// worker — tell it the size, adopt the newest complete frame it handed over (only once
     /// its fence has signalled: else the previous frame stays, re-checked next call), front
     /// vs staging back and Ready promotion exactly as the loop renderer does, and give back
@@ -2024,7 +2022,7 @@ impl MpvSource {
         changed
     }
 
-    /// `"worker"` (Phase 2 render worker) or `"loop"` — where this source renders (probe).
+    /// `"worker"` (render worker) or `"loop"` — where this source renders (probe).
     pub fn render_mode(&self) -> &'static str {
         if self.worker.is_some() {
             "worker"
@@ -2221,7 +2219,7 @@ fn render_into(
         (Some((_, f)), _) | (None, Some((_, f))) => f.id.0.get(),
         (None, None) => unreachable!("reuse implies a target"),
     };
-    // R25: FLIP_Y = 0 lands the image's top row at texture row 0 (t = 0) — the raw
+    // FLIP_Y = 0 lands the image's top row at texture row 0 (t = 0) — the raw
     // source layout `gfx::compose` expects (pinned by tests/sources.rs).
     let res = unsafe { render.render(fbo, w, h, glow::RGBA8, false) };
     reset_gl_state(gfx);
@@ -2379,7 +2377,7 @@ impl Source for MpvSource {
                     .and_then(|()| self.load(&s))
             }
             // Stepped: logical only (mpv stays paused; the runtime seeks each step). A
-            // paused -> un-paused edge still arms the R85 flowing-wait — which fires at
+            // paused -> un-paused edge still arms the flowing-wait — which fires at
             // once (`arm_audio_flowing`'s own `self.stepped` check): there is never real
             // audio to wait for in stepped mode, so a recipe holding an onset ramp on
             // this id must not block on a confirmation that can never arrive.
@@ -2392,7 +2390,7 @@ impl Source for MpvSource {
             }
             "position" if self.stepped => Ok(()),
             "paused" => {
-                // R85: arm the real-audio-flowing wait on a genuine paused -> un-paused
+                // Arm the real-audio-flowing wait on a genuine paused -> un-paused
                 // edge, before the (async, so unconfirmed yet) un-pause request is even
                 // sent — `prev` is what `apply` observed last, i.e. the value *before*
                 // this call (captured above `self.props.insert`).
@@ -2415,7 +2413,7 @@ impl Source for MpvSource {
                 }
             }
             // Copy modes unless this render context loaded a GL interop (on the render
-            // worker — `mpv_hwdec`, § Sources "Hardware decoding").
+            // worker — `mpv_hwdec`, `docs/player/modules/sources.md` § Hardware decoding).
             "hwdec" => self.set(prop, "hwdec", &mpv_hwdec(&s, self.hwdec_interop)),
             // `vf` `fps=<n>` — never on a still (`want_vf`); the prop keeps the value, and it
             // applies if the load turns out to move.
@@ -2453,7 +2451,7 @@ impl Source for MpvSource {
                 self.af_refused = None;
                 self.set(prop, "af", &mpv_af(&s))
             }
-            // Phase 2: a scene's still image and user properties; stored (a global `set`
+            // A scene's still image and user properties; stored (a global `set`
             // never fails here).
             "preview" | "scene_props" | "loudness_seed" | "loudness_key" => Ok(()),
             // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
@@ -2497,7 +2495,7 @@ impl Source for MpvSource {
             "width" => self.target_size().map(|(w, _)| PropValue::I64(w as i64)),
             "height" => self.target_size().map(|(_, h)| PropValue::I64(h as i64)),
             "color" => None,
-            // R92: unknown stays `None` (unmirrored) rather than an explicit `true` — the
+            // Unknown stays `None` (unmirrored) rather than an explicit `true` — the
             // graph's own schema default (`true`) already is the conservative "treat as
             // audio" fallback invariants #4/#8 need; no point mirroring a value we don't
             // actually know yet.
@@ -2512,7 +2510,7 @@ impl Source for MpvSource {
         std::mem::take(&mut self.pending)
     }
 
-    /// R51 phase 1: `stop` (async) — the file ends, mpv goes idle and uninitialises its
+    /// Teardown phase 1: `stop` (async) — the file ends, mpv goes idle and uninitialises its
     /// VO, after which `mpv_render_context_free` no longer waits on the playloop (with the
     /// VO live it blocked the loop 21–32 ms for a playing 1080p clip, measured). The
     /// stream is silent from the stop on.
@@ -2525,7 +2523,7 @@ impl Source for MpvSource {
         false
     }
 
-    /// R51 phase 2: idle after the stop (or the core is gone, or [`TEARDOWN_MAX`] passed).
+    /// Teardown phase 2: idle after the stop (or the core is gone, or [`TEARDOWN_MAX`] passed).
     fn teardown_ready(&mut self) -> bool {
         if !self.dead {
             self.drain_wake();
@@ -2586,7 +2584,7 @@ impl Drop for MpvSource {
         drop(cur);
         // 2. The core: clear the wakeup callback (no write to the eventfd once this
         //    returns — mpv calls it under the same lock), then hand the core to the reaper
-        //    thread (R51): `mpv_terminate_destroy` takes 30–240 ms (measured) and must never
+        //    thread: `mpv_terminate_destroy` takes 30–240 ms (measured) and must never
         //    stall the render loop. 3. The eventfd closes right after (field drop).
         if let Some(h) = &self.handle {
             unsafe { h.set_wakeup_callback(None, ptr::null_mut()) };
@@ -2655,7 +2653,7 @@ mod tests {
         }
     }
 
-    /// Task 20d: never a GL interop mode; `auto` prefers nvdec/vaapi copies over mpv's own
+    /// Never a GL interop mode; `auto` prefers nvdec/vaapi copies over mpv's own
     /// `vulkan-copy`-first list; the user's explicit choices keep their API.
     #[test]
     fn hwdec_maps_to_copy_modes_only() {

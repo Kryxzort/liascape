@@ -1,4 +1,4 @@
-//! Task 9 brief, Step 1: GPU pixel tests for layer composition — `Composer::compose_output`
+//! GPU pixel tests for layer composition — `Composer::compose_output`
 //! drawing a real output's main layer (source or effect) with fill/fit/stretch/crop,
 //! viewport spanning, and opacity, read back pixel-for-pixel.
 //!
@@ -11,7 +11,7 @@
 //! two conditions `tests/effects_all.rs` already skips on: no EGL device at all, or no
 //! `transitions/` directory resolves (true inside `nix build .#liascape-player`'s sandboxed
 //! check phase). Every test here needs a `Catalogue` even when it never actually draws an
-//! effect, because `Composer::compose_output`'s signature always takes one (R20) — so a
+//! effect, because `Composer::compose_output`'s signature always takes one — so a
 //! missing `transitions/` skips every test in this file, not just the effect ones. Under
 //! `LIASCAPE_REQUIRE_GPU=1` either missing precondition fails instead (`common::skip_gpu`).
 
@@ -348,7 +348,7 @@ fn opacity_half() {
     assert_eq!(px[2], 0, "blue channel should be 0, got {}", px[2]);
 }
 
-/// R19: a missing source texture (the `textures` lookup returns `None`) draws as fully
+/// A missing source texture (the `textures` lookup returns `None`) draws as fully
 /// transparent — no frame memory in this module at all.
 #[test]
 fn missing_source_texture_is_transparent() {
@@ -659,15 +659,12 @@ fn y_axis_orientation_matches_image_top() {
     }
 }
 
-/// Review finding (Critical, fix round 1 → fix round 2): round 1's fix made plain
-/// `Source` layers correct but introduced a *double* Y-flip for the `Effect` path
-/// (`render_side` pre-flipped raw `from`/`to` textures, and
-/// `effects::EffectProgram::draw` flips again via `transitions/wrap.frag.template`'s
-/// unconditional `getFromColor`/`getToColor` — flip∘flip = identity = the *original*
-/// upside-down bug, just now only for transitions). Untested at the time because
-/// `y_axis_orientation_matches_image_top` only exercises a plain `Source` layer, and
-/// `effect_fade_midpoint_through_graph` uses Y-uniform colours that can't distinguish a
-/// flip from no flip.
+/// The trap: a *double* Y-flip on the `Effect` path — `render_side` pre-flipping raw
+/// `from`/`to` textures while `effects::EffectProgram::draw` flips again via
+/// `transitions/wrap.frag.template`'s unconditional `getFromColor`/`getToColor`
+/// (flip∘flip = identity = upside-down transitions). Neither
+/// `y_axis_orientation_matches_image_top` (a plain `Source` layer only) nor
+/// `effect_fade_midpoint_through_graph` (Y-uniform colours) can see it.
 ///
 /// This pins the property that actually matters: **a transition at `progress = 0`/`1`
 /// must look pixel-identical to the plain `Source` layer it starts/ends on** — for two
@@ -776,7 +773,7 @@ fn effect_progress_endpoints_match_plain_source() {
     }
 }
 
-/// M3 (final review): an effect this driver can't compile draws as a cut (the side the
+/// An effect this driver can't compile draws as a cut (the side the
 /// progress is nearer), never a black output — and the failure is cached: the next call
 /// doesn't re-read or re-compile (`Catalogue::failed`).
 #[test]

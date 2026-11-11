@@ -1,4 +1,4 @@
-//! The `snapshot` probe (Task 16): the state snapshot `--restore` would load
+//! The `snapshot` probe: the state snapshot `--restore` would load
 //! (`crate::snapshot`) — what would be saved right now (`current`), when the next write is
 //! due, and the writer thread's counters.
 

@@ -1,4 +1,4 @@
-//! The bridge between the graph's `Source` nodes and live [`Source`]s (R32): the only
+//! The bridge between the graph's `Source` nodes and live [`Source`]s: the only
 //! place a node turns into a decoder/texture, so the recipes (`crate::recipes`) and the
 //! command API only ever talk to the graph.
 //!
@@ -30,7 +30,7 @@ use crate::log::{self, Level};
 
 /// Observed values mirrored into the graph after every `update` (`Graph::set_observed`).
 /// `kind` too: an `MpvSource` infers image/video from the file (and corrects it after
-/// load), and recipes decide what is a still by it. `has_audio` (R92): what mpv actually
+/// load), and recipes decide what is a still by it. `has_audio`: what mpv actually
 /// resolved — distinct from `no_audio` (our own request) — so a video with literally no
 /// audio track is never mistaken for one that merely has audio disabled.
 const MIRRORED: [&str; 10] = [
@@ -42,7 +42,7 @@ const MIRRORED: [&str; 10] = [
     "height",
     "paused",
     "has_audio",
-    // Phase 2 Task 10: a scene past its restart budget (the snapshot saves it).
+    // A scene past its restart budget (the snapshot saves it).
     "broken",
     // A scene whose live worker is inside its load + build (no first frame yet): the
     // transition recipe waits longer for such a B (`recipes::transition::LOADING_READY_TIMEOUT`).
@@ -52,7 +52,7 @@ const MIRRORED: [&str; 10] = [
 struct Hosted {
     src: Box<dyn Source>,
     wake: Option<RawFd>,
-    /// The value last mirrored into the graph per [`MIRRORED`] prop (Phase 2 Task 14): an
+    /// The value last mirrored into the graph per [`MIRRORED`] prop: an
     /// unchanged one isn't written again. A scene updates on every frame and the mirror used
     /// to format, parse and resolve nine paths per update — the bulk of the compositor's CPU
     /// per worker (perf, on-machine). Cleared whenever a change is forwarded to the source,
@@ -63,7 +63,7 @@ struct Hosted {
 /// Nothing mirrored yet.
 const UNMIRRORED: [Option<PropValue>; MIRRORED.len()] = [const { None }; MIRRORED.len()];
 
-/// Phase 2 Task 8 (low VRAM, mode `stop`): a media source whose decoder/worker was dropped to
+/// Low VRAM, mode `stop`: a media source whose decoder/worker was dropped to
 /// free GPU memory while its node stays in the graph ([`SourceHost::suspend_media`]).
 struct Suspended {
     /// Where it was (`time_pos`; `None` = the node's own `position`).
@@ -80,7 +80,7 @@ struct Resuming {
     stand_in: Option<SnapshotSource>,
 }
 
-/// I5 (final review): wakes the loop when an async open's core is ready.
+/// Wakes the loop when an async open's core is ready.
 pub type OpenWaker = Arc<dyn Fn() + Send + Sync>;
 
 type OpenSlot = Arc<Mutex<Option<Result<PreparedCore, ApiError>>>>;
@@ -90,7 +90,7 @@ type OpenSlot = Arc<Mutex<Option<Result<PreparedCore, ApiError>>>>;
 /// on the first `sync` after the worker is done.
 struct Opening {
     slot: OpenSlot,
-    /// The audio route generation its core was prepared with (I7).
+    /// The audio route generation its core was prepared with.
     route_gen: u64,
 }
 
@@ -103,7 +103,7 @@ static OPENING: AtomicUsize = AtomicUsize::new(0);
 static OPEN_SKIPPED: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether a source opened from `node` gets the render worker's hwdec GL interop (`interop`,
-/// § Sources "Hardware decoding"): only when its `hwdec` (as the node says when the open is
+/// `docs/player/modules/sources.md` § Hardware decoding): only when its `hwdec` (as the node says when the open is
 /// submitted) would decode zero-copy through it — not `no`/unset, not a `-copy` mode or
 /// `auto-copy`, not a decoder this interop can't show — and it isn't an image (mpv decodes
 /// stills in software). The interop's init (a CUDA context per render context on NVIDIA:
@@ -122,7 +122,7 @@ fn wants_hwdec_interop(node: &[(String, PropValue)], interop: &str) -> bool {
     super::mpv::mpv_hwdec(hw, Some(interop)) != super::mpv::mpv_hwdec(hw, None)
 }
 
-/// I5: async opens still queued or creating a core.
+/// Async opens still queued or creating a core.
 pub fn opening_pending() -> usize {
     OPENING.load(Ordering::SeqCst)
 }
@@ -252,8 +252,8 @@ pub fn open_queued() -> usize {
 
 /// Owns one live [`Source`] per graph `Source` node.
 pub struct SourceHost {
-    /// Merged into every `MpvSource::open`'s opts (e.g. `{"ao": "null"}` in tests — R26 —
-    /// or the player bus `audio_device`, Task 14). Node props win over these.
+    /// Merged into every `MpvSource::open`'s opts (e.g. `{"ao": "null"}` in tests,
+    /// or the player bus `audio_device`). Node props win over these.
     base_opts: Map<String, Value>,
     /// Every scene path's loudness measurement, shared by the scene sources of that path
     /// (`audio::loudness::Book`: a reopen or a transition A → A' continues it).
@@ -262,37 +262,37 @@ pub struct SourceHost {
     /// Nodes whose source failed to open synchronously: not retried until the node goes.
     failed: BTreeSet<String>,
     events: Vec<(String, SourceEvent)>,
-    /// Sources whose node is gone, mid two-phase teardown (R51): silent, no longer
+    /// Sources whose node is gone, mid two-phase teardown: silent, no longer
     /// hosted (not in `ids`/`texture`/`wake_fds`), dropped by `update` once ready.
     dying: Vec<(String, Hosted, std::time::Instant)>,
     /// Time spent opening sources since the last `take_open_time` (opening is synchronous
     /// — mpv init + render context; the `loop` probe reports it apart).
     open_time: std::time::Duration,
-    /// Sources whose texture changed since the last `take_changed` (Task 13: the redraw
+    /// Sources whose texture changed since the last `take_changed` (the redraw
     /// policy wakes only the outputs showing them).
     changed: BTreeSet<String>,
-    /// R75 (Task 16b): the last `player_paused` [`SourceHost::sync`] saw. While true, the
+    /// The last `player_paused` [`SourceHost::sync`] saw. While true, the
     /// `paused` mirror in [`SourceHost::update`] is suspended — every hosted source's
     /// live `paused` is the OR'd *effective* value (what actually reached the source),
     /// not the node's own intention, and mirroring that back would corrupt what the
     /// recipe/user asked for (see `sync`'s doc).
     player_paused: bool,
-    /// Task 16c (R88): ids `Runtime`'s player-pause anticlick gate is still ramping down —
+    /// Ids `Runtime`'s player-pause anticlick gate is still ramping down —
     /// excluded from the `player_paused` OR composition below (treated as if
     /// `player_paused` were `false` for them specifically) until the gate itself decides
     /// the ramp has settled and calls [`SourceHost::force_paused`]. Set each tick by
     /// `Runtime` via [`SourceHost::set_pause_exclusions`]; consulted only inside `sync`.
     pause_exclusions: BTreeSet<String>,
-    /// I5: `Some` = open mpv cores on a worker thread (the real-clock runtime); `None` =
+    /// `Some` = open mpv cores on a worker thread (the real-clock runtime); `None` =
     /// synchronously (stepped mode — determinism — and the test harnesses).
     async_open: Option<OpenWaker>,
     opening: BTreeMap<String, Opening>,
-    /// I7: bumped by every `set_audio_route` (a core prepared before it is re-routed).
+    /// Bumped by every `set_audio_route` (a core prepared before it is re-routed).
     route_gen: u64,
-    /// Phase 2: async opens hand their core's rendering to this worker (§ Sources "Render
-    /// worker"); `None` = every mpv source renders on the loop.
+    /// Async opens hand their core's rendering to this worker
+    /// (`docs/player/modules/sources.md` § Render worker); `None` = every mpv source renders on the loop.
     render_worker: Option<Arc<RenderWorker>>,
-    /// Task 8 (low VRAM, `stop`): media sources dropped to free GPU memory, by node id…
+    /// Low VRAM, `stop`: media sources dropped to free GPU memory, by node id…
     suspended: BTreeMap<String, Suspended>,
     /// …new media nodes are not opened meanwhile (they open at the resume)…
     suspend_new: bool,
@@ -336,7 +336,7 @@ impl SourceHost {
         }
     }
 
-    /// Phase 2 Task 8 (the low-VRAM rule, mode `stop`): drop every video/image/scene source's
+    /// The low-VRAM rule, mode `stop`: drop every video/image/scene source's
     /// decoder or worker to free its GPU memory — the node stays, a still of its last frame is
     /// shown in its place (`texture`), and media nodes created meanwhile wait unopened. The
     /// caller has paused and silenced them first (the player pause). Returns the ids.
@@ -399,7 +399,7 @@ impl SourceHost {
         ids
     }
 
-    /// Task 8: the low VRAM is over — every suspended source reopens (next `sync`) at the
+    /// The low VRAM is over — every suspended source reopens (next `sync`) at the
     /// position it had, its stand-in shown until its first frame; new media nodes open again.
     /// Returns the ids.
     pub fn resume_media(&mut self) -> Vec<String> {
@@ -421,12 +421,12 @@ impl SourceHost {
         ids
     }
 
-    /// Suspended sources (Task 8; probes).
+    /// Suspended sources (probes).
     pub fn suspended_ids(&self) -> Vec<String> {
         self.suspended.keys().cloned().collect()
     }
 
-    /// Reopened sources still waiting for their first frame (Task 8).
+    /// Reopened sources still waiting for their first frame.
     pub fn resuming_count(&self) -> usize {
         self.resuming.len()
     }
@@ -436,7 +436,7 @@ impl SourceHost {
         self.suspend_new
     }
 
-    /// I7 (final review): the audio bus went down (`device = None`: mpv's default device)
+    /// The audio bus went down (`device = None`: mpv's default device)
     /// or came back (`Some(bus device)`, `bias` = −bus latency) — every source opened from
     /// now on uses it, and every hosted mpv source is re-routed live. Returns the ids
     /// re-routed.
@@ -478,7 +478,7 @@ impl SourceHost {
         n
     }
 
-    /// I5 (final review): create mpv cores off the loop. `waker` is called (from the
+    /// Create mpv cores off the loop. `waker` is called (from the
     /// worker) when a core is ready, so the loop picks it up at once; the source then opens
     /// on the next `sync` (render context, props, `loadfile` — the GL half stays on the
     /// loop thread). `None` = synchronous opens (the default).
@@ -486,7 +486,7 @@ impl SourceHost {
         self.async_open = waker;
     }
 
-    /// Phase 2 (§ Sources "Render worker"): render every mpv source opened asynchronously
+    /// Render worker (`docs/player/modules/sources.md` § Render worker): render every mpv source opened asynchronously
     /// from now on on `worker` (its `lia-open` job attaches the core there). Synchronous opens
     /// (stepped mode, the harnesses, a pool that can't start a thread) keep rendering on the
     /// loop. `None` = off.
@@ -512,16 +512,16 @@ impl SourceHost {
         self.opening.len()
     }
 
-    /// Task 16c (R88): set the ids `Runtime`'s player-pause anticlick gate is still
+    /// Set the ids `Runtime`'s player-pause anticlick gate is still
     /// ramping down this tick — `sync` treats `player_paused` as `false` for exactly
-    /// these ids (never touching the node's own `paused`, same as every other R75 path)
+    /// these ids (never touching the node's own `paused`, same as every other player-pause path)
     /// until the gate calls [`SourceHost::force_paused`]. Cheap to call every tick even
     /// when empty (the common case).
     pub fn set_pause_exclusions(&mut self, ids: BTreeSet<String>) {
         self.pause_exclusions = ids;
     }
 
-    /// Task 16c (R88): push `paused` straight to one hosted source, bypassing the
+    /// Push `paused` straight to one hosted source, bypassing the
     /// `player_paused`/node composition entirely — used only by `Runtime`'s player-pause
     /// anticlick gate, once *it* (real wall-clock timed, never the possibly-frozen player
     /// clock) decides the ramp has settled enough to actually pause, or that a resume
@@ -550,7 +550,7 @@ impl SourceHost {
         }
     }
 
-    /// R90 (Task 16d): a direct, scoped forward of one already-graph-set gain change to
+    /// A direct, scoped forward of one already-graph-set gain change to
     /// its hosted source — the fast gain timer's own ≥ 1 kHz channel
     /// (`Runtime::gain_fast_tick`), bypassing the ordinary per-tick [`sync`](Self::sync)
     /// entirely (no source opens, no gone-source scan, no `player_paused` composition —
@@ -559,7 +559,7 @@ impl SourceHost {
     /// open, or its node vanished the instant before) is silently skipped: the ordinary
     /// `sync` catches up once/if it exists, same as any other graph change reaching a
     /// never-hosted id. A rejection is logged/queued exactly like `sync`'s own (the
-    /// source is fine, R45).
+    /// source is fine).
     pub fn push_gain(&mut self, id: &str, prop: &str, v: &PropValue) {
         let Some(h) = self.sources.get_mut(id) else {
             return;
@@ -588,18 +588,18 @@ impl SourceHost {
     /// 2. open a source for every `Source` node not hosted yet, from the node's current
     ///    props (`kind` `color` → [`ColorSource`], `snapshot` → [`SnapshotSource`] of
     ///    `of`'s current texture, anything else → [`MpvSource`]) — its initial `paused`
-    ///    is the *effective* one (R75: `node.paused || player_paused`), not the node's
+    ///    is the *effective* one (`node.paused || player_paused`), not the node's
     ///    raw value;
     /// 3. forward each change addressed to a hosted source to [`Source::apply`] — except
     ///    to sources opened in step 2, whose props already include them; a `paused`
     ///    change is composed with `player_paused` the same way. A refused write is
-    ///    logged and queued as [`SourceEvent::Rejected`] (the source is fine, R45); a
+    ///    logged and queued as [`SourceEvent::Rejected`] (the source is fine); a
     ///    failed open as [`SourceEvent::Error`];
     /// 4. if `player_paused` itself changed since the last call, push every *other*
     ///    hosted source's recomputed effective `paused` too (step 3 above only reaches a
     ///    source whose own node changed this call).
     ///
-    /// R75's effective pause is intentionally never written into `self.props["paused"]`
+    /// The player-level effective pause is intentionally never written into `self.props["paused"]`
     /// as the node's own truth would be: `Source::apply("paused", …)` is still the single
     /// channel (mpv's real `pause` ends up OR'd either way — there's only one mpv
     /// property to tell), but the *mirror* back into the graph (`SourceHost::update`) is
@@ -658,13 +658,13 @@ impl SourceHost {
         self.suspended.retain(|id, _| alive(id));
         self.resuming.retain(|id, _| alive(id));
         self.resume_at.retain(|id, _| alive(id));
-        // I5: a node gone while its core is still being made — the worker's result is
+        // A node gone while its core is still being made — the worker's result is
         // dropped with the slot (`PreparedCore::drop` hands the core to the reaper).
         self.opening
             .retain(|id, _| graph.kind_of(id) == Some(NodeKind::Source));
 
         let mut opened = BTreeSet::new();
-        // I5: cores the workers finished since the last sync become sources now, from
+        // Cores the workers finished since the last sync become sources now, from
         // their nodes' *current* props (every change while opening is already in them).
         let ready: Vec<String> = self
             .opening
@@ -696,7 +696,7 @@ impl SourceHost {
             self.open_time += t_open.elapsed();
             match opened_src {
                 Ok(mut h) => {
-                    // I7: the bus went down/up while this core was being made — its
+                    // The bus went down/up while this core was being made — its
                     // `audio-device` is the old one.
                     if stale_route && let Some(m) = h.src.as_mpv_mut() {
                         let dev = self
@@ -738,7 +738,7 @@ impl SourceHost {
             let Some(mut node) = graph.props_of(&id) else {
                 continue;
             };
-            // Task 8: while media is suspended (low VRAM), a new video/image/scene waits.
+            // While media is suspended (low VRAM), a new video/image/scene waits.
             if self.suspend_new && is_media(&node) {
                 self.suspended.insert(
                     id.clone(),
@@ -791,9 +791,9 @@ impl SourceHost {
             let Some(h) = self.sources.get_mut(id) else {
                 continue;
             };
-            // R75: a node-level `paused` change is composed with the current
+            // A node-level `paused` change is composed with the current
             // `player_paused` before it reaches the source — the source only ever sees
-            // the effective value. Task 16c (R88): an id the pause-anticlick gate is still
+            // the effective value. An id the pause-anticlick gate is still
             // ramping down is excluded from that OR — `player_paused` reads as `false`
             // for it specifically until the gate itself calls `force_paused`.
             let effective = (prop == "paused").then_some(PropValue::Bool(
@@ -821,7 +821,7 @@ impl SourceHost {
             }
         }
 
-        // R75: `player_paused` itself changed — every *other* hosted source (one whose
+        // `player_paused` itself changed — every *other* hosted source (one whose
         // own `paused` didn't just change above, and that wasn't just opened with the
         // right value already) needs its effective pause recomputed and pushed too.
         if player_paused != self.player_paused {
@@ -863,7 +863,7 @@ impl SourceHost {
         }
         self.player_paused = player_paused;
 
-        // Phase 2 Task 5: every scene's demand — the outputs showing it now (their sizes,
+        // Every scene's demand — the outputs showing it now (their sizes,
         // refresh, `scene_fps`). The first one naming an output spawns its worker (here, on
         // the loop thread: the worker's PDEATHSIG follows the spawning thread); a change of
         // the largest output re-exports its ring; no output (parked) changes nothing.
@@ -900,7 +900,7 @@ impl SourceHost {
             _ => String::new(),
         };
         let kind = s("kind");
-        // R75: the source is opened already effectively paused if either the node asked
+        // The source is opened already effectively paused if either the node asked
         // for it or `player_paused` is on — never just the node's raw value.
         let node_paused = matches!(get("paused"), Some(PropValue::Bool(true)));
         let effective_paused = node_paused || player_paused;
@@ -928,7 +928,7 @@ impl SourceHost {
                 Box::new(SnapshotSource::new(gfx, &of, from))
             }
             "scene" => {
-                // Opened with the *effective* pause (R75), like every other kind.
+                // Opened with the *effective* pause, like every other kind.
                 let mut n = node.to_vec();
                 n.retain(|(k, _)| k != "paused");
                 n.push(("paused".into(), PropValue::Bool(effective_paused)));
@@ -945,7 +945,7 @@ impl SourceHost {
         };
         // Colour/snapshot: store every writable prop so `read` (and the mirror) agrees with
         // the node from the start (e.g. `paused`) — `paused` itself gets the effective
-        // value (R75), same as the mpv path above.
+        // value, same as the mpv path above.
         for (k, v) in &writable {
             if !matches!(k.as_str(), "kind" | "color") {
                 if k == "paused" {
@@ -963,7 +963,7 @@ impl SourceHost {
     }
 
     /// The `MpvSource` for `node`: its opts (base + every writable prop, `paused` the
-    /// effective one, R75), on `core` if one was prepared off the loop (I5), else a core
+    /// effective one), on `core` if one was prepared off the loop, else a core
     /// made here.
     fn open_mpv(
         &self,
@@ -996,7 +996,7 @@ impl SourceHost {
         // A synchronous open still renders on the worker when there is one (the harness; a
         // pool that couldn't start a thread) — every source of a player renders in one place.
         // Without the hwdec interop: this thread (the loop) waits for the attach, and the
-        // interop's init would be its wait (§ Sources "Hardware decoding").
+        // interop's init would be its wait (`docs/player/modules/sources.md` § Hardware decoding).
         let m = match (core, &self.render_worker) {
             (Some(core), _) => MpvSource::open_with_core(gfx, &s("path"), &opts, core),
             (None, Some(w)) => MpvSource::prepare_core(&opts)
@@ -1013,7 +1013,7 @@ impl SourceHost {
         })
     }
 
-    /// I5: start making `id`'s mpv core on a worker thread, if opens are async and it is
+    /// Start making `id`'s mpv core on a worker thread, if opens are async and it is
     /// an mpv source. `false` = open it synchronously instead.
     fn start_async_open(&mut self, id: &str, node: &[(String, PropValue)]) -> bool {
         let Some(waker) = self.async_open.clone() else {
@@ -1051,7 +1051,7 @@ impl SourceHost {
                 OPENING.fetch_sub(1, Ordering::SeqCst);
                 return;
             };
-            // Phase 2: the render context is made on the render worker too, not the loop —
+            // The render context is made on the render worker too, not the loop —
             // with the hwdec GL interop when the source will decode in hardware (its init
             // waits on this thread and costs the worker, never the loop).
             let r = MpvSource::prepare_core(&opts).and_then(|core| match &worker {
@@ -1093,7 +1093,7 @@ impl SourceHost {
     /// then mirror its observed values (`ready`, `duration`, `time_pos`, `width`, `height`,
     /// `paused` as the source reports it) into the graph via `Graph::set_observed` — never
     /// a change, so nothing loops back. An unknown value (`None`) leaves the graph as is.
-    /// R75: the `paused` mirror is skipped entirely while `player_paused` — every hosted
+    /// The `paused` mirror is skipped entirely while `player_paused` — every hosted
     /// source's live `paused` is then the OR'd effective value, not the node's own
     /// intention, and mirroring it back would corrupt that (`sync`'s doc).
     pub fn update(&mut self, gfx: &Gfx, graph: &mut Graph) {
@@ -1124,7 +1124,7 @@ impl SourceHost {
             if h.src.update(gfx) {
                 self.changed.insert(id.clone());
             }
-            // Task 8: a source reopened after a low-VRAM stop is the same wallpaper: until its
+            // A source reopened after a low-VRAM stop is the same wallpaper: until its
             // first frame the graph keeps what it knew (no mirror) and the stand-in shows.
             let resuming = self.resuming.get(id);
             if let Some(r) = resuming
@@ -1226,7 +1226,7 @@ impl SourceHost {
     /// (shutdown).
     pub fn finish_teardown(&mut self, max: std::time::Duration) {
         let t = std::time::Instant::now();
-        // I5: cores still being made go too (a worker finishing later hands its core to
+        // Cores still being made go too (a worker finishing later hands its core to
         // the reaper itself); queued ones are skipped at once, so the wait below is the
         // ≤ MAX_OPEN_WORKERS cores in progress (2–8 ms each).
         self.opening.clear();
@@ -1248,7 +1248,7 @@ impl SourceHost {
     }
 
     /// The live texture of source node `id` (the compositor's `textures` closure) — or, for a
-    /// source suspended/resuming after a low-VRAM stop (Task 8), the still of its last frame.
+    /// source suspended/resuming after a low-VRAM stop, the still of its last frame.
     pub fn texture(&self, id: &str) -> Option<&Tex> {
         self.sources
             .get(id)
@@ -1276,8 +1276,8 @@ impl SourceHost {
         self.sources.get_mut(id).and_then(|h| h.src.as_mpv_mut())
     }
 
-    /// Set (`Some`) or remove (`None`) one base opt for sources opened from now on (Task 7:
-    /// `scene_assets` / `scene_assets_error` follow `player.scene_assets` live).
+    /// Set (`Some`) or remove (`None`) one base opt for sources opened from now on
+    /// (`scene_assets` / `scene_assets_error` follow `player.scene_assets` live).
     pub fn set_base_opt(&mut self, key: &str, v: Option<Value>) {
         match v {
             Some(v) => {
@@ -1346,13 +1346,13 @@ impl SourceHost {
     }
 }
 
-/// `node`'s `position` for an open (a source resumed after a low-VRAM stop — Task 8).
+/// `node`'s `position` for an open (a source resumed after a low-VRAM stop).
 fn patch_position(node: &mut Vec<(String, PropValue)>, t: f64) {
     node.retain(|(k, _)| k != "position");
     node.push(("position".into(), PropValue::F64(t)));
 }
 
-/// A video/image/scene node (what a low-VRAM stop suspends — Task 8): not colour/snapshot.
+/// A video/image/scene node (what a low-VRAM stop suspends): not colour/snapshot.
 fn is_media(node: &[(String, PropValue)]) -> bool {
     !matches!(
         node.iter().find(|(k, _)| k == "kind").map(|(_, v)| v),
@@ -1360,7 +1360,7 @@ fn is_media(node: &[(String, PropValue)]) -> bool {
     )
 }
 
-/// What the outputs showing source `id` ask of it (Phase 2 Task 5): each `out:<c>` in
+/// What the outputs showing source `id` ask of it: each `out:<c>` in
 /// `graph.outputs_of(id)` with its size, refresh and `scene_fps`.
 pub fn demand_for(graph: &Graph, id: &str) -> Vec<OutputDemand> {
     let num = |o: &str, p: &str| match graph.get(&PropPath(format!("{o}.{p}"))) {

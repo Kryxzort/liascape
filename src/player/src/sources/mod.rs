@@ -4,12 +4,12 @@
 //! - [`MpvSource`] (`mpv.rs`) — video and image files through libmpv's render API.
 //! - [`ColorSource`] (`color.rs`) — a solid colour.
 //! - [`SnapshotSource`] (`snapshot.rs`) — a held still copy of another source's frame
-//!   (R34: what reveal/frozen show for an outgoing side that keeps playing elsewhere).
-//! - [`scene::SceneSource`] (`scene.rs`, Phase 2) — a WE scene rendered by an
+//!   (what reveal/frozen show for an outgoing side that keeps playing elsewhere).
+//! - [`scene::SceneSource`] (`scene.rs`) — a WE scene rendered by an
 //!   `liascape-scene-worker` process, its frames imported over dmabuf.
 //! - [`SourceHost`] (`host.rs`) — owns one live source per graph `Source` node: opens/
 //!   drops them as nodes come and go, forwards property changes, mirrors observed values
-//!   back into the graph, and collects events (R32).
+//!   back into the graph, and collects events.
 //!
 //! Every source implements [`Source`]. [`SourceHost`] owns them: it forwards graph
 //! property changes (`graph::Graph::drain_changes`) to [`Source::apply`], calls
@@ -48,13 +48,12 @@ pub enum SourceEvent {
     /// path. The source is broken until something changes.
     Error { reason: String },
     /// A property write was refused (synchronously by `apply`, or later by mpv's async
-    /// reply) and reverted; the source itself is fine and keeps playing (R45). `prop` is
+    /// reply) and reverted; the source itself is fine and keeps playing. `prop` is
     /// the graph property (`gain` for the summed gain push).
     Rejected { prop: String, reason: String },
-    /// Real audio output is flowing after this source's most recent un-pause (Task 16c,
-    /// R85): the owner's "flicker of silence" report measured mpv/PipeWire's own audio-out
-    /// restart lagging the `pause -> no` request by ~19 ms — an onset gain ramp that
-    /// starts at the instant of un-pause runs mostly on no audio at all, then jumps to an
+    /// Real audio output is flowing after this source's most recent un-pause: measured,
+    /// mpv/PipeWire's own audio-out restart lags the `pause -> no` request by ~19 ms — an
+    /// onset gain ramp that starts at the instant of un-pause runs mostly on no audio at all, then jumps to an
     /// already-part-way gain with no ramp the listener can hear. Recipes/the runtime hold
     /// an onset ramp until this fires (bounded: see `recipes::transition::ONSET_TIMEOUT`).
     /// Fires once per un-pause; a source with no audio track, or in stepped mode (mpv
@@ -72,7 +71,7 @@ pub trait Source {
     /// whether the texture changed.
     fn update(&mut self, gfx: &Gfx) -> bool;
     /// The last good frame — kept forever once one exists (a stalled source never goes
-    /// black; R19's other half). `None` until the first frame.
+    /// black; the composer itself keeps no frame memory). `None` until the first frame.
     fn texture(&self) -> Option<&Tex>;
     /// The texture's size, `(0, 0)` before the first frame.
     fn size(&self) -> (u32, u32);
@@ -82,7 +81,7 @@ pub trait Source {
     fn read(&self, prop: &str) -> Option<PropValue>;
     /// Drain the events produced since the last call.
     fn poll_events(&mut self) -> Vec<SourceEvent>;
-    /// Start tearing this source down without blocking (R51) — called when its node is
+    /// Start tearing this source down without blocking — called when its node is
     /// gone. `true` = it can be dropped right away; `false` = keep it (silent) and poll
     /// [`Source::teardown_ready`] until it can.
     fn begin_teardown(&mut self) -> bool {

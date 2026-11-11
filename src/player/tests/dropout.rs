@@ -1,4 +1,4 @@
-//! Task 15: the reference-based dropout detector — synthetic-envelope tests of
+//! The reference-based dropout detector — synthetic-envelope tests of
 //! [`analyse`] (port of `scripts/liascape_audiowatch.py`'s `refcheck`), plus one integration
 //! test of [`expected_envelope`]'s `ffmpeg` decode path against a real synthetic clip.
 //! Pure-function unit tests of the gain-weighting math (`mix_envelope`, `gain_at`) and the
@@ -31,10 +31,9 @@ fn curve_a(k: i64) -> f64 {
 }
 
 /// A gentler version of [`curve_a`] for the longer `big_hole` window (keeps levels
-/// plausible over 2000 ms instead of running away positive). Review fix round, R77:
-/// the coefficient was re-tuned (and the window extended from 650 ms to 2000 ms) so the
-/// window still has enough reliably-paired bins to clear the new, window-scaled lag
-/// guard even with its 446 ms drop silencing a big chunk of it — see that test's own
+/// plausible over 2000 ms instead of running away positive). The coefficient and the
+/// 2000 ms window are tuned so the window still has enough reliably-paired bins to clear
+/// the window-scaled lag guard even with its 446 ms drop silencing a big chunk of it — see that test's own
 /// comment.
 fn curve_b(k: i64) -> f64 {
     -25.0 + 0.0005 * (k * k) as f64
@@ -103,7 +102,7 @@ fn content_silence_not_flagged_as_a_dropout() {
 
 #[test]
 fn held_method_silence_not_flagged_as_a_dropout() {
-    // The frozen-method schedule (R71): both A's and B's recorded gain is SILENT_DB
+    // The frozen-method schedule: both A's and B's recorded gain is SILENT_DB
     // throughout the effect — even though their decoded content is loud (0.1 linear
     // power ≈ −10 dB) — computed through the same `db_to_lin` the production
     // `mix_envelope` uses, so a regression in the "silence floor" guarantee would show
@@ -131,10 +130,9 @@ fn held_method_silence_not_flagged_as_a_dropout() {
 
 #[test]
 fn big_hole_is_flagged_as_one_drop_of_about_440_to_450ms() {
-    // Review fix round, R77: extended from the original 650 ms window to 2000 ms (200
-    // bins) — the 446 ms drop alone silences 44-45 of a 650-bin-ms window's bins for the
-    // lag search's own "is this bin's capture plausible" filter, which the OLD flat
-    // `MIN_LAG_PAIRS = 3` guard didn't care about but the new window-scaled guard does
+    // A 2000 ms window (200 bins), not 650 ms — the 446 ms drop alone silences 44-45 of a
+    // 650-bin-ms window's bins for the lag search's own "is this bin's capture plausible"
+    // filter, which the window-scaled guard counts
     // (it wants at least half of `expected`'s audible bins to have actually paired, up
     // to 50). A 650 ms window where 68% of it is one drop is a pathological ratio no
     // real transition produces; 2000 ms with the same 446 ms drop (23%) is realistic and
@@ -166,7 +164,7 @@ fn big_hole_is_flagged_as_one_drop_of_about_440_to_450ms() {
 
 #[test]
 fn sparse_window_is_insufficient_and_flags_nothing() {
-    // R77 (review fix round): only ~8 audible bins in the whole window — nowhere near
+    // Only ~8 audible bins in the whole window — nowhere near
     // enough to trust a lag/offset fit against. The report must say so plainly
     // (`fit: Insufficient`, `lag_ms: 0`) rather than guess a lag and flag findings on
     // top of a fit it can't actually vouch for.
@@ -185,7 +183,7 @@ fn sparse_window_is_insufficient_and_flags_nothing() {
     );
 }
 
-// ------------------------------------------- Task 16d: R96 1 ms lag + window-grid fix
+// ------------------------------------------- 1 ms lag + window grid
 
 /// A synthetic copy of the on-machine frozen window (`tests/onmachine/dropout.sh`,
 /// case 2): A steady at −20 dB until 500 ms, a 30 ms linear-*amplitude* anti-click ramp
@@ -247,9 +245,9 @@ fn frozen_fixture(
 
 #[test]
 fn refined_lag_recovers_a_23ms_lag_with_no_micro_gap() {
-    // R96: a true 23 ms lag — between two 10 ms steps — on a window full of steep ramp
+    // A true 23 ms lag — between two 10 ms steps — on a window full of steep ramp
     // edges. The coarse search can only say 20 (or 30); the micro-gap pass applying
-    // that in continuous time misaligns A's ramp bottom by 3+ ms, past R94's ±2 ms
+    // that in continuous time misaligns A's ramp bottom by 3+ ms, past the ±2 ms steady
     // guard. Refined to 1 ms it lands on 23 ± 1 and nothing is flagged.
     let (observed, coarse, fine) = frozen_fixture(0.0, 23.0, None);
     let report = analyse_with_fine(&observed, &coarse, &fine);
@@ -273,7 +271,7 @@ fn refined_lag_recovers_a_23ms_lag_with_no_micro_gap() {
 
 #[test]
 fn refined_lag_still_flags_an_injected_4ms_gap() {
-    // R96 must not absorb a real hole: the same 23 ms-lag window with 4 ms of true
+    // The 1 ms lag refinement must not absorb a real hole: the same 23 ms-lag window with 4 ms of true
     // silence in B's steady tone is still exactly one 4 ms micro-gap, at the hole.
     let (mut observed, coarse, fine) = frozen_fixture(0.0, 23.0, None);
     for s in observed
@@ -297,11 +295,10 @@ fn refined_lag_still_flags_an_injected_4ms_gap() {
 
 #[test]
 fn window_phase_does_not_skew_the_lag() {
-    // Task 16d, the on-machine failure itself (`dropout.sh` frozen @60 and @240 Hz:
-    // `lag_ms` 10, a 4 ms / 61 dB micro-gap at A's ramp bottom, `at_ms` 532): the window
+    // An on-machine window (`dropout.sh` frozen @60 and @240 Hz): the window
     // starts 7.9 ms past a 10 ms boundary and the true lag is 2 ms. Binning the meter on
-    // the absolute 10 ms grid paired each expected bin with samples 7.9 ms early, so the
-    // search said 10 ms (really +2.1) and the micro-gap pass then shifted the fine
+    // the absolute 10 ms grid would pair each expected bin with samples 7.9 ms early, so the
+    // search would say 10 ms (really +2.1) and the micro-gap pass would then shift the fine
     // envelope a full 10 ms — 8 ms off at the ramp's steepest point.
     for origin in [3967.9, 3118.17, 3057.86, 4000.0] {
         let (observed, coarse, fine) = frozen_fixture(origin, 2.0, None);
@@ -318,11 +315,10 @@ fn window_phase_does_not_skew_the_lag() {
 
 #[test]
 fn truncated_capture_does_not_pull_the_lag() {
-    // Task 16d, the @240 Hz on-machine failure (`lag_ms` 40, a 30 ms / 73 dB *drop* at
-    // `at_ms` 500 — A's whole anti-click ramp "observed silent"): the auto-trigger used
-    // to snapshot the meter at `transition.done`, so the capture ended at B's ramp end
-    // while `expected` ran 500 ms further. The real audio was ramped (meter + an
-    // independent `parec` capture agree). Whatever window the analysis gets, the lag
+    // A capture that ends at B's ramp end while `expected` runs 500 ms further (a meter
+    // snapshot taken at `transition.done`) can pull the lag to 40 ms and flag A's whole
+    // anti-click ramp as a 30 ms / 73 dB *drop*, though the real audio is ramped (meter +
+    // an independent `parec` capture agree). Whatever window the analysis gets, the lag
     // must stay the true one and A's ramp must not be flagged.
     for origin in [3967.9, 4000.0] {
         let (observed, coarse, fine) = frozen_fixture(origin, 2.0, Some(1600.0));
@@ -338,8 +334,8 @@ fn truncated_capture_does_not_pull_the_lag() {
 
 #[test]
 fn an_unramped_cut_at_effect_start_is_flagged() {
-    // The REAL defect the effect-start finding had to rule out: A's audio stopping at
-    // effect start with no ramp. The fixed detector (window grid + R96) must flag it —
+    // The REAL defect to rule out: A's audio stopping at
+    // effect start with no ramp. The detector (window grid + 1 ms lag) must flag it —
     // its precision gain can't mask a real cut: the lag is pinned by B's onset edge and
     // A's steady tone, and A's expected-audible ramp bins then pair with true silence.
     for origin in [3967.9, 4000.0] {
@@ -386,8 +382,7 @@ fn loud_late_b(
 
 #[test]
 fn ramp_in_a_few_ms_late_is_not_a_drop() {
-    // Phase 2 Task 14 (on-machine, frozen V→S at 60 Hz: 4 of 20 switches, `at_ms` 1510,
-    // 41 dB under): one lag serves the whole window and A's video pins it, but a scene B's
+    // Seen on-machine (frozen V→S at 60 Hz, 41 dB under): one lag serves the whole window and A's video pins it, but a scene B's
     // sound reaches the bus ~3 ms later than its own gain schedule says (another stream, its
     // own latency). B's ramp-in starts 7 ms into a 10 ms bin, so that bin's expected power
     // mean is just audible (> −55 dB) while the observed bin is still silent: a "drop" on the
@@ -416,9 +411,8 @@ fn ramp_in_that_never_comes_is_still_a_drop() {
 
 #[test]
 fn meter_discontinuity_is_unmeasured_not_a_gap() {
-    // Phase 2 Task 14 (on-machine): the bus meter's capture (then on the non-real-time
-    // `lia-bus` thread) missed graph cycles — its timestamps jump
-    // 2.3–22 ms and the blocks right after are −96 (silence PipeWire hands a stream that
+    // A bus meter capture without real-time scheduling misses graph cycles — its
+    // timestamps jump 2.3–22 ms and the blocks right after are −96 (silence PipeWire hands a stream that
     // missed its cycles). The bus itself never had a hole there; the detector must call that
     // stretch unmeasured, never a micro-gap or a drop.
     // Three audible levels pin the lag at 0 (a flat window lets the lag search slide the
@@ -496,10 +490,10 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
     // channel, not a plain 0.5/0.5 average): measured directly against the
     // pre-downmix stream, the mono decode's peak comes out at `0.1*√2`, i.e. **+3.01 dB**
     // over the stereo peak — so the 10 ms power bin reads ≈ the ORIGINAL −20 dBFS peak's
-    // own RMS, not −23. This is the exact `ffmpeg … -ac 1 …` command the brief and
-    // `scripts/liascape_audiowatch.py` both specify (no extra `-af pan=…`), so the level is kept
+    // own RMS, not −23. This is the exact `ffmpeg … -ac 1 …` command
+    // `scripts/liascape_audiowatch.py` specifies (no extra `-af pan=…`), so the level is kept
     // as ffmpeg really produces it rather than papering over the downmix with a filter
-    // neither the brief nor the ported reference uses.
+    // the ported reference doesn't use.
     let path = ensure_clip(
         "dropout_tone",
         ClipSpec::Solid {
@@ -591,7 +585,7 @@ fn ensure_speed_step_clip() -> std::path::PathBuf {
 
 #[test]
 fn expected_envelope_maps_window_time_to_file_time_at_speed() {
-    // R78 (review fix round): a source played at speed=2.0 has its FILE position
+    // A source played at speed=2.0 has its FILE position
     // advance twice as fast as the window's own time (mpv's scaletempo keeps pitch, so
     // this is a genuine time-compression, not a pitch shift). A clip silent for its
     // first file-second and a tone for its second should show the level step at HALF
@@ -628,7 +622,7 @@ fn expected_envelope_maps_window_time_to_file_time_at_speed() {
 
 #[test]
 fn expected_envelope_wraps_a_looping_source_across_its_duration() {
-    // R78 (review fix round): a window spanning more than one lap of a short, looping
+    // A window spanning more than one lap of a short, looping
     // source must stay continuous across the wrap — no artificial silence where
     // `decode_power_bins` would otherwise treat crossing `duration` as "past EOF".
     let path = ensure_clip(

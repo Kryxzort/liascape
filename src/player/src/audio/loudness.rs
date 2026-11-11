@@ -1,6 +1,6 @@
-//! Scene loudness, learned on first play (Phase 2, owner decision: "measure a scene's
-//! integrated loudness over its first ~60 s of play (from the worker's stream on the bus),
-//! store it in the index like a video's `loudness*`, apply normalization from then on").
+//! Scene loudness, learned on first play: a scene's integrated loudness is measured over its
+//! first ~60 s of play (from the worker's stream on the bus), stored in the index like a
+//! video's `loudness*`, and normalization applies from then on.
 //! `docs/player/modules/scene-loudness.md`.
 //!
 //! ITU-R BS.1770-4 / EBU R128, split across the two processes:
@@ -18,9 +18,8 @@
 //!   destroyed, its path changed) with at least a third of the window reports what it has
 //!   (`complete: false`).
 //!
-//! **Refined across plays** (owner 2026-10-28: "60s to normalize for rest of scene, keep
-//! measuring to get a more accurate measure when the scene is played in future (probably add
-//! a max cap …)"): the blocks are kept as a histogram (0.1 LU bins, −70…+5 LUFS) — exactly
+//! **Refined across plays** (normalize after the first window, keep measuring on later plays
+//! for a more accurate value, up to a cap): the blocks are kept as a histogram (0.1 LU bins, −70…+5 LUFS) — exactly
 //! what BS.1770's relative gate needs, and two of them add — reported with every
 //! `scene.loudness` as `state` and stored by the backend; the next play's source is seeded
 //! with it (`loudness_seed`) and continues the same integration. Reports: at the window
@@ -55,8 +54,7 @@ pub fn window_s(v: Option<&str>) -> f64 {
 }
 
 /// The cap: total audible seconds measured over every play of a scene, after which nothing
-/// more is measured (owner: "probably add a max cap for people who will never change
-/// wallpaper") — 30 min; tests shorten it. Never below the window.
+/// more is measured (so a wallpaper that is never changed doesn't meter forever) — 30 min; tests shorten it. Never below the window.
 pub const CAP_ENV: &str = "LIASCAPE_PLAYER_LOUDNESS_CAP_S";
 pub const DEFAULT_CAP_S: f64 = 1800.0;
 
@@ -817,8 +815,7 @@ mod tests {
         segs.iter().filter_map(|s| l.push(*s)).collect()
     }
 
-    /// Owner (2026-10-28): "keep measuring to get a more accurate measure when the scene is
-    /// played in future". A session seeded with the previous one's state (its histogram) ends
+    /// Measuring continues across plays: a session seeded with the previous one's state (its histogram) ends
     /// where ONE long integration over both would — within 0.1 LU — for any split.
     #[test]
     fn histogram_merge_across_sessions_equals_one_long_integration() {

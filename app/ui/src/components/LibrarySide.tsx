@@ -38,8 +38,8 @@ const READY_CAP_MS = 450;
 // The Library sidebar's content (components/SidePanel.tsx is the shell): everything the per-card settings modal had —
 // volume / speed (drag-preview live, persist on release), the scene's properties, its loudness line, the crash
 // whitelist, the trailer (the picture's preview switch), Workshop / Steam — plus the old right-click menu's actions (Open in
-// file manager, Delete, Delete from source) as tiles, Play (the picture itself — owner 2026-11-11: the Play / In playlist row
-// was "redundant clutter") and the playlist toggle (in the head). Mounted per item (`key` = its path, SidePanel): its state is
+// file manager, Delete, Delete from source) as tiles, Play (the picture itself — docs/decisions.md § "Make the sidebar's
+// picture the Play control") and the playlist toggle (in the head). Mounted per item (`key` = its path, SidePanel): its state is
 // that item's.
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
 // `targets` = the multi-selection it's part of (volume / speed / delete repeat to it), else [item].
@@ -59,7 +59,7 @@ export function LibrarySide({
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
-  // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
+  // liascape-player plays a scene at its speed (its animation and its pitch-kept sound, by design); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
@@ -88,7 +88,7 @@ export function LibrarySide({
     setWl(item.isWhitelisted);
   }, [item, globalVolume, globalSpeed]);
 
-  // per item (this component is keyed by the path): the duration, read at once — nothing flies any more
+  // per item (this component is keyed by the path): the duration, read at once — no flight to wait for
   useEffect(() => {
     if (item.isScene) return;
     let alive = true;
@@ -166,7 +166,7 @@ export function LibrarySide({
 
   return (
     <>
-      {/* nothing in the head but close (owner 2026-11-11: no playlist toggle there, and no Play either — not even while the
+      {/* nothing in the head but close (no playlist toggle there, and no Play either — not even while the
           YouTube trailer covers the picture: play it from the card / Enter, or switch the picture back) */}
       <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc} youtube={item.youtubeUrl}
         preview={preview} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
@@ -181,7 +181,7 @@ export function LibrarySide({
           {!item.isScene && <span className="side-pill" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={13} /> {dur || "0 seconds"}</span>}
           {item.resolution && <span className="side-pill"><Monitor size={13} /> {item.resolution}</span>}
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
-          {/* the Workshop ID: a pill that copies itself (owner 2026-11-11: a "Details" card for one property felt strange) */}
+          {/* the Workshop ID: a pill that copies itself (a "Details" card for one property looks odd) */}
           {item.workshopId && at("standard") && (
             <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" title="Copy the Workshop ID"
               aria-label={`Workshop ID ${item.workshopId} — copy`}
@@ -192,7 +192,7 @@ export function LibrarySide({
         {item.tags && item.tags.length > 0 && (
           <div className="tags side-tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
         )}
-        {/* the right-click menu's actions (owner: "all the 4 options from the right click menu"), as tiles */}
+        {/* the right-click menu's actions (all four of them), as tiles */}
         <div className="side-tiles">
           <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</button>
           {/* a Workshop item: the Steam CLIENT (POST /steam/open-page; the browser when that couldn't open); else its page link */}

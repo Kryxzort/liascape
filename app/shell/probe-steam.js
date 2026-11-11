@@ -1,5 +1,5 @@
 // Steam sign-in + "Subscribe via Steam" without a sign-in — `scripts/test-ui-matrix.sh --probe probe-steam.js` (the matrix's
-// hermetic stack). Owner 2026-11-11: "is it a dead end for users without mobile guard?" → a password sign-in (SteamPasswordModal)
+// hermetic stack). docs/decisions.md § "Offer a password sign-in beside the QR": a password sign-in (SteamPasswordModal)
 // next to the QR one, and Workshop downloads that open in the Steam app when there's no usable sign-in. NOTHING here reaches
 // Steam: a script injected before the page's own (CDP Page.addScriptToEvaluateOnNewDocument) answers /steam/status (the state
 // a cell wants), /steam/login* and /steam/qr/* itself (recording each body), stubs POST /browse (Workshop items) and /download
@@ -251,8 +251,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("drive steam" → "yeah, try it", then "why is this a checkbox"): "Use the Steam app" is the FIRST of the
-    // three download-mode radios; picking it saves workshopDownloadMode "steamapp", shows its note and hides the Steam
+    // "Use the Steam app" (docs/decisions.md § "Drive the Steam client through its own `steamclient.so`") is the FIRST of the
+    // download-mode radios; picking it saves workshopDownloadMode "steamapp", shows its note and hides the Steam
     // sign-in row (only Subscribe via Steam uses it)
     await cell("steam:row:steamApp", async () => {
       const v = []; await setSettings({ workshopDownloadMode: "subscribe" }); await load(SIGNED_OUT); await tab("Settings");
@@ -277,7 +277,6 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("i wonder if a white checkbox matches the rest of the app or we just overlooked this part of the ui"):
     // every Settings checkbox + radio is the app's themed control — dark when off (never the browser's white), the accent when on
     await cell("look:toggles", async () => {
       const v = []; await setSettings({ workshopDownloadMode: "subscribe" }); await load(SIGNED_OUT); await tab("Settings");
@@ -294,7 +293,7 @@ app.whenReady().then(async () => {
       const white = r.off.filter((c) => c.lum > 0.5);
       if (white.length) v.push(`${white.length} unchecked controls are light (e.g. ${white[0].bg})`);
       if (r.onBox[0] && r.onBox[0].lum < 0.05) v.push(`a ticked checkbox isn't filled (${r.onBox[0].bg})`);
-      // the tick's own pixels, centred in its box (owner: "is it just me or the tick is off-center") — a ticked box, captured
+      // the tick's own pixels, centred in its box — a ticked box, captured
       // at the device scale, the tick = pixels much darker than the accent fill around it
       const box = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked);
         if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
@@ -325,7 +324,7 @@ app.whenReady().then(async () => {
         // ±0.5 css px: at most half a pixel of rounding
         else if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) v.push(`the tick is off-centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px`);
       }
-      // owner 2026-11-11 ("clicking on name or the entire box of a specific setting should tick/untick it?"): a real click on a
+      // a click anywhere on a checkbox / radio row ticks it: a real click on a
       // radio row's HINT text picks it, on a checkbox row's NAME flips it (twice: back); a slider row's name changes nothing
       const rowPt = (sel, part) => page(`const row = ${sel}; if (!row) return null; row.scrollIntoView({ block: "center" });
         const t = row.querySelector(${J(part)}); const r = t.getBoundingClientRect(); return { x: r.x + Math.min(20, r.width / 2), y: r.y + r.height / 2 };`);
@@ -483,8 +482,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("its hilarious that the download button on browse cards is off-center but gets correctly centered once
-    // you hover on it"): the arrow's pixel bounding box vs the button's centre — at rest (the card hovered, the button not) and
+    // the download button's arrow is centred at rest as well as on hover: the arrow's pixel bounding box vs the button's
+    // centre — at rest (the card hovered, the button not) and
     // on the button (the bob frozen at its 0 % and 50 % keyframes). Pixels: the capture with the arrow minus without it.
     await cell("look:dlCentre", async () => {
       const v = []; await load(SIGNED_OUT);
@@ -535,8 +534,8 @@ app.whenReady().then(async () => {
         console.log(`        ${label}: arrow off the ring's centre by ${rn ? `(${dx.toFixed(2)}, ${dy.toFixed(2)}) css px` : "— (no ring: hovered, the chip is filled)"} (layout box: ${lx.toFixed(2)}, ${ly.toFixed(2)}) — ${n} arrow px, ${rn} ring px, button ${b.w.toFixed(1)}×${b.h.toFixed(1)} at (${b.x.toFixed(2)}, ${b.y.toFixed(2)})`);
         return { dx, dy, n: rn ? n : 0 };
       };
-      // owner: "weirdly, its not offcenter on a small window? try a 1920x1080 window" — every size (cards, and so the button's
-      // position, land on fractional pixels at some sizes)
+      // several window sizes (cards, and so the button's position, land on fractional pixels at some sizes; a small window
+      // can hide it)
       const sizes = (E.LIASCAPE_DLC_SIZES || "1000x800,1920x1080,1600x900").split(",").map((x) => x.split("x").map(Number));
       for (const [W0, H0] of sizes) {
         win.setContentSize(W0, H0); await sleep(900);
@@ -577,7 +576,7 @@ app.whenReady().then(async () => {
       console.log(`        ${J(r)}`);
       if (r.side !== STATUS) v.push(`the sidebar says "${r.side}"`);
       if (!(r.bar ?? "").includes("click Subscribe in Steam")) v.push(`the status bar says "${r.bar}"`);
-      // owner 2026-11-11 (a 458 MB item: "Downloading…" over an empty bar for a minute, like a hang): the CARD says the step in
+      // a bare "Downloading…" over an empty bar for a minute looks like a hang: the CARD says the step in
       // short words, over a sweeping (indeterminate) bar — each phase the backend reports, in order
       const card = (sel) => page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
         const l = c?.querySelector("[data-dl-label]"), bar = c?.querySelector(".dl-bar"), f = bar?.querySelector(".dl-fill");
@@ -591,7 +590,7 @@ app.whenReady().then(async () => {
         if (c.label !== want) v.push(`for "${status}" the card says "${c.label}" (expected "${want}")`);
         if (!c.indet || c.anim !== "dl-indet") v.push(`for "${status}" the card's bar isn't sweeping (indet ${c.indet}, animation ${c.anim})`);
       }
-      // owner 2026-11-11 ("why is the loading bar so micro"): with a short label ("1%") the bar still spans ~72 % of the card
+      // with a short label ("1%") the bar still spans ~72 % of the card
       await ev("download-progress", { id: dl.result.pageUrl, value: 0.01, status: "Steam is downloading it…" }); await sleep(250);
       const bw = await page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
         const b = c?.querySelector(".dl-bar"); return b ? { bar: b.getBoundingClientRect().width, card: c.getBoundingClientRect().width, label: c.querySelector("[data-dl-label]")?.textContent } : null;`);
@@ -607,7 +606,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("Guided, auto-advance" mockup → then "lets just have them click 'next'"): the Steam to-do panel, driven by
+    // docs/decisions.md § "Queue the Steam pages the user must click, one at a time, advanced by Next": the Steam to-do panel, driven by
     // fake WS steam-todo events; every button POSTs its /steam-todo/<action> (stubbed — nothing reaches the backend)
     await cell("steam:todo", async () => {
       const v = []; await load(SIGNED_OUT);
@@ -635,7 +634,7 @@ app.whenReady().then(async () => {
       if (!/Click Subscribe on the page Steam opened, then Done — next/.test(p.hint ?? "")) v.push(`the hint reads "${p.hint}"`);
       if (p.next !== "Done — next" || p.reopen !== "Open again" || p.skip !== "Skip" || p.stop !== "Stop") v.push(`the buttons read ${J([p.next, p.reopen, p.skip, p.stop])}`);
       if (p.use !== "Let the Steam app do all 4") v.push(`the Steam-app line reads "${p.use}" (4 remaining)`);
-      // owner 2026-11-11: "'Let the Steam app do all N' should mention that it needs WE and it will show you as playing and stuff"
+      // "Let the Steam app do all N" says it needs WE, Steam running, and shows the user as playing
       if (!/Wallpaper Engine/.test(p.useNote ?? "") || !/playing/.test(p.useNote ?? "") || !/Steam running/.test(p.useNote ?? "")) v.push(`the Steam-app note reads "${p.useNote}"`);
       if (p.titles) v.push(`${p.titles} element(s) with a title (tooltip) in the panel`);
       if (p.iconOnlyNoLabel) v.push(`${p.iconOnlyNoLabel} icon-only button(s) without an aria-label`);
@@ -684,7 +683,7 @@ app.whenReady().then(async () => {
     const fakeBar = `if (!document.querySelector(".playlist-bar")) { const b = document.createElement("div"); b.className = "playlist-bar"; b.id = "__fakebar";
       b.style.cssText = "position:fixed;left:0;bottom:0;width:40px;height:130px;pointer-events:none"; document.body.append(b); }`;
 
-    // owner 2026-11-11: "why does to-do panel have no morph and stuff or a smooth movement when switching tabs or anything" — the lift
+    // the to-do panel moves smoothly — the lift
     // GLIDES (a playlist bar appearing), fold ⇄ unfold MORPHS (widths in between), a new current entry SLIDES (the carousel);
     // under no-motion all three are instant. Mid-animation shots: steam-todo-glide.png, steam-todo-fold.png, steam-todo-slide.png
     for (const motion of [true, false]) {
@@ -735,9 +734,8 @@ app.whenReady().then(async () => {
     }
     await setSettings({ morphs: true });
 
-    // owner 2026-11-11: "make it so browse > wallpaper engine (local) has option to unsubscribe / same for browse > workshop / it needs
-    // to be in the sidebar / probably a button that lets you subscribe/unsubscribe in the sidebar" + "open on steam doesn't open in
-    // real steam". The Browse sidebar's toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
+    // The Browse sidebar's subscribe / unsubscribe toggle for WE-local and Workshop items, and Open on Steam opening the Steam
+    // client. The toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
     // → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-subtoggle*.png
     const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll .card:not(.skel-card) .thumb-wrap")[${n}].click();`); await sleep(800); };
     const sub = () => page(`const s = document.querySelector("[data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");

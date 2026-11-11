@@ -1,6 +1,6 @@
-// Regression probe: a right-click on a playlist bar item must never start playback. Since 2026-11-11 (owner: "right-click opens
-// the sidebar on that item without applying it — no context menu anywhere") it opens the item's Library sidebar and no menu;
-// the menu it replaced was portal'd to document.body and React bubbled its clicks up to the .pl-item's onClick (playFrom).
+// Regression probe: a right-click on a playlist bar item must never start playback. It opens the item's Library sidebar and
+// no menu (docs/decisions.md § "Open the item sidebar on right-click; no context menus"); a menu portal'd to document.body
+// has React bubble its clicks up to the .pl-item's onClick (playFrom).
 // Loads the UI offscreen, stubs the playback endpoints (nothing reaches the backend, so the live wallpaper is never touched),
 // right-clicks a playlist item, then clicks the sidebar's playlist toggle twice and its picture's switch area, and reports which
 // playback requests the UI tried to send. `/open` is stubbed as well (no real file manager).
@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
   const opened = await js(`({ side: document.querySelector('.side-panel[data-side="library"]')?.dataset.sideId ?? null,
     item: document.querySelector('.pl-item')?.dataset.morphId?.replace(/^pl-/, '') ?? null, menu: !!document.querySelector('.ctx-menu, .pl-ctx') })`);
   results.rightClick = await js(`window.__sent.slice()`);
-  // (the sidebar's playlist toggle that a portal'd menu used to bubble through is gone — owner 2026-11-11)
+  // (no portal'd menu whose playlist toggle could bubble through)
   await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
   await new Promise((r) => setTimeout(r, 400));
   if (opened.menu) results.menu = ["a context menu opened"];

@@ -2,7 +2,7 @@
 """Feasibility probe: link MPRIS players to PipeWire output streams (read-only).
 
 Stdlib only, plus `busctl` and `pw-dump` subprocesses. Run as: python3 -I scripts/probe-mpris-streams.py [--json]
-Rules, in order (liascape phase-3 Task 14): pid-tree, app-id, name.
+Rules, in order (the player's auto-mute Signal): pid-tree, app-id, name.
 """
 import json, os, re, subprocess, sys
 

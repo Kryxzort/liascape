@@ -1,4 +1,4 @@
-//! Phase 3: programs (`prog:<name>`, kind `program`) — the rotation recipe end to end.
+//! Programs (`prog:<name>`, kind `program`) — the rotation recipe end to end.
 //! Every test spawns the real binary (`serve --no-supervise --headless --outputs
 //! 640x360@60,320x180@60 --clock stepped --ao null`) with temp `XDG_*` dirs, talks JSON
 //! lines over its socket and kills the child on drop (`tests/api.rs`' harness, trimmed).
@@ -267,7 +267,7 @@ fn every_prop(clip: &str) -> Value {
     })
 }
 
-// ---------------------------------------------------------------- Task 2: the node + verbs
+// ---------------------------------------------------------------- the node + verbs
 
 #[test]
 fn program_node_roundtrips() {
@@ -535,7 +535,7 @@ fn destroy_program_leaves_the_picture() {
     let _ = srv.path("unused");
 }
 
-// ---------------------------------------------------------------- Task 3: the rotation engine
+// ---------------------------------------------------------------- the rotation engine
 
 use liascape_player::scene::synthetic::{Pattern, SyntheticSpec};
 
@@ -1387,9 +1387,8 @@ fn wait_real(
     let t = Instant::now();
     while !pred(c) {
         if t.elapsed() >= limit {
-            // Everything a stalled rotation needs to be read from (2026-11-05: once, under a
-            // loaded suite, `vram_hold_freezes_the_rotation` saw no switch after the release
-            // and only `program.current` was printed — not reproduced alone or under stress).
+            // Everything a stalled rotation needs to be read from (a stall seen once under a
+            // loaded suite printed only `program.current`, not enough to diagnose it).
             let vram = c.ok("logs", json!({"kind_prefix": "vram.", "limit": 50}));
             let prog = c.ok("probe", json!({"name": "programs"}));
             panic!(
@@ -1458,7 +1457,7 @@ fn vram_stopped_scene_advances_without_broken_flag() {
     let _ = std::fs::remove_file(&file);
 }
 
-// ---------------------------------------------------------------- Task 4: user switches, live edits
+// ---------------------------------------------------------------- user switches, live edits
 
 /// `state.programs[0]`.
 fn prog(c: &mut Client) -> Value {
@@ -2172,7 +2171,7 @@ fn defaults_and_item_props_reach_the_next_b() {
     assert_eq!(gain(&mut c, 2), -20.0, "the new defaults reach the next B");
 }
 
-// ---------------------------------------------------------------- Task 5: pause, VRAM, parking, persistence
+// ---------------------------------------------------------------- pause, VRAM, parking, persistence
 
 fn remove_outputs(c: &mut Client) {
     for o in ["VIRTUAL-1", "VIRTUAL-2"] {
@@ -2275,7 +2274,7 @@ fn vram_hold_freezes_the_rotation() {
     let _ = std::fs::remove_file(&file);
 }
 
-/// Task 6: the cover hold freezes a rotation like a pause — no switch while held, the
+/// The cover hold freezes a rotation like a pause — no switch while held, the
 /// countdown and play time stand still, and the switch comes at the remaining time after the
 /// release (stepped; the fake source is `headless.cover`).
 #[test]
@@ -2366,7 +2365,7 @@ fn parked_on_end_video_waits_for_an_output() {
     verb(&mut c, "play", json!({}));
     step_until(&mut c, 16, 2000, "the play", n_currents(1));
     // the end switch armed before the outputs go is handed off by the runtime's removal (its
-    // B becomes the parked wallpaper — R60/I4) and the program commits it
+    // B becomes the parked wallpaper) and the program commits it
     remove_outputs(&mut c);
     c.step(16);
     c.step(16);
@@ -2551,7 +2550,7 @@ fn program_json_written_only_on_config_change() {
         .as_u64()
         .unwrap();
     // ≥ 2 refreshes in 10 s (every 2 s → 5 when quiet; each write is fsync'ed, so a disk busy
-    // with other writers stretches the cadence — 2 → 4 under a loaded suite, 2026-11-05).
+    // with other writers stretches the cadence — 2 → 4 under a loaded suite).
     assert!(w1 >= w0 + 2, "the snapshot refreshes while a video plays: {w0} → {w1}");
     assert_eq!(
         std::fs::metadata(&file).unwrap().modified().unwrap(),
@@ -2568,7 +2567,7 @@ fn program_json_written_only_on_config_change() {
     assert_eq!(read_json(&file).unwrap()["rev"], v["rev"], "written once");
 }
 
-// ---------------------------------------------------------------- Task 5b: playlist start
+// ---------------------------------------------------------------- playlist start
 
 /// `prog:main` with `key` and `start_mode`, items as given (no play yet).
 fn keyed(c: &mut Client, key: &str, mode: &str, items: &[&str], props: Value) {
@@ -2660,7 +2659,7 @@ fn session_start_start_over_never_shows_the_old_item() {
     assert!(p["played_ms"].as_f64().unwrap() < 500.0, "{p}");
 }
 
-/// F7: a start over's fresh shuffle is new each boot — the program's random sequence goes on
+/// A start over's fresh shuffle is new each boot — the program's random sequence goes on
 /// from the snapshot instead of replaying from its `seed` in every new process.
 #[test]
 fn session_start_start_over_shuffles_anew_each_boot() {
@@ -2904,8 +2903,8 @@ fn start_setting_change_never_jumps_the_current_play() {
     assert_eq!(r["path"], json!(items[0]), "an explicit start still starts over: {r}");
 }
 
-// ---------------------------------------------------------------- keep (owner 2026-11-10: "keybind toggle to infinite loop
-// current wallpaper" — `liascape loop-current`)
+// ---------------------------------------------------------------- keep: loop the current
+// wallpaper until lifted (`liascape loop-current`)
 
 #[test]
 fn keep_holds_the_current_item_and_loops_it() {

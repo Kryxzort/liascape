@@ -114,7 +114,7 @@ pub enum ClipSpec {
     /// trip to within ±1 (neutral grey has no chroma, so only luma quantisation applies).
     FrameIndex { frames: u32 },
     /// [`ClipSpec::FrameIndex`]'s exact visual pattern, plus a stereo 48 kHz sine at
-    /// `tone_hz`, −20 dBFS peak (R92 review: a `b_has_audio`/onset-wait test needs a
+    /// `tone_hz`, −20 dBFS peak (a `b_has_audio`/onset-wait test needs a
     /// frame-marker-readable B that also has a real audio track — `FrameIndex` itself
     /// deliberately never does).
     FrameIndexWithAudio { frames: u32, tone_hz: f64 },
@@ -128,7 +128,7 @@ pub enum ClipSpec {
     },
     /// A single 1920×1080 PNG of one colour (lossless RGB, no YUV involved).
     Image { rgb: [u8; 3] },
-    /// Top half `top`, bottom half `bottom`, for `secs` — the R25 orientation pin
+    /// Top half `top`, bottom half `bottom`, for `secs` — the orientation pin
     /// (`tests/sources.rs::source_texture_holds_image_top_at_t0`). No audio.
     SplitV {
         top: [u8; 3],
@@ -136,7 +136,7 @@ pub enum ClipSpec {
         secs: f64,
     },
     /// `frames` frames at `fps`, `w`×`h`, every frame ONE uniform grey: frame `n` is
-    /// `16 + 4·n` (`frames` ≤ 56, so 16…236), no audio — Phase 2's torn-frame test: a
+    /// `16 + 4·n` (`frames` ≤ 56, so 16…236), no audio — the torn-frame test: a
     /// composed picture that isn't uniform is a partial frame, a level that goes backwards
     /// (outside a loop wrap) is a stale texture, one off the ladder is uninitialised memory.
     /// [`flash_index`] decodes a pixel back to `n`.
@@ -147,7 +147,7 @@ pub enum ClipSpec {
         frames: u32,
     },
     /// ffmpeg's `testsrc2` (a moving pattern: every frame differs, so decode + upload cost
-    /// what real content costs) at `w`×`h`, `fps`, `secs` long, no audio — Phase 2's
+    /// what real content costs) at `w`×`h`, `fps`, `secs` long, no audio — the
     /// render-worker A/B (`tests/api.rs::bench_render_worker_ab`: 1080p30, 4K60, 1080p120).
     /// `ultrafast` CRF 23 instead of the near-lossless default: a 4K60 clip stays small and
     /// quick to make.
@@ -156,7 +156,7 @@ pub enum ClipSpec {
 
 /// [`ClipSpec::Flash`]'s frame index for a decoded pixel, if it is one: grey (channels within
 /// ±3) and on the `16 + 4·n` ladder within ±1 (a neutral grey survives the YUV round trip
-/// within ±1 — § Sources "Tests"), so a step of 4 never decodes to a neighbour.
+/// within ±1 — `docs/player/modules/sources.md` § Tests), so a step of 4 never decodes to a neighbour.
 #[allow(dead_code)]
 pub fn flash_index(px: [u8; 4]) -> Option<u32> {
     let [r, g, b, _] = px.map(i32::from);
@@ -177,7 +177,7 @@ fn hex(rgb: [u8; 3]) -> String {
 #[allow(dead_code)]
 static CLIP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// A synthetic WE scene folder (Phase 2 D7) for `liascape-scene-worker`'s synthetic renderer:
+/// A synthetic WE scene folder for `liascape-scene-worker`'s synthetic renderer:
 /// `<crate>/target/test-media/scenes/<name>/` with `project.json` (`type: scene`), a 16-byte
 /// placeholder `scene.pkg`, a 1×1 `preview.png` of `spec.rgb` and `liascape-synthetic.json`
 /// (`spec`). Rewritten on every call (temp dir + rename), serialised like clips.
@@ -220,7 +220,7 @@ pub fn synthetic_scene(
 }
 
 /// A solid `rgb` 8×8 PNG at `<crate>/target/test-media/<name>.png` (a scene's `preview`
-/// image in the Task 10 crash-policy tests); written via a temp name + rename.
+/// image in the crash-policy tests); written via a temp name + rename.
 #[allow(dead_code)] // not every test target uses every helper
 pub fn solid_png(name: &str, rgb: [u8; 3]) -> std::path::PathBuf {
     let _guard = CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner());

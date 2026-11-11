@@ -1,4 +1,4 @@
-//! Audio (spec §5.3; Task 14): the player audio bus ([`Bus`], `bus.rs`) — one in-process
+//! Audio (spec §5.3): the player audio bus ([`Bus`], `bus.rs`) — one in-process
 //! PipeWire loopback sink every wallpaper plays into, forwarded to the default sink — and
 //! the bus meter ([`Meter`], `meter.rs`) on its monitor. See `docs/player/modules/audio-bus.md`.
 //!
@@ -34,8 +34,8 @@ pub struct Audio {
 impl Audio {
     /// Start the bus for sources playing through mpv's `ao` (`None` = liascape-player's default,
     /// `pipewire`) and ask for its meter — never blocks ([`Bus::start`]; [`Audio::wait_bus`]
-    /// is the bounded wait). Any other AO never reaches the bus (`--ao null` in tests — R26 —
-    /// would only add a sink to the owner's session for nothing), so none is created for it.
+    /// is the bounded wait). Any other AO never reaches the bus (`--ao null` in tests
+    /// would only add a sink to the user's session for nothing), so none is created for it.
     pub fn start(ao: Option<&str>) -> Audio {
         let ao = ao.unwrap_or(crate::sources::mpv::DEFAULT_AO);
         if ao != "pipewire" {

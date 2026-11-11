@@ -56,7 +56,7 @@ public static class SteamOps
 
     public static void CancelQr() => _qrCts?.Cancel();
 
-    // ---- password sign-in (owner 2026-11-11: "is it a dead end for users without mobile guard?") ---------------------
+    // ---- password sign-in (docs/decisions.md § "Offer a password sign-in beside the QR") -----------------------------
     // POST /steam/login {username, password} → (WS steam-login-code {kind: email|device|confirm, hint, retry} → POST
     // /steam/login/code {code})* → WS steam-signed-in | steam-login-error {message, rateLimited} | steam-login-cancelled.
     // The password goes to Steam once (LoginViaCredentialsAsync takes it out of the box below, which is then empty); it is

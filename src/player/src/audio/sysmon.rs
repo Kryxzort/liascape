@@ -1,13 +1,13 @@
 //! Per-stream capture of every application playback stream — **one capture per stream, shared
 //! by two users**:
 //!
-//! - **The visualiser's audio input** (Phase 2 Task 7, owner decision D4): **all system audio,
+//! - **The visualiser's audio input**: **all system audio,
 //!   like Wallpaper Engine** — which listens to everything that plays, a wallpaper's own sound
 //!   included. [`SysMon::visual_since`] sums every stream that delivered within [`STALE`], each
 //!   frame at its place on the graph clock (`pw_buffer.time`), into one **stereo** f32 stream
-//!   (B8 "feed stereo": WE analyses left and right apart) that each scene reads from its own
+//!   (WE analyses left and right apart) that each scene reads from its own
 //!   cursor and the worker hands to `wp_context_audio_input_push` in order.
-//! - **The in-player auto-mute's per-stream meter** (Phase 3 Task 14, `crate::signal::automute`;
+//! - **The in-player auto-mute's per-stream meter** (`crate::signal::automute`;
 //!   rules recon §0.6 "share it rather than add a second one"): each capture's callback runs on
 //!   PipeWire's **real-time data thread** (`RT_PROCESS`, like the bus meter: a non-RT loop misses
 //!   cycles under load) and meters peaks in ≤ [`FRAG_FRAMES`] (10 ms) slices **as each buffer
@@ -28,7 +28,7 @@
 //! that goes away is never replaced by the default source — a microphone). It also tracks
 //! Client objects (a native node's pid is on its client), Links (a stream linked into the bus is
 //! ours) and each stream's `Props`. Read-only: it never plays, links nothing else and changes no
-//! routing; no capture requests a quantum (R68). The runtime runs it while ≥ 1 live scene wants
+//! routing; no capture requests a quantum. The runtime runs it while ≥ 1 live scene wants
 //! audio input **or** the auto-mute Signal is on, and drops it when neither does. A lost
 //! PipeWire connection is retried every [`RETRY`].
 
@@ -135,8 +135,7 @@ pub fn identity_of(sp: &StreamProps, client: Option<&ClientProps>) -> Identity {
     }
 }
 
-/// Whether a stream counts for auto-mute now. **Classify, then count** (the bug the backend's
-/// `AudioMonitor` had until 2026-10-28): a stream whose identity isn't read yet (`identified`:
+/// Whether a stream counts for auto-mute now. **Classify, then count**: a stream whose identity isn't read yet (`identified`:
 /// its node's and its client's full props arrived) never counts, so a scene worker's stream
 /// ramping in can't mute the wallpaper in the moment before its pid is known. Its run keeps
 /// its first audible time, so a foreign stream's delay still counts from its first sample.
@@ -151,7 +150,7 @@ pub fn counts_now(
 }
 
 /// Whether a stream is captured at all. **The plug point for a future per-app
-/// white/blacklist** (D4): today every application playback stream counts (WE's "all system
+/// white/blacklist**: today every application playback stream counts (WE's "all system
 /// audio"), except a loopback half (`node.virtual`), which re-plays streams already counted.
 pub fn admit(p: &StreamProps) -> bool {
     p.media_class == "Stream/Output/Audio" && !p.virtual_node

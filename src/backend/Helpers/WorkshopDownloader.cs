@@ -51,8 +51,8 @@ public static class WorkshopDownloader
     public const string InSteamTodo = "In the Steam to-do — its page opens in Steam when it's its turn…";
 
     // Real Steam subscription. Signed in here: the community AJAX endpoint (the same call the website's Subscribe button
-    // makes). Not (no sign-in, or one Steam turned down — owner 2026-11-11: "is it a dead end for users without mobile
-    // guard?"): the item's page opens in the Steam app (steam://url/CommunityFilePage/<id>) and the user clicks Subscribe
+    // makes). Not (no sign-in, or one Steam turned down — never a dead end for a user without a mobile guard): the item's
+    // page opens in the Steam app (steam://url/CommunityFilePage/<id>) and the user clicks Subscribe
     // there — status says so and why. Either way Steam then syncs + auto-updates the item like any normal subscription,
     // and the running Steam client downloads it to a workshop/content/431960 dir which we poll for.
     private static async Task<string> AcquireViaSubscribeAsync(
@@ -64,8 +64,8 @@ public static class WorkshopDownloader
         CancellationToken ct)
     {
         // "Use the Steam app": the running Steam client does it (one click, its own progress, no sign-in here). It FAILS when the
-        // Steam client can't do it — never a quiet switch to the sign-in or the page (owner 2026-11-11: "instead of fallbacks for
-        // when direct steam connection fails, i want failures there")
+        // Steam client can't do it — never a quiet switch to the sign-in or the page (a fallback would hide why the chosen
+        // mode didn't work)
         if (settings.WorkshopDownloadMode == "steamapp")
         {
             var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
@@ -82,8 +82,8 @@ public static class WorkshopDownloader
 
         string? why = null; // set = no usable sign-in: subscribe in the Steam app, and this is why
         string? cookie = null;
-        // "Open in the Steam app" (owner 2026-11-11: "getting workshop wallpapers should have 4 options not 3, the 4th being the
-        // one which opens the wallpaper in your app"): always the item's page in Steam — never the sign-in, even when there is one
+        // "Open in the Steam app" (docs/decisions.md § "Offer four Workshop download modes, the user's choice"): always the
+        // item's page in Steam — never the sign-in, even when there is one
         bool pageMode = settings.WorkshopDownloadMode == "steampage";
         if (pageMode) why = "Set to open items in the Steam app";
         else try
@@ -117,7 +117,8 @@ public static class WorkshopDownloader
 
         string waitingFor = "Subscribed — waiting for Steam to download…";
         // no usable sign-in: the user subscribes on the item's page in the Steam app — through the Steam to-do, one page at a
-        // time app-wide (owner 2026-11-11: a bulk download opened N pages at once, Steam showed one and the rest were lost)
+        // time app-wide: given N pages at once, Steam shows one and loses the rest (docs/decisions.md § "Queue the Steam pages
+        // the user must click, one at a time, advanced by Next")
         SteamTodo.Entry? todo = null;
         if (why != null)
         {
@@ -132,12 +133,12 @@ public static class WorkshopDownloader
         const int maxWaitMs = 600_000;
         int pollMs = PollMs;
         int waited = 0;
-        // the last size seen PER media path: the roots can name one folder twice (owner 2026-11-11: Steam's
+        // the last size seen PER media path: the roots can name one folder twice (Steam's
         // ~/.local/share/Steam/…/content/431960 a symlink to another library's — both paths polled), and one shared
-        // "last" slot then alternated between them every poll, so the size never matched twice → a 10-min hang
+        // "last" slot would alternate between them every poll, so the size never matches twice → a 10-min hang
         var lastSize = new System.Collections.Generic.Dictionary<string, long>(StringComparer.Ordinal);
-        // the step the card shows (owner 2026-11-11: a 458 MB item said "Downloading…" for a minute with nothing moving —
-        // the same look as a hang). Phases only, no percent: Steam may reserve a staged file's full size before writing it.
+        // the step the card shows (a bare "Downloading…" for a minute on a big item looks like a hang; docs/decisions.md §
+        // "Report Workshop download phases, not a percent"). Phases only, no percent: Steam may reserve a staged file's full size before writing it.
         string? shown = null;
         void Phase(string s) { if (s != shown) { shown = s; progress?.Report((-1, s)); } }
         bool delivered = false;
@@ -333,8 +334,8 @@ public static class WorkshopDownloader
     /// else Todo = it waits in the Steam to-do for the user's click + Next.
     public sealed record SubscribeOnlyResult(bool Subscribed, string Message, SteamTodo.Entry? Todo = null);
 
-    /// Subscribe WITHOUT importing anything into the library (owner 2026-11-11: "a button that lets you subscribe/unsubscribe in
-    /// the sidebar") — routed by the download mode like a download's subscribe: `steamapp` → the Steam client (it waits for the
+    /// Subscribe WITHOUT importing anything into the library (the sidebar's subscribe/unsubscribe button) — routed by the
+    /// download mode like a download's subscribe: `steamapp` → the Steam client (it waits for the
     /// install, reporting Steam's bytes), else a usable sign-in (not under `steampage`) → the website's subscribe call (done —
     /// Steam downloads it by itself), else → a Steam to-do subscribe entry without a download (the user clicks Subscribe on its
     /// page, then Next). `steamcmd` isn't a subscription mode, but this is an explicit Subscribe click: the sign-in / to-do route.
@@ -439,8 +440,8 @@ public static class WorkshopDownloader
         }
         async Task<DrainResult> DrainCoreAsync()
         {
-        // "Use the Steam app": the running Steam client unsubscribes (owner 2026-11-11: "clicked the unsubscribe button but for
-        // some reason it took me to the steam page instead of handling it itself"); whatever it can't confirm → the paths below
+        // "Use the Steam app": the running Steam client unsubscribes itself, no Steam page; whatever it can't confirm → the
+        // paths below
         if (settings.WorkshopDownloadMode == "steamapp")
         {
             int total0 = pending.Count, n = 0;
@@ -496,8 +497,8 @@ public static class WorkshopDownloader
         }
     }
 
-    /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them (owner 2026-11-11: "what if i
-    /// unsubscribe + undo / does it resubscribe? it doesn't right?") — the way the download mode subscribes: the Steam client
+    /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them — the way the download mode
+    /// subscribes: the Steam client
     /// (steamapp), the sign-in (subscribe), else the item's page in the Steam app. Null = all done; else what the user still
     /// has to click (the status bar shows it). steamcmd: nothing (no subscription).
     public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct,
@@ -531,7 +532,7 @@ public static class WorkshopDownloader
         }
         if (failedViaApp != null) return "Undone, but " + char.ToLowerInvariant(SteamClientUgc.FailureMessage(failedViaApp)[0]) + SteamClientUgc.FailureMessage(failedViaApp)[1..];
         if (toPage.Count == 0) return null;
-        // the Steam to-do: one page at a time, Next moves on (it used to open up to 5 pages at once, the rest never)
+        // the Steam to-do: one page at a time, Next moves on (Steam shows only one of several pages opened at once)
         foreach (var id in toPage)
             SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
         // the page route can't know whether the user clicked Unsubscribe there — the words cover both
@@ -544,11 +545,11 @@ public static class WorkshopDownloader
         s.SteamSignInRejected && SteamAuthService.HasRefreshToken() ? "Steam signed this app out" : "Not signed in to Steam here";
 
     /// The no-sign-in unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
-    /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (the subscriptions list of
-    /// ~320 items is never opened any more). Only those: the unsubscribe queue holds items deleted from the LIBRARY, and a library
+    /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (never the subscriptions
+    /// list of hundreds of items). Only those: the unsubscribe queue holds items deleted from the LIBRARY, and a library
     /// Workshop item is either a `local/<id>` link into Steam's folder (a subscription — its folder exists) or an owned
-    /// `workshop/<id>` copy (a steamcmd download, never a subscription; our steamcmd cache isn't a Steam root here) — owner
-    /// 2026-11-11. The rest are blocked at once, no page. A queued id stays `pending` until the user's Next marks it blocked
+    /// `workshop/<id>` copy (a steamcmd download, never a subscription; our steamcmd cache isn't a Steam root here; docs/decisions.md
+    /// § "Open an unsubscribe page only for items in a Steam Workshop folder"). The rest are blocked at once, no page. A queued id stays `pending` until the user's Next marks it blocked
     /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`).
     private static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
     {

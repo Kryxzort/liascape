@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { useStore } from "../store";
 
-// Motion switches + reading a card's picture state (was morph.ts / useMorph.ts: the card → modal flight went with the
-// modals when the item sidebar replaced them, 2026-11-10 — the WAAPI flight code is in git history, last in c87376bb).
+// Motion switches + reading a card's picture state (docs/decisions.md § "Replace the card settings and preview modals with
+// an item sidebar": no card → modal flight).
 
 // the OS / desktop's "reduce motion" (prefers-reduced-motion): every motion the "Smooth window animations" toggle governs
 // (the sidebar's slide / cross-fade, the tab slide, the playlist bar's dock lift) behaves as if that toggle were off

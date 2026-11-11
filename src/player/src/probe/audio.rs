@@ -1,4 +1,4 @@
-//! Audio probes (Task 14; spec §5.3 "the probes tap the bus monitor").
+//! Audio probes (spec §5.3 "the probes tap the bus monitor").
 //!
 //! - `bus` — `{state, device, latency_ms, latency_samples, quantum_ms, target,
 //!   default_sink, playback_node, sink_node, retargets, connecting, generation, reason,

@@ -99,7 +99,7 @@ public static class PlayerHelper
         if (paths.Count == 0) return;
         if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
         {
-            // the player's rotation (Task 7): its items grow
+            // the player's rotation: its items grow
             var items = (LiascapePlayerProgram.Paths ?? []).ToList();
             foreach (var p in paths) if (!items.Contains(p)) items.Add(p);
             LiascapePlayerProgram.SetItems(items);
@@ -128,7 +128,7 @@ public static class PlayerHelper
     // switch where mpvpaper has been killed but the next instance hasn't launched.
     public static bool IsTimedPlaylistActive()
     {
-        // liascape-player (Task 7): a rotation session is the player's program (timed_state.json is legacy's)
+        // liascape-player: a rotation session is the player's program (timed_state.json is legacy's)
         if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerProgram.IsActive;
         try
         {
@@ -287,7 +287,7 @@ public static class PlayerHelper
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".config", "liascape", "pending_action.txt");
 
-    // ── Phase 3 Task 8: under liascape-player the player's program rotates by itself (with the app closed too) ───────
+    // ── under liascape-player the player's program rotates by itself (with the app closed too) ────────────────────
     // No timer-daemon, no restart-daemon, no pending-action IPC, no timer ownership (`timer.pid` / `gui_timer.pid` /
     // `restart.pid`), no `timed_state.json` / `playlist_observer_paths.json`: every entry point that reaches one is a
     // no-op there, logged once per entry point. A stale file from a legacy run is ignored (`timed_state.json` is read
@@ -303,7 +303,7 @@ public static class PlayerHelper
 
     // A timer-daemon / restart-daemon / monitor-daemon left by a legacy session (the engine switched since, an older
     // build) — stopped at `serve` start, by `restore` and by `stop`/`kill` under liascape-player (the player's program
-    // rotates by itself, its Signal auto-mutes: Phase 3 Tasks 8 and 14). Verified by its command line (a pid file outlives
+    // rotates by itself, its Signal auto-mutes). Verified by its command line (a pid file outlives
     // a reboot: its number may belong to anything by now); its pid file goes with it.
     public static void KillLegacyDaemons()
     {
@@ -382,9 +382,9 @@ public static class PlayerHelper
     // `timer-daemon`, or another backend took it over — WITHOUT touching the session the new owner
     // resumes from (saved first; TeardownTimer would clear it and consume a pending action): no more
     // ticks, and its armed end-of-video wait is cancelled (the new owner arms its own; left armed, it
-    // would be superseded and switch now). The stopping backend used to tick on until the process exited
-    // — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket held it open — next to the daemon
-    // and then the next backend: their aligned switches superseded each other, a dev restart switched
+    // would be superseded and switch now). A stopping backend that ticks on until the process exits
+    // — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket holds it open — next to the daemon
+    // and then the next backend has their aligned switches supersede each other: a dev restart switches
     // the wallpaper every 1–16 s.
     private static volatile bool _timerReleased;
     private static DateTime _ownerCheckedAt;
@@ -696,7 +696,7 @@ public static class PlayerHelper
 
     public static Action? OnTimedPlaylistStopped;
     public static Action<string>? OnSceneCrashed;
-    // liascape-player Task 8: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
+    // liascape-player: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
     public static Action<string, double, double, string>? OnSceneVramStoppedCb;
     public static Action<string?>? OnWallpaperChanged;
 
@@ -834,7 +834,7 @@ public static class PlayerHelper
             {
                 if (PlayerEngine.IsLiascapePlayer)
                 {
-                    // Phase 2: liascape-player plays scenes when they're on and the player can (its worker +
+                    // liascape-player plays scenes when they're on and the player can (its worker +
                     // WE's assets) — else the reason; a crashed one only when whitelisted (D6)
                     if (PlayerEngine.SceneUnavailableReason(SettingsService.Load()) is string why) throw new InvalidOperationException(why);
                     if (LibraryService.HasCrashed(videoPath) && !LibraryService.IsWhitelisted(videoPath))
@@ -851,7 +851,7 @@ public static class PlayerHelper
             }
             TeardownTimer();
             ClearTimedStateFile();
-            // a single wallpaper replaces a rotation: `destroy prog:main` queued before the switch (Task 7)
+            // a single wallpaper replaces a rotation: `destroy prog:main` queued before the switch
             if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.End();
             // I1: a new session plays — unless it's a user next/prev/random keeping the pause
             if (PlayerEngine.IsLiascapePlayer && !_keepPauseNextSwitch) LiascapePlayerMedia.QueueNewSession();
@@ -867,7 +867,7 @@ public static class PlayerHelper
     public static void ApplyPlaylist(IReadOnlyList<string> videoPaths, string mpvOptions, bool shuffle = false, int intervalSeconds = 0)
     {
         if (videoPaths.Count == 0) return;
-        // liascape-player (Task 7): more than one item, or any scene → the player's program (advance-on-end, as below)
+        // liascape-player: more than one item, or any scene → the player's program (advance-on-end, as below)
         if (PlayerEngine.IsLiascapePlayer && (videoPaths.Count > 1 || videoPaths.Any(IsScenePath)))
         {
             ApplyTimedPlaylist(videoPaths, mpvOptions, shuffle, intervalSeconds, switchWhenVideoEnds: true);
@@ -916,7 +916,7 @@ public static class PlayerHelper
     {
         if (PlayerEngine.IsLiascapePlayer)
         {
-            // Task 7: the player's program — a start of the playlist (a restore, the engine switched to the player, Play
+            // the player's program — a start of the playlist (a restore, the engine switched to the player, Play
             // All), so its "When the playlist starts again" decides where (§ Playlist start). AppOps.PlayPlaylist/PlayFrom
             // load it themselves (the bar's order, play-from's index).
             LoadProgram(paths, SettingsService.Load(), PlaylistService.LoadCurrentState()?.Settings, shuffle, intervalSeconds, switchWhenVideoEnds, from: null);
@@ -929,7 +929,7 @@ public static class PlayerHelper
 
             var ordered = new List<string>(paths); // caller is responsible for initial order; shuffle flag only controls cycle-end reshuffle
             // liascape-player: start at the first item that can play — a scene marked crashed (D6) first in the
-            // list used to reach SwitchToFile, which stops playback for an unplayable scene (legacy unchanged)
+            // list would reach SwitchToFile, which stops playback for an unplayable scene (legacy unchanged)
             int first = 0;
             if (PlayerEngine.IsLiascapePlayer && IsSkippedPath(ordered[0]))
             {
@@ -1025,7 +1025,7 @@ public static class PlayerHelper
 
     public static bool RestoreTimedPlaylist()
     {
-        if (PlayerEngine.IsLiascapePlayer) return LoadFromTimedState(); // Task 7: legacy → the player's program, at its item
+        if (PlayerEngine.IsLiascapePlayer) return LoadFromTimedState(); // legacy → the player's program, at its item
         bool ok;
         lock (_lock)
         {
@@ -1056,7 +1056,7 @@ public static class PlayerHelper
 
     public static bool ResumeTimedTimer()
     {
-        // Task 7: the player's program never stopped (an app restart); a legacy session still in timed_state.json moves over
+        // the player's program never stopped (an app restart); a legacy session still in timed_state.json moves over
         if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerProgram.IsActive || LoadFromTimedState();
         bool ok;
         lock (_lock)
@@ -1084,12 +1084,11 @@ public static class PlayerHelper
     // interval (pure advance-on-end too: Tick ignores its countdown there) and whatever its length: a
     // one-item session (a trash leaving one survivor, a one-item playlist played) takes a next / random (a
     // switch to its one item, its transition included — the playlist bar's "next" after it is itself) and the
-    // restart daemon's "restart" (legacy's leak workaround); it never rotates by itself (`CanRotate`). It
-    // used to start only at a session (re)start with > 1 item AND an interval: a pure advance-on-end session
-    // never took a next, a one-item session never took anything — the queued action sat in
-    // pending_action.txt until a tick started for a grown list (Undo, a playlist bar add) and threw it away
-    // (StartTimedTimer). `takeBack: false` (a live list edit): not once this process released the timer to
-    // another owner (ReleaseTimer); a session (re)started here takes it back as before.
+    // restart daemon's "restart" (legacy's leak workaround); it never rotates by itself (`CanRotate`). Starting
+    // it only for > 1 item AND an interval would leave a pure advance-on-end session taking no next, a one-item
+    // session nothing — the queued action would sit in pending_action.txt until a tick started for a grown list
+    // (Undo, a playlist bar add) and threw it away (StartTimedTimer). `takeBack: false` (a live list edit): not once
+    // this process released the timer to another owner (ReleaseTimer); a session (re)started here takes it back.
     private static void EnsureTimedTick(bool takeBack = true)
     {
         if (LegacyRotationReached(nameof(EnsureTimedTick))) return;
@@ -1293,14 +1292,14 @@ public static class PlayerHelper
     public static string EffectiveStart(AppSettings s, PlaylistSettings? p) =>
         p?.OverrideGlobalSettings == true ? p.PlaylistStart : s.GlobalPlaylistStart;
 
-    // What a playing item plays under advance-on-end (2026-10-28, owner: "a toggle which when toggled lets you configure
-    // differently for scenes … 0 … just turns them off"). (MinMs, MaxMs), wall-clock ms; 0 = off everywhere:
+    // What a playing item plays under advance-on-end (docs/decisions.md § "Use one interval field: "Switch every" or
+    // "Minimum play time""; scenes may have timing of their own). (MinMs, MaxMs), wall-clock ms; 0 = off everywhere:
     // - MinMs: a VIDEO plays at least this long, then switches at its next end (0 → at its first end, however short);
     //   for an item that never ends (a still image, a scene) reaching it IS its end. NeverMs = it stays until a user
     //   switch (or the maximum, where one applies).
     // - MaxMs: the cap, even mid-video (0 = none → a 10 h video plays to its end).
-    // Separate timing OFF: a scene uses whichever limit is set as its end, the minimum when both are (owner 2026-11-10 —
-    // a shorter maximum no longer cuts it first); neither → it stays until a user switch. A still image
+    // Separate timing OFF: a scene uses whichever limit is set as its end, the minimum when both are (docs/decisions.md §
+    // "A scene's minimum play time beats its maximum" — a shorter maximum doesn't cut it first); neither → it stays until a user switch. A still image
     // shows for the minimum (0 → it flashes by). ON: a scene AND a still image switch after "Switch scenes after"
     // (0 → they stay) and the minimum / maximum don't apply to them — they have no end, so "at least … then at the next
     // end" / "at most" mean nothing there; one number says it. A video is never touched by the scene timing.
@@ -1353,7 +1352,7 @@ public static class PlayerHelper
     {
         if (PlayerEngine.IsLiascapePlayer)
         {
-            // Task 7: the program's limits — the player reads them at its next tick
+            // the program's limits — the player reads them at its next tick
             if (LiascapePlayerProgram.IsActive) LiascapePlayerProgram.SetLimits(maxSeconds, separateScenes, scenesAfterSeconds);
             return;
         }
@@ -1439,7 +1438,7 @@ public static class PlayerHelper
     private static void SwitchToFile(string path, string mpvOptions)
     {
         // liascape-player: ONE `transition` request (a cut when transitions are off) does the whole switch —
-        // no pre-launch crossover, no overlay, no IPC loadfile — for a scene too (Phase 2: `kind: scene`,
+        // no pre-launch crossover, no overlay, no IPC loadfile — for a scene too (`kind: scene`,
         // kind-agnostic in the player; no V→S lead, no SceneTransitionDelayMs). A scene that can't play
         // stops playback here, exactly like legacy with AllowScenes=false (the pickers never hand one over).
         bool keepPause = _keepPauseNextSwitch; // a user switch staying paused: a cut (StayPausedWhenSwitching)
@@ -1917,7 +1916,7 @@ public static class PlayerHelper
     {
         if (PlayerEngine.IsLiascapePlayer)
         {
-            // Task 7: the program's items + order (Order::reorder keeps the current item, the countdown and the play
+            // the program's items + order (Order::reorder keeps the current item, the countdown and the play
             // time; a removed current item finishes without a replay, the rotation goes on from its place)
             if (originalPaths.Count > 0 && LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetItems(originalPaths); LiascapePlayerProgram.SetOrder(shuffle); }
             return;
@@ -2263,7 +2262,7 @@ public static class PlayerHelper
         //    no playtime polling and no `_lastSwitchTarget` settle gate (legacy-only): the previous
         //    switch's transition.handoff is the gate (a new request would supersede a pre-Running one).
         //    Cancel (ct) → `cancel {corr}` inside SwitchAndWait.
-        //    Phase 2: a scene on either side too (kind-agnostic in the player). A scene A never ends, so
+        //    A scene on either side too (kind-agnostic in the player). A scene A never ends, so
         //    a switch away from one (a restore re-arming onto a scene — the tick moves scenes on itself) is
         //    align:"now" — legacy's "prevIsScene → switch now".
         if (PlayerEngine.IsLiascapePlayer)
@@ -2631,7 +2630,7 @@ public static class PlayerHelper
     public static void RearmAlignedSwitch()
     {
         if (!PlayerEngine.IsLiascapePlayer) return;
-        // Task 7: the program's `transition` — the player re-arms an armed switch to the same B with it
+        // the program's `transition` — the player re-arms an armed switch to the same B with it
         if (LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetTransition(); return; }
         lock (_lock)
         {
@@ -2697,8 +2696,8 @@ public static class PlayerHelper
     {
         // When _waitingForVideoEnd is true, _historyIndex is pre-fetched one step ahead: the playing
         // item is at PlayingHistoryIndex, the previous one right before it. Nothing played before it →
-        // leave it AND its armed video-end wait alone (with a pre-fetch this used to undo the pre-fetch
-        // only and relaunch the playing item: restarted, its armed switch cancelled).
+        // leave it AND its armed video-end wait alone (undoing only the pre-fetch would relaunch the
+        // playing item: restarted, its armed switch cancelled).
         if (_history == null) return;
         int prev = PlayingHistoryIndex - 1;
         if (prev < 0 || prev >= _history.Count) return;
@@ -2782,7 +2781,7 @@ public static class PlayerHelper
     // ── Pause × a user switch (next / previous / random: keybind, CLI, /next /prev /random) ──────
     // StayPausedWhenSwitching off (default): a switch made while paused resumes playback first, so it
     // switches with its transition and plays — single and playlist alike (a paused playlist's tick
-    // used to hold the action until the resume, then switch; a single one already unpaused). On: the
+    // doesn't hold the action until the resume). On: the
     // pause stays — the switch is a cut (an effect can't run with playback stopped: liascape-player's clock
     // is frozen) to the new wallpaper's first frame, paused, and a paused playlist's tick runs it at
     // once (its countdown stays paused). A rotation never switches while paused.
@@ -2817,7 +2816,7 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Next(keep); // Task 7: the player's program, never the pending file
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Next(keep); // the player's program, never the pending file
             else WritePendingAction("next");
             return;
         }
@@ -2893,7 +2892,7 @@ public static class PlayerHelper
     {
         if (PlayerEngine.IsLiascapePlayer)
         {
-            // Task 7: the program's rotation (the player retimes the countdown / re-arms to the same B)
+            // the program's rotation (the player retimes the countdown / re-arms to the same B)
             if (LiascapePlayerProgram.IsActive) { LiascapePlayerProgram.SetOrder(shuffle); LiascapePlayerProgram.SetRotation(intervalSeconds, switchWhenVideoEnds); }
             return;
         }
@@ -3009,7 +3008,7 @@ public static class PlayerHelper
             SignalTimerStop();
             ClearPlaylistObserverPaths();
         }
-        if (PlayerEngine.IsLiascapePlayer) KillLegacyDaemons(); // only a legacy leftover can run (verified, Task 8)
+        if (PlayerEngine.IsLiascapePlayer) KillLegacyDaemons(); // only a legacy leftover can run (verified by command line)
         else KillRestartDaemon();
         // any in-flight transition died with its players — a stale InProgress marker would delay the
         // NEXT session's first video-end sample (late transition on a short first clip)
@@ -3041,7 +3040,7 @@ public static class PlayerHelper
         SpawnRestartDaemon();
     }
 
-    // Phase 3 Task 8: `liascape restore` (boot / autostart), the `play` key, `toggle-play` from stopped — under
+    // `liascape restore` (boot / autostart), the `play` key, `toggle-play` from stopped — under
     // liascape-player. A player that isn't running is started with its snapshot as a SESSION START (`serve --restore
     // --session-start`): the player brings back what it showed, and each restored program starts per its "When the
     // playlist starts again" by itself (plan § Playlist start: start over → item 1 / a fresh shuffle, the old item never
@@ -3052,7 +3051,7 @@ public static class PlayerHelper
     // restart-daemon; a legacy leftover of either is stopped.
     private static void RestoreOnPlayer(AppSettings settings)
     {
-        // auto-mute: no monitor-daemon (retired, Task 14) — the player's Signal gets the settings once it answers (AfterRestore)
+        // auto-mute: no monitor-daemon — the player's Signal gets the settings once it answers (AfterRestore)
         KillLegacyDaemons();
         if (!LiascapePlayerClient.Shared.EnsureRunning(restore: true, sessionStart: true))
             throw new InvalidOperationException($"liascape-player could not start: {LiascapePlayerClient.Shared.LastError ?? "unknown reason"}");
@@ -3151,7 +3150,7 @@ public static class PlayerHelper
             bool started = IsPlaying && ResumeTimedTimer();
             if (!started)
             {
-                if (RestoreTimedPlaylist()) { }   // legacy always resumed its timed playlist (the "Resume from last" row folded into the playlist start, Task 10)
+                if (RestoreTimedPlaylist()) { }   // legacy always resumes its timed playlist (docs/decisions.md § "Fold "Resume from last" into the playlist start setting")
                 else if (session.IsTimedPlaylist)
                 {
                     var paths = session.Shuffle
@@ -3199,7 +3198,7 @@ public static class PlayerHelper
         lock (_lock)
         {
             SendCommand("cycle", "pause");
-            if (!PlayerEngine.IsLiascapePlayer) UpdateTimerPaused(p => !p); // the player's clock is the rotation's (Task 7)
+            if (!PlayerEngine.IsLiascapePlayer) UpdateTimerPaused(p => !p); // the player's clock is the rotation's
         }
     }
 
@@ -3261,7 +3260,7 @@ public static class PlayerHelper
         if (IsLweRunning) ApplyLweMute(_isMuted);
     }
 
-    // The in-player auto-mute has every source muted (Task 14): `gain.automute`, the player's own slot — `_autoMuted` and
+    // The in-player auto-mute has every source muted: `gain.automute`, the player's own slot — `_autoMuted` and
     // `gain.mute` stay the user's there. Asked of the player, so a one-shot CLI process (the keybind, app closed) knows too.
     public static bool AutoMutedInPlayer => AudioMonitor.AutoMuteInPlayer && LiascapePlayerMedia.AutoMuteActive();
 
@@ -3300,7 +3299,7 @@ public static class PlayerHelper
 
     // The Settings page's global Volume/Speed drag preview (`/preview {global:true}`, no persist — the
     // UI's debounced /settings persists): every live wallpaper WITHOUT its own override for that field
-    // takes the dragged value (effective = override ?? global, R61); an overridden one never moves.
+    // takes the dragged value (effective = override ?? global); an overridden one never moves.
     public static void PreviewGlobal(int? volume, double? speed)
     {
         if (PlayerEngine.IsLiascapePlayer) { LiascapePlayerMedia.PreviewGlobal(volume, speed); return; }
@@ -3527,7 +3526,7 @@ public static class PlayerHelper
     // The volume keybinds, ±delta clamped 0–100, by `VolumeKeyTarget`: "auto" (default) moves the playing
     // wallpaper's own volume when it has one, else the global; "item" always the playing wallpaper's own
     // (override ?? global → its override); "global" always the global — then an overridden wallpaper keeps
-    // its own (it used to get the new global pushed and snap back on the next settings save). Live either
+    // its own (pushing the new global onto it would snap it back on the next settings save). Live either
     // way: an override like /library/volume (save + ApplyOverrideLive), the global by the effective value.
     // Returns the item whose override moved (null: the global did, or nothing changed) for the UI event.
     public static string? AdjustVolume(int delta)
@@ -3865,7 +3864,7 @@ public static class PlayerHelper
         !string.IsNullOrEmpty(path) && Path.GetExtension(path).Length == 0;
 
     // Is this item skipped by the pickers (next/prev/random, a rotation's advance)? A scene when scenes
-    // can't play, or (D6, Phase 2) when it is marked crashed and not whitelisted — what the item settings
+    // can't play, or (D6) when it is marked crashed and not whitelisted — what the item settings
     // modal promises ("Scene crashed — won't be played"). Pure — the self-test's truth table. Marking
     // happens only under liascape-player (OnSceneBroken), so it is inert for legacy unless liascape-player marked one.
     public static bool SkipScene(bool isScene, bool playable, bool crashed, bool whitelisted) =>
@@ -3883,9 +3882,9 @@ public static class PlayerHelper
         ? _history != null && PlayingHistoryIndex >= 0 && PlayingHistoryIndex < _history.Count && IsScenePath(_history[PlayingHistoryIndex])
         : IsLweRunning;
 
-    // liascape-player Phase 2: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
+    // liascape-player: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
     // marked crashed in its index entry (skipped from now on unless whitelisted, D6), the UI told
-    // (WS `scene-crashed`), and — the owner's call — a rotation PLAYING it advances at once (the tick's
+    // (WS `scene-crashed`), and — by design — a rotation PLAYING it advances at once (the tick's
     // own advance: its owner check, pause and mode rules apply). A single wallpaper keeps what the player
     // shows (its last frame or preview, silent). A broken PENDING B is the switch's own failure
     // (`transition.failed` → DoVideoEndWait's fallback, which skips an item marked meanwhile).
@@ -3897,7 +3896,7 @@ public static class PlayerHelper
         AdvanceIfPlaying(path, "scene broken while playing");
     }
 
-    // liascape-player Task 8: `scene.vram_exceeded` — the player's VRAM guard stopped this scene's worker (it used more
+    // liascape-player: `scene.vram_exceeded` — the player's VRAM guard stopped this scene's worker (it used more
     // than `player.scene_vram_limit_mib`). For playback exactly like a broken scene — a rotation playing it
     // advances at once, a single wallpaper keeps what the player shows (its last frame) — but it is NOT marked
     // crashed (it isn't broken; with a higher limit or less on the GPU it plays): the UI is told why instead
@@ -3918,7 +3917,7 @@ public static class PlayerHelper
     {
         if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
         {
-            // Task 7: the player's program advanced by itself (a broken / VRAM-stopped current item); the item's skip
+            // the player's program advanced by itself (a broken / VRAM-stopped current item); the item's skip
             // flag follows the crash mark
             TransitionService.TransLog($"{why}: {System.IO.Path.GetFileName(path)} — the player's program advances");
             LiascapePlayerProgram.PushItem(path);
@@ -3942,7 +3941,7 @@ public static class PlayerHelper
     // The pickers' rule for a program item's `skip` flag (LiascapePlayerProgram.BuildItems).
     public static bool SkippedForRotation(string path, bool scenesPlayable) => IsSkippedPath(path, scenesPlayable);
 
-    // ── liascape-player Phase 3 Task 7: the rotation is the player's program (LiascapePlayerProgram) ──────────────
+    // ── liascape-player: the rotation is the player's program (LiascapePlayerProgram) ─────────────────────────────
     // A program switch committed (`program.current`, its effect started): what every client is told plays, the speed
     // factor kept like PostSwitch did. The program measures nothing itself — every unmeasured video of it was kicked
     // when its items were built (NormalizeAf), so with the app closed only an item never measured before plays raw.
@@ -3972,8 +3971,8 @@ public static class PlayerHelper
         return LiascapePlayerProgram.Load(spec, from, index, keepPause: false);
     }
 
-    // A legacy rotation (timed_state.json — legacy's tick, or a backend before Task 7) → the player's program at the
-    // item it was on (designer call 10). The playlist bar's order when it holds the same items (the timed paths are the
+    // A legacy rotation (timed_state.json — legacy's tick, or an older backend) → the player's program at the
+    // item it was on. The playlist bar's order when it holds the same items (the timed paths are the
     // play order, maybe shuffled). The item restarts at 0 (a play-from); the file is gone afterwards.
     public static bool LoadFromTimedState()
     {

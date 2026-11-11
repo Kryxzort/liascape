@@ -1,33 +1,33 @@
 //! Probes (spec §4.2 "Probe", §9): named measurements the `probe {name, args}` verb runs
-//! against the live runtime. A registry ([`PROBES`]); later tasks add their own (Task 13:
-//! `frames`, Task 15: the dropout detector) as files in this directory plus one entry here.
+//! against the live runtime. A registry ([`PROBES`]); a new probe (e.g. `frames`, or
+//! `dropout`, the dropout detector) is a file in this directory plus one entry here.
 //!
 //! - `list` — every probe with a one-line description.
 //! - `sources` — per hosted source: kind, path, ready, paused (the node's own raw value),
-//!   `effective_paused` (`paused || player.paused`, Task 16b, R75), time_pos, duration,
+//!   `effective_paused` (`paused || player.paused`), time_pos, duration,
 //!   the graph's effective gain, the live source's own gain slots, mpv's actual
 //!   `volume-gain` and in-flight requests (libmpv sources), stepped-mode virtual time,
 //!   last event.
 //! - `loop` — tick rate, recent tick durations + phases, the longest busy stretch since the
 //!   last reset (`args: {"reset": true}` clears it after reading), wakes, clients.
-//! - `frames` (`frames.rs`, Task 13) — per output, rolling present intervals (paced:
+//! - `frames` (`frames.rs`) — per output, rolling present intervals (paced:
 //!   mean/p50/p95/max/count/missed; all: + fps), idle, frame callback state.
-//! - `bus`, `meter.window` (`audio.rs`, Task 14) — the player audio bus and its meter.
-//! - `dropout` (`dropout.rs`, Task 15) — the reference-based dropout detector; runs on a
+//! - `bus`, `meter.window` (`audio.rs`) — the player audio bus and its meter.
+//! - `dropout` (`dropout.rs`) — the reference-based dropout detector; runs on a
 //!   worker thread and replies `pending`, delivering `probe.dropout` as an event.
-//! - `snapshot` (`snapshot.rs`, Task 16) — the state snapshot: what would be saved now,
+//! - `snapshot` (`snapshot.rs`) — the state snapshot: what would be saved now,
 //!   when it's next written, writer counters.
-//! - `vram` (`vram.rs`, Phase 2 Task 8) — the VRAM sampler, the low-VRAM rule's state and
+//! - `vram` (`vram.rs`) — the VRAM sampler, the low-VRAM rule's state and
 //!   hold, each scene worker's VRAM against `player.scene_vram_limit_mib`.
-//! - `memory` (`memory.rs`, Task 20b) — RSS + glibc malloc in-use vs retained, arena
+//! - `memory` (`memory.rs`) — RSS + glibc malloc in-use vs retained, arena
 //!   count; `args: {"trim": true}` runs `malloc_trim(0)` and reports the RSS it gave back.
-//! - `cover` (Phase 3 Task 6, `crate::signal`) — the covered Signal: its source (`hyprland` |
+//! - `cover` (`crate::signal`) — the covered Signal: its source (`hyprland` |
 //!   `sway` | `wlr-foreign-toplevel` | `headless` | `unavailable`) and status, per output
 //!   `covered`/`app_id`/`pid`/`showing`/`since_ms`, the rule, the hold, its last decisions.
-//! - `automute` (Phase 3 Task 14, `crate::signal::automute`) — the in-player auto-mute: settings,
+//! - `automute` (`crate::signal::automute`) — the in-player auto-mute: settings,
 //!   state, each captured stream's verdict (`foreign` / `own:<why>`), level and MPRIS owner, the
 //!   MPRIS players (`unmatched`: Playing with no stream), decisions with `t_mono_ms` timestamps.
-//! - `programs` (`programs.rs`, Phase 3) — every program: `state.programs` plus each item's
+//! - `programs` (`programs.rs`) — every program: `state.programs` plus each item's
 //!   `skip`/`broken`/`failed` flags.
 
 mod audio;
@@ -184,14 +184,14 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             "gain_effective_db".into(),
             json!(rt.graph.effective_gain_db(&id)),
         );
-        // R75: `paused` above is the node's own raw value (recipe/user intent — never
+        // `paused` above is the node's own raw value (recipe/user intent — never
         // corrupted by the player-level override); this is what the live source is
-        // actually held at (`node.paused || player.paused`). Task 16c review fix: read
+        // actually held at (`node.paused || player.paused`). Read
         // `player.paused` straight off the graph here, never `rt.player_paused()` (the
         // cached runtime field) — a pipelined `set player.paused` + `probe sources` in the
-        // same batch saw the *stale* cached value (it's only refreshed at the top of the
+        // same batch would see the *stale* cached value (it's only refreshed at the top of the
         // next tick/step), even though `get`/`state` already read it live.
-        // A rule's hold (low VRAM, Phase 3 Task 6's cover) pauses every source too.
+        // A rule's hold (low VRAM, the cover) pauses every source too.
         let player_paused_live = matches!(
             rt.graph.get(&crate::anim::PropPath("player.paused".into())),
             Ok(PropValue::Bool(true))
@@ -226,18 +226,18 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
                 "mpv_audio_delay".into(),
                 json!(m.mpv_get_f64("audio-delay")),
             );
-            // I7: whether mpv has a live audio output at all (it drops it when the AO
+            // Whether mpv has a live audio output at all (it drops it when the AO
             // can't open — e.g. PipeWire was down — and gets it back on a re-route).
             o.insert(
                 "mpv_current_ao".into(),
                 json!(m.mpv_get_string("current-ao")),
             );
-            // Task 20b: which decoder mpv really picked (`hwdec: auto` resolves per file).
+            // Which decoder mpv really picked (`hwdec: auto` resolves per file).
             o.insert(
                 "mpv_hwdec_current".into(),
                 json!(m.mpv_get_string("hwdec-current")),
             );
-            // Task 20d: what we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes unless
+            // What we asked mpv for (`sources::mpv::mpv_hwdec` — copy modes unless
             // the render context loaded a GL interop on the render worker: `hwdec_interop`).
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("hwdec_interop".into(), json!(m.hwdec_interop()));
@@ -252,7 +252,7 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             );
             // How often its dropped first frame was asked for again (`REFETCH_AFTER`, sources/mpv.rs).
             o.insert("frame_refetches".into(), json!(m.frame_refetches()));
-            // Phase 2: where it renders, and the worker's timings for it.
+            // Where it renders, and the worker's timings for it.
             o.insert("render_mode".into(), json!(m.render_mode()));
             o.insert("render".into(), m.render_stats());
             o.insert("stepped".into(), json!(m.is_stepped()));
@@ -262,7 +262,7 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             );
         }
         if let Some(s) = rt.host.scene(&id) {
-            // Phase 2 Task 5: a scene's worker side (the `workers` probe has the rest).
+            // A scene's worker side (the `workers` probe has the rest).
             o.insert("pid".into(), json!(s.pid()));
             o.insert("scene_time".into(), json!(s.scene_time()));
             o.insert("latched_t".into(), json!(s.latched_t()));
@@ -338,19 +338,19 @@ fn loop_stats(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
         "tap_dropped": rt.tap.dropped(),
         "reaper_pending": reaper::pending(),
         "uptime_ms": rt.started.elapsed().as_secs_f64() * 1000.0,
-        // R90 (Task 16d): the fast (>= 1 kHz) gain-only timer — armed iff a `gain.*`
+        // The fast (>= 1 kHz) gain-only timer — armed iff a `gain.*`
         // animation exists (never under the stepped clock). `recent_gain_pushes`:
         // [t_mono_ms, db] pairs, oldest first, bounded.
         "gain_timer_armed": rt.gain_timer_armed(),
         "gain_ticks": s.gain_ticks,
         "gain_pushes": s.gain_pushes,
-        // R93: open player-pause anticlick gates (`PauseGate`) — must drop to 0 once a
+        // Open player-pause anticlick gates (`PauseGate`) — must drop to 0 once a
         // gated source is destroyed/retired, never leaked. `dropout_windows_open`: how
         // many recorded audio windows (transitions, retires, pause gates) are still
         // open — a gate abandoned mid-flight must close its window, not leave it open.
         "pause_gates": rt.pause_gate_count(),
         "dropout_windows_open": rt.dropout_windows.open_count(),
-        // C1 (final review): every per-source collection's size — a long run of switches
+        // Every per-source collection's size — a long run of switches
         // must leave each of these bounded (the "long-run bounds" evidence).
         "bounds": rt.bounds(),
         "recent_gain_pushes": s.recent_gain_pushes

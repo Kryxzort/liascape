@@ -1,5 +1,4 @@
-// COOL: the Workshop filter column's "Filters · N" pill and the docked column's title are ONE control in two places (owner
-// 2026-11-11: "how about the filter button morphing into the filter title area of the expanded section?"). On a fold / unfold
+// COOL: the Workshop filter column's "Filters · N" pill and the docked column's title are ONE control in two places. On a fold / unfold
 // a ghost copy of the element being left flies to where the other one lands — translate + scale (transform-origin 0 0) with
 // its background / colour / shadow easing into the target's — while the column slides and the grid glides (same duration +
 // curve, so all three land together). The target stays hidden until the ghost arrives; the source is already gone (the pill
@@ -43,8 +42,8 @@ export function morph(from: MorphSource, to: Element | null) {
   Object.assign(g.style, { position: "fixed", left: `${from.rect.left}px`, top: `${from.rect.top}px`, width: `${from.rect.width}px`,
     height: `${from.rect.height}px`, margin: "0", zIndex: "60", pointerEvents: "none", transformOrigin: "0 0", boxSizing: "border-box" });
   document.body.append(g);
-  // `transition: none` too: the pill's `transition: all` covers visibility, which then stayed VISIBLE through its 150 ms
-  // transition — the pill showed under the ghost on a fold (traced 2026-11-11: inline hidden, computed visible until ~350 ms)
+  // `transition: none` too: the pill's `transition: all` covers visibility, which then stays VISIBLE through its 150 ms
+  // transition — the pill shows under the ghost on a fold (traced: inline hidden, computed visible until ~350 ms)
   to.style.transition = "none";
   to.style.visibility = "hidden";
   const sx = end.width / from.rect.width, sy = end.height / from.rect.height;
@@ -58,8 +57,8 @@ export function morph(from: MorphSource, to: Element | null) {
     { offset: 1, transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
       backgroundColor: cs.backgroundColor, color: cs.color, boxShadow: cs.boxShadow, borderRadius: cs.borderRadius },
   ], { duration: MORPH_MS, easing: EASE, fill: "forwards" });
-  // the chevron TURNS on the way (owner 2026-11-11: "make the chevron smoothly flip like the cool apps, not just snap"): the copy
-  // starts with the source's direction and the landing swapped it for the target's at once. Rotate the ghost's chevron between
+  // the chevron TURNS on the way, never snaps: the copy
+  // starts with the source's direction and the landing swaps it for the target's at once. Rotate the ghost's chevron between
   // the two (an `open` button points left = 0°, the folded pill right = 180°) on the same clock, with a springy overshoot.
   const gc = g.querySelector<SVGElement>(".wf-chev"), tc = to.querySelector(".wf-chev");
   if (gc && tc) {

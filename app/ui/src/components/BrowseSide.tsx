@@ -49,7 +49,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
-  // the About card only for a description; tags alone sit in a plain row (owner 2026-11-11: a card for one property felt strange)
+  // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tagRow = w.tags && w.tags.length > 0 ? <div className="tags side-tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
 
   return (

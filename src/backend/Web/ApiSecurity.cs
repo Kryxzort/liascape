@@ -18,7 +18,7 @@ namespace Liascape.Web;
 
 #pragma warning disable CA1416 // Unix file modes: this backend is Linux-only
 
-// The loopback API is the app's own (owner 2026-11-11: "make the app as a whole more secure"). Loopback is NOT private:
+// The loopback API is the app's own. Loopback is NOT private:
 // every web page open in the user's browser can send requests to 127.0.0.1 (and read the answers when CORS lets it, or
 // via DNS rebinding), and every other local user can connect. So (.claude/rules/backend/api.md § Security):
 //  • a secret token in ~/.config/liascape/serve.token (0600, beside serve.port) on every request — header

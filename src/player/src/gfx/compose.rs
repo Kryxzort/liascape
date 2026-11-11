@@ -4,22 +4,21 @@
 //!
 //! See `docs/player/modules/composition.md` § Composer for the fit-semantics
 //! table, the viewport/span rule, the coordinate conventions, the premultiplied-opacity
-//! contract, and rulings R19/R20 this module implements.
+//! contract.
 //!
-//! **R19 (no frame memory here).** [`Composer::compose_output`] never remembers a
+//! **No frame memory here.** [`Composer::compose_output`] never remembers a
 //! previous frame. A missing texture — the caller's `textures` lookup returning `None` —
 //! draws as fully transparent, for both a plain source layer and either side of an
-//! effect. Keeping the last good frame around when a source stalls is the *Source*'s job
-//! (Task 10), not this module's: this module is purely `(graph state, live textures) ->
+//! effect. Keeping the last good frame around when a source stalls is the *Source*'s job,
+//! not this module's: this module is purely `(graph state, live textures) ->
 //! one composited frame`.
 //!
-//! **R20 (this task's exact API).** The brief's free `compose_output` function becomes a
+//! **A `Composer`, not a free function.** `compose_output` is a
 //! method on [`Composer`], which caches the output-sized intermediate textures an effect
 //! needs across calls (keyed by `(width, height)`, since every output this process will
 //! ever drive is one of a small, effectively-fixed set of sizes) and owns the small
 //! blit/transform shader every draw (source or effect-result) is composited through.
-//! [`fit_rect`] stays a pure free function — the brief's exact signature, unit-testable
-//! with no GPU at all.
+//! [`fit_rect`] stays a pure free function, unit-testable with no GPU at all.
 //!
 //! ## Coordinate conventions (read this before touching pixel math here)
 //!
@@ -64,7 +63,7 @@
 //! opacity`) and blends with `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` onto a target
 //! already cleared to transparent black (`0,0,0,0`). Concretely: a fully-opaque red
 //! source (`1,0,0,1`) at `opacity = 0.5` writes `(0.5, 0, 0, 0.5)` into the (transparent)
-//! target — read back as `rgb ≈ (127, 0, 0)`, matching the brief's `opacity_half` number
+//! target — read back as `rgb ≈ (127, 0, 0)`, matching `opacity_half`'s number
 //! directly, with **no separate "composite over black" step needed**: because premultiplied
 //! colour *is* the correct final RGB once actually displayed over black, reading it
 //! straight off the target already gives the right answer for a black backdrop. A real
@@ -72,7 +71,7 @@
 //! actually behind the output surface; this module only has to get the premultiplied
 //! maths right once.
 //!
-//! ## Fit semantics (brief's four modes, unified by [`fit_rect`]/[`axis`])
+//! ## Fit semantics (four modes, unified by [`fit_rect`]/[`axis`])
 //!
 //! | `fit`      | meaning                                              | mpv equivalent    |
 //! |------------|-------------------------------------------------------|-------------------|
@@ -104,7 +103,7 @@
 //! (`viewport.xy + (sub-rect coords) * viewport.wh`). Spanning one source across two
 //! outputs is exactly two layers with the same `content`, same `fit`, and complementary
 //! viewports — e.g. `DP-1` gets `[0, 0, 0.5, 1]` (the source's left half) and `DP-2` gets
-//! `[0.5, 0, 0.5, 1]` (its right half), per the brief.
+//! `[0.5, 0, 0.5, 1]` (its right half).
 
 use std::collections::HashMap;
 
@@ -161,7 +160,7 @@ fn axis(effective_px: f64, scale: f64, output_px: u32) -> (f64, f64, f64, f64) {
 }
 
 /// Maps a `src`-sized texture into a `dst`-sized output under `fit`, after first
-/// selecting `viewport` (a normalised sub-rectangle of `src`) — the brief's exact pure
+/// selecting `viewport` (a normalised sub-rectangle of `src`) — the pure
 /// function. See the module doc comment for the full semantics; this is the one place
 /// that picks each mode's per-axis scale factor(s) and feeds them through [`axis`].
 pub fn fit_rect(src: (u32, u32), dst: (u32, u32), fit: Fit, viewport: [f64; 4]) -> UvRect {
@@ -377,7 +376,7 @@ fn draw_rect(
 }
 
 /// Clears `fbo` (full `w`×`h`) to transparent black — the one colour every "nothing to
-/// draw here" path in this module relies on: a missing texture (R19), the bars `fit`
+/// draw here" path in this module relies on: a missing texture, the bars `fit`
 /// leaves outside its centred content, and the two effect-input intermediates before
 /// whatever `render_side` below actually draws into them.
 fn clear_transparent(gfx: &Gfx, fbo: glow::Framebuffer, w: u32, h: u32) {
@@ -394,7 +393,7 @@ fn clear_transparent(gfx: &Gfx, fbo: glow::Framebuffer, w: u32, h: u32) {
 /// the layer's own `fit`/`viewport` — both sides of a transition share the layer's single
 /// transform, since the transition happens at one screen position regardless of which
 /// side is currently more visible. `tex` is `None` exactly when the caller's `textures`
-/// lookup missed: per R19/R20, that side is simply left as the transparent clear this
+/// lookup missed: with no frame memory here, that side is simply left as the transparent clear this
 /// function always starts with — observably identical to feeding
 /// `effects::EffectProgram::draw` a transparent 1×1 texture for that input (anything that
 /// only ever samples a texture can't tell "transparent everywhere, size 1×1" from
@@ -435,7 +434,7 @@ struct Intermediates {
 
 /// Draws one output's main layer at a time. Owns the blit/transform shader program
 /// ([`BlitProgram`]) and caches the output-sized intermediate textures/FBOs an effect
-/// layer needs, keyed by `(width, height)` (R20) — a process drives a small, effectively
+/// layer needs, keyed by `(width, height)` — a process drives a small, effectively
 /// fixed set of output sizes, so this never evicts; the only growth is one entry per
 /// distinct size ever seen.
 pub struct Composer {
@@ -475,7 +474,7 @@ impl Composer {
     /// **The seam probe's input** (§11 "zero visible seams by the seam probe"): the nodes the
     /// last [`compose_output`](Self::compose_output) call drew as transparent although the
     /// output's visible main layer (`opacity > 0`) pointed at them — a plain source or
-    /// either side of an effect with no texture (R19), or a dangling `content`. Empty for
+    /// either side of an effect with no texture, or a dangling `content`. Empty for
     /// an empty `content` (nothing asked for) and for every frame where each referenced
     /// source had a texture. By the recipes a shown source always has one (B is shown only
     /// once it's `Ready`; a crashed scene holds its frame), so anything here is a frame the
@@ -486,12 +485,12 @@ impl Composer {
     }
 
     /// Draws `output_id`'s main layer (`lay:<connector>:main`) into `target` (cleared to
-    /// transparent black first — R19's default, and where `fit`'s bars come from).
+    /// transparent black first — the missing-texture default, and where `fit`'s bars come from).
     ///
     /// - `content` empty, or pointing at a destroyed node: nothing more is drawn (stays
     ///   transparent) — there's no live node to read a transform or texture from.
     /// - `content` a `Source` node: looked up in `textures`; missing → stays transparent
-    ///   (R19). Present → drawn once via [`fit_rect`] + [`draw_rect`] at the layer's
+    ///   . Present → drawn once via [`fit_rect`] + [`draw_rect`] at the layer's
     ///   `opacity`.
     /// - `content` an `Effect` node: `from`/`to` are each rendered into an output-sized
     ///   intermediate under the layer's `fit`/`viewport` ([`render_side`]), the effect
@@ -509,8 +508,8 @@ impl Composer {
     /// `graph::Graph`'s own `cur:` alias already has to handle) — treated the same as an
     /// empty `content`.
     ///
-    /// **Lifetime note (deviation from the brief's literal signature).** The brief's
-    /// shorthand writes `textures: &dyn Fn(&str) -> Option<&Tex>`, but Rust's elision
+    /// **Lifetime note.** The shorthand `textures: &dyn Fn(&str) -> Option<&Tex>` doesn't
+    /// work: Rust's elision
     /// rule for a bare `Fn(&str) -> Option<&Tex>` trait bound ties the output reference's
     /// lifetime to the *input* `&str`'s — i.e. `for<'a> Fn(&'a str) -> Option<&'a Tex>`.
     /// No closure backed by a longer-lived registry (`move |id| registry.get(id)`, the
@@ -519,7 +518,7 @@ impl Composer {
     /// ones longer than the registry itself lives, which only a `'static` registry could
     /// ever provide (confirmed directly: that exact closure fails to coerce with "one type
     /// is more general than the other" / "requires that `registry` is borrowed for
-    /// `'static`"). The fix is an explicit lifetime parameter `'t`, tying the output to
+    /// `'static`"). Hence an explicit lifetime parameter `'t`, tying the output to
     /// *the registry's* lifetime instead of the per-call input string's — which is what
     /// every real implementation (this module's tests' `HashMap`-backed closures, and the
     /// eventual Source registry) actually provides, and is still exactly
@@ -665,7 +664,7 @@ impl Composer {
                     program.draw(gfx, &inter.from.0, &inter.to.0, progress, ratio, &params)
                 }
                 Err(_) => {
-                    // M3 (final review): an effect this driver can't compile is a cut at
+                    // An effect this driver can't compile is a cut at
                     // the midpoint — never a black output (the failure is cached and
                     // logged once by the catalogue). The intermediates hold raw
                     // (image-top-at-t0) orientation, so this copy is the one flip.

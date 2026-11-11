@@ -1,11 +1,10 @@
-//! The worker GPU budget (Phase 2 Task 8; owner decision "GPU budget = a setting, default
-//! auto-throttle"): when the outputs showing a scene miss compositor frames **and** the
+//! The worker GPU budget (a setting, `player.scene_throttle`, auto-throttle by default): when the outputs showing a scene miss compositor frames **and** the
 //! scene's own worker is busy enough on the GPU to be the cause, that scene's frame rate is
 //! lowered stepwise; once the outputs present cleanly again it is raised back to what they
 //! ask for. Pure (the caller passes `now` and the measurements; `SceneSource::observe_budget`
 //! feeds it every [`OBSERVE_EVERY`] from the runtime).
 //!
-//! The rule (plan Task 8, "Interfaces"):
+//! The rule:
 //! - **throttle** when the showing outputs missed more than [`THROTTLE_MISSED_PCT`] of their
 //!   frames over the last 2 s (the `frames` probe's window) **and** the worker's GPU time per
 //!   second of scene — `gpu_ms_p50 × fps_actual` — is at least [`GPU_LOAD_MS_PER_S`] (a worker

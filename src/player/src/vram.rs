@@ -32,7 +32,7 @@
 //!   must never keep the wallpaper stopped).
 //!
 //! The runtime applies the actions (`Runtime::vram_tick`): `Engage` holds the player paused
-//! (composed with `player.paused` — the R75/R88 machinery ramps every source out and freezes
+//! (composed with `player.paused` — the player-pause machinery and its gates ramp every source out and freezes
 //! time) and, in `stop` mode, then drops every video/image/scene source's decoder or worker
 //! (`SourceHost::suspend_media` — a still of its last frame stays shown); `Release` reopens them
 //! at their positions, waits for their first frames, then lets go of the pause.

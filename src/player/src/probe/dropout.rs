@@ -1,19 +1,17 @@
-//! The reference-based dropout detector (Task 15; spec §5.3, §9 "debug mode"): a port of
-//! the proven `scripts/liascape_audiowatch.py` monitor (2026-10-20, found the cubic-volume-sag,
-//! speed-step micro-gap and ready-timeout-silence bugs documented in
+//! The reference-based dropout detector (spec §5.3, §9 "debug mode"): a port of
+//! the `scripts/liascape_audiowatch.py` monitor (the bug classes it finds are listed in
 //! `docs/player/debugging.md`). It compares what the player's audio bus actually output
-//! (the 1 ms [`crate::audio::meter::Meter`] window, Task 14) against what it SHOULD have
+//! (the 1 ms [`crate::audio::meter::Meter`] window) against what it SHOULD have
 //! output (the transition's sources, decoded from their logged positions, weighted by the
 //! *recorded* gain schedule) — so a real dropout is flagged while silence that's in the
 //! content, or intended by a held transition method (reveal/frozen), is not.
 //!
-//! **R70 — why a recorded schedule, not `Animator::value_at` after the fact.** The brief
-//! sketched reconstructing each source's gain from `Animator::value_at`, but an
+//! **Why a recorded schedule, not `Animator::value_at` after the fact.** An
 //! animation's entry is only guaranteed to answer for *its own* target path, and by the
-//! time this probe's worker thread runs (after `transition.done`, off the loop — R71) the
+//! time this probe's worker thread runs (after `transition.done`, off the loop) the
 //! source may already be destroyed/buried (graveyard) and its animations gone outright
 //! (`cancel`/a later `add()` on the same path supersedes permanently — `anim.rs`). So the
-//! runtime instead records each live source's `Graph::effective_gain_db` once per tick
+//! runtime records each live source's `Graph::effective_gain_db` once per tick
 //! into [`GainHistory`], a small per-source ring on the **log's `t_mono_ms` clock**
 //! (`log::mono_now`, never `Runtime::now()` — which may be the stepped/virtual clock and
 //! would disagree with the meter's real-time samples), independent of whether the node
@@ -21,12 +19,12 @@
 //! that instant ([`crate::recipes::transition::AudioSourceSnapshot`]); [`expected_envelope`]
 //! takes both.
 //!
-//! **R71 — never blocks the loop.** After `transition.done`, if `player.debug` is on, the
+//! **Never blocks the loop.** After `transition.done`, if `player.debug` is on, the
 //! runtime snapshots the meter window + the recorded gain schedule (cheap, synchronous,
 //! main thread) and hands the owned snapshot to a spawned `std::thread` that does the
 //! `ffmpeg` decode + [`analyse`] and then `log::event("probe", Info, "probe.dropout",
 //! …)`s the result — which reaches subscribers exactly the way every other cross-thread
-//! event does (the bus thread's `audio.bus.*` events, §Audio bus): `log::event` is
+//! event does (the bus thread's `audio.bus.*` events, `docs/player/modules/audio-bus.md`): `log::event` is
 //! thread-safe, and the tap pings the loop's own wake fd. No new channel/plumbing needed.
 //! `probe {"name":"dropout","args":{"corr":…}}` (registered in `probe/mod.rs`) runs the
 //! same path on demand: it replies `{"status":"pending","corr"}` at once (never defers
@@ -35,30 +33,25 @@
 //! meter is unavailable (bus down, `--ao null`) the event (or, for the on-demand verb, the
 //! reply) says so with `skipped` instead of running anything.
 //!
-//! ## Review fix round (binding controller rulings, kept distinct from the task-15 brief)
+//! **Mean, not median, dB error.** [`DropoutReport::fit_db`] is the **mean**
+//! (power-domain-correct arithmetic mean of `|observed − expected − offset|` over the
+//! qualifying bins) — exact parity with the `liascape_audiowatch.py` reference
+//! (`refcheck`'s `err = sum(...) / len(pairs)`). `offset_db` is the one place a *median* is
+//! used (robust against one outlier bin). Don't "fix" `fit_db` to a median.
 //!
-//! **R76 — mean, not median, dB error.** The brief's text says the lag search minimises
-//! the *median* absolute dB error; [`DropoutReport::fit_db`] has always been, and stays,
-//! the **mean** (power-domain-correct arithmetic mean of `|observed − expected − offset|`
-//! over the qualifying bins) — exact parity with the proven `liascape_audiowatch.py` reference
-//! (`refcheck`'s `err = sum(...) / len(pairs)`), which the brief's own text misdescribes.
-//! `offset_db` is the one place a *median* is used (robust against one outlier bin). Kept
-//! deliberately; flagged here rather than "fixed" to match a brief that was itself wrong.
-//!
-//! **R77 — the lag-search guard scales with the window, not a bare constant.** A fixed
-//! `MIN_LAG_PAIRS = 3` let a near-silent window pick an arbitrary "best" lag; the Python
-//! reference uses a flat 50, too strict for these mostly sub-second windows. The guard is
-//! now `max(10, min(50, qualifying_bins / 2))`, where `qualifying_bins` = how many of
+//! **The lag-search guard scales with the window, not a bare constant.** A small fixed
+//! minimum (3 pairs) lets a near-silent window pick an arbitrary "best" lag; the Python
+//! reference's flat 50 is too strict for these mostly sub-second windows. The guard is
+//! `max(10, min(50, qualifying_bins / 2))`, where `qualifying_bins` = how many of
 //! `expected`'s own bins are audible (`> −60 dB`) at all — independent of the lag or of
 //! the capture's own plausibility, so it's the same number for every lag candidate. A lag
 //! whose *actual* paired-bin count falls short is skipped; if **no** lag clears the guard,
 //! [`analyse`] returns [`FitStatus::Insufficient`] with `lag_ms: 0`, `fit_db: 0.0`,
 //! `offset_db: 0.0` and **no** drops/micro-gaps — a report that can't trust its own
-//! alignment must not invent findings on top of it. `DropoutReport` stays serde-stable
-//! (no field changes, only the new additive `fit` field): old consumers that don't look
-//! at `fit` see exactly the same shape as before.
+//! alignment must not invent findings on top of it. `fit` is an additive field: a consumer
+//! that doesn't look at it sees the same shape.
 //!
-//! **R78 — speed and loop wrap.** [`AudioSourceSnapshot`] now carries `speed`, `loop_`
+//! **Speed and loop wrap.** [`AudioSourceSnapshot`] carries `speed`, `loop_`
 //! (serializes `"loop"`) and `duration`, snapshotted alongside `path`/`position`.
 //! [`expected_envelope`]/[`expected_envelopes`] decode each source's **file-time** span
 //! (`window length × speed`, mpv's scaletempo keeping pitch — so the decoded power bins
@@ -69,93 +62,83 @@
 //! −500 ms pre-roll rebase ([`spawn_analysis`]) scales by `speed` too, and wraps into
 //! `[0, duration)` for a looping source instead of going negative.
 //!
-//! **R79 — bounded concurrent analyses, tracked ffmpeg children.** At most
+//! **Bounded concurrent analyses, tracked ffmpeg children.** At most
 //! [`MAX_CONCURRENT_ANALYSES`] decode+analyse passes run at once (a small
 //! `Mutex<usize>` + `Condvar` gate, not a queue — a refused request is told `skipped:
 //! "busy"` immediately, synchronously, never queued); every ffmpeg child this module
 //! spawns is registered by pid (`FFMPEG_CHILDREN`) and gets `PR_SET_PDEATHSIG(SIGKILL)` so it
 //! can never outlive this process even if killed outright — set by `setpriv --pdeathsig KILL`
-//! in front of it, never in a `pre_exec` hook (TODO F4, below). [`shutdown`] (called from
+//! in front of it, never in a `pre_exec` hook (below). [`shutdown`] (called from
 //! `Runtime`'s own shutdown, mirroring `sources::reaper::shutdown`) kills every still-tracked
 //! child immediately (no point waiting one out) then waits up to its `timeout` for every gate
 //! slot to free, logging + returning the straggler count.
 //!
-//! **F4 — a decode is `posix_spawn`ed, never `fork`ed.** A `Command` with a `pre_exec` hook
+//! **A decode is `posix_spawn`ed, never `fork`ed.** A `Command` with a `pre_exec` hook
 //! makes std `fork()` the whole player (glibc's `posix_spawn` is `clone(CLONE_VM|CLONE_VFORK)`:
-//! no page-table copy). Forking the compositor took 1.9–10.5 ms per decode (bpftrace, private
-//! PipeWire, a looping tone) and stalled the in-process bus — the loopback and mpv's AO miss
+//! no page-table copy). Forking the compositor costs 1.9–10.5 ms per decode (bpftrace, private
+//! PipeWire, a looping tone) and stalls the in-process bus — the loopback and mpv's AO miss
 //! their graph cycles while the address space is copied and its pages turned copy-on-write —
-//! so `--debug` recordings held whole cycles of exact silence (64–576 frames) right after every
-//! analysis: 161 in 460 s on the battery, 28–44 per 12 analyses in
-//! `tests/api.rs::dropout_analysis_never_skips_bus_cycles`; 0 since. The death signal moved to
-//! `setpriv --pdeathsig KILL` (util-linux, [`SETPRIV`]); without `setpriv` on `PATH` ffmpeg
+//! so `--debug` recordings get whole cycles of exact silence (64–576 frames) right after every
+//! analysis. Guard: `tests/api.rs::dropout_analysis_never_skips_bus_cycles`. The death signal
+//! comes from `setpriv --pdeathsig KILL` (util-linux, [`SETPRIV`]); without `setpriv` on `PATH` ffmpeg
 //! runs bare: an orphan still dies on its next write to the closed stdout pipe (SIGPIPE, which
 //! std resets to default in the child) and the 20 s timeout bounds it otherwise.
 //!
-//! **R80 — the micro-gap comparison is 1 ms-accurate, not a 10 ms zero-order hold.** The
-//! frozen-method micro-gap the owner flagged (`at_ms` ≈ 35 ms after a 1000 ms effect's own
-//! end, relative to the window's start) sat right at A's 30 ms anti-click ramp to silence
-//! — comparing a 1 ms observed sample against its *whole 10 ms bin's* expected level (one
-//! gain value, held for the entire bin) makes a steep ramp's quiet tail look like a
-//! dropout even when nothing actually glitched. [`mix_envelope_fine`] recomputes the
+//! **The micro-gap comparison is 1 ms-accurate, not a 10 ms zero-order hold.** Comparing a
+//! 1 ms observed sample against its *whole 10 ms bin's* expected level (one gain value, held
+//! for the entire bin) makes a steep ramp's quiet tail (e.g. A's 30 ms anti-click ramp to
+//! silence) look like a dropout even when nothing glitched. [`mix_envelope_fine`] computes the
 //! expected level at 1 ms resolution: the same 10 ms **source-power** bin (drops, at 10 ms
-//! resolution, are unaffected and keep using it directly), but the **gain** evaluated at
+//! resolution, keep using it directly), but the **gain** evaluated at
 //! that exact millisecond via [`gain_lin_interp_at`] — linear interpolation **in
 //! amplitude** between [`GainHistory`]'s recorded ticks, not a held/stepped value. Only
-//! `micro_gaps` uses this ([`analyse_with_fine`]); `drops` and the lag search are
-//! unchanged. **Superseded by R94 below** — a micro-gap can still appear after this fix
-//! and not be real; see R94 for the remaining edge case and what actually distinguishes
-//! a real one.
+//! `micro_gaps` uses this ([`analyse_with_fine`]); `drops` and the lag search don't.
 //!
-//! **R94 (Task 16d review) — the micro-gap pass ignores a ramp's own edge; `drops`
-//! unchanged.** Even with R80's 1 ms-accurate comparison, a `GainLinear` ramp (linear in
+//! **The micro-gap pass ignores a ramp's own edge.** A `GainLinear` ramp (linear in
 //! *amplitude*; invariant #2/#4) has an **unbounded dB slope in its last fraction of a
-//! millisecond** — measured directly (`tests/onmachine/dropout.sh` @ both 60 Hz and 240
-//! Hz, after Task 16d's 1 kHz fast gain timer made the *real* push rate no longer the
-//! bottleneck): a 30 ms ramp's true dB value crosses from −58 dB to −96 dB within its
+//! millisecond** — measured (`tests/onmachine/dropout.sh` @ both 60 Hz and 240 Hz, with the
+//! 1 kHz fast gain timer): a 30 ms ramp's true dB value crosses from −58 dB to −96 dB within its
 //! last 0.04 ms of real time (`10^(-58/20)` vs `10^(-96/20)` amplitude, both converted
 //! back to a ramp-progress fraction — see this module's test
 //! `micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms`'s own sanity check for the
 //! numbers). No alignment the 10 ms-bin lag search offers, and no real push/capture
 //! jitter (sub-ms, but still ≫ 0.04 ms), can land exactly on that edge — so comparing
 //! `observed` against `fine_expected` *at that one instant* produces a false `micro_gap`
-//! that is the **detector's own alignment limit**, not a real glitch in the audio. Fixed
-//! by [`STEADY_NEIGHBOURHOOD_MS`] (2 ms): a 1 ms sample only counts toward a micro-gap if
+//! that is the **detector's own alignment limit**, not a real glitch in the audio. Hence
+//! [`STEADY_NEIGHBOURHOOD_MS`] (2 ms): a 1 ms sample only counts toward a micro-gap if
 //! the expected level stays audible (> −45 dB) for its *whole* ±2 ms neighbourhood, not
 //! just at that exact instant — a ramp edge never has that (its own neighbourhood crosses
 //! into silence), while a genuine hole in otherwise-steady audio does (both sides stay
-//! audible), so it's untouched. `drops` (10 ms bins) and the lag search are unaffected —
-//! only the `micro_gaps` pass gained this guard. Tests:
-//! `micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms` (a realistic sub-bin
-//! misalignment at a ramp edge is never flagged — RED without the guard, pinned by its
-//! own inline sanity check of the raw pre-guard condition),
+//! audible), so it's untouched. `drops` (10 ms bins) and the lag search are unaffected.
+//! Guards: `micro_gap_pass_ignores_a_ramp_edge_misaligned_by_one_ms` (a realistic sub-bin
+//! misalignment at a ramp edge is never flagged; its inline sanity check shows the raw
+//! condition without the guard would flag it),
 //! `micro_gap_pass_still_flags_a_hole_shortly_before_a_ramp_starts` (a real 4 ms hole
 //! whose own ±2 ms neighbourhood never touches a ramp 5 ms away is still flagged exactly
 //! once), `injected_4ms_gap_is_flagged_as_exactly_one_micro_gap_not_a_drop` (`tests/
-//! dropout.rs`, unaffected — its whole neighbourhood is steady). **If a micro-gap still
-//! appears after this fix, check first whether it sits at a ramp edge** (the expected
+//! dropout.rs` — its whole neighbourhood is steady). **If a micro-gap appears, check first
+//! whether it sits at a ramp edge** (the expected
 //! level within ±2 ms of it crosses the −45 dB line) before treating it as real; see
 //! `docs/player/debugging.md`'s "ramp-edge micro-gap" row.
 //!
-//! **Task 16d (R96 + the effect-start finding) — alignment is exact to 1 ms; the auto-run
-//! sees the whole window.** Intermittent `frozen` findings at effect start (a 4 ms / 61 dB
-//! micro-gap at A's ramp bottom with `lag_ms` 10; once, @240 Hz, a 30 ms / 73 dB *drop*
-//! with `lag_ms` 40) were proven to be this module's own alignment, not the audio: the
-//! meter and an independent `parec` capture of the bus monitor both showed A's full 30 ms
-//! ramp in all 24 reproduced runs. Three causes, three fixes (none loosens a threshold):
-//! 1. **Window grid** ([`bin_observed`]): the meter was binned on the *absolute* 10 ms
-//!    grid while `expected` starts at the window's own sub-10 ms phase φ — "lag 10" meant
-//!    10 − φ, and the micro-gap pass then applied a full 10 ms. Coarse bins are now also
-//!    the power mean of the 1 ms envelope ([`coarse_from_fine`]), the same reduction the
-//!    meter side gets, instead of the gain held at each bin's start.
-//! 2. **R96, 1 ms lag** ([`refine_lag`]): the coarse best ± [`REFINE_RADIUS_MS`], scored
+//! **Alignment is exact to 1 ms; the auto-run sees the whole window.** Without these, `frozen`
+//! switches show findings at effect start (a micro-gap at A's ramp bottom, or a 30 ms drop)
+//! that are this module's own misalignment, not the audio — the meter and an independent
+//! `parec` capture of the bus monitor both show A's full 30 ms ramp. Three parts, none of
+//! which loosens a threshold:
+//! 1. **Window grid** ([`bin_observed`]): the meter is binned on the window's own sub-10 ms
+//!    phase φ, the same grid as `expected` — on the *absolute* 10 ms grid "lag 10" would mean
+//!    10 − φ, and the micro-gap pass would then apply a full 10 ms. Coarse bins are the
+//!    power mean of the 1 ms envelope ([`coarse_from_fine`]), the same reduction the
+//!    meter side gets, not the gain held at each bin's start.
+//! 2. **1 ms lag** ([`refine_lag`]): the coarse best ± [`REFINE_RADIUS_MS`], scored
 //!    by the same error sample by sample against the fine envelope; the meter is then
 //!    re-binned at that lag for `drops`/`fit_db`/`offset_db`, and the micro-gap pass uses
 //!    it. `lag_ms` is reported at 1 ms.
-//! 3. **Complete window** ([`request_analysis`]/[`run_due`]): the debug auto-trigger
-//!    snapshotted the meter at `transition.done`, so the capture ended at B's ramp while
-//!    `expected` ran another 500 ms — a lag pushing B's ramp off the captured data scored
-//!    better. Analyses now start at `done + WINDOW_POST + CAPTURE_MARGIN`.
+//! 3. **Complete window** ([`request_analysis`]/[`run_due`]): analyses start at
+//!    `done + WINDOW_POST + CAPTURE_MARGIN`. A snapshot taken at `transition.done` itself
+//!    ends the capture at B's ramp while `expected` runs another 500 ms — a lag pushing B's
+//!    ramp off the captured data then scores better.
 //!
 //! **Why this can't mask a real cut:** the lag is pinned by whatever edges and level the
 //! window has *as a whole* (A's steady tone, B's onset), so an instant cut at one edge
@@ -165,22 +148,22 @@
 //! `refined_lag_still_flags_an_injected_4ms_gap`). `probe dropout {corr, dump}` writes
 //! every input + the report for offline replay ([`write_dump`]).
 //!
-//! **Phase 2 Task 14 (on-machine, 720 switches with scenes) — two more detector edges.**
-//! 1. **A ramp edge's own bin.** One lag serves the whole window; a scene's stream reached
-//!    the bus ~3 ms later than its schedule while A's video pinned the lag, so B's ramp-in
-//!    started 7 ms into a 10 ms bin whose expected power mean was just audible (> −55 dB)
-//!    while the observed bin was still silent: a 10 ms "drop" ~40 dB under at the very
-//!    start of a correctly shaped ramp (4 of 20 frozen V→S switches at 60 Hz). A drop bin
-//!    now needs both neighbouring expected bins audible too — the 10 ms analogue of the
+//! **Two more detector edges (measured over switches with scenes).**
+//! 1. **A ramp edge's own bin.** One lag serves the whole window; a scene's stream can reach
+//!    the bus ~3 ms later than its schedule while A's video pins the lag, so B's ramp-in
+//!    starts 7 ms into a 10 ms bin whose expected power mean is just audible (> −55 dB)
+//!    while the observed bin is still silent: a 10 ms "drop" ~40 dB under at the very
+//!    start of a correctly shaped ramp. A drop bin
+//!    needs both neighbouring expected bins audible too — the 10 ms analogue of the
 //!    micro-gap pass's steady neighbourhood. A late onset or a hole spans steady bins and
-//!    is still flagged (`ramp_in_that_never_comes_is_still_a_drop`; RED before:
-//!    `ramp_in_a_few_ms_late_is_not_a_drop`, a drop at 1560 len 10).
-//! 2. **The meter's missed cycles** ([`drop_meter_discontinuities`]): the bus meter's
-//!    capture, while it ran on the non-real-time `lia-bus` thread, skipped graph cycles under
-//!    load — a timestamp jump followed by −96 blocks (since then RT, `audio::meter`; this
-//!    stays the safety net for a meter without RT scheduling). Those samples are left out and reported as
-//!    `unmeasured`, never as a gap (`meter_discontinuity_is_unmeasured_not_a_gap`; RED
-//!    before: a 2 ms micro-gap at 132). A contiguous hole is still a micro-gap.
+//!    is still flagged. Guards: `ramp_in_that_never_comes_is_still_a_drop`,
+//!    `ramp_in_a_few_ms_late_is_not_a_drop`.
+//! 2. **The meter's missed cycles** ([`drop_meter_discontinuities`]): a bus meter capture
+//!    without real-time scheduling skips graph cycles under load — a timestamp jump followed
+//!    by −96 blocks (the meter runs RT, `audio::meter`; this is the safety net for a meter
+//!    that couldn't get RT). Those samples are left out and reported as
+//!    `unmeasured`, never as a gap (`meter_discontinuity_is_unmeasured_not_a_gap`).
+//!    A contiguous hole is still a micro-gap.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -200,19 +183,19 @@ use crate::units::{SILENT_DB, db_to_lin};
 /// Bin width for the whole algorithm (lag search, drops): 10 ms, matching the Python
 /// reference.
 const BIN_MS: i64 = 10;
-/// R94 (controller ruling): how far either side of a 1 ms sample the micro-gap pass's
+/// How far either side of a 1 ms sample the micro-gap pass's
 /// steady-state guard checks — see `analyse_inner`'s `is_steady`.
 const STEADY_NEIGHBOURHOOD_MS: i64 = 2;
-/// The probe's window around a transition (R71): `transition.started` − this, `.done` +
+/// The probe's window around a transition: `transition.started` − this, `.done` +
 /// this.
 pub const WINDOW_PRE: Duration = Duration::from_millis(500);
 pub const WINDOW_POST: Duration = Duration::from_millis(500);
-/// Lag search range (0..=25 × 10 ms = 0..=250 ms), inclusive, matching the brief.
+/// Lag search range (0..=25 × 10 ms = 0..=250 ms), inclusive.
 const MAX_LAG_BINS: i64 = 25;
-/// R96 (controller ruling): how far either side of the coarse (10 ms-step) best lag the
+/// How far either side of the coarse (10 ms-step) best lag the
 /// 1 ms refinement searches ([`refine_lag`]).
 const REFINE_RADIUS_MS: i64 = 10;
-/// Review fix round, R79: at most this many decode+analyse passes run at once (ffmpeg
+/// At most this many decode+analyse passes run at once (ffmpeg
 /// decode is the expensive part — two full-resolution decodes is already real CPU/IO
 /// load off the loop thread). A request beyond this is refused with `skipped: "busy"`
 /// rather than queued — the caller (debug mode's auto-trigger, or `ctl probe dropout`)
@@ -238,13 +221,12 @@ pub struct Drop {
     pub under_db: f64,
 }
 
-/// Whether [`analyse`]/[`analyse_with_fine`] found a reliable alignment at all (R77,
-/// review fix round). Additive field — `DropoutReport` otherwise serializes exactly as
-/// before, so an older consumer that never looks at `fit` sees no change.
+/// Whether [`analyse`]/[`analyse_with_fine`] found a reliable alignment at all. An
+/// additive field: a consumer that never looks at `fit` sees the same `DropoutReport` shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FitStatus {
-    /// A lag cleared the guard (§ module docs, R77); `lag_ms`/`fit_db`/`offset_db` and any
+    /// A lag cleared the guard (see the module docs); `lag_ms`/`fit_db`/`offset_db` and any
     /// `drops`/`micro_gaps` are meaningful.
     Ok,
     /// No lag had enough qualifying paired bins to trust — `lag_ms: 0`, `fit_db: 0.0`,
@@ -257,18 +239,17 @@ pub enum FitStatus {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DropoutReport {
     /// The lag (ms) that best aligns `observed` to `expected`: 1 ms resolution when a
-    /// fine envelope was given ([`analyse_with_fine`], production — R96), else 10 ms
+    /// fine envelope was given ([`analyse_with_fine`], production), else 10 ms
     /// steps ([`analyse`]).
     pub lag_ms: u32,
-    /// Mean absolute dB error at that lag, after `offset_db` — how good the fit is. R76
-    /// (review fix round): the brief's text says "median" here; this has always been,
-    /// and stays, the **mean** — exact parity with `liascape_audiowatch.py`'s `refcheck`, which
-    /// the brief's text misdescribed. See the module docs.
+    /// Mean absolute dB error at that lag, after `offset_db` — how good the fit is. The
+    /// **mean**, not the median — exact parity with `liascape_audiowatch.py`'s `refcheck`.
+    /// See the module docs.
     pub fit_db: f64,
     /// Median `observed − expected` at the chosen lag (a level mismatch, e.g. a
     /// miscalibrated bus gain, isn't itself a dropout).
     pub offset_db: f64,
-    /// R77 (review fix round): `Insufficient` when no lag had enough reliably-paired
+    /// `Insufficient` when no lag had enough reliably-paired
     /// bins to trust — see [`FitStatus`].
     pub fit: FitStatus,
     /// 10 ms-bin-granularity gaps the aligned, offset-corrected observed level falls
@@ -295,7 +276,7 @@ fn pw_mean_db(vals: &[f64]) -> f64 {
 
 /// `t + ms` for a signed millisecond offset; `None` if that would go negative (there's
 /// no instant before the recording started). Used by the micro-gap pass's steady-state
-/// neighbourhood check (R94).
+/// neighbourhood check.
 fn offset_ms(t: Duration, ms: i64) -> Option<Duration> {
     if ms >= 0 {
         Some(t + Duration::from_millis(ms as u64))
@@ -308,8 +289,8 @@ fn offset_ms(t: Duration, ms: i64) -> Option<Duration> {
 /// (raw, ~1 ms-resolution bus-meter samples) against `expected` (10 ms power bins, e.g.
 /// from [`expected_envelope`]) by searching a 0–250 ms lag, then flags both coarse
 /// (10 ms-bin) drops and fine (sub-bin) micro-gaps against that same coarse `expected` —
-/// the brief's exact signature, kept for the 5 task-15 synthetic tests and any other
-/// caller with no finer envelope to offer. [`analyse_with_fine`] is the R80 fix-round
+/// kept for the synthetic tests and any other
+/// caller with no finer envelope to offer. [`analyse_with_fine`] is the
 /// entry point production wiring ([`spawn_analysis`]) actually uses.
 pub fn analyse(observed: &[(Duration, f64)], expected: &[(Duration, f64)]) -> DropoutReport {
     analyse_inner(observed, expected, None)
@@ -318,7 +299,7 @@ pub fn analyse(observed: &[(Duration, f64)], expected: &[(Duration, f64)]) -> Dr
 /// Like [`analyse`], but `fine_expected` (e.g. from [`mix_envelope_fine`]/
 /// [`expected_envelopes`] — 1 ms-resolution, same time origin as `expected`) is used for
 /// the micro-gap pass instead of holding `expected`'s 10 ms bin value across the whole
-/// bin (R80, review fix round: that zero-order hold is what turned a legitimate 30 ms
+/// bin (that zero-order hold turns a legitimate 30 ms
 /// anti-click ramp's quiet tail into a false micro-gap). `drops` and the lag search are
 /// unaffected — they still use the coarse `expected` only.
 pub fn analyse_with_fine(
@@ -335,9 +316,9 @@ const METER_STEP_MAX: Duration = Duration::from_micros(1500);
 /// back silence for the cycles right after the ones it missed (measured: 2 blocks).
 pub const UNMEASURED_TAIL_MS: u64 = 4;
 
-/// Phase 2 Task 14: splits `observed` into the samples the meter really captured in
-/// sequence and the stretches it didn't. A bus meter capture that isn't real-time (it ran
-/// on the `lia-bus` main loop until Task 14; a session without rtkit still has no RT) misses
+/// Splits `observed` into the samples the meter really captured in
+/// sequence and the stretches it didn't. A bus meter capture that isn't real-time (a
+/// session without rtkit gets no RT) misses
 /// graph cycles under load — its timestamps jump
 /// (measured 2.3–22 ms) and the blocks right after read −96 (what PipeWire hands a stream
 /// that missed its cycles), and the block before the jump joins two non-adjacent pieces.
@@ -396,12 +377,12 @@ fn analyse_inner(
         return insufficient();
     }
     let origin = expected[0].0;
-    // Phase 2 Task 14: the meter's own missed cycles are unmeasured, never a hole.
+    // The meter's own missed cycles are unmeasured, never a hole.
     let (kept, unmeasured) = drop_meter_discontinuities(observed, origin);
     let observed: &[(Duration, f64)] = &kept;
     let fine_expected = fine_expected.filter(|f| !f.is_empty());
     let n = expected.len() as i64;
-    // Task 16d: with a fine envelope, each coarse bin is the power mean of its own 1 ms
+    // With a fine envelope, each coarse bin is the power mean of its own 1 ms
     // values (`coarse_from_fine`) — the same reduction the observed side gets (a power
     // mean of its 1 ms samples per bin). `mix_envelope`'s bin holds the gain at the
     // bin's *start* across all 10 ms, which on a ramp is up to a whole bin louder/
@@ -412,14 +393,14 @@ fn analyse_inner(
         None => expected.iter().map(|(_, v)| *v).collect(),
     };
 
-    // R77 (review fix round): the guard scales with the window instead of a bare
+    // The guard scales with the window instead of a bare
     // constant — see the module docs. Independent of lag/capture: just how many of
     // `expected`'s own bins are audible at all.
     let qualifying = exp.iter().filter(|&&e| e > -60.0).count();
     let min_pairs = (qualifying / 2).clamp(10, 50);
 
     // Bin the raw observed samples onto the expected grid (sparse — a gap in the meter
-    // leaves a bin with no entry at all, never a fabricated silence). Task 16d: the
+    // leaves a bin with no entry at all, never a fabricated silence). The
     // grid is `expected`'s own (`origin` + 10 ms·k), never the absolute 10 ms grid —
     // see `bin_observed`.
     let cap0 = bin_observed(observed, origin, 0);
@@ -442,13 +423,13 @@ fn analyse_inner(
     let Some((coarse_fit, coarse_lag, coarse_off)) = best else {
         // No lag had enough reliably-paired bins to trust an alignment at all — report
         // that plainly rather than guessing a lag of 0 and flagging findings on top of
-        // it (R77).
+        // it.
         return insufficient();
     };
 
-    // R96 (controller ruling): refine the lag to 1 ms on the fine envelope, ±10 ms
+    // Refine the lag to 1 ms on the fine envelope, ±10 ms
     // around the coarse best — a 10 ms lag step misaligns a steep ramp edge by up to
-    // 5 ms, far beyond R94's ±2 ms steady-state guard. Then re-bin the observed side at
+    // 5 ms, far beyond the ±2 ms steady-state guard. Then re-bin the observed side at
     // that exact lag, so `drops`/`fit_db`/`offset_db` are computed on the same
     // alignment the micro-gap pass uses.
     // Final review (minor): one alignment for everything — if the refined lag's re-binned
@@ -477,7 +458,7 @@ fn analyse_inner(
     };
 
     // Drops: runs of 10 ms bins at least 15 dB under an audible expected level.
-    // Phase 2 Task 14: a bin counts only when its neighbours are expected audible too — the
+    // A bin counts only when its neighbours are expected audible too — the
     // first/last bin of a sound (a ramp-in starting late in its bin, a ramp-out's tail) is
     // the edge one stream's few ms of latency against another's lag moves across; a
     // genuine gap or a late onset spans steady bins and is still flagged
@@ -519,8 +500,8 @@ fn analyse_inner(
     }
 
     // Micro-gaps: raw (sub-bin) observed samples far under their expected level at that
-    // exact instant. R80: when a `fine_expected` (1 ms resolution) is available, use it
-    // (shifted by the same — R96: 1 ms-refined — lag, in continuous time) instead of
+    // exact instant. When a `fine_expected` (1 ms resolution) is available, use it
+    // (shifted by the same 1 ms-refined lag, in continuous time) instead of
     // holding the coarse bin's value across its whole 10 ms span.
     let fine_origin = fine_expected.and_then(|f| f.first()).map(|(t, _)| *t);
     let lag_dur = Duration::from_millis(lag_ms.max(0) as u64);
@@ -540,8 +521,7 @@ fn analyse_inner(
         }
         run.clear();
     };
-    // R94 (controller ruling): the expected level AT one exact instant, fine or coarse
-    // (the same lookup the pre-R94 code ran inline) — pulled out so the steady-state
+    // The expected level AT one exact instant, fine or coarse — pulled out so the steady-state
     // guard below can reuse it at the neighbouring instants too.
     let expected_at = |t: Duration| -> Option<f64> {
         match (fine_expected, fine_origin) {
@@ -560,7 +540,7 @@ fn analyse_inner(
             }
         }
     };
-    // R94 (controller ruling): a 1 ms sample counts toward a micro-gap only if the
+    // A 1 ms sample counts toward a micro-gap only if the
     // EXPECTED level stays "steady" — audible (> −45 dB) for its *whole*
     // `STEADY_NEIGHBOURHOOD_MS` neighbourhood, not just at that exact instant. A
     // linear-amplitude anti-click ramp's dB curve has an unbounded slope in its very
@@ -605,7 +585,7 @@ fn analyse_inner(
     }
 }
 
-/// Task 16d: bins `observed` onto `expected`'s own 10 ms grid — bin `k` holds the
+/// Bins `observed` onto `expected`'s own 10 ms grid — bin `k` holds the
 /// samples in `[origin + shift + 10k, origin + shift + 10k + 10)` ms, power-averaged.
 /// **Never the absolute 10 ms grid** (the pre-16d `⌊t/10⌋ − ⌊origin/10⌋`): the
 /// window starts at an arbitrary sub-10 ms phase φ (`transition.started` − 500 ms), so
@@ -613,7 +593,7 @@ fn analyse_inner(
 /// "10 ms" then really meant 10 − φ, which the micro-gap pass applied as a full 10 ms
 /// in continuous time: measured on-machine, φ ≈ 8 ms turned a true ~2 ms lag into a
 /// reported 10 ms one and flagged the bottom of A's clean anti-click ramp as a 4 ms
-/// micro-gap. `shift` (ms, ≥ 0) re-bins at a 1 ms-refined lag (R96).
+/// micro-gap. `shift` (ms, ≥ 0) re-bins at a 1 ms-refined lag.
 fn bin_observed(
     observed: &[(Duration, f64)],
     origin: Duration,
@@ -634,7 +614,7 @@ fn bin_observed(
         .collect()
 }
 
-/// Task 16d: `expected`'s grid re-derived from the 1 ms `fine` envelope — bin `k` is the
+/// `expected`'s grid re-derived from the 1 ms `fine` envelope — bin `k` is the
 /// power mean of every fine value in `[t_k, t_k + 10 ms)` (`t_k` = `expected[k]`'s own
 /// time), i.e. the same reduction [`bin_observed`] applies to the meter's 1 ms samples.
 /// A bin with no fine values keeps `expected`'s own value.
@@ -666,7 +646,7 @@ fn coarse_from_fine(fine: &[(Duration, f64)], expected: &[(Duration, f64)]) -> V
 
 /// The lag search's fit at one bin lag: `(mean |c − e − offset|, offset)` over bins
 /// where expected is audible (> −60 dB) and the capture plausible (> −90 dB), with the
-/// median `c − e` as the offset — `None` below `min_pairs` paired bins (R77).
+/// median `c − e` as the offset — `None` below `min_pairs` paired bins.
 fn bin_fit(cap: &HashMap<i64, f64>, exp: &[f64], lag: i64, min_pairs: usize) -> Option<(f64, f64)> {
     let n = exp.len() as i64;
     let mut pairs: Vec<(f64, f64)> = Vec::new();
@@ -688,7 +668,7 @@ fn bin_fit(cap: &HashMap<i64, f64>, exp: &[f64], lag: i64, min_pairs: usize) -> 
     Some((err, off))
 }
 
-/// R96 (controller ruling): the coarse lag refined to 1 ms — every whole-ms lag within
+/// The coarse lag refined to 1 ms — every whole-ms lag within
 /// [`REFINE_RADIUS_MS`] of `coarse_ms` (clamped to the search range), scored by the
 /// same error as the coarse search (mean |c − e − median offset| over audible-expected,
 /// plausible-capture pairs) but sample by sample: each 1 ms meter sample against the
@@ -743,26 +723,26 @@ fn refine_lag(
 /// its decoded file path, and its playback position (file-seconds) **at the window's own
 /// start** (`window.0` of whatever window it's later decoded against — the probe wiring
 /// in [`spawn_analysis`] rebases the position recorded at `transition.started`, which is
-/// effect start, by subtracting [`WINDOW_PRE`] (scaled by `speed`, R78)).
+/// effect start, by subtracting [`WINDOW_PRE`] (scaled by `speed`)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceWindow {
     pub id: String,
     pub path: PathBuf,
     pub position: f64,
-    /// R78 (review fix round): playback speed at snapshot time. The decoded **file-time**
+    /// Playback speed at snapshot time. The decoded **file-time**
     /// span covering one window is `(window length) × speed` — mpv's scaletempo keeps
     /// pitch, so file time genuinely advances `speed`× the window's own time; the decoded
     /// power bins are that time-compressed/expanded envelope, resampled back onto the
     /// window's own 10 ms (or 1 ms, for the fine envelope) grid.
     pub speed: f64,
-    /// R78: whether the source loops. A window whose file-time span crosses `duration` is
+    /// Whether the source loops. A window whose file-time span crosses `duration` is
     /// decoded in wrap-around segments ([`decode_wrapped`]) instead of silently treating
     /// the wrap as EOF and padding silence.
     pub looped: bool,
-    /// R78: the source's own duration (file-seconds) at snapshot time, when known.
+    /// The source's own duration (file-seconds) at snapshot time, when known.
     /// `None` disables wrap handling even if `looped` is set — nothing to wrap against.
     pub duration: Option<f64>,
-    /// Phase 2 Task 6: a scene's reference — its worker's own envelope over the window (1 ms
+    /// A scene's reference — its worker's own envelope over the window (1 ms
     /// pre-gain dBFS on the log clock, [`SceneEnvelopes`]) instead of a decoded file (a
     /// scene folder has none). Already in window time (speed included).
     pub envelope: Option<Vec<(Duration, f32)>>,
@@ -780,7 +760,7 @@ pub type GainSchedule = HashMap<String, GainTrack>;
 /// along, as far as we know); [`SILENT_DB`] if the id has no track at all — a source we
 /// never recorded is treated as silent, never guessed loud. Used by the coarse
 /// [`mix_envelope`] (one gain value held across each whole 10 ms bin); the fine envelope
-/// uses [`gain_lin_interp_at`] instead (R80).
+/// uses [`gain_lin_interp_at`] instead.
 fn gain_at(track: Option<&GainTrack>, t: Duration) -> f64 {
     let Some(track) = track.filter(|t| !t.is_empty()) else {
         return SILENT_DB;
@@ -793,7 +773,7 @@ fn gain_at(track: Option<&GainTrack>, t: Duration) -> f64 {
     }
 }
 
-/// Linear interpolation **in amplitude** (R80, review fix round) between the two
+/// Linear interpolation **in amplitude** between the two
 /// [`GainHistory`] ticks bracketing `t` — unlike [`gain_at`]'s nearest-previous/held
 /// value, this tracks a ramp continuously between ticks instead of snapping to the
 /// last-recorded ones. Before the first recorded tick, or with no track at all:
@@ -825,7 +805,7 @@ fn gain_lin_interp_at(track: Option<&GainTrack>, t: Duration) -> f64 {
 /// `scripts/liascape_audiowatch.py`).
 const FFMPEG: &str = "ffmpeg";
 
-/// F4: util-linux's `setpriv`, from `PATH`, put in front of every decode for its
+/// util-linux's `setpriv`, from `PATH`, put in front of every decode for its
 /// `--pdeathsig KILL` — the death signal without a `pre_exec` hook (which would `fork` the
 /// player, the module doc's F4).
 const SETPRIV: &str = "setpriv";
@@ -845,7 +825,7 @@ fn setpriv_available() -> bool {
 }
 
 /// The decode command: `setpriv --pdeathsig KILL -- ffmpeg` (or bare `ffmpeg` without
-/// `setpriv`). No `pre_exec`: std `posix_spawn`s it (F4).
+/// `setpriv`). No `pre_exec`: std `posix_spawn`s it.
 fn ffmpeg_command() -> Command {
     if setpriv_available() {
         let mut cmd = Command::new(SETPRIV);
@@ -856,7 +836,7 @@ fn ffmpeg_command() -> Command {
     }
 }
 
-/// R79 (review fix round): ffmpeg children this module has spawned and not yet reaped —
+/// ffmpeg children this module has spawned and not yet reaped —
 /// [`shutdown`] kills every one of these outright rather than waiting it out; each also
 /// runs under `PR_SET_PDEATHSIG(SIGKILL)` ([`ffmpeg_command`]), so a hard-killed player
 /// can never leave one running either way.
@@ -876,7 +856,7 @@ fn unregister_child(pid: u32) {
     }
 }
 
-/// Sends every still-tracked decode child `SIGKILL` (R79: `shutdown`'s first move).
+/// Sends every still-tracked decode child `SIGKILL` (`shutdown`'s first move).
 fn kill_all_children() {
     let g = FFMPEG_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
     for &pid in g.iter() {
@@ -884,7 +864,7 @@ fn kill_all_children() {
     }
 }
 
-/// Spawn-and-wait one ffmpeg decode (R79): tracked by pid for the call's lifetime
+/// Spawn-and-wait one ffmpeg decode: tracked by pid for the call's lifetime
 /// ([`register_child`]/[`unregister_child`]) and `PR_SET_PDEATHSIG(SIGKILL)`'d so it
 /// can't outlive this process even on an abrupt exit.
 fn run_ffmpeg(start_s: f64, decode_s: f64, path: &Path) -> std::io::Result<std::process::Output> {
@@ -917,11 +897,11 @@ fn run_ffmpeg_bounded(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // F4: never a `pre_exec` hook here — it turns this spawn into a `fork` of the player.
+    // Never a `pre_exec` hook here — it turns this spawn into a `fork` of the player.
     let mut child = cmd.spawn()?;
     let pid = child.id();
     register_child(pid);
-    // M8 (final review): bounded — a decode that hangs (a stale network path) is killed
+    // Bounded — a decode that hangs (a stale network path) is killed
     // after DECODE_TIMEOUT instead of holding an analysis slot forever. stdout/stderr are
     // drained on their own threads so a full pipe can't stall the child meanwhile.
     let mut stdout = child.stdout.take();
@@ -966,9 +946,9 @@ fn run_ffmpeg_bounded(
     })
 }
 
-/// M8: the longest one ffmpeg decode may run before it's killed.
+/// The longest one ffmpeg decode may run before it's killed.
 const DECODE_TIMEOUT: Duration = Duration::from_secs(20);
-/// M8: the longest window one analysis decodes (a pause gate's window spans the whole
+/// The longest window one analysis decodes (a pause gate's window spans the whole
 /// pause; one 1 ms fine-envelope entry per ms, decoded audio for every source) — longer
 /// ones are skipped (`skipped: "window_too_long"`), never decoded into memory.
 pub(crate) const MAX_ANALYSIS_WINDOW: Duration = Duration::from_secs(120);
@@ -1014,11 +994,11 @@ fn decode_plain(path: &Path, start_s: f64, dur_s: f64) -> Vec<f64> {
 
 /// A loop too short to decode this many laps within one window is almost certainly a
 /// misconfigured/zero `duration` — bail to padding silence rather than spinning ffmpeg
-/// hundreds of times (R78).
+/// hundreds of times.
 const MAX_LOOP_SEGMENTS: usize = 64;
 
 /// Decodes `span_s` seconds of **file time** starting at `start_s`, wrapping at
-/// `duration` when `looped` is set (R78: "when loop is on and the window crosses EOF,
+/// `duration` when `looped` is set ("when loop is on and the window crosses EOF,
 /// decode in segments wrapping to 0") — each segment stays within one lap, so
 /// [`decode_plain`]'s own past-EOF padding never fires mid-loop. Falls back to a single
 /// [`decode_plain`] call (unchanged behaviour, including negative-`start_s` padding)
@@ -1050,7 +1030,7 @@ fn decode_wrapped(
 }
 
 /// Resamples FILE-time power bins (10 ms each) onto the window's own 10 ms grid at
-/// `speed` (R78): window bin `k` reads file bin `⌊k·speed⌋`, clamped to the last decoded
+/// `speed`: window bin `k` reads file bin `⌊k·speed⌋`, clamped to the last decoded
 /// bin past EOF/silence padding. Pure — unit-tested without ffmpeg.
 fn resample_to_window(file_bins: &[f64], n_window_bins: usize, speed: f64) -> Vec<f64> {
     (0..n_window_bins)
@@ -1081,7 +1061,7 @@ fn decode_failed(path: &Path, reason: &str) {
     );
 }
 
-/// `decode_wrapped` + [`resample_to_window`] (R78): the window-time, speed/loop-aware
+/// `decode_wrapped` + [`resample_to_window`]: the window-time, speed/loop-aware
 /// decode behind both [`expected_envelope`] and the fine envelope — one ffmpeg decode per
 /// source, shared by [`expected_envelopes`].
 fn decode_power_bins(
@@ -1102,7 +1082,7 @@ fn decode_power_bins(
 /// The pure half of [`expected_envelope`] — mixes already-decoded linear power bins by the
 /// recorded gain schedule. Separated out so the gain-weighting math (what actually makes a
 /// held/frozen transition's silence come out silent in the expected mix even when the
-/// underlying file is loud — R70/R71) is unit-testable without a subprocess.
+/// underlying file is loud) is unit-testable without a subprocess.
 fn mix_envelope(
     ids: &[String],
     decoded: &[Vec<f64>],
@@ -1130,7 +1110,7 @@ fn mix_envelope(
     out
 }
 
-/// The 1 ms-resolution twin of [`mix_envelope`] (R80, review fix round): the same decoded
+/// The 1 ms-resolution twin of [`mix_envelope`]: the same decoded
 /// per-source 10 ms **power** bins (drops still compare against the coarse envelope
 /// built from these, unaffected), but the **gain** evaluated at each exact millisecond
 /// via [`gain_lin_interp_at`] instead of held across the whole 10 ms bin. Used only for
@@ -1163,8 +1143,8 @@ fn mix_envelope_fine(
 }
 
 /// `expected_envelope(src_paths_and_positions, gain_schedule, window) -> Vec<(Duration,
-/// f64)>` (the brief's signature): the coarse (10 ms) half of [`expected_envelopes`] —
-/// kept as its own entry point for the task-15 synthetic/integration tests.
+/// f64)>`: the coarse (10 ms) half of [`expected_envelopes`] —
+/// kept as its own entry point for the synthetic/integration tests.
 pub fn expected_envelope(
     sources: &[SourceWindow],
     gain_schedule: &GainSchedule,
@@ -1173,11 +1153,11 @@ pub fn expected_envelope(
     expected_envelopes(sources, gain_schedule, window).0
 }
 
-/// Decodes each source once (`ffmpeg -ss <pos> -t <len>`; R78: `<pos>`/`<len>` are
+/// Decodes each source once (`ffmpeg -ss <pos> -t <len>`; `<pos>`/`<len>` are
 /// FILE-time, scaled by the source's own `speed` and wrapped at `duration` when
 /// `looped`), multiplies each by `db_to_lin(gain)²` per source per bin and sums — same
 /// as `liascape_audiowatch.py`'s `refcheck` — and returns BOTH the coarse (10 ms; lag search +
-/// `drops`) and fine (1 ms; R80's micro-gap pass) expected envelopes from that one
+/// `drops`) and fine (1 ms; the micro-gap pass) expected envelopes from that one
 /// decode.
 pub fn expected_envelopes(
     sources: &[SourceWindow],
@@ -1200,26 +1180,26 @@ pub fn expected_envelopes(
 
 // --------------------------------------------------------------------- runtime wiring
 
-/// How long a source's gain history is kept — comfortably past the brief's "≥ 30 s".
+/// How long a source's gain history is kept — comfortably past 30 s.
 const HISTORY_SPAN: Duration = Duration::from_secs(40);
-/// C1 (final review): how long a *dead* source's track (its node destroyed — retired,
+/// How long a *dead* source's track (its node destroyed — retired,
 /// released, stopped) outlives its last reading. A transition's analysis runs only once
 /// its window's post-roll is captured (`done + WINDOW_POST + CAPTURE_MARGIN`, after the
 /// outgoing A is usually already gone) and `probe dropout` can be asked again a little
 /// later, so a track can't be dropped the instant its source dies — but it must go
 /// eventually: ids are never reused, so without this every switch leaked its A's track.
 pub(crate) const DEAD_LINGER: Duration = Duration::from_secs(30);
-/// C1: global caps — however fast sources come and go (rapid "next" floods), the history
+/// Global caps — however fast sources come and go (rapid "next" floods), the history
 /// never holds more than this many tracks or samples (24 B each: ≤ ~3 MiB). Over a cap the
 /// least recently seen *dead* track goes first, then the oldest samples of the longest
 /// track.
 pub(crate) const MAX_TRACKS: usize = 64;
 pub(crate) const MAX_TOTAL_SAMPLES: usize = 131_072;
-/// C1: one track never holds more than this many samples (a gain that changes on every
+/// One track never holds more than this many samples (a gain that changes on every
 /// 1 kHz push for longer than this keeps only its newest ~32 s).
 const MAX_TRACK_SAMPLES: usize = 32_768;
 
-/// One source's recorded gain, run-length encoded (C1): a run of identical readings is
+/// One source's recorded gain, run-length encoded: a run of identical readings is
 /// kept as its first and its latest sample (the latest one's time moves forward), so a
 /// steady source costs two entries instead of one per tick, and both lookups
 /// ([`gain_at`]'s nearest-previous, [`gain_lin_interp_at`]'s interpolation) see exactly
@@ -1233,7 +1213,7 @@ struct Track {
 }
 
 /// Per-source `effective_gain_db` history, recorded every `Runtime` tick (and every fast
-/// gain push), on the log's `t_mono_ms` clock (R70). Bounded (C1): per track by
+/// gain push), on the log's `t_mono_ms` clock. Bounded: per track by
 /// [`HISTORY_SPAN`] + [`MAX_TRACK_SAMPLES`], dead tracks by [`DEAD_LINGER`], in total by
 /// [`MAX_TRACKS`] + [`MAX_TOTAL_SAMPLES`].
 #[derive(Default)]
@@ -1320,7 +1300,7 @@ impl GainHistory {
         }
     }
 
-    /// `(tracks, samples)` currently held — the `loop` probe's bound evidence (C1).
+    /// `(tracks, samples)` currently held — the `loop` probe's bound evidence.
     pub(crate) fn stats(&self) -> (usize, usize) {
         (
             self.tracks.len(),
@@ -1344,7 +1324,7 @@ impl GainHistory {
     }
 }
 
-/// Phase 2 Task 6: the most scene envelopes kept (a few scenes live at once + the dead ones
+/// The most scene envelopes kept (a few scenes live at once + the dead ones
 /// lingering for their post-roll analysis).
 const MAX_ENVELOPE_TRACKS: usize = 16;
 /// One scene's envelope entries at most (1 ms each: the last [`HISTORY_SPAN`]).
@@ -1422,7 +1402,7 @@ impl SceneEnvelopes {
     }
 }
 
-/// A scene's 10 ms **power** bins over `window` from its 1 ms dBFS envelope (Task 6): each
+/// A scene's 10 ms **power** bins over `window` from its 1 ms dBFS envelope: each
 /// bin the mean power of the entries inside it; a bin with none is silent (the scene's
 /// sound wasn't on its stream then).
 fn envelope_power_bins(env: &[(Duration, f32)], window: (Duration, Duration)) -> Vec<f64> {
@@ -1519,8 +1499,8 @@ impl PendingWindows {
         self.map.get(corr)
     }
 
-    /// R93 (review): how many recorded windows are still open (`done_mono.is_none()`) —
-    /// the `loop` probe's own evidence that nothing (a transition, `retire`, the R88
+    /// How many recorded windows are still open (`done_mono.is_none()`) —
+    /// the `loop` probe's own evidence that nothing (a transition, `retire`, the
     /// pause gate) left a window dangling. A gate abandoned mid-flight
     /// (`Runtime::abandon_pause_gate`) must close its window outright rather than leave
     /// it open forever, so this returns to whatever it was before that gate opened.
@@ -1529,7 +1509,7 @@ impl PendingWindows {
     }
 }
 
-/// R79 (review fix round): a small gate, not a queue — at most
+/// A small gate, not a queue — at most
 /// [`MAX_CONCURRENT_ANALYSES`] decode+analyse passes run at once; a request beyond that
 /// is refused immediately (`skipped: "busy"`), never queued.
 struct AnalysisGate {
@@ -1577,7 +1557,7 @@ impl std::ops::Drop for SlotGuard {
     }
 }
 
-/// R79 (review fix round): kills every still-tracked ffmpeg child immediately (no point
+/// Kills every still-tracked ffmpeg child immediately (no point
 /// waiting one out — the process is on its way down), then waits up to `timeout` for
 /// every gate slot to free — mirrors `sources::reaper::shutdown`. Returns how many
 /// analyses are still running when the wait ends (0 = all done); `Runtime::shutdown`
@@ -1595,7 +1575,7 @@ pub fn shutdown(timeout: Duration) -> usize {
     *guard
 }
 
-/// R78 (review fix round): rebases a snapshot's `position` by [`WINDOW_PRE`] scaled by
+/// Rebases a snapshot's `position` by [`WINDOW_PRE`] scaled by
 /// its own `speed` (file time, not window time — `expected_envelope` always works in
 /// file time for the decode). If the source loops, the shifted result wraps into
 /// `[0, duration)` instead of going negative: a negative pre-roll on a looping source
@@ -1624,7 +1604,7 @@ fn snapshot_window(
     }
 }
 
-/// Task 16d: how long past a window's end (`done + WINDOW_POST`) an analysis waits before
+/// How long past a window's end (`done + WINDOW_POST`) an analysis waits before
 /// it snapshots the meter, so the window's last samples have been delivered (a meter
 /// block lands one graph cycle after its own time — 1.3 ms at this machine's 64-frame
 /// quantum, ~21 ms at a 1024-frame one).
@@ -1637,14 +1617,14 @@ pub(crate) struct DueAnalysis {
     dump: Option<PathBuf>,
 }
 
-/// Task 16d: run `corr`'s analysis once the meter has captured its **whole** window —
+/// Run `corr`'s analysis once the meter has captured its **whole** window —
 /// at once if it already has (or there's nothing to wait for: stepped clock, no meter),
 /// else queued until `done + WINDOW_POST + CAPTURE_MARGIN` ([`run_due`], from every
-/// tick). The auto-trigger used to snapshot the meter at `transition.done` itself, so
-/// the 500 ms post-roll was never checked and the lag search saw a capture that ended
-/// at B's ramp while `expected` ran on: measured on-machine (@240 Hz), it picked a lag
-/// that pushed B's ramp bins off the end of the capture (40 ms, the last lag still
-/// clearing the R77 pair guard) and flagged A's clean anti-click ramp as a 30 ms drop.
+/// tick). Never snapshot the meter at `transition.done` itself: the 500 ms post-roll
+/// would go unchecked and the lag search would see a capture that ends at B's ramp while
+/// `expected` runs on — measured on-machine (@240 Hz), it then picks a lag that pushes
+/// B's ramp bins off the end of the capture (40 ms, the last lag still clearing the pair
+/// guard) and flags A's clean anti-click ramp as a 30 ms drop.
 pub(crate) fn request_analysis(rt: &mut Runtime, corr: CorrId, dump: Option<PathBuf>) {
     let Some(pending) = rt.dropout_windows.get(&corr.0) else {
         return;
@@ -1662,7 +1642,7 @@ pub(crate) fn request_analysis(rt: &mut Runtime, corr: CorrId, dump: Option<Path
     }
 }
 
-/// Task 16d: starts every queued [`request_analysis`] whose window is now fully captured
+/// Starts every queued [`request_analysis`] whose window is now fully captured
 /// (called from `Runtime::tick`; a no-op with nothing queued).
 pub(crate) fn run_due(rt: &mut Runtime) {
     if rt.dropout_due.is_empty() {
@@ -1684,8 +1664,8 @@ pub(crate) fn run_due(rt: &mut Runtime) {
 /// Snapshot the meter + gain schedule for `pending`'s window (main thread, cheap) and
 /// run the decode + [`analyse_with_fine`] on a spawned thread, delivering
 /// `probe.dropout {corr, report}` (or `{corr, skipped}`) via `log::event` once it's
-/// done — R71, never blocks the caller. A no-op if `pending` hasn't reached
-/// `transition.done` yet. R79: refuses (`skipped: "busy"`) rather than queues past
+/// done — never blocks the caller. A no-op if `pending` hasn't reached
+/// `transition.done` yet. Refuses (`skipped: "busy"`) rather than queues past
 /// [`MAX_CONCURRENT_ANALYSES`] concurrent analyses.
 fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition, dump: Option<PathBuf>) {
     let Some(done_mono) = pending.done_mono else {
@@ -1757,7 +1737,7 @@ fn spawn_analysis(rt: &Runtime, corr: CorrId, pending: &PendingTransition, dump:
     });
 }
 
-/// Task 16d: `probe dropout {corr, dump}` writes every input the analysis saw (the 1 ms
+/// `probe dropout {corr, dump}` writes every input the analysis saw (the 1 ms
 /// meter samples, both expected envelopes, the recorded gain schedule, the sources'
 /// rebased positions) plus the report to `dump` (an absolute path) — the raw evidence
 /// for "is this flagged gap real or the detector's own alignment", reproducible offline.
@@ -1805,7 +1785,7 @@ fn write_dump(
 }
 
 /// `probe {"name":"dropout","args":{"corr":"tr-12"}}` — re-runs the detector for a
-/// recently-completed transition on demand (R71): async-safe by replying `pending` at
+/// recently-completed transition on demand: async-safe by replying `pending` at
 /// once and letting the worker thread's `log::event` deliver `probe.dropout` as usual,
 /// rather than deferring the reply the way `step` does (simpler, and the result is an
 /// event either way).
@@ -1888,7 +1868,7 @@ mod tests {
         assert_eq!(gain_at(schedule.get("empty"), ms(0)), SILENT_DB);
     }
 
-    /// Phase 2 Task 6: a scene's reference is its worker's own envelope (no file to decode):
+    /// A scene's reference is its worker's own envelope (no file to decode):
     /// the expected mix is that envelope × the recorded gain schedule, in window time; ms the
     /// worker sent nothing for are silent; the history keeps a dead scene for its post-roll,
     /// then drops it.
@@ -1955,7 +1935,7 @@ mod tests {
 
     #[test]
     fn mix_envelope_silent_gain_suppresses_loud_content_to_the_floor() {
-        // The held-method case (R71): both sources' gain is SILENT_DB throughout even
+        // The held-method case: both sources' gain is SILENT_DB throughout even
         // though the decoded content is loud (0.1 linear power ≈ −10 dB) — the mix must
         // still land at (or under) the floor, never leak the content's real level through.
         let ids = vec!["a".to_string(), "b".to_string()];
@@ -2038,7 +2018,7 @@ mod tests {
 
     #[test]
     fn gain_history_forgets_dead_sources_and_stays_bounded() {
-        // C1: 10 000 simulated create → record → destroy cycles (ids never reused, like
+        // 10 000 simulated create → record → destroy cycles (ids never reused, like
         // `src<n>`): the map must stay bounded by the caps, and a dead track must go
         // once DEAD_LINGER has passed.
         let mut h = GainHistory::new();
@@ -2072,7 +2052,7 @@ mod tests {
 
     #[test]
     fn a_hung_decode_is_killed_at_its_timeout() {
-        // M8: ffmpeg reading a FIFO nobody writes blocks forever — bounded, it's killed.
+        // ffmpeg reading a FIFO nobody writes blocks forever — bounded, it's killed.
         if std::process::Command::new(FFMPEG)
             .arg("-version")
             .output()
@@ -2108,7 +2088,7 @@ mod tests {
         assert!(bins.iter().all(|&p| p == 0.0));
     }
 
-    // ------------------------------------------------------------- R78: speed/resample
+    // ------------------------------------------------------------- speed/resample
 
     #[test]
     fn resample_to_window_picks_file_bin_floor_k_times_speed() {
@@ -2125,7 +2105,7 @@ mod tests {
         assert_eq!(resample_to_window(&file_bins, 10, 1.0)[9], 0.0);
     }
 
-    // --------------------------------------------------------- R80: fine gain + micro-gap
+    // --------------------------------------------------------- fine gain + micro-gap
 
     #[test]
     fn gain_lin_interp_at_interpolates_in_amplitude_between_ticks() {
@@ -2145,7 +2125,7 @@ mod tests {
 
     #[test]
     fn fine_resolution_micro_gap_pass_does_not_flag_a_clean_anticlick_ramp() {
-        // R80 (review fix round): a legitimate 30 ms ramp-to-silence (anti-click),
+        // A legitimate 30 ms ramp-to-silence (anti-click),
         // flat before and after. The OLD coarse (10 ms zero-order-hold) comparison
         // mistakes its tail for a dropout, because the bin containing the ramp's end
         // reads the bin-START's (pre-ramp) gain across its whole 10 ms span even
@@ -2194,7 +2174,7 @@ mod tests {
     }
 
     #[test]
-    // R94 (controller ruling): a ramp edge whose observed copy is shifted by exactly
+    // A ramp edge whose observed copy is shifted by exactly
     // 1 ms — a realistic sub-bin capture/push misalignment, nothing the 10 ms lag
     // search can correct for — must never be flagged. The curve's own slope is
     // unbounded in its last fraction of a millisecond (ramp_curve's doc), so a 1 ms
@@ -2250,7 +2230,7 @@ mod tests {
     }
 
     #[test]
-    // R94 (controller ruling): a genuine 4 ms hole in otherwise-steady audio, placed
+    // A genuine 4 ms hole in otherwise-steady audio, placed
     // 5 ms *before* an unrelated ramp starts, must still be flagged — the hole's own
     // ±2 ms neighbourhood never touches the ramp (2 ms < the 5 ms gap between them), so
     // the steady-state guard must not suppress it. Proves the guard is scoped to ramp
@@ -2289,7 +2269,7 @@ mod tests {
         assert_eq!(report.micro_gaps[0].len_ms, HOLE_LEN_MS as u32);
     }
 
-    // ------------------------------------------------------------ R79: bounded analyses
+    // ------------------------------------------------------------ bounded analyses
 
     #[test]
     fn analysis_gate_caps_concurrency_at_two() {

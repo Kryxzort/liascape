@@ -1,11 +1,11 @@
-//! Task 10: libmpv video/image sources + the colour source, on the real GPU.
+//! Libmpv video/image sources + the colour source, on the real GPU.
 //!
-//! Every `MpvSource` here is opened with `ao: "null"` (R26) so a test run is silent on the
+//! Every `MpvSource` here is opened with `ao: "null"` so a test run is silent on the
 //! owner's speakers — `audio-params` still populate with the null AO, so the audio-path
 //! tests still see a real audio chain.
 //!
 //! **Pixel coordinates: GL bottom-left origin** (`tests/common::read_rgba`). A raw source
-//! texture holds the image's TOP row at texture row 0 (R25 / Task 9's orientation
+//! texture holds the image's TOP row at texture row 0 (the player's orientation
 //! convention), so the image's top-left corner is at small `(x, y)` here.
 //!
 //! **Colour tolerances.** Clips are H.264 `yuv420p` (BT.709 limited range, tagged): solid
@@ -28,7 +28,7 @@ use liascape_player::sources::mpv::mpv_hwdec;
 use liascape_player::sources::{ColorSource, MpvSource, RenderWorker, Source, SourceEvent};
 use serde_json::{Map, Value, json};
 
-/// `opts` for `MpvSource::open`, always with `ao: "null"` (R26).
+/// `opts` for `MpvSource::open`, always with `ao: "null"`.
 fn opts(v: Value) -> Map<String, Value> {
     let mut m = v.as_object().expect("opts must be an object").clone();
     m.insert("ao".into(), json!("null"));
@@ -36,7 +36,7 @@ fn opts(v: Value) -> Map<String, Value> {
 }
 
 /// `MpvSource::open`, or — with the render worker on (`LIASCAPE_PLAYER_RENDER_WORKER`, the same
-/// switch `serve` reads; § Sources "Render worker") — the same open with the render context
+/// switch `serve` reads; `docs/player/modules/sources.md` § Render worker) — the same open with the render context
 /// on a worker sharing `gfx`'s context, exactly as the real-clock runtime's async open does
 /// it (`prepare_core` → `attach_render` → `open_with_core`). Each source gets its own worker;
 /// it is joined when the source (its last handle) drops. So the whole file runs in both modes.
@@ -91,7 +91,7 @@ const RED_2S: ClipSpec = ClipSpec::Solid {
     tone_dbfs: -20.0,
 };
 
-/// Wait (≤ `ms`) for the source's wake fd to become readable — the Task 12 runtime's
+/// Wait (≤ `ms`) for the source's wake fd to become readable — the runtime's
 /// contract, exercised here instead of a blind sleep.
 fn wait_wake(fd: Option<RawFd>, ms: i32) {
     match fd {
@@ -224,7 +224,7 @@ fn first_frame_and_ready() {
     );
 }
 
-/// R25: mpv renders with `MPV_RENDER_PARAM_FLIP_Y = 0` into the source FBO, which must
+/// mpv renders with `MPV_RENDER_PARAM_FLIP_Y = 0` into the source FBO, which must
 /// land the image's TOP row at texture row 0 (t = 0, GL's bottom row) — the same layout
 /// as uploading image rows top-down, which is what `gfx::compose` expects of a raw source.
 #[test]
@@ -294,12 +294,12 @@ fn frame_exact_seek() {
     assert_rgb(rest, [128, 128, 128], 2, "mid-grey background");
 }
 
-/// § Sources "Hardware decoding": a hardware `hwdec` on the render worker decodes zero-copy
+/// `docs/player/modules/sources.md` § Hardware decoding: a hardware `hwdec` on the render worker decodes zero-copy
 /// through the worker's GL interop (nvdec frames written into mpv's textures by CUDA, then
 /// rendered into ours on the lane and fenced) — and the picture is exactly the software
-/// one: orientation (R25), colours within ±3, a frame-exact seek's marker within ±1, frames
+/// one: orientation, colours within ±3, a frame-exact seek's marker within ±1, frames
 /// advancing while playing. On the loop (worker off) the same `hwdec` stays a copy mode with
-/// no interop in the render context (Task 20d). Torn/stale frames under fence faults with the
+/// no interop in the render context. Torn/stale frames under fence faults with the
 /// interop: `tests/api.rs::render_worker_never_composes_a_torn_frame` (its `hwdec: auto` cases).
 #[test]
 fn hardware_decoding_matches_software_in_both_render_modes() {
@@ -615,8 +615,7 @@ fn dropped_first_frame_of_a_paused_source_or_image_still_readies() {
 
 /// A short clip that plays to its end before anything rendered it (the loop or the render worker
 /// stalled): it still becomes Ready with its last frame, and `Ended` comes after `Ready` in either
-/// renderer — the loop renderer used to report Ended first (a loaded full run failed
-/// `ended_holds_last_frame`), and an ended clip, like a paused one, has no next frame to render.
+/// renderer (reporting Ended first breaks `ended_holds_last_frame` under load), and an ended clip, like a paused one, has no next frame to render.
 #[test]
 fn clip_ended_before_any_render_readies_then_ends() {
     let Some((_serial, gfx)) = gpu() else { return };
@@ -692,7 +691,7 @@ fn no_audio_live() {
     );
 }
 
-/// R92 (review of Task 16c/16d): `has_audio` must reflect what mpv actually resolved —
+/// `has_audio` must reflect what mpv actually resolved —
 /// `true` for a clip with a real audio stream, `false` for one with none at all
 /// (`ClipSpec::FrameIndex`, which `ensure_clip`'s own doc says carries no audio). This is
 /// distinct from `no_audio` ([`no_audio_live`] above, our own request to disable it): a
@@ -725,7 +724,7 @@ fn has_audio_reflects_real_track_presence() {
     );
 }
 
-/// The brief's property map, checked against what mpv itself reports.
+/// The property map, checked against what mpv itself reports.
 #[test]
 fn property_map_reaches_mpv() {
     let Some((_serial, gfx)) = gpu() else { return };
@@ -748,7 +747,7 @@ fn property_map_reaches_mpv() {
     assert_eq!(src.mpv_get_f64("speed"), Some(1.5));
     ap(&mut src, "hwdec", PropValue::Str("no".into()));
     assert_eq!(s(&src, "hwdec"), "no");
-    // Task 20d: copy modes only (no GL interop init on the loop); the graph keeps the
+    // Copy modes only (no GL interop init on the loop); the graph keeps the
     // user's value.
     assert_eq!(s(&src, "gpu-hwdec-interop"), "no");
     ap(&mut src, "hwdec", PropValue::Str("auto".into()));
@@ -876,7 +875,7 @@ fn apply_never_blocks_the_render_thread() {
 
 /// Fix round 1 (#1): a value mpv rejects (after the synchronous schema gate passed)
 /// surfaces as `SourceEvent::Error` naming the property — and `read` reverts.
-/// R45: a refused write is `Rejected` (the source is fine), never a load `Error`.
+/// A refused write is `Rejected` (the source is fine), never a load `Error`.
 #[test]
 fn rejected_property_is_a_rejected_event() {
     let Some((_serial, gfx)) = gpu() else { return };
@@ -917,9 +916,8 @@ fn audio_out_up(s: &MpvSource) -> bool {
 /// itself succeeds; only building the chain fails.
 const BAD_LOUDNORM: &str = "loudnorm=I=0:TP=-1.5:LRA=11";
 
-/// TODO "A rejected `af` silences the video" (owner 2026-11-06): a source opened with an
-/// `af` mpv can't build played NO audio at all (mpv deselected the track: `current-ao`
-/// unset). Now it falls back to the chain without it: audio flows, one `Rejected` `af`
+/// A source opened with an `af` mpv can't build would play NO audio at all (mpv deselects
+/// the track: `current-ao` unset). It falls back to the chain without it: audio flows, one `Rejected` `af`
 /// names ffmpeg's own reason (no `Error`: the source is fine), `read("af")` keeps the value
 /// asked for, the `sources` probe's `af_refused` says why, the same value again is a no-op,
 /// and a good value clears it.
@@ -1205,7 +1203,7 @@ fn defaults_applied_at_open_match_mpv() {
     assert_eq!(src.mpv_get_f64("volume"), Some(100.0));
 }
 
-/// TODO "mpv's built-in Lua scripts per core": every core used to start six Lua script
+/// mpv's built-in Lua scripts per core: by default every core starts six Lua script
 /// threads (`lua/commands`, `lua/console`, `lua/context_menu`, `lua/positioning`,
 /// `lua/select`, `lua/stats` — 6 of a 1080p core's 28 threads, measured) for an OSD, a
 /// console and menus nobody can open on a wallpaper. Each option reads back `no`, and no
@@ -1252,15 +1250,15 @@ fn builtin_scripts_are_not_loaded() {
     );
 }
 
-/// Crash on rapid superseding switches (2026-10-26, SIGSEGV in the compositor): mpv ≥ 0.40
+/// A clipboard per core can crash the compositor (SIGSEGV on rapid switches): mpv ≥ 0.40
 /// gives every core a native clipboard at `mpv_initialize` — on X11 (no `WAYLAND_DISPLAY`,
 /// a reachable `DISPLAY`) its own X connection on its own thread, on Wayland its own
 /// `ext-data-control` connection to the compositor. A wallpaper never reads the clipboard,
 /// and when that X connection drops, mpv's clipboard thread `XCloseDisplay`s it → Xlib's
 /// default I/O error handler → `exit(1)` from mpv's thread → the NVIDIA EGL atexit
 /// teardown under the loop's GL → SIGSEGV. No backend at all, in any environment: the
-/// option reads back empty and the core reports no clipboard backend. RED before:
-/// `current-clipboard-backend` = `wayland` (a session's `WAYLAND_DISPLAY`), `x11`, or `vo`.
+/// option reads back empty and the core reports no clipboard backend (not `current-clipboard-backend` = `wayland`
+/// (a session's `WAYLAND_DISPLAY`), `x11`, or `vo`).
 #[test]
 fn no_clipboard_backend_per_core() {
     let Some((_serial, gfx)) = gpu() else { return };
@@ -1461,7 +1459,7 @@ fn color_source() {
 }
 
 /// Fix round (T11 #9): a `SnapshotSource` is the source's frame at the moment it's made —
-/// pixel-identical, same size, same orientation (image top at low y, R25) — and it stays
+/// pixel-identical, same size, same orientation (image top at low y) — and it stays
 /// that frame while the source moves on.
 #[test]
 fn snapshot_copies_frame_and_orientation() {
@@ -1540,7 +1538,8 @@ fn snapshot_copies_frame_and_orientation() {
 /// `ready: false` with no texture. A still runs no `vf` whatever the cap; a video keeps it.
 /// Cases: opened capped; the cap changed live on a shown image; a capped source switched
 /// image → video → image by `path`; a still whose extension says video (`.dat` — mpv's image
-/// flag corrects the guess after the load). RED before: never Ready (events `[AudioFlowing]`).
+/// flag corrects the guess after the load). Failure it catches: never Ready (events
+/// `[AudioFlowing]`).
 #[test]
 fn fps_cap_never_stalls_an_image() {
     let Some((_serial, gfx)) = gpu() else { return };

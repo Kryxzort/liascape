@@ -88,7 +88,7 @@ pub enum GainSlot {
     Xfade,
     /// The short anti-click ramp at a hold boundary (≤ 30 ms).
     AntiClick,
-    /// The player-pause anti-click gate's own ramp (R88; final review I2): a slot of its
+    /// The player-pause anti-click gate's own ramp: a slot of its
     /// own so the gate — wall-clock timed while the player clock is frozen — never
     /// shares a writer with the recipe/retire/park ramps on `anticlick`, and can gate any
     /// playing source whatever transition it's part of.
@@ -230,10 +230,9 @@ pub fn mpv_volume_gain(db: f64) -> f64 {
 /// PulseAudio's cubic `pa_sw_volume_from_linear` curve: `pa_volume = round(65536 *
 /// cbrt(linear))`, where `linear = db_to_lin(db)`. Measured: 50% volume is −18.07 dB
 /// (cubic), matching mpv's plain `volume` property — both follow the same PulseAudio
-/// convention. Nothing in Phase 1 calls this (the player drives mpv via `volume-gain`,
-/// not PulseAudio stream volumes, for in-player sources); it is kept `pub` because design
-/// §5.3 names it as the PulseAudio/PipeWire-pulse edge conversion, and Phase 3 (direct
-/// PulseAudio stream control, e.g. for scene/web worker audio) will consume it.
+/// convention. The player drives mpv via `volume-gain`, not PulseAudio stream volumes, for
+/// in-player sources; this is kept `pub` because design §5.3 names it as the
+/// PulseAudio/PipeWire-pulse edge conversion, for direct PulseAudio stream control.
 pub fn pulse_volume_from_db(db: f64) -> u32 {
     let linear = db_to_lin(db);
     (65536.0 * linear.cbrt()).round() as u32

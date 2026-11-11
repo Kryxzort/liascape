@@ -1,4 +1,4 @@
-// Settings levels (owner 2026-11-06: "these are gonna be the forever final 4 levels", Standard the default): how much of
+// Settings levels (docs/decisions.md § "Use four settings levels, Standard by default, and never reset a hidden value"): how much of
 // Settings shows. `settingsLevel` is an ordinary saved setting the backend never reads; each level shows its own rows and
 // every row of the levels below it. A hidden row keeps its value and keeps working (.claude/rules/ui/state-and-api.md § Settings page).
 // The picker sits in the top bar beside the tabs while Settings is open (App.tsx).

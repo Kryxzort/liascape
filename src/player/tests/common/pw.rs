@@ -1,21 +1,21 @@
-//! A **private, hermetic** PipeWire + WirePlumber for tests that need real audio flow (I7;
-//! moved here from `tests/api.rs` by Phase 2 Task 6 so every target can use it): their own
+//! A **private, hermetic** PipeWire + WirePlumber for tests that need real audio flow (shared
+//! by every test target): their own
 //! runtime/config/state dirs, no session D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth/
 //! V4L2 monitors, so no real device is ever touched; one null sink (`hermetic-sink`) as the
 //! only output. The owner's PipeWire is never involved: `PIPEWIRE_RUNTIME_DIR` points every
 //! client of a test (the bus, mpv's AO, a scene worker's stream) at the private socket.
 //!
-//! **The daemon runs its graph real-time, like the owner's** (`libpipewire-module-rt` via rtkit
+//! **The daemon runs its graph real-time, like a desktop session's** (`libpipewire-module-rt` via rtkit
 //! on the system bus — hence `support.dbus = true`; the session bus stays unreachable; the same
 //! config as `tests/onmachine/scenes.sh`). Its data thread drives the graph (the null sink's
 //! timer), and this machine's `client.conf.d/99-lowlatency.conf` asks every client stream for
-//! `node.latency = 64/48000`, so a cycle is 1.33 ms. Without RT that thread ran SCHED_OTHER at
-//! the test's nice level and lost whole cycles whenever it woke late — the driver skipping a
+//! `node.latency = 64/48000`, so a cycle is 1.33 ms. Without RT that thread runs SCHED_OTHER at
+//! the test's nice level and loses whole cycles whenever it wakes late — the driver skipping a
 //! period (`pw-profiler`: position +128, `Dummy-Driver` and the bus playback xrun), each one
-//! 64 frames of exact silence at the sink, mostly as a stream joined or left the graph: the
-//! recording tests' (`tests/api.rs::*_never_skips_bus_cycles`) "lost cycles" that weren't the
-//! player's (2026-11-05: `mpv_source_teardown_never_skips_bus_cycles` failed 5 of 26 runs
-//! quiet, 4 of 4 under CPU load with 38–90 runs each; with RT 0 of 20 quiet, 0–1 runs loaded).
+//! 64 frames of exact silence at the sink, mostly as a stream joins or leaves the graph: "lost
+//! cycles" in the recording tests (`tests/api.rs::*_never_skips_bus_cycles`) that aren't the
+//! player's (measured: `mpv_source_teardown_never_skips_bus_cycles` failed 5 of 26 runs quiet
+//! and every run under CPU load without RT; 0 of 20 quiet, 0–1 loaded with it).
 #![allow(dead_code)]
 
 use std::path::PathBuf;

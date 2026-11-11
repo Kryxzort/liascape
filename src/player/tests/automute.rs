@@ -1,4 +1,4 @@
-//! Phase 3 Task 14: the in-player auto-mute Signal end to end, on a **private, hermetic**
+//! The in-player auto-mute Signal end to end, on a **private, hermetic**
 //! PipeWire + WirePlumber (`common::pw`; the owner's audio is never touched) with a second null
 //! sink, `foreign-sink`, that every "foreign" test stream plays to (synthetic tones, `pw-cat`).
 //! The player runs `serve --headless --clock real --ao pipewire` with
@@ -441,7 +441,7 @@ fn automute_mutes_on_a_foreign_stream() {
             .contains(&json!("automute")),
         "automute capability with the bus up: {caps}"
     );
-    // defaults (owner 2026-10-29): 500 ms mute delay, 2000 ms unmute, −70 dB, off
+    // defaults: 500 ms mute delay, 2000 ms unmute, −70 dB, off
     assert_eq!(c.get("player.automute"), json!(false));
     assert_eq!(c.get("player.automute_delay_ms"), json!(500.0));
     assert_eq!(c.get("player.autounmute_delay_ms"), json!(2000.0));

@@ -1,8 +1,8 @@
-//! GPU frames between processes (Phase 2 Task 4; `docs/player/spikes/dmabuf.md` §2, §9):
+//! GPU frames between processes (`docs/player/spikes/dmabuf.md` §2, §9):
 //! a texture exported once as a dmabuf (`EGL_MESA_image_dma_buf_export`), imported once on the
 //! other side (`EGL_EXT_image_dma_buf_import_modifiers` + `glEGLImageTargetTexture2DOES`),
 //! and `sync_file` fences both ways (`EGL_ANDROID_native_fence_sync`). Methods on [`Gfx`]
-//! (in their own file rather than `egl.rs`, which other Phase 2 work also extends). Every
+//! (in their own file rather than `egl.rs`). Every
 //! entry point the extensions add is fetched by name once per process.
 
 use std::ffi::c_void;
@@ -78,7 +78,7 @@ pub struct Exported {
 }
 
 /// A dmabuf imported as a sampleable `GL_TEXTURE_2D`. Owns the texture and the `EGLImage`;
-/// the memory stays valid after the exporter dies (spike §6). Dropped on its own context.
+/// the memory stays valid after the exporter dies (`docs/player/spikes/dmabuf.md` §6). Dropped on its own context.
 pub struct ImportedTex {
     tex: Tex,
     image: Option<EglImage>,

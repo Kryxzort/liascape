@@ -1,4 +1,4 @@
-//! The Sway cover source (Task 6, designer call 9): i3 IPC on `$SWAYSOCK`. A thread
+//! The Sway cover source (designer call 9): i3 IPC on `$SWAYSOCK`. A thread
 //! (`lia-cover`) subscribes to `window`/`workspace`/`output` events on one connection and, on
 //! each (coalesced), reads `GET_TREE` on a second one and publishes [`covered::sway_cover`] of
 //! it. Sway's `visible` is a real on-screen flag (unlike Hyprland's). Read-only. Not running on

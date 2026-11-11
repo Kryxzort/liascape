@@ -6,16 +6,15 @@ import { YouTubeEmbed } from "./YouTubeEmbed";
 import { useStore, type PreviewKind } from "../store";
 import { type usePreview } from "./sidePreview";
 
-// COOL: the Wallpaper Engine-style item sidebar (owner 2026-11-10: "instead of a settings menu when clicking right click
-// and settings, it should open a sidebar when you focus a card and thats what has all the 4 options from the right click
-// menu. same for the browse tab"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
+// COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
+// item sidebar"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
 // the Browse sidebar: an <aside> beside the page (a sibling of `.scroll` inside `.app`), docked at ≥ 900 px — the grid
 // and the playlist bar end at its left edge (index.css `.app:has(> .side-panel…)`) — and floating over the page with a
 // scrim below that. It slides in on a slightly springy curve and its content follows in a quick stagger (picture → hero →
 // actions → rows), a switch re-staggers the new item's content faster, it slides out on close (transform + opacity only,
 // `:root.no-motion` → none of it). `id` is the item's IDENTITY (its path / page URL): a new copy of the same item
-// (`library-item-changed`) is no new open — nothing replays (the 2026-11-10 morph-replay bug).
-// Look (owner 2026-11-11: "very untasteful compared to the rest of the app"): the Settings page's language — accent-tinted
+// (`library-item-changed`) is no new open — nothing replays.
+// Look: the Settings page's language — accent-tinted
 // section cards with glowing icon chips (`.side-sec`), the picture in a framed stage with a soft accent glow, action tiles.
 
 
@@ -30,9 +29,7 @@ export function SideHeadTools({ children }: { children: ReactNode }) {
   return slot ? createPortal(children, slot) : null;
 }
 
-// A switch slides like a carousel (owner 2026-11-11: "instead of a crossfade, it slides to the next wallpaper's sidebar menu
-// depending on where it is respective to the current one" + "it should also slide differently based on whether the next one
-// is above or below"): the direction is where the new item's card sits on screen relative to the old one's (`card` = the
+// A switch slides like a carousel, not a crossfade: the direction is where the new item's card sits on screen relative to the old one's (`card` = the
 // cards' `data-morph-id`, measured at the switch) — a row below → the new content rises from below and the old leaves
 // upwards, a row above → mirrored, the same row → sideways (right of it → in from the right, the old out left). No card to
 // measure (filtered out / scrolled away from a content-visibility grid) → `order`, the item's index in the list: later =
@@ -136,9 +133,9 @@ const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, vide
 // animation), the video (from where the card's hover video was) or the YouTube trailer (muted — the desktop owns the sound;
 // unmounted on a switch / close, which stops it). Layers cross-fade on opacity. At the picture's own aspect: read from the
 // card's loaded image when the item is focused, else from an earlier visit, else 16:9 until the still loads — capped in
-// height (index.css `.side-media`). `play`: the Library sidebar's picture is its Play control (owner 2026-11-11: the Play /
-// In playlist row was "redundant clutter") — no icon (owner: clicking the picture is intuitive), the hover cue is the frame lifting 1.025× with its glow; already
-// playing → the green frame (no badge: owner 2026-11-11, the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
+// height (index.css `.side-media`). `play`: the Library sidebar's picture is its Play control (docs/decisions.md § "Make
+// the sidebar's picture the Play control") — no icon, the hover cue is the frame lifting 1.025× with its glow; already
+// playing → the green frame (no badge: the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
 export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, play }: {
   id: string; cardId: string | null; base: string; full: string | null; gif: string | null; video: string | null; youtube: string | null;
@@ -154,15 +151,15 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const [vidMounted, setVidMounted] = useState(false);
   if (mode === "video" && video && !vidMounted) setVidMounted(true);
   const vidRef = useRef<HTMLVideoElement>(null);
-  // the Video preview's sound (owner 2026-11-11: "in video, show a button to mute/unmute"): muted by default — the desktop's
+  // the Video preview's sound (a mute / unmute button): muted by default — the desktop's
   // wallpaper owns the sound — unmuted at the app's global volume; a new item (a remount) starts muted again
   const [vidMuted, setVidMuted] = useState(true);
   const appVolume = useStore((s) => Number(s.settings?.volume ?? 100));
   useEffect(() => { const v = vidRef.current; if (v) v.volume = Math.max(0, Math.min(1, (Number.isFinite(appVolume) ? appVolume : 100) / 100)); }, [appVolume, vidMounted]);
   useEffect(() => { const v = vidRef.current; if (!v) return; if (mode === "video") v.play().catch(() => {}); else v.pause(); }, [mode, vidMounted]);
   const a = aspect ?? 16 / 9;
-  // the frame takes the SHOWN preview's own shape (owner 2026-11-11: the 16:9 video was cover-cropped into the square
-  // picture's frame — its sides cut off; they chose "the frame reshapes"): the picture / gif → the picture's aspect, Video
+  // the frame takes the SHOWN preview's own shape (a 16:9 video cover-cropped into a square picture's frame loses its
+  // sides): the picture / gif → the picture's aspect, Video
   // → the video's own (from its metadata), the YouTube trailer → 16:9. The rows below move with it on a switch.
   const [vidAspect, setVidAspect] = useState<number | null>(null);
   const shape = mode === "video" && video && vidAspect ? vidAspect : mode === "youtube" && youtube ? 16 / 9 : a;
@@ -171,8 +168,7 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const playable = !!play && !play.playing && !yt;
   return (
     <div className={`side-stage${options.length > 0 ? " has-switch" : ""}`}>
-      {/* the preview switch: a strip attached to the stage's top edge, above the picture (owner 2026-11-11: "in a attached
-          field above the preview instead of a overlay") */}
+      {/* the preview switch: a strip attached to the stage's top edge, above the picture — not an overlay on it */}
       {options.length > 0 && (
         <div className="side-switch" role="radiogroup" aria-label="Preview">
           {options.map((k) => (

@@ -7,8 +7,8 @@ using System.Text.Json;
 
 namespace Liascape.Helpers;
 
-// Where the Steam sign-in's secrets live (owner 2026-11-11: "wait, steam token is kept in plaintext??" → "system keyring and
-// then fallback to some file other than settings.json"). Three names: the refresh token (~200 days), the cached web cookie
+// Where the Steam sign-in's secrets live (docs/decisions.md § "Keep Steam tokens in the system keyring, a 0600 file as
+// fallback"). Three names: the refresh token (~200 days), the cached web cookie
 // (~24 h), a pasted steamLoginSecure. Every reader / writer goes through here (SteamAuthService, SteamOps, WorkshopDownloader).
 //  - Primary: the freedesktop Secret Service (GNOME Keyring, KWallet's provider, KeePassXC) through libsecret's `secret-tool`
 //    — attributes `application=liascape name=<name>`; the value goes over stdin, never argv (argv is world-readable in /proc).

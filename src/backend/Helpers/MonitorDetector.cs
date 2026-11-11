@@ -42,8 +42,8 @@ public static class MonitorDetector
         // liascape-transition --list-outputs: plain wl_output enumeration (name + current mode + layout origin),
         // hyprctl-shaped JSON. Compositor-agnostic and needs only WAYLAND_DISPLAY — the safety net when
         // every compositor CLI above is missing or its env (instance signature, DISPLAY/Xauthority) isn't
-        // there. An empty result here used to silently disable every transition (TryStart: 0 monitors) and
-        // the un-covered timed advance then storm-switched (see PlayerHelper.DoVideoEndWait).
+        // there. An empty result here silently disables every transition (TryStart: 0 monitors) and
+        // the un-covered timed advance then storm-switches (see PlayerHelper.DoVideoEndWait).
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))
             && TransitionService.ResolveBinary() is { } transitionBin)
         {

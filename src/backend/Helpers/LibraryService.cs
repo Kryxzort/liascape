@@ -106,16 +106,16 @@ public static class LibraryService
     }
 
     // The audio-filter string that gain-matches a measured item to targetLufs: ONE fixed gain for the whole play, the way
-    // Spotify normalizes (owner 2026-11-11 chose it): turned down as far as needed, turned UP only as far as the item's
+    // Spotify normalizes (docs/decisions.md § "Normalize video loudness with one fixed gain capped by the true peak"):
+    // turned down as far as needed, turned UP only as far as the item's
     // true peak allows with 1 dB of headroom (PeakCeilingDb) — the sound itself is never altered, no limiter, no rider.
     // Null if the item isn't measured yet. Used by the player (LiascapePlayerMedia), mpvpaper (PlayerHelper) and the
     // transition overlay (TransitionService → liascape-transition --from-af/--to-af).
-    // NOT ffmpeg's loudnorm (owner: "it fades in … when its coming to an end it keeps getting louder and louder and a
-    // click right at the end — as if its doing loudness normalization real time"; "i dont think anyone would like it"):
+    // NOT ffmpeg's loudnorm (audibly fades in, climbs louder toward the end and clicks at the end):
     // even with `linear=true` and the pass-1 measurements it silently falls back to its DYNAMIC mode whenever the linear
     // gain would put the true peak over its TP or the measured LRA is over its target LRA — a 3 s look-ahead rider that
-    // made 3019725456 start +3 dB hot and climb to +4.4 dB over its last 4 s (old/new rendered + measured offline).
-    // 62 of the owner's 189 measured videos took that path. A quiet item with big peaks now plays a little under the
+    // makes 3019725456 start +3 dB hot and climb to +4.4 dB over its last 4 s (rendered + measured offline).
+    // 62 of 189 measured videos take that path. A quiet item with big peaks plays a little under the
     // target instead (49 of 189; most 1–3 dB) — Spotify's own trade-off (its example: −20 LUFS with −5 dBTP peaks is
     // lifted to −16, not −14). The rejected alternative: the full gain + a peak limiter (Spotify's "Loud" mode) — it
     // audibly flattened the hits on the worst items (up to 14 dB of limiting).
@@ -148,13 +148,13 @@ public static class LibraryService
     // - The APPLIED value (LoudnessI, LoudnessTP) = the CURRENT configuration's live measurement once it has one,
     //   else its estimate; within one configuration it moves only when it changed ≥ ApplyHysteresisLu (0.5 LU / dB)
     //   — it is what a NEW play of the scene starts with: a play in progress keeps its own `gain.normalize`
-    //   (LiascapePlayerMedia.NormalizePin — set once per play, 2026-11-06); a change of configuration jumps to the new
+    //   (LiascapePlayerMedia.NormalizePin — set once per play); a change of configuration jumps to the new
     //   one's value (another sound). A report of another configuration (an old key's end report after a property
     //   change) is stored under it and applies nothing.
     // Returns (stored: `m` changed, applied: LoudnessI/TP changed — the next play's value). Pure (the self-test drives
     // it on a bare LibMeta).
-    // - WindowReached (owner 2026-11-06, "set it once"): this report made the CURRENT configuration's live measurement
-    //   complete for the first time (before: none or a partial) — the moment a play that started without a complete
+    // - WindowReached (docs/decisions.md § "Set scene normalization once per play"): this report made the CURRENT
+    //   configuration's live measurement complete for the first time (before it: none or a partial) — the moment a play that started without a complete
     //   measurement sets its normalization, once (LiascapePlayerMedia.LandSceneNormalize). Every later report only
     //   refines the stored value: it applies from the next play on (player-adapter.md § Scenes → "Loudness").
     public const double ApplyHysteresisLu = 0.5;
@@ -391,9 +391,9 @@ public static class LibraryService
     // clips are ready before they play instead of being measured lazily on first play. Runs while the
     // app is open when NormalizeAudio is on. Idempotent (skips measured) + single-flight; stops early if
     // normalization is turned off mid-scan.
-    // The scan reads each source's index ONCE (it used to parse the whole index.json twice per item,
-    // plus settings.json per item — O(items × index size), ~0.3–0.5 s for a 300-item library, and
-    // `/settings` ran it on its request thread on every save). EnsureLoudnessAsync re-reads an item's
+    // The scan reads each source's index ONCE: parsing index.json (and settings.json) per item is
+    // O(items × index size), ~0.3–0.5 s for a 300-item library, and `/settings` runs it on its request
+    // thread on every save. EnsureLoudnessAsync re-reads an item's
     // entry before measuring, so a snapshot of the index is enough to decide what to skip.
     public static async System.Threading.Tasks.Task BackfillLoudnessAsync()
     {

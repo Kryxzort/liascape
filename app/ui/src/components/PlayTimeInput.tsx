@@ -1,8 +1,8 @@
 import { NumInput } from "./NumInput";
 
 // A rotation duration in seconds as h / m / s fields — "Switch every", "Minimum play time", "Maximum play time"
-// (Settings → Rotation and the playlist modal). A thin wrapper over the shared `NumInput` (the owner's number-field
-// rule: free typing while focused — empty, partial, out of range — a complete in-range number commits live, blur /
+// (Settings → Rotation and the playlist modal). A thin wrapper over the shared `NumInput` (docs/decisions.md § "Let
+// numeric fields be emptied while focused": free typing while focused — empty, partial, out of range — a complete in-range number commits live, blur /
 // Enter clamps and saves), one per unit; the total is clamped to `max` (99:59:59, the backend's own clamp).
 export const MAX_PLAY_SECONDS = 359999;
 
@@ -35,7 +35,7 @@ export const ROT_HINT = {
   minScenes: " · a scene switches after this (it never ends), even when the maximum is shorter · a still image shows this long",
   max: "switch at this point even mid-video · wall-clock (speed doesn't stretch it), a pause stops it · 0 = off: a video plays to its end, however long",
   maxScenes: " · a scene uses it only while the minimum is off",
-  // the scene rule in one plain line (separate timing off; owner 2026-11-10): the one limit that's set, the minimum if both are
+  // the scene rule in one plain line (separate timing off; docs/decisions.md § "A scene's minimum play time beats its maximum"): the one limit that's set, the minimum if both are
   sceneRule: "Scenes: they switch at the minimum — or at the maximum if the minimum is off. Both off: a scene stays until you switch.",
   separate: "scenes and still images never end — give them their own time; the minimum / maximum then apply to videos only",
   separateOff: "Turn this on to give scenes and still images a time of their own (the minimum / maximum then apply to videos only).",
@@ -44,7 +44,7 @@ export const ROT_HINT = {
   startOver: "Sequential starts from the first wallpaper, shuffle shuffles anew",
   startResume: "The same wallpaper, at the same moment",
   startLive: "Takes effect the next time the playlist starts — what's playing now carries on",
-  // Pause when covered (Task 6) / the Expert "while parked" rule (O2)
+  // Pause when covered / the Expert "while parked" rule
   cover: "Pauses picture and sound while every monitor showing the wallpaper is covered",
   parked: "Keep rotating: the playlist carries on unseen, as it always did · Hold: its timers stop until a monitor shows the wallpaper again",
 };

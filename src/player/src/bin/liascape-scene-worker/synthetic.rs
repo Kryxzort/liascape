@@ -1,6 +1,6 @@
-//! The synthetic renderer (plan D7): draws `liascape_player::scene::synthetic`'s patterns with one
+//! The synthetic renderer: draws `liascape_player::scene::synthetic`'s patterns with one
 //! fragment shader — integer maths, so the probe pixels the tests predict are bit-exact.
-//! Image orientation as LWE's core (R25): image top at texture row 0 = `gl_FragCoord.y` 0,
+//! Image orientation as LWE's core: image top at texture row 0 = `gl_FragCoord.y` 0,
 //! no flip anywhere.
 
 use glow::HasContext;
@@ -116,7 +116,7 @@ mod tests {
 
 impl Synthetic {
     /// `fail: build` refuses like a scene whose first render produced nothing.
-    /// Task 8 (tests): the GPU time every frame reports instead of the measured one.
+    /// Tests: the GPU time every frame reports instead of the measured one.
     pub fn report_gpu_ms(&self) -> Option<f32> {
         self.spec.report_gpu_ms
     }
@@ -137,7 +137,7 @@ impl Synthetic {
         Ok(Synthetic { spec, prog, loc })
     }
 
-    /// Task 7: the synthetic scene's user properties — `rgb` / `rgb2` (`[r, g, b]`, 0–255)
+    /// The synthetic scene's user properties — `rgb` / `rgb2` (`[r, g, b]`, 0–255)
     /// recolour the pattern live; `color` is `rgb` in WE's own colour encoding (`[r, g, b]`
     /// 0–1, what the backend's properties editor sends for a `color` property, and what LWE's
     /// `wp_project_property_set_color_by_name` takes); anything else is refused like LWE's

@@ -121,10 +121,9 @@ public static class LibraryStore
         catch { return new(); }
     }
 
-    // Private: every write is a read-modify-write under `_lock` (SetMeta / Remove / UpdateIndex). Trash, undo, the
-    // WE sync and the direct-download reconcile used to LoadIndex, work, then SaveIndex their copy outside it —
-    // over an override saved meanwhile (matrix race:indexLostUpdate: 2–3 of 40 slider saves reverted by
-    // trash/undo cycles of another item).
+    // Private: every write is a read-modify-write under `_lock` (SetMeta / Remove / UpdateIndex). A caller that
+    // LoadIndex-es, works, then SaveIndex-es its copy outside it writes over an override saved meanwhile
+    // (Guard: matrix race:indexLostUpdate — 2–3 of 40 slider saves reverted by trash/undo cycles of another item).
     private static void SaveIndex(string source, Dictionary<string, LibMeta> idx)
     {
         try { AtomicFile.WriteAllText(IndexPath(source), JsonSerializer.Serialize(idx, _json)); }

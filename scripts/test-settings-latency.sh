@@ -2,8 +2,8 @@
 # Hermetic latency check of the Settings page's hot paths under PlayerEngine=liascape-player, with a library the
 # size of a real one (300 items, every one loudness-measured, NormalizeAudio on): a no-op POST /settings
 # (what every debounced slider save costs) and /preview {global:true} (the slider's live drag preview).
-# Speed storm leftover: a no-op /settings cost ~150 ms on the owner's machine (330–550 ms here) — the
-# loudness backfill scanned the whole library on the request thread, parsing index.json twice per item.
+# A no-op /settings must stay cheap: a loudness backfill that scans the whole library on the request thread,
+# parsing index.json per item, costs ~150–550 ms a save.
 #
 # Hermetic like scripts/test-liascape-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
 # player socket), a private `liascape-player serve --headless --clock real --ao null`, its own backend port;

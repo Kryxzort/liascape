@@ -43,7 +43,7 @@ let rel = released();
 out(!alive(childPid()) && rel.includes("user") && rel.includes("pipe"), "the helper released its Steam user + pipe and exited", `pid ${childPid()} alive ${alive(childPid())}, released [${rel}]`);
 
 // b. Steam refuses (not running / WE not owned) → the download FAILS with the reason; it never switches to the page / the
-// to-do / a sign-in (owner 2026-11-11: "instead of fallbacks for when direct steam connection fails, i want failures there")
+// to-do / a sign-in (a failure, not a fallback)
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
 r = await Promise.race([download("710000002"), sleep(20000).then(() => null)]);
@@ -79,7 +79,7 @@ fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project
 r = await Promise.race([pd, sleep(20000).then(() => null)]);
 out(r?.status === 200, "…and finishes once Steam has it", r ? String(r.status) : "timed out");
 await post("/steam-todo/next"); // the Steam to-do's entry waits for the user's Next even after Steam delivered
-// e. owner 2026-11-11 (a 369 MB duplicate): the WE folder setting names Steam's folder THROUGH A SYMLINK, the Steam client
+// e. no duplicate copy: the WE folder setting names Steam's folder THROUGH A SYMLINK, the Steam client
 // reports the real folder → still linked into the library (local/<id>), never copied (workshop/<id>)
 fs.symlinkSync(`${T}/steamlib`, `${T}/wslink`);
 const cur = await (await fetch(U + "/settings")).json();
@@ -89,8 +89,7 @@ body = r ? await r.json() : null;
 const vp = body?.videoPath ?? "";
 const linked = /\/library\/local\/710000005(\/|$)/.test(vp) && fs.lstatSync(vp.replace(/\/[^/]*$/, "")).isSymbolicLink();
 out(r?.status === 200 && linked, "a Workshop folder setting through a symlink: the item is LINKED (local/), not copied", vp || (r ? String(r.status) : "timed out"));
-// f. owner 2026-11-11 ("clicked the unsubscribe button but for some reason it took me to the steam page instead of handling it
-// itself"): Delete from source under "Use the Steam app" → the Steam client unsubscribes; nothing opens in the Steam app
+// f. Delete from source under "Use the Steam app" → the Steam client unsubscribes itself; nothing opens in the Steam app
 const unsub = []; ws.addEventListener("message", (m) => { const e = JSON.parse(m.data); if (e.type === "unsub-progress") unsub.push(e.payload); });
 const item = async (id) => (await lib()).find((i) => i.workshopId === id);
 const queue = async () => (await (await fetch(U + "/workshop/queue")).json()).pending;
@@ -123,7 +122,7 @@ for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100)
 out(!fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001"),
   "…and the next drain (Steam back) unsubscribes it through the Steam client", `still subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}`);
 
-// g. owner 2026-11-11 ("what if i unsubscribe + undo / does it resubscribe? it doesn't right?"): Undo after Steam already
+// g. Undo after Steam already
 // unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (the Steam client unsubscribed
 // it on the second drain), 710000005 the one before (the Steam client unsubscribed it).
 const undo = async () => (await (await fetch(U + "/library/undo", { method: "POST" })).json());
@@ -148,7 +147,7 @@ out(urls().length === n0 && /^Undone, but couldn't use the Steam app/.test(msg) 
 await post("/steam-todo/stop");
 fs.rmSync(`${T}/steamlib/fail-init`);
 
-// h. the Steam to-do (owner 2026-11-11, "Guided"): one page at a time, app-wide; the user's Next moves on — nothing is detected,
+// h. the Steam to-do: one page at a time, app-wide; the user's Next moves on — nothing is detected,
 // and the page route never connects to the Steam client (no steam-ugc child) unless "Let the Steam app do all N" is clicked
 const setMode = async (mode) => { const c = await (await fetch(U + "/settings")).json(); await post("/settings", { ...c, workshopDownloadMode: mode }); };
 const helpersLog = () => fs.existsSync(`${T}/steamlib/helpers.log`) ? fs.readFileSync(`${T}/steamlib/helpers.log`, "utf8").split("\n").filter(Boolean) : [];
@@ -179,7 +178,7 @@ out(t?.autoNext === true, "…item 1 wasn't on disk when its page opened → aut
 dropItem("720000001"); // Steam delivers item 1 (the user clicked Subscribe)
 const r1 = await settle(dl3[0]);
 out(r1?.status === 200 && r1.body?.workshopId === "720000001", "…item 1 arrives in the Workshop folder → its download finishes", JSON.stringify(r1)?.slice(0, 120));
-// owner 2026-11-11 ("make it auto detect then if its flawless"): files that weren't there when its page opened = Steam downloading
+// files that weren't there when its page opened = Steam downloading
 // it = subscribed → the to-do moves on by itself, no POST /steam-todo/next
 const opened2 = await waitUrl("720000002", n0);
 t = await waitTodo((x) => x?.current?.id === "720000002");
@@ -201,7 +200,7 @@ out(helpersLog().length === h0, "…the page route never started a Steam-client 
 
 // Delete from source of 3 (Open in the Steam app): the two Steam has in its Workshop folder (720000001 dropped there, 710000001
 // installed by the fake during g.) get their pages, one at a time; 710000004 has no folder in any Steam root now (it came from
-// $T/ws3, no longer the WE folder setting since e. — like an owned steamcmd copy, never a subscription: owner 2026-11-11) →
+// $T/ws3, not the WE folder setting since e. — like an owned steamcmd copy, never a subscription) →
 // no page, blocked at once. Next = unsubscribed (blocked), Skip = kept subscribed (out of pending + blocked).
 const delItems = [await item("720000001"), await item("710000004"), await item("710000001")].filter(Boolean);
 h0 = helpersLog().length; n0 = urls().length; todo.length = 0; unsub.length = 0;
@@ -267,8 +266,8 @@ out(iv.length >= 3 && overlaps === 0, "…no two Steam-client helpers ever ran a
 out(idsC.filter((id) => statuses(id).includes("Waiting for the Steam app…")).length >= 2, "…the queued ones said \"Waiting for the Steam app…\"",
   idsC.map((id) => statuses(id).join(" > ")).join(" || "));
 
-// i. the Browse sidebar (owner 2026-11-11: "open on steam doesn't open in real steam, and make it so browse > wallpaper engine
-// (local) has option to unsubscribe / same for browse > workshop / … a button that lets you subscribe/unsubscribe in the sidebar")
+// i. the Browse sidebar: Open on Steam opens the Steam client, and a subscribe / unsubscribe button for WE-local and
+// Workshop items
 const subEv = []; ws.addEventListener("message", (m) => { const e = JSON.parse(m.data); if (e.type === "subscribe-progress") subEv.push(e.payload); });
 const state = async (ids) => (await post("/workshop/state", { ids })).json();
 const undoDepth = async () => (await (await fetch(U + "/library/undo-depth")).json()).depth;
@@ -364,7 +363,7 @@ out(t?.finished === true && subEv.some((e) => e.id === "760000003" && e.done && 
   && (await lib()).length === libN && helpersLog().length === h0,
   "…Next finishes it: subscribed, nothing imported, no Steam-client helper", JSON.stringify(st["760000003"]));
 
-// owner 2026-11-11 ("make it auto detect then if its flawless"): a subscribe-only entry moves on by itself when its folder appears
+// a subscribe-only entry moves on by itself when its folder appears
 todo.length = 0; n0 = urls().length;
 await post("/workshop/subscribe", { workshopId: "760000004", title: "sub-only 4" });
 t = await waitTodo((x) => x?.current?.id === "760000004");

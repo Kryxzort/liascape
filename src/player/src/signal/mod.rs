@@ -1,5 +1,5 @@
-//! Signals (spec §4.2 "Signal"; Phase 3): facts about the world outside the player that rules
-//! read. So far one, **covered** (Task 6, designer call 9 as revised 2026-10-30): per output,
+//! Signals (spec §4.2 "Signal"): facts about the world outside the player that rules
+//! read. So far one, **covered**: per output,
 //! whether a window that is on screen there is fullscreen or maximized.
 //!
 //! - **Sources** ([`choose`], at serve start): Hyprland IPC when `HYPRLAND_INSTANCE_SIGNATURE`
@@ -18,7 +18,7 @@
 //!   output showing content is covered at that threshold for [`covered::COVER_ENGAGE_MS`] (base
 //!   clock), the **cover hold** engages: a player-level hold composed in
 //!   `Runtime::update_player_paused` beside the low-VRAM hold — never written to
-//!   `player.paused`, so a user pause survives the release, and the R88 pause gates ramp the
+//!   `player.paused`, so a user pause survives the release, and the pause gates ramp the
 //!   audio with the picture. It releases at the first tick the rule stops holding.
 //!   `player.cover_hold_active` mirrors it; `cover.engaged` / `cover.released` log it.
 //!
@@ -365,7 +365,7 @@ impl Runtime {
         self.cover_mirror();
     }
 
-    /// Task 6, every tick/step before `update_player_paused`: take a new reading (a source
+    /// Every tick/step before `update_player_paused`: take a new reading (a source
     /// thread's feed, or the backend's wlr-ft/headless map), mirror it, then run the rule and
     /// move the hold. O(1) unless something changed or an output is covered.
     pub(crate) fn cover_tick(&mut self) {

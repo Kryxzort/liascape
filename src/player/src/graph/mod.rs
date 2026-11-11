@@ -1,7 +1,7 @@
 //! The node graph (spec §4.2 "Blocks", §4.3 "Recipes", §9 "`state` query"): the player's
 //! single source of truth. Every output, layer, source and effect is a [`Node`] with typed
-//! properties ([`props::PropValue`]) that the command API (Task 12) sets/gets/animates and
-//! the renderer (Task 9) reads. [`Graph::snapshot`] is the `state` query's payload.
+//! properties ([`props::PropValue`]) that the command API sets/gets/animates and
+//! the renderer reads. [`Graph::snapshot`] is the `state` query's payload.
 //!
 //! **Id scheme:** outputs are `out:<connector>` (e.g. `out:DP-1`); every output auto-creates
 //! a `lay:<connector>:main` [`Layer`](NodeKind::Layer) alongside it (destroyed with the
@@ -24,14 +24,14 @@
 //! - `cur:<connector>` / `cur:*` — the source currently shown by that output's (or every
 //!   output's, deduplicated) main layer: if `content` is a `Source`, that id; if `content`
 //!   is an `Effect`, its `to` (the incoming side); if `content` is unset, no entry.
-//! - `srcs:<connector>` / `srcs:*` (Task 12, R50) — every `Source` whose picture is on that
+//! - `srcs:<connector>` / `srcs:*` — every `Source` whose picture is on that
 //!   output (a layer of it shows it directly or as either side of an effect) **or** that an
 //!   in-flight transition on it holds (its pending B, held A's) — snapshots and graves
 //!   excluded. Where global settings (`gain.user`, `no_audio`, `speed`, …) go, so a
 //!   setting changed mid-transition also reaches the B that is about to take over. The
 //!   transition part comes from [`Graph::set_transition_sources`], refreshed by the runtime
 //!   after every `Transitions` start/cancel/tick. `srcs:*` also includes the wallpaper
-//!   parked while no output exists ([`Graph::set_parked`], R60).
+//!   parked while no output exists ([`Graph::set_parked`]).
 //! - anything else is tried as a concrete node id.
 //!
 //! `set` on a multi-resolution path (e.g. `out:*.paused`) applies to every resolved node.
@@ -50,7 +50,7 @@
 //! registered. Property seeding done by `create` is *not* a change: there is no live
 //! source yet for a hook to receive it.
 //!
-//! **`picture_rev`** (Task 13) counts every mutation that can change a picture — `create`,
+//! **`picture_rev`** counts every mutation that can change a picture — `create`,
 //! `destroy`, and every `set` except a `gain.<slot>` (audio only); never `set_observed`.
 //! The Wayland redraw policy (`crate::redraw`) compares it with the revision each output
 //! last presented, so a static wallpaper costs no frames.
@@ -77,7 +77,7 @@ pub enum NodeKind {
     Layer,
     Source,
     Effect,
-    /// Phase 3: a rotation (`prog:<name>`, `recipes::program`) — configuration and observed
+    /// A rotation (`prog:<name>`, `recipes::program`) — configuration and observed
     /// state only; it never shows anything itself.
     Program,
 }
@@ -218,7 +218,7 @@ pub struct Graph {
     tr_sources: BTreeMap<String, BTreeSet<String>>,
     /// Released sources waiting to be destroyed: never part of `srcs:` via `tr_sources`.
     tr_graves: BTreeSet<String>,
-    /// The wallpaper parked while no output exists (R60): part of `srcs:*`.
+    /// The wallpaper parked while no output exists: part of `srcs:*`.
     parked: Option<String>,
     /// Picture-affecting mutations so far (see the module doc).
     picture_rev: u64,
@@ -447,7 +447,7 @@ impl Graph {
     /// [`Graph::drain_changes`] like any set, but it does **not** move
     /// [`Graph::picture_rev`] — the runtime marks only the outputs that show the animated
     /// node for a redraw (`crate::redraw::Redraw::mark_nodes`), so an animation on one
-    /// output never wakes the others (Task 16, review item a).
+    /// output never wakes the others.
     pub fn set_animated(&mut self, path: &PropPath, value: PropValue) -> Result<(), ApiError> {
         let (node_ref, prop) = split_path(path)?;
         let targets = self.resolve(node_ref);
@@ -506,7 +506,7 @@ impl Graph {
         Ok(v)
     }
 
-    /// The transition half of the `srcs:` alias (R50): `by_output` maps `out:<connector>`
+    /// The transition half of the `srcs:` alias: `by_output` maps `out:<connector>`
     /// to the sources in-flight transitions on it hold (pending B, held A's); `graves` are
     /// released sources about to be destroyed, never included through this map. Replaces
     /// the previous value; the runtime calls it after every `Transitions` start/cancel/tick.
@@ -522,7 +522,7 @@ impl Graph {
         self.tr_graves = graves;
     }
 
-    /// The wallpaper the runtime parked because no output is left (R60) — silent and
+    /// The wallpaper the runtime parked because no output is left — silent and
     /// paused, but still a target of `srcs:*` so global settings keep reaching it.
     pub fn set_parked(&mut self, id: Option<String>) {
         if self.parked != id {
@@ -779,7 +779,7 @@ impl Graph {
         }
     }
 
-    /// The inverse of `srcs:<connector>` (Phase 2 Task 5): every output (`out:<c>`, sorted)
+    /// The inverse of `srcs:<connector>`: every output (`out:<c>`, sorted)
     /// whose `srcs:` includes source `id` — where its picture is (or an in-flight transition
     /// on that output holds it). What a scene's ring is sized and ticked for.
     pub fn outputs_of(&self, id: &str) -> Vec<String> {
@@ -862,14 +862,14 @@ impl Graph {
         std::mem::take(&mut self.changes)
     }
 
-    /// R90 (Task 16d): drains only the `gain.*` entries from the pending-changes queue,
+    /// Drains only the `gain.*` entries from the pending-changes queue,
     /// leaving every other pending change in place for the next ordinary
     /// [`Graph::drain_changes`]. The fast gain timer's own forwarding channel
     /// (`Runtime::gain_fast_tick`) calls this right after hand-delivering each push
     /// straight to its source — without it, the next ordinary `sync_sources` would walk
     /// `self.changes` and replay every historical gain value the ramp already pushed
     /// since the last ordinary tick, once per normal tick while it's in flight (redundant
-    /// mpv IPC — exactly the cost R90 asks to bound). Any *other* already-pending gain
+    /// mpv IPC — exactly the cost the fast timer must keep bounded). Any *other* already-pending gain
     /// change (e.g. a plain `set srcs:*.gain.user` a handler queued moments ago, not yet
     /// drained) is swept up too and forwarded by the same caller — never silently
     /// dropped, just delivered sooner than the next main tick would have.
@@ -950,7 +950,7 @@ mod tests {
         assert!(err.hint.contains("0.1–4.0"), "hint was: {}", err.hint);
     }
 
-    /// Task 13: the redraw policy's counter — a picture can only change through create,
+    /// The redraw policy's counter — a picture can only change through create,
     /// destroy or a non-gain set; gain slots and observations never wake an output.
     #[test]
     fn picture_rev_counts_picture_mutations_only() {
@@ -1226,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    // R90 (Task 16d): `drain_gain_changes` must extract only the `gain.*` entries,
+    // `drain_gain_changes` must extract only the `gain.*` entries,
     // leaving every other pending change exactly in place (order preserved) for the
     // next ordinary `drain_changes`.
     fn drain_gain_changes_is_scoped() {
@@ -1498,7 +1498,7 @@ mod tests {
         assert_eq!(g.resolve("srcs:A"), vec!["a", "pend"], "grave excluded");
         assert_eq!(g.resolve("srcs:*"), vec!["a", "b", "pend"]);
         assert!(g.resolve("srcs:NOPE").is_empty());
-        // `outputs_of` is the inverse (Phase 2 Task 5: a scene's demand).
+        // `outputs_of` is the inverse (a scene's demand).
         assert_eq!(g.outputs_of("a"), vec!["out:A"]);
         assert_eq!(g.outputs_of("b"), vec!["out:B"]);
         assert_eq!(g.outputs_of("pend"), vec!["out:A"], "held by a transition");

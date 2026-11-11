@@ -238,7 +238,7 @@ fn build_record(
 }
 
 /// Append one record to `<dir>/events.jsonl` **without** the global logger — for a process
-/// that shares the player's event log but isn't the player (the supervisor, Task 16): open
+/// that shares the player's event log but isn't the player (the supervisor): open
 /// with `O_APPEND`, one `write` of the whole line, close. `t_mono_ms` is that process's own
 /// monotonic time. Never rotates (the player does); the line is written whole, so it can't
 /// interleave with the player's lines.
@@ -466,7 +466,7 @@ pub fn event(comp: &'static str, level: Level, kind: &str, corr: Option<CorrId>,
     }
 }
 
-/// A live consumer of every event (the command API's `subscribe`, Task 12). Installed
+/// A live consumer of every event (the command API's `subscribe`). Installed
 /// with [`set_tap`]; called from whatever thread logs, so it must only queue (never block,
 /// never log itself).
 pub trait Tap: Send + Sync {
@@ -497,7 +497,7 @@ pub fn recent(filter: &LogFilter, limit: usize) -> Vec<Value> {
 }
 
 /// The instant `t_mono_ms` counts from (the global logger's start) — `None` before `init`.
-/// Anything that timestamps on "the player's monotonic clock" (the bus meter, Task 14)
+/// Anything that timestamps on "the player's monotonic clock" (the bus meter)
 /// uses this base, so its times line up with every event's `t_mono_ms`.
 pub fn mono_start() -> Option<Instant> {
     GLOBAL

@@ -1,5 +1,5 @@
 //! The bus meter (spec §5.3: "the probes tap the bus monitor: the real, server-side mix of
-//! exactly the player's audio and nothing else"; Task 14). A PipeWire capture stream on the
+//! exactly the player's audio and nothing else"). A PipeWire capture stream on the
 //! `liascape-player-bus` monitor (48 kHz F32, stereo, a 10 ms quantum requested via
 //! `node.latency = 480/48000`) turns every 1 ms of the bus mix into one dBFS value and keeps
 //! the last 4 minutes of them in a ring of `(t_mono, dbfs_1ms)`.
@@ -10,12 +10,12 @@
 //!   anti-phase content and reads a one-sided channel 6 dB low, which a dropout detector
 //!   would take for a dip. A full-scale sine reads −3.01 dBFS (RMS = peak − 3 dB).
 //! - **`t_mono`** is on the player's monotonic clock — the same base as every event's
-//!   `t_mono_ms` (`log::mono_start`), so Task 15 can line meter samples up against
+//!   `t_mono_ms` (`log::mono_start`), so the dropout detector can line meter samples up against
 //!   transition events. A block's time = its graph cycle's start (`pw_time.now`,
 //!   CLOCK_MONOTONIC) + its first frame's offset in that buffer; a block spanning two buffers
 //!   is stamped at its first frame.
 //! - The capture's `process` callback runs on PipeWire's **real-time data thread**
-//!   (`RT_PROCESS`, Phase 2 Task 14) — on the non-RT `lia-bus` main loop it missed whole graph
+//!   (`RT_PROCESS`) — on the non-RT `lia-bus` main loop it missed whole graph
 //!   cycles under load (a timestamp jump, then silent blocks), exactly when a switch loads the
 //!   machine — and never blocks or allocates: blocks go to a callback-local staging buffer,
 //!   moved into the ring under a `try_lock` (a reader copying a window just delays them to
@@ -57,7 +57,7 @@ pub fn block_dbfs(sum_sq: &[f64], frames: usize) -> f64 {
 }
 
 /// Max-channel RMS dBFS (floor −96) of one block of interleaved `samples` with `channels`
-/// channels — the meter's measure, shared with the scene worker's `Envelope` (Task 6) so a
+/// channels — the meter's measure, shared with the scene worker's `Envelope` so a
 /// scene's reference and the bus capture are the same number.
 pub fn dbfs_block(samples: &[f32], channels: usize) -> f32 {
     let channels = channels.max(1);
@@ -223,7 +223,7 @@ impl MeterShared {
         }
     }
 
-    /// I7: the bus reconnected and the meter's capture stream is re-created.
+    /// The bus reconnected and the meter's capture stream is re-created.
     pub fn clear_error(&self) {
         if let Ok(mut g) = self.error.lock() {
             *g = None;

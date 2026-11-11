@@ -1,4 +1,4 @@
-//! The player audio bus (spec §5.3 "(my call) Player audio bus"; Task 14). One in-process
+//! The player audio bus (spec §5.3 "(my call) Player audio bus"). One in-process
 //! PipeWire loopback (`libpipewire-module-loopback`) owned by the player: a virtual sink,
 //! `liascape-player-bus`, that every wallpaper stream plays into, forwarded at 0 dB to the user's
 //! current default sink (so chains such as EasyEffects keep working) and re-targeted when
@@ -11,18 +11,19 @@
 //!                                └─ monitor ──▶ liascape-player-bus.meter (the Meter)
 //! ```
 //!
-//! **Identity contract (auto-mute relies on it verbatim, Task 17):** the playback stream is
+//! **Identity contract (auto-mute relies on it verbatim):** the playback stream is
 //! `node.name = liascape-player-bus.playback`, `application.name = liascape-player`, `media.role =
 //! Wallpaper`; the sink is `node.name = liascape-player-bus`, `node.description = "liascape-player bus"`.
 //!
 //! Everything PipeWire runs on one thread ("lia-bus") with its own main loop + context +
 //! core: the module's nodes, the registry/metadata watch, the latency measurement and the
 //! meter's capture stream (only the meter's capture uses `RT_PROCESS` — its process callback
-//! runs on PipeWire's real-time data thread, Phase 2 Task 14; every other callback runs on
+//! runs on PipeWire's real-time data thread; every other callback runs on
 //! this one thread — capture buffers carry their own cycle time, `pw_buffer.time`). The rest of
 //! the player only sees [`Bus`] (state behind a mutex) and [`super::Meter`].
 //!
-//! **Sessions** (I7; cold boot 2026-10-29): [`Bus::start`] never blocks — the thread runs the
+//! **Sessions**: [`Bus::start`] never blocks (a cold boot may start the player before
+//! PipeWire/WirePlumber) — the thread runs the
 //! bus as sessions (connect, load, link, measure, watch); a setup that fails and a
 //! connection lost later are the same case: `audio.bus.down {reason}`, then the reconnect
 //! backoff until a session is up (`audio.bus.up {reconnected, generation}`). [`Bus::route`]
@@ -85,9 +86,9 @@ pub const RATE: u32 = 48_000;
 /// it) connects is an **ASYNC node** (`node.async`, read by libpipewire at
 /// `pw_stream_connect`, then by the server). An async producer is never waited for inside a
 /// graph cycle: its consumer reads the buffer it queued one cycle earlier, and its leaving
-/// can't stall anyone. **F7 residual (2026-11-04):** with synchronous links the bus's cycle
-/// counted every stream playing into it, and a stream *deactivating* (a scene worker's quit,
-/// mpv's `pw_stream_set_active(false)` on pause, its `pw_stream_destroy` at teardown) hit a
+/// can't stall anyone. **Why async:** with synchronous links the bus's cycle
+/// counts every stream playing into it, and a stream *deactivating* (a scene worker's quit,
+/// mpv's `pw_stream_set_active(false)` on pause, its `pw_stream_destroy` at teardown) hits a
 /// libpipewire race — the client marks its own activation INACTIVE at once, the server
 /// drops it from the bus's dependency count only after a protocol roundtrip; a driver cycle
 /// starting in that window skips the stream (inactive) yet the bus still waits for it, the
@@ -122,11 +123,11 @@ pub unsafe fn set_async_streams_env() {
     };
     unsafe { std::env::set_var("PIPEWIRE_PROPS", merged) };
 }
-/// The latency probes' quantum request: 10 ms. The meter no longer requests one (R68 fix
-/// round) — this is kept only for `measure_latency`'s transient streams.
+/// The latency probes' quantum request: 10 ms. The meter requests none — this is only for
+/// `measure_latency`'s transient streams.
 pub const QUANTUM: u32 = 480;
 /// PipeWire's own default max quantum (`default.clock.max-quantum`), in frames. Since the
-/// meter's capture no longer pins `node.latency` (R68), the graph it runs on can grow up to
+/// meter's capture doesn't pin `node.latency`, the graph it runs on can grow up to
 /// this before the meter's RT scratch buffer, sized for it below, would need to.
 const MAX_QUANTUM_FRAMES: usize = 8192;
 /// The meter capture is always stereo (FL/FR, [`RATE`]'s format): one scratch slot per
@@ -145,7 +146,7 @@ const IMPULSE: f32 = 1.0e-3;
 const IMPULSE_SEEN: f32 = 1.0e-6;
 /// The bus thread wakes at least this often (commands, retarget timeouts, quit).
 const TICK: Duration = Duration::from_millis(10);
-/// I7 (final review): after the PipeWire connection is lost the bus is re-created —
+/// After the PipeWire connection is lost the bus is re-created —
 /// first after this, then doubling up to [`RECONNECT_MAX`] while attempts keep failing.
 const RECONNECT_INITIAL: Duration = Duration::from_millis(500);
 const RECONNECT_MAX: Duration = Duration::from_secs(10);
@@ -180,7 +181,7 @@ pub struct BusInfo {
     pub sink_node: Option<u32>,
     pub retargets: u64,
     /// Down, and the bus thread is (re)trying to bring it up: a first session still setting
-    /// up, or the reconnect backoff after a failed or lost one (cold boot 2026-10-29).
+    /// up, or the reconnect backoff after a failed or lost one.
     pub connecting: bool,
     /// Sessions that came up so far (1 = the first, 2+ = reconnected) — [`Bus::route`]'s.
     pub generation: u64,
@@ -195,7 +196,7 @@ pub struct BusInfo {
 struct Shared {
     info: Mutex<BusInfo>,
     quit: AtomicBool,
-    /// I7: `generation << 1 | up` in one word, so a reader never sees a half-made change.
+    /// `generation << 1 | up` in one word, so a reader never sees a half-made change.
     /// The generation is bumped every time the bus comes up (1 = the first session, 2+ =
     /// reconnected) — the runtime re-targets every source's `audio-device` when the route
     /// moves; `up` is cheap to poll every tick, unlike `info`.
@@ -266,12 +267,12 @@ pub struct Bus {
 }
 
 impl Bus {
-    /// Start the bus thread — **never blocks** (cold boot, 2026-10-29: `serve` used to wait
-    /// up to 10 s here for a PipeWire/WirePlumber that wasn't up yet, answering nothing, and
-    /// a failed first setup left the process without a bus for good). The thread loads the
+    /// Start the bus thread — **never blocks**: on a cold boot PipeWire/WirePlumber may not be
+    /// up yet, and a blocking `serve` answers nothing meanwhile (and a failed first setup must
+    /// not leave the process without a bus for good). The thread loads the
     /// loopback, waits until its playback is linked to the default sink and measures the
     /// latency (measured ~0.2 s); a setup that fails — PipeWire unreachable, no session
-    /// manager linking the loopback within [`CREATE_TIMEOUT`] — goes into the I7 reconnect
+    /// manager linking the loopback within [`CREATE_TIMEOUT`] — goes into the reconnect
     /// backoff like a lost connection, until a session is up. Every session that comes up
     /// logs `audio.bus.up`; [`Bus::route`] says where sources should play meanwhile.
     /// [`Bus::wait_up`] is `serve`'s bounded wait for the first one. `Err(reason)` only when
@@ -369,7 +370,7 @@ impl Bus {
         self.info().state
     }
 
-    /// I7: `(up, generation)` — cheap; the runtime re-targets sources when it changes
+    /// `(up, generation)` — cheap; the runtime re-targets sources when it changes
     /// (down → mpv's default device; up again → the bus).
     pub fn route(&self) -> (bool, u64) {
         let r = self.shared.route.load(Ordering::SeqCst);
@@ -556,7 +557,7 @@ fn spa_str(s: &str) -> String {
 /// are never saved as a "user choice" that WirePlumber would later apply to an mpv stream.
 const NO_RESTORE: &str = "state.restore-props = false state.restore-target = false";
 
-/// The module-loopback arguments (brief values verbatim + the identity contract).
+/// The module-loopback arguments (fixed values + the identity contract).
 fn loopback_args(target: Option<&str>) -> String {
     let target = target
         .map(|t| {
@@ -646,7 +647,7 @@ fn roundtrip(ml: &MainLoopRc, core: &CoreRc, seen: &Rc<RefCell<Seen>>) -> Result
     .map_err(|e| format!("PipeWire roundtrip: {e}"))
 }
 
-/// Rate-limits the `audio.meter.scratch_exceeded` warning (T14 residual fix round): at
+/// Rate-limits the `audio.meter.scratch_exceeded` warning: at
 /// most once per [`SCRATCH_WARN_EVERY`], regardless of which capture stream hit it.
 static SCRATCH_WARN_LAST: Mutex<Option<Instant>> = Mutex::new(None);
 const SCRATCH_WARN_EVERY: Duration = Duration::from_secs(5);
@@ -672,7 +673,7 @@ fn scratch_cap_exceeded(frames: usize, cap_frames: usize) {
 /// into pieces of at most `scratch`'s own capacity — **never grown** — each handed to
 /// `on_chunk` with its own `t_ns` advanced by its frame offset at [`RATE`], so a buffer
 /// bigger than the scratch (a negotiated quantum above PipeWire's default max,
-/// [`MAX_QUANTUM_FRAMES`] — T14 residual, found in review) is chunked rather than
+/// [`MAX_QUANTUM_FRAMES`]) is chunked rather than
 /// reallocating the RT callback's scratch, and no frame is dropped, only chunked. The
 /// pure half of [`read_capture`]'s chunking — unit-tested without PipeWire. `channels`
 /// keeps a chunk boundary frame-aligned.
@@ -768,14 +769,13 @@ fn format_pod() -> Vec<u8> {
 }
 
 /// Connect `stream` as 48 kHz F32 stereo FL/FR (`AUTOCONNECT | MAP_BUFFERS`). Public for the
-/// scene worker's playback stream (Task 6), which uses the bus's exact format.
+/// scene worker's playback stream, which uses the bus's exact format.
 pub fn connect(stream: &StreamRc, dir: spa::utils::Direction) -> Result<(), String> {
     connect_with(stream, dir, StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS)
 }
 
 /// [`connect`] with explicit stream flags (the scene worker adds `RT_PROCESS`: its process
-/// callback must run on PipeWire's real-time data thread — Phase 2 Task 6's stream, Task 10's
-/// flake fix).
+/// callback must run on PipeWire's real-time data thread).
 pub fn connect_with(
     stream: &StreamRc,
     dir: spa::utils::Direction,
@@ -796,7 +796,7 @@ fn latency_str() -> String {
 /// given, requests that graph quantum (`node.latency`) for this stream. Only the ~1 s
 /// startup latency probes pass one; the meter's long-lived capture ([`Watch::start_meter`])
 /// passes `None` (the graph default) — a 10 ms request held for as long as the player runs
-/// would otherwise pin the *whole* PipeWire graph's quantum to it (R68: the meter must not
+/// would otherwise pin the *whole* PipeWire graph's quantum to it (the meter must not
 /// force the graph quantum).
 pub(crate) fn capture_stream(
     core: &CoreRc,
@@ -1009,8 +1009,8 @@ fn measure_latency(
 }
 
 /// The bus thread: sessions until `Bus` drops. The first one's setup failing is no
-/// different from a connection lost later (cold boot, 2026-10-29: PipeWire or WirePlumber
-/// not up yet) — both go into the I7 reconnect backoff until a session is up.
+/// different from a connection lost later (on a cold boot PipeWire or WirePlumber may not
+/// be up yet) — both go into the reconnect backoff until a session is up.
 fn run(shared: &Arc<Shared>, rx: mpsc::Receiver<Cmd>) {
     pw::init();
     let mut meter_req: Option<Arc<MeterShared>> = None;
@@ -1076,7 +1076,7 @@ enum End {
     Lost(String),
 }
 
-/// I7: sleep `d` (in `TICK`s), still taking meter commands; `true` = quit.
+/// Sleep `d` (in `TICK`s), still taking meter commands; `true` = quit.
 fn wait_or_quit(
     shared: &Shared,
     rx: &mpsc::Receiver<Cmd>,
@@ -1337,7 +1337,7 @@ fn session(
             }
         }
         if let Some(e) = seen.borrow().core_error.clone() {
-            // I7: everything on this connection is dead — re-create the bus. The loopback
+            // Everything on this connection is dead — re-create the bus. The loopback
             // module unloads itself on a core error (module-loopback's own core listener
             // schedules its destroy), so destroying it here too is a double free
             // (measured: "double free or corruption" on a PipeWire kill) — leave it to
@@ -1480,14 +1480,14 @@ impl Watch {
                 // `target.object` back onto the *current* default, after we'd already
                 // reported an override, means the playback is observed back on the
                 // default without any intervention of ours. Status accuracy only (never a
-                // write of our own, R67): clear the stale flag so `overridden` reports what
+                // write of our own): clear the stale flag so `overridden` reports what
                 // is true now. Keyed off this explicit write event, never a `linked_targets`
                 // snapshot — the module's own rule (see `Watch`'s doc): a relink the write
                 // triggers lags the metadata by a tick or more, so reading the momentary
-                // link set here would race the lag and misreport (found on-machine: the
-                // very next tick after the first override detection still showed the link
-                // on the old target, which this exact bug briefly cleared `override_seen`
-                // over, letting a second, spurious `audio.bus.moved` fire later).
+                // link set here would race the lag and misreport (measured on-machine: the
+                // very next tick after the first override detection can still show the link
+                // on the old target; clearing `override_seen` from it lets a second, spurious
+                // `audio.bus.moved` fire later).
                 if self.override_seen
                     && s.default_sink.is_some()
                     && v.as_deref()
@@ -1686,7 +1686,7 @@ impl Watch {
 
     fn start_meter(&mut self, core: &CoreRc, m: Arc<MeterShared>) {
         self.meter = None;
-        // No `node.latency` request (R68): the meter must not pin the graph quantum for as
+        // No `node.latency` request: the meter must not pin the graph quantum for as
         // long as the player runs. See `capture_stream`'s doc.
         let stream = match capture_stream(core, METER_NAME, SINK_NAME, true, None) {
             Ok(s) => s,
@@ -1699,7 +1699,7 @@ impl Watch {
         // Sized for PipeWire's own default max quantum up front (`METER_SCRATCH_CAP`) —
         // with no pinned `node.latency`, the graph can run at anything up to it. Never
         // reallocated inside the RT process callback: a buffer bigger than this capacity
-        // is chunked by `read_capture`/`chunk_into` instead (T14 residual fix round).
+        // is chunked by `read_capture`/`chunk_into` instead.
         let mut scratch = Vec::with_capacity(METER_SCRATCH_CAP);
         let m_state = m.clone();
         let l = stream
@@ -1724,7 +1724,7 @@ impl Watch {
                 return;
             }
         };
-        // Phase 2 Task 14: the callback runs on PipeWire's real-time data thread — on this
+        // The callback runs on PipeWire's real-time data thread — on this
         // non-RT main loop it missed whole cycles under load (a switch spawning a worker or
         // tearing a source down), each an unmeasured stretch for the dropout detector. It is
         // RT-safe: no allocation (scratch + staging sized up front), the ring via `try_lock`.
@@ -1787,7 +1787,7 @@ mod tests {
         // `Watch::start_meter`'s RT scratch (sized via `METER_SCRATCH_CAP`) must never grow
         // inside the process callback — it has to be sized for PipeWire's own default max
         // quantum (8192 frames, stereo) up front, now that the meter no longer pins
-        // `node.latency` and the graph can run at anything up to that (R68).
+        // `node.latency` and the graph can run at anything up to that.
         let mut scratch: Vec<f32> = Vec::with_capacity(METER_SCRATCH_CAP);
         let cap0 = scratch.capacity();
         assert!(cap0 >= MAX_QUANTUM_FRAMES * 2, "cap0={cap0}");
@@ -1809,7 +1809,7 @@ mod tests {
 
     #[test]
     fn chunk_into_never_reallocates_and_meters_every_frame_past_3x_capacity() {
-        // T14 residual (found in review): a buffer more than `scratch`'s own capacity
+        // A buffer more than `scratch`'s own capacity
         // must be chunked, never grown — and every frame must still reach `on_chunk`,
         // just split across more than one call.
         let channels = 2usize;

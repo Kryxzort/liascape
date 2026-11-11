@@ -1,4 +1,4 @@
-//! Task 16: the supervisor + the state snapshot, end to end. Every test spawns the real
+//! The supervisor + the state snapshot, end to end. Every test spawns the real
 //! binary **supervised** (`liascape-player serve --headless --outputs 640x360@60,320x180@60
 //! --clock real --ao null`, no `--no-supervise`) with a temp `XDG_RUNTIME_DIR` /
 //! `XDG_STATE_HOME`, crashes or stops the compositor child (`hello.pid`), and checks what
@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 const BIN: &str = env!("CARGO_BIN_EXE_liascape-player");
 static SERIAL: Mutex<()> = Mutex::new(());
 static N: AtomicU32 = AtomicU32::new(0);
-/// The brief: the restarted player answers `hello` within this.
+/// The restarted player answers `hello` within this.
 const RESTART_BUDGET: Duration = Duration::from_millis(1500);
 /// How long a test waits for a snapshot it needs on disk (a precondition — `wait_snapshot`
 /// returns the moment it matches). Written 250 ms after a change, but `fsync`ed twice (file +
@@ -68,7 +68,7 @@ fn state_dir(root: &Path) -> PathBuf {
 /// (DrKonqi) pops a notification per crash (measured).
 fn guard(c: &mut Command) {
     use std::os::unix::process::CommandExt;
-    // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
+    // Hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
     // that drives it sets `fake:<file>` after this).
     c.env("LIASCAPE_PLAYER_VRAM_PROBE", "none");
     unsafe {
@@ -397,7 +397,7 @@ fn frame_index() -> PathBuf {
 
 // ---------------------------------------------------------------- tests
 
-/// The brief's test: a SEGV of the compositor → the supervisor restarts it with
+/// A SEGV of the compositor → the supervisor restarts it with
 /// `--restore` → within 1.5 s `hello` answers from a new pid, the same clip plays on both
 /// outputs from ≥ the saved position, and the child logged `supervisor.restart` with the
 /// signal.
@@ -435,8 +435,7 @@ fn crash_restores() {
     let mut c = sup.client();
     // The position the restore started at: the first `time_pos` the restored source reports
     // (it can play on for seconds before `ready` under load — a 4 s clip would wrap past it,
-    // so the position is read here, not at `ready`). Load-proof waits (switch-over checklist,
-    // 2026-11-05): the restart's LATENCY is the budget asserted above; these only converge.
+    // so the position is read here, not at `ready`). Load-proof waits: the restart's LATENCY is the budget asserted above; these only converge.
     let st = wait_state(&mut c, Duration::from_secs(20), |st| {
         sources(st).iter().any(|(_, n)| {
             n["path"] == s(&clip) && n["time_pos"].as_f64().is_some_and(|t| t > 0.0)
@@ -481,7 +480,7 @@ fn crash_restores() {
     assert_eq!(st["graph"][&nid]["gain"]["anticlick"], json!(0.0));
 }
 
-/// Task 16b leftover: SIGKILLing the supervisor must orphan nothing — its
+/// SIGKILLing the supervisor must orphan nothing — its
 /// `PR_SET_PDEATHSIG(SIGTERM)` (set between fork and exec) fires from the kernel's own
 /// notice of the parent's death, not from any cleanup code of ours. Asserted directly
 /// (no fallback kill anywhere in this test masking a regression), in two parts:
@@ -656,7 +655,7 @@ fn gives_up_after_5_in_60s() {
     assert!(sup.stderr().contains("giving up"), "{}", sup.stderr());
 }
 
-/// Task 16b: "compositor/EGL not available yet" (here: Wayland mode, a bogus
+/// "compositor/EGL not available yet" (here: Wayland mode, a bogus
 /// `WAYLAND_DISPLAY`) is its own startup-failure class, distinct from "already running" —
 /// the supervisor retries it with backoff instead of passing the exit code straight
 /// through. `TEST_COMPOSITOR_WAIT_ENV` shortens the real 30 s budget so the test doesn't
@@ -718,7 +717,7 @@ fn gives_up_without_compositor_after_backoff() {
     );
     assert!(err.contains("compositor"), "giving-up message: {err}");
     // Never counted against the real crash-loop budget: no `supervisor.restart` and no
-    // `supervisor.child_exited` (those are the crash-loop's own events, R73) at all.
+    // `supervisor.child_exited` (those are the crash-loop's own events) at all.
     assert!(
         !events
             .iter()
@@ -728,7 +727,7 @@ fn gives_up_without_compositor_after_backoff() {
     drop(serial);
 }
 
-/// M9 (final review): a SIGTERM while the supervisor sits in its no-compositor backoff
+/// A SIGTERM while the supervisor sits in its no-compositor backoff
 /// ends it at once (exit 0, `supervisor.stopped`) — never a multi-second "hung" stop.
 #[test]
 fn sigterm_during_compositor_backoff_exits_at_once() {
@@ -1027,7 +1026,7 @@ fn output_props_survive_replug() {
     );
 }
 
-/// Phase 2 Task 5: a scene shown when the compositor crashes is saved at its scene time
+/// A scene shown when the compositor crashes is saved at its scene time
 /// (`time_pos`, refreshed while it plays) and restored there by the restarted child, on a
 /// fresh worker (the old one died with its compositor: PDEATHSIG).
 #[test]
@@ -1116,7 +1115,7 @@ fn png_rgb(path: &Path, x: u32, y: u32) -> [u8; 3] {
     [buf[i], buf[i + 1], buf[i + 2]]
 }
 
-/// Phase 2 Task 10: a broken scene (its every worker crashed before a first frame: past the
+/// A broken scene (its every worker crashed before a first frame: past the
 /// restart budget, showing its preview) is saved `broken: true`, and the restarted compositor
 /// restores it as its preview — `broken` again, **no worker** (none spawned for it), the
 /// preview on every output — instead of crash-looping a fresh worker through a new budget.
@@ -1211,7 +1210,7 @@ fn broken_scene_restores_as_preview() {
     assert!(spawned.is_empty(), "spawned {spawned:?}");
 }
 
-// ---------------------------------------------------------------- Phase 3 Task 5: programs
+// ---------------------------------------------------------------- programs
 
 fn prog_clip(name: &str, secs: f64) -> String {
     let frames = (secs * 30.0).round() as u32;
@@ -1397,7 +1396,7 @@ fn quit_then_restore_resumes_the_program() {
 
 /// The supervisor's 4th restart within a minute starts without `--restore` (a snapshot that
 /// crashes the player at startup can't loop): no program comes back — documented; the
-/// backend re-sends it (Task 7 reconciliation).
+/// backend re-sends it (its reconciliation after a restart).
 #[test]
 fn fourth_restart_in_a_minute_starts_without_program() {
     let Some(mut sup) = Sup::start(&[]) else {
@@ -1427,7 +1426,7 @@ fn fourth_restart_in_a_minute_starts_without_program() {
     }
 }
 
-/// Phase 3 Task 5b: a crash restart is a recovery, never a start — a `start_over` program
+/// A crash restart is a recovery, never a start — a `start_over` program
 /// comes back on its item at its position, and the supervisor never forwards
 /// `--session-start` to a restarted child.
 #[test]

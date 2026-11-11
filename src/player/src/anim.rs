@@ -49,9 +49,9 @@ use crate::units::{equal_power, lin_to_db};
 pub struct PropPath(pub String);
 
 /// Whether `path` names a gain slot (`<id>.gain.<slot>`) rather than a picture-affecting
-/// property — split at the first `.` (node ids never contain one, § `graph::split_path`),
+/// property — split at the first `.` (node ids never contain one, see `graph::split_path`),
 /// same convention used throughout the crate (`graph/props.rs`, `sources/mpv.rs`, …).
-/// Shared by [`Animator::has_live_gain`]/[`Animator::tick_gains`] (R90, Task 16d's fast
+/// Shared by [`Animator::has_live_gain`]/[`Animator::tick_gains`] (the fast
 /// gain timer) and [`crate::redraw::audio_only`] (a gain change never needs a redraw) —
 /// one definition, not two that could drift apart.
 pub fn is_gain_path(path: &PropPath) -> bool {
@@ -301,11 +301,11 @@ impl Animator {
     }
 
     /// Like [`tick`](Self::tick), but only evaluates/emits animations whose target is a
-    /// `gain.*` path (R90, Task 16d: the fast gain timer's own ≥ 1 kHz driver, run
+    /// `gain.*` path (the fast gain timer's own ≥ 1 kHz driver, run
     /// independent of the output refresh — `docs/player/modules/runtime.md` § The fast
     /// gain timer). Shares the same per-[`Entry`] `done` flag and `finished_queue`
     /// as `tick`: whichever call reaches an animation's end first (this one, or the
-    /// ordinary `tick` the main loop timer still runs every cycle, R47 unchanged — it
+    /// ordinary `tick` the main loop timer still runs every cycle — it
     /// evaluates every path, gain included) finalizes it; the other sees `done` already
     /// set and skips it — never a double emission of the final value, never a double
     /// `finished()` entry.
@@ -333,7 +333,7 @@ impl Animator {
     }
 
     /// Whether a not-yet-finished animation targets a `gain.*` path and has started or
-    /// starts within `horizon` of `now` (R90; M1 of the final review): the fast gain timer
+    /// starts within `horizon` of `now`: the fast gain timer
     /// arms (and stays armed) iff this is true. The horizon (the caller passes one main
     /// tick period — the next main tick re-checks) lets the timer be running already when
     /// a ramp's own `start` arrives, without staying armed at 1 kHz for one that starts
@@ -347,7 +347,7 @@ impl Animator {
     }
 
     /// How many animations are held (live or finished-and-holding) — the `loop` probe's
-    /// `bounds` (C1).
+    /// `bounds`.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -359,7 +359,7 @@ impl Animator {
 
     /// Drop every animation whose target `keep` rejects (a node that no longer exists):
     /// one that never started — e.g. a restored source's placeholder fade-in — would
-    /// otherwise sit here forever (M1).
+    /// otherwise sit here forever.
     pub fn retain_targets(&mut self, keep: impl Fn(&PropPath) -> bool) {
         self.entries.retain(|e| keep(&e.anim.target));
     }
@@ -386,8 +386,8 @@ impl Animator {
     }
 
     /// Whether an animation that has started by `now` and isn't finished yet targets a
-    /// path `pred` accepts — the redraw policy's "something moves" (Task 13,
-    /// `crate::redraw::animating`). A finished animation holding its final value doesn't
+    /// path `pred` accepts — the redraw policy's "something moves"
+    /// (`crate::redraw::animating`). A finished animation holding its final value doesn't
     /// count: it emits nothing more.
     pub fn any_live(&self, now: Duration, pred: impl Fn(&PropPath) -> bool) -> bool {
         self.entries
@@ -419,7 +419,7 @@ impl Animator {
     /// The value the animation on `path` ends at (what it emits at its own end — for a
     /// `GainLinear` animation, that end in dB), whether it has started, is running, or has
     /// finished and is holding it. `None` when nothing animates `path` (never added, or
-    /// cancelled/superseded away). R41: a recipe that records a property to restore it
+    /// cancelled/superseded away). A recipe that records a property to restore it
     /// later records *this* when an animation is in flight, not the instantaneous value —
     /// otherwise a restore lands mid-ramp and leaves the property there for good.
     pub fn target_of(&self, path: &PropPath) -> Option<f64> {
@@ -504,18 +504,16 @@ mod tests {
     }
 
     #[test]
-    // The brief's exact Step 1 value (`0.70710678`) happens to be close enough to
-    // `FRAC_1_SQRT_2` to trip clippy's `approx_constant` — keep the literal verbatim as
-    // specified rather than swapping in the constant.
+    // The literal `0.70710678` is close enough to `FRAC_1_SQRT_2` to trip clippy's
+    // `approx_constant` — keep it: the test checks the curve against an independent value,
+    // not against the constant the code might use.
     #[allow(clippy::approx_constant)]
     fn curves() {
         assert!((Curve::Smoothstep.eval(0.5) - 0.5).abs() < 1e-12);
         assert!((Curve::EqualPowerIn.eval(0.5) - 0.70710678).abs() < 1e-7);
         assert_eq!(Curve::Linear.eval(1.7), 1.0);
 
-        // Extra coverage for the other two curves + clamping, not explicitly required by
-        // the brief's Step 1 list but cheap and directly relevant for an audio-critical
-        // crate.
+        // The other two curves + clamping.
         assert!((Curve::EqualPowerOut.eval(0.5) - 0.70710678).abs() < 1e-7);
         assert_eq!(Curve::EqualPowerOut.eval(0.0), 1.0);
         assert_eq!(Curve::EqualPowerIn.eval(0.0), 0.0);
@@ -573,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    // R90 (Task 16d): `tick_gains` must only ever touch `gain.*` targets — a scalar
+    // `tick_gains` must only ever touch `gain.*` targets — a scalar
     // animation on the same tick must be invisible to it, and `has_live_gain` must
     // reflect only the gain one's presence.
     fn tick_gains_ignores_scalar_paths() {
@@ -614,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    // R90: a not-yet-started gain animation still counts as "live" — the fast timer
+    // A not-yet-started gain animation still counts as "live" — the fast timer
     // must arm ahead of its own start, not wait for it.
     fn has_live_gain_before_start() {
         let mut a = Animator::new();
@@ -641,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    // R90: tick_gains finishing an animation must disarm has_live_gain, and must share
+    // Tick_gains finishing an animation must disarm has_live_gain, and must share
     // the `done`/finished bookkeeping with a subsequent plain `tick()` — no double
     // emission, no double `finished()` entry, no resurfacing.
     fn tick_gains_finish_is_shared_with_tick() {
@@ -780,7 +778,7 @@ mod tests {
 
     #[test]
     fn supersede_is_permanent_no_handback_to_shadowed_animation() {
-        // Regression for the critical review finding: a long-running animation A on a
+        // Guards against "shadowing": a long-running animation A on a
         // target, superseded by a short animation B on the same target (no explicit
         // cancel_target). Once B finishes, A must never resurface on a later tick — there
         // is no "shadowed" A left to hand control back to, because add() removed it
@@ -802,10 +800,10 @@ mod tests {
             "only B finishes; A must not appear"
         );
 
-        // Tick again, much later: the old buggy behaviour would fall through to A here
+        // Tick again, much later: "shadowing" would fall through to A here
         // (A hasn't "finished" by its own clock yet at 10s duration) and emit A's
-        // part-way value, re-litigating a target that had already settled. The fixed
-        // behaviour: nothing emits for this target ever again.
+        // part-way value, re-litigating a target that had already settled. Nothing may
+        // emit for this target ever again.
         let later = a.tick(Duration::from_millis(5_000));
         assert!(
             later.is_empty(),
@@ -826,8 +824,7 @@ mod tests {
     #[test]
     fn value_at_agrees_with_tick_after_supersede() {
         // value_at must never disagree with what tick() actually emitted for a target —
-        // the exact failure mode the critical review caught (tick and value_at used
-        // different "which animation is live" logic before the fix).
+        // the trap is tick and value_at using different "which animation is live" logic.
         let mut a = Animator::new();
         let path = PropPath("fx2.progress".to_string());
         a.add(anim("fx2.progress", 0.0, 1.0, 0, 10_000, Curve::Linear)); // long A

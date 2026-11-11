@@ -1,4 +1,4 @@
-//! The MPRIS reader for auto-mute's "Only if an MPRIS player is active" (Phase 3 Task 14):
+//! The MPRIS reader for auto-mute's "Only if an MPRIS player is active":
 //! thread `lia-mpris` reads every `org.mpris.MediaPlayer2.*` player over the **session bus**
 //! (zbus, blocking — off the loop; `org.mpris.MediaPlayer2.playerctld` is skipped, it mirrors
 //! another player): its `PlaybackStatus`, `Identity`, `DesktopEntry`, and the pid owning the

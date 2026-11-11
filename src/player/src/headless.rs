@@ -1,6 +1,6 @@
 //! Outputs (spec §4.2 "Output", §9 "headless deterministic mode"): the [`OutputBackend`]
 //! abstraction the runtime renders through, and its first implementation — [`Headless`],
-//! virtual outputs rendered offscreen (R46). The Wayland backend (`crate::wl`, Task 13:
+//! virtual outputs rendered offscreen. The Wayland backend (`crate::wl`:
 //! one layer-shell surface per `wl_output`, its own fd in the loop, presents paced by
 //! frame callbacks) implements the same trait and feeds the same hotplug path.
 //!
@@ -47,7 +47,7 @@ pub struct FrameState {
     pub pending: bool,
     /// Frame callbacks received so far.
     pub callbacks: u64,
-    /// Presents that failed (`eglSwapBuffers`) since the output appeared (Task 16).
+    /// Presents that failed (`eglSwapBuffers`) since the output appeared.
     pub failures: u64,
     /// After a failed present the output backs off (100 ms, then 1 s while it keeps
     /// failing): how long until it may try again; `None` = not backing off.
@@ -117,7 +117,7 @@ pub trait OutputBackend {
     fn desktop_rect(&self, _name: &str) -> Option<[f64; 4]> {
         None
     }
-    /// Phase 3 Task 6: the backend's own cover source (`crate::signal`) — wlr-foreign-toplevel
+    /// The backend's own cover source (`crate::signal`) — wlr-foreign-toplevel
     /// on Wayland, `headless.cover` headless: its name, or why there is none.
     fn cover_source(&self) -> Result<&'static str, String> {
         Err("this output backend has no window-state source".into())
@@ -149,13 +149,13 @@ struct VOut {
 pub struct Headless {
     outs: Vec<VOut>,
     changes: Vec<OutputChange>,
-    /// `--redraw-policy content` (Task 16): pace like Wayland — present only when the redraw
+    /// `--redraw-policy content`: pace like Wayland — present only when the redraw
     /// policy (`crate::redraw`) says the picture changed; every output can always take a
     /// frame (there are no frame callbacks). Default: compose every output every tick.
     content_paced: bool,
-    /// `headless.pointer` samples not taken yet (Task 7: a virtual pointer for scenes).
+    /// `headless.pointer` samples not taken yet (a virtual pointer for scenes).
     pointer: Vec<PointerSample>,
-    /// Phase 3 Task 6: the fake cover source (`headless.cover`), and whether it changed.
+    /// The fake cover source (`headless.cover`), and whether it changed.
     cover: CoverMap,
     cover_dirty: bool,
 }
@@ -277,7 +277,7 @@ impl Headless {
         Ok(())
     }
 
-    /// A virtual pointer over output `name` (`headless.pointer`, Task 7): surface pixels from
+    /// A virtual pointer over output `name` (`headless.pointer`): surface pixels from
     /// the top-left, buttons as in `out:<c>.pointer`.
     pub fn pointer(
         &mut self,

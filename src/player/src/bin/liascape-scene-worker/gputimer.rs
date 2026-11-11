@@ -1,4 +1,4 @@
-//! The worker's GPU time per frame (Phase 2 Task 8, the GPU budget's input): one
+//! The worker's GPU time per frame (the GPU budget's input): one
 //! `GL_TIME_ELAPSED` query around each frame's rendering (scene + blit into the slot), read
 //! back once the driver says its result is available — normally a frame or two later — and
 //! **never waited on** (`QUERY_RESULT_AVAILABLE` first; a query not done yet stays queued).

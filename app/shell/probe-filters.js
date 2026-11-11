@@ -1,7 +1,7 @@
 // Workshop filter column probe — `scripts/test-ui-matrix.sh --probe probe-filters.js` (the matrix's hermetic stack; run it with
-// LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb). Owner 2026-11-11: Wallpaper Engine's left filter
-// column ("the 2nd feels most natural (im probably used to wallpaper engine's design lol…)") with a three-way switch per tag
-// and click-to-cycle names ("3 way switch + click cycle would be good imo"). The stack has no network: the page's POST /browse
+// LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb). Wallpaper Engine's left filter column with a
+// three-way switch per tag and click-to-cycle names (docs/decisions.md § "Filter the Workshop in a column of three-way
+// switches"). The stack has no network: the page's POST /browse
 // and /detail are stubbed (each page-1 /browse body recorded in window.__browse — later pages in __more —, a fixed list of 24 fake Workshop items returned).
 //   wf:workshopOnly   the column shows for the Workshop source only (not WE-local / the others); docked at 1400 px, left of the
 //                     grid (the grid starts at its right edge, no card under it); Features collapsed by default
@@ -285,7 +285,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // Genre + Features: the same All / Any switch (featureMatch default all; genreMatch default any — owner 2026-11-11)
+    // Genre + Features: the same All / Any switch (featureMatch default all; genreMatch default any — docs/decisions.md §
+    // "AND Workshop features, OR genres, each switchable")
     await cell("wf:match", async () => {
       const v = [];
       const sw = (g) => page(`const g = m.grp(${J(g)}).querySelector(".wf-fm"); return g ? { idle: g.classList.contains("idle"), val: g.dataset.wfMatch,
@@ -386,8 +387,7 @@ app.whenReady().then(async () => {
     });
 
     await cell("wf:library", async () => {
-      // "In my library" (owner 2026-11-11: "there should probably be a option to exclude the wallpapers already in library from
-      // showing") + no download button on an owned card ("whats the point of a download button on the wallpapers … in library")
+      // "In my library" (show only / hide what the library already has) + no download button on an owned card
       const v = [];
       const r0 = await page(`return { cards: m.cards(), owned: document.querySelectorAll(".card [data-in-library]").length,
         dlOnOwned: [...document.querySelectorAll(".card")].filter((c) => c.querySelector("[data-in-library]") && c.querySelector(".dl-btn")).length,
@@ -421,8 +421,7 @@ app.whenReady().then(async () => {
     });
 
     await cell("wf:collapseCol", async () => {
-      // fold / unfold the docked column (owner 2026-11-11: "the sidebar should be collapsable btw", "a clunky new button and no
-      // transition?", "how about the filter button morphing into the filter title area of the expanded section?"): ONE control —
+      // fold / unfold the docked column: ONE control —
       // the column's title while it's out, the sort row's pill while it's folded — and a ghost flying between them while the
       // column slides (transform + opacity) and the grid glides (transform); remembered over a reload; no replay on a tab visit
       const v = [];

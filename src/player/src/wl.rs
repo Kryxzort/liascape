@@ -1,4 +1,4 @@
-//! Wayland outputs (spec §4.2 "Output", §5.1 "Graphics"; Task 13): one
+//! Wayland outputs (spec §4.2 "Output", §5.1 "Graphics"): one
 //! `zwlr_layer_surface_v1` per `wl_output`, rendered through the one EGL context
 //! ([`Gfx::new_wayland`]) and presented on each output's own frame callbacks.
 //!
@@ -6,7 +6,7 @@
 //!   moved live with `set_layer` — layer-shell v2+, else the surface is re-created),
 //!   anchored to all four edges, exclusive zone −1 (ignores other surfaces' zones, covers
 //!   the whole output), keyboard interactivity none, input region = the whole surface
-//!   (pointer accepted for Phase 2's mouse-reactive sources), opaque region = the whole
+//!   (pointer accepted for mouse-reactive sources), opaque region = the whole
 //!   surface (every pixel is written with alpha 1).
 //! - **Names** come from `wl_output` v4 `name` (`DP-1`); without one, `WL-<global id>`.
 //!   Size = the current mode (rotated by the transform), refresh = the current mode's
@@ -19,7 +19,7 @@
 //!   swap (no commit) keeps the one requested callback for the next commit — never a
 //!   second request — and backs off ([`present_backoff`]: 100 ms, then 1 s while it keeps
 //!   failing; `frames` probe `present_failed`/`retry_in_ms`).
-//! - **No undispatched event queue (Task 20e):** `serve` turns NVIDIA's EGL explicit sync
+//! - **No undispatched event queue:** `serve` turns NVIDIA's EGL explicit sync
 //!   off unless the caller set `__NV_DISABLE_EXPLICIT_SYNC` ([`apply_driver_env`]) and
 //!   [`OutputBackend::process`] dispatches libwayland's default queue every iteration —
 //!   otherwise each present left one `wl_buffer.release` (~224 B) queued for good.
@@ -27,13 +27,13 @@
 //!   [`OutputChange::Removed`] and its GPU side freed in [`OutputBackend::process`] with the
 //!   context current (surfaceless), window target before `wl_surface`. A `closed` layer
 //!   surface whose output still exists is re-created. The runtime runs the same add/remove
-//!   path as headless hotplug (R59 adopt / R60 retire-park).
+//!   path as headless hotplug (adopt the live transition / retire or park).
 //! - **Pointer:** enter/leave/motion/press/release → [`PointerSample`]s (the runtime stores
 //!   `out:<c>.pointer` `[x, y, buttons]`) and `input.pointer` debug events (motion at most
 //!   10/s per output, `suppressed` counts the rest). The cursor is set to the default
 //!   shape on enter (`wp_cursor_shape_v1` when the compositor has it).
 //!
-//! - **Cover (Phase 3 Task 6):** when the cover source is wlr-foreign-toplevel (neither
+//! - **Cover:** when the cover source is wlr-foreign-toplevel (neither
 //!   Hyprland nor Sway IPC — `crate::signal::choose_from_env`), `zwlr_foreign_toplevel_manager_v1`
 //!   v1–3 is bound if advertised. Each handle's `app_id`/`state`/`output_enter`/`output_leave`
 //!   accumulate and apply on `done` into a [`Toplevels`]; [`OutputBackend::take_cover`] hands the
@@ -103,8 +103,8 @@ pub fn output_name(name: Option<&str>, global_id: u32) -> String {
 }
 
 /// Hyprland's stand-in while no monitor is enabled (headless, shown to nobody). It is not an
-/// output: with it the player would render for no one and never park (R60), and a program's
-/// `while_parked: hold` would keep rotating (found by Phase 3 Task 12, step 4b).
+/// output: with it the player would render for no one and never park, and a program's
+/// `while_parked: hold` would keep rotating.
 pub fn is_placeholder_output(name: &str) -> bool {
     name == "FALLBACK"
 }
@@ -172,7 +172,7 @@ pub fn button_bit(code: u32) -> u32 {
 /// `EGLDisplay` is initialized (`__NV_DISABLE_EXPLICIT_SYNC=1` → implicit/CPU sync).
 pub const NV_DISABLE_EXPLICIT_SYNC: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 
-/// Who decided [`NV_DISABLE_EXPLICIT_SYNC`] for this process (Task 20e).
+/// Who decided [`NV_DISABLE_EXPLICIT_SYNC`] for this process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExplicitSync {
     /// It was unset: `serve` set it to `1` (the leak workaround, [`apply_driver_env`]).
@@ -194,7 +194,7 @@ pub fn explicit_sync_choice(current: Option<&std::ffi::OsStr>) -> ExplicitSync {
 
 static DRIVER_ENV: std::sync::OnceLock<ExplicitSync> = std::sync::OnceLock::new();
 
-/// Task 20e: turn NVIDIA's EGL explicit sync off for this process unless the caller chose.
+/// Turn NVIDIA's EGL explicit sync off for this process unless the caller chose.
 ///
 /// egl-wayland2 ≤ 1.0.2 (NVIDIA 595's) creates its `wl_buffer`s on a per-swapchain event
 /// queue that it only dispatches without explicit sync; with explicit sync on, every
@@ -329,7 +329,7 @@ pub struct WlState {
     changes: Vec<OutputChange>,
     pointers: Vec<(wl_pointer::WlPointer, Option<WpCursorShapeDeviceV1>)>,
     samples: Vec<PointerSample>,
-    /// Phase 3 Task 6: wlr-foreign-toplevel, when it is the cover source and advertised.
+    /// Wlr-foreign-toplevel, when it is the cover source and advertised.
     ft: Option<Ft>,
 }
 
@@ -384,7 +384,7 @@ impl Wayland {
             )
         })?;
         let cursor_shape = CursorShapeManager::bind(&globals, &qh).ok();
-        // Task 6: wlr-ft only as the fallback cover source (Hyprland/Sway use their IPC).
+        // Wlr-ft only as the fallback cover source (Hyprland/Sway use their IPC).
         let ft = (crate::signal::choose_from_env(false) == crate::signal::Choice::Foreign)
             .then(|| globals.bind::<ftm::ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, FtManagerData))
             .and_then(Result::ok)
@@ -440,7 +440,7 @@ impl Wayland {
         self.conn.backend().display_ptr().cast()
     }
 
-    /// Task 20e: dispatch what C code on our connection (the EGL platform library) left on
+    /// Dispatch what C code on our connection (the EGL platform library) left on
     /// libwayland's default queue. Every event is read off the socket into its proxy's
     /// queue by whoever reads (usually our `WaylandSource`); one nobody dispatches piles up
     /// for good. A normal libwayland app dispatches the default queue in its main loop and
@@ -673,7 +673,8 @@ impl OutputBackend for Wayland {
     }
 
     fn process(&mut self, gfx: &Gfx) {
-        // 0. Task 20e: libwayland's default queue (EGL's objects), every iteration.
+        // 0. libwayland's default queue (EGL's objects), every iteration (`docs/decisions.md`
+        //    § Default `__NV_DISABLE_EXPLICIT_SYNC=1` and drain libwayland's default queue every iteration).
         self.dispatch_default_queue();
         let st = &mut self.state;
         // 1. Free what's dead — window target (EGL surface + wl_egl_window) before its
@@ -1217,7 +1218,7 @@ impl ProvidesRegistryState for WlState {
     sctk::registry_handlers![OutputState, SeatState];
 }
 
-// ------------------------------------------------------------------ wlr-foreign-toplevel (Task 6)
+// ------------------------------------------------------------------ wlr-foreign-toplevel
 
 /// User data of the `zwlr_foreign_toplevel_manager_v1` (its `toplevel` event creates handles).
 struct FtManagerData;

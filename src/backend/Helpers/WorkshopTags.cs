@@ -5,21 +5,22 @@ using Liascape.Models;
 
 namespace Liascape.Helpers;
 
-// The Workshop Browse tag taxonomy and how a filter's include/exclude tags combine (owner 2026-11-11). Lives in the backend
+// The Workshop Browse tag taxonomy and how a filter's include/exclude tags combine (docs/decisions.md § "AND Workshop
+// features, OR genres, each switchable"; § "Drop untagged items under any age filter"). Lives in the backend
 // so every client gets the same semantics; the Steam client-protocol path (SteamWorkshopDetails.QueryAsync) sends the Plan
 // as `taggroups` + `excludedtags`, the page-scraping fallback sends what the page can express and checks the rest (Matches).
-//   - Group mode Any (OR): an item carries ONE age rating / type / resolution and normally one genre (measured 2026-11-11: 500
+//   - Group mode Any (OR): an item carries ONE age rating / type / resolution and normally one genre (measured: 500
 //     trending items, all with exactly 1 genre; "Anime AND Girls" = 4 items in the whole Workshop), so OR is the only
 //     useful mode there — "Anime or Girls".
 //   - Group mode All (AND): features stack (500 trending: 0 features → 277, 1 → 131, 2 → 63, 3 → 17, 4 → 9, 5 → 3;
 //     "Audio responsive AND Customizable" = 46,026 vs OR 407,685), and Steam's own Workshop page ANDs them: each ticked
 //     feature is its own taggroup ("must have all ticked features"). The filter's `featureMatch: "any"` makes them one OR
-//     taggroup instead (owner: "what if a user wants 3D OR HDR and not 3D AND HDR"). Genre has the mirror choice,
-//     `genreMatch: "all"` (owner: "lets just have a 'all or any' option for genere too") — default Any; "all" finds the
+//     taggroup instead (a user may want 3D OR HDR, not 3D AND HDR). Genre has the mirror choice,
+//     `genreMatch: "all"` — default Any; "all" finds the
 //     ~2,800 multi-genre items (mostly 2016–17). Only these two groups have a choice.
 //   - A tag in no group is its own group.
-//   - AGE: an untagged item must never sneak past an age filter (owner: "a 'everyone' user encountering a untagged
-//     'mature' is a tragedy" — 219 videos + scenes, all from 2017, carry no age tag). Any age include OR exclude →
+//   - AGE: an untagged item must never sneak past an age filter (an "Everyone" user must not meet an untagged
+//     mature item — 219 videos + scenes, all from 2017, carry no age tag). Any age include OR exclude →
 //     a taggroup of the allowed ages (the included ones, else all three, minus the excluded), which drops untagged items.
 //     Every other group's excludes only go to excludedtags (an untagged item stays).
 //   - TYPE: always restricted to what plays here — (included types, else Video + Scene) minus excluded, minus Scene when

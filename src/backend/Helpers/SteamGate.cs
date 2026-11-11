@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 
 namespace Liascape.Helpers;
 
-// EVERY request to steamcommunity.com goes through here (owner 2026-11-11: "make sure you obey the rate limits so user dont
-// face ip issues"). Steam limits steamcommunity.com per IP, and once tripped it refused for 30+ minutes — the owner's own
-// browser included — after a burst of ~150 page reads (a manual scan + the trailer lookup + timing tests, close together).
-// Each feature pacing itself wasn't enough: Browse fetches pages in parallel (+ a prefetch), the background trailer lookup
-// ran beside it, and a backend restart forgot Steam had just said "slow down" and started asking again at once.
+// EVERY request to steamcommunity.com goes through here (docs/decisions.md § "Gate every steamcommunity.com request
+// app-wide"). Steam limits steamcommunity.com per IP, and once tripped it refuses for 30+ minutes — the user's own
+// browser included — after a burst of ~150 page reads close together (measured).
+// Each feature pacing itself isn't enough: Browse fetches pages in parallel (+ a prefetch), the background trailer lookup
+// runs beside it, and a backend restart would forget Steam had just said "slow down" and start asking again at once.
 //   - Spacing: request STARTS are spaced app-wide — InteractiveGapMs for what the user clicked (Browse, subscribe),
 //     BackgroundGapMs for background work, which also stays BackgroundQuietMs behind the last interactive request (the
 //     user's browsing goes first). Only the start slot is serialized, never the whole request — Browse stays snappy.

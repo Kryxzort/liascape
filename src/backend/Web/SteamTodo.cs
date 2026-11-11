@@ -8,16 +8,16 @@ using Liascape.Helpers;
 
 namespace Liascape.Web;
 
-// The "Steam to-do" (owner 2026-11-11, "Guided" — the panel he picked): every Workshop page the USER has to click in the Steam
+// The "Steam to-do" (docs/decisions.md § "Queue the Steam pages the user must click, one at a time, advanced by Next"):
+// every Workshop page the USER has to click in the Steam
 // app (Subscribe on a download's page route, Unsubscribe on a Delete from source without a sign-in, Subscribe again after an
-// Undo) goes through ONE app-wide queue, one page at a time. Before it, a bulk download opened N pages at once (Steam shows
-// one, the rest were lost) and a bulk Delete from source opened the whole subscriptions list (~320 items) with "unsubscribe the
-// N you deleted there".
+// Undo) goes through ONE app-wide queue, one page at a time: given N pages at once, Steam shows one and loses the rest, and
+// the whole subscriptions list (hundreds of items) is no way to unsubscribe N of them.
 //
-// Advancing is the user's: **Next** ("I clicked it") opens the next page (owner: "lets just have them click 'next' or smth
-// themselves" — reading Steam's own state would mean connecting to the Steam client, which the user who chose "Open in the
+// Advancing is the user's: **Next** ("I clicked it") opens the next page (reading Steam's own state would mean connecting
+// to the Steam client, which the user who chose "Open in the
 // Steam app" may have chosen precisely to avoid; and "not on disk does not always mean unsubscribed"). The one exception,
-// disk-only and unambiguous (owner 2026-11-11: "make it auto detect then if its flawless"): a SUBSCRIBE entry whose item was
+// disk-only and unambiguous: a SUBSCRIBE entry whose item was
 // NOT on disk when it became current (`Turn`) and whose files then appear (its download delivered — `Finish` —, or for one
 // without a download its Steam folder / staging folder — `WatchDisk`) is Done by itself: only Steam downloading it puts them
 // there, and Steam downloads only what's subscribed. On disk already at its turn → no proof, it waits for Next. Unsubscribe
@@ -266,8 +266,8 @@ public static class SteamTodo
         if (delivered && e.IsCurrent)
         {
             // its files appeared after its page opened: only Steam downloading it puts them there, and Steam downloads only what's
-            // subscribed — the user clicked Subscribe; Done without the click on Next (owner 2026-11-11: "make it auto detect
-            // then if its flawless"). Already on disk at its turn → no proof: it waits for Next as before.
+            // subscribed — the user clicked Subscribe; Done without the click on Next. Already on disk at its turn → no proof:
+            // it waits for Next.
             if (e.AbsentAtTurn) { Console.WriteLine($"workshop: {e.Id}: Steam delivered it after its page opened — the Steam to-do moves on"); Resolve(e, Outcome.Done); return; }
             e.Delivered = true; Broadcast(); return;
         }

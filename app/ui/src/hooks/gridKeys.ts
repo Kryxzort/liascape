@@ -1,6 +1,6 @@
 import { shortcutsBlocked } from "./rangeDrag";
 
-// Keyboard focus in the Library / Browse grids (the WE-style sidebar, 2026-11-10): ← → step one card, ↑ ↓ one row (the
+// Keyboard focus in the Library / Browse grids (the WE-style sidebar): ← → step one card, ↑ ↓ one row (the
 // grid's `--cols`, set by useGridFit), Enter acts on the focused card, Escape closes the sidebar. The grid owns a key only
 // when nothing else wants it: no dropdown / modal open, no slider held, and — for arrows and Enter — the key isn't
 // aimed at a field or a button (a focused slider in the sidebar steps itself; Enter on a button presses it).

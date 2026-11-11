@@ -29,7 +29,7 @@ public static class DownloadHelper
             key = detail.WorkshopId!;
             weSteamDir = detail.IsScene ? (Directory.Exists(detail.DownloadUrl) ? detail.DownloadUrl : null)
                                         : Path.GetDirectoryName(detail.DownloadUrl);
-            // compared as REAL paths (owner 2026-11-11: a 369 MB duplicate) — the Steam client reports an item's real folder
+            // compared as REAL paths (else a duplicate copy of a whole item) — the Steam client reports an item's real folder
             // (/mnt/Games/…/content/431960/<id>) while the WE folder setting can name it through a symlink
             // (~/.local/share/Steam/…/content/431960 → /mnt/Games/…): as text "not under it" → an owned COPY instead of the link
             bool underWeDir = weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)

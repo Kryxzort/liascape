@@ -9,10 +9,10 @@
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
-#   engine liascape-player → legacy with nothing playing · Phase 2 scenes (synthetic scene items: apply, every live
+#   engine liascape-player → legacy with nothing playing · scenes (synthetic scene items: apply, every live
 #   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker) ·
 #   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse) ·
-#   Phase 3 Task 8: the app closed (the program rotates alone, no timer/restart daemon, none of legacy's daemon files
+#   the app closed (the program rotates alone, no timer/restart daemon, none of legacy's daemon files
 #   ever written), keybinds as one-shot CLI processes with no backend (a 10× `next` storm, every action), `liascape
 #   restore` × the playlist start mode (it starts the player `serve --restore --session-start` through a headless shim).
 #
@@ -31,7 +31,7 @@
 #   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
 #   LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor …          # the auto-mute section with the backend's AudioMonitor as the
 #                                                 # engine (the player's Signal off: LIASCAPE_PLAYER_AUTOMUTE=0) —
-#                                                 # without it, the shipped engine: the player's Signal (Task 14)
+#                                                 # without it, the shipped engine: the player's Signal
 # Needs: dotnet (or DOTNET=/path/to/dotnet), ffmpeg, jq, curl, python3. Exit 0 = all pass.
 # Last line: `RESULT pass=N fail=M`.
 set -u
@@ -86,7 +86,7 @@ export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never r
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
-# Phase 2 scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
+# scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
 # finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/liascape-player)
 export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/liascape-scene-worker
 # The adapter's aligned-switch backstop slack (LiascapePlayerMedia.AlignBackstopSlackSec, 15 s in production),
@@ -158,9 +158,9 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
  "RestartMpvpaperEverySeconds":600}
 EOF
 
-# Phase 3 Task 8: under liascape-player legacy's daemon files are never written (no timer-daemon / restart-daemon, no
+# under liascape-player legacy's daemon files are never written (no timer-daemon / restart-daemon, no
 # pending-action IPC, no timer ownership) — sampled every 0.2 s for the whole run, checked before the engine switch at
-# the end. The legacy timed_state.json the Task 7 section plants itself is exempt while its marker exists.
+# the end. The legacy timed_state.json the rotation-program section plants itself is exempt while its marker exists.
 LEGACY_FILES_LOG=$T/legacy-files.log; : > "$LEGACY_FILES_LOG"
 ( while :; do
     for f in pending_action.txt timer.pid gui_timer.pid restart.pid timed_state.json; do
@@ -214,8 +214,8 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
 # A body that isn't JSON is a quoting slip in THIS script, never a backend fault: the backend answers 400 before the
-# route runs, `-f` + `>/dev/null` swallowed it, and the check after it waited for a switch nobody asked for (2026-11-06:
-# `post /apply "{"path":"$Bc"}"` sent {path:/tmp/…/b.mp4} — read as "/apply b after a library item never switched").
+# route runs, `-f` + `>/dev/null` would swallow it, and the check after it would wait for a switch nobody asked for (e.g.
+# `post /apply "{"path":"$Bc"}"` sends {path:/tmp/…/b.mp4} — it reads as "/apply b after a library item never switched").
 # Loud, and nothing is sent: a FAIL on stderr (a `$(post …)` caller captures stdout, and its subshell's `fail` count
 # is lost — so each one is also logged and counted at the end).
 post() {
@@ -225,7 +225,7 @@ post() {
 # an import copies the clip + ffmpeg-extracts its thumbnail: seconds under load, past `post`'s 10 s
 lib_import() { curl -sf -m 60 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$1\",\"title\":\"$2\"}" "$U/library/import" | jq -r .videoPath; }
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
-# R75 (final): pause is PLAYER-level (`player.paused`), not a per-source prop — `cur:*.paused` (the
+# pause is PLAYER-level (`player.paused`), not a per-source prop — `cur:*.paused` (the
 # node's own raw value) never changes, by design (a recipe-held source must stay exactly as the
 # recipe left it; see docs/player/modules/graph-properties.md § Player-level pause).
 playerPaused() { ctl get '{"path":"player.paused"}' | jq -r .value; }
@@ -349,10 +349,10 @@ quick_ok() { shows "$1" && [ "$(last_sched)" = "$1" ]; }
 n0=$(nsch); post /apply "{\"path\":\"$A\"}" >/dev/null; post /apply "{\"path\":\"$C\"}" >/dev/null
 waitfor $WAIT quick_ok "$C" && ok "two quick clicks (a, c) → c ($(( $(nsch) - n0 )) switches scheduled)" \
   || bad "two quick clicks (a, c) → cur $(basename "$(cur path)"), last scheduled $(basename "$(last_sched)"), transitions $(ctl state | jq -c '[.transitions[].phase]')"
-# …and clicked while the player is stalled (2026-11-07): the adapter's worker found no answer (hello 1 s + the
-# supervisor wait 2 s, the breaker open) and DROPPED the switch — no log line, never retried; the stall breaker
-# closing (R81) re-applied settings only, so the screen stayed on the old wallpaper for good (a 13–34 s stall in the
-# owner's log = every click in it lost). Now a switch (or stop) lost to a stall is the backend's intent and is put on
+# …and clicked while the player is stalled: the adapter's worker finds no answer (hello 1 s + the
+# supervisor wait 2 s, the breaker open); dropped silently, the switch would be lost for good — the settings reapply on
+# the breaker closing doesn't carry it, and the screen would stay on the old wallpaper (a 13–34 s stall seen in the
+# field = every click in it lost). So a switch (or stop) lost to a stall is the backend's intent and is put on
 # screen once the player answers again — found by the adapter's own probe, with NO further request from here (the
 # `ctl` reads below go to the player, never the backend).
 CP=$(comp_pid); kill -STOP "$CP"; t0=$(ms_now)
@@ -384,8 +384,8 @@ post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" &
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
 
 echo "== normalization: an out-of-range target in settings.json is clamped; an af mpv can't build plays without it, never silent"
-# TODO "A rejected `af` silences the video" (owner 2026-11-06): a target of 0 LUFS built a loudnorm ffmpeg refuses
-# (I takes −70…−5) and mpv then played the video with NO audio. The backend clamps a stored target; the player survives any
+# TODO "A rejected `af` silences the video": a target of 0 LUFS builds a loudnorm ffmpeg refuses
+# (I takes −70…−5), and mpv would play the video with NO audio. The backend clamps a stored target; the player survives any
 # af mpv can't build (falls back to its chain without it, re-selects the audio track, reports `source.rejected`).
 sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
 src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
@@ -410,7 +410,7 @@ waitfor $WAIT refused_seen "$SIDC" && waitfor $WAIT ao_up "$SIDC" \
   || bad "unbuildable af live: $(src_probe "$SIDC"), rejected: $(ctl logs '{"kind_prefix":"source.rejected","limit":100}' | jq -c '.events')"
 waitfor $WAIT grep -q "player refused af on $SIDC" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" \
   && ok "…and the backend's log says so" || bad "backend log has no 'player refused af on $SIDC'"
-# a NEW source opened with it (the owner's case: mpv deselected the track at its audio init → no audio at all)
+# a NEW source opened with it (the failing case: mpv deselects the track at its audio init → no audio at all)
 ctl create "$(jq -nc --arg p "$C" '{kind:"source", props:{path:$p, loop:true, af:"loudnorm=I=0:TP=-1.5:LRA=11"}}')" > "$T/afc.json"
 SIDX=$(jq -r .id "$T/afc.json")
 waitfor $WAIT refused_seen "$SIDX" && waitfor $WAIT ao_up "$SIDX" \
@@ -595,7 +595,7 @@ stop_now
 
 # pure timed (advance-on-end off): a plain timer — the 3 s interval switches MID-video (align:now; e1 is 12 s), the
 # maximum (2 s) doesn't apply. The removed "wait for video to end" toggle's key, still in an old settings.json, changes
-# nothing (it used to hold the switch for e1's end).
+# nothing (it must not hold the switch for e1's end).
 setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3 | .GlobalWaitForVideoEnd = true'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -624,7 +624,7 @@ between "$(sw_field 2)" 2400 4300 && ok "min 3 s: an image showed for it (handof
 setting '.GlobalIntervalSeconds = 0'
 stop_now
 
-# an fps cap never stalls a still: VideoFpsCap 30 → an image item plays (it used to sit in waiting_ready,
+# an fps cap never stalls a still: VideoFpsCap 30 → an image item plays (never stuck in waiting_ready,
 # ready:false — docs/TODO.md "An fps cap stalls a still image"); the cap still reaches the node
 setting '.VideoFpsCap = 30'
 post /apply "{\"path\":\"$I1\"}" >/dev/null
@@ -695,7 +695,7 @@ near "$gB" "$g40" && ok "pending B ($TB) got ITS override 40 (gain $gB)" || bad 
 echo "== pause during an in-flight transition (R75 final: ONE set player.paused freezes A and the pending B ($TB))"
 # $TB is still SCHEDULED (align:end, waiting for a 10 s clip to reach its end) — the recipe holds a
 # scheduled/pending B at frame 0 (its own `paused`, nothing to do with player.paused) regardless of our
-# toggle, same as before R75; it only comes off hold at its own handoff. So A is the one that proves the
+# toggle; it only comes off hold at its own handoff. So A is the one that proves the
 # toggle (it's genuinely playing, not recipe-held) — B's effective_paused must stay true continuously,
 # proving the hold survives an unrelated player.paused flip rather than fighting it (docs/player/modules/graph-properties.md
 # § Player-level pause: a recipe-held source's own `paused` is never touched by the
@@ -867,7 +867,7 @@ mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
 stop_now
 
 echo "== Phase 2: scenes under liascape-player (synthetic scenes — the player runs with LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1)"
-# Synthetic scene items (mk_scene, above). Task 20c's fake scenes have no liascape-synthetic.json (they'd need WE's assets): out of the library meanwhile
+# Synthetic scene items (mk_scene, above). The scene-skip section's fake scenes have no liascape-synthetic.json (they'd need WE's assets): out of the library meanwhile
 mv "$LIB/imported/ss1" "$T/removed-ss1"; mv "$LIB/imported/ss2" "$T/removed-ss2"
 S1=$LIB/workshop/900000001; S2=$LIB/workshop/900000002; S3=$LIB/workshop/900000003; S4=$LIB/workshop/900000004
 mk_scene "$S1" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360],"has_audio":true,"tone_hz":440}'
@@ -957,8 +957,8 @@ post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/
 swr=none; waitfor 15000 sw_seen "$m0" "$A"
 between "$(sw_field 1)" 2300 3900 && [ "$(sw_field 3)" = now ] && ok "max 3 s on a scene: advanced 3 s in (+$(sw_field 1) ms, align $(sw_field 3))" || bad "max 3 s × scene: $swr (want align now at +2.3…3.9 s)"
 setting '.GlobalMaxPlaySeconds = 0'; stop_now
-# both set → the minimum (owner 2026-11-10: "use either maximum or minimum if other one's off, minimum if both on"), even
-# with a shorter maximum: min 6 s + max 3 s → the scene plays its 6 s (it used to be cut at the 3 s maximum)
+# both set → the minimum (docs/decisions.md § "A scene's minimum play time beats its maximum"), even
+# with a shorter maximum: min 6 s + max 3 s → the scene plays its 6 s (never cut at the 3 s maximum)
 setting '.GlobalIntervalSeconds = 6 | .GlobalMaxPlaySeconds = 3'
 m0=$(tev_n)
 post /playlist/play "{\"paths\":[\"$S1\",\"$A\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -1215,7 +1215,7 @@ for m in pause off stop; do
   waitfor $WAIT p_is vram_low_mode "$m" && ok "VramLowMode $m → player.vram_low_mode $m live" || bad "VramLowMode $m → $(gpu_props)"
 done
 [ "$(pget paused)" = false ] && ok "none of it touched player.paused" || bad "player.paused $(pget paused) after the GPU settings"
-# a fresh player process (not restored: the defaults) gets the backend's values back (R81's re-apply)
+# a fresh player process (not restored: the defaults) gets the backend's values back (the settings re-apply)
 setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .VramLowMode = "pause"'
 waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' || bad "set before the restart: $(gpu_props)"
 stop_now
@@ -1316,7 +1316,7 @@ A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b
 [ "$SID5b" != "$SID5" ] && near "$G5b" "$W5" 0.01 && [ "$A5b" = 0 ] \
   && ok "reopened ($SID5b): gain.normalize $G5b from its first frame (its create props — no ramp)" || bad "reopened $SID5b: gain.normalize $G5b (want $W5), ramps $A5b"
 ns_l() { ctl logs '{"kind_prefix":"scene.loudness","limit":10000}' | jq --arg id "$1" '[.events[] | select(.id==$id)] | length'; }
-# refined across plays (2026-10-28): the reopened source continues the first play's measurement, each report covers
+# refined across plays: the reopened source continues the first play's measurement, each report covers
 # both plays, the index keeps the longer one — and the applied value only moves by ≥ 0.5 LU. The player continues its
 # OWN measurement of the path (audio::loudness::Book): the backend's `loudness_seed`, read from the index at create,
 # can lag the end-of-play report the stop just made (stored off its event thread — TODO "A reopen right after a stop
@@ -1346,7 +1346,7 @@ A5b=$(ctl logs '{"kind_prefix":"anim.start","limit":10000}' | jq --arg p "$SID5b
 grep -q "loudness .* stored (< 0.5 LU: not applied)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" || bad "adapter log has no 'stored (< 0.5 LU: not applied)' line"
 # a third play much louder (the same folder, its tone at −10 dBFS now): the combined measurement moves ≥ 0.5 LU → the
 # STORED value moves (the next play's), but this play keeps the normalization it started with — set once per play
-# (owner 2026-11-06: "not … real-time … calculates rest of the scene for future"); the next play opens at the new value
+# (docs/decisions.md § "Set scene normalization once per play"); the next play opens at the new value
 stop_now
 mk_scene "$S5" '{"pattern":"solid","rgb":[255,255,0],"native":[640,360],"has_audio":true,"tone_hz":1000,"tone_dbfs":-10}'
 post /apply "{\"path\":\"$S5\"}" >/dev/null
@@ -1537,7 +1537,7 @@ waitfor $WAIT eval 'near "$(prog defaults | jq -r ".\"gain.mute\"")" 0 0.01' || 
 stop_now
 waitfor $WAIT eval '[ -z "$(pst)" ]' && curl -sf -m 5 "$U/current" | jq -e '.timed == false' >/dev/null && ok "/stop → no program, /current timed false" || bad "after /stop: $(pst), $(curl -sf -m 5 "$U/current" | jq -c .timed)"
 
-# per-item values (R61) → the item props; a library item's own volume, its loudness (normalization)
+# per-item values (override ?? global) → the item props; a library item's own volume, its loudness (normalization)
 setting '.Volume = 100'
 QA=$(lib_import "$A" qa); QB=$(lib_import "$Bc" qb)
 post /library/volume "{\"path\":\"$QB\",\"intValue\":30}" >/dev/null
@@ -1607,7 +1607,7 @@ waitfor $WAIT eval '[ "$(curs_after "$c9" | jq "map(select(.r == \"play\")) | le
 stop_now
 post /playlist/state '{"videoPaths":[],"settings":{"order":0},"name":null}' >/dev/null
 
-# a backend restart under a legacy rotation (timed_state.json — a backend before Task 7): the player's program takes over at its item
+# a backend restart under a legacy rotation (timed_state.json — an older backend): the player's program takes over at its item
 touch "$T/planted-timed_state.json"   # planted on purpose: the legacy-files watch ignores it until the takeover removed it
 printf '{"Paths":["%s","%s","%s"],"Index":1,"Options":"","Shuffle":false,"IntervalSeconds":3,"History":["%s","%s"],"HistoryIndex":1,"TimerPaused":false,"TimerStopped":false,"RemainingMs":2000,"SwitchWhenVideoEnds":false,"WaitingForVideoEnd":false,"ItemPlayedMs":0,"PlayedSavedAtMs":0}' \
   "$A" "$Bc" "$C" "$A" "$Bc" > "$XDG_CONFIG_HOME/liascape/timed_state.json"
@@ -1707,7 +1707,7 @@ stop_now
 
 echo "== /preview mid-transition reaches the edited item's source only (never the other side)"
 # The per-wallpaper modal drag-previews through /preview. Mid-effect `cur:*` is the INCOMING side, so a
-# drag on the outgoing A used to land on B (and stay there: the persist that follows targets A by path).
+# drag on the outgoing A without its path would land on B (and stay there: the persist that follows targets A by path).
 # The fades below are 60 s (an 8 s one ran out under load before the last check: A gone → `null dB`);
 # nothing here depends on the duration, and the `/stop` after each section ends it.
 post /apply "{\"path\":\"$E1\"}" >/dev/null; waitfor $WAIT shows "$E1" || bad "/apply e1 → cur $(cur path)"
@@ -1727,7 +1727,7 @@ stop_now
 
 echo "== global slider drag (/preview global): every source that follows the global moves, an overridden one never does"
 # The Settings page's Volume/Speed sliders drag-preview through /preview {global:true} (no persist; the
-# debounced /settings persists). Effective = override ?? global (R61): mid-effect, A follows the global and
+# debounced /settings persists). Effective = override ?? global: mid-effect, A follows the global and
 # B has its own override → only A moves (RED before: the request ignored `global` and moved `cur:*` = B).
 setting '.Volume = 100 | .Speed = 1'
 LG1=$(lib_import "$E1" "gee one")
@@ -1800,7 +1800,7 @@ e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one alig
 [ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
-# Phase 3 Task 8: no backend owns a timer under liascape-player (the player's program rotates) — no gui_timer.pid
+# no backend owns a timer under liascape-player (the player's program rotates) — no gui_timer.pid
 [ ! -e "$XDG_CONFIG_HOME/liascape/gui_timer.pid" ] && ok "no backend claims the timer (no gui_timer.pid: the player's program rotates)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
 tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no timer-daemon left running" || bad "a timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
@@ -1870,7 +1870,7 @@ new_backend_up "$port0"
 e1_window "$te" "$pe"
 [ "$(storms)" = "$st0" ] && [ "$(nows)" = "$nw0" ] && ok "two live backends: no storm, no immediate switch" || bad "two live backends: $(( $(storms) - st0 )) failed aligned switches, $(( $(nows) - nw0 )) align:now"
 one_advance && ok "one advance at E1's end" || bad "$dh handoffs, the last to $(basename "$dto")"
-# Phase 3 Task 7: no backend ticks a rotation under liascape-player — neither one requested a switch (the program did)
+# no backend ticks a rotation under liascape-player — neither one requested a switch (the program did)
 apis1=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '[.events[] | select(.origin=="api")] | length')
 [ "$apis1" = "$apis0" ] && ok "neither backend requested a switch (every one origin program)" || bad "$(( apis1 - apis0 )) backend (origin api) switches with two backends"
 kill "$first" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$first" 2>/dev/null || break; sleep 0.1; done
@@ -1945,8 +1945,8 @@ stop_now
 
 echo "== a crash whose snapshot lags the last switch (an fsync under I/O load): the backend puts back what it switched to"
 # Every snapshot write takes 4 s here (LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS — what an fsync took under load): a crash
-# right after a switch restores the wallpaper before it. R81 re-applied settings only, never the wallpaper — the
-# screen kept a, while the backend (and every UI) said c.
+# right after a switch restores the wallpaper before it. The settings re-apply alone never carries the wallpaper — the
+# screen would keep a, while the backend (and every UI) says c.
 restart_player 4 LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS=4000
 snap_shows() { jq -e --arg p "$1" '[.outputs[].content as $k | .sources[$k].path] | length > 0 and all(. == $p)' "$SNAP" >/dev/null 2>&1; }
 post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "/apply a → cur $(cur path)"
@@ -2228,7 +2228,7 @@ stop_now
 
 else
   # LIASCAPE_IT_ONLY=automute: only the auto-mute section, from the state the sections before leave it in — the
-  # backend's binary a COPY of this build (the upgrade test's), a fresh backend (Task 8's last), a player current
+  # backend's binary a COPY of this build (the upgrade test's), a fresh backend (the app-closed section's last), a player current
   # for it, two synthetic scenes with audio
   echo "== (LIASCAPE_IT_ONLY=automute: the sections before skipped)"
   S1=$LIB/workshop/900000001; S2=$LIB/workshop/900000002
@@ -2400,7 +2400,7 @@ EOF
   wait "$TP" 2>/dev/null
   waitfor 3000 eff_open && ok "…and unmutes when it ends" || bad "still muted after the foreign stream ended: $(am_gains)"
 
-  # ---- Parity criteria 1, 5, 6, 7 (plan Phase 3 Task 14): the same checks on either engine ----
+  # ---- Parity criteria 1, 5, 6, 7: the same checks on either engine ----
   # the matrix's `autoMute*` cells at the backend level, with a real stream
   echo "  -- every setting, live"
   am_set 0 300 -6
@@ -2431,7 +2431,7 @@ EOF
   m0=$(amutes); foreign "$PW/long.wav"; sleep 1.5
   [ "$(amutes)" = "$m0" ] && eff_open && ok "Only if MPRIS player active, no player (no session bus): a stream doesn't mute" || bad "MPRIS-only with no player muted: $(am_gains)"
   foreign_stop; setting '.AutoMuteOnlyIfMprisActive = false'; sleep 0.3
-  # the one intended difference (criterion 2, owner 2026-10-29): a stream calling itself mpv is heard by the Signal
+  # the one intended difference (criterion 2, by design): a stream calling itself mpv is heard by the Signal
   m0=$(amutes); foreign "$PW/short.wav" mpv; waitfor 3000 eval '[ "$(amutes)" -gt "$m0" ]'; heard=$?; foreign_stop
   if [ "$AM_SIGNAL" = 1 ]; then [ "$heard" = 0 ] && ok "a user's mpv is heard (the intended difference)" || bad "a stream named mpv never muted under the Signal"
   else [ "$heard" != 0 ] && ok "a stream named mpv is filtered out (AudioMonitor's name filter)" || bad "AudioMonitor muted on a stream named mpv"; fi

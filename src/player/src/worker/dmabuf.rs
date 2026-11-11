@@ -1,4 +1,4 @@
-//! Compositor side of the scene frame transport (Phase 2 Task 4; `docs/player/spikes/dmabuf.md`
+//! Compositor side of the scene frame transport (`docs/player/spikes/dmabuf.md`
 //! §9): [`ImportedRing`] — one worker's exported ring, imported once — and [`Latch`] — which
 //! frame to show: **only the newest queued frame whose acquire fence has already signalled**
 //! (never an `eglWaitSync` on an unsignalled worker fence: that would queue the compositor's

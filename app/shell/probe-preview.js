@@ -1,7 +1,7 @@
 // Regression probe: the per-wallpaper settings modal's live drag (/preview) must name the item being
 // edited. Mid-transition the backend's "playing item" is the INCOMING wallpaper, so a preview without
-// a path moved the other side of the effect (owner report: changing A's volume/speed mid-transition
-// changed B). Loads the UI offscreen, stubs every write (/preview, /library/volume|speed, playback,
+// a path moves the other side of the effect (changing A's volume/speed mid-transition
+// changes B). Loads the UI offscreen, stubs every write (/preview, /library/volume|speed, playback,
 // /open — nothing reaches the backend: the live wallpaper and the library are never touched), opens
 // the modal from the playlist bar's right-click menu, drags the volume and speed sliders, and checks
 // what the UI tried to send.
@@ -40,7 +40,7 @@ app.whenReady().then(async () => {
 
   await js(`(() => { const it = document.querySelector('.pl-item'); const r = it.getBoundingClientRect();
     it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); })()`);
-  await wait(1200); // a right-click on a bar item = its Library sidebar (no menu since 2026-11-11)
+  await wait(1200); // a right-click on a bar item = its Library sidebar (no context menu)
   const sliders = await js(`document.querySelectorAll('.side-panel [data-side-row] input[type=range]').length`);
   if (!sliders) { console.log("PROBE_PREVIEW FAIL: the item sidebar didn't open"); app.exit(1); return; }
   await js(`window.__sent = []`);

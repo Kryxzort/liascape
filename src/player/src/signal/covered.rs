@@ -1,4 +1,4 @@
-//! The covered Signal's pure half (Phase 3 Task 6, designer call 9 as revised 2026-10-30):
+//! The covered Signal's pure half:
 //! what "output X is covered" means on each source, the pause rule over it and the hold's
 //! debounce. Nothing here talks to a compositor, so every rule is tested on plain records.
 //!
@@ -147,8 +147,8 @@ fn ws_id(v: &Value, k: &str) -> i64 {
     v.get(k).map(|w| num(w, "id")).unwrap_or(0)
 }
 
-/// Parse `j/monitors` + `j/clients` (Hyprland 0.56 field names; recon §1.1, checked on the
-/// owner's machine 2026-10-30). Disabled monitors are left out.
+/// Parse `j/monitors` + `j/clients` (Hyprland 0.56 field names; `docs/superpowers/specs/2026-10-29-rules-recon.md` §1.1,
+/// checked against a live Hyprland). Disabled monitors are left out.
 pub fn hypr_parse(monitors: &Value, clients: &Value) -> (Vec<HyprMonitor>, Vec<HyprClient>) {
     let empty = Vec::new();
     let mons = monitors

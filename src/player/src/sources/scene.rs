@@ -2,10 +2,10 @@
 //! modules/scene-source.md`). The **texture path**: spawn the
 //! worker ([`WorkerHost`]), import its exported ring once ([`ImportedRing`]), tick it, latch
 //! only frames whose fence already signalled ([`Latch`]) and return each replaced slot with a
-//! release fence. The latched texture survives the worker's death (spike §6); a restarted
+//! release fence. The latched texture survives the worker's death (`docs/player/spikes/dmabuf.md` §6); a restarted
 //! worker's new ring replaces the old one only once its first frame latched.
 //!
-//! Task 5 makes it a graph [`Source`] (`kind: scene`): opened by `SourceHost` from the node's
+//! It is a graph [`Source`] (`kind: scene`): opened by `SourceHost` from the node's
 //! props ([`SceneSource::open`]), the worker spawned at the first [`set_demand`] that names an
 //! output (the ring is exported at the cover size of the largest output showing it), ticked
 //! at the outputs' [`scene_rate`] (WE's `fps`, not capped by the refresh), on a **scene clock**
@@ -14,7 +14,7 @@
 //! = a new worker on the new folder with the old frame held until its first frame; stepped
 //! mode ticks exactly the step's scene time ([`step_to`]).
 //!
-//! Task 8: the tick rate is `min(demand, the GPU budget's cap)` ([`observe_budget`] — the
+//! The tick rate is `min(demand, the GPU budget's cap)` ([`observe_budget`] — the
 //! runtime feeds it every 500 ms; `scene::budget`), the worker's per-frame GPU time arrives in
 //! `Frame.gpu_ms`, and the per-scene VRAM guard stops a worker over its limit
 //! ([`stop_for_vram`] — reported like an error, never a crash).
@@ -58,9 +58,10 @@ const MAX_INFLIGHT: u64 = 2;
 /// frame when the scene runs at the loop's rate).
 const TICK_SLACK: Duration = Duration::from_millis(2);
 
-/// The scene frame rate when nothing says otherwise: WE's own default `fps` (2026-11-06, decoded
+/// The scene frame rate when nothing says otherwise: WE's own default `fps` (decoded
 /// from wallpaper64.exe 2.8.485: the settings loader writes 15 when `general.user.fps` is missing,
-/// and the first-run wizard's preset is "medium" = 15). It was 30 (D5, LWE's default) before.
+/// and the first-run wizard's preset is "medium" = 15), not LWE's 30. `docs/decisions.md`
+/// § Default `scene_fps` to WE's own `fps` (15), not capped by the refresh rate.
 pub const DEFAULT_SCENE_FPS: f64 = 15.0;
 
 /// `Position` events at most this often (like `MpvSource`).
@@ -73,10 +74,10 @@ const ENVELOPE_KEEP: usize = 10_000;
 /// The window the GPU budget's inputs are taken over (the `frames` probe's miss window).
 const BUDGET_WINDOW: Duration = Duration::from_secs(2);
 
-/// A scene latching under this fraction of its tick rate is missing its own frames (Task 8).
+/// A scene latching under this fraction of its tick rate is missing its own frames.
 const DEFICIT_RATIO: f64 = 0.9;
 
-/// F4: a process's CPU time from `/proc/<pid>/task/*/stat` (`utime + stime`): `{total_ms,
+/// A process's CPU time from `/proc/<pid>/task/*/stat` (`utime + stime`): `{total_ms,
 /// threads: {name: ms}}` (threads summed by name), `None` if it is gone.
 pub fn proc_cpu(pid: u32) -> Option<Value> {
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
@@ -127,7 +128,7 @@ pub fn eff_fps(scene_fps: f64, refresh_hz: f64) -> f64 {
     if r > 0.0 { r } else { DEFAULT_SCENE_FPS }
 }
 
-/// The rate a scene **ticks** at for one output — WE's `fps` semantics (2026-11-06, decoded from
+/// The rate a scene **ticks** at for one output — WE's `fps` semantics (decoded from
 /// wallpaper64.exe 2.8.485's render loop FUN_140141520): WE sleeps each frame to `fps` frames a
 /// second and presents with `Present1(0, DXGI_PRESENT_ALLOW_TEARING)` — no vsync wait — so its
 /// scene (and every per-frame simulation, cursorripple) runs at `fps` even above the monitor's
@@ -160,7 +161,7 @@ pub fn demand_of(outs: &[OutputDemand]) -> Option<([u32; 2], f64)> {
     Some(([w, h], hz))
 }
 
-/// The scene clock (plan Task 5): scene seconds that advance at `speed` while running, with
+/// The scene clock: scene seconds that advance at `speed` while running, with
 /// paused intervals excised — never stopped-and-jumped. Pure (the caller passes `now`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneClock {
@@ -244,7 +245,7 @@ pub struct SceneOpts {
     pub speed: f64,
     /// Stepped clock: tick only what [`SceneSource::step_to`] asks for.
     pub stepped: bool,
-    /// WE's `assets/` (Task 7: resolved by the compositor, `scene::assets`; `None` = none —
+    /// WE's `assets/` (resolved by the compositor, `scene::assets`; `None` = none —
     /// a real scene then fails with the hint).
     pub assets_dir: Option<String>,
     /// The Steam library the item lives in (`scene::assets::steam_root_of_item`).
@@ -259,7 +260,7 @@ pub struct SceneOpts {
     /// Spawn the worker at the first [`SceneSource::set_demand`] naming an output instead of
     /// at open (the graph path: the ring is exported at the right size from the start).
     pub defer_spawn: bool,
-    /// The item's preview image (Task 10: shown while no worker frame exists after a crash,
+    /// The item's preview image (shown while no worker frame exists after a crash,
     /// and for a scene restored broken). Empty = none.
     pub preview: String,
     /// Scene loudness learning: seconds of audible play to learn over (`audio::loudness`,
@@ -281,7 +282,7 @@ pub struct SceneOpts {
 }
 
 impl SceneOpts {
-    /// Defaults: 30 ticks/s (D5), a 1920×1080 demand, LWE (not synthetic), position 0,
+    /// Defaults: 30 ticks/s, a 1920×1080 demand, LWE (not synthetic), position 0,
     /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open.
     pub fn new(path: impl Into<PathBuf>, worker_bin: impl Into<PathBuf>) -> SceneOpts {
         SceneOpts {
@@ -402,7 +403,7 @@ pub struct SceneSource {
     latency_ms: VecDeque<f32>,
     /// Latch instants of the last second (`fps_actual`).
     latch_times: VecDeque<Instant>,
-    /// Task 7: the scene reacts to audio (`Ready.wants_audio_input`) — the runtime feeds it.
+    /// The scene reacts to audio (`Ready.wants_audio_input`) — the runtime feeds it.
     wants_audio_input: bool,
     /// The system audio for the next tick: interleaved stereo f32 at `audio::bus::RATE`, every
     /// frame since the last tick's (newest [`AUDIO_INPUT_MAX_FRAMES`] kept), and this scene's
@@ -415,7 +416,7 @@ pub struct SceneSource {
     pointer: Option<(f64, f64, u32)>,
     /// `PropertySet` outcomes: name → (ok, reason) (`workers` probe `properties`).
     prop_results: BTreeMap<String, (bool, Option<String>)>,
-    /// Task 6: the source's `gain.*` slots; their sum goes to the worker's stream as `Gain`.
+    /// The source's `gain.*` slots; their sum goes to the worker's stream as `Gain`.
     gains: Gains,
     /// The last `Gain` sent (a change resends; a restart's `Ready` resends).
     gain_sent: Option<f64>,
@@ -430,10 +431,10 @@ pub struct SceneSource {
     /// The newest envelope block (probe) and how many arrived.
     envelope_last: Option<f32>,
     envelope_blocks: u64,
-    /// Task 8: the rate the outputs ask for (`demand_of`); `opts.tick_hz` is what the scene
+    /// The rate the outputs ask for (`demand_of`); `opts.tick_hz` is what the scene
     /// ticks at = `min(demand, the GPU budget's cap)`.
     demand_hz: f64,
-    /// Task 8: the worker GPU budget (`scene::budget`).
+    /// The worker GPU budget (`scene::budget`).
     budget: Budget,
     /// Since when the scene is throttled (probe).
     throttled_since: Option<Instant>,
@@ -442,10 +443,10 @@ pub struct SceneSource {
     rate_since: Option<Instant>,
     /// The worker's `Frame.gpu_ms` of the last [`BUDGET_WINDOW`].
     gpu_ms: VecDeque<(Instant, f32)>,
-    /// Task 8 (VRAM guard): the worker was stopped for using more VRAM than the per-scene
+    /// The VRAM guard: the worker was stopped for using more VRAM than the per-scene
     /// limit — `(used_mib, limit_mib)`; reported like an error, never a crash.
     vram_stopped: Option<(f64, f64)>,
-    /// Task 10: the worker died with a frame on screen — the scene clock is stopped at that
+    /// The worker died with a frame on screen — the scene clock is stopped at that
     /// frame's `t` until a frame of a later worker generation (`> held`) latched: the restart
     /// resumes exactly where the picture froze. `Some(held generation)`.
     resuming: Option<u32>,
@@ -454,7 +455,7 @@ pub struct SceneSource {
     /// A `position` set since the last latch: a restart resumes at the clock (the requested
     /// time), not at the held frame.
     clock_jumped: bool,
-    /// Task 10: the `preview` image (an internal paused image `MpvSource`), shown by
+    /// The `preview` image (an internal paused image `MpvSource`), shown by
     /// [`texture`](Self::texture) while no worker frame exists — opened when a worker dies
     /// before the first frame and for a scene restored broken; retired at the first frame.
     preview: Option<MpvSource>,
@@ -489,7 +490,7 @@ pub struct SceneSource {
     loudness_received: u64,
 }
 
-/// The hang-timeout knob (Task 10): a `Tick`/`Ping` unanswered this many ms = hung (tests
+/// The hang-timeout knob: a `Tick`/`Ping` unanswered this many ms = hung (tests
 /// set 300; production leaves it unset = [`HANG_TIMEOUT`], 2 s).
 pub const HANG_ENV: &str = "LIASCAPE_SCENE_WORKER_HANG_MS";
 
@@ -620,7 +621,7 @@ impl SceneSource {
         o.speed = f("speed", 1.0);
         o.stepped = bb("stepped");
         o.assets_dir = bs("scene_assets").filter(|a| !a.is_empty());
-        // Task 7 (Review Focus #2): no WE assets → a real scene can't build (a 1×1 render
+        // No WE assets → a real scene can't build (a 1×1 render
         // loop otherwise): refuse it here, naming how to point the player at them.
         if !o.synthetic && o.assets_dir.is_none() {
             return Err(unsupported(format!(
@@ -654,7 +655,7 @@ impl SceneSource {
         o.loudness_key = s("loudness_key");
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
-        // Task 10: a scene the snapshot saved broken (past its restart budget before the
+        // A scene the snapshot saved broken (past its restart budget before the
         // player restarted) comes back as its preview with no worker — never a fresh crash
         // loop on every player restart. A `path` change plays again.
         if matches!(get("broken"), Some(PropValue::Bool(true))) {
@@ -671,7 +672,7 @@ impl SceneSource {
                 json!({"id": id, "path": path, "preview": src.opts.preview}),
             );
         }
-        // Task 6: the stream starts at the node's gain and mute (the worker is spawned later,
+        // The stream starts at the node's gain and mute (the worker is spawned later,
         // at the first demand, with them in its `Start`).
         for (k, v) in node {
             if let Some(slot) = k
@@ -873,7 +874,7 @@ impl SceneSource {
         }
     }
 
-    /// The tick rate = `min(demand, the budget's cap)` (Task 8), live: the next tick is
+    /// The tick rate = `min(demand, the budget's cap)`, live: the next tick is
     /// scheduled on the new period.
     fn apply_rate(&mut self) {
         let hz = self.budget.rate().clamp(1.0, 1000.0);
@@ -884,7 +885,7 @@ impl SceneSource {
         }
     }
 
-    /// Task 8 (the VRAM guard): the worker used `used_mib` > `limit_mib` of VRAM — stop it.
+    /// The VRAM guard: the worker used `used_mib` > `limit_mib` of VRAM — stop it.
     /// Reported like a broken scene (`SourceEvent::Error` "stopped: used X MiB > limit Y MiB",
     /// so a rotation advances / a single wallpaper keeps its last frame) plus
     /// `scene.vram_exceeded`, but never a crash: no restart, no crash record, nothing marks it
@@ -895,7 +896,7 @@ impl SceneSource {
         }
         let mut ev = json!({"id": self.opts.id, "path": self.opts.path, "pid": self.pid(),
                             "used_mib": used_mib, "limit_mib": limit_mib});
-        crate::outbox::with_seq("scene.vram_exceeded", &mut ev); // Phase 3 Task 9
+        crate::outbox::with_seq("scene.vram_exceeded", &mut ev);
         log::event("scene", Level::Warn, "scene.vram_exceeded", None, ev);
         if let Some(h) = self.host.as_mut() {
             h.stop();
@@ -938,7 +939,7 @@ impl SceneSource {
         self.vram_stopped
     }
 
-    /// Task 8: one GPU-budget observation (the runtime, every `budget::OBSERVE_EVERY`):
+    /// One GPU-budget observation (the runtime, every `budget::OBSERVE_EVERY`):
     /// `missed_pct` = the worst miss rate of the outputs showing this scene over the last 2 s,
     /// `now` the caller's monotonic time (tests pass a virtual one). `auto` off (`player.
     /// scene_throttle` false) lifts any cap at once — fixed fps. Skipped while the scene can't
@@ -1153,8 +1154,8 @@ impl SceneSource {
                 self.want_preview_if_blank();
                 let reason = format!("scene worker broken (crash record {})", record.display());
                 if self.broken.is_none() {
-                    // The source is broken until its path changes. `source.broken` (Phase 2 Task 11,
-                    // the event half of Task 10): the backend marks the item crashed from it.
+                    // The source is broken until its path changes. `source.broken`: the
+                    // backend marks the item crashed from it.
                     self.log_broken(&record);
                     self.events.push(SourceEvent::Error {
                         reason: reason.clone(),
@@ -1171,7 +1172,7 @@ impl SceneSource {
         }
     }
 
-    /// Task 10: the worker is gone with a frame on screen — stop the scene clock at that
+    /// The worker is gone with a frame on screen — stop the scene clock at that
     /// frame's `t` (or at the clock, after a `position` set the frame didn't show yet) until a
     /// later generation's frame latched ([`on_latched`](Self::on_latched)). Idempotent (an
     /// old frame latching between a hang and the reap moves the held `t`; the `Restarted`
@@ -1465,7 +1466,7 @@ impl SceneSource {
                 );
                 self.prop_results.insert(name, (ok, reason));
             }
-            // Task 10: the worker's GL context is gone (a GPU reset, an NVIDIA video-memory
+            // The worker's GL context is gone (a GPU reset, an NVIDIA video-memory
             // purge after suspend): it can't render again — a crash restart, through the
             // budget, its record naming the cause.
             FromWorker::ContextLost => {
@@ -1503,8 +1504,8 @@ impl SceneSource {
 
     /// `source.broken {id, path, scene_id, reason, signal|code, restarts, record,
     /// total_restarts, uptime_ms, shows}` — the fields from the crash record the host just
-    /// wrote (a small file; read once, at the break); `shows` (Task 10) = what stays on screen:
-    /// `last_frame` | `preview` | `nothing`. Kept in the outbox too (Phase 3 Task 9: `outbox_seq`).
+    /// wrote (a small file; read once, at the break); `shows` = what stays on screen:
+    /// `last_frame` | `preview` | `nothing`. Kept in the outbox too (`outbox_seq`).
     fn log_broken(&self, record: &std::path::Path) {
         let rec: Value = std::fs::read(record)
             .ok()
@@ -1523,7 +1524,7 @@ impl SceneSource {
                 ev[k] = v.clone();
             }
         }
-        // Task 10: what the output keeps showing — the last frame, else the preview image.
+        // What the output keeps showing — the last frame, else the preview image.
         ev["shows"] = json!(if self.latch.current().is_some() {
             "last_frame"
         } else if self.opts.preview.is_empty() || self.preview_error.is_some() {
@@ -1531,7 +1532,7 @@ impl SceneSource {
         } else {
             "preview"
         });
-        crate::outbox::with_seq("source.broken", &mut ev); // Phase 3 Task 9
+        crate::outbox::with_seq("source.broken", &mut ev);
         log::event("source", Level::Error, "source.broken", None, ev);
     }
 
@@ -1626,7 +1627,7 @@ impl SceneSource {
             return;
         }
         if self.resuming.is_some() {
-            // Task 10: one tick at the held `t` (the clock is stopped there); the clock runs
+            // One tick at the held `t` (the clock is stopped there); the clock runs
             // again once its frame latched.
             if !self.resume_ticked {
                 let t = self.clock.now(now);
@@ -1710,7 +1711,7 @@ impl SceneSource {
         }
     }
 
-    /// The pointer over this scene (Task 7, mouse on), in the scene's **native pixels** (y
+    /// The pointer over this scene (mouse on), in the scene's **native pixels** (y
     /// down from the image's top) — the runtime maps an output's `out:<c>.pointer` through the
     /// layer's fit (`scene::pointer`). Kept for a restarted worker.
     /// `jump` = it arrived here (entered the output) rather than moved here: the scene draws no
@@ -1795,7 +1796,7 @@ impl SceneSource {
     }
 
     /// The player bus went down (`None`: the default device) or came back: the worker's
-    /// stream moves (Task 6 plays it; the route is kept for a restart's `Start`).
+    /// stream moves (the route is kept for a restart's `Start`).
     pub fn set_audio_route(&mut self, device: Option<&str>) {
         if matches!(self.opts.audio, AudioRoute::Null) {
             return;
@@ -1869,7 +1870,7 @@ impl SceneSource {
     /// complete, capped, window_s, cap_s, state}` — the integration over every play so far of
     /// the configuration `key` (`seconds` audible, `session_s` of them this source's); the
     /// backend stores it in the item's index under `key` (`state` seeds the next play) and
-    /// normalizes the scene by it. Kept in the outbox too (Phase 3 Task 9: `outbox_seq`), so a
+    /// normalizes the scene by it. Kept in the outbox too (`outbox_seq`), so a
     /// report made with no backend listening still reaches the index.
     fn report_loudness(&self, l: Learned, key: &str) {
         let mut ev = json!({"id": self.opts.id, "path": self.opts.path, "key": key, "lufs": l.lufs,
@@ -1879,7 +1880,7 @@ impl SceneSource {
                             "complete": l.complete, "capped": l.capped,
                             "window_s": l.window_s, "cap_s": l.cap_s,
                             "state": l.state});
-        crate::outbox::with_seq("scene.loudness", &mut ev); // Phase 3 Task 9
+        crate::outbox::with_seq("scene.loudness", &mut ev);
         log::event("scene", Level::Info, "scene.loudness", None, ev);
     }
 
@@ -2017,7 +2018,7 @@ impl SceneSource {
         }
         self.clock_jumped = false;
         if self.resuming.is_some_and(|g| l.generation > g) {
-            // Task 10: the restarted worker's first frame (at the held `t`) is on screen.
+            // The restarted worker's first frame (at the held `t`) is on screen.
             self.resuming = None;
             self.clock.set_running(self.clock_should_run(), now);
             self.next_tick = Some(now + self.tick_period);
@@ -2048,7 +2049,7 @@ impl SceneSource {
                 .iter()
                 .find(|r| r.generation == generation)?
                 .tex(slot),
-            // Task 10: no worker frame (a crash before the first one, a restored broken
+            // No worker frame (a crash before the first one, a restored broken
             // scene) — the preview image, once it rendered.
             None => self.preview.as_ref().and_then(|p| p.texture()),
         }
@@ -2201,7 +2202,7 @@ impl SceneSource {
                 };
                 (s, w, t)
             }
-            // Task 10: restored broken (no worker is ever spawned).
+            // Restored broken (no worker is ever spawned).
             None if self.broken.is_some() => ("broken".to_string(), 0, 0),
             None => ("not_spawned".to_string(), 0, 0),
         };
@@ -2245,7 +2246,6 @@ impl SceneSource {
             "spawns": st.spawns,
             "rings": st.rings,
             "last_error": self.error.as_ref().or(self.broken.as_ref()),
-            // Task 7
             "assets_dir": self.opts.assets_dir,
             "steam_dir": self.opts.steam_dir,
             "wants_audio_input": self.wants_audio_input,
@@ -2254,13 +2254,12 @@ impl SceneSource {
             "properties": self.prop_results.iter().map(|(k, (ok, reason))| {
                 (k.clone(), json!({"ok": ok, "reason": reason}))
             }).collect::<Map<String, Value>>(),
-            // Task 6
             "audio": audio,
         });
-        // F4 (Phase 2 battery): the worker process's own CPU, cumulative (two probes give a
+        // The worker process's own CPU, cumulative (two probes give a
         // rate) — whole and per thread name (`lia-scene-audio`, PipeWire's `data-loop.0`, LWE's).
         v["cpu"] = json!(self.pid().and_then(proc_cpu));
-        // Task 8: the GPU budget and the VRAM guard.
+        // The GPU budget and the VRAM guard.
         v["fps_demand"] = json!(self.demand_hz);
         v["gpu_ms_p50"] = json!(gpu_p50);
         v["gpu_ms_p95"] = json!(gpu_p95);
@@ -2275,7 +2274,7 @@ impl SceneSource {
             self.vram_stopped
                 .map(|(used, limit)| json!({"used_mib": used, "limit_mib": limit}))
         );
-        // Task 10: the crash policy.
+        // The crash policy.
         v["broken"] = json!(self.broken.is_some());
         v["restored_broken"] = json!(self.restored_broken);
         v["resuming"] = json!(self.resuming.is_some());
@@ -2402,7 +2401,7 @@ impl Source for SceneSource {
                 || self.flow_seen)
         {
             // Nothing to hear (stepped: never real audio; no sound; muted) — nothing to wait
-            // for; else the worker said the scene's sound is on its stream (Task 6).
+            // for; else the worker said the scene's sound is on its stream.
             self.flow_armed = false;
             self.flow_seen = false;
             self.events.push(SourceEvent::AudioFlowing);
@@ -2466,7 +2465,7 @@ impl Source for SceneSource {
             }
             // Stepped: the runtime's step advances by `ms × speed` itself (and plays no
             // audio). Else the clock re-rates, and the worker time-stretches the sound to it,
-            // pitch kept (owner decision; Task 6).
+            // pitch kept.
             "speed" if !self.opts.stepped => {
                 let sp = super::num(v);
                 self.clock.set_speed(sp, now);
@@ -2474,7 +2473,7 @@ impl Source for SceneSource {
                     let _ = h.send(&ToWorker::Speed { speed: sp }, &[]);
                 }
             }
-            // Task 6: the effective dB on every slot change (the 1 kHz `push_gain` path too).
+            // The effective dB on every slot change (the 1 kHz `push_gain` path too).
             p if p.starts_with("gain.") => {
                 if let Ok(slot) = p["gain.".len()..].parse::<GainSlot>() {
                     self.gains.set(slot, super::num(v));
@@ -2492,7 +2491,7 @@ impl Source for SceneSource {
                     }
                 }
             }
-            // Task 10: a new preview image (the item's thumbnail changed): a shown one follows.
+            // A new preview image (the item's thumbnail changed): a shown one follows.
             "preview" => {
                 if let PropValue::Str(p) = v
                     && *p != self.opts.preview
@@ -2506,7 +2505,7 @@ impl Source for SceneSource {
                     }
                 }
             }
-            // Task 7: the scene's user properties, live (`wp_project_property_set_*`).
+            // The scene's user properties, live (`wp_project_property_set_*`).
             "scene_props" => {
                 if let PropValue::Map(m) = v {
                     self.set_properties(m);
@@ -2559,12 +2558,12 @@ impl Source for SceneSource {
             "time_pos" => Some(PropValue::F64(self.scene_time())),
             "width" => SceneSource::size(self).map(|(w, _)| PropValue::I64(w as i64)),
             "height" => SceneSource::size(self).map(|(_, h)| PropValue::I64(h as i64)),
-            // A broken scene (no worker, Task 10) is never heard: nothing to wait for.
+            // A broken scene (no worker) is never heard: nothing to wait for.
             "has_audio" => Some(PropValue::Bool(
                 self.broken.is_none() && self.has_audio.unwrap_or(true),
             )),
             "paused" => Some(PropValue::Bool(self.paused)),
-            // Task 10: past the restart budget (or restored so) — observed into the graph.
+            // Past the restart budget (or restored so) — observed into the graph.
             "broken" => Some(PropValue::Bool(self.broken.is_some())),
             "loading" => Some(PropValue::Bool(self.loading())),
             "color" => None,
@@ -2577,7 +2576,7 @@ impl Source for SceneSource {
     }
 
     /// The worker quits now (never blocks); a preview image goes through `MpvSource`'s own
-    /// two-phase teardown (R51) before this source may be dropped.
+    /// two-phase teardown before this source may be dropped.
     fn begin_teardown(&mut self) -> bool {
         self.end_loudness();
         if let Some(h) = self.host.take() {
@@ -2622,7 +2621,7 @@ pub fn kind_change_unsupported(v: &PropValue) -> ApiError {
 mod tests {
     use super::*;
 
-    /// F4: the `workers` probe's `cpu` — a live process's CPU, whole and per thread name, and
+    /// The `workers` probe's `cpu` — a live process's CPU, whole and per thread name, and
     /// growing with the work it does; a pid that's gone is `None`.
     #[test]
     fn proc_cpu_reads_a_process_and_its_threads() {
@@ -2697,7 +2696,7 @@ mod tests {
         assert!((c.now(at(10000)) - 2.0).abs() < 1e-9);
     }
 
-    /// Task 10: `LIASCAPE_SCENE_WORKER_HANG_MS` sets the hang timeout (tests: 300); unset, empty,
+    /// `LIASCAPE_SCENE_WORKER_HANG_MS` sets the hang timeout (tests: 300); unset, empty,
     /// zero or garbage → the production `HANG_TIMEOUT` (2 s).
     #[test]
     fn hang_timeout_knob() {

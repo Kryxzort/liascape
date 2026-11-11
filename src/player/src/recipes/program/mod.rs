@@ -8,7 +8,7 @@
 //! - [`order`] — the play order: cycles, shuffle, history, random, reorder (pure, seeded).
 //! - [`pick`] — the effect / duration / method of one switch (pure, seeded).
 //! - [`store`] — `program.json` (configuration + order) and the snapshot's dynamic half.
-//! - [`resume`] — per-playlist resume points and the playlist start rules (O4).
+//! - [`resume`] — per-playlist resume points and the playlist start rules.
 
 pub mod order;
 pub mod pick;
@@ -108,7 +108,7 @@ pub enum ProgPhase {
     Switching,
     /// Failed switches in a row: waiting out the backoff.
     Backoff,
-    /// No output exists (R60): the program's item is parked.
+    /// No output exists: the program's item is parked.
     Parked,
     /// Nothing playable.
     Empty,
@@ -179,7 +179,7 @@ pub struct ProgCfg {
     pub scenes_after_ms: u64,
     pub transition: TransitionCfg,
     pub seed: u64,
-    /// `while_parked: hold` — both clocks stop while no output shows the item (O2).
+    /// `while_parked: hold` — both clocks stop while no output shows the item.
     pub hold_parked: bool,
     /// The playlist's identity (its resume point's key; "" = none).
     pub key: String,
@@ -819,7 +819,7 @@ impl Prog {
         let mut acts = Vec::new();
         let mut dt = self.clock.advance(now).as_secs_f64() * 1000.0;
         self.parked = parked;
-        // `while_parked: hold` (O2): both clocks and the rules stop until an output returns
+        // `while_parked: hold`: both clocks and the rules stop until an output returns
         let frozen = parked && self.cfg.hold_parked;
         if frozen {
             dt = 0.0;
@@ -993,7 +993,7 @@ impl Prog {
             return acts;
         }
 
-        // 7. the rotation rules (player-adapter.md § Rotation); while parked they go on
+        // 7. the rotation rules (`docs/player/adapter.md` § Rotation wiring); while parked they go on
         // under `rotate` (no sooner than PARKED_MIN_PLAY_MS apart) and stop under `hold`
         let in_flight_now = self.pending.as_ref().is_some_and(|p| p.align == Align::Now);
         let parked_wait = parked && (frozen || self.played_ms < PARKED_MIN_PLAY_MS);
@@ -1312,7 +1312,7 @@ impl Programs {
         ids
     }
 
-    // ------------------------------------------------------------ playlist start (O4)
+    // ------------------------------------------------------------ playlist start
 
     /// `<state>/resume.json` (at startup, whatever `--restore`: a later Play resumes).
     pub fn load_resume(&mut self, dir: &std::path::Path) {
@@ -1359,7 +1359,7 @@ impl Programs {
     }
 
     /// `program.play {id, from: "start" | "resume" | "index", index?, keep_pause?}` — the
-    /// § Playlist start table (`resume::plan_start`). A missing `from` = `index` with an
+    /// playlist-start table (`resume::plan_start`). A missing `from` = `index` with an
     /// index, else `start`. `resume` while the same key's playlist plays → nothing switched
     /// (`Some(reply)` = the verb's reply as is). `cut`: no effect (`keep_pause` while
     /// paused; a session start).
@@ -1401,7 +1401,7 @@ impl Programs {
                 && !key.is_empty()
                 && p.playing_key.as_deref() == Some(key.as_str());
             if same_playing && from == resume::StartFrom::Resume {
-                // it never stopped: keep playing where it is (a pause is the backend's, I1)
+                // it never stopped: keep playing where it is (a pause is the backend's)
                 let path = p.order.current().map(str::to_string);
                 let index = path.as_deref().map(|x| p.index_of(x)).unwrap_or(-1);
                 return Ok((
@@ -1828,7 +1828,7 @@ impl Programs {
         }
     }
 
-    /// One tick, after `Transitions::tick` (R47): the transitions' and sources' events, the
+    /// One tick, after `Transitions::tick`: the transitions' and sources' events, the
     /// clocks (`now` = the player clock), the rules. `parked` = no output exists;
     /// `active` = every in-flight transition's corr; `held` = the clocks stand (a user pause or
     /// a rule's hold) — no rule starts a switch then ("a rotation never switches under a hold").

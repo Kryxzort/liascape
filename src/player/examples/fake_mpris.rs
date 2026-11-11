@@ -1,4 +1,4 @@
-//! A fake MPRIS player for testing the scene worker's media events (gap audit B10):
+//! A fake MPRIS player for testing the scene worker's media events:
 //! `cargo run --example fake_mpris -- <state.json>` owns `org.mpris.MediaPlayer2.liascapefake`
 //! on the session bus and answers `Properties.Get`/`GetAll` of `org.mpris.MediaPlayer2.Player`
 //! from the JSON file, re-read on every call (edit it to change the track):

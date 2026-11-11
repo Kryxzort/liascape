@@ -1,4 +1,4 @@
-//! The "now playing" feed for SceneScript's media events (gap audit B10, S11–S14): thread
+//! The "now playing" feed for SceneScript's media events: thread
 //! `lia-scene-media` reads the system's MPRIS players over the session bus once a second, and
 //! [`Media::apply`] (on the render thread, before a frame) hands what changed to LWE's
 //! `wp_project_notify_*`. Started only for a scene that takes media events

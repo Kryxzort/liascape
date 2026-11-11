@@ -1,4 +1,4 @@
-//! The `memory` probe (Task 20b): RSS + glibc malloc accounting (`crate::mem`) — splits a
+//! The `memory` probe: RSS + glibc malloc accounting (`crate::mem`) — splits a
 //! growing RSS into *in use* (`in_use_bytes + mmap_bytes`: something still owns it — a
 //! leak) vs *retained* (`free_bytes`: freed, held by the arenas). `args: {"trim": true}`
 //! runs `malloc_trim(0)` and reports the RSS before/after — what retention alone costs.

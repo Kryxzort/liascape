@@ -1,4 +1,4 @@
-//! The `programs` probe (Phase 3): every program as `state.programs` reports it, plus each
+//! The `programs` probe: every program as `state.programs` reports it, plus each
 //! item's `skip`/`broken`/`failed` flags (`recipes::program::Programs::probe`).
 
 use serde_json::Value;

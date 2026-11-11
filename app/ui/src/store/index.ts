@@ -18,8 +18,8 @@ const LS = {
   set(k: string, v: unknown) { try { localStorage.setItem("liascape." + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
-// the saved Workshop filter. The 2026-11-11 filter column replaced the one-of dropdowns (type / ageRating / resolution) and
-// the genre / feature chips with include / exclude tag sets: an old saved filter's picks all become includes, once (the
+// the saved Workshop filter: include / exclude tag sets (the filter column). An older saved filter's one-of picks (type /
+// ageRating / resolution, the genre / feature chips) all become includes, once (the
 // migrated filter is written back). Anything malformed -> the default.
 export type TagState = "inc" | "exc" | null;
 type OldFilter = Partial<WorkshopFilter> & { type?: string; ageRating?: string; resolution?: string; genres?: string[]; features?: string[] };
@@ -97,7 +97,7 @@ interface State {
   // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   status: string; error: string | null;
-  // the item sidebar (WE-style, 2026-11-10 — replaced the per-card settings modal): the focused Library item's path / Browse
+  // the item sidebar (WE-style): the focused Library item's path / Browse
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
   libFocus: string | null; browseFocus: string | null;
@@ -188,7 +188,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",
-  // Phase 3 Task 10: pause when covered, the playlist start, while parked
+  // pause when covered, the playlist start, while parked
   pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,
 };
 
@@ -210,7 +210,7 @@ export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
-  // the docked filter column folded away (owner 2026-11-11: "the sidebar should be collapsable btw"); remembered
+  // the docked filter column folded away; remembered
   filterColHidden: LS.get<boolean>("browseFilterHidden", false),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
@@ -221,7 +221,7 @@ export const useStore = create<State>((set, get) => ({
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
-  // page shows (init used to take a failed /library as [] → "Library is empty" for good while a wallpaper played).
+  // page shows (a failed /library taken as [] would say "Library is empty" for good while a wallpaper plays).
   async init() {
     for (let i = 0; !(await get().resync()); i++) await new Promise((r) => setTimeout(r, Math.min(250 * 2 ** i, 2000)));
     await get().reload();
@@ -264,8 +264,8 @@ export const useStore = create<State>((set, get) => ({
     set({ filterCollapsed: n }); LS.set("browseFilterCollapsed", n);
   },
   // API: every Browse list read carries the generation it started in (`browseGen`): a source switch / search / refresh
-  // starts a new one, and a reply from an older one is dropped — a slow online source's page used to land AFTER the
-  // source the user switched to and replace (or extend) its list, under the new source's pill (seen 2026-11-10 in the
+  // starts a new one, and a reply from an older one is dropped — else a slow online source's page lands AFTER the
+  // source the user switched to and replaces (or extends) its list, under the new source's pill (seen in the
   // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
     const { activeSource, query } = get();

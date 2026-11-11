@@ -1,4 +1,4 @@
-//! The player outbox (Phase 3 Task 9, plan designer call 6): the facts the backend must store
+//! The player outbox (plan designer call 6): the facts the backend must store
 //! even when it isn't listening — `source.broken` (→ the item is marked crashed),
 //! `scene.loudness` (→ the index) and `scene.vram_exceeded` (UI text only) — kept in
 //! `<state>/outbox.jsonl` until the backend acks them. The backend drains it on every

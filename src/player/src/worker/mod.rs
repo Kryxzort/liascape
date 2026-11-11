@@ -195,7 +195,7 @@ struct Proc {
     eof_at: Option<Instant>,
     killed: bool,
     hung: bool,
-    /// Why the host killed it (Task 10: `kill_for_restart`) — the restart's / record's reason.
+    /// Why the host killed it (`kill_for_restart`) — the restart's / record's reason.
     why: Option<String>,
 }
 
@@ -376,7 +376,7 @@ impl WorkerHost {
         }
     }
 
-    /// Task 10: end the live worker as a crash — SIGKILL now, then the usual path (`Exited`,
+    /// End the live worker as a crash — SIGKILL now, then the usual path (`Exited`,
     /// a restart through the [`RestartBudget`], or `Broken` + a crash record), with `why`
     /// leading the restart's / record's reason (`"GL context lost, killed by signal 9"`).
     /// For a worker that reported it can't go on (`ContextLost`). Never blocks; a no-op when
@@ -478,11 +478,11 @@ impl WorkerHost {
             ToWorker::Paused { paused } => *sp = *paused,
             ToWorker::Resize { max_size } => *sm = *max_size,
             ToWorker::Route { audio } => *sa = audio.clone(),
-            // Task 7: a scene property set live must survive a restart.
+            // A scene property set live must survive a restart.
             ToWorker::SetProperty { name, value } => {
                 props.insert(name.clone(), value.clone());
             }
-            // Task 6: the stream's state is recorded while connected too (like
+            // The stream's state is recorded while connected too (like
             // `SetProperty`): a restart starts at the latest gain (faded in by the worker's
             // own gate), mute and speed.
             ToWorker::Gain { db } => *sg = *db,
@@ -715,7 +715,7 @@ impl WorkerHost {
                     );
                 }
                 Err(_) => {
-                    // EOF (the crash signal, spike §6) or a dead socket.
+                    // EOF (the crash signal, `docs/player/spikes/dmabuf.md` §6) or a dead socket.
                     let p = self.proc_.as_mut().unwrap();
                     let s = p.sock.take().unwrap();
                     p.eof_at = Some(now);
@@ -1371,7 +1371,7 @@ mod tests {
             &[],
         )
         .unwrap();
-        // Task 7: a live scene property is part of what a restart must come back with.
+        // A live scene property is part of what a restart must come back with.
         for (name, value) in [("clock", json!(false)), ("bar_color", json!("1 0 0"))] {
             host.send(
                 &ToWorker::SetProperty {
@@ -1391,7 +1391,7 @@ mod tests {
         )
         .unwrap();
         host.set_resume_position(3.25);
-        // Task 6: the stream's level, mute and speed come back with a restart too.
+        // The stream's level, mute and speed come back with a restart too.
         host.send(&ToWorker::Gain { db: -6.0 }, &[]).unwrap();
         host.send(&ToWorker::NoAudio { on: true }, &[]).unwrap();
         host.send(&ToWorker::Speed { speed: 1.5 }, &[]).unwrap();

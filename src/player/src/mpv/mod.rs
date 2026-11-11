@@ -506,7 +506,7 @@ impl RenderContext {
         unsafe { RenderContext::create_raw(handle.raw(), get_proc) }
     }
 
-    /// [`create`](Self::create) on a raw core (Phase 2: the render worker creates the render
+    /// [`create`](Self::create) on a raw core (the render worker creates the render
     /// context of a core another thread owns — `client.h`: the core may be used from any
     /// thread).
     ///
@@ -566,7 +566,7 @@ impl RenderContext {
 
     /// `MPV_RENDER_PARAM_NEXT_FRAME_INFO`: the pending frame is a **redraw** of the frame
     /// last rendered (`MPV_RENDER_FRAME_INFO_REDRAW` — the VO re-presenting its current
-    /// frame, e.g. after a reset/reconfig), not a new one. Phase 2's render worker tags such a
+    /// frame, e.g. after a reset/reconfig), not a new one. The render worker tags such a
     /// frame like the one it repeats: mpv redraws the OLD file's last frame after a new
     /// file's FILE_LOADED. Never blocks.
     pub fn next_frame_is_redraw(&self) -> bool {
@@ -643,7 +643,7 @@ impl Drop for RenderContext {
 
 /// A weak second client on a core (`mpv_create_weak_client`) that receives **only**
 /// FILE_LOADED (every other maskable event is turned off; SHUTDOWN and QUEUE_OVERFLOW can't
-/// be) and observes no property — Phase 2's render worker counts FILE_LOADED with it in
+/// be) and observes no property — the render worker counts FILE_LOADED with it in
 /// mpv's own event order (`sources::render_worker`). With no observed property and no log
 /// level requested, [`WeakClient::poll`]'s `mpv_wait_event(…, 0)` only takes this client's
 /// own lock (never the core's), so it's safe on a render thread. Must be dropped

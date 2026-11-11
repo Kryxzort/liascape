@@ -12,7 +12,7 @@
 //! GPU copy read back on `lia-capture`'s own shared context) stalled the loop 29–47 ms — the
 //! NVIDIA driver's process-wide lock around the new context's first `eglMakeCurrent`.
 //!
-//! Before (Task 13): readback + encode on the loop — 39–112 ms (release, fdeflate `Fast`) /
+//! Before: readback + encode on the loop — 39–112 ms (release, fdeflate `Fast`) /
 //! 810 ms (debug) for a 3840×1080 frame, every output frozen; a synchronous readback alone is
 //! 1.6–10 ms (the GPU wait + a 16 MB copy into fresh pages).
 

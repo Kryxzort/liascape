@@ -53,7 +53,7 @@ public sealed class LiascapePlayerClient
     public string SocketPath { get; }
     // EnsureRunning may `setsid liascape-player serve` when nothing answers. Off for the self-test.
     public bool AutoSpawn { get; set; } = true;
-    // The COMPOSITOR's pid from `hello` (refreshed on every new connection) — auto-mute ownership (R69).
+    // The COMPOSITOR's pid from `hello` (refreshed on every new connection) — auto-mute ownership.
     // Under a supervisor this is the supervisor's CHILD, not the process EnsureRunning/the self-test
     // spawned — never signal this pid alone while SupervisorPid is set (the supervisor treats that as
     // a crash and restarts it).
@@ -74,7 +74,7 @@ public sealed class LiascapePlayerClient
     // quit, crashed, was restarted with another environment — may lead to another process: greet it first)
     private volatile bool _capsKnown, _capsEver;
 
-    // Phase 2 Task 11: can liascape-player play a scene here? The running player's own word (its `scene`
+    // Can liascape-player play a scene here? The running player's own word (its `scene`
     // capability) when one answers; else `liascape-player scene-check` (the same rule, run with this backend's
     // environment), cached 30 s. Hot path (every next/prev/random's skip check, sometimes under
     // PlayerHelper's lock): at most one quick `hello` per connection; a stalled player → its last word.
@@ -89,7 +89,7 @@ public sealed class LiascapePlayerClient
         return _capsKnown || (IsStalled && _capsEver) ? Capabilities.Contains("scene") : null;
     }
 
-    // Phase 3 Task 14: the running player's word on a capability (the `FromPlayer` rule; no player answering → no).
+    // The running player's word on a capability (the `FromPlayer` rule; no player answering → no).
     // `fresh` greets it again: `automute` comes and goes with the audio bus, so a connection's first `hello` — a
     // player just started, its bus not up yet — isn't its last word on it.
     public bool HasCapability(string cap, bool fresh = false)
@@ -261,10 +261,10 @@ public sealed class LiascapePlayerClient
     private long _stalledUntil;
     public bool IsStalled => Environment.TickCount64 < Interlocked.Read(ref _stalledUntil);
 
-    // Startup grace (2026-10-29 cold boot): the player binds its socket FIRST, then starts — the PipeWire bus (≤ 500 ms),
+    // Startup grace (a cold boot): the player binds its socket FIRST, then starts — the PipeWire bus (≤ 500 ms),
     // EGL, CUDA, the catalogue — and answers ~1 s later. A request reaching it in that window is waiting for a STARTING
-    // player, not a stalled one: the restore's monitor-daemon (another process, a 300 ms `get`) tripped the breaker on
-    // the player the restore had just spawned and failed every request for 3 s. So until a player answered this client
+    // player, not a stalled one: without the grace a 300 ms `get` from another process (the restore's monitor-daemon) trips
+    // the breaker on the player the restore just spawned and fails every request for 3 s. So until a player answered this client
     // once, a request waits for its first answer up to StartGraceMs after its socket was bound (the socket file's mtime
     // = its bind time; a supervised restart's child binds anew), and the request connection's lock as long. Only once
     // that runs out does a timeout trip the breaker. A player that answered once gets QuickMs as before.
@@ -302,10 +302,10 @@ public sealed class LiascapePlayerClient
     internal void EndStarting() => Interlocked.Exchange(ref _spawningUntil, 0);
     private bool Spawning => Environment.TickCount64 < Interlocked.Read(ref _spawningUntil);
 
-    // Any successful reply (ok or error — both are an answer) clears the breaker. R81: if it HAD been
+    // Any successful reply (ok or error — both are an answer) clears the breaker. If it HAD been
     // open, this is the "the player answered again" moment — fire Recovered so the adapter can re-push
-    // whatever a mutation dropped while the breaker was shut (the "New concern" in task-17-report.md:
-    // a set made while stalled is otherwise never replayed).
+    // whatever a mutation dropped while the breaker was shut (a set made while stalled is otherwise never
+    // replayed).
     private void MarkAnswered()
     {
         _answeredBorn = _connBorn; // this socket's player has started: no startup grace on it any more
@@ -403,7 +403,7 @@ public sealed class LiascapePlayerClient
                                 bool supervised = restarted && sup != null && sup == SupervisorPid;
                                 int? prevPid = PlayerPid;
                                 PlayerPid = p; Generation++;
-                                _playerIdentity = ProcIdentity.Of(p); // R81/item5: captured once, re-checked before any signal
+                                _playerIdentity = ProcIdentity.Of(p); // captured once, re-checked before any signal (pid reuse)
                                 // corr ids are per player process (tr-1… again) → outcomes recorded for the
                                 // old one must not answer waits on the new one
                                 if (restarted)
@@ -456,7 +456,7 @@ public sealed class LiascapePlayerClient
 
     // A new connection's `hello` (pid, capabilities) before `cmd`. Its error is swallowed — except a timeout: that
     // opened the breaker (the player didn't answer within the grace a starting one gets), and `cmd` must not be sent
-    // into the stalled player to time out once more (the 2026-10-29 boot: a 300 ms `get` took 2 × 300 ms).
+    // into the stalled player to time out once more (a 300 ms `get` would take 2 × 300 ms).
     private void Greet(string cmd, int timeoutMs)
     {
         try { Call("hello", null, timeoutMs); }
@@ -605,10 +605,10 @@ public sealed class LiascapePlayerClient
     // (`/proc/<pid>/exe` — it opens the running file even after a rebuild replaced it).
     internal static string? StaleReasonFor(string exe, string runningPath, string bin)
     {
-        // what `bin` really runs (2026-10-29 cold boot: Nix's `liascape/libexec/liascape/liascape-player` is a symlink
+        // what `bin` really runs (Nix's `liascape/libexec/liascape/liascape-player` is a symlink
         // into ANOTHER store path — the `liascape-player` package's wrapProgram wrapper, whose process runs its
-        // `.liascape-player-wrapped`; compared by the symlink's own store root, the player the restore had just
-        // started read as "out of date" and was restarted at once)
+        // `.liascape-player-wrapped`; compared by the symlink's own store root, the player the restore just
+        // started reads as "out of date" and is restarted at once. Guard: the self-test's in-place upgrade section)
         var runs = RunsFile(bin);
         if (StoreRoot(exe) is string re && StoreRoot(runs) is string rb)
             return re == rb ? null : $"it runs {re}, this backend starts {rb}{(runs != bin ? $" (via {bin})" : "")}";
@@ -672,7 +672,7 @@ public sealed class LiascapePlayerClient
 
     // Restart the player onto the current binary, keeping what it shows: `quit` (it writes its final
     // snapshot) and the same `serve` arguments again + `--restore` — the same wallpaper at the same place
-    // after ~0.2 s, settings re-applied by the Restarted handler (R81). Never twice onto the same build:
+    // after ~0.2 s, settings re-applied by the Restarted handler. Never twice onto the same build:
     // one that still reads as stale after its upgrade (a wrapper this check can't see through) must not
     // restart the player every 10 s — a new build may try again.
     // Every wait here is on the real condition, bounded by a deadline that scales — never a fixed 3 s:
@@ -764,7 +764,7 @@ public sealed class LiascapePlayerClient
     }
 
     // `argv` (after the binary) minus the restart plumbing — `--restore`, `--supervised`, `--restarted <spec>` and
-    // (Task 8) `--session-start`: a restart or an upgrade is recovery, never a session start. null = not a `serve`.
+    // `--session-start`: a restart or an upgrade is recovery, never a session start. null = not a `serve`.
     internal static List<string>? UserServeArgs(IReadOnlyList<string> argv)
     {
         if (argv.Count == 0 || argv[0] != "serve") return null;
@@ -779,7 +779,7 @@ public sealed class LiascapePlayerClient
     }
 
     // What EnsureRunning starts: the last player's own arguments + `--restore` (it went away — recovery), else a first
-    // start's defaults (+ `--restore [--session-start]` for `liascape restore` / `play`, Task 8).
+    // start's defaults (+ `--restore [--session-start]` for `liascape restore` / `play`).
     internal static List<string> StartArgs(IReadOnlyList<string>? known, string socket, bool defaultSocket, bool restore, bool sessionStart)
     {
         if (known != null) return [.. known, "--restore"];
@@ -814,7 +814,7 @@ public sealed class LiascapePlayerClient
     // second `serve` exits 1 on the instance lock and we connect to the winner.
     public bool EnsureRunning() => EnsureRunning(restore: false, sessionStart: false);
 
-    // Phase 3 Task 8: `restore` — a FIRST start (no earlier player's arguments known: `liascape restore`, `play`) brings
+    // `restore` — a FIRST start (no earlier player's arguments known: `liascape restore`, `play`) brings
     // back the player's snapshot (`--restore`), `sessionStart` marks it a session start (`--session-start`: each
     // restored program starts per its start mode, § Playlist start), and its first answer is waited for ≤ 30 s (a
     // restore creates a source per output first). A player that went away always comes back with `--restore` alone.
@@ -897,17 +897,17 @@ public sealed class LiascapePlayerClient
     // source-id cache: a transition scheduled/started/handed off/done/cancelled/failed/adopting an
     // output, a stop, an output's sources retired) — a handful per switch. `source.` as a whole
     // would stream every debug-level `source.position` (~10 Hz per source) to be discarded;
-    // restarts are detected by `hello.pid`, not events. Phase 2: `source.broken` — a scene whose worker
-    // crashed past its restart budget (LiascapePlayerMedia.OnEvent → PlayerHelper.OnSceneBroken); Task 8:
+    // restarts are detected by `hello.pid`, not events. `source.broken` — a scene whose worker
+    // crashed past its restart budget (LiascapePlayerMedia.OnEvent → PlayerHelper.OnSceneBroken);
     // `scene.vram_exceeded` — the VRAM guard stopped a scene (→ PlayerHelper.OnSceneVramStopped);
     // `scene.loudness` — a scene's loudness learned on first play (→ LiascapePlayerMedia.OnSceneLoudness: stored in
     // the index, normalization applied live). Once per scene play at most.
-    // Phase 3 Task 7: `program.` — the player's rotation (LiascapePlayerProgram's mirror; `program.current` → the UI)
+    // `program.` — the player's rotation (LiascapePlayerProgram's mirror; `program.current` → the UI)
     // `source.rejected` — a value the player's source refused (rare; e.g. an `af` mpv couldn't build: it plays
     // without it, TODO "A rejected `af` silences the video") → logged here, so the backend's log says why.
     public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "program.", "source.rejected"];
     public event Action<string, JsonElement>? Event;
-    // Phase 3 Task 9: an entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
+    // An entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
     // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in
     // seq order; the ack follows once every handler returned, so a handler stores synchronously (and idempotently), and
     // throws when it couldn't: the entry stays for the next subscription.

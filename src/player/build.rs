@@ -1,4 +1,4 @@
-//! libmpv FFI (spec §5.1, Task 10): bindgen over `mpv/client.h` + `mpv/render.h` +
+//! libmpv FFI (spec §5.1): bindgen over `mpv/client.h` + `mpv/render.h` +
 //! `mpv/render_gl.h`, found through pkg-config `mpv` — which also emits the
 //! `cargo:rustc-link-lib=mpv` + `-L` that nixpkgs auto-rpaths (same mechanism the
 //! `khronos-egl` `static` feature relies on for libEGL; see `docs/player/modules/gfx-egl.md`). The flake's `liascape-player` derivation carries `pkg-config` +
@@ -40,7 +40,7 @@ fn main() {
     bindings.write_to_file(&out).expect("write mpv_bindings.rs");
 }
 
-/// Phase 2 (feature `lwe`, default on): only `liascape-scene-worker` links LWE's core — the
+/// Feature `lwe` (default on): only `liascape-scene-worker` links LWE's core — the
 /// compositor binary never does (`rustc-link-arg-bin`). The core is `$LIASCAPE_LWE_CORE_DIR/lib`:
 /// the flake's `lwe-core` (its devShell and the `liascape-player` package set it), or
 /// `scripts/lwe.sh build` (`build/lwe-core`). The worker's RUNPATH is that dir, or

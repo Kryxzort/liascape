@@ -29,7 +29,7 @@ public static class AudioMonitor
         catch { }
     }
 
-    // Legacy only: under liascape-player `monitor-daemon` is retired (Phase 3 Task 14) — the player's Signal mutes with
+    // Legacy only: under liascape-player there is no `monitor-daemon` — the player's Signal mutes with
     // the app closed, and a leftover daemon is stopped at serve start / restore / stop (PlayerHelper.KillLegacyDaemons).
     public static void SpawnDetachedMonitor()
     {
@@ -64,7 +64,7 @@ public static class AudioMonitor
         catch { }
     }
 
-    // The engine (plan Phase 3 Task 14, parity passed on the owner's machine 2026-11-02): under liascape-player the player
+    // The engine: under liascape-player the player
     // runs auto-mute itself (the `automute` Signal, docs/player/modules/signals.md) whenever it has the `automute` capability.
     // Capability absent (the player's `LIASCAPE_PLAYER_AUTOMUTE=0`, its audio bus down) → this monitor keeps the job while
     // `serve` runs (criterion 10; with the app closed there is no monitor-daemon under liascape-player). Legacy: this
@@ -84,7 +84,7 @@ public static class AudioMonitor
     private static (int pid, bool said)? _probeSaid;
     // …asking the player again: `automute` comes and goes with its process and its bus. On a client of its own (same
     // socket, never spawns): this runs from the 10 s watch, and the shared client's `hello` would be the one to discover
-    // a new player process — its restart handler (R81's reapply) then raced the user's next request (an /apply posted
+    // a new player process — its restart handler (the settings reapply) would race the user's next request (an /apply posted
     // right after a player restart was lost, adapter IT § "a rebuilt player binary"), and a 300 ms timeout on a player
     // busy quitting opened the shared stall breaker for 3 s. The probe's breaker and restarts are its own.
     private static Liascape.Player.LiascapePlayerClient? _probe;
@@ -231,10 +231,10 @@ public static class AudioMonitor
     // Watches pactl subscribe and maintains one parec --monitor-stream per foreign (not-ours) stream.
     // Classify-then-count: a stream's level never counts before `ClassifyAsync` says it isn't ours, and a stream
     // classified ours is remembered until its `remove` — its later `change` events (uncork, relink, a volume or
-    // property change) never open another window. Before (owner report, 2026-10-28): a new stream was counted at
-    // once and checked 100 ms later, and every `change` re-added an already-checked own stream → each switch's
-    // incoming source (liascape-player's mpv `liascape-player` / scene worker `liascape-player-scene.<id>` stream, ramping in at
-    // −62 dB > the −70 dB threshold) auto-muted the wallpaper for a hitch — for the whole unmute delay when > 0.
+    // property change) never open another window. Counting a new stream at once and checking it later (or re-adding
+    // an already-checked own stream on `change`) lets each switch's incoming source (liascape-player's mpv
+    // `liascape-player` / scene worker `liascape-player-scene.<id>` stream, ramping in at −62 dB > the −70 dB
+    // threshold) auto-mute the wallpaper for a hitch — for the whole unmute delay when > 0.
     private static async Task WatchStreamsAsync(double thresholdDb, CancellationToken ct)
     {
         Interlocked.Exchange(ref _aboveThresholdCount, 0);
@@ -516,7 +516,7 @@ public static class AudioMonitor
         psi.ArgumentList.Add("list");
         psi.ArgumentList.Add("sink-inputs");
 
-        // liascape-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name, R69)
+        // liascape-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name)
         var isOwnTask = Liascape.Player.PlayerEngine.IsLiascapePlayer
             ? Task.Run<Func<string, bool>?>(Liascape.Player.LiascapePlayerMedia.OwnStreamFilter, ct)
             : Task.FromResult<Func<string, bool>?>(null);

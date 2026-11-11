@@ -14,8 +14,7 @@ const t = (tag: string, label = tag): Tag => ({ tag, label });
 const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "Standard Definition"), ...rest.map((r) => t(`${p} ${r}`, r))];
 // Steam's "Miscellaneous" group (the wallpaper-relevant features). Left out: "Verified" + "Multi-monitor optimized" (Steam's
 // Hidden group — no-ops), "No Animation" (a Script Type tag), "User Shortcut" / "Asset Pack" (not playable wallpapers).
-// "In my library" (owner 2026-11-11: "there should probably be a option to exclude the wallpapers already in library from
-// showing"): a UI-only pseudo-tag in the same include / exclude sets — ✓ = only what the library has, ✕ = hide it. Never sent
+// "In my library": a UI-only pseudo-tag in the same include / exclude sets — ✓ = only what the library has, ✕ = hide it. Never sent
 // to Steam (`wireFilter` strips it; the backend ignores "@" tags too) and filtered in Browse's render against the library
 // (`inLibrary`), so toggling it needs no request and leaves the prefetched page valid.
 export const LIBRARY_TAG = "@library";

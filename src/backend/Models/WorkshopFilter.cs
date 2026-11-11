@@ -6,7 +6,7 @@ namespace Liascape.Models;
 
 // The Workshop Browse filter (POST /browse `filter`). `Include` / `Exclude` are Steam tags; how they combine (OR within a
 // group, AND across groups, the age rule) is Helpers/WorkshopTags' job, so every client gets the same semantics.
-// The single-pick fields (Type, AgeRating, Resolution, Genres, Features) are the pre-2026-11-11 filter bar's: still
+// The single-pick fields (Type, AgeRating, Resolution, Genres, Features) are an older filter bar's: still
 // accepted, and when Include AND Exclude are both empty each value becomes one included tag (Effective).
 public class WorkshopFilter
 {
@@ -14,14 +14,14 @@ public class WorkshopFilter
     public int TrendDays { get; set; } = 7;
     public List<string> Include { get; set; } = [];
     public List<string> Exclude { get; set; } = [];
-    // how ticked FEATURES combine (owner 2026-11-11: "what if a user wants 3D OR HDR and not 3D AND HDR"): "all"
+    // how ticked FEATURES combine (docs/decisions.md § "AND Workshop features, OR genres, each switchable"): "all"
     // (default; missing / unknown = all) = every one required, "any" = at least one. Only features and genres have a choice
     // (GenreMatch below) — age / type / resolution are one tag per item, so OR is their only meaningful mode (WorkshopTags).
     public string FeatureMatch { get; set; } = "all";
     public bool FeaturesAny => string.Equals(FeatureMatch?.Trim(), "any", StringComparison.OrdinalIgnoreCase);
-    // how ticked GENRES combine (owner 2026-11-11: "lets just have a 'all or any' option for genere too"): "any" (default;
+    // how ticked GENRES combine (same decision): "any" (default;
     // missing / unknown = any) = at least one, "all" = every one. An item normally carries ONE genre — "all" of two finds
-    // the ~2,800 multi-genre items (mostly 2016–17 uploads, measured 2026-11-11: e.g. Game + Music 180, Anime + Girls 4).
+    // the ~2,800 multi-genre items (mostly 2016–17 uploads, measured: e.g. Game + Music 180, Anime + Girls 4).
     public string GenreMatch { get; set; } = "any";
     public bool GenresAll => string.Equals(GenreMatch?.Trim(), "all", StringComparison.OrdinalIgnoreCase);
 

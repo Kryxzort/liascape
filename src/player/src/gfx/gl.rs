@@ -13,8 +13,8 @@ use glow::HasContext;
 use super::egl::Gfx;
 
 /// A 2D texture this crate owns: `GL_RGBA8`, `LINEAR` min/mag filtering, `CLAMP_TO_EDGE`
-/// wrap on both axes (brief's texture defaults — every texture `Gfx::tex` creates gets
-/// exactly these, no per-call knobs yet because nothing needs them before Task 8).
+/// wrap on both axes (every texture `Gfx::tex` creates gets
+/// exactly these, no per-call knobs because nothing needs them).
 pub struct Tex {
     pub id: glow::Texture,
     pub w: u32,
@@ -29,7 +29,7 @@ pub struct Fbo {
     pub id: glow::Framebuffer,
 }
 
-/// [`Gfx::tex`] on any context (Phase 2: the render worker's own, `sources::render_worker`):
+/// [`Gfx::tex`] on any context (the render worker's own, `sources::render_worker`):
 /// a `w`×`h` `GL_RGBA8` texture with the fixed defaults. Textures are shared across a share
 /// group, so one made on the worker's context is sampled by the compositor's too.
 pub(crate) fn new_tex(gl: &glow::Context, w: u32, h: u32) -> Tex {
@@ -89,7 +89,7 @@ pub(crate) fn new_fbo(gl: &glow::Context, tex: &Tex) -> Fbo {
 }
 
 impl Gfx {
-    /// Allocate a `w`×`h` `GL_RGBA8` texture with the brief's fixed defaults (`LINEAR`
+    /// Allocate a `w`×`h` `GL_RGBA8` texture with fixed defaults (`LINEAR`
     /// min/mag, `CLAMP_TO_EDGE` wrap). Storage is allocated (`tex_image_2d` with no pixel
     /// data) but left uninitialized — callers that need a known starting color clear it
     /// through an `Fbo`.
@@ -161,7 +161,7 @@ impl Gfx {
 
     /// The crate-wide empty VAO: core-profile GL requires *some* vertex array object
     /// bound even for a draw that reads nothing from a vertex buffer (a fullscreen
-    /// triangle built from `gl_VertexID` alone, Task 8's approach). Created once per
+    /// triangle built from `gl_VertexID` alone, as the effects do). Created once per
     /// `Gfx` and reused — callers never need to manage or delete it themselves; it's
     /// dropped along with the GL context it belongs to.
     pub fn empty_vao(&self) -> glow::VertexArray {
@@ -189,8 +189,8 @@ impl Gfx {
     }
 
     /// [`Gfx::write_png`] for a raw **source** texture, whose row 0 already holds the
-    /// image's top (R25: `t = 0` = image top, the layout `gfx::compose` flips once) — so
-    /// no flip here; the PNG is upright too (`capture` of a source, Task 12).
+    /// image's top (`t = 0` = image top, the layout `gfx::compose` flips once) — so
+    /// no flip here; the PNG is upright too (`capture` of a source).
     pub fn write_png_source(&self, tex: &Tex, path: impl AsRef<Path>) -> io::Result<()> {
         self.write_png_rows(tex, path, false)
     }
@@ -472,7 +472,7 @@ impl MappedPixels {
 
 /// `w`×`h` RGBA8 `pixels` (GL row order) → a top-down PNG at `path` (`flip`: the rows are
 /// bottom-up, as GL reads an output's picture; a source texture already holds its top row
-/// first, R25).
+/// first).
 fn encode_png(path: &Path, w: u32, h: u32, pixels: &[u8], flip: bool) -> io::Result<()> {
     let stride = (w as usize) * 4;
     let flipped;
@@ -493,7 +493,7 @@ fn encode_png(path: &Path, w: u32, h: u32, pixels: &[u8], flip: bool) -> io::Res
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     // fdeflate's PNG-tuned mode: the default (`Balanced`) took 820–875 ms for a 3840×1080
-    // scene frame (Task 13, when `capture` still encoded on the loop); `Fast` 39–112 ms —
+    // scene frame (when `capture` still encoded on the loop); `Fast` 39–112 ms —
     // still the reply's latency now that it encodes on `lia-capture`.
     encoder.set_compression(png::Compression::Fast);
     let mut writer = encoder.write_header().map_err(io::Error::other)?;

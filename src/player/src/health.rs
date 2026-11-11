@@ -1,4 +1,5 @@
-//! Feature health (owner, 2026-10-28: "make missing libraries fail loudly"): which of the player's
+//! Feature health (`docs/decisions.md` § Report a missing dependency with a warning, never
+//! hide the control): which of the player's
 //! optional pieces work HERE, and why not — so the backend can put a warning on the setting a missing
 //! piece breaks instead of the feature degrading silently. Each entry is `{ok, reason, …}` (`reason`
 //! null when ok); `ok: null` = not known yet (the VRAM check runs once, off the loop).
@@ -13,7 +14,7 @@
 //!   (`LIASCAPE_PLAYER_AUTOMUTE=0` turns it off) and the audio bus up. Without it the backend's
 //!   `AudioMonitor` mutes only while the app is open. `liascape-player health` knows only the gate
 //!   (`ok: null` when on: the bus is known once a player runs).
-//! - `bus` — the player audio bus itself (§ Audio bus): up (or re-targeting) = ok; down = sources play on mpv's
+//! - `bus` — the player audio bus itself (`docs/player/modules/audio-bus.md`): up (or re-targeting) = ok; down = sources play on mpv's
 //!   default device instead (nothing stops working, the bus meter and the in-player auto-mute do), with the
 //!   reason (`--ao` other than pipewire, `LIASCAPE_PLAYER_BUS=off`, no PipeWire / session manager). `ok: null`
 //!   while the first session is still being set up, and in `liascape-player health` (no player: the bus is

@@ -1,6 +1,5 @@
-//! The in-player **auto-mute** Signal (Phase 3 Task 14, spec §4.4) — the shipped auto-mute
-//! under `liascape-player` since it passed its parity bar against the backend's `AudioMonitor`
-//! (plan Task 14, on the owner's machine 2026-11-02). On by default; `LIASCAPE_PLAYER_AUTOMUTE=0`
+//! The in-player **auto-mute** Signal (spec §4.4) — the shipped auto-mute
+//! under `liascape-player` (it matches the backend's `AudioMonitor`). On by default; `LIASCAPE_PLAYER_AUTOMUTE=0`
 //! turns it off (no thread, no `automute` capability — the backend's `AudioMonitor` then keeps the
 //! job while the app is open).
 //!

@@ -1,4 +1,4 @@
-//! The Hyprland cover source (Task 6, designer call 9): a thread (`lia-cover`) that listens on
+//! The Hyprland cover source (designer call 9): a thread (`lia-cover`) that listens on
 //! `.socket2.sock` and, on every event that can change what is on screen, re-reads
 //! `j/monitors` + `j/clients` in one `[[BATCH]]` request on `.socket.sock` and publishes
 //! [`covered::hypr_cover`] of them to the [`Feed`]. Read-only: it never sends a dispatch.
@@ -6,7 +6,7 @@
 //! - **Why re-query:** the `fullscreen>>0|1` event names no window (and an app may send several
 //!   enters), so the state is always read back, never inferred from events.
 //! - **Focus is not visibility:** `activewindow`/`activewindowv2` also fire on every title change
-//!   of the focused window (a terminal's spinner: ~1/s, measured 2026-10-30), and focus alone never
+//!   of the focused window (a terminal's spinner: ~1/s, measured), and focus alone never
 //!   changes what is on screen. Only `activewindowv2` with a *new* address triggers a re-read
 //!   ([`Relevance`]); `activewindow` (v1, the same change) never does.
 //! - **Coalescing:** a burst of events (a workspace switch emits several) is one query,

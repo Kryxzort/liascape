@@ -14,14 +14,14 @@
 //! that can take a frame (its last frame callback arrived) is composed + presented only if
 //! its picture changed or something animates (`crate::redraw`) — else it stays idle.
 //!
-//! **Who runs what (R47).** The timer tick is the one place animation and the recipes
+//! **Who runs what.** The timer tick is the one place animation and the recipes
 //! advance: `Animator::tick` → `Graph::set` → `drain_changes` → `SourceHost::sync` →
 //! `SourceHost::update` → `Transitions::tick` (with every source event since the last
 //! tick) → compose + present every output — the same order as
 //! `tests/common/harness.rs`. An mpv wake only syncs + updates the sources (textures,
 //! events); ticking on wakes would self-sustain (every gain push's reply wakes the fd).
 //!
-//! **Stepped clock (R48).** No timer: `step {ms}` advances the `SteppedClock`, runs the
+//! **Stepped clock.** No timer: `step {ms}` advances the `SteppedClock`, runs the
 //! animator + `sync`, seeks every video source to its own virtual media time (paused,
 //! `seek <t> absolute exact`), waits (≤ [`STEP_TIMEOUT`], without blocking the loop) until
 //! each one's frame is the texture, then runs the rest of the tick and replies — the same
@@ -67,25 +67,25 @@ pub const REAPER_WAIT: Duration = Duration::from_secs(2);
 /// Anti-click ramp used by `stop`/`quit` before sources are destroyed (invariant #4).
 const STOP_RAMP: Duration = Duration::from_millis(30);
 /// `serve`'s bounded wait (from the bus thread's start, after the bind and the compositor
-/// connection) for the audio bus's first session before the loop runs (cold boot,
-/// 2026-10-29: it waited up to 10 s, answering nothing). Long enough that a normal start opens its sources straight
+/// connection) for the audio bus's first session before the loop runs (an unbounded wait
+/// on a cold boot answers nothing and fails the backend's probe). Long enough that a normal start opens its sources straight
 /// onto the bus — its setup measured ~0.2 s and runs beside EGL and the catalogue —,
 /// short enough that a boot whose PipeWire/WirePlumber isn't ready yet delays the first
 /// answer by at most this — under the backend's 1 s spawn probe (`LiascapePlayerClient.
 /// Reachable`'s `hello`, whose timeout opens its 3 s stall breaker: what failed the cold
 /// boot's restore). A bus that comes up later moves the sources onto it.
 pub const BUS_STARTUP_WAIT: Duration = Duration::from_millis(500);
-/// R90 (Task 16d): the fast gain-only timer's period — independent of the output
+/// The fast gain-only timer's period — independent of the output
 /// refresh (which can be a single 60 Hz monitor), this is what turns a ≤ 30 ms
 /// anti-click ramp (invariant #4) into a genuinely smooth push sequence in the real
 /// audio output instead of the 1–2 `Animator::tick` evaluations a 60 Hz main tick alone
-/// gives it (measured, Task 16c's report: held steps then an abrupt final jump, 5–7 ms
+/// gives it (measured at the main tick alone: held steps then an abrupt final jump, 5–7 ms
 /// `micro_gaps`). See `docs/player/modules/runtime.md` § The fast gain timer.
 const GAIN_TICK_PERIOD: Duration = Duration::from_millis(1);
-/// R90: how many recent fast-timer gain pushes the `loop` probe keeps — a test/
+/// How many recent fast-timer gain pushes the `loop` probe keeps — a test/
 /// diagnostic hook for counting or inspecting real pushes within a ramp without logging
 /// one event per 1 kHz tick (which would allocate a JSON object even below the log
-/// level threshold, exactly the per-tick cost R90 asks to bound).
+/// level threshold, exactly the per-tick cost this timer must keep bounded).
 const GAIN_PUSH_HISTORY: usize = 256;
 /// How often a `capture`'s GPU readback is polled while it is in flight.
 const CAPTURE_POLL: Duration = Duration::from_millis(1);
@@ -114,7 +114,7 @@ pub struct ServeOpts {
     /// `(width, height, hz)` per virtual output (`--outputs`), headless only.
     pub outputs: Vec<(u32, u32, u32)>,
     pub clock: ClockMode,
-    /// mpv `ao` for every source (`--ao null` in tests — R26); `None` = mpv's default
+    /// mpv `ao` for every source (`--ao null` in tests); `None` = mpv's default
     /// for liascape-player (`pipewire`).
     pub ao: Option<String>,
     pub socket: PathBuf,
@@ -130,7 +130,7 @@ pub struct ServeOpts {
     pub restore: bool,
     /// `--session-start` (with `--restore`; a boot / `liascape restore`, never a crash
     /// restart — the supervisor gives it to its first child only): each restored program
-    /// starts per its `start_mode` (§ Playlist start) instead of where it was.
+    /// starts per its `start_mode` (`docs/player/modules/programs.md` § Playlist start and resume points) instead of where it was.
     pub session_start: bool,
     /// Run by the supervisor (`--supervised`, `crate::supervise`): its pid, and why this is
     /// a restart (`--restarted`).
@@ -138,19 +138,19 @@ pub struct ServeOpts {
     /// Headless only: `--redraw-policy content` (present only on picture changes, like
     /// Wayland) instead of composing every output every tick.
     pub redraw_content: bool,
-    /// `--debug`: starts with `player.debug = true` (Task 15 — the dropout probe's
+    /// `--debug`: starts with `player.debug = true` (the dropout probe's
     /// auto-trigger after every `transition.done`); equivalent to `set player.debug true`
     /// once running.
     pub debug: bool,
-    /// Phase 2 (`--render-worker on|off`, env `LIASCAPE_PLAYER_RENDER_WORKER`): render mpv sources
-    /// on the `lia-render` worker thread (§ Sources "Render worker"). Real clock only — the
+    /// `--render-worker on|off` (env `LIASCAPE_PLAYER_RENDER_WORKER`): render mpv sources
+    /// on the `lia-render` worker thread (`docs/player/modules/sources.md` § Render worker). Real clock only — the
     /// stepped clock renders on the loop whatever this says.
     pub render_worker: bool,
 }
 
-/// Phase 2: whether the render worker runs when neither `--render-worker` nor
-/// `LIASCAPE_PLAYER_RENDER_WORKER` says (§ Sources "Render worker"). On since 2026-10-26: the
-/// switch loop's warm median max_busy 16.3 → 1.3–3.6 ms, missed frames at 2× content on a
+/// Whether the render worker runs when neither `--render-worker` nor
+/// `LIASCAPE_PLAYER_RENDER_WORKER` says (`docs/player/modules/sources.md` § Render worker). On by
+/// default because, measured against rendering on the loop: the switch loop's warm median max_busy 16.3 → 1.3–3.6 ms, missed frames at 2× content on a
 /// 240 Hz output 2.2–3.3 → 1.8–2.5/s, full suite green with it on and off, the UI matrix
 /// 682/0 with it on. `off` stays the escape hatch.
 pub const RENDER_WORKER_DEFAULT: bool = true;
@@ -182,7 +182,7 @@ pub fn render_worker_enabled(flag: Option<bool>) -> bool {
     }
 }
 
-/// This compositor runs under the supervisor (Task 16).
+/// This compositor runs under the supervisor.
 #[derive(Debug, Clone)]
 pub struct Supervised {
     pub pid: u32,
@@ -192,10 +192,10 @@ pub struct Supervised {
 
 /// Why `serve` failed: at startup, never retried by the supervisor — another instance
 /// already holds the lock, or the socket/state dir is unusable (exit 1); at startup, but
-/// worth retrying — the compositor/EGL genuinely isn't available *yet* (Task 16b: no
+/// worth retrying — the compositor/EGL genuinely isn't available *yet* (no
 /// Wayland compositor running, EGL init failing before a GPU driver/device is ready; exit
 /// [`supervise::EXIT_NO_COMPOSITOR`], backed off and eventually given up on by the
-/// supervisor, § Supervisor "Startup-failure classes"); or while running (the compositor
+/// supervisor, `docs/player/modules/persistence.md` § Supervisor); or while running (the compositor
 /// connection was lost: exit [`supervise::EXIT_RUNTIME`] — restarted).
 #[derive(Debug)]
 pub enum ServeError {
@@ -280,24 +280,24 @@ struct PendingStep {
     sync: Duration,
 }
 
-/// The wallpaper kept while no output exists (R60).
+/// The wallpaper kept while no output exists.
 #[derive(Debug, Clone)]
 pub(crate) struct Parked {
     pub id: String,
     /// Its pause state to restore (a pending B always resumes playing).
     resume_paused: bool,
     /// When its park ramp is over (then it's paused); `None` = settled. On the *unpaused*
-    /// base clock (I1: a park ramp completes even while the player is paused).
+    /// base clock (a park ramp completes even while the player is paused).
     settle_at: Option<Duration>,
     /// The ramp end has been reached once (its final value sent): pause next.
     armed: bool,
     /// The connector it was parked for (a restored snapshot's output that isn't present):
     /// that connector shows it when it appears, whatever else is on screen. `None` = the
-    /// R60 "no output left" park (the next output shows it).
+    /// "no output left" park (the next output shows it).
     pub connector: Option<String>,
 }
 
-/// I4 (final review): an `align: end` transition requested while no output exists — its
+/// An `align: end` transition requested while no output exists — its
 /// B already replaced the parked wallpaper; its handoff is reported when an output comes
 /// back and shows it (the parked A is paused, so its end can't come before), or it is
 /// superseded by the next parked request.
@@ -308,7 +308,7 @@ pub(crate) struct ParkedReq {
     pub from: Option<String>,
 }
 
-/// A restored source's fade-in waiting to start (`Runtime::fade_in`, I6): it starts once
+/// A restored source's fade-in waiting to start (`Runtime::fade_in`): it starts once
 /// the source is `Ready` **and** its audio flows — or `ONSET_TIMEOUT` after `Ready`.
 #[derive(Debug, Clone, Default)]
 struct FadeWait {
@@ -316,7 +316,7 @@ struct FadeWait {
     flowed: bool,
 }
 
-/// When the snapshot is written (§ Snapshot): `due` = 250 ms after the first unsaved
+/// When the snapshot is written (`docs/player/modules/persistence.md`): `due` = 250 ms after the first unsaved
 /// change, `last_write` for the 2 s refresh while a video plays, `frozen` once the final
 /// (clean-exit) snapshot is queued.
 pub(crate) struct SnapState {
@@ -570,7 +570,7 @@ pub(crate) struct LoopStats {
     pub max_busy_excl_open_ms: f64,
     pub max_open_ms: f64,
     pub iterations: u64,
-    /// R90 (Task 16d): the fast gain timer's own fire count (armed periods only) and
+    /// The fast gain timer's own fire count (armed periods only) and
     /// how many gain values it actually forwarded to a hosted source — the `loop`
     /// probe's own evidence that the fast path is doing (bounded) work, or sitting
     /// idle while disarmed.
@@ -670,7 +670,7 @@ impl LoopStats {
         }
     }
 
-    /// R90: records one fast-timer gain push (bounded history, [`GAIN_PUSH_HISTORY`]).
+    /// Records one fast-timer gain push (bounded history, [`GAIN_PUSH_HISTORY`]).
     pub(crate) fn record_gain_push(&mut self, t_mono_ms: f64, db: f64) {
         self.gain_pushes += 1;
         self.recent_gain_pushes.push_back((t_mono_ms, db));
@@ -690,7 +690,7 @@ pub struct Runtime {
     clock: ClockKind,
     pub(crate) host: SourceHost,
     pub(crate) tr: Transitions,
-    /// Phase 3: the rotations (`recipes::program`), ticked after `Transitions::tick`.
+    /// The rotations (`recipes::program`), ticked after `Transitions::tick`.
     pub(crate) programs: Programs,
     /// Transition events drained outside the tick (the `transition`/`cancel` verbs, an
     /// output removed): the programs see them with the next tick's.
@@ -723,9 +723,9 @@ pub struct Runtime {
     /// `stop`/`quit`: sources to destroy once their anti-click ramp is over.
     /// `(ramp end, id, armed)`: armed at the first tick at/after the ramp end — whose sync
     /// sends the final −96 dB to the live source — and destroyed at the next one. The ramp
-    /// end is on the *unpaused* base clock (I1): teardown completes while paused.
+    /// end is on the *unpaused* base clock: teardown completes while paused.
     pending_destroy: Vec<(Duration, String, bool)>,
-    /// I1 (final review): teardown ramps — `retire` (destroy / stop / output removal) and
+    /// Teardown ramps — `retire` (destroy / stop / output removal) and
     /// `park` — on the **unpaused** base clock (`ClockKind::now`), so they finish while
     /// the player is paused (the main Animator's `Runtime::now` freezes then). Only ever
     /// holds `gain.anticlick` ramps of sources being retired/parked; a source in here is
@@ -739,30 +739,30 @@ pub struct Runtime {
     /// ramp-in). Inaudible meanwhile: the pause gate holds every playing source silent. One
     /// writer per path: adding here cancels the main Animator's ramp on it and vice versa.
     pub(crate) setting_anim: Animator,
-    /// I6: the runtime's own held onsets (unpark) — `crate::onset`.
+    /// The runtime's own held onsets (unpark) — `crate::onset`.
     onsets: Onsets,
-    /// I4: an `align: end` request made while no output exists, waiting for one.
+    /// An `align: end` request made while no output exists, waiting for one.
     parked_req: Option<ParkedReq>,
-    /// I7: the bus route (`Bus::route`) the sources were last pointed at.
+    /// The bus route (`Bus::route`) the sources were last pointed at.
     pub(crate) bus_route: (bool, u64),
     /// `quit` requested: exit once the ramps are done (or this instant passes).
     quit_at: Option<Instant>,
-    /// R60: the wallpaper parked while no output exists.
+    /// The wallpaper parked while no output exists.
     pub(crate) parked: Option<Parked>,
     /// Rate-limited warnings: key → (last emitted, suppressed since).
     warned: BTreeMap<String, (Instant, u64)>,
     tap_dropped_seen: u64,
     pub(crate) started: Instant,
-    /// Which paced outputs need a frame (Task 13).
+    /// Which paced outputs need a frame.
     pub(crate) redraw: Redraw,
     /// F6b: what each output shows, cached per routing change (`redraw::Routes`).
     routes: crate::redraw::Routes,
     /// Present timing per output (the `frames` probe).
     pub(crate) frames: BTreeMap<String, FrameStats>,
-    /// The player audio bus + its meter (Task 14), or why there is none.
+    /// The player audio bus + its meter, or why there is none.
     pub(crate) audio: Audio,
     /// Settable output props (`layer`, `paused`) of connectors that are not present —
-    /// re-applied when the connector comes back (Task 16).
+    /// re-applied when the connector comes back.
     pub(crate) out_props: BTreeMap<String, Map<String, Value>>,
     pub(crate) snap: SnapState,
     pub(crate) supervised: Option<Supervised>,
@@ -770,9 +770,9 @@ pub struct Runtime {
     pub(crate) restart_event: Option<Value>,
     /// Restored sources that start silent and ramp in over 30 ms once ready: each has a
     /// not-yet-started `gain.anticlick` animation to 0 dB ([`RESTORE_FADE`] corr), so a
-    /// recipe recording its gains (R41) sees the 0 dB it is heading to.
+    /// recipe recording its gains sees the 0 dB it is heading to.
     fade_in: BTreeMap<String, FadeWait>,
-    /// R75 (Task 16b): the last `player.paused` [`Runtime::sync_sources`] saw — mirrors
+    /// The last `player.paused` [`Runtime::sync_sources`] saw — mirrors
     /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
     /// read the graph on every call. `paused_at`/`pause_offset` excise paused time from
     /// `now()` exactly like [`crate::clock::OutputClock`]'s pause/resume (same algebra,
@@ -783,36 +783,36 @@ pub struct Runtime {
     paused_at: Option<Duration>,
     /// Total time excised so far across every completed pause/resume cycle.
     pause_offset: Duration,
-    /// Per-source `effective_gain_db` history, one entry per tick (Task 15, R70) — what
+    /// Per-source `effective_gain_db` history, one entry per tick — what
     /// `probe::dropout::expected_envelope` weights decoded source audio by. Recorded on
-    /// the log's real `t_mono_ms` clock (`log::mono_now()`, § `record_gain_history`) —
+    /// the log's real `t_mono_ms` clock (`log::mono_now()`, see `record_gain_history`) —
     /// the same time base the bus meter's samples use — never `Runtime::now()`, which is
-    /// the paused-adjusted animation/transition clock (R75) and would disagree with the
+    /// the paused-adjusted animation/transition clock and would disagree with the
     /// meter during a player-level pause.
     pub(crate) gain_history: GainHistory,
-    /// Phase 2 Task 6: each scene's own pre-gain envelope (its worker's `Envelope`) — a
+    /// Each scene's own pre-gain envelope (its worker's `Envelope`) — a
     /// scene's dropout reference (it has no file to decode). Same clock and bounds rules.
     pub(crate) scene_envelopes: dropout::SceneEnvelopes,
     /// Recent transitions' audio windows (`transition.started`/`.done`), for the
     /// dropout probe's auto-trigger and its on-demand `probe dropout` verb.
     pub(crate) dropout_windows: PendingWindows,
-    /// Task 16d: dropout analyses waiting for their window's post-roll to be captured
+    /// Dropout analyses waiting for their window's post-roll to be captured
     /// (`probe::dropout::request_analysis`/`run_due`).
     pub(crate) dropout_due: Vec<dropout::DueAnalysis>,
-    /// Task 16c (R88): per-source anticlick gate for player-level pause/resume — see
+    /// Per-source anticlick gate for player-level pause/resume — see
     /// [`PauseGate`]. Real wall-clock timed (`Instant`, never `Runtime::now()`, which
     /// freezes the instant `player.paused` does): the Animator/graph clock can't drive a
     /// ramp that has to run *while* time is otherwise frozen.
     pause_gates: BTreeMap<String, PauseGate>,
     /// The last `player_paused` [`Runtime::update_pause_gates`] itself saw — its own edge
-    /// detection, independent of `update_player_paused`'s (R75) bookkeeping.
+    /// detection, independent of `update_player_paused`'s bookkeeping.
     pause_gate_prev: bool,
     /// The dropout-probe `corr` minted for each gate still open, from `Pausing` through
-    /// `Resuming` — same pattern as `retire`'s own window (R79/R80), so `ctl probe
+    /// `Resuming` — same pattern as `retire`'s own window, so `ctl probe
     /// '{"name":"dropout","args":{"corr":…}}'` can check a whole pause/resume cycle once
     /// it's done (`source.player_pause_gate`'s log event carries it).
     pause_gate_corr: BTreeMap<String, CorrId>,
-    /// R90 (Task 16d): whether the fast (≥ 1 kHz) gain-only timer is currently
+    /// Whether the fast (≥ 1 kHz) gain-only timer is currently
     /// registered with the event loop. Armed the moment any `gain.*` animation exists
     /// (`arm_gain_timer_if_needed`, checked from `sync_sources` — after every
     /// graph/animator change reaches it) and self-disarms (`TimeoutAction::Drop`, from
@@ -820,26 +820,26 @@ pub struct Runtime {
     /// clock (gains there are evaluated at step boundaries exactly like every other
     /// property — nothing "between steps" for a 1 ms timer to drive).
     gain_timer_armed: bool,
-    /// Phase 2 Task 7: the visualiser's system-audio capture (D4), while ≥ 1 live scene wants
+    /// The visualiser's system-audio capture, while ≥ 1 live scene wants
     /// audio input; dropped (off the loop) when none does.
     pub(crate) sysmon: Option<crate::audio::sysmon::SysMon>,
-    /// Task 7: the `player.scene_assets` value the scene base opts were resolved for.
+    /// The `player.scene_assets` value the scene base opts were resolved for.
     scene_assets_for: Option<String>,
-    /// Phase 2 Task 8: when the scenes' GPU budgets are fed next (`budget::OBSERVE_EVERY`).
+    /// When the scenes' GPU budgets are fed next (`budget::OBSERVE_EVERY`).
     next_budget: Instant,
-    /// Task 8: VRAM measurement, the per-scene limit and the low-VRAM rule.
+    /// VRAM measurement, the per-scene limit and the low-VRAM rule.
     pub(crate) vram: VramState,
-    /// Phase 3 Task 6: the covered Signal and the cover hold (`crate::signal`).
+    /// The covered Signal and the cover hold (`crate::signal`).
     pub(crate) cover: crate::signal::CoverRt,
-    /// Audit C6 (2026-11-06): the desktop pointer — the cursor over windows and other monitors
+    /// The desktop pointer — the cursor over windows and other monitors
     /// too, like WE's `GetCursorPos` (`crate::signal::cursor`).
     pub(crate) desktop_pointer: crate::signal::cursor::PointerRt,
-    /// Phase 3 Task 14: the in-player auto-mute Signal (`crate::signal::automute`; on unless
+    /// The in-player auto-mute Signal (`crate::signal::automute`; on unless
     /// `LIASCAPE_PLAYER_AUTOMUTE=0`).
     pub(crate) automute: crate::signal::automute::AutoMuteRt,
 }
 
-/// Phase 2 Task 8: the runtime's side of `crate::vram` (`Runtime::vram_tick`).
+/// The runtime's side of `crate::vram` (`Runtime::vram_tick`).
 pub(crate) struct VramState {
     /// The `lia-vram` sampler, while a rule needs it.
     pub(crate) monitor: Option<crate::vram::Monitor>,
@@ -877,7 +877,7 @@ pub(crate) enum HoldPhase {
     Resuming { at: Instant },
 }
 
-/// Task 8: how long a resume waits for the reopened sources' first frames before un-pausing
+/// How long a resume waits for the reopened sources' first frames before un-pausing
 /// anyway.
 const VRAM_RESUME_WAIT: Duration = Duration::from_secs(5);
 
@@ -929,7 +929,7 @@ fn p(s: &str) -> PropPath {
     PropPath(s.to_string())
 }
 
-/// Phase 2 Task 8: the present gate of scene source `src` on output `out` (connector name):
+/// The present gate of scene source `src` on output `out` (connector name):
 /// `1 / eff(out:<c>.scene_fps, refresh)`; `None` for any other source (never gated).
 fn scene_gate_period(
     host: &crate::sources::SourceHost,
@@ -941,7 +941,7 @@ fn scene_gate_period(
     crate::redraw::scene_gate_period(route.scene_fps, route.refresh_hz, frame_callbacks)
 }
 
-/// Phase 2 Task 14: output `out` (with frame callbacks) shows a playing scene that renders at
+/// Output `out` (with frame callbacks) shows a playing scene that renders at
 /// its refresh (`scene_fps` 0 or ≥ the refresh, not throttled below it) — so it presents on
 /// every frame callback, like an animation. The worker's frames come on the loop's own clock
 /// (1 / the rounded refresh), never in phase with the vblank: presenting only when a new frame
@@ -974,7 +974,7 @@ impl Runtime {
     }
 
     /// The player's own virtual time: [`ClockKind::now`], with every interval spent
-    /// `player.paused` excised — never just frozen-and-jumped (R75). This is what the
+    /// `player.paused` excised — never just frozen-and-jumped. This is what the
     /// Animator and `Transitions::tick` read, so a transition's progress, gain ramps,
     /// `align:end` waits and handoff timers all stop and resume exactly where they were.
     pub(crate) fn now(&self) -> Duration {
@@ -983,7 +983,7 @@ impl Runtime {
         frozen.saturating_sub(self.pause_offset)
     }
 
-    /// The **unpaused** base clock (I1): what teardown ramps (`teardown_anim`), their
+    /// The **unpaused** base clock: what teardown ramps (`teardown_anim`), their
     /// destroy deadlines and park settling run on, so they complete while paused.
     pub(crate) fn base_now(&self) -> Duration {
         self.clock.now()
@@ -1034,12 +1034,12 @@ impl Runtime {
         self.player_paused
     }
 
-    /// R90: whether the fast gain timer is currently armed (the `loop` probe).
+    /// Whether the fast gain timer is currently armed (the `loop` probe).
     pub(crate) fn gain_timer_armed(&self) -> bool {
         self.gain_timer_armed
     }
 
-    /// R93: how many player-pause anticlick gates (`PauseGate`) are currently open (the
+    /// How many player-pause anticlick gates (`PauseGate`) are currently open (the
     /// `loop` probe) — a destroyed/retired gated source must leave this at 0 for it,
     /// never leaked.
     pub(crate) fn pause_gate_count(&self) -> usize {
@@ -1053,7 +1053,7 @@ impl Runtime {
     /// happens in [`Runtime::sync_sources`], which reads the now-current
     /// `self.player_paused` this set). Cheap when nothing changed (one graph read).
     fn update_player_paused(&mut self) {
-        // Task 8: the low-VRAM rule holds the player paused too, and Phase 3 Task 6's cover hold
+        // The low-VRAM rule holds the player paused too, and the cover hold
         // (composed, never written to `player.paused` — the user's own pause is untouched and
         // survives both).
         let now_paused = matches!(
@@ -1085,7 +1085,7 @@ impl Runtime {
         self.vram.hold.is_some() || self.cover_held()
     }
 
-    /// `player.debug` (Task 15: gates the dropout probe's auto-trigger after
+    /// `player.debug` (gates the dropout probe's auto-trigger after
     /// `transition.done`; `serve --debug` or `set player.debug true`).
     pub(crate) fn debug_mode(&self) -> bool {
         matches!(
@@ -1116,12 +1116,12 @@ impl Runtime {
         dropout::run_due(self);
     }
 
-    // ------------------------------------------------------------ Task 8: GPU budget, VRAM
+    // ------------------------------------------------------------ GPU budget, VRAM
 
     /// Every `budget::OBSERVE_EVERY`: each scene's GPU budget gets the worst miss rate (paced
     /// presents over the `frames` probe's 2 s window) of **every** output — the GPU is shared,
-    /// so a heavy worker on one output starves another's presents (Phase 2 Task 14,
-    /// `frames::worst_missed_pct`) — and
+    /// so a heavy worker on one output starves another's presents
+    /// (`frames::worst_missed_pct`) — and
     /// `player.scene_throttle` (off = fixed fps, any cap lifted). Real clock only.
     fn feed_scene_budgets(&mut self) {
         let now = Instant::now();
@@ -1142,7 +1142,7 @@ impl Runtime {
         }
     }
 
-    /// Task 8: the VRAM rules (`crate::vram`), every tick (cheap when off): run the sampler
+    /// The VRAM rules (`crate::vram`), every tick (cheap when off): run the sampler
     /// while a rule needs it (low-VRAM mode not `off`, or a per-scene limit with a scene
     /// playing), apply each new sample — scene workers over `player.scene_vram_limit_mib` for
     /// `scene_hold` are stopped (`SceneSource::stop_for_vram`), the low rule engages/releases
@@ -1404,7 +1404,7 @@ impl Runtime {
         }
     }
 
-    /// I7 (final review): the bus lost its PipeWire connection (down — sources go to mpv's
+    /// The bus lost its PipeWire connection (down — sources go to mpv's
     /// default device so they keep playing) or was re-created after one (up, a new
     /// generation — every source back onto the bus, the meter resumes on its own). Every
     /// hosted mpv source gets an async `audio-device` set, new ones open with the route.
@@ -1470,7 +1470,7 @@ impl Runtime {
         );
     }
 
-    /// Task 6: every scene's new envelope entries into [`dropout::SceneEnvelopes`] (dead
+    /// Every scene's new envelope entries into [`dropout::SceneEnvelopes`] (dead
     /// scenes linger for their post-roll analysis, then go).
     fn record_scene_envelopes(&mut self) {
         let Some(now) = log::mono_now() else { return };
@@ -1491,7 +1491,7 @@ impl Runtime {
         }
     }
 
-    /// R70: one `effective_gain_db` reading per live `Source` node per tick, on the log's
+    /// One `effective_gain_db` reading per live `Source` node per tick, on the log's
     /// real `t_mono_ms` clock — **not** `self.now()`, which may be the stepped/virtual
     /// clock and would disagree with the bus meter's real-time samples.
     fn record_gain_history(&mut self) {
@@ -1509,14 +1509,14 @@ impl Runtime {
         let evs = std::mem::take(&mut self.src_events);
         self.drive_onsets(&evs, now);
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
-        // Already in the event log → subscribers via the tap; the dropout probe (Task 15,
-        // R71) also watches for Started/Done here to track each transition's audio window.
+        // Already in the event log → subscribers via the tap; the dropout probe
+        // also watches for Started/Done here to track each transition's audio window.
         let mut tr_events = std::mem::take(&mut self.tr_backlog);
         tr_events.extend(self.tr.drain_events());
         self.record_dropout_windows(&tr_events);
         self.tick_programs(&tr_events, &evs, now);
         self.refresh_srcs();
-        // R88 (Task 16c): resolve any `AwaitingFlow` gate against this tick's events —
+        // Resolve any `AwaitingFlow` gate against this tick's events —
         // the other half runs earlier, from `sync_sources` (see its doc).
         self.drive_pause_gates_post_update(&evs);
         let tr_d = t_tr.elapsed();
@@ -1553,7 +1553,7 @@ impl Runtime {
                 );
             }
         }
-        // I1: teardown ramps on the unpaused base clock (gain-only, never a redraw).
+        // Teardown ramps on the unpaused base clock (gain-only, never a redraw).
         for (path, v) in self.teardown_anim.tick(self.base_now()) {
             if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
                 self.teardown_anim.cancel_target(&path);
@@ -1566,7 +1566,7 @@ impl Runtime {
                 self.setting_anim.cancel_target(&path);
             }
         }
-        // M1: an animation on a node that is gone never emits again (a placeholder that
+        // An animation on a node that is gone never emits again (a placeholder that
         // never started would otherwise sit — and keep the gain timer armed — forever).
         let g = &self.graph;
         let alive = |p: &PropPath| g.kind_of(redraw::node_of(p)).is_some();
@@ -1596,7 +1596,7 @@ impl Runtime {
         self.tr_backlog.extend(evs);
     }
 
-    /// Phase 3: the programs' tick (R47 order: after `Transitions::tick`, before
+    /// The programs' tick (loop order, module docs: after `Transitions::tick`, before
     /// `refresh_srcs`) and the switches it asks for.
     fn tick_programs(
         &mut self,
@@ -1677,7 +1677,7 @@ impl Runtime {
         last
     }
 
-    /// Task 15 (R70/R71): track each transition's audio window from its own
+    /// Track each transition's audio window from its own
     /// `transition.started`/`.done` events, and — once `done` arrives, if `player.debug`
     /// is on — kick off the dropout probe's auto-trigger (never blocks: it only snapshots
     /// cheap data and spawns a worker thread, `probe::dropout::spawn_analysis`).
@@ -1695,7 +1695,7 @@ impl Runtime {
                 TransitionEventKind::Done { .. } => {
                     self.dropout_windows.done(&ev.corr.0, mono);
                     if self.debug_mode() {
-                        // Task 16d: deferred until the window's post-roll is captured.
+                        // Deferred until the window's post-roll is captured.
                         dropout::request_analysis(self, ev.corr.clone(), None);
                     }
                 }
@@ -1707,12 +1707,12 @@ impl Runtime {
     /// Forward graph changes to the live sources (and keep the wake-fd registrations in
     /// line with the hosted sources).
     pub(crate) fn sync_sources(&mut self) {
-        // Task 14: a source created while auto-muted (a handler's `create`, a program's or a
+        // A source created while auto-muted (a handler's `create`, a program's or a
         // transition's B) comes up at −96 — set before its first sync opens it.
         if self.automute.muted {
             self.automute_enforce();
         }
-        // R75: catch a `player.paused` change promptly even between ticks/steps — this
+        // Catch a `player.paused` change promptly even between ticks/steps — this
         // runs after every dispatch (`after_dispatch`), not only on a timer/`step`, so a
         // plain `set` pushes the effective pause to every source at once (a no-op if
         // `tick`/`begin_step` already called this for `now`'s sake this iteration).
@@ -1753,12 +1753,12 @@ impl Runtime {
         }
         // `update_player_paused` already ran at the top of this tick/step, before `now`
         // was read for `run_anims` — a pause applied this iteration freezes it too.
-        // R88 (Task 16c): the pause-ramp gate's exclusion set must land *before* `sync`
+        // The pause-ramp gate's exclusion set must land *before* `sync`
         // composes `player_paused` for every source — a tick that both applies the edge
         // and calls `sync` (every tick does) must never let `sync` see an un-excluded
         // newly-eligible id even once, or it pauses it instantly before the gate exists.
         let mut exclude = self.drive_pause_gates_pre_sync();
-        // I1: a source ramping out (retire) or into its park keeps playing into silence on
+        // A source ramping out (retire) or into its park keeps playing into silence on
         // the unpaused clock — a pause landing mid-ramp must not cut it.
         exclude.extend(self.pending_destroy.iter().map(|(_, id, _)| id.clone()));
         if let Some(pk) = &self.parked
@@ -1774,14 +1774,14 @@ impl Runtime {
         self.arm_gain_timer_if_needed();
     }
 
-    /// R90 (Task 16d): arms the fast (≥ 1 kHz) gain-only timer if it isn't already and
-    /// at least one `gain.*` animation exists *or* an R88 pause gate is mid-ramp (fix
-    /// round: the gate's own ramp isn't an Animator animation at all, so it needs its
+    /// Arms the fast (≥ 1 kHz) gain-only timer if it isn't already and
+    /// at least one `gain.*` animation exists *or* a pause gate is mid-ramp (the
+    /// gate's own ramp isn't an Animator animation at all, so it needs its
     /// own arming condition — `has_active_pause_gate_ramp`). A no-op under the stepped
     /// clock (`self.stepped()`) — gains there are evaluated at step boundaries exactly
     /// like every other property (`begin_step`'s own `run_anims` call), never between
     /// them; there's no "real time" for a 1 ms timer to tick against anyway (and a
-    /// gate never exists under stepped either, § invariant #7 R93). Called from
+    /// gate never exists under stepped either, `docs/player/invariants.md` #7). Called from
     /// `sync_sources` (both the main tick's own call and `after_dispatch`'s), so a gain
     /// animation a handler just added (`animate`, `transition`) or the recipe just added
     /// (`Transitions::tick`, one loop iteration later) is armed promptly. Cheap when
@@ -1807,7 +1807,7 @@ impl Runtime {
         }
     }
 
-    /// Whether the fast gain timer has anything to push (M1, final review): a gain
+    /// Whether the fast gain timer has anything to push: a gain
     /// animation that is live **and moving** — started or starting within one main tick
     /// (the next main tick re-checks), and not frozen by the player pause (the main
     /// Animator's clock stops then; a teardown ramp's doesn't) — or a pause gate mid-ramp.
@@ -1821,18 +1821,18 @@ impl Runtime {
             || self.has_active_pause_gate_ramp()
     }
 
-    /// R90: one fire of the fast gain timer — evaluates only `gain.*` animations at the
+    /// One fire of the fast gain timer — evaluates only `gain.*` animations at the
     /// current (pause-adjusted) [`Runtime::now`], `graph.set`s each, then forwards just
     /// those changes straight to their hosted sources (`SourceHost::push_gain`, the same
-    /// direct-apply bypass pattern as the R88 pause gate's `force_paused`) instead of
+    /// direct-apply bypass pattern as the pause gate's `force_paused`) instead of
     /// the ordinary per-tick `sync` — which would also scan for opened/gone sources and
     /// compose `player_paused`, neither of which a gain push needs — then removes them
     /// from the pending-changes queue (`Graph::drain_gain_changes`) so the next ordinary
     /// `sync_sources` never replays what this call already hand-delivered. The main
-    /// timer keeps doing everything else at the output refresh (R47 unchanged — this
+    /// timer keeps doing everything else at the output refresh (the loop order is unchanged — this
     /// timer only ever touches gain paths).
     ///
-    /// **Pause (R88/invariant #7).** While `player.paused`, [`Runtime::now`] is frozen
+    /// **Pause (invariant #7).** While `player.paused`, [`Runtime::now`] is frozen
     /// (excised, never merely stopped-and-later-jumped) — calling `tick_gains` with an
     /// unchanged `now` would just keep re-emitting the same already-sent value, so
     /// *that* loop skips evaluating entirely while paused: zero Animator pushes for the
@@ -1854,11 +1854,11 @@ impl Runtime {
         // `sync_sources`, the cached `self.player_paused` field would still read stale
         // (`false`) and `self.now()` would hand back the real, still-advancing clock
         // instead of the frozen one — exactly the race `drive_pause_gates_pre_sync`'s
-        // own doc warns about for the R88 gate. Calling this directly (cheap: one graph
+        // own doc warns about for the gate. Calling this directly (cheap: one graph
         // read, a no-op if nothing changed) closes it the same way the main `tick()`
         // does as its own first line.
         self.update_player_paused();
-        // I1: teardown ramps run on the unpaused clock — pushed whether paused or not.
+        // Teardown ramps run on the unpaused clock — pushed whether paused or not.
         for (path, v) in self.teardown_anim.tick_gains(self.base_now()) {
             if self.graph.set_animated(&path, PropValue::F64(v)).is_err() {
                 self.teardown_anim.cancel_target(&path);
@@ -1886,9 +1886,9 @@ impl Runtime {
                 }
             }
         }
-        // R90 fix round: the R88 pause gate's own ramp is deliberately *not* an
+        // The pause gate's own ramp is deliberately *not* an
         // Animator animation at all (its `Pausing` state exists only while
-        // `player.paused` — which is exactly what freezes `Runtime::now()`, R75 — so it
+        // `player.paused` — which is exactly what freezes `Runtime::now()` — so it
         // has to be wall-clock timed) — `tick_gains` above never touches it. Push its
         // current value here too, unconditionally (never gated on `player_paused`: a
         // `Pausing` ramp runs *while* paused, and a `Resuming` one starts the instant
@@ -1907,7 +1907,7 @@ impl Runtime {
                     self.stats.record_gain_push(t_mono_ms, *db);
                 }
             }
-            // R90 fix round: the dropout detector's `GainHistory` must be sampled at
+            // The dropout detector's `GainHistory` must be sampled at
             // the same (fast) rate as what's actually pushed, or its "expected"
             // envelope — held at the *coarse* bin's last recorded value for the
             // `drops` check (`gain_at`, nearest-previous) — goes stale mid-ramp:
@@ -1933,14 +1933,14 @@ impl Runtime {
         })
     }
 
-    /// R90 fix round: whether any R88 pause gate is currently mid-ramp (`Pausing` or
+    /// Whether any pause gate is currently mid-ramp (`Pausing` or
     /// `Resuming`) — the fast gain timer's other arming condition alongside
     /// `Animator::has_live_gain`, since the gate's ramp isn't an Animator animation.
     fn has_active_pause_gate_ramp(&self) -> bool {
         self.pause_gates.values().any(PauseGate::flowing)
     }
 
-    /// R90 fix round: pushes the current wall-clock-computed `gain.pause` value for every
+    /// Pushes the current wall-clock-computed `gain.pause` value for every
     /// open `Pausing`/`Resuming` gate — the same formula (`PauseGate::ramp_db`)
     /// `drive_pause_gates_pre_sync` uses for its own per-tick write, so the two never
     /// disagree. State transitions stay `drive_pause_gates_pre_sync`'s job alone.
@@ -2028,8 +2028,8 @@ impl Runtime {
     /// per-source state of sources that are gone).
     fn after_update(&mut self, all: bool) {
         let changed = self.host.take_changed();
-        // Phase 2 Task 8: a scene's new frame wakes each output at most at that output's
-        // `eff(scene_fps, refresh)` (one worker serves every output showing it, D1).
+        // A scene's new frame wakes each output at most at that output's
+        // `eff(scene_fps, refresh)` (one worker serves every output showing it).
         let host = &self.host;
         let callbacks = self.backend.kind() == "wayland";
         self.redraw.mark_shown_gated(
@@ -2051,7 +2051,7 @@ impl Runtime {
                 SourceEvent::Rejected { prop, reason } => {
                     ("", Level::Warn, json!({ "prop": prop, "reason": reason }))
                 }
-                // Task 16c, R85: logged at debug — common (every un-pause) and only
+                // Logged at debug — common (every un-pause) and only
                 // interesting when hunting an onset-timeout.
                 SourceEvent::AudioFlowing => {
                     ("source.audio_flowing", Level::Debug, json!({ "id": id }))
@@ -2069,7 +2069,7 @@ impl Runtime {
                 SourceEvent::AudioFlowing => "audio_flowing".to_string(),
             };
             self.last_event.insert(id.clone(), name);
-            // Task 10: a source that broke (a scene past its restart budget is saved
+            // A source that broke (a scene past its restart budget is saved
             // `broken`) is news for the snapshot even when no graph change came with it.
             errored |= matches!(ev, SourceEvent::Error { .. });
             self.src_events.push((id, ev));
@@ -2085,11 +2085,11 @@ impl Runtime {
         }
     }
 
-    /// I6 (final review): resolve this iteration's held onsets — the runtime's own
+    /// Resolve this iteration's held onsets — the runtime's own
     /// (`onsets`: unpark) and every restored source's fade-in (`fade_in`), which starts
     /// once the source is `Ready` **and** its audio flows (or `ONSET_TIMEOUT` after
     /// `Ready`; at once for a source with no audio). A restored source that errors
-    /// instead has its placeholder dropped (M1).
+    /// instead has its placeholder dropped.
     fn drive_onsets(&mut self, evs: &[(String, SourceEvent)], now: Duration) {
         let g = &self.graph;
         self.onsets
@@ -2143,7 +2143,7 @@ impl Runtime {
         }
     }
 
-    /// Task 16c (R88): advance every player-pause anticlick gate (see [`PauseGate`]) and
+    /// Advance every player-pause anticlick gate (see [`PauseGate`]) and
     /// return the ids to exclude from the `player_paused` composition this sync (the
     /// gates still ramping down). Runs from [`Runtime::sync_sources`], *before*
     /// `SourceHost::sync` — a tick that both applies a `player.paused` edge and calls
@@ -2152,7 +2152,7 @@ impl Runtime {
     /// protecting it exists. Resolving `AwaitingFlow` needs this tick's events, so it
     /// stays in `drive_pause_gates_post_update` (from `finish_tick`).
     ///
-    /// **Eligibility (final review I2).** Every source with audio that is playing (not
+    /// **Eligibility.** Every source with audio that is playing (not
     /// node-paused — a source the recipe holds paused is silent already), not being
     /// retired, not parked. The gate ramps its own `gain.pause` slot, so it composes with
     /// whatever the recipe does to the same source on `xfade`/`anticlick` (a pending
@@ -2163,7 +2163,7 @@ impl Runtime {
     /// the player is already paused, so composed paused at once) starts `Paused`
     /// (`gain.pause` −96, silent), so its resume is a flow-gated ramp in like every other.
     fn drive_pause_gates_pre_sync(&mut self) -> BTreeSet<String> {
-        // R93: explicitly inert under the stepped clock — mpv stays paused for good there
+        // Explicitly inert under the stepped clock — mpv stays paused for good there
         // and the gate's wall-clock ramp has nothing to pace against.
         if self.stepped() {
             return BTreeSet::new();
@@ -2178,7 +2178,7 @@ impl Runtime {
             .map(|(_, id, _)| id.clone())
             .collect();
         let parked = self.parked.as_ref().map(|pk| pk.id.clone());
-        // R93: a gate never outlives its node, and never competes with a teardown/park.
+        // A gate never outlives its node, and never competes with a teardown/park.
         let abandoned: Vec<String> = self
             .pause_gates
             .keys()
@@ -2363,7 +2363,7 @@ impl Runtime {
         exclude
     }
 
-    /// The other half of the R88 gate (see `drive_pause_gates_pre_sync`'s doc): resolve
+    /// The other half of the gate (see `drive_pause_gates_pre_sync`'s doc): resolve
     /// any `AwaitingFlow` gate against this tick's source events — the same flow test and
     /// bound as every onset (`crate::onset`), on the gate's own wall clock; logged
     /// `player.pause_resume_onset_timeout` if the bound is hit.
@@ -2403,7 +2403,7 @@ impl Runtime {
         }
     }
 
-    /// Feed the transition recipe's held sources into the `srcs:` alias (R50).
+    /// Feed the transition recipe's held sources into the `srcs:` alias.
     pub(crate) fn refresh_srcs(&mut self) {
         let (by_output, graves) = self.tr.held_sources();
         self.graph.set_transition_sources(by_output, graves);
@@ -2572,7 +2572,7 @@ impl Runtime {
     }
 
     /// Pointer samples from the backend → `out:<c>.pointer` `[x, y, buttons]` (observed), and
-    /// (Phase 2 Task 7, mouse on) every scene on that output — both sides mid-transition (the
+    /// (mouse on) every scene on that output — both sides mid-transition (the
     /// `srcs:<c>` alias) — gets it in its own native pixels, mapped back through the main
     /// layer's fit/viewport (`scene::pointer`); a point in a letterbox bar reaches nobody.
     /// Audit C6: while the desktop pointer has a reading, scenes get **its** position instead
@@ -2781,7 +2781,7 @@ impl Runtime {
         Some(crate::scene::pointer::to_native_px(uv, native))
     }
 
-    /// Phase 2 Task 7 (D4): every live scene that wants audio input gets the latest frame of
+    /// Every live scene that wants audio input gets the latest frame of
     /// the system-audio mix (`audio::sysmon`) on its next tick. The capture runs only while
     /// at least one does; the last one gone drops it on a helper thread (its PipeWire thread
     /// is joined there, never on the loop).
@@ -2814,7 +2814,7 @@ impl Runtime {
             if only.is_some() {
                 return;
             }
-            // the auto-mute Signal (Task 14) shares the capture: it keeps it running
+            // the auto-mute Signal shares the capture: it keeps it running
             if self.automute_wants_monitor() {
                 if let Some(m) = &self.sysmon {
                     m.set_visual(false);
@@ -2840,7 +2840,7 @@ impl Runtime {
         }
     }
 
-    /// Phase 2 Task 7: `player.scene_assets` → the scenes' base opts. Re-resolved whenever
+    /// `player.scene_assets` → the scenes' base opts. Re-resolved whenever
     /// the prop changes ("" = auto: `LIASCAPE_WE_ASSETS_DIR`, then every Steam library); the result
     /// is `player.scene_assets_resolved` ("" = none — a scene then errors naming
     /// `LIASCAPE_WE_ASSETS_DIR` / `player.scene_assets`, and `hello` offers no `scene`).
@@ -2884,7 +2884,7 @@ impl Runtime {
     }
 
     /// Whether `kind: scene` sources can play here: the worker binary resolves, and WE's
-    /// assets dir does (unless synthetic test scenes are allowed — D7). `Err` = why not.
+    /// assets dir does (unless synthetic test scenes are allowed). `Err` = why not.
     pub fn scenes_available(&self) -> Result<(), String> {
         if crate::paths::scene_worker_bin().is_none() {
             return Err(
@@ -2911,15 +2911,14 @@ impl Runtime {
     /// Apply the backend's hotplug (graph `out:<name>` + its main layer; the timer period
     /// follows the max refresh).
     ///
-    /// **Added (R59/R60):** its remembered output props (`layer`, …) are re-applied (Task
-    /// 16). If the parked wallpaper was parked *for this connector* (a restored snapshot's
+    /// **Added:** its remembered output props (`layer`, …) are re-applied. If the parked wallpaper was parked *for this connector* (a restored snapshot's
     /// output that wasn't present), it shows that; else it joins the live transition
     /// covering the first other output, if any (`Transitions::adopt_output` — it shows
     /// what that transition shows and goes through cancel/commit/handoff with it); else it
     /// shows `cur:` of the first output that has one; else, if a wallpaper is parked (no
     /// output was left), it shows that, unpaused and ramped back in over 30 ms.
     ///
-    /// **Removed (R60):** the node + layer go; every live transition forgets the output
+    /// **Removed:** the node + layer go; every live transition forgets the output
     /// (`Transitions::drop_output` — one left with no output is committed); then whatever
     /// that output alone showed or held (not shown by another layer, not held by a
     /// transition) is ramped to silence and destroyed (`retire`) — except, when no output
@@ -3080,7 +3079,7 @@ impl Runtime {
     fn output_removed(&mut self, name: &str) {
         let id = format!("out:{name}");
         let layer = format!("lay:{name}:main");
-        // Its settings outlive it: re-applied if this connector comes back (Task 16).
+        // Its settings outlive it: re-applied if this connector comes back.
         let props = self.output_props(name);
         if props.is_empty() {
             self.out_props.remove(name);
@@ -3177,7 +3176,7 @@ impl Runtime {
             .find_map(|c| self.graph.resolve(&format!("cur:{c}")).into_iter().next())
     }
 
-    /// I1: ramp `id`'s `gain.anticlick` from its current value to silence over 30 ms on
+    /// Ramp `id`'s `gain.anticlick` from its current value to silence over 30 ms on
     /// the **unpaused** base clock (`teardown_anim`) — the retire/park teardown, which
     /// must finish while the player is paused. The main Animator's ramp on the same slot
     /// (and any held onset of it) is dropped: one writer.
@@ -3216,7 +3215,7 @@ impl Runtime {
         self.fade_in.remove(id);
     }
 
-    /// R93 (review of Task 16c/16d): drop `id`'s player-pause gate (if any) outright —
+    /// Drop `id`'s player-pause gate (if any) outright —
     /// closing its own dropout-probe window — wherever a gated source is retired,
     /// destroyed or parked. The gate's `gain.pause` value is left as it is (the caller
     /// decides: retire/park ramp `anticlick` to silence on top of it; a resume on a
@@ -3233,7 +3232,7 @@ impl Runtime {
 
     /// Remove a source without a click (core invariant, item 10): an audible one is ramped
     /// to −96 over 30 ms (`gain.anticlick`) and destroyed when the ramp is over; a silent
-    /// one — including one the player-level pause holds paused (I1) — goes at once.
+    /// one — including one the player-level pause holds paused — goes at once.
     /// Returns the ramp length. Used by `destroy`, `stop`, output removal. The ramp runs on
     /// the unpaused clock and the source is kept out of the pause composition meanwhile,
     /// so a retire completes (and frees its decoder) while the player is paused.
@@ -3242,7 +3241,7 @@ impl Runtime {
             return at.saturating_sub(self.base_now()); // already on its way out
         }
         // Its audio still flows while paused only through a gate mid-ramp — decided
-        // before the gate goes (R93: retire becomes the sole writer from here).
+        // before the gate goes (retire becomes the sole writer from here).
         let flowing_gate = self.pause_gates.get(id).is_some_and(PauseGate::flowing);
         self.abandon_pause_gate(id);
         if self.graph.kind_of(id) != Some(NodeKind::Source) {
@@ -3260,7 +3259,7 @@ impl Runtime {
             let _ = self.graph.destroy(id);
             Duration::ZERO
         } else {
-            // R80: a plain retire's own 30 ms anti-click ramp is a dropout-probe window
+            // A plain retire's own 30 ms anti-click ramp is a dropout-probe window
             // too — same mechanism as a transition's A, with a silent/empty "B".
             let a = crate::recipes::transition::snapshot_source(&self.graph, id);
             let b = crate::recipes::transition::AudioSourceSnapshot {
@@ -3274,7 +3273,7 @@ impl Runtime {
             let mono = log::mono_now().unwrap_or_default();
             let c = log::new_corr("rt");
             self.dropout_windows.started(c.0.clone(), mono, vec![a], b);
-            // Real time: the ramp runs on the unpaused clock (I1).
+            // Real time: the ramp runs on the unpaused clock.
             self.dropout_windows.done(&c.0, mono + STOP_RAMP);
             corr = Some(c);
             self.teardown_ramp(id);
@@ -3292,11 +3291,11 @@ impl Runtime {
         ramp
     }
 
-    /// R60: no output is left — keep the current wallpaper, silent and paused, until one
+    /// No output is left — keep the current wallpaper, silent and paused, until one
     /// comes back. `pending_b`: it's a transition's B that was never shown (it starts
     /// playing when unparked, whatever its pause state now). `connector`: parked for that
     /// connector (a restored output that isn't present) — shown when it appears. The park
-    /// ramp runs on the unpaused clock (I1).
+    /// ramp runs on the unpaused clock.
     fn park(&mut self, id: &str, pending_b: bool, connector: Option<String>) {
         if self.fade_in.remove(id).is_some() && self.restore_fade_pending(id) {
             // Parked = silent; unpark ramps it in from −96.
@@ -3361,7 +3360,7 @@ impl Runtime {
     }
 
     /// Show the parked wallpaper again: unpaused (unless it was paused before), ramped
-    /// back in over 30 ms — on audio that is actually flowing (I6: the ramp waits for
+    /// back in over 30 ms — on audio that is actually flowing (the ramp waits for
     /// `AudioFlowing`, bounded). Returns its id.
     fn unpark(&mut self) -> Option<String> {
         let pk = self.parked.take()?;
@@ -3430,7 +3429,7 @@ impl Runtime {
         Some(id)
     }
 
-    /// I4: the `align: end` request parked with `b` is handed off now (an output shows
+    /// The `align: end` request parked with `b` is handed off now (an output shows
     /// it), or cancelled if `b` is no longer the parked wallpaper.
     fn finish_parked_req(&mut self, shown: &str) {
         let Some(req) = self.parked_req.take() else {
@@ -3464,13 +3463,13 @@ impl Runtime {
         }
     }
 
-    /// I4 (final review): a `transition` while **no output exists** (R60 parked). It is
+    /// A `transition` while **no output exists** (parked). It is
     /// accepted: B is created paused and silent and becomes the parked wallpaper (the old
     /// one is retired — it's paused and silent, so it goes at once), so a rotation keeps
     /// its place and the *last* target is what an output shows when one comes back. An
     /// `align: now` request is handed off at once; an `align: end` one waits for that
     /// output (the parked A is paused — its end can't come before) unless the parked A
-    /// never ends (a scene or a still: `Now`, Phase 2 Task 9), and a newer parked
+    /// never ends (a scene or a still: `Now`), and a newer parked
     /// request supersedes it. Events: `transition.scheduled` → `.handoff {committed,
     /// parked}` → `.done` (or `.cancelled {reason: "superseded"}`), corr `tr-<n>`.
     pub(crate) fn transition_parked(
@@ -3518,7 +3517,7 @@ impl Runtime {
                     "duration_ms": req.duration_ms, "parked": true, "origin": req.origin }),
         );
         let old = self.parked.take().map(|pk| pk.id);
-        // Phase 2 Task 9: a parked A that never ends (a scene, a still) has no end to wait
+        // A parked A that never ends (a scene, a still) has no end to wait
         // for — `align: end` is `Now`, exactly as in the recipe (`never_ends`).
         let wait_end = req.align == crate::recipes::transition::Align::End
             && !old
@@ -3585,13 +3584,13 @@ impl Runtime {
     /// `stop`: every in-flight transition is dropped (`transition.cancelled {reason:
     /// "stopped"}`), every layer emptied, every source ramped to silence over 30 ms
     /// (invariant #4) and then destroyed — a source the player pause holds paused is
-    /// silent and goes at once (I1). Then `player.paused` is cleared (I1, final review):
+    /// silent and goes at once. Then `player.paused` is cleared:
     /// as with legacy, a stop ends the session and the next wallpaper starts playing.
     /// `instant` (stepped clock / quit): silence and destroy now — virtual time won't move
     /// on by itself.
     pub(crate) fn stop_all(&mut self, instant: bool) -> Vec<String> {
         let now = self.now();
-        // Phase 3: the session ends — every program goes (its pending switches with the
+        // The session ends — every program goes (its pending switches with the
         // transitions below).
         for id in self.programs.destroy_all(&self.graph) {
             let _ = self.graph.destroy(&id);
@@ -3648,7 +3647,7 @@ impl Runtime {
                 self.retire(id);
             }
         }
-        // I1: the session ends here — whatever comes next plays (the stop ramps above
+        // The session ends here — whatever comes next plays (the stop ramps above
         // run on the unpaused clock, so they complete either way).
         let _ = self.graph.set(&p("player.paused"), PropValue::Bool(false));
         self.refresh_srcs();
@@ -3663,7 +3662,7 @@ impl Runtime {
     }
 
     /// Destroy every retired source whose ramp is over — `now` is the unpaused base
-    /// clock (I1) — then settle a parked wallpaper whose park ramp is over.
+    /// clock — then settle a parked wallpaper whose park ramp is over.
     fn destroy_due(&mut self, now: Duration) {
         let mut due = Vec::new();
         for (at, id, armed) in &mut self.pending_destroy {
@@ -3719,7 +3718,7 @@ impl Runtime {
         self.capture.shutdown(&self.gfx);
         let t = Instant::now();
         self.host.finish_teardown(Duration::from_millis(500));
-        // Phase 2: the render worker frees every render context it still holds (each before
+        // The render worker frees every render context it still holds (each before
         // its core goes to the reaper) and exits; one it couldn't free is a straggler too.
         let render_left = self.host.render_worker().map_or(0, |w| {
             let t = Instant::now();
@@ -3733,7 +3732,7 @@ impl Runtime {
             );
             left
         });
-        // I5: an async open still creating its core counts like a reaper straggler.
+        // An async open still creating its core counts like a reaper straggler.
         let left =
             reaper::shutdown(REAPER_WAIT) + crate::sources::host::opening_pending() + render_left;
         if left > 0 {
@@ -3745,7 +3744,7 @@ impl Runtime {
                 json!({ "count": left, "waited_ms": t.elapsed().as_secs_f64() * 1000.0 }),
             );
         }
-        // R79 (review fix round): kills any in-flight dropout-probe ffmpeg decode
+        // Kills any in-flight dropout-probe ffmpeg decode
         // outright and joins its analysis thread, bounded the same way as the mpv
         // reaper above.
         let t_dropout = Instant::now();
@@ -3862,7 +3861,7 @@ impl Runtime {
     }
 
     fn write_snapshot(&mut self) {
-        // Phase 3: `program.json` first (a definition changed), then the snapshot whose
+        // `program.json` first (a definition changed), then the snapshot whose
         // program state names that revision.
         if self.programs.def_dirty() {
             let f = self.programs.program_file(&self.graph);
@@ -3925,16 +3924,16 @@ impl Runtime {
         }
     }
 
-    /// Recreate a snapshot (§ Snapshot): player props; each saved connector that is
+    /// Recreate a snapshot (`docs/player/modules/persistence.md`): player props; each saved connector that is
     /// present gets its output props, main-layer settings and content (fresh source ids,
     /// at the saved positions); a saved connector that is missing keeps its props for
     /// when it appears, and its content — unless a present output shows it — is parked
-    /// for that connector (R60: never lost); the saved parked wallpaper is shown on the
+    /// for that connector (never lost); the saved parked wallpaper is shown on the
     /// outputs that show nothing, else parked again; a present connector the snapshot
     /// didn't know shows the current wallpaper (as hotplug would). Audible sources start
     /// silent and ramp in over 30 ms once ready.
     fn restore_snapshot(&mut self, mut snap: Snapshot, session_start: bool) {
-        // § Playlist start: a session start of a `start_over` program never shows the item
+        // `docs/player/modules/programs.md` § Playlist start and resume points: a session start of a `start_over` program never shows the item
         // it was on — that item isn't restored at all (the program starts afresh below).
         let starting_over = if session_start {
             self.starting_over(&mut snap)
@@ -4090,7 +4089,7 @@ impl Runtime {
         out
     }
 
-    /// Phase 3 (`recipes::program::store`): after the snapshot's sources, every program of
+    /// `recipes::program::store`: after the snapshot's sources, every program of
     /// `<state>/program.json` is created again and given its saved state
     /// (`Programs::restore`): current = what its first output shows (or the parked
     /// wallpaper) when that is its saved item.
@@ -4221,8 +4220,8 @@ impl Runtime {
         }
         let s = snap.sources.get(saved)?;
         let mut props = s.create_props();
-        // A video or a scene (its worker's stream, Phase 2) will be heard — not a scene
-        // restored broken (Task 10: its preview, no worker, nothing to fade in).
+        // A video or a scene (its worker's stream) will be heard — not a scene
+        // restored broken (its preview, no worker, nothing to fade in).
         let audible = onset::kind_has_audio(&s.kind) && !s.paused && !s.broken;
         if audible {
             props.insert("gain.anticlick".into(), json!(SILENT_DB));
@@ -4303,7 +4302,7 @@ impl Runtime {
         let dt_s = dt.as_secs_f64();
         let mut waits = Vec::new();
         for id in self.host.ids() {
-            // Phase 2 Task 5: a scene gets the same virtual time (no duration: never clamped
+            // A scene gets the same virtual time (no duration: never clamped
             // or wrapped) and ticks exactly it (`SceneSource::step_to`).
             let scene = self.host.scene(&id).is_some();
             let video = match self.host.mpv(&id) {
@@ -4333,9 +4332,9 @@ impl Runtime {
             if let Some(r) = lt.reset.take() {
                 lt.t = r;
             } else if lt.steps > 0 && !paused && !self.player_paused {
-                // R75: player-level pause freezes virtual media time too, same as a
+                // Player-level pause freezes virtual media time too, same as a
                 // node-level pause — `step_seek` below then sees an unchanged target and
-                // skips the seek entirely (§ Runtime "Stepped mode").
+                // skips the seek entirely (`docs/player/modules/runtime.md` § Stepped clock).
                 lt.t += dt_s * speed;
             }
             lt.steps += 1;
@@ -4878,9 +4877,9 @@ fn signal_fd() -> Result<OwnedFd, String> {
 /// `liascape-player serve [--headless …]`: run until `quit` / SIGINT / SIGTERM (or the Wayland
 /// connection is lost — then every source is silenced and torn down, and it returns `Err`).
 pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
-    crate::mem::apply_policy(); // Task 20b: allocator policy, first thing (before the mpv cores exist)
+    crate::mem::apply_policy(); // Allocator policy, first thing (before the mpv cores exist)
     if opts.wayland {
-        crate::wl::apply_driver_env(); // Task 20e: before any thread (setenv) and before EGL
+        crate::wl::apply_driver_env(); // Before any thread (setenv) and before EGL
     }
     supervise::make_sent_faults_fatal(); // `kill -SEGV` crashes, never shrugged off
     let sigfd = signal_fd()?;
@@ -4894,7 +4893,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     if opts.wayland {
         crate::wl::log_driver_env();
     }
-    // R73: a restarted child says why, first thing (the supervisor has no socket).
+    // A restarted child says why, first thing (the supervisor has no socket).
     let restart_event = opts
         .supervised
         .as_ref()
@@ -4921,7 +4920,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     }
     let (listener, mut socket_file) = crate::api::server::bind(&opts.socket, opts.own_socket_dir)?;
     // Wayland: connect first (EGL needs the wl_display), then the context on it. Both
-    // failure classes here are "compositor/EGL not available yet" (Task 16b) — the
+    // failure classes here are "compositor/EGL not available yet" — the
     // supervisor retries these with backoff, unlike `bind`'s "already running" above.
     let wl = if opts.wayland {
         Some(crate::wl::Wayland::connect().map_err(ServeError::NoCompositor)?)
@@ -4931,7 +4930,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     // The bus comes after the socket (a second instance exits above without touching
     // PipeWire) and the compositor connection (a start waiting for its compositor doesn't
     // load and unload a sink in the user's session on every retry). Its thread connects in
-    // the background (never blocking serve on the audio server — cold boot, 2026-10-29)
+    // the background (never blocking serve on the audio server, which may not be up on a cold boot)
     // while EGL and the catalogue come up; sources play into it unless `--ao` routes them
     // elsewhere (then there's none).
     let audio_started = Instant::now();
@@ -4987,7 +4986,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             json!(-bus.latency().as_secs_f64()),
         );
     }
-    // I5: mpv's GL shader cache under the player's state dir (repeat opens skip the
+    // mpv's GL shader cache under the player's state dir (repeat opens skip the
     // shader compile that otherwise dominates a switch's loop time).
     let shader_cache = opts.state_dir.join("shader-cache");
     if std::fs::create_dir_all(&shader_cache).is_ok() {
@@ -4996,10 +4995,10 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             json!(shader_cache.display().to_string()),
         );
     }
-    // Phase 2 Task 5: `kind: scene` sources. The worker binary (none → a scene's open fails
+    // `kind: scene` sources. The worker binary (none → a scene's open fails
     // naming it; `hello` has no `scene` capability), crash records under the state dir, and
     // the synthetic test renderer only when this process runs with
-    // `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (D7; production never sets it).
+    // `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (production never sets it).
     if let Some(bin) = crate::paths::scene_worker_bin() {
         base.insert("scene_worker".into(), json!(bin));
     }
@@ -5118,7 +5117,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             crate::signal::automute::env_enabled(),
         ),
     };
-    // Phase 3 Task 9: the backend's outbox (`<state>/outbox.jsonl`), compacted on `lia-snapshot`
+    // The backend's outbox (`<state>/outbox.jsonl`), compacted on `lia-snapshot`
     let runner = rt.snap.writer.runner();
     crate::outbox::install(crate::outbox::Outbox::open(
         &opts.state_dir,
@@ -5132,7 +5131,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         let _ = rt.graph.set(&p("player.debug"), PropValue::Bool(true));
     }
     rt.apply_output_changes();
-    // Phase 3 (§ Playlist start): the per-playlist resume points, restore or not
+    // The per-playlist resume points, restore or not (`docs/player/modules/programs.md`
+    // § Playlist start and resume points)
     rt.programs.load_resume(&opts.state_dir);
     if opts.restore {
         rt.restore_from_disk(&opts.state_dir, opts.session_start);
@@ -5181,7 +5181,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| format!("event loop: {}", e.error))?;
     }
     if opts.clock == ClockMode::Real {
-        // I5 (final review): mpv cores are created on a worker thread; its ping wakes the
+        // mpv cores are created on a worker thread; its ping wakes the
         // loop, whose next `sync_sources` opens the source (GL half on this thread).
         // Stepped mode keeps synchronous opens (its frames must be deterministic).
         let (open_ping, open_ping_src) =
@@ -5191,7 +5191,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             .map_err(|e| format!("event loop: {}", e.error))?;
         rt.host
             .set_async_open(Some(Arc::new(move || open_ping.ping())));
-        // Phase 2: render contexts (creation, first render, every frame) on `lia-render`.
+        // Render contexts (creation, first render, every frame) on `lia-render`.
         // Real clock only, like the async opens it rides on.
         if opts.render_worker {
             match crate::sources::RenderWorker::start(&rt.gfx) {
@@ -5274,7 +5274,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             break;
         }
         rt.after_dispatch();
-        // Phase 2: the render worker died (a panic on `lia-render`): every mpv picture would
+        // The render worker died (a panic on `lia-render`): every mpv picture would
         // freeze and every open wait out the attach timeout — fail like a lost compositor
         // instead (silenced + torn down, exit 3: the supervisor restarts with `--restore`).
         if rt.quit_at.is_none()

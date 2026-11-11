@@ -24,8 +24,8 @@ export const LibraryCard = memo(function LibraryCard({
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
-      {/* right-click = the item sidebar on this card WITHOUT applying it (owner 2026-11-11: "right-click opens the sidebar on that
-          item without applying it — no context menu anywhere"); the sidebar has Open in file manager / Delete / Delete from
+      {/* right-click = the item sidebar on this card WITHOUT applying it (docs/decisions.md § "Open the item sidebar on
+          right-click; no context menus"); the sidebar has Open in file manager / Delete / Delete from
           source. Library.tsx keeps the card where it was while the docked sidebar re-fits the grid (gridKeys.ts keepCardInView). */}
       <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={onClick}
         onContextMenu={(e) => { e.preventDefault(); onContextFocus(); }}

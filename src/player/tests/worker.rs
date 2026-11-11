@@ -380,10 +380,10 @@ fn starve(id: &str, knobs: &str, hang_ms: u64) -> (WorkerHost, Instant, Instant,
     (host, t0, Instant::now(), held)
 }
 
-/// Incident 1 (suspend, 2026-10-29 08:16): after the resume every slot of the worker's ring
-/// was with the compositor (latched + queued frames whose fences hadn't signalled yet), so the
-/// next tick could not be rendered — the worker sat idle waiting for a `Release` (eu-stack:
-/// `Renderer::run` → `recv`) and the heartbeat killed it as hung. A worker the host starves of
+/// After a suspend/resume every slot of the worker's ring can be with the compositor
+/// (latched + queued frames whose fences haven't signalled yet), so the
+/// next tick can't be rendered — the worker sits idle waiting for a `Release`
+/// (`Renderer::run` → `recv`), which a naive heartbeat kills as hung. A worker the host starves of
 /// slots is waiting on the host, not hung: it answers pings, and renders the tick the moment
 /// a slot comes back.
 #[test]
@@ -460,10 +460,9 @@ fn starved_forever_is_killed_after_the_starve_limit() {
     );
 }
 
-/// Incident 2 (suspend, 2026-10-29 08:35, NVIDIA saving VRAM through its kernel suspend
-/// notifier): the compositor's own loop was blocked for ~6 s (its heartbeat ran nowhere
-/// near the 2 s deadline), and its first poll after the thaw found a tick 6438 ms old and
-/// killed the worker. Time the host itself didn't run is not the worker's: after a host stall
+/// A suspend with NVIDIA saving VRAM through its kernel suspend notifier can block the
+/// compositor's own loop for ~6 s (its heartbeat runs nowhere near the 2 s deadline), and its
+/// first poll after the thaw then finds a tick ~6.4 s old — a naive heartbeat kills the worker. Time the host itself didn't run is not the worker's: after a host stall
 /// every outstanding tick/ping gets a fresh hang timeout. (The worker here is frozen too, and
 /// comes back 150 ms after the host does — inside the timeout.)
 #[test]

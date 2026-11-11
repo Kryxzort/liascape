@@ -10,9 +10,8 @@ using Liascape.Models;
 namespace Liascape.Web;
 
 // The Browse sidebar's Subscribe / Unsubscribe toggle for Workshop items — "Wallpaper Engine (Local)" (the WE folder's items:
-// Steam subscriptions unless put there by hand) and "Wallpaper Engine (Workshop)" (owner 2026-11-11: "make it so browse >
-// wallpaper engine (local) has option to unsubscribe / same for browse > workshop / it needs to be in the sidebar / probably a
-// button that lets you subscribe/unsubscribe in the sidebar"). `POST /workshop/state|subscribe|unsubscribe` are thin wrappers.
+// Steam subscriptions unless put there by hand) and "Wallpaper Engine (Workshop)". `POST /workshop/state|subscribe|unsubscribe`
+// are thin wrappers.
 // - State: from disk + the unsubscribe queue + the Steam to-do only — never a Steam-client connection just to show it.
 // - Unsubscribe: an item IN the library = exactly the Library's "Delete from source" (trash + the queued unsubscribe, undoable);
 //   not in it = the queued unsubscribe alone. Then the drain (routed by the download mode, like Delete from source).

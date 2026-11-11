@@ -2,8 +2,8 @@
 //! (feature `lwe`, `build.rs`): its C API declared by hand — the public headers are C++-only
 //! (struct tags used as type names) — and a minimal owner for one project in one context.
 //!
-//! Phase 2 Task 1–2 ship this as the link proof and the `--lwe-smoke` diagnostic
-//! ([`smoke`]); Task 7 builds the real renderer (`render.rs`) on [`Scene`] and adds the mouse
+//! The `--lwe-smoke` diagnostic ([`smoke`]) proves the link; the real renderer (`render.rs`)
+//! builds on [`Scene`], with the mouse
 //! (`wp_mouse_input`), the visualiser feed (stereo `wp_context_audio_input_push`) and the live user-property
 //! setters (`wp_project_property_set_*_by_name`).
 //!
@@ -11,7 +11,7 @@
 //! renders into a scratch FBO, then the output is sized to `wp_project_get_width/height`; a NULL
 //! load or a size ≤ 1 after the first render = broken, never rendered again (patch 0004 makes a
 //! second render harmless anyway); `wp_render_update_time` once per frame; the output is y-down
-//! (row 0 = the image's top, our R25 source layout — no flip); alpha is 0 in every pixel.
+//! (row 0 = the image's top, the player's source layout — no flip); alpha is 0 in every pixel.
 //! Audio goes through the host driver (patch 0003): no SDL device is ever opened.
 
 use std::cell::Cell;
@@ -188,7 +188,7 @@ fn storage_dir() -> Option<std::path::PathBuf> {
         .map(|d| d.join("liascape/scene-storage"))
 }
 
-/// The host audio format: what Task 6's PipeWire stream plays.
+/// The host audio format: what the worker's PipeWire stream plays.
 pub const SAMPLE_RATE: i32 = 48_000;
 pub const CHANNELS: i32 = 2;
 
@@ -489,7 +489,7 @@ impl Scene {
     }
 
     /// The context's host audio driver as a [`Pull`](crate::stretch::Pull) for the audio
-    /// thread (Task 6). It holds the raw context: take it out of the audio thread's hands
+    /// thread. It holds the raw context: take it out of the audio thread's hands
     /// (`audio::Control::remove`) before this `Scene` is dropped.
     pub fn audio_puller(&self) -> LwePull {
         LwePull {
@@ -637,7 +637,7 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// real scene offscreen through LWE's core, writes the native frames at 1 s and at S (default 3)
 /// as `<out>/lwe-smoke-1s.png` / `-<S>s.png` (upright, alpha forced to 1), pulls 0.5 s of its
 /// sound through the host driver, and prints one JSON line. Exit 0 = rendered and animating.
-/// A diagnostic for the build (Task 1) and the patches (Task 2); not used by liascape-player.
+/// A diagnostic for the build and the patches; not used by liascape-player.
 /// `--prop name=value` (repeatable) sets a user property at load, like `scene_props` (the value as
 /// JSON — `0.8`, `true`, `"text"` — else a string); `--prop-at T name=value` sets it `T` s into the
 /// `--audio-dump` (a live change, as the worker applies `SetProperty`), or without `--audio-dump`
@@ -887,7 +887,7 @@ fn run_smoke(
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
 
     let opaque = |gfx: &Gfx| unsafe {
-        // LWE leaves alpha 0 in every pixel; the worker forces 1 (spike §2)
+        // LWE leaves alpha 0 in every pixel; the worker forces 1 (`docs/player/spikes/lwe-core.md` §2)
         gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo.id));
         gfx.gl.color_mask(false, false, false, true);
         gfx.gl.clear_color(0.0, 0.0, 0.0, 1.0);
@@ -1100,7 +1100,7 @@ impl Tone {
     }
 }
 
-/// `--audio-dump S` (Task 6 diagnostic): `S` seconds of the scene's sound pulled at 1× in real
+/// `--audio-dump S` (a diagnostic): `S` seconds of the scene's sound pulled at 1× in real
 /// time (64-frame pulls, like the stream's callbacks) → `<out>/audio-in.f32`, then that same
 /// input through the time stretch at 0.5× and 1.5× → `audio-out-0.5.f32` / `-1.5.f32`
 /// (interleaved stereo F32, 48 kHz). Reports each file's exact-silence 1 ms blocks. The scene

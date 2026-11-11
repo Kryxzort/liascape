@@ -36,8 +36,8 @@ export type LiascapeEvent =
   | { type: "steam-login-cancelled"; payload: null };
 
 // API: subscribe to backend push events over WS /events. Auto-reconnects. Same-origin (the installed
-// app: the backend serves the UI, API = "") connects to this page's own origin — it used to return
-// here instead, so the installed app never got a single push event (rotation/keybind switches,
+// app: the backend serves the UI, API = "") connects to this page's own origin — returning here
+// instead would leave the installed app without a single push event (rotation/keybind switches,
 // download progress, Steam sign-in).
 // `onReconnect`: every open after the first — the backend restarted (or the socket dropped): whatever changed in the
 // gap was never pushed, so the page re-reads what it mirrors (store.resync).

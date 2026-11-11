@@ -2,7 +2,7 @@
 //! FBO, exported once as a dmabuf. A slot is busy from the `Frame` that names it until the
 //! compositor's `Release` (whose fence must be waited on before rendering into it again).
 //! Slot ids are unique for the worker's lifetime (`first_id..`), so a re-exported ring
-//! (Task 5's `Resize`) can't be confused with this one.
+//! (a `Resize`) can't be confused with this one.
 
 use std::os::fd::OwnedFd;
 

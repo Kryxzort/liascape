@@ -1,4 +1,4 @@
-//! Playlist start (O4, plan § Playlist start): "When the playlist starts again" = start over
+//! Playlist start (`docs/player/modules/programs.md` § Playlist start and resume points): "When the playlist starts again" = start over
 //! (default) | resume where it left off. A keyed program (`key` = `name:<saved name>` or
 //! `bar`) keeps a resume point per key in `<state>/resume.json` — put when the program is
 //! stopped, replaced (its key changes), destroyed or the player quits, whatever its
@@ -160,7 +160,7 @@ pub fn new_start(
     Some(Order::from_parts(perm, 0, true, items.to_vec(), Vec::new(), usize::MAX))
 }
 
-/// The § Playlist start table. `items` = the program's items (bar order), `point` = the
+/// The playlist-start table. `items` = the program's items (bar order), `point` = the
 /// key's resume point, `avoid_first` = the last item played (a fresh shuffle won't start
 /// there). `None` when nothing is playable.
 pub fn plan_start(

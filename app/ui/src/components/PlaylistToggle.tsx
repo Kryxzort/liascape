@@ -1,8 +1,8 @@
 // Playlist toggle — unchecked = a rounded-square accent ring; checked = an accent square with the tick in the theme's
-// contrast colour (`--accent-fg`). The tick used to be CUT THROUGH the square (an SVG mask — the thumbnail showing in it):
-// on hover the square turns the paler `--accent-hover`, and the see-through tick (a mid-grey thumbnail, say) all but
-// vanished into it — "the checkmarks … become a invisible fill on hover" (owner 2026-11-11; rendered old vs new in
-// Electron 42: the masked tick lost its contrast, the square itself stayed). A solid dark tick keeps it on any thumbnail.
+// contrast colour (`--accent-fg`). Never a tick CUT THROUGH the square (an SVG mask — the thumbnail showing in it):
+// on hover the square turns the paler `--accent-hover`, and a see-through tick (a mid-grey thumbnail, say) all but
+// vanishes into it (rendered in Electron 42: the masked tick loses its contrast, the square itself stays). A solid dark
+// tick keeps it on any thumbnail.
 export function PlaylistToggle({ on, size = 18 }: { on: boolean; size?: number }) {
   return (
     <svg className="pl-toggle-svg" width={size} height={size} viewBox="0 0 20 20" aria-hidden focusable="false">

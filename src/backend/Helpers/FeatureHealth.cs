@@ -8,8 +8,8 @@ using Liascape.Player;
 
 namespace Liascape.Helpers;
 
-// GET /health/features (owner, 2026-10-28: "make missing libraries fail loudly — if a feature won't work because of
-// something in the build, show a warning icon"): every feature that silently degrades when a build piece or a runtime
+// GET /health/features (docs/decisions.md § "Report a missing dependency with a warning, never hide the control"):
+// every feature that silently degrades when a build piece or a runtime
 // tool is missing, with whether it works HERE, why not, and the settings (camelCase AppSettings keys, what the UI's
 // rows carry as `rk`) it breaks — the UI puts a warning icon with the reason on each of those rows.
 // `ok`: true = works, false = won't work (reason says why + what to install), null = not known (e.g. the GPU interop
@@ -133,7 +133,7 @@ public static class FeatureHealth
             f.Add(new("transitions", "Transition effects", i.LegacyTransitions,
                 i.LegacyTransitions ? null : "liascape-transition or the transitions catalogue not found (install.sh builds it) — every switch is a cut",
                 ["globalTransitionEnabled", "transitionMethod", "transitions"]));
-        // auto-mute. liascape-player (the shipped engine since Phase 3 Task 14): the player's `automute` Signal hears other
+        // auto-mute. liascape-player: the player's `automute` Signal hears other
         // apps' audio itself — no pactl / parec / playerctl; "Only if MPRIS player active" needs a session bus. Its health
         // part `automute` false (LIASCAPE_PLAYER_AUTOMUTE=0, its audio bus down): the backend's AudioMonitor mutes while the
         // app is open, nothing with it closed (no monitor-daemon under liascape-player) — said so, with AudioMonitor's

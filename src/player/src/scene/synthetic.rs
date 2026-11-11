@@ -1,4 +1,4 @@
-//! The synthetic test scene (plan D7): `liascape-synthetic.json` in a scene folder makes
+//! The synthetic test scene: `liascape-synthetic.json` in a scene folder makes
 //! `liascape-scene-worker` render a known pattern instead of LWE — exact, repeatable checks of the
 //! transport, timing, crashes and every switch combo without WE's proprietary assets. Only
 //! honoured when the worker's environment has `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1` (production
@@ -22,7 +22,7 @@ pub enum Pattern {
     FrameIndex,
     /// `rgb` everywhere.
     Solid,
-    /// Top half `rgb`, bottom half `rgb2` (the R25 orientation pin).
+    /// Top half `rgb`, bottom half `rgb2` (the orientation pin).
     SplitTb,
     /// `rgb2` background with an `rgb` dot (radius 16 px) at the last `Pointer` position
     /// (sent in native pixels, drawn scaled to the ring).
@@ -61,7 +61,7 @@ pub struct SyntheticSpec {
     pub crash_after_ms: Option<u64>,
     pub hang_after_ms: Option<u64>,
     pub fail: Option<Fail>,
-    /// Task 7: the "load + build" takes this long (the worker's renderer thread sleeps, like a
+    /// The "load + build" takes this long (the worker's renderer thread sleeps, like a
     /// cold LWE build of up to 2.8 s) — the protocol must stay answered meanwhile.
     pub load_ms: u64,
     /// Corpus under load (test-only): `load_ms` is spent working — 5 ms on the CPU every 20 ms —
@@ -69,10 +69,10 @@ pub struct SyntheticSpec {
     /// keeps getting CPU time (the worker's `LoadGate` keeps covering such a load past its
     /// base timeout; a load asleep that long is a hang).
     pub load_busy: bool,
-    /// Task 8 (test-only): every `Frame` reports this GPU time instead of the measured one —
+    /// Test-only: every `Frame` reports this GPU time instead of the measured one —
     /// drives the GPU budget deterministically without loading the GPU.
     pub report_gpu_ms: Option<f32>,
-    /// Task 10 (test-only): this long after its start the worker reports `ContextLost` as if
+    /// Test-only: this long after its start the worker reports `ContextLost` as if
     /// its GL context had been lost (a GPU reset / `EGL_NV_robustness_video_memory_purge`),
     /// then renders nothing more — the compositor must treat it as a crash restart.
     pub context_lost_after_ms: Option<u64>,
@@ -80,7 +80,7 @@ pub struct SyntheticSpec {
     /// frame goes out with a stand-in acquire fence (a pipe) that signals only when the window
     /// ends, as if the GPU finished nothing meanwhile (NVIDIA saving VRAM before a suspend,
     /// the GPU waking after one). The compositor latches nothing, soon holds every slot, and
-    /// the worker starves — the false-hang of the 2026-10-29 suspends, hermetically.
+    /// the worker starves — the false hang a suspend can cause, hermetically.
     pub gpu_stall: Option<[u64; 2]>,
 }
 

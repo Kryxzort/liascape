@@ -1,10 +1,9 @@
 // Wallpaper Engine-style sidebar probe — `scripts/test-ui-matrix.sh --probe probe-sidebar.js` (the matrix's hermetic
-// stack: private backend + headless liascape-player + this tree's UI bundle on a private Xvfb). Owner 2026-11-10: "instead
-// of a settings menu when clicking right click and settings, it should open a sidebar when you focus a card and thats what
-// has all the 4 options from the right click menu. same for the browse tab" (docs/superpowers/specs/2026-11-10-we-sidebar-design.md).
+// stack: private backend + headless liascape-player + this tree's UI bundle on a private Xvfb). docs/decisions.md §
+// "Replace the card settings and preview modals with an item sidebar" (docs/superpowers/specs/2026-11-10-we-sidebar-design.md).
 //   lib:click            a plain click focuses the card AND applies it (WE); the sidebar shows it — volume, speed, the actions
-//   lib:rightClick       right-click = the sidebar on that card, nothing applies, no menu (owner 2026-11-11: "no context menu
-//                        anywhere"); with the sidebar open it moves to the card; Escape closes it
+//   lib:rightClick       right-click = the sidebar on that card, nothing applies, no menu (docs/decisions.md § "Open the item
+//                        sidebar on right-click; no context menus"); with the sidebar open it moves to the card; Escape closes it
 //   lib:reflow           a right-click on a card in a scrolled grid while the sidebar is closed: the docked sidebar re-fits the
 //                        grid's columns, the card stays in view near where it was (real input events)
 //   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete from source (a Workshop item)
@@ -20,7 +19,7 @@
 //                        the content scrolling below it; opaque without
 //   lib:volume           its volume slider persists the item's own volume
 //   lib:still            a `library-item-changed` (two volume keybinds on the playing item) moves nothing and replays nothing;
-//                        the slider follows (the 2026-11-10 morph-replay bug's guard, kept for the sidebar)
+//                        the slider follows (guards against a morph replay on an item's update)
 //   lib:keys             ← → ↑ ↓ move the focus between cards, Enter applies, Escape closes
 //   lib:selection        a focused card inside a Ctrl-selection: the sidebar says how many it applies to
 //   bar:settings         a right-click on a playlist bar item opens the sidebar on it; nothing applies, no menu
@@ -391,9 +390,9 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the picture = the Play control (owner 2026-11-11: the Play / In playlist row was "redundant clutter"); the head's toggle
-    // owner 2026-11-11: "instead of a crossfade, it slides to the next wallpaper's sidebar menu depending on where it is
-    // respective to the current one" — a later item (k3 after k1 in the grid) pushes the old content out left and slides in
+    // the picture = the Play control (docs/decisions.md § "Make the sidebar's picture the Play control"); the head's toggle
+    // a switch slides like a carousel, by where the new card sits relative to the old one, not a crossfade
+    // — a later item (k3 after k1 in the grid) pushes the old content out left and slides in
     // from the right, an earlier one mirrored; the outgoing copy is inert, after the live one, gone after ~0.3 s; motion off → none
     const SLIDE = (t) => `m.ctx(m.thumb(${JSON.stringify(t)})); const t0 = performance.now(), out = { live: null, exit: null, exitInert: null, liveFirst: null, x0: null, y0: null, xMid: null, goneAt: null, title: null };
       await new Promise((res) => { const f = () => { const t = performance.now() - t0; const s = m.side();
@@ -418,7 +417,7 @@ app.whenReady().then(async () => {
       if (b.live !== "slide-prev" || b.exit !== "to-right") v.push(`k3 → k1 (earlier): live ${b.live}, exit ${b.exit} — expected slide-prev / to-right`);
       if (!(b.x0 < -40)) v.push(`k3 → k1: the new content doesn't start off to the left (x ${b.x0})`);
       if (await page(`return m.side().querySelectorAll("[data-side-playlist], .side-head-tools > *").length;`) !== 0) v.push("the head has tools after the slides (an outgoing copy's leaked, or the playlist toggle is back)");
-      // owner 2026-11-11: "it should also slide differently based on whether the next one is above or below" — a card in a
+      // above or below slides vertically — a card in a
       // row below rises in from below (the old one leaves upwards), back up → mirrored
       win.setContentSize(1000, 800); await sleep(300); await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(500);`); // the grid wraps (≈3 columns beside the docked panel)
       const rows = await page(`return ["k1","k2","k3","k4","s1","s2","s3","we1"].map((t) => { const r = m.thumb(t)?.getBoundingClientRect(); return r ? [t, Math.round(r.top)] : null; }).filter(Boolean);`);
@@ -454,7 +453,7 @@ app.whenReady().then(async () => {
       if (r0.label !== "Play k3") v.push(`its accessible name is "${r0.label}", not "Play k3"`);
       if (r0.tag !== "BUTTON" || r0.tab < 0) v.push(`it isn't keyboard-reachable (${r0.tag}, tabIndex ${r0.tab})`);
       if (r0.old) v.push(`the old Play / In playlist buttons are still there (${r0.old})`);
-      // owner 2026-11-11: "remove the playlist checkmark from title area and let the title occupy more of the empty space"
+      // no playlist toggle in the head: the title takes the room
       if (r0.pl !== null) v.push(`the head still has a playlist toggle (aria-pressed=${r0.pl})`);
       if (r0.icon || (r0.bg && r0.bg !== "none")) v.push(`the picture shows a Play icon / tint (owner: no icon; ${r0.icon} icons, bg ${r0.bg})`);
       const cx = r0.media.x + r0.media.w / 2, cy = r0.media.y + r0.media.h / 2;
@@ -468,7 +467,7 @@ app.whenReady().then(async () => {
       let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== K[2]; i++) await sleep(100);
       if (cur !== K[2]) v.push(`a click on the picture didn't play k3 (/current ${T(cur)})`);
       let r2 = null;
-      // playing → the green frame only (owner 2026-11-11: the "Playing now" pill was redundant — the card and the frame say it);
+      // playing → the green frame only (no "Playing now" pill — the card and the frame say it);
       // "looping this one" is a hero chip, shown only while loop-current is on
       for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); const f = s.querySelector(".side-frame");
           return { play: !!s.querySelector("[data-side-play]"), frame: !!f?.matches(".is-playing[data-side-playing]"),
@@ -499,7 +498,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the picture's preview switch (owner 2026-11-11: "a button to switch between gif preview, mp4 preview and youtube video preview")
+    // the picture's preview switch: gif / video / YouTube trailer / still (docs/decisions.md § "Open previews on the gif or
+    // still, never the video, and remember the pick per sidebar")
     await cell("lib:preview", async () => {
       const v = [];
       // s1 gets a YouTube trailer (its index entry); the embed never reaches the network (no network in the stack anyway)
@@ -520,18 +520,18 @@ app.whenReady().then(async () => {
         const J = JSON.stringify;
         let r = await look("k1");
         if (J(r.opts) !== J(["gif", "video"])) v.push(`k1 (a gif + its video): options ${J(r.opts)}`);
-        // owner 2026-11-11: the switch is "a attached field above the preview instead of a overlay"
+        // the switch is a strip attached above the preview, not an overlay
         if (r.above !== true) v.push(`k1: the preview switch isn't above the picture (it overlaps / sits inside it: ${r.above})`);
         if (r.mode !== "gif" || !(r.lay.gif > 0.9)) v.push(`k1 opens on ${r.mode} (layers ${J(r.lay)}), expected the gif`);
         if (r.opts.includes("video")) {
           const p = await pick("video");
           if (p.mode !== "video" || !(p.lay.video > 0.9) || !(p.lay.gif < 0.1)) v.push(`k1 → Video: mode ${p.mode}, layers ${J(p.lay)}`);
-          // owner 2026-11-11: the 16:9 video was cropped into the square picture's frame → the frame takes the video's own shape
+          // the frame takes the video's own shape (a 16:9 video must not be cropped into a square picture's frame)
           const sh = await page(`const s = m.side(), f = s.querySelector(".side-frame"), vd = s.querySelector('video[data-preview-layer="video"]'), r = f.getBoundingClientRect();
             return { shape: +f.dataset.shape, box: r.width / r.height, video: vd && vd.videoHeight ? vd.videoWidth / vd.videoHeight : null };`);
           console.log(`        Video shape: ${J(sh)}`);
           if (!sh.video || Math.abs(sh.shape - sh.video) > 0.01 || Math.abs(sh.box - sh.video) > 0.03) v.push(`k1 → Video: the frame (${sh.box.toFixed(3)}) isn't the video's own shape (${sh.video})`);
-          // owner 2026-11-11: "in video, show a button to mute/unmute" — muted by default; the button toggles the preview's
+          // the Video preview's mute button — muted by default; the button toggles the preview's
           // sound and never applies the wallpaper. (Silent either way: the stack's audio is private, and the volume is 0 first.)
           const cur0 = await current();
           const mu = await page(`const s = m.side(), b = s.querySelector("[data-side-mute]"), vd = s.querySelector('video[data-preview-layer="video"]');
@@ -552,7 +552,7 @@ app.whenReady().then(async () => {
           await shot("lib-preview-video");
         }
         r = await look("k2");
-        // owner 2026-11-11: "dont force mp4 when the preview is a still image" — no gif → it opens on the still, Video to pick
+        // never the video by default — no gif → it opens on the still, Video to pick
         if (J(r.opts) !== J(["image", "video"])) v.push(`k2 (a still + its video): options ${J(r.opts)}, expected [image, video]`);
         if (r.mode !== "video") v.push(`k2 after picking Video on k1: opened on ${r.mode} (the session's pick applies when it has it)`);
         r = await look("k1");
@@ -574,11 +574,11 @@ app.whenReady().then(async () => {
           if (p.mode !== "youtube" || !p.yt || !/youtube\.com\/embed\//.test(p.yt)) v.push(`s1 → YouTube: no embed (${J(p)})`);
           else if (!/[?&]mute=1/.test(p.yt)) v.push(`the YouTube embed isn't muted (${p.yt})`);
           if (!(p.lay.youtube > 0.5)) v.push(`the YouTube layer isn't shown (${J(p.lay)})`);
-          // owner 2026-11-11: no Play in the head even on the trailer, and the trailer has no close button of its own
+          // no Play in the head even on the trailer, and the trailer has no close button of its own
           if (p.headPlay || p.picPlay) v.push(`on the trailer: a Play button shows (head ${p.headPlay}, picture ${p.picPlay})`);
           if (await page(`return !!m.side().querySelector(".yt-close, .yt-stage button");`)) v.push("the trailer has a close button");
           await shot("lib-preview-youtube");
-          // owner 2026-11-11: the trailer REMEMBERS its mute + volume (YouTube's embed messages; faked here — no network)
+          // the trailer REMEMBERS its mute + volume (YouTube's embed messages; faked here — no network)
           const ym = await page(`const s = m.side(), f = s.querySelector("iframe"); if (!f) return null;
             const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
             const out = { src: f.src };
@@ -594,8 +594,8 @@ app.whenReady().then(async () => {
           if (!ym) v.push("YouTube: no iframe");
           else {
             if (!/[?&]enablejsapi=1/.test(ym.src)) v.push(`the trailer can't report its state (no enablejsapi: ${ym.src})`);
-            // it loops at its REAL end — we restart it on the player's "ended", not YouTube's playlist loop (owner 2026-11-11:
-            // that one "loops prematurely")
+            // it loops at its REAL end — we restart it on the player's "ended", not YouTube's playlist loop, which restarts
+            // early (docs/decisions.md § "Loop trailers on the player's "ended", not YouTube's `loop=1`")
             if (/[?&](loop|playlist)=/.test(ym.src)) v.push(`the trailer still uses YouTube's own loop (it restarts early: ${ym.src})`);
             if (ym.loops !== "1") v.push(`the player's "ended" didn't restart the trailer (data-yt-loops ${ym.loops})`);
             if (ym.saved.muted !== "0" || ym.saved.volume !== "40") v.push(`the trailer's unmute / volume 40 wasn't remembered (${JSON.stringify(ym.saved)})`);
@@ -648,8 +648,8 @@ app.whenReady().then(async () => {
     }
     await reducedMotion(false); await setMotion(true);
 
-    // the focused card: the accent ring off the card + the accent glow (owner 2026-11-11: "the theme color like hover color, not
-    // just plain white"); Glow effects off → the ring alone
+    // the focused card: the accent ring + the accent glow (the theme colour like hover, never plain white); Glow effects off
+    // → the ring alone
     await cell("look:focus", async () => {
       const v = [];
       await mv(5, 5, 100);
@@ -659,7 +659,7 @@ app.whenReady().then(async () => {
         document.documentElement.classList.remove("no-glow"); return out;`);
       if (!r) return ["no focused card"];
       if (r.oc !== r.acc || r.os === "none" || !(r.ow >= 1.5)) v.push(`the focused card's ring: ${r.os} ${r.ow}px ${r.oc}, expected the accent ${r.acc}`);
-      // owner 2026-11-11: the ring 3 px off the card felt out of place → flush, and the card held lifted like its hover
+      // the ring sits flush (not 3 px off the card), and the card is held lifted like its hover
       if (Math.abs(r.off) > 0.5) v.push(`the focused card's outline floats ${r.off}px off its edge — it sits flush`);
       if (!(r.lift <= -2)) v.push(`the focused card isn't lifted (translateY ${r.lift}) — the lift is what tells it from a selected card`);
       if (!r.bs.includes(r.acc)) v.push(`no accent glow on the focused card (box-shadow ${r.bs})`);
@@ -669,7 +669,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // "go to playing": the spotlight (owner 2026-11-11: "make the go-to-playing more apparant of where's the wallpaper")
+    // "go to playing": the spotlight that shows where the playing wallpaper is
     const LOCATE = (btn) => `await m.closeAll(); await m.sleep(200); const b = document.querySelector('[data-go-playing="${btn}"]'); if (!b || b.disabled) return { btn: false };
       b.click(); const t0 = performance.now(); const fx0 = document.querySelector(".locate-fx");
       const out = { btn: true, atClick: !!fx0 && !!fx0.querySelector(".lfx-dim") && !fx0.querySelector(".lfx-edge"), edge: null, preDim: 0, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null };
@@ -684,18 +684,16 @@ app.whenReady().then(async () => {
           const el = document.querySelector(".locate-flash"); if (el) { out.outline = getComputedStyle(el).outlineColor; out.olOff = parseFloat(getComputedStyle(el).outlineOffset);
             const a = d?.getBoundingClientRect(), b = el.getBoundingClientRect();
             if (a) out.holeOff = Math.max(out.holeOff ?? 0, Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.right - b.right), Math.abs(a.bottom - b.bottom)); }
-          // the hole never leaves the window — from the click on (owner 2026-11-11: far off in the bar, part of the app stayed lit)
+          // the hole never leaves the window — from the click on (a target far off in the bar must not leave part of the app lit)
           if (d) { const a = d.getBoundingClientRect(); out.holeOut = Math.max(out.holeOut ?? 0, -a.left, -a.top, a.right - innerWidth, a.bottom - innerHeight); } }
         else if (out.seen != null && out.gone == null) out.gone = Math.round(t);
         if (t < 2800) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
       out.acc = (() => { const d = document.createElement("div"); d.style.color = "var(--success)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; })(); out.left = !!document.querySelector(".locate-fx, .locate-flash"); return out;`;
-    // owner 2026-11-11: "the background is too opaque for the transparency mode" → then "make it more like the settings page":
     // live wallpaper behind the tabs → the panel has no fill, its section cards hold the darkness; the head is see-through
     // too, and the content scrolls below it (never under it)
-    // owner 2026-11-11: "the buttons get the yellow focus outline when you click a letter after clicking them … we never want
-    // those pesky yellow outlines anywhere" — a click + a key: no ring; Tab: the accent ring (never the system's yellow)
-    // owner 2026-11-11: "make it so the checkmarks dont just become a invisible fill on hover" (the CHECKED one) — the tick
-    // was cut through the square (the thumbnail showing in it) and lost its contrast against the paler hover colour:
+    // docs/decisions.md § "Show focus rings only while tabbing" — a click + a key: no ring; Tab: the accent ring (never the system's yellow)
+    // the CHECKED playlist toggle keeps its tick on hover — a tick cut through the square (the thumbnail showing in it)
+    // loses its contrast against the paler hover colour:
     // hovered, the box must still be accent AND carry a dark tick (counted in real pixels, not computed styles)
     await cell("look:plCheck", async () => {
       const v = [];
@@ -758,17 +756,16 @@ app.whenReady().then(async () => {
       const on = await read(); console.log(`        on: ${JSON.stringify(on)}`);
       if (!on.live) v.push("the Wallpaper behind every tab row didn't set bg-live");
       else {
-        // owner 2026-11-11 (2nd): "more like the settings page, the background is 100% see-through while the actual settings
-        // section is what has the darkness"
+        // like the Settings page: the background 100 % see-through, the section cards carry the darkness
         if (on.panel > 0.01 || on.bgImg !== "none") v.push(`live wallpaper: the panel has a fill (alpha ${on.panel}, image ${on.bgImg.slice(0, 60)})`);
         if (on.sec == null || on.sec < 0.4) v.push(`live wallpaper: the section cards don't hold the darkness (alpha ${on.sec}; Settings' .ssection = 0.5)`);
         if (on.head > 0.01) v.push(`live wallpaper: the head has its own background (alpha ${on.head}) — it would read as a band`);
-        // owner 2026-11-11: "the left of the text shadow is being clipped … we hate clipping!!"
+        // the title's shadow is never clipped
         if (on.tShadow !== "none") v.push(`the title's shadow is a text-shadow inside the clamped h2 — its overflow clips it (${on.tShadow})`);
         if (!/drop-shadow/.test(on.wFilter)) v.push(`no Netflix-style drop-shadow on the title's wrapper (filter ${on.wFilter})`);
         if (on.wClip.some((o) => o !== "visible")) v.push(`something around the title clips its shadow (overflow ${on.wClip})`);
-        // owner 2026-11-11: "why does hovering 'open in file manager' and 'open on steam' makes its background transparent?" —
-        // a tile's hover tints over its dark fill, never replaces it (the danger one too: not an opaque block)
+        // a tile's hover tints over its dark fill, never replaces it (else it turns transparent; the danger one too: not an
+        // opaque block)
         for (const label of ["Open in file manager", "Delete"]) {
           const r = await page(`const t = [...m.side().querySelectorAll(".side-tile")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); return t ? m.rect(t) : null;`);
           if (!r) { v.push(`no "${label}" tile`); continue; }
@@ -797,7 +794,7 @@ app.whenReady().then(async () => {
         const r = await run(`${btn}`, btn);
         if (!r) continue;
         if (r.seen == null) { v.push(`${btn}: no spotlight after the button`); continue; }
-        // owner 2026-11-11: "make the spotlight dim be there from the moment you click the button" — the dim is up in the click's
+        // the dim is there from the moment of the click — up in the click's
         // own task (no edge / rings yet: those wait for the glide's arrival) and fades up during the glide
         if (!r.atClick) v.push(`${btn}: no dim (alone) right at the click`);
         if (r.edge == null) v.push(`${btn}: the spotlight never revealed the item (no edge)`);
@@ -807,9 +804,9 @@ app.whenReady().then(async () => {
         if (r.dim < 0.8) v.push(`${btn}: the rest never dimmed (dim opacity ${r.dim})`);
         if (r.rings < 3 || r.scale < 1.05) v.push(`${btn}: no rippling rings (${r.rings} rings, scale ≤ ${r.scale.toFixed(2)})`);
         if (!r.glow) v.push(`${btn}: no glow layer`);
-        // the PLAYING colour, not the accent (owner 2026-11-11: it finds what's playing; the target already pulses green)
+        // the PLAYING colour, not the accent (it finds what's playing; the target already pulses green)
         if (r.outline !== r.acc) v.push(`${btn}: the item's outline ${r.outline}, not the playing colour ${r.acc}`);
-        // owner 2026-11-11: flush on the item like the focused card — no ring floating off it, the clear hole = the item
+        // flush on the item like the focused card — no ring floating off it, the clear hole = the item
         if (Math.abs(r.olOff ?? 99) > 0.5) v.push(`${btn}: the item's outline floats ${r.olOff}px off its edge`);
         if (!(r.holeOff <= 1.5)) v.push(`${btn}: the spotlight's clear hole is off the item by ${r.holeOff}px`);
         if (!(r.holeOut <= 0.5)) v.push(`${btn}: the spotlight's hole went ${r.holeOut}px outside the window — part of the app stays undimmed`);
@@ -888,7 +885,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the download button under a real pointer (owner 2026-11-11: "add hover effects on the download button"), and the sidebar's
+    // the download button's hover effects under a real pointer, and the sidebar's
     await cell("look:dlHover", async () => {
       const v = [], J = JSON.stringify;
       await page(`await m.closeAll();`); await mv(5, 5, 150);
@@ -955,7 +952,7 @@ app.whenReady().then(async () => {
           const b = m.byText(".lib-ctx button", "Settings"); if (b) b.click(); await m.waitSide("library"); await m.sleep(900);`);
         mv(W / 3, 30); await sleep(300);
         await shot(`look-${size}-library-playing`);
-        // live-wallpaper mode: the panel as see-through as the cards' name bars (owner 2026-11-11)
+        // live-wallpaper mode: the panel as see-through as the cards' name bars
         await setBgLive(true); await sleep(1200);
         await page(`await m.closeAll(); m.thumb("k2").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); await m.waitSide("library"); await m.sleep(900);`);
         mv(W / 3, 30); await sleep(300);

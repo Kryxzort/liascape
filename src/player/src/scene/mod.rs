@@ -1,7 +1,7 @@
 //! Pure scene helpers (`docs/player/modules/scene-worker.md`): the export
 //! size of a scene's frame ring ([`cover_size`]), the synthetic test scene's spec
-//! ([`synthetic`], D7), WE's assets dir ([`assets`], Task 7), the pointer → scene mapping
-//! ([`pointer`], Task 7), the worker GPU budget ([`budget`], Task 8), the `scene.pkg` reader
+//! ([`synthetic`]), WE's assets dir ([`assets`]), the pointer → scene mapping
+//! ([`pointer`]), the worker GPU budget ([`budget`]), the `scene.pkg` reader
 //! ([`pkg`]) and the offline loudness estimate ([`loudness_estimate`]). No GPU.
 
 pub mod assets;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test of the Steam paths that need no Steam account (owner 2026-11-11: "is it a dead end for users without
-# mobile guard?" → a password sign-in + Workshop downloads through the Steam app when there's no usable sign-in):
+# Hermetic test of the Steam paths that need no Steam account (no dead end without a mobile guard: a password sign-in +
+# Workshop downloads through the Steam app when there's no usable sign-in):
 #  1. `liascape-backend steam-selftest` — the password sign-in's plumbing with a scripted sign-in in place of SteamKit2
 #     (email / authenticator / approve-in-the-app steps, a wrong code, cancel, replace, timeout, wrong password, Steam's
 #     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json) and the
@@ -27,7 +27,7 @@
 #     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
 #     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one.
-#  Where the sign-in's secrets live (Helpers/SecretStore.cs; owner 2026-11-11 "steam token is kept in plaintext??"): § 1 also
+#  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), the migration of an
 #     older settings.json (and a failed store leaving it untouched), sign-out, and the keyring path against a STUB secret-tool
 #     (the value on stdin, never argv; a refused lookup → signed out, not asked again); § 2 the migration in a running backend.
@@ -154,7 +154,7 @@ async function viaSteam(id, why, label) {
   out(r?.status === 200 && body?.workshopId === id, `${label}: once Steam has it, the download finishes into the library`, r ? `${r.status} ${JSON.stringify(body).slice(0, 160)}` : "timed out");
   out(await inLib(id), `${label}: /library has it`);
   // the Steam to-do (Web/SteamTodo.cs): a queue of 1 whose files weren't there when its page opened — Steam delivering them is
-  // the proof it's subscribed → it finishes by itself (owner 2026-11-11: "make it auto detect then if its flawless"), no Next
+  // the proof it's subscribed → it finishes by itself, no Next
   for (let i = 0; i < 40 && !todo.at(-1)?.finished; i++) await sleep(50);
   const mine = todo.filter((x) => x.current?.id === id);
   out(mine.length > 0 && mine.every((x) => x.index === 1 && x.total === 1 && x.autoNext === true) && todo.at(-1)?.finished === true,
@@ -200,9 +200,9 @@ ac.abort(); await p; await sleep(800);
 drop("700000004"); await sleep(1500);
 out(urls().length === n0 + 1 && !(await inLib("700000004")), "cancelled: its page had opened, nothing imported after Steam delivers");
 
-// owner 2026-11-11 (a download "Downloading…" forever): Steam's own Workshop folder a SYMLINK to another library's — the
+// a download must not hang on "Downloading…": Steam's own Workshop folder a SYMLINK to another library's — the
 // standard ~/.local/share/Steam root and the WE folder setting name one folder, both polled; one shared "last size" slot
-// alternated between the two paths and never matched twice. Now: per path.
+// would alternate between the two paths and never match twice. So: per path.
 const std = `${process.env.HOME}/.local/share/Steam/steamapps/workshop/content`;
 fs.mkdirSync(std, { recursive: true }); fs.symlinkSync(`${T}/ws/431960`, `${std}/431960`);
 await viaSteam("700000005", "Steam signed this app out", "Workshop folder reached through a symlink");

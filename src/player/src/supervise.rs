@@ -1,4 +1,4 @@
-//! The supervisor (spec §4.1 "Supervision"; Task 16, R72/R73): `liascape-player serve` keeps the
+//! The supervisor (spec §4.1 "Supervision"): `liascape-player serve` keeps the
 //! compositor alive. It runs **before any thread, GL context or PipeWire connection
 //! exists** and only ever does three things: spawn the compositor (fork + exec of its own
 //! binary, `/proc/self/exe serve --supervised …`), wait for it, and forward SIGINT/SIGTERM
@@ -8,7 +8,7 @@
 //! **Exit classification** ([`classify`]): exit codes 0 (quit / SIGTERM / SIGINT), 1
 //! (refused at startup: another instance already holds the lock, or an unusable socket
 //! dir/state dir) and 2 (usage) are **clean** — not restarted, the supervisor exits with
-//! that code. [`EXIT_NO_COMPOSITOR`] (5 — Task 16b) is its own, third class: the
+//! that code. [`EXIT_NO_COMPOSITOR`] (5) is its own, third class: the
 //! compositor/EGL genuinely isn't available *yet* (no Wayland compositor running, EGL
 //! init failing before a GPU driver/device is ready — the two can't be told apart from
 //! out here, and don't need to be) — handled below, not restarted through the crash
@@ -39,7 +39,7 @@
 //! `<state>/snapshot.json`, `crate::snapshot`) and `--restarted <spec>` ([`RestartInfo`]:
 //! the signal/code, the count, when the old child died) — the child logs
 //! `supervisor.restart {signal|code, count, total, since_ms, prev_pid, restore}` as one of
-//! its first events (R73). **Give up** when the next restart would be the 6th within 60 s
+//! its first events. **Give up** when the next restart would be the 6th within 60 s
 //! ([`MAX_RESTARTS`], [`WINDOW`]): `supervisor.giving_up` is appended to the event log
 //! (shared with the child; [`log::append_detached`]) and the supervisor exits
 //! [`EXIT_GAVE_UP`] (4). From the 4th restart in the window on ([`RESTORE_RESTARTS`]) the
@@ -84,7 +84,7 @@ pub const STOP_WAIT: Duration = Duration::from_secs(10);
 pub const EXIT_RUNTIME: u8 = 3;
 /// The supervisor's exit code after giving up.
 pub const EXIT_GAVE_UP: u8 = 4;
-/// The child's exit code when the compositor/EGL isn't available *yet* (Task 16b):
+/// The child's exit code when the compositor/EGL isn't available *yet*:
 /// distinct from [`ServeError::Startup`](crate::runtime::ServeError::Startup)'s 1
 /// ("already running", or another startup refusal that waiting never fixes) — this one
 /// the supervisor retries with backoff ([`run`]'s module-doc "Startup-failure classes").
@@ -453,7 +453,7 @@ fn wait_child(sup: &Sup, child: &mut Child, set: &libc::sigset_t) -> (ExitStatus
 }
 
 /// Sleep `d` with SIGCHLD/SIGINT/SIGTERM blocked, but wake for a stop signal: returns
-/// `Some(signal)` if SIGINT/SIGTERM arrived (M9), `None` once `d` has passed.
+/// `Some(signal)` if SIGINT/SIGTERM arrived, `None` once `d` has passed.
 fn sleep_unless_stopped(set: &libc::sigset_t, d: Duration) -> Option<i32> {
     let end = Instant::now() + d;
     loop {
@@ -484,7 +484,7 @@ fn status_code(st: ExitStatus) -> u8 {
 /// Run the supervisor (module doc) until supervision ends; returns the process exit code.
 /// `user_args`: the `serve` options without `--restore`/`--session-start`; `restore`: pass
 /// `--restore` to the first child too; `session_start`: pass `--session-start` to the first
-/// child only (a restart is a recovery, never a playlist start — § Programs).
+/// child only (a restart is a recovery, never a playlist start — `docs/player/modules/programs.md`).
 pub fn run(
     user_args: Vec<String>,
     restore: bool,
@@ -565,7 +565,7 @@ pub fn run(
                         "budget_ms": compositor_budget.as_secs_f64() * 1000.0,
                     }),
                 );
-                // M9 (final review): a SIGTERM/SIGINT during the backoff ends supervision
+                // A SIGTERM/SIGINT during the backoff ends supervision
                 // at once (there's no child to forward it to) — never a "hung" stop.
                 if let Some(sig) = sleep_unless_stopped(&set, compositor_delay) {
                     sup.event(

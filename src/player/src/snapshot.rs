@@ -1,4 +1,4 @@
-//! The persisted state snapshot (spec §4.1 "Supervision"; Task 16, R74): what the player
+//! The persisted state snapshot (spec §4.1 "Supervision"): what the player
 //! shows, written to `<state>/snapshot.json` so a restarted player (`serve --restore`, the
 //! supervisor's respawn after a crash) comes back with the same wallpaper at the same place.
 //!
@@ -10,7 +10,7 @@
 //! `layer`); `sources` — per referenced source: `kind`, `path`, `position`, `paused`,
 //! `speed`, `loop`, `gains` (every set slot except the transient `xfade`/`anticlick`) and
 //! every other settable per-source prop (`color`, `hwdec`, `no_audio`, …); `parked` — the
-//! R60 parked wallpaper (`{id, resume_paused, connector}`), if any.
+//! parked wallpaper (`{id, resume_paused, connector}`), if any.
 //!
 //! **Excluded:** transient nodes — effects, `snapshot`-kind sources, graves, held A's,
 //! every in-flight transition's scaffolding. **A transition in flight is saved as its
@@ -19,7 +19,7 @@
 //! its position (= its requested start until it has started playing) — **except an
 //! `align: end` one still waiting for A's end**, saved as A where it plays (B would cut A's
 //! remaining play short; the backend re-arms the switch on the restarted player). A numeric prop that
-//! is animating is saved at the animation's **target** (R41) — never mid-ramp; once the
+//! is animating is saved at the animation's **target** — never mid-ramp; once the
 //! animation is over, the prop's own value (a `set` after it must win —
 //! `Animator::live_target_of`).
 //!
@@ -31,7 +31,7 @@
 //! **Writing** (`Writer`): atomic — `snapshot.json.tmp` written + `fsync`ed, renamed over
 //! `snapshot.json`, the directory `fsync`ed — on a writer thread (`lia-snapshot`), so an
 //! `fsync` never stalls the render loop. When to write is the runtime's call (`docs/player/modules/persistence.md`
-//! § Snapshot): [`DEBOUNCE`] after the first unsaved graph change,
+//! `docs/player/modules/persistence.md`): [`DEBOUNCE`] after the first unsaved graph change,
 //! every [`REFRESH`] while a video plays, and once more on a clean exit.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,7 +91,7 @@ pub struct Snapshot {
     pub sources: BTreeMap<String, SourceSnap>,
     #[serde(default)]
     pub parked: Option<ParkedSnap>,
-    /// Phase 3: each program's dynamic state (cursor, history, play time, countdown —
+    /// Each program's dynamic state (cursor, history, play time, countdown —
     /// `recipes::program::store`; its configuration and order are `program.json`).
     /// Additive: a file without it parses ([`VERSION`] stays 1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -138,7 +138,7 @@ pub struct SourceSnap {
     /// completed).
     #[serde(default)]
     pub transition_target: bool,
-    /// Phase 2 Task 10: a scene past its restart budget — restored as its preview, no worker.
+    /// A scene past its restart budget — restored as its preview, no worker.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub broken: bool,
 }
@@ -147,7 +147,7 @@ fn one() -> f64 {
     1.0
 }
 
-/// The R60 parked wallpaper.
+/// The parked wallpaper (kept while no output exists).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParkedSnap {
     /// A key of [`Snapshot::sources`].
@@ -280,7 +280,7 @@ fn source_snap(
     let kind = get_str(g, id, "kind");
     let ready = get_bool(g, id, "ready");
     let paused = get_bool(g, id, "paused");
-    // A playing video's or scene's (Phase 2) own clock; else the requested start.
+    // A playing video's or scene's own clock; else the requested start.
     let media = crate::onset::kind_has_audio(&kind);
     let position = if ready && media {
         get_f64(g, id, "time_pos").unwrap_or(0.0)
@@ -742,7 +742,7 @@ mod tests {
         g.set(&p("lay:DP-1:main.fit"), PropValue::Str("crop".into()))
             .unwrap();
         g.set(&p("player.debug"), PropValue::Bool(true)).unwrap();
-        // Phase 3 Task 6: the backend's cover setting survives a crash restart; the observed
+        // The backend's cover setting survives a crash restart; the observed
         // Signal (`out:<c>.covered`, `player.cover_hold_active`) is never saved.
         g.set(&p("player.pause_when_covered"), PropValue::Str("maximized".into()))
             .unwrap();
@@ -780,7 +780,7 @@ mod tests {
         g2.create(NodeKind::Source, None, cp).unwrap();
     }
 
-    /// Phase 2 Task 10: a scene past its restart budget (`broken`, observed) is saved
+    /// A scene past its restart budget (`broken`, observed) is saved
     /// `broken: true` and recreated with it (seeded at create — `broken` is read-only), so a
     /// restore shows its preview without a worker; a playing scene saves no `broken` key.
     #[test]
@@ -881,7 +881,7 @@ mod tests {
 
     /// An `align: end` switch still waiting for A's end is saved as what shows NOW (A, at its
     /// position), not as its B: restoring B would cut A's remaining play short — the backend
-    /// re-arms the aligned switch on the restarted player (player-adapter.md § Reconnection).
+    /// re-arms the aligned switch on the restarted player (`docs/player/adapter.md` § Reconnection and missed switches).
     #[test]
     fn aligned_pending_transition_is_saved_as_a() {
         let mut g = graph();
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn snapshot_without_programs_still_parses() {
-        // a Phase 2 file: no `programs` key
+        // a file from before programs existed: no `programs` key
         let old = br#"{"version": 1, "saved_unix_ms": 5, "outputs": {}, "sources": {}}"#;
         let s = Snapshot::parse(old).unwrap();
         assert!(s.programs.is_empty());

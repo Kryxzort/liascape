@@ -1,7 +1,7 @@
 import { useState, type InputHTMLAttributes } from "react";
 
-// Every numeric settings field (owner: "everything should let you empty out the field entirely and only snap
-// back to minimum when you focus out"). While it has focus the field shows exactly what was typed — empty, a
+// Every numeric settings field (docs/decisions.md § "Let numeric fields be emptied while focused"). While it has
+// focus the field shows exactly what was typed — empty, a
 // lone "-", a value past min/max, a partial number — and only a draft that's a number within [min, max] is
 // committed (`onChange` — so a valid value still applies live while typing, like every setting); an empty /
 // out-of-range draft is never saved. On blur or Enter the draft is clamped (empty → min, or `emptyValue`),

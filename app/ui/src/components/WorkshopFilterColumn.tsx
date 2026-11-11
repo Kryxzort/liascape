@@ -5,21 +5,21 @@ import { Select } from "./Select";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { PERIODS, SORTS, WF_GROUPS, useActiveTagCount, type Group, type GroupMatch, type Tag } from "./workshopFilter";
 
-// COOL: the Workshop filter column — Wallpaper Engine's left column (owner 2026-11-11, picking from mockups: "the 2nd feels most
-// natural (im probably used to wallpaper engine's design lol…)" + "3 way switch + click cycle would be good imo"). Every Steam
+// COOL: the Workshop filter column — Wallpaper Engine's left column (docs/decisions.md § "Filter the Workshop in a column of
+// three-way switches"). Every Steam
 // tag is a row: its name + a compact three-way switch [✓ | · | ✕] = include / off / exclude. A click on a segment sets that
 // state, a click on the NAME cycles off → include → exclude → off, a right-click on the row toggles exclude. The store keeps
 // the tags as two flat sets (`browseFilter.include` / `.exclude`, a tag in at most one) and reloads 280 ms after the last
 // change (setBrowseFilter) — the backend owns what a set means (within a group any of; Genre / Features by their All / Any
 // switch — genreMatch default any, featureMatch default all —; all groups at once; an excluded tag hides).
-// Calm on purpose (the owner worried 40 switches would look "like a mixing desk"): an untouched row's switch is faint (half
+// Calm on purpose (40 switches must not look like a mixing desk): an untouched row's switch is faint (half
 // opacity, no fill, muted glyphs) and only the ACTIVE segment of an include / exclude row carries colour.
 // Docked left of the grid from WF_DOCK_QUERY up (a sibling of `.scroll` in `.app`, like the item sidebar on the right — index.css
 // `.app:has(> .wf-col[data-mode=dock])`); narrower it's a drawer the sort row's "Filters · N" button opens over the grid.
 
 // a name click is a checkbox label: it toggles INCLUDE (off ↔ ✓; an excluded tag → off). Hiding is always deliberate — the ✕
-// segment or a right-click. (Owner 2026-11-11, after off → ✓ → ✕ skipped over the middle segment and the left-to-right wrap made
-// the first click hide: "it going to exclude first is kind of weird too, no right choice ig.. do what you think is better".)
+// segment or a right-click. (A cycle off → ✓ → ✕ skips over the middle segment, and a left-to-right wrap makes the first click
+// hide.)
 const NEXT: Record<string, TagState> = { off: "inc", inc: null, exc: null };
 const SEGS: { st: TagState; cls: string }[] = [{ st: "inc", cls: "i" }, { st: null, cls: "o" }, { st: "exc", cls: "e" }];
 
@@ -57,8 +57,8 @@ const TagRow = memo(function TagRow({ tag, label, st }: Tag & { st: TagState }) 
   );
 });
 
-// a group's All / Any switch — Features (owner 2026-11-11: "what if a user wants a 3D OR HDR and not 3D AND HDR") and Genre
-// ("lets just have a 'all or any' option for genere too"): only means something with ≥ 2 of the group's tags included — shown
+// a group's All / Any switch — Features and Genre (docs/decisions.md § "AND Workshop features, OR genres, each switchable"):
+// only means something with ≥ 2 of the group's tags included — shown
 // muted until then
 function MatchSwitch({ m, on }: { m: GroupMatch; on: boolean }) {
   const val = useStore((s) => s.browseFilter[m.key]);
@@ -157,9 +157,8 @@ export function WorkshopFilterColumn({ mode, closing = false, entering = false, 
 
 // the row above the grid: sort + period (as before) and — while the column is a drawer — the button that opens it
 // the "Filters · N" pill: below the dock breakpoint it opens the drawer; docked and folded it brings the column back — and
-// while the column is out it isn't here at all: it morphed into the column's title (owner 2026-11-11: "the sidebar should be
-// collapsable btw", "a clunky new button and no transition?", "how about the filter button morphing into the filter title area
-// of the expanded section?") — one control, never two
+// while the column is out it isn't here at all: it morphed into the column's title (hooks/filterMorph.ts) — one control,
+// never two
 export function WorkshopSortRow({ drawer, open, onOpenFilters }: { drawer: boolean; open: boolean; onOpenFilters: () => void }) {
   const f = useStore((s) => s.browseFilter);
   const setF = useStore((s) => s.setBrowseFilter);

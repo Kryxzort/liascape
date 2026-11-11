@@ -22,9 +22,9 @@ import { useDockLift } from "../hooks/useDockLift";
 import { useMotion } from "./motion";
 import { revealCard } from "../hooks/gridKeys";
 
-// The hovered item is the ROW's state (owner 2026-11-11: "doesn't lose the hover thing in the gaps between playlist items"):
+// The hovered item is the ROW's state (the hover must survive the gaps between playlist items):
 // entering an item hovers it, the 10 px gaps between items keep the last one, and leaving the row (or the empty space past
-// its ends) clears it. A CSS :hover dropped in every gap, so the dock lift sank and re-rose crossing from item to item.
+// its ends) clears it. A CSS :hover drops in every gap, so the dock lift would sink and re-rise crossing from item to item.
 type SetHover = Dispatch<SetStateAction<string | null>>;
 const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHover }:
   { path: string; item?: LibraryItem; index: number; playing: boolean; hover: boolean; setHover: SetHover }) {
@@ -74,8 +74,8 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
     <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`} data-title={item?.title}
       {...attributes} {...listeners} onClick={() => playFrom(index)}
       onMouseEnter={onEnter}
-      // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (owner 2026-11-11: "no
-      // context menu anywhere" — the sidebar has the playlist toggle, Open in file manager, Delete)
+      // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (docs/decisions.md §
+      // "Open the item sidebar on right-click; no context menus" — the sidebar has the playlist toggle, Open in file manager, Delete)
       onContextMenu={(e) => { e.preventDefault(); focusLib(path); revealCard(`lib-${path}`); }}>
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
@@ -121,8 +121,7 @@ export function PlaylistBar() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const rowRef = useRef<HTMLDivElement>(null);
   // the row only exists while the bar is expanded and the playlist has items (it loads after the first render): re-attach the
-  // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolled (owner 2026-11-11: "i cant scroll on
-  // playlist bar")
+  // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolls
   const rowShown = !collapsed && playlist.length > 0;
   useSmoothScroll(rowRef, "x", [rowShown]);
   const [hoverPath, setHoverPath] = useState<string | null>(null);
@@ -178,7 +177,7 @@ export function PlaylistBar() {
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderOpen size={15} /></button>
-        {/* "Go to playing" (owner 2026-11-11): glides the row to the playing item and rings it; only when it's in the playlist */}
+        {/* "Go to playing": glides the row to the playing item and rings it; only when it's in the playlist */}
         <button className="mini ico go-playing" data-go-playing="bar" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
           title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
           onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)}><LocateFixed size={15} /></button>

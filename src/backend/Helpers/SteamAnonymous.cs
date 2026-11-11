@@ -9,7 +9,7 @@ namespace Liascape.Helpers;
 // ONE shared anonymous session on Steam's client protocol (the CM servers the Steam client — and so Wallpaper Engine — talks
 // to): no account, no Web API key, no steamcommunity.com. Used by the trailer lookup and the Workshop Browse source
 // (SteamWorkshopDetails). Shared rather than one session per call because a session costs more than the request it carries
-// (measured 2026-11-11: connect 0.83–1.85 s — the first one also fetches the server list —, anonymous logon 0.38–0.8 s,
+// (measured: connect 0.83–1.85 s — the first one also fetches the server list —, anonymous logon 0.38–0.8 s,
 // one QueryFiles page of 100 0.5–1.3 s): per call a Browse page took 2.3–4 s, on the kept session ~1 s.
 //   - Lazily connected on first use; a dropped connection (Steam restarts its CMs, the network goes away) is simply
 //     reconnected by the next request.

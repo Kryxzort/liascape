@@ -36,7 +36,7 @@ pub fn state_dir() -> PathBuf {
     base.join("liascape/liascape-player")
 }
 
-/// Crash records of scene workers (Phase 2 Task 3): `<state>/crashes/`.
+/// Crash records of scene workers: `<state>/crashes/`.
 pub fn crash_dir() -> PathBuf {
     state_dir().join("crashes")
 }

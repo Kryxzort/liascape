@@ -7,10 +7,10 @@ import { useStore, type PreviewKind } from "../store";
 export const rangeFill = (v: number, min: number, max: number): CSSProperties =>
   ({ "--fill": `${Math.max(0, Math.min(100, ((v - min) / (max - min || 1)) * 100))}%` } as CSSProperties);
 
-// ---- the picture's preview switch (owner 2026-11-11: "a button to switch between gif preview, mp4 preview and youtube video
-// preview"). The options are what the item has: its base — the gif / webp, else the still ("Picture") — a video (the library
+// ---- the picture's preview switch (docs/decisions.md § "Open previews on the gif or still, never the video, and remember
+// the pick per sidebar"). The options are what the item has: its base — the gif / webp, else the still ("Picture") — a video (the library
 // item's own file; Browse: a remote preview video) and its YouTube trailer. The default is the base: a video never plays
-// unasked (owner 2026-11-11: "dont force mp4 when the preview is a still image"); a pick is kept for the
+// unasked; a pick is kept for the
 // session per sidebar (`previewPref`): the next item opens on it when it has it, else on the default.
 // online? — the YouTube trailer is the one preview that needs the network: offline the switch doesn't offer it (it would
 // open a dead player); the gif / video / picture are local files. Follows the browser's online / offline events.
@@ -23,8 +23,7 @@ export function usePreview(side: "library" | "browse", a: PreviewAvail) {
   const pref = useStore((s) => s.previewPref[side]);
   const setPref = useStore((s) => s.setPreviewPref);
   const [picked, setPicked] = useState<PreviewKind | null>(null); // this item's own pick (it outlives a later pref)
-  // the base is what the card shows: its gif, else the still — never the video (owner 2026-11-11: "dont force mp4 when the
-  // preview is a still image"); the video / trailer are there to pick
+  // the base is what the card shows: its gif, else the still — never the video; the video / trailer are there to pick
   const def: PreviewKind = a.gif ? "gif" : "image";
   const options: PreviewKind[] = [def];
   if (a.video) options.push("video");

@@ -15,7 +15,7 @@ import { useGridFit } from "../hooks/useGridFit";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem, Wallpaper } from "../api/client";
 
-// "Mark the wallpapers already downloaded" (owner todo 2026-11-10): what of a Browse list the library already holds — by
+// "Mark the wallpapers already downloaded": what of a Browse list the library already holds — by
 // its Workshop id (Workshop + the WE-local folder: the same item under either source), else by the page it came from
 // (moewalls / motionbgs / desktophut downloads keep it as `pageUrl`; `sourceId` is the source URL too).
 export function libraryKeys(items: LibraryItem[]): Set<string> {
@@ -118,7 +118,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
     return () => removeEventListener("keydown", h);
   }); // eslint-disable-line
 
-  // a click focuses (the sidebar shows it) — it no longer downloads: double-click, Enter or a download button does
+  // a click focuses (the sidebar shows it) — it never downloads: double-click, Enter or a download button does
   // a pointer focus with the sidebar closed: the card stays where it was while the docked sidebar re-fits the grid (gridKeys.ts)
   const focusFromCard = (pageUrl: string) => {
     if (!useStore.getState().browseFocus) keepCardInView(scrollRef.current, `br-${pageUrl}`);

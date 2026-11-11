@@ -13,13 +13,13 @@ namespace Liascape.Helpers;
 // Workshop data over Steam's own client connection (the CM protocol the Steam client — and so Wallpaper Engine — talks),
 // ANONYMOUSLY: no account, no Web API key, no web page. All of it rides SteamAnonymous' one shared session.
 //   - GetTrailersAsync: `PublishedFile.GetDetails` with `includeadditionalpreviews` carries each item's YouTube preview ids,
-//     100 items a request (owner 2026-11-11 asked for faster trailer lookups: tested 2026-11-11 — an anonymous session
+//     100 items a request (measured: an anonymous session
 //     returned all 6 known trailers in one 355 ms request; the web API's `IPublishedFileService/GetDetails` needs a key or a
 //     signed-in token, the keyless `GetPublishedFileDetails` has no previews, and reading Workshop pages trips
 //     steamcommunity.com's per-IP limit).
 //   - QueryAsync: the Workshop Browse source — `PublishedFile.QueryFiles`, one page of up to 100 items with tags, previews
-//     (YouTube ids) and descriptions inline (verified 2026-11-11: ~1 s a page; any page number answers directly, no cursor
-//     walk; search_text works with every sort). Replaces scraping steamcommunity.com's browse page (rate-limited per IP,
+//     (YouTube ids) and descriptions inline (measured: ~1 s a page; any page number answers directly, no cursor
+//     walk; search_text works with every sort). Preferred over scraping steamcommunity.com's browse page (rate-limited per IP,
 //     30 items a page, AND-only tags) — that stays only as the fallback (SteamWorkshopService).
 // Both return null when Steam's servers can't be reached / refuse (the caller falls back to page reading).
 public static class SteamWorkshopDetails
@@ -76,7 +76,7 @@ public static class SteamWorkshopDetails
         {
             appid = AppId, query_type = QueryType(filter.Sort), page = (uint)Math.Max(1, page), numperpage = (uint)Math.Clamp(perPage, 1, 100),
             return_tags = true, return_previews = true, return_metadata = true,
-            // the full description (it's persisted on a download and shown in the sidebar); measured 2026-11-11 no slower
+            // the full description (it's persisted on a download and shown in the sidebar); measured no slower
             // than the short one — a page's descriptions are a few KB
             return_short_description = false,
         };

@@ -80,7 +80,8 @@ const SLOW_JOB_MS: f64 = 100.0;
 /// - `no-fence` — publish each frame right after its render, before the flush and without a
 ///   fence (what the sync objects exist to prevent). Measured: NO visible effect on NVIDIA 595
 ///   even with `slow-flush` — the driver serializes access to a shared texture across the share
-///   group itself (the same process-wide lock § Sources "Render worker" works around), so the
+///   group itself (the same process-wide lock the render worker works around, see
+///   `docs/player/modules/sources.md` § Render worker), so the
 ///   loop never read a texture with the worker's commands for it still unsubmitted. The fences
 ///   stay: the GL spec (and Mesa) only guarantee another context's changes once they completed;
 /// - `publish-early` — hand the loop each target BEFORE rendering into it ([`SLOW_FLUSH`] later):
@@ -133,9 +134,9 @@ fn faults() -> Faults {
     })
 }
 
-/// The env knob for zero-copy hardware decoding on the worker (§ Sources "Hardware decoding"):
+/// The env knob for zero-copy hardware decoding on the worker (`docs/player/modules/sources.md` § Hardware decoding):
 /// unset/`on` = the GPU's own interop ([`hwdec_interop_for`]), `off` = copy modes only (the
-/// Task 20d behaviour — the A/B and escape hatch), or an mpv `gpu-hwdec-interop` name
+/// A/B and escape hatch), or an mpv `gpu-hwdec-interop` name
 /// (`cuda`, `vaapi`, `drmprime`, `all`) to force one.
 pub const HWDEC_INTEROP_ENV: &str = "LIASCAPE_PLAYER_HWDEC_INTEROP";
 
@@ -240,7 +241,7 @@ pub(crate) struct Frame {
     /// Signalled once the render finished on the GPU (the worker already waited for it; the
     /// loop re-checks without blocking).
     pub fence: Option<SyncFence>,
-    /// FILE_LOADED events mpv had emitted when this render started (§ "Load fencing").
+    /// FILE_LOADED events mpv had emitted when this render started (`docs/player/modules/sources.md` § Load fencing and events).
     pub file_loaded: u64,
 }
 
@@ -583,7 +584,7 @@ impl RenderWorker {
     }
 
     /// Why an `lia-render` lane died (it panicked), if one did — the runtime then fails like
-    /// a lost compositor (§ Sources "Render worker" → "Failure").
+    /// a lost compositor (`docs/player/modules/sources.md` § Render worker).
     pub fn died(&self) -> Option<String> {
         self.lanes.iter().find_map(|l| l.lock().died.clone())
     }
@@ -1136,7 +1137,7 @@ impl Slot {
         }
         let t = Instant::now();
         let render = self.render.as_ref()?;
-        // R25: FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
+        // FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
         let res = unsafe { render.render(fbo, size.0, size.1, glow::RGBA8, false) };
         reset_gl(gl);
         let ms = t.elapsed().as_secs_f64() * 1000.0;

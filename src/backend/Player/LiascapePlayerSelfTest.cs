@@ -46,7 +46,7 @@ public static class LiascapePlayerSelfTest
         return 1;
     }
 
-    // ---- Phase 3 Task 9: what a live ack may cover: only an unbroken run of handled seqs after the last ack ------------
+    // ---- what a live ack may cover: only an unbroken run of handled seqs after the last ack ----------------------------
     private static void OutboxAckAssertions(List<string> fails)
     {
         void Check(string what, long done, long[] handled, long want, long[] left)
@@ -63,7 +63,7 @@ public static class LiascapePlayerSelfTest
         Check("already covered by the drain", 5, [3, 5], 5, []);
     }
 
-    // ---- Phase 3 Task 7: a rotation session → the player's program spec (LiascapePlayerProgram.BuildSpec) -------------
+    // ---- a rotation session → the player's program spec (LiascapePlayerProgram.BuildSpec) -----------------------------
     private static void ProgramSpecAssertions(List<string> fails)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"lia-selftest-prog-{Environment.ProcessId}"); // never created: no file is read
@@ -157,7 +157,7 @@ public static class LiascapePlayerSelfTest
         foreach (var (iv, adv, max, want) in new[] { (30, true, 600, (30, 600)), (0, true, 0, (0, 0)), (30, false, 600, (0, 0)),
                                                      (20, true, 2, (20, 2)), (-4, true, 400000, (0, 359999)) })
             if (PlayerHelper.PlayLimits(iv, adv, max) != want) fails.Add($"PlayLimits(interval {iv}, advance {adv}, max {max}) = {PlayerHelper.PlayLimits(iv, adv, max)}, want {want}");
-        // the defaults (2026-10-28, "0 = off unless set"): a video plays to its end however long — no minimum, no
+        // the defaults ("0 = off unless set"): a video plays to its end however long — no minimum, no
         // maximum —, a scene / still image (they never end) switches after its own 30 min; globally and per playlist
         var d = new AppSettings(); var dp = new PlaylistSettings();
         var dG = (d.GlobalIntervalSeconds, d.GlobalSwitchWhenVideoEnds, d.GlobalMaxPlaySeconds, d.GlobalSeparateSceneTiming, d.GlobalSwitchScenesAfterSeconds);
@@ -203,7 +203,7 @@ public static class LiascapePlayerSelfTest
                  (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
                  (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
                  (PlayerHelper.PlayKind.Image, 0, 0, true, 0, (N, 0)),           // …0 = off → it stays
-                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (owner 2026-11-10)
+                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (docs/decisions.md § "A scene's minimum play time beats its maximum")
                  (PlayerHelper.PlayKind.Scene, 9000, 4000, false, 3000, (9000, 0)),  // …even when the maximum is shorter
                  (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → the maximum moves it
                  (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
@@ -281,7 +281,7 @@ public static class LiascapePlayerSelfTest
         Want("steamcmd", false, "steamcmd", "workshopDownloadMode");
         if ((F(none, "auto-mute").reason ?? "").Contains("parec")) fails.Add("health: auto-mute names parec, which is present");
         if (!(F(none, "auto-mute").reason ?? "").Contains("only while the app is open")) fails.Add($"health: a player without automute doesn't say the app-closed limit: {F(none, "auto-mute").reason}");
-        // the Signal (Task 14): pactl / parec / playerctl all missing don't matter; MPRIS needs a session bus; no player ran → unknown
+        // the Signal: pactl / parec / playerctl all missing don't matter; MPRIS needs a session bus; no player ran → unknown
         var sig = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not ("pactl" or "parec" or "playerctl"), true, false, SessionBus: false));
         if (F(sig, "auto-mute").ok != true) fails.Add($"health: the Signal without pactl/parec: auto-mute ok={F(sig, "auto-mute").ok} ({F(sig, "auto-mute").reason})");
         if (F(sig, "mpris").ok != false || !(F(sig, "mpris").reason ?? "").Contains("session bus")) fails.Add($"health: the Signal without a session bus: mpris ok={F(sig, "mpris").ok} ({F(sig, "mpris").reason})");
@@ -302,7 +302,7 @@ public static class LiascapePlayerSelfTest
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
     }
 
-    // ---- Phase 3 Task 8: what a player is started with (`liascape restore` = a session start; a restart never is) -----
+    // ---- what a player is started with (`liascape restore` = a session start; a restart never is) --------------------
     private static void StartArgsAssertions(List<string> fails)
     {
         static string J(IEnumerable<string>? a) => a == null ? "null" : string.Join(" ", a);
@@ -378,7 +378,7 @@ public static class LiascapePlayerSelfTest
             fails.Add("map `set_property osd-level 1` → non-null, want null (unknown)");
     }
 
-    // ---- R69: auto-mute excludes liascape-player's OWN streams (by ownership, not just by name) ------
+    // ---- auto-mute excludes liascape-player's OWN streams (by ownership, not just by name) ------------
     private static void OwnershipAssertions(List<string> fails)
     {
         static string Block(string app, string pid, string node, string sink) =>
@@ -393,15 +393,15 @@ public static class LiascapePlayerSelfTest
         Own("bus playback node", Block("x", "1", "liascape-player-bus.playback", "12"), true);
         Own("targets the bus sink", Block("x", "1", "y", "57"), true);
         Own("application.name liascape-player", Block("liascape-player", "1", "y", "12"), true);
-        // Phase 2: a scene worker's own stream (its own process, its own app name here) — by node name
+        // a scene worker's own stream (its own process, its own app name here) — by node name
         Own("scene worker stream", Block("x", "1", "liascape-player-scene.src4", "12"), true);
         Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
     }
 
-    // ---- Phase 2 Task 11: scenes under liascape-player (pure decisions + a scene's create props) ------
+    // ---- scenes under liascape-player (pure decisions + a scene's create props) ---------------------
     private static void SceneAdapterAssertions(List<string> fails)
     {
-        // Task 8: AppSettings → the player's GPU / VRAM props (the limit is 0 = off while its toggle is off)
+        // AppSettings → the player's GPU / VRAM props (the limit is 0 = off while its toggle is off)
         string G(AppSettings s) => string.Join(" ", LiascapePlayerMedia.GpuProps(s).Select(p => $"{p.prop}={p.value}"));
         foreach (var (s, want) in new (AppSettings, string)[] {
             (new AppSettings(), "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
@@ -457,7 +457,7 @@ public static class LiascapePlayerSelfTest
     // the gain the resolver gives a scene.
     private static void SceneLoudnessAssertions(List<string> fails)
     {
-        // MergeSceneLoudness (refined across plays, 2026-10-28; per audio configuration, 2026-10-29): the report covering
+        // MergeSceneLoudness (refined across plays, per audio configuration): the report covering
         // MORE audible seconds replaces its configuration's live measurement (state, seconds, partial); the applied I/TP
         // move only by ≥ 0.5 LU/dB
         var m = new LibMeta();
@@ -536,7 +536,8 @@ public static class LiascapePlayerSelfTest
         m.SceneLoudness["L"].Estimate!.Notes = ["two versions of one song play at once"];
         if (LibraryService.SceneLoudnessInfoOf(m).Note != "two versions of one song play at once") fails.Add("a low estimate's first note is the card's note");
 
-        // Set once per play (owner 2026-11-06): WindowReached = the report that completes the CURRENT configuration's first
+        // Set once per play (docs/decisions.md § "Set scene normalization once per play"): WindowReached = the report that
+        // completes the CURRENT configuration's first
         // window (before: no live measurement or a partial) — the one moment a live source's gain.normalize moves; every
         // later report only changes the next play's value
         m = new LibMeta();
@@ -756,7 +757,7 @@ public static class LiascapePlayerSelfTest
         Console.WriteLine($"scene properties corpus: {scenes} project.json, {n} properties, {conds} conditions — all parsed");
     }
 
-    // ---- Task 20c: next/prev/random's scene-skip decision point ------------------------------
+    // ---- next/prev/random's scene-skip decision point -----------------------------------------
     // TryStepLibrary/ApplyRandom/AdvanceToNext (PlayerHelper) skip a path exactly when
     // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
     // private IsSkippedPath uses, reused here rather than invented (.claude/rules/backend/legacy-engine.md /
@@ -778,7 +779,7 @@ public static class LiascapePlayerSelfTest
 
         try
         {
-            // liascape-player (Phase 2): playable exactly when the player has the `scene` capability — the
+            // liascape-player: playable exactly when the player has the `scene` capability — the
             // capability half is SceneAdapterAssertions' truth table (pure: asking the shared client
             // here would greet whatever player owns the default socket)
             static bool LiascapeSkip(string path, bool cap) =>
@@ -863,7 +864,7 @@ public static class LiascapePlayerSelfTest
             if (ran.LastOrDefault() != "E2") fails.Add($"an essential command at the cap didn't run last (last: {ran.LastOrDefault() ?? "none"})");
         }
         if (LiascapePlayerMedia.QueueDepth != 0) fails.Add($"queue depth {LiascapePlayerMedia.QueueDepth} after the coalescing checks, want 0");
-        // the cap logs what filled it (the 2026-11-03 re-run's two drops said only "dropping a queued command")
+        // the cap logs what filled it (a bare "dropping a queued command" can't tell which)
         if (LiascapePlayerMedia.CapDrops < 1 || LiascapePlayerMedia.LastCapHistogram is not { } hist || !hist.Contains("t:d"))
             fails.Add($"at the cap: drops {LiascapePlayerMedia.CapDrops}, histogram `{LiascapePlayerMedia.LastCapHistogram ?? "none"}` (want the pending kinds)");
 
@@ -929,7 +930,7 @@ public static class LiascapePlayerSelfTest
             if (helloSup != serve.Id) fails.Add($"hello: supervisor_pid {helloSup?.ToString() ?? "null"} != spawned supervisor {serve.Id}");
             if (client.PlayerPid != helloPid) fails.Add($"client.PlayerPid {client.PlayerPid} != hello.pid {helloPid}");
             if (client.SupervisorPid != helloSup) fails.Add($"client.SupervisorPid {client.SupervisorPid} != hello.supervisor_pid {helloSup}");
-            // Phase 2: the capabilities `hello` lists (this private player allows synthetic scenes, so it
+            // the capabilities `hello` lists (this private player allows synthetic scenes, so it
             // has `scene` whenever liascape-scene-worker resolves — next to liascape-player in the dev tree)
             var caps = hello.GetProperty("capabilities").EnumerateArray().Select(x => x.GetString()).ToHashSet();
             if (!client.Capabilities.Contains("video")) fails.Add($"client.Capabilities = [{string.Join(",", client.Capabilities)}], want hello's [{string.Join(",", caps)}]");
@@ -987,7 +988,7 @@ public static class LiascapePlayerSelfTest
 
                 // Speed storm leftover: a slider burst past the queue cap behind a slow command — the
                 // NEWEST value must be the one that lands (coalesced per target + property), never
-                // dropped at the cap (RED before: sets past 256 were refused, the last one included).
+                // dropped at the cap (failing shape: sets past 256 refused, the last one included).
                 _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(600); return 0; });
                 for (int i = 0; i < LiascapePlayerMedia.MaxQueueDepth + 60; i++) LiascapePlayerMedia.Mpv(["set_property", "volume", 20 + i % 40]);
                 LiascapePlayerMedia.Mpv(["set_property", "volume", 77]);
@@ -1001,7 +1002,7 @@ public static class LiascapePlayerSelfTest
 
                 // /preview round trips (speed storm): a drag value costs ONE `set` per source — not a
                 // `state` read for the path → source ids (+ `get cur:*.path` without paths) every time.
-                // The map is cached until the graph changes (RED before: 2 requests per value).
+                // The map is cached until the graph changes (failing shape: 2 requests per value).
                 LiascapePlayerMedia.Preview(30, null, [a]); LiascapePlayerMedia.Drain().Wait(2000); // may (re)read the map once
                 long req0 = client.RequestCount; int reads0 = LiascapePlayerMedia.SourceMapReads;
                 const int nPrev = 20;
@@ -1012,12 +1013,12 @@ public static class LiascapePlayerSelfTest
                 if (Math.Abs(guPrev - MpvPropertyMap.VolumeDb(50)) > 1e-3) fails.Add($"/preview's last value didn't land: gain.user {guPrev:0.###}, want {MpvPropertyMap.VolumeDb(50):0.###}");
                 Phase($"/preview: {perPreview:0.##} requests per value over {nPrev} (map reads {LiascapePlayerMedia.SourceMapReads - reads0})");
 
-                // Speed storm re-run (2026-11-03): the queue hit its cap with the player answering fast — the storm's
-                // global phase clears every playlist item's speed override in a loop (315 × /library/speed), and each
-                // was its own `override:<path>` pass, a key per item that never coalesced: ≥ 256 pending, and the next
-                // one dropped (whichever item it was — the PLAYING one's included). A burst of per-item overrides
+                // Speed storm: the storm's global phase clears every playlist item's speed override in a loop
+                // (315 × /library/speed). With a key per item (`override:<path>`, never coalescing) the queue hits its
+                // cap with the player answering fast: ≥ 256 pending, and the next one dropped (whichever item it is —
+                // the PLAYING one's included). A burst of per-item overrides
                 // behind a slow command must stay a handful of commands and every item's pass (the playing one last
-                // here) must land. RED before: depth 256, a's override dropped (its speed stayed the preview's).
+                // here) must land. Failing shape: depth 256, a's override dropped (its speed stays the preview's).
                 {
                     double eff = Math.Clamp(LibraryService.ReadSpeedOverride(a) ?? SettingsService.Load().Speed, 0.1, 4.0);
                     double transient = Math.Abs(eff - 2.0) > 0.1 ? 2.0 : 3.0;
@@ -1106,7 +1107,7 @@ public static class LiascapePlayerSelfTest
                 stepping.Set();
                 if (LiascapePlayerMedia.CurrentPath() != b) fails.Add("cancel didn't leave A (b.mp4) on screen");
 
-                // Phase 2 Task 11: a scene folder plays as `kind: scene` (a synthetic one), takes the
+                // a scene folder plays as `kind: scene` (a synthetic one), takes the
                 // settings like a video, and the per-monitor scene fps reaches its output live
                 var scene = Path.Combine(tmp, "workshop", "900000001");
                 SyntheticScene(scene);
@@ -1127,7 +1128,7 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.Drain().Wait(2000);
                 if (Math.Abs(Fps() - 15) > 1e-6) fails.Add($"removing VIRTUAL-1 from SceneMonitors → scene_fps {Fps()}, want the default 15");
                 else Phase("ApplySceneFps: VIRTUAL-1 45 live, back to 15 when removed");
-                // Task 8: the GPU / VRAM settings → the player props, live, diffed
+                // the GPU / VRAM settings → the player props, live, diffed
                 string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
                 var g0 = new AppSettings();
                 var g1 = new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, VramLowMode = "pause" };
@@ -1137,7 +1138,7 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.ApplyGpuSettings(g1, g0); LiascapePlayerMedia.Drain().Wait(2000);
                 if (Gpu() != "true 0.0 stop" && Gpu() != "true 0 stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 stop");
                 else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / vram_low_mode live and back");
-                // Task 10: pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
+                // pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
                 LiascapePlayerMedia.ApplyCoverSetting(g0, new AppSettings { PauseWhenCovered = "fullscreen" }); LiascapePlayerMedia.Drain().Wait(2000);
                 if (PlayerProp("pause_when_covered") != "fullscreen") fails.Add($"ApplyCoverSetting(fullscreen) → {PlayerProp("pause_when_covered")}");
                 LiascapePlayerMedia.ApplyCoverSetting(new AppSettings { PauseWhenCovered = "fullscreen" }, g0); LiascapePlayerMedia.Drain().Wait(2000);
@@ -1173,7 +1174,7 @@ public static class LiascapePlayerSelfTest
                 Thread.Sleep(3300); // the breaker re-opens the line 3 s after the timeout
                 if (LiascapePlayerMedia.CurrentPath() != b) fails.Add("no recovery after SIGCONT (+3 s breaker window)");
                 Phase("recovered after SIGCONT");
-                // R81: the breaker closing (this is exactly that — the first query above after it
+                // the reapply: the breaker closing (this is exactly that — the first query above after it
                 // reopened) must have fired a reapply, catching up whatever the `volume 80` set during
                 // the stall (above) dropped. OnRecovered's Queue(...) is fire-and-forget (by design — it
                 // must never block the caller that happened to be the one to notice the recovery), so
@@ -1183,16 +1184,16 @@ public static class LiascapePlayerSelfTest
                 if (LiascapePlayerMedia.ReapplyCount < 1) fails.Add("R81: no settings reapply after the stall recovered (OnRecovered)");
                 else Phase($"R81: stall recovery triggered a reapply ({LiascapePlayerMedia.ReapplyCount}x so far)");
 
-                // I3 (final review): the pause is toggled by ANOTHER process (a keybind's one-shot
+                // I3: the pause is toggled by ANOTHER process (a keybind's one-shot
                 // `liascape toggle-pause` — here a second, independent client): this
                 // backend has no memory of it, and must never re-assert one. After the supervised
-                // restart below (whose snapshot restores `player.paused`) and its R81 reapply, the
+                // restart below (whose snapshot restores `player.paused`) and its reapply, the
                 // pause must still be on — not flipped.
                 var other = new LiascapePlayerClient(sock) { AutoSpawn = false };
                 other.Call("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = true }, 2000);
                 Thread.Sleep(600); // the snapshot is written 250 ms after a change
 
-                // Supervised restart (Task 17 fix): SIGKILL the COMPOSITOR directly, never the supervisor
+                // Supervised restart: SIGKILL the COMPOSITOR directly, never the supervisor
                 // — the supervisor must see this as a crash and restart its child with a NEW hello.pid
                 // (same supervisor_pid) within ~1.5 s (measured on-machine: 150-260 ms).
                 int reapplyBeforeRestart = LiascapePlayerMedia.ReapplyCount;
@@ -1203,7 +1204,7 @@ public static class LiascapePlayerSelfTest
                 var rsw = Stopwatch.StartNew();
                 // Polled with a FRESH client per attempt: a hello that reaches the new compositor before
                 // it serves times out, and the shared client's stall breaker would then fail every
-                // further attempt for 3 s (under load that alone used to fail this check).
+                // further attempt for 3 s (under load that alone fails this check).
                 while (rsw.ElapsedMilliseconds < 1500)
                 {
                     try
@@ -1227,7 +1228,7 @@ public static class LiascapePlayerSelfTest
                 else if (client.PlayerPid != newCompositor) fails.Add($"the shared client never saw the restarted compositor {newCompositor} (still {client.PlayerPid})");
                 else if (client.SupervisorPid != priorSupervisor) fails.Add($"after the supervised restart, supervisor_pid {client.SupervisorPid} != {priorSupervisor} (expected the SAME supervisor)");
 
-                // R81: OnRestarted must have queued a reapply of the backend's current effective settings.
+                // OnRestarted must have queued a reapply of the backend's current effective settings.
                 if (newCompositor >= 0)
                 {
                     LiascapePlayerMedia.Drain().Wait(2000);
@@ -1268,13 +1269,13 @@ public static class LiascapePlayerSelfTest
 
     [System.Runtime.InteropServices.DllImport("libc")] private static extern int kill(int pid, int sig);
 
-    // ---- in-place upgrade: the same build through a symlink + a wrapProgram wrapper (2026-10-29 cold boot) --------
+    // ---- in-place upgrade: the same build through a symlink + a wrapProgram wrapper ---------------------------------
     // The Nix layout: `liascape/libexec/liascape/liascape-player` (what the launcher's LIASCAPE_PLAYER_BIN names) is a
     // symlink into ANOTHER store path, `liascape-player/bin/liascape-player`, a wrapProgram script that execs its sibling
     // `.liascape-player-wrapped` — the running process's exe. Compared by the symlink's own store root, the player the
-    // restore had just started read as "out of date" and was restarted at once. Built here as pkg-a/pkg-b in a temp dir
+    // restore just started would read as "out of date" and be restarted at once. Built here as pkg-a/pkg-b in a temp dir
     // (a running process whose exe is pkg-b's `.liascape-player-wrapped`, started through pkg-a's symlink), plus the
-    // owner's real store paths when they exist.
+    // real installed store paths when they exist.
     private static void StaleThroughWrapperAssertions(List<string> fails)
     {
         string? sleep = null;
@@ -1337,7 +1338,7 @@ public static class LiascapePlayerSelfTest
             if (LiascapePlayerClient.StaleReasonFor(p.Id, plainD) == null)
                 fails.Add("stale: a different plain binary reads as current");
 
-            // the owner's real layout (2026-10-29: liascape-0.1.0's libexec symlink → liascape-player-0.1.0's wrapper,
+            // the real installed layout (liascape-0.1.0's libexec symlink → liascape-player-0.1.0's wrapper,
             // the process running its `.liascape-player-wrapped`) — only where such a store path exists
             if (Directory.Exists("/nix/store"))
                 foreach (var pkg in Directory.EnumerateDirectories("/nix/store", "*-liascape-0.1.0").Take(8))
@@ -1359,11 +1360,11 @@ public static class LiascapePlayerSelfTest
         }
     }
 
-    // ---- a player that is still starting is waited for, never "stalled" (2026-10-29 cold boot) --------------------
-    // The player binds its socket first, then starts (PipeWire bus ≤ 500 ms, EGL, CUDA…) and answers ~1 s later. The
-    // restore's monitor-daemon — another process, its `IsPlaying` a 300 ms `get` — connected in that window: its
-    // greeting `hello` timed out, the stall breaker opened (and the `get` itself was still sent and timed out again),
-    // and every request failed fast for 3 s. A fake player here binds and answers only 1 s later.
+    // ---- a player that is still starting is waited for, never "stalled" (a cold boot) ----------------------------
+    // The player binds its socket first, then starts (PipeWire bus ≤ 500 ms, EGL, CUDA…) and answers ~1 s later. A
+    // request from another process in that window (the restore's monitor-daemon, its `IsPlaying` a 300 ms `get`) must
+    // not time out its greeting `hello` and open the stall breaker (the `get` itself sent and timing out again), which
+    // fails every request fast for 3 s. A fake player here binds and answers only 1 s later.
     private sealed class SlowStartPlayer : IDisposable
     {
         private readonly Socket _l;

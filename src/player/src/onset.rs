@@ -1,7 +1,7 @@
-//! Invariant #8's one onset helper (final review I6, M12): every "un-pause, then ramp a
+//! Invariant #8's one onset helper: every "un-pause, then ramp a
 //! gain in" path — the transition recipe's B onsets, `restore_a` (snap-back, a failed or
 //! cancelled switch, a grave shown again), unpark, a restored source's fade-in, and the
-//! player-pause gate's resume (`Runtime`'s R88 gate, on its own wall clock) — holds its
+//! player-pause gate's resume (`Runtime`'s pause gate, on its own wall clock) — holds its
 //! ramp until the source's audio is really flowing ([`SourceEvent::AudioFlowing`]), never
 //! longer than [`ONSET_TIMEOUT`], and skips the wait entirely for a source with nothing to
 //! hear ([`has_audio`]).
@@ -20,8 +20,8 @@ use crate::log::{self, CorrId, Level};
 use crate::sources::SourceEvent;
 use crate::units::SILENT_DB;
 
-/// R85 (Task 16c): the longest an onset ramp waits for [`SourceEvent::AudioFlowing`]
-/// before ramping anyway. Measured real restart latency (owner's machine, PipeWire/mpv) is
+/// The longest an onset ramp waits for [`SourceEvent::AudioFlowing`]
+/// before ramping anyway. Measured real restart latency (PipeWire/mpv) is
 /// ~19–85 ms; 150 ms gives headroom for a slow/cold audio-out restart while staying far
 /// short of anything a viewer would read as "the wallpaper froze". Logged
 /// `<comp>.onset_timeout` when hit.
@@ -36,14 +36,14 @@ fn flag(g: &Graph, id: &str, name: &str) -> bool {
 }
 
 /// Can a source of this `kind` carry audio at all? A `video` (mpv) and a `scene` (its
-/// worker's stream, Phase 2) — never a `color`/`image`/`snapshot`.
+/// worker's stream) — never a `color`/`image`/`snapshot`.
 pub fn kind_has_audio(kind: &str) -> bool {
     matches!(kind, "video" | "scene")
 }
 
 /// Does `id` carry audio at all? Only a live source of a kind with audio
 /// ([`kind_has_audio`]: video, scene) — not `no_audio` (our own `aid=no`), and not one
-/// found to have no audio (`has_audio`, R92: mpv's selected track, a scene worker's `Ready`;
+/// found to have no audio (`has_audio`: mpv's selected track, a scene worker's `Ready`;
 /// unknown reads `true`, the conservative "don't skip a real wait" default). A `color`/
 /// `image`/`snapshot` source has no audio behind it and never reports
 /// [`SourceEvent::AudioFlowing`].
@@ -258,7 +258,7 @@ impl Onsets {
     }
 
     /// The level `id.gain.<slot>` is held at by a pending onset's ramp target (what a
-    /// recipe recording a gain to restore later must see — R41: never the silent hold).
+    /// recipe recording a gain to restore later must see — never the silent hold).
     pub fn target_of(&self, id: &str, slot: &str) -> Option<f64> {
         self.pending
             .iter()

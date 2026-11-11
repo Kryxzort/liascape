@@ -1,5 +1,5 @@
 // Layout + motion polish probe — `scripts/test-ui-matrix.sh --probe probe-layout.js` (same hermetic stack as the
-// matrix; run it with LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb). Owner todo 2026-11-10:
+// matrix; run it with LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb).
 //   resize:<tab>:<w>x<h>  the window at any tiled size / aspect: nothing in the top bar sticks out of the window or
 //                         overlaps another top-bar control, the top bar stays a band (≤ 35 % of the height), the search
 //                         field keeps a usable width, the page never scrolls sideways, the grid's cards fit its width.

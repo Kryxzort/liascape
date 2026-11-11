@@ -183,7 +183,7 @@ fn opt_u64(args: &Value, key: &str) -> Result<Option<u64>, ApiError> {
     }
 }
 
-/// Phase 3 Task 9: `outbox.read {after?, limit? (500, 1–2000)}` → `{events, last_seq,
+/// `outbox.read {after?, limit? (500, 1–2000)}` → `{events, last_seq,
 /// dropped_before}` (`crate::outbox`).
 fn outbox_read(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let after = opt_u64(args, "after")?;
@@ -199,7 +199,7 @@ fn outbox_read(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
     Ok(json!({"events": p.events, "last_seq": p.last_seq, "dropped_before": p.dropped_before}))
 }
 
-/// Phase 3 Task 9: `outbox.ack {seq}` → `{}`: everything ≤ seq is stored by the backend.
+/// `outbox.ack {seq}` → `{}`: everything ≤ seq is stored by the backend.
 fn outbox_ack(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let seq = opt_u64(args, "seq")?.ok_or_else(|| bad_request("`seq` is required".into()))?;
     if let Some(o) = crate::outbox::global() {
@@ -210,8 +210,8 @@ fn outbox_ack(_: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> 
 
 fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     let mut caps = vec!["video", "image", "color", "transition", "program"];
-    // Phase 2: scenes play when the worker binary resolves (Task 5) and WE's assets dir does
-    // (Task 7 — `player.scene_assets_resolved`), unless synthetic scenes are allowed.
+    // Scenes play when the worker binary resolves and WE's assets dir does
+    // (`player.scene_assets_resolved`), unless synthetic scenes are allowed.
     if rt.scenes_available().is_ok() {
         caps.push("scene");
     }
@@ -221,12 +221,12 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.backend.kind() == "headless" {
         caps.push("headless");
     }
-    // Phase 3 Task 6: the covered Signal has a source here (whether it reads yet:
+    // The covered Signal has a source here (whether it reads yet:
     // `hello.health.cover`, `ok: null` until its first reading).
     if rt.cover.source != "unavailable" {
         caps.push("cover");
     }
-    // Phase 3 Task 14: the in-player auto-mute Signal runs here (on unless
+    // The in-player auto-mute Signal runs here (on unless
     // `LIASCAPE_PLAYER_AUTOMUTE=0`, and the audio bus up); without it the backend keeps `AudioMonitor`.
     if rt.automute_capable() {
         caps.push("automute");
@@ -234,7 +234,7 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     if rt.stepped() {
         caps.push("stepped");
     }
-    // Phase 3 Task 9: `outbox.read` / `outbox.ack` (the backend drains on every subscription)
+    // `outbox.read` / `outbox.ack` (the backend drains on every subscription)
     if crate::outbox::global().is_some() {
         caps.push("outbox");
     }
@@ -250,7 +250,7 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "clock": rt.clock_name(),
         "backend": rt.backend.kind(),
         "verbs": verb_names(),
-        // Task 16: `pid` is this compositor (the supervisor's child when supervised).
+        // `pid` is this compositor (the supervisor's child when supervised).
         "supervisor_pid": rt.supervised.as_ref().map(|s| s.pid),
         "restart": rt.restart_event,
         // which optional pieces work here, and why not (crate::health) — the backend's warning icons
@@ -282,16 +282,16 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
     Ok(json!({
         "graph": rt.graph.snapshot(),
         "transitions": rt.tr.status(),
-        // Phase 3: every program (`recipes::program`)
+        // Every program (`recipes::program`)
         "programs": rt.programs.status(),
         "clock": {"mode": rt.clock_name(), "now_ms": rt.now().as_secs_f64() * 1000.0},
         "outputs": outputs,
         "backend": rt.backend.kind(),
         "sources": rt.host.ids(),
         "parked": rt.parked.as_ref().map(|p| p.id.clone()),
-        // Phase 2 Task 5: every scene source's worker (the `workers` probe's entries).
+        // Every scene source's worker (the `workers` probe's entries).
         "workers": rt.host.workers_info(),
-        // Phase 3 Task 6: the covered Signal's source, each output's cover, the hold.
+        // The covered Signal's source, each output's cover, the hold.
         "cover": rt.cover_state(),
     }))
 }
@@ -415,7 +415,7 @@ fn create(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     Ok(json!({ "id": id }))
 }
 
-/// R49 for every way an effect id gets in (`transition`, `create`, `set`): a non-empty
+/// For every way an effect id gets in (`transition`, `create`, `set`): a non-empty
 /// string must name a catalogue effect.
 fn check_effect(rt: &Runtime, v: &Value) -> Result<(), ApiError> {
     match v.as_str() {
@@ -499,7 +499,7 @@ fn set(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         return Ok(json!({ "targets": [] }));
     }
     let targets = rt.graph.set_json(&PropPath(path.to_string()), value)?;
-    // Phase 3: a program's settings are live — the program re-reads its node
+    // A program's settings are live — the program re-reads its node
     for t in &targets {
         if rt.graph.kind_of(t) == Some(NodeKind::Program) {
             let acts = rt.programs.configure(t, &mut rt.graph);
@@ -561,7 +561,7 @@ fn animate(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         )));
     }
     let targets = rt.graph.resolve(node_ref);
-    // M13 (final review): a broadcast alias that matches nothing right now is a broadcast
+    // A broadcast alias that matches nothing right now is a broadcast
     // to nobody — `{targets: []}`, exactly like `set` — after the same schema check.
     if targets.is_empty()
         && let Some(kind) = wildcard_kind(rt, node_ref)
@@ -673,7 +673,7 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
         check_effect(rt, &json!(eid))?;
     }
     req.origin = crate::recipes::transition::ORIGIN_API.to_string();
-    // I4 (final review): no output at all (R60 parked) — accepted, B replaces the parked
+    // No output at all (parked) — accepted, B replaces the parked
     // wallpaper (`Runtime::transition_parked`); never refused, so a rotation can't spin.
     if req.outputs.starts_with("out:") && rt.graph.ids_of(NodeKind::Output).is_empty() {
         let (corr, to) = rt.transition_parked(req)?;
@@ -701,7 +701,7 @@ fn cancel(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     Ok(json!({}))
 }
 
-// ---------------------------------------------------------------- programs (Phase 3)
+// ---------------------------------------------------------------- programs
 
 fn opt_bool(args: &Value, key: &str) -> Result<bool, ApiError> {
     match args.get(key) {
@@ -730,7 +730,7 @@ fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, Api
     let now = rt.now();
     let cat = &rt.cat;
     let acts = if verb == "play" {
-        // § Playlist start: `from` start | resume | index
+        // `docs/player/modules/programs.md` § Playlist start and resume points: `from` start | resume | index
         let from = match args.get("from") {
             None | Some(Value::Null) => None,
             Some(Value::String(f)) => Some(f.as_str()),
@@ -930,7 +930,7 @@ fn remove_output(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiErr
     Ok(json!({}))
 }
 
-/// Phase 2 Task 7: a virtual pointer over a headless output (what the Wayland backend's
+/// A virtual pointer over a headless output (what the Wayland backend's
 /// pointer events do) — `out:<c>.pointer` and every scene shown there get it at once.
 fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let name = arg_str(args, "output")?.to_string();
@@ -946,7 +946,7 @@ fn headless_pointer(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, Api
     Ok(json!({ "scenes": scenes }))
 }
 
-/// Phase 3 Task 6: the fake cover source — what Hyprland/Sway/wlr-ft report on Wayland. The
+/// The fake cover source — what Hyprland/Sway/wlr-ft report on Wayland. The
 /// next tick reads it (`Runtime::cover_tick`).
 fn headless_cover(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
     let name = arg_str(args, "output")?.to_string();

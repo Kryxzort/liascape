@@ -3,7 +3,7 @@
 //! (where one exists), their default, and whether they're read-only.
 //!
 //! [`PropValue`] is the typed value a property holds inside the graph. The wire format
-//! (command API, Task 12) is `serde_json::Value`; [`from_json`]/[`PropValue::to_json`] are
+//! (command API) is `serde_json::Value`; [`from_json`]/[`PropValue::to_json`] are
 //! the two conversions between the two, done **with the property's declared [`PropType`] in
 //! hand** — a bare JSON number is ambiguous between [`PropValue::F64`] and
 //! [`PropValue::I64`], and only the schema (not the JSON payload) can say which one a given
@@ -34,11 +34,11 @@ pub enum PropValue {
     Str(String),
     List(Vec<f64>),
     Map(serde_json::Map<String, Value>),
-    /// A program's `items` (Phase 3).
+    /// A program's `items`.
     Items(Vec<ProgramItem>),
 }
 
-/// One item of a program (Phase 3, `prog:<name>.items`): a file, the `Source` create props
+/// One item of a program (`prog:<name>.items`): a file, the `Source` create props
 /// where it differs from the program's `defaults` (B's props = `defaults` with these merged
 /// over them, shallowly), and whether the rotation passes it over.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,18 +99,18 @@ pub enum PropType {
 }
 
 /// One property's full schema entry: its shape, whether `set` may touch it, its numeric
-/// range (if any — only `F64` properties the brief gives an exact range for carry one), and
+/// range (if any — only `F64` properties with a defined range carry one), and
 /// the value a freshly-created node starts with.
 #[derive(Debug, Clone)]
 pub struct PropDef {
     pub ty: PropType,
     pub readonly: bool,
     /// `(lo, hi)` inclusive, checked against the value's `f64`. `None` means "typed but not
-    /// range-checked" (e.g. `position`, `fps_cap` — the brief gives no range for them).
+    /// range-checked" (e.g. `position`, `fps_cap` — they have no defined range).
     pub range: Option<(f64, f64)>,
     /// The exact substring an `out_of_range` hint must contain for this property — kept as
     /// a literal rather than formatted from `range`, because `f64`'s `Display` drops a
-    /// trailing `.0` (`format!("{}", 4.0)` is `"4"`, not `"4.0"`) and the brief's test
+    /// trailing `.0` (`format!("{}", 4.0)` is `"4"`, not `"4.0"`) and the test
     /// asserts the hint contains the literal text `"0.1–4.0"`.
     pub range_hint: Option<&'static str>,
     pub default: PropValue,
@@ -141,7 +141,7 @@ fn ranged(
     }
 }
 
-/// Every property [`NodeKind`] defines, in the order given by the brief, with its default
+/// Every property [`NodeKind`] defines, in schema order, with its default
 /// value. A freshly-created [`crate::graph::Node`] seeds every one of these into its `props`
 /// map (`crate::graph::Node::with_defaults`) — `crate::graph::Graph::snapshot`'s "every node
 /// with every property" promise falls out of that for free, with no special-casing for
@@ -150,18 +150,18 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
     match kind {
         NodeKind::Player => vec![
             ("debug", def(PropType::Bool, false, PropValue::Bool(false))),
-            // R75 (Task 16b): player-level pause. `SourceHost` applies an *effective*
+            // Player-level pause. `SourceHost` applies an *effective*
             // pause (`node.paused || player.paused`) to every video/image source, and the
             // runtime excises paused time from the clock it feeds the Animator and
             // `Transitions` — see `docs/player/modules/graph-properties.md`
-            // "Player node `paused`" and § Runtime "Player-level pause".
+            // "Player node `paused`" and `docs/player/modules/graph-properties.md` § Player-level pause.
             ("paused", def(PropType::Bool, false, PropValue::Bool(false))),
             (
                 "version",
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("pid", def(PropType::I64, true, PropValue::I64(0))),
-            // Phase 2 Task 7: WE's `assets/` dir for scenes ("" = auto: `LIASCAPE_WE_ASSETS_DIR`,
+            // WE's `assets/` dir for scenes ("" = auto: `LIASCAPE_WE_ASSETS_DIR`,
             // then every Steam library — `scene::assets`); live (the next scene opened uses
             // it). `scene_assets_resolved` = what is in use ("" = none found: no `scene`
             // capability, a scene source errors with the hint).
@@ -173,7 +173,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_assets_resolved",
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
-            // Phase 2 Task 8 (owner: "GPU budget = a setting, default auto-throttle"): `true`
+            // The GPU budget is a setting, auto-throttle by default: `true`
             // = a scene whose worker starves its outputs is throttled stepwise and restored
             // (`scene::budget`); `false` = every scene ticks at exactly its outputs'
             // `scene_rate(scene_fps, refresh)` (a cap in force is lifted at once). Live.
@@ -181,10 +181,10 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_throttle",
                 def(PropType::Bool, false, PropValue::Bool(true)),
             ),
-            // Task 8, the per-scene VRAM guard: a scene worker using more than this many MiB of
+            // The per-scene VRAM guard: a scene worker using more than this many MiB of
             // VRAM (2 s in a row) is stopped — reported like a broken scene (`source.error`)
-            // plus `scene.vram_exceeded`, never a crash record. 0 = off (the default; the
-            // owner's suggestion when on: 1536). Live (the next sample applies it).
+            // plus `scene.vram_exceeded`, never a crash record. 0 = off (the default; a
+            // suggested value when on: 1536). Live (the next sample applies it).
             (
                 "scene_vram_limit_mib",
                 ranged(
@@ -194,7 +194,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     PropValue::F64(0.0),
                 ),
             ),
-            // Task 8, the system low-VRAM rule (owner round 3): what happens while the GPU's
+            // The system low-VRAM rule: what happens while the GPU's
             // free VRAM is low (`crate::vram` thresholds, hysteresis + hold): `stop` (the
             // default) pauses everything and frees the sources' GPU memory (each shows a still
             // of its last frame), `pause` only pauses, `off` does nothing. Every source kind;
@@ -213,11 +213,11 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "vram_low_active",
                 def(PropType::Bool, true, PropValue::Bool(false)),
             ),
-            // Phase 3 Task 6, pause when covered (`crate::signal`): `fullscreen` = hold the player
+            // Pause when covered (`crate::signal`): `fullscreen` = hold the player
             // while every output showing content has a fullscreen window on screen, `maximized` =
             // a fullscreen or maximized one, `off` = never. The prop's default stays `off` (a raw
             // player never pauses by itself); the backend asserts the user's setting (default
-            // `maximized`, O1). Live; kept across a crash restart by the snapshot.
+            // `maximized`). Live; kept across a crash restart by the snapshot.
             (
                 "pause_when_covered",
                 def(
@@ -231,12 +231,12 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "cover_hold_active",
                 def(PropType::Bool, true, PropValue::Bool(false)),
             ),
-            // Phase 3 Task 14, the in-player auto-mute (`crate::signal::automute`; off only with
+            // The in-player auto-mute (`crate::signal::automute`; off only with
             // `LIASCAPE_PLAYER_AUTOMUTE=0`): foreign audio continuously present for
             // `automute_delay_ms` mutes every source (`gain.automute`), silence for
             // `autounmute_delay_ms` unmutes. A slice counts above `automute_min_level_db` (peak
             // dBFS). `automute_only_if_mpris`: only a Playing MPRIS player's own streams count.
-            // Every foreign stream counts by default (owner 2026-10-29: no default exclusions).
+            // Every foreign stream counts by default: no default exclusions (by name or app).
             // Live; kept across a crash restart by the snapshot.
             ("automute", def(PropType::Bool, false, PropValue::Bool(false))),
             (
@@ -293,15 +293,16 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 ),
             ),
             ("paused", def(PropType::Bool, false, PropValue::Bool(false))),
-            // Task 13: the pointer over this output's surface, `[x, y, buttons]` in surface
+            // The pointer over this output's surface, `[x, y, buttons]` in surface
             // pixels (buttons: bit 0 left, 1 right, 2 middle, 3 side, 4 extra) — observed
-            // (`set_observed`) by the Wayland backend, for Phase 2's mouse-reactive sources.
+            // (`set_observed`) by the Wayland backend, for mouse-reactive sources.
             (
                 "pointer",
                 def(PropType::List3, true, PropValue::List(vec![0.0, 0.0, 0.0])),
             ),
-            // Phase 2 Task 5: the frame rate scene sources shown here are rendered at — WE's
-            // `fps` (2026-11-06): default 15 (WE's own; was 30, D5), and NOT capped by the
+            // The frame rate scene sources shown here are rendered at — WE's
+            // `fps` (`docs/decisions.md` § Default `scene_fps` to WE's own `fps` (15), not
+            // capped by the refresh rate): default 15 (WE's own), and NOT capped by the
             // refresh (WE's loop sleeps to `fps` and presents without vsync); 0 = this output's
             // refresh. A scene shown on several outputs ticks at the highest of their
             // `scene_rate(scene_fps, refresh_hz)`; each output presents its frames at most at
@@ -310,7 +311,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_fps",
                 ranged(PropType::F64, (0.0, 480.0), "0–480", PropValue::F64(15.0)),
             ),
-            // Phase 3 Task 6, the covered Signal (observed, `crate::signal`): how a window that is
+            // The covered Signal (observed, `crate::signal`): how a window that is
             // on screen here covers this output — `unavailable` when this session has no
             // window-state source (GNOME, KDE) — and the covering window, `{app_id, pid}` where
             // the source names them (`{}` when uncovered).
@@ -389,7 +390,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
             ("ready", def(PropType::Bool, true, PropValue::Bool(false))),
-            // R92: what mpv actually selected once the file loaded — `true` (the
+            // What mpv actually selected once the file loaded — `true` (the
             // conservative default) until a real source observes otherwise. Distinct
             // from `no_audio` (our own request) and `kind` (video vs a still): this is
             // "does the file even have an audio track". See `sources::MpvSource::
@@ -398,7 +399,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "has_audio",
                 def(PropType::Bool, true, PropValue::Bool(true)),
             ),
-            // Phase 2 Task 10: a `scene` past its restart budget (3 crashes within 60 s) —
+            // A `scene` past its restart budget (3 crashes within 60 s) —
             // observed from the live source; it shows its last frame (or its `preview`), silent,
             // no worker. Seeded `true` at create by a snapshot restore (read-only like `of`):
             // the scene comes back as its preview, no worker. A `path` change plays again.
@@ -437,13 +438,13 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "audio_delay",
                 def(PropType::F64, false, PropValue::F64(0.0)),
             ),
-            // Phase 2 Task 5: a `scene`'s still image (the item's preview), shown while no
-            // worker frame exists (Task 10). Stored on every kind, used by scenes only.
+            // A `scene`'s still image (the item's preview), shown while no
+            // worker frame exists. Stored on every kind, used by scenes only.
             (
                 "preview",
                 def(PropType::Str, false, PropValue::Str(String::new())),
             ),
-            // Phase 2 Task 7: a scene's user properties (`project.json` `general.properties`
+            // A scene's user properties (`project.json` `general.properties`
             // name → value: bool, number, `[r,g,b]` 0–1, or a string LWE parses by type),
             // applied at every open and live (each changed entry → `wp_project_property_set_*`
             // in the worker). Stored on every kind, used by scenes only.
@@ -470,7 +471,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 def(PropType::Str, false, PropValue::Str(String::new())),
             ),
         ],
-        // Phase 3: a rotation (`recipes::program`). Settable props are the program's live
+        // A rotation (`recipes::program`). Settable props are the program's live
         // configuration; the observed ones are what it does now (read-only).
         NodeKind::Program => {
             let ms = |d: f64| {
@@ -527,7 +528,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 // the RNG seed (shuffles, random picks, effect picks); `create` mints one
                 // from the wall clock when none is given
                 ("seed", def(PropType::I64, false, PropValue::I64(0))),
-                // while no output shows its item (O2): keep rotating invisibly (today's
+                // while no output shows its item: keep rotating invisibly (today's
                 // behaviour) or hold both clocks until an output returns
                 (
                     "while_parked",
@@ -538,16 +539,16 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     ),
                 ),
                 // the playlist's identity (`name:<saved name>` | `bar`; "" = none): its resume
-                // point is kept per key (§ Playlist start)
+                // point is kept per key (`docs/player/modules/programs.md` § Playlist start and resume points)
                 (
                     "key",
                     def(PropType::Str, false, PropValue::Str(String::new())),
                 ),
-                // "keep playing this one" (`liascape loop-current`, owner 2026-11-10): no rotation
+                // "keep playing this one" (`liascape loop-current`): no rotation
                 // away from the current item (no timer, end, maximum or scene-time switch; it loops)
                 // until it is set false again — a user switch still moves, and the keep holds that item
                 ("keep", def(PropType::Bool, false, PropValue::Bool(false))),
-                // "When the playlist starts again" (O4): start over (default) | resume
+                // "When the playlist starts again": start over (default) | resume
                 (
                     "start_mode",
                     def(
@@ -922,7 +923,7 @@ fn out_of_range(prop: &str, hint_range: &str) -> ApiError {
     }
 }
 
-/// `fit`'s value, for typed consumers (the renderer, Task 9) that don't want to re-parse the
+/// `fit`'s value, for typed consumers (the renderer) that don't want to re-parse the
 /// schema's enum strings themselves. The graph itself still stores `fit` as
 /// `PropValue::Str` (validated against the same four lowercase strings by
 /// [`check_type_and_range`]) — this is a convenience conversion at the read side, not a

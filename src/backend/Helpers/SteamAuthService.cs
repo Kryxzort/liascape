@@ -67,8 +67,8 @@ public static class SteamAuthService
         finally { try { steamClient.Disconnect(); } catch { } }
     }
 
-    /// What a password sign-in asks of the user while it runs (owner 2026-11-11: "is it a dead end for users without
-    /// mobile guard?" — the QR needs the Steam mobile app). Web/SteamOps turns each call into a WS event and
+    /// What a password sign-in asks of the user while it runs (docs/decisions.md § "Offer a password sign-in beside the
+    /// QR" — the QR needs the Steam mobile app). Web/SteamOps turns each call into a WS event and
     /// waits for the user's answer (POST /steam/login/code).
     public interface ILoginPrompt
     {
@@ -210,7 +210,7 @@ public static class SteamAuthService
         if (root.TryGetProperty("error", out var err) && err.GetInt32() != 0)
         {
             // AccessDenied (15) / Revoked (26) / Expired (27) on a well-formed, unexpired WebBrowser token = Steam ended that sign-in
-            // (owner 2026-11-11: a June token, aud web, never renewed — "Steam finalizelogin failed (EResult 15)"): say what to do
+            // (e.g. an old `aud web` token never renewed): say what to do rather than a bare EResult
             if (err.GetInt32() is 15 or 26 or 27) throw new SteamSignInRejectedException();
             throw new InvalidOperationException($"Steam finalizelogin failed (EResult {err.GetInt32()}).");
         }
@@ -251,9 +251,9 @@ public static class SteamAuthService
     {
         // the secrets live in SecretStore (the keyring, else steam-auth.json) — never in AppSettings / settings.json
         var rt = SecretStore.Get(SecretStore.RefreshToken);
-        // A sign-in whose SteamId was zeroed (owner 2026-11-11: Settings said "Signed in as …" — it reads the refresh token — while a
-        // Workshop download failed "Not signed in to Steam"): an old settings save wrote the UI's stale `SteamId: 0` back before
-        // `SettingsService.Patch` kept it (d12ab993), and since then the guard has faithfully kept the 0. The id is the refresh
+        // A sign-in whose SteamId is 0 while the refresh token is there (Settings reads the token and says "Signed in as …"
+        // while a Workshop download fails "Not signed in to Steam"): an older settings save could write the UI's stale
+        // `SteamId: 0`, and `SettingsService.Patch` keeps it. The id is the refresh
         // token's own `sub` claim, so restore it from there instead of sending the user through the QR sign-in again.
         if (!string.IsNullOrWhiteSpace(rt) && settings.SteamId == 0)
         {

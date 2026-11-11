@@ -68,8 +68,8 @@ sealed class Program
                 return;
             // internal: the daemons a closing app hands its work to (setsid-spawned by the backend itself).
             // timer-daemon / restart-daemon are legacy-only: under liascape-player the player's program rotates by
-            // itself (Phase 3 Task 8) and both return at once; so does monitor-daemon (AudioMonitor): the player's auto-mute
-            // Signal runs with the app closed (Task 14).
+            // itself and both return at once; so does monitor-daemon (AudioMonitor): the player's auto-mute
+            // Signal runs with the app closed.
             case "monitor-daemon":
                 AudioMonitor.RunDaemon();
                 return;

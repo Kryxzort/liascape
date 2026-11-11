@@ -9,19 +9,19 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// The adapter's program half (Phase 3 Task 7; plan docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md,
+// The adapter's program half (plan docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md,
 // player-adapter.md § Rotation). Under PlayerEngine=liascape-player a rotation session — Play / play-from of a playlist,
 // a timed or advance-on-end one, Play All with more than one item — is ONE player program, `prog:main` on `out:*`:
 // the player keeps its clock, its order, its history and every rule of § Rotation (recipes/program/), and keeps
 // rotating with the app closed. The backend only (a) turns the playlist + the settings into the program's spec
-// (`BuildSpec` — the settings stay the backend's: R61's resolver writes `defaults` and the per-item props), (b) sends
+// (`BuildSpec` — the settings stay the backend's: the override ?? global resolver writes `defaults` and the per-item props), (b) sends
 // the user switches as thin verbs, (c) sends every live edit as a `set prog:main.<prop>` (coalescible, ordered with
 // every other player mutation on LiascapePlayerMedia's queue) and (d) mirrors what plays from the program's events
 // (`program.current` → the UI's `wallpaper-changed`). A single applied wallpaper stays a plain `transition`.
 //
 // The mirror (`IsActive`, `CurrentPath`, `CurrentIndex`) is seeded from `state.programs` (`Sync`: serve start, a
 // player restart, the first question in a fresh process) and then follows the events. The MODEL (`_model`) is what
-// this backend last loaded — R81 (`Reapply`) re-loads it into a player that lost it (a restart without its snapshot)
+// this backend last loaded — the reapply (`Reapply`) re-loads it into a player that lost it (a restart without its snapshot)
 // and puts back a prop that differs; a backend that didn't load the program (it restarted) has no model and leaves the
 // player's program as it is.
 public static class LiascapePlayerProgram
@@ -135,7 +135,7 @@ public static class LiascapePlayerProgram
     private static string? _path;          // what it plays (its last `program.current`)
     private static int _index = -1;
     private static string? _key;           // its `key`, as last set / read
-    private static Spec? _model;           // what this backend last loaded (null: nothing of ours — R81 leaves it alone)
+    private static Spec? _model;           // what this backend last loaded (null: nothing of ours — Reapply leaves it alone)
     private static List<string>? _paths;   // its items, as this backend knows them (the model's, or read by Sync)
     private static string? _wantKey;       // a key to set before the next items push (another playlist into the bar)
     private static JsonElement? _sentItems, _sentDefaults; // the last items / defaults sent (a push that changes nothing sends nothing)
@@ -210,8 +210,8 @@ public static class LiascapePlayerProgram
     }
 
     // `serve` start under liascape-player: the mirror, then a legacy rotation still described by timed_state.json
-    // (a backend before Task 7, or the legacy engine) becomes the player's program at the item it was on (designer
-    // call 10). A program already in the player (an app restart: it never stopped) is left alone.
+    // (an older backend, or the legacy engine) becomes the player's program at the item it was on. A program already
+    // in the player (an app restart: it never stopped) is left alone.
     public static void Startup()
     {
         Sync();
@@ -269,7 +269,7 @@ public static class LiascapePlayerProgram
         }
     }
 
-    // A new player process (LiascapePlayerMedia.OnRestarted): re-seed the mirror when next asked, R81 for the program.
+    // A new player process (LiascapePlayerMedia.OnRestarted): re-seed the mirror when next asked, Reapply for the program.
     internal static void OnRestarted()
     {
         lock (_lock) _known = false;
@@ -419,7 +419,7 @@ public static class LiascapePlayerProgram
         return false;
     }
 
-    // ---- keep ("keep playing this one" — `liascape loop-current`, owner 2026-11-10) -----------------------------
+    // ---- keep ("keep playing this one" — `liascape loop-current`) -----------------------------------------------
     // The program's `keep` prop: no rotation away from the current item (it loops) until lifted. It lives in the player
     // (program.json — a player restart keeps it; a backend restart never touches it: Props/Reapply don't carry it); a
     // Play of a playlist (LoadNow) lifts it. Toggled ESSENTIAL (ordered after any switch queued before the keybind) and
@@ -465,7 +465,7 @@ public static class LiascapePlayerProgram
         }
         catch (LiascapePlayerException e) when (e.Code == "no_such_node")
         {
-            // the player lost it (a restart without its snapshot) and R81 hasn't caught up yet: load ours, then the verb
+            // the player lost it (a restart without its snapshot) and Reapply hasn't caught up yet: load ours, then the verb
             Spec? model; int at;
             lock (_lock) { model = _model; at = _paths?.IndexOf(_path ?? "") ?? -1; }
             if (model == null) { LiascapePlayerClient.Log($"program.{verb}: the player has no rotation"); lock (_lock) _exists = false; return; }
@@ -554,7 +554,7 @@ public static class LiascapePlayerProgram
         LiascapePlayerMedia.QueueSet("program:items", PushItemsNow);
     }
 
-    // Task 8: the mirror isn't seeded for this player process yet — a one-shot CLI (`liascape volume up` with the app
+    // The mirror isn't seeded for this player process yet — a one-shot CLI (`liascape volume up` with the app
     // closed) has asked nothing before its push. The push is queued anyway; on the queue's worker it seeds the mirror
     // first (EnsureSynced) and drops out when the player has no program. Under `_lock`.
     private static bool Unseeded() => !_known || _gen != C.Generation;
@@ -625,7 +625,7 @@ public static class LiascapePlayerProgram
         });
     }
 
-    // ---- R81 --------------------------------------------------------------------------------------------------
+    // ---- reapply after a restart / stall ------------------------------------------------------------------------
     // A new player process or the stall breaker closing: our model back on the player. Absent (a restart without its
     // snapshot — the supervisor's 4th restart in a minute) → loaded again at the item it was on; present → each prop
     // that differs from the model (with its items + defaults recomputed now) is set. No model (this backend didn't

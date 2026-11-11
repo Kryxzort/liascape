@@ -103,8 +103,8 @@ public static class TransitionService
 
     public static int PickDuration(Config c)
     {
-        // 0 ms = a cut (Pick → null; TryStart → false) — the old floor was 50 ms (owner QOL: "lower than 50");
-        // 1–49 ms run the effect that fast (the player's gains still ramp ≥ 30 ms, R42)
+        // 0 ms = a cut (Pick → null; TryStart → false); there is no 50 ms floor:
+        // 1–49 ms run the effect that fast (the player's gains still ramp ≥ 30 ms)
         int min = Math.Clamp(c.DurationMs, 0, 10000);
         if (c.DurationMaxMs > min) return _rng.Next(min, Math.Clamp(c.DurationMaxMs, min, 10000) + 1);
         return min;

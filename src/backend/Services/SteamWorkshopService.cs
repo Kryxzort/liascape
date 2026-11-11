@@ -10,13 +10,14 @@ using Liascape.Scrapers;
 
 namespace Liascape.Services;
 
-// The "Wallpaper Engine (Workshop)" Browse source. Since 2026-11-11 a page comes from Steam's own client protocol,
+// The "Wallpaper Engine (Workshop)" Browse source (docs/decisions.md § "Browse the Workshop over Steam's client protocol,
+// anonymously"). A page comes from Steam's own client protocol,
 // anonymously (SteamWorkshopDetails.QueryAsync — PublishedFile.QueryFiles over SteamAnonymous' shared session): one app
 // page = one QueryFiles page of 100, tags / previews / descriptions inline, ~1 s, and include/exclude tag filtering Steam
 // does server-side (WorkshopTags — OR within a group, the age rule, playable types only, so pages come back full).
-// It used to scrape steamcommunity.com's browse page (30 items a page, 3 pages + a prefetch of 3 per scroll, AND-only
-// tags, a GetPublishedFileDetails call per page, and a page read per detail click for the trailer) — a host Steam
-// rate-limits per IP, which once locked the owner's browser out for 30+ min. That stays as the FALLBACK, when Steam's
+// Scraping steamcommunity.com's browse page instead (30 items a page, AND-only tags, a GetPublishedFileDetails call per
+// page, a page read per detail click for the trailer) hits a host Steam rate-limits per IP — a lock-out of 30+ min that
+// takes the user's browser with it. Scraping stays as the FALLBACK, when Steam's
 // servers can't be reached / refuse (FallbackPagesPerLoad pages, no prefetch, through SteamGate; its cooldown → 429).
 // LIASCAPE_WORKSHOP_FALLBACK=1 forces the fallback (testing).
 public class SteamWorkshopService : IBgsProvider
@@ -41,8 +42,8 @@ public class SteamWorkshopService : IBgsProvider
     private bool _allowScenes;
     private int _gen; // bumped when filter/scenes change → invalidates the prefetch
 
-    // Every /browse sets these (ConfigureProvider); only a real change drops the prefetched page — compared by value, a
-    // re-sent identical filter used to invalidate it on every request.
+    // Every /browse sets these (ConfigureProvider); only a real change drops the prefetched page — compared by value, or a
+    // re-sent identical filter would invalidate it on every request.
     public WorkshopFilter Filter
     {
         get { lock (_lock) return _filter; }
@@ -59,7 +60,7 @@ public class SteamWorkshopService : IBgsProvider
 
     // Background-fetched next page so a scroll-load is instant. Keyed by (gen, query, page). A stale one (the filter
     // changed, another page was asked for) is CANCELLED: the session serves one request at a time, and the user's real
-    // request queued behind a useless prefetch (measured 2026-11-11: ~2 s a page instead of ~1 s).
+    // request would queue behind a useless prefetch (measured: ~2 s a page instead of ~1 s).
     private (int gen, string? query, int page, Task<List<WallpaperResult>> task, CancellationTokenSource cts)? _prefetch;
 
     private void DropPrefetch() { if (_prefetch is { } p) { try { p.cts.Cancel(); } catch { } } _prefetch = null; }

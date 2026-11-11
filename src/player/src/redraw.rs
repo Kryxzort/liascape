@@ -1,4 +1,4 @@
-//! The redraw policy for frame-paced outputs (Task 13, Wayland): an output presents a new
+//! The redraw policy for frame-paced outputs (Wayland): an output presents a new
 //! frame only when its picture can have changed — never 240 fps of a static colour.
 //!
 //! An output **wants a frame** when any of these holds since its last present:
@@ -6,7 +6,7 @@
 //!   than the Animator's — conservative: such a change anywhere wakes every output once);
 //! - an animated value changed on a node it shows ([`Redraw::mark_nodes`]: the Animator's
 //!   per-tick sets go through `Graph::set_animated`, which doesn't move `picture_rev`, and
-//!   mark only the outputs whose [`shown_nodes`] contain the animated node — Task 16);
+//!   mark only the outputs whose [`shown_nodes`] contain the animated node);
 //! - a source it shows (main layer `content`, or either side of the effect there) produced
 //!   a new texture ([`Redraw::mark_shown`], from `SourceHost::take_changed`) — a playing
 //!   video presents at its own frame rate, each frame at the next refresh;
@@ -17,14 +17,14 @@
 //!   content (a source or an effect) or either side of that effect; e.g. a transition's
 //!   `progress` or an opacity ramp) — then it presents on *every* frame callback, at its
 //!   own refresh, even between two animator ticks. An animation on another output's
-//!   nodes doesn't count (Task 16, review item a).
+//!   nodes doesn't count.
 //!
 //! Otherwise it is **idle**: no frame is drawn and no frame callback requested (the
 //! `frames` probe reports `idle: true`). Headless outputs don't use this — they compose on
-//! every tick, unchanged (R46).
+//! every tick, unchanged.
 //!
-//! **Scene frames are gated per output (Phase 2 Task 8):** one scene worker serves every
-//! output showing it (D1) and ticks at the fastest of their `scene_rate(scene_fps, refresh)` (WE's
+//! **Scene frames are gated per output:** one scene worker serves every
+//! output showing it and ticks at the fastest of their `scene_rate(scene_fps, refresh)` (WE's
 //! `fps`, which may exceed the refresh), so a
 //! new scene frame wakes output `<c>` at most `eff(out:<c>.scene_fps, refresh)` times per
 //! second ([`Redraw::mark_shown_gated`]): on a grid of that period, a frame that comes early
@@ -32,7 +32,7 @@
 //! a pause is still drawn. Anything else that wakes the output (a video it shows, an
 //! animation) presents the scene's newest frame with it. A scene at the output's refresh is
 //! not gated on an output with frame callbacks ([`scene_gate_period`]) — the runtime presents
-//! it on every callback instead (`runtime::scene_paces_output`, Phase 2 Task 14).
+//! it on every callback instead (`runtime::scene_paces_output`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -100,7 +100,7 @@ pub struct Redraw {
     drawn_rev: BTreeMap<String, u64>,
     /// Outputs with a new source frame / a backend request since their last present.
     dirty: BTreeSet<String>,
-    /// Task 8: per output, the grid slot of the last scene frame let through…
+    /// Per output, the grid slot of the last scene frame let through…
     gate_last: BTreeMap<String, Instant>,
     /// …and when a scene frame that came early may wake it.
     gate_due: BTreeMap<String, Instant>,
@@ -115,7 +115,7 @@ pub const GATE_SLACK: Duration = Duration::from_millis(2);
 /// output has frame callbacks (Wayland): they already pace it at the refresh, on the vblank,
 /// while the gate's own time grid (1 / the rounded refresh) drifts against the real one and,
 /// whenever its slot fell after a callback, made the output present off-callback at the slot
-/// (Task 14: DP-1 0 of 288 intervals paced for ~20 s at a time, DP-2 lost frames).
+/// (DP-1 0 of 288 intervals paced for ~20 s at a time, DP-2 lost frames).
 pub fn scene_gate_period(scene_fps: f64, refresh_hz: f64, frame_callbacks: bool) -> Option<Duration> {
     let hz = crate::sources::scene::eff_fps(scene_fps, refresh_hz);
     if frame_callbacks && refresh_hz > 0.0 && hz >= refresh_hz {
@@ -152,7 +152,7 @@ impl Redraw {
         }
     }
 
-    /// [`mark_shown`](Self::mark_shown) with the per-output scene gate (Task 8): `period(src,
+    /// [`mark_shown`](Self::mark_shown) with the per-output scene gate: `period(src,
     /// output)` = `Some(1 / eff(scene_fps, refresh))` for a scene source, `None` for anything
     /// else (marks at once). An output only woken by gated sources is marked on a grid of its
     /// period; an early frame is deferred to its slot (`promote_due`).
@@ -258,7 +258,7 @@ impl Redraw {
 }
 
 /// Whether `path` only changes audio (a `gain.<slot>`), never a picture. Shares its
-/// definition with [`is_gain_path`] (R90, Task 16d) — one predicate, not two that could
+/// definition with [`is_gain_path`] — one predicate, not two that could
 /// drift apart.
 pub fn audio_only(path: &PropPath) -> bool {
     is_gain_path(path)
@@ -434,17 +434,17 @@ mod tests {
         );
     }
 
-    /// Task 8: one scene frame every 1/60 s, shown on DP-1 (scene_fps 60) and DP-2 (15): DP-1
+    /// One scene frame every 1/60 s, shown on DP-1 (scene_fps 60) and DP-2 (15): DP-1
     /// presents every frame, DP-2 at most 15 per second — on a grid, the frame that came early
     /// deferred to its slot, never lost (the last one before the scene stops is drawn too).
     #[test]
     fn scene_at_the_refresh_is_paced_by_frame_callbacks_not_the_gate() {
-        // Phase 2 Task 14 (on-machine): with scene_fps at (or above) the refresh, the gate's own
+        // With scene_fps at (or above) the refresh, a gate's own
         // time grid (1/144 s) drifts against the real vblank (143.981 Hz) — whenever its slot
-        // fell after a frame callback the output went idle and presented off-callback at the
-        // slot: DP-1 presented 144/s with 0 of 288 intervals paced for ~20 s at a time, DP-2
-        // lost frames (235–239.5 presents/s, ~100 idle gaps/s). Frame callbacks already cap an
-        // output at its refresh, so such a scene is not gated there.
+        // falls after a frame callback the output goes idle and presents off-callback at the
+        // slot (measured on-machine: 144/s with 0 of 288 intervals paced for ~20 s at a time; a
+        // 240 Hz output lost frames: 235–239.5 presents/s, ~100 idle gaps/s). Frame callbacks
+        // already cap an output at its refresh, so such a scene is not gated there.
         let ms = |d: Option<Duration>| d.map(|d| (d.as_secs_f64() * 1e3 * 1000.0).round() / 1000.0);
         assert_eq!(scene_gate_period(0.0, 144.0, true), None, "scene_fps 0 = the refresh");
         assert_eq!(scene_gate_period(240.0, 144.0, true), None, "above the refresh");

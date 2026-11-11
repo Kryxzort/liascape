@@ -49,7 +49,7 @@ public static class AppOps
 
         if (PlayerEngine.IsLiascapePlayer)
         {
-            // Phase 3 Task 7: the player's program — the bar's order (the player shuffles), the playlist's "When the
+            // the player's program — the bar's order (the player shuffles), the playlist's "When the
             // playlist starts again" (§ Playlist start: Start over / Resume), its identity = the bar's saved name
             bool adv = EffAdvance(s, ps);
             if (!adv && interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
@@ -62,9 +62,9 @@ public static class AppOps
 
         if (EffAdvance(s, ps))
         {
-            // always the timed machinery, whatever the minimum (0 = switch at every end is an ordinary value now): a
-            // minimum of 0 used to go through ApplyPlaylist, where one item (a trash leaving one survivor, a one-item
-            // playlist) became a plain non-timed launch — an Undo growing it back then had no rotation to re-arm
+            // always the timed machinery, whatever the minimum (0 = switch at every end is an ordinary value): through
+            // ApplyPlaylist one item (a trash leaving one survivor, a one-item playlist) would become a plain non-timed
+            // launch — an Undo growing it back would then have no rotation to re-arm
             var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
             PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, switchWhenVideoEnds: true);
             Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
@@ -82,7 +82,7 @@ public static class AppOps
     public static string PlayFrom(List<string> paths, int startIndex, PlaylistSettings ps)
     {
         if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count) return "bad index";
-        // liascape-player (Task 7): the program plays from that item (`from: index` — an explicit play-from beats the
+        // liascape-player: the program plays from that item (`from: index` — an explicit play-from beats the
         // start setting) in the playlist's own order; the player shuffles the rest of a shuffled cycle
         if (PlayerEngine.IsLiascapePlayer) return PlayPlaylist(paths, ps, playFrom: startIndex);
         bool shuffle = ps.Order == PlaylistOrder.Shuffle;
@@ -335,7 +335,7 @@ public static class AppOps
         return null;
     }
 
-    // `liascape loop-current` (owner todo 2026-11-10, "keybind toggle to infinite loop current wallpaper"): toggles "keep
+    // `liascape loop-current` (a keybind to loop the current wallpaper indefinitely): toggles "keep
     // playing this one" — the rotation (the player's prog:main) stays on what plays, which loops, until toggled off; a
     // user switch still moves (and the keep holds that one), a Play of a playlist lifts it. The player keeps it across a
     // backend or player restart, and with the app closed the CLI toggles it straight on the player. A single wallpaper
@@ -397,7 +397,7 @@ public static class AppOps
         
     }
 
-    // Task 7: the playlist bar's save → the player's program, live, diffed prev → now (an unrelated save sends nothing): the
+    // The playlist bar's save → the player's program, live, diffed prev → now (an unrelated save sends nothing): the
     // items (+ the bar's identity: another playlist loaded into the bar or "Save as" → its key, set first so the player
     // keeps the old one's resume point), the order, the effective limits / rotation / transition / start mode.
     private static void ApplyToProgram(CustomPlaylist? prevP, CustomPlaylist p)
@@ -470,7 +470,7 @@ public static class AppOps
     {
         if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
         {
-            // Task 7 (.claude/rules/backend/api.md § Session and playlist operations): the program's items lose it (the bar's survivors), then the rotation goes
+            // .claude/rules/backend/api.md § Session and playlist operations: the program's items lose it (the bar's survivors), then the rotation goes
             // on to the next survivor at once — the item after the trashed one's place (the reorder rule)
             var keep = (pl?.VideoPaths ?? LiascapePlayerProgram.Paths?.ToList() ?? []).Where(x => !del.Contains(x)).ToList();
             if (keep.Count > 0)
@@ -541,8 +541,7 @@ public static class AppOps
                 SavePlaylistState(new CustomPlaylist { VideoPaths = paths, Settings = pl.Settings, Name = pl.Name });
         }
         // undoing a "Delete from Source" un-queues the unsubscribe (a no-op for a plain delete), like the old app — and one
-        // Steam already carried out is undone too: subscribed again (owner 2026-11-11: "what if i unsubscribe + undo / does it
-        // resubscribe? it doesn't right?" — it didn't: the item came back while Steam deleted its folder)
+        // Steam already carried out is undone too: subscribed again (else the item comes back while Steam deletes its folder)
         var resub = new List<string>();
         var titles = new Dictionary<string, string>();
         foreach (var i in batch.Items)

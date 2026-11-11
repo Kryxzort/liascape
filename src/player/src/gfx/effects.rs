@@ -44,7 +44,7 @@ const BODY_PLACEHOLDER: &str = "//<<BODY>>";
 // `lowp`/`mediump`/`highp` as reserved, no-op keywords even outside GLSL ES and outside
 // `#ifdef GL_ES` guards (verified by temporarily forcing a `#define highp` / etc. prelude
 // off and re-running `all_compile`: still 122/122). So there is nothing to work around
-// here; if a future driver/body combination needs one, the brief's intended seam is right
+// here; if a future driver/body combination needs one, the intended seam is right
 // here, in `Catalogue::program`'s assembly step — never in `transitions/` itself.
 
 /// One `uniforms[]` entry from `manifest.json`, resolved to a concrete GL uniform shape.
@@ -52,12 +52,12 @@ const BODY_PLACEHOLDER: &str = "//<<BODY>>";
 struct UniformSpec {
     name: String,
     kind: UniformKind,
-    /// Manifest default, always present as an array even for scalar types (brief: "the
+    /// Manifest default, always present as an array even for scalar types ("the
     /// manifest `uniforms[].default`" — "default is always an array").
     default: Vec<f64>,
 }
 
-/// The uniform types the brief enumerates: `bool | float | int | ivec2 | vec2 | vec3 |
+/// The uniform types supported: `bool | float | int | ivec2 | vec2 | vec3 |
 /// vec4`. Resolved once at [`Catalogue::load`] time from the manifest's `type` string so
 /// a typo'd/unrecognised type fails loudly at load rather than silently skipping a
 /// uniform later.
@@ -131,14 +131,14 @@ pub struct Catalogue {
     /// — substituted per effect in [`Catalogue::program`].
     frag_template: String,
     programs: HashMap<String, EffectProgram>,
-    /// M3 (final review): effects that failed to load/compile on this driver — the error,
+    /// Effects that failed to load/compile on this driver — the error,
     /// cached so a failing effect is read and compiled once (logged once,
     /// `effects.compile_failed`), not on every frame of every output.
     failed: HashMap<String, String>,
 }
 
 impl Catalogue {
-    /// Resolve the `transitions/` directory to load, in order (brief's exact order):
+    /// Resolve the `transitions/` directory to load, in order:
     ///
     /// 1. `LIASCAPE_TRANSITIONS_DIR` env var.
     /// 2. `~/.local/lib/liascape/transitions` (the default install, `install.sh`).
@@ -269,7 +269,7 @@ impl Catalogue {
     /// `tests/effects_all.rs`'s `all_compile` can list failures by id without having to
     /// re-thread it through `Gfx::program`'s own stage-only error).
     ///
-    /// A failure is cached (M3): later calls return the same error at once, and it is
+    /// A failure is cached: later calls return the same error at once, and it is
     /// logged once (`effects.compile_failed`) — the compositor then draws a cut.
     pub fn program(&mut self, gfx: &Gfx, id: &str) -> Result<&EffectProgram, String> {
         if let Some(e) = self.failed.get(id) {
@@ -373,7 +373,7 @@ impl EffectProgram {
 
     /// Draw this effect's fullscreen triangle into whatever FBO/viewport is currently
     /// bound — this function never binds or queries a framebuffer, resizes a viewport, or
-    /// restores any GL state afterwards (the brief's contract: the caller, Task 9's layer
+    /// restores any GL state afterwards (the caller, the layer
     /// compositor, owns the target). What it *does* leave behind, for the next caller to
     /// either rely on or overwrite: this program bound (`glUseProgram`), `fromTex`/`toTex`
     /// bound at texture units 0/1 with unit 1 left active, and the crate-wide empty VAO
@@ -381,7 +381,7 @@ impl EffectProgram {
     ///
     /// `params` supplies this effect's per-uniform values; a name missing from `params`
     /// (or present but empty) falls back to that uniform's manifest default. Per the
-    /// brief: a value may be the manifest-shaped array (`[x, y, ...]`) or, for a scalar
+    /// A value may be the manifest-shaped array (`[x, y, ...]`) or, for a scalar
     /// uniform, a bare JSON number — both are accepted. A uniform name in `params` that
     /// this effect doesn't declare is simply never looked at (this loop only ever reads
     /// `self.uniforms`, never iterates `params`' own keys). A uniform the driver optimised
@@ -440,7 +440,7 @@ impl EffectProgram {
 /// Normalize one `params` value to the manifest's `default`-array shape: a JSON array is
 /// read element-by-element (numbers and bools both accepted, matching how the manifest
 /// itself encodes `bool` defaults as `[0.0]`/`[1.0]` — see `docs/player/modules/composition.md`'s
-/// "Effects" section); a bare number or bool is treated as a 1-element array (brief: "a
+/// "Effects" section); a bare number or bool is treated as a 1-element array ("a
 /// bare number is accepted as a 1-element array"). Anything else (string, object, null)
 /// yields an empty vec, which [`EffectProgram::draw`] then treats the same as "absent" and
 /// falls back to the manifest default.
@@ -459,7 +459,7 @@ fn value_to_f64(v: &Value) -> Option<f64> {
     }
 }
 
-/// Apply one resolved `values` slice to `loc` per the brief's exact type mapping: `bool`
+/// Apply one resolved `values` slice to `loc` per this type mapping: `bool`
 /// → `glUniform1i(0/1)`, `int` → `1i`, `ivec2` → `2i`, `float`/`vec2`/`vec3`/`vec4` →
 /// `Nf`. Missing trailing components default to `0.0` (`1.0` for a `vec4`'s alpha, so an
 /// under-specified color default still reads as opaque).
@@ -492,7 +492,7 @@ fn apply_uniform(
     }
 }
 
-/// Rewrite one wrapper shader's header for desktop GL 3.3 core (brief's exact rule):
+/// Rewrite one wrapper shader's header for desktop GL 3.3 core (this exact rule):
 /// replace the exact first line `#version 300 es` with `#version 330 core`, and delete a
 /// `precision highp float;` line if present.
 ///

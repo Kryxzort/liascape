@@ -136,7 +136,7 @@ export const Library = memo(function Library() {
     focusLib(path);
   };
   // a click focuses the card (the sidebar shows it) — a plain click also applies it, as before (and as WE does); a right-click
-  // (LibraryCard) focuses it without applying (owner 2026-11-11: "no context menu anywhere")
+  // (LibraryCard) focuses it without applying (docs/decisions.md § "Open the item sidebar on right-click; no context menus")
   const onCardClick = (it: LibraryItem, e: React.MouseEvent) => {
     focusFromCard(it.videoPath);
     if (e.shiftKey && anchor.current) {

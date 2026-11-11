@@ -35,22 +35,22 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// …unless B reports a load in progress (its observed `loading`: a scene whose worker is alive
 /// inside LWE's load + build — `SceneSource::loading`): such a B is waited for up to this long.
 /// A keeps playing meanwhile (its frames and gain untouched), so waiting costs nothing on screen;
-/// failing would drop the switch. Measured (docs/TODO.md "Corpus under load", 2026-11-03): a
+/// failing would drop the switch. Measured (a corpus under load): a
 /// heavy scene's build is one CPU-bound thread (3.5–4.9 s of CPU), 7 s to its first frame quiet,
-/// 13 s with 24 busy threads + 3 scenes playing and 17–20 s with 48 — past the 10 s, so every
-/// such switch failed. A load that really hangs is the worker's business: its `LoadGate` stops
+/// 13 s with 24 busy threads + 3 scenes playing and 17–20 s with 48 — past a 10 s ready
+/// timeout, so every such switch would fail. A load that really hangs is the worker's business: its `LoadGate` stops
 /// covering it (no progress past `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, 30 s) and the heartbeat kills
 /// it (a restart; past the budget `broken` → `Error`, which fails the transition at once). 50 s:
 /// under the backend's own 60 s wait for a non-aligned switch (`WaitSwitch`), so the player's
 /// verdict (`failed: … (still loading)`) is what the backend sees, never its timeout + cancel.
 pub const LOADING_READY_TIMEOUT: Duration = Duration::from_secs(50);
-/// R85: the onset bound — one constant for every onset path (`crate::onset`, I6).
+/// The onset bound — one constant for every onset path (`crate::onset`).
 pub use crate::onset::ONSET_TIMEOUT;
-/// M2 (final review): an `align: end` wait never outlasts A's remaining play time (at its
+/// An `align: end` wait never outlasts A's remaining play time (at its
 /// speed) by more than this — an A that errors mid-file, stalls, or has no known end falls
 /// back to starting now (`transition.align_fallback`), so rotation never silently stops.
 pub const ALIGN_SLACK: Duration = Duration::from_secs(10);
-/// Requirement #2 (Task 16c): the extra tail *after* a ramp-to-silence's own 30 ms before
+/// Requirement #2: the extra tail *after* a ramp-to-silence's own 30 ms before
 /// the source is actually paused — gain pushes are async and mpv's own audio buffering
 /// lags the graph value (dropout evidence: a ramp paused exactly at its nominal end
 /// truncated its last ~6 ms in the audio actually output). 15 ms is comfortably ≥ 2× the
@@ -101,7 +101,7 @@ fn origin_api() -> String {
     ORIGIN_API.to_string()
 }
 
-/// One transition request (the command API's `transition` verb, Task 12).
+/// One transition request (the command API's `transition` verb).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionReq {
     /// Output alias (`out:*`, `out:DP-1`, …).
@@ -119,7 +119,7 @@ pub struct TransitionReq {
     pub method: Method,
     #[serde(default)]
     pub align: Align,
-    /// Who asked (Phase 3): `"api"` — a client's `transition` (the verb always sets it) — or
+    /// Who asked: `"api"` — a client's `transition` (the verb always sets it) — or
     /// `"program:<id>"`, a program's switch. Reported in `transition.scheduled`.
     #[serde(default = "origin_api")]
     pub origin: String,
@@ -147,11 +147,11 @@ impl Phase {
     }
 }
 
-/// A source's identity + playback position at some instant (R70): what the dropout
-/// detector (Task 15, `probe::dropout`) needs to decode the matching stretch of the file
+/// A source's identity + playback position at some instant: what the dropout
+/// detector (`probe::dropout`) needs to decode the matching stretch of the file
 /// and weight it by the recorded gain schedule. `position` is the observed `time_pos`
 /// (seconds); `path` is the graph `path` — both read straight off the graph, never a
-/// synchronous mpv call. Review fix round, R78: also carries `speed`, `loop_` (wire name
+/// synchronous mpv call. Also carries `speed`, `loop_` (wire name
 /// `"loop"`) and `duration`, so the dropout detector can map window time to FILE time at
 /// this source's own speed and wrap a looping decode at this `duration` instead of
 /// treating every window-crossing-EOF as silence.
@@ -166,7 +166,7 @@ pub struct AudioSourceSnapshot {
     pub duration: Option<f64>,
 }
 
-/// One outbox entry (R37): written to the event log too, forwarded to API subscribers by
+/// One outbox entry: written to the event log too, forwarded to API subscribers by
 /// the runtime. Serializes flat: `{"corr", "at_ms", "event": "transition.…", …fields}`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TransitionEvent {
@@ -200,7 +200,7 @@ pub enum TransitionEventKind {
         /// The effect's own start instant (= `at_ms`, except `align: end` full-live may
         /// start up to one tick in the past so `progress` reaches 1 exactly at A's end).
         start_ms: f64,
-        /// R70 (Task 15, the dropout detector): every distinct outgoing A (one per
+        /// For the dropout detector: every distinct outgoing A (one per
         /// `Side`, in request order — not shared/held distinction, the recipe's own A id
         /// regardless of whether a snapshot is fronting it), each with its graph `path`
         /// and observed `time_pos` (seconds) at this instant.
@@ -256,9 +256,9 @@ pub struct TransitionStatus {
 }
 
 /// What the recipe changed on a source, for exact restoration (cancel/failure, or the
-/// source turning out to be shown elsewhere — R43). Only the first change of each is
+/// source turning out to be shown elsewhere). Only the first change of each is
 /// recorded, and a gain is recorded as the *target* of whatever animation was moving it
-/// then (R41), never a mid-ramp value.
+/// then, never a mid-ramp value.
 #[derive(Debug, Default)]
 struct Orig {
     looped: Option<bool>,
@@ -266,7 +266,7 @@ struct Orig {
     gains: Vec<(&'static str, f64)>,
 }
 
-/// One distinct outgoing source and the requested layers that show it (R34).
+/// One distinct outgoing source and the requested layers that show it.
 #[derive(Debug)]
 struct Side {
     /// `None`: those layers showed nothing.
@@ -304,7 +304,7 @@ struct Tr {
     swap_at: Option<Duration>,
     /// Handoff → Done once this has passed (and A's grave is empty).
     settle_until: Duration,
-    /// When the gain animations begun at t0 end (≥ t0 + 30 ms whatever the duration, R42).
+    /// When the gain animations begun at t0 end (≥ t0 + 30 ms whatever the duration).
     gain_end: Duration,
     /// When the effect's picture ends (handoff): t0 + D, earlier once compressed.
     end_at: Duration,
@@ -337,10 +337,10 @@ struct Tr {
     evaluated: bool,
     /// reveal/frozen: the snapshots have been created (they're waited on until ready).
     copies_made: bool,
-    /// R85 (Task 16c): B's onset ramp, held until real audio confirms (or times out).
+    /// B's onset ramp, held until real audio confirms (or times out).
     /// `None` once started, or never needed (a cut never goes through this path).
     onset: Option<PendingOnset>,
-    /// M2: when an `align: end` wait gives up on A's end and starts anyway (player clock;
+    /// When an `align: end` wait gives up on A's end and starts anyway (player clock;
     /// `None` = not computed yet / recompute — after a speed change or a new lead).
     align_deadline: Option<Duration>,
     /// B reported `loading` past `READY_TIMEOUT` and is being waited for
@@ -355,7 +355,7 @@ impl Tr {
 }
 
 /// A source waiting to be destroyed once its ramp to silence is over. `orig` is what the
-/// recipe changed on it: if a layer shows it again before then, it's restored (R43).
+/// recipe changed on it: if a layer shows it again before then, it's restored.
 struct Grave {
     id: String,
     at: Duration,
@@ -365,7 +365,7 @@ struct Grave {
 }
 
 enum Outcome {
-    /// A newer request took over; it proceeds from A as it is now (R44: no rewind).
+    /// A newer request took over; it proceeds from A as it is now (no rewind).
     Superseded,
     /// Cancelled; A stays current.
     Cancelled,
@@ -382,7 +382,7 @@ pub struct Transitions {
     ended: BTreeMap<String, (f64, Duration)>,
     outbox: Vec<TransitionEvent>,
     prev_now: Duration,
-    /// I6 (final review): `restore_a`'s un-pause-then-ramp-in onsets (a snap-back, a
+    /// `restore_a`'s un-pause-then-ramp-in onsets (a snap-back, a
     /// cancelled/failed/superseded switch, a grave shown again) — held until the restored
     /// A's audio flows, like every other onset.
     restore_onsets: Onsets,
@@ -415,12 +415,12 @@ fn is_source(g: &Graph, id: &str) -> bool {
     g.kind_of(id) == Some(NodeKind::Source)
 }
 
-/// R70: `id`'s path + observed `time_pos` right now, for the dropout detector's gain
+/// `id`'s path + observed `time_pos` right now, for the dropout detector's gain
 /// schedule — falls back to the (writable) `position` target, then `0.0`, so a source
 /// that hasn't produced its first frame yet (B, just created) still gets a sane start
-/// point instead of `None` collapsing to a silent gap in the recorded schedule. R78
-/// (review fix round): also reads `speed`/`loop`/`duration` off the graph at this same
-/// instant. `pub(crate)` so `Runtime::retire` (R79's plain-retire dropout window) can
+/// point instead of `None` collapsing to a silent gap in the recorded schedule. Also
+/// reads `speed`/`loop`/`duration` off the graph at this same
+/// instant. `pub(crate)` so `Runtime::retire` (its plain-retire dropout window) can
 /// reuse the exact same snapshot shape without duplicating it.
 pub(crate) fn snapshot_source(g: &Graph, id: &str) -> AudioSourceSnapshot {
     AudioSourceSnapshot {
@@ -448,7 +448,7 @@ fn is_still(g: &Graph, id: &str) -> bool {
     )
 }
 
-/// A source that never reaches an end — a still, or a scene (Phase 2 Task 9: a scene has
+/// A source that never reaches an end — a still, or a scene (a scene has
 /// no duration and never emits `Ended`; its `loop` is stored, inert). `align: end` on such
 /// a lead A is `Now`, and End leaves its loop alone. Unlike a still, a scene's picture
 /// changes: reveal/frozen still hold it by a snapshot (`changing_sides` uses `is_still`).
@@ -530,7 +530,7 @@ fn ramp_slot(
     );
 }
 
-/// R85: actually start a held onset ramp — called once [`SourceEvent::AudioFlowing`]
+/// Actually start a held onset ramp — called once [`SourceEvent::AudioFlowing`]
 /// confirms real audio, or [`ONSET_TIMEOUT`] passes. Bumps `settle_until` so a Handoff's
 /// `transition.done` can't fire before this ramp (started here, possibly well after the
 /// nominal effect end) actually finishes.
@@ -550,8 +550,8 @@ fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration, reason: &str) {
     tr.settle_until = tr.settle_until.max(now + dur);
 }
 
-/// R85: does `id` have real audio worth holding an onset ramp for? Only a live `video`
-/// source (not `no_audio`, R92: and not confirmed to have no actual audio track —
+/// Does `id` have real audio worth holding an onset ramp for? Only a live `video`
+/// source (not `no_audio`, and not confirmed to have no actual audio track —
 /// `has_audio`, defaulting `true` until a real source observes otherwise) ever reports
 /// [`SourceEvent::AudioFlowing`] — `MpvSource::apply` fires it immediately for everything
 /// else (stepped mode, no audio track, no audio stream in the file at all), and a
@@ -559,13 +559,13 @@ fn start_onset(tr: &mut Tr, anim: &mut Animator, now: Duration, reason: &str) {
 /// the first place. Checking here too (never scheduling a [`PendingOnset`] for one) avoids
 /// relying on a 150 ms [`ONSET_TIMEOUT`] for the completely ordinary case of a plain cut-
 /// like fade onto a colour/image B, **or onto a video that simply has no audio stream**
-/// (R92: before this check, every such B waited the full timeout and logged a warning,
+/// (before this check, every such B waited the full timeout and logged a warning,
 /// every time) — ramp it in at once instead.
 fn b_has_audio(g: &Graph, id: &str) -> bool {
     crate::onset::has_audio(g, id)
 }
 
-/// Un-pause `id` and either hold its onset ramp (R85, real audio) or start it at once (no
+/// Un-pause `id` and either hold its onset ramp (real audio) or start it at once (no
 /// audio to wait for) — the one seam every B-onset call site (full-live/reveal at
 /// `begin_running`, frozen at `handoff`, a `frozen` commit interrupt) goes through.
 #[allow(clippy::too_many_arguments)]
@@ -657,7 +657,7 @@ fn main_layer(output: &str) -> String {
     format!("lay:{}:main", output.strip_prefix("out:").unwrap_or(output))
 }
 
-/// One side per distinct A on the requested outputs (R34).
+/// One side per distinct A on the requested outputs.
 fn build_sides(g: &Graph, outputs: &[String]) -> Vec<Side> {
     let layers: Vec<String> = outputs
         .iter()
@@ -690,8 +690,8 @@ fn build_sides(g: &Graph, outputs: &[String]) -> Vec<Side> {
 }
 
 /// Record `a.gain.<slot>` in `orig` (first change only): the target of the animation
-/// *still moving* it, if one is live, else its current value (R41). `live_target_of`
-/// (not `target_of`) is deliberate (Task 16b): a *finished* animation's held target must
+/// *still moving* it, if one is live, else its current value. `live_target_of`
+/// (not `target_of`) is deliberate: a *finished* animation's held target must
 /// never win over a later direct `set` on the same path — that `set` is the newer truth.
 fn note_gain(orig: &mut Orig, g: &Graph, anim: &Animator, a: &str, slot: &'static str) {
     if !orig.gains.iter().any(|(s, _)| *s == slot) {
@@ -709,7 +709,7 @@ impl Transitions {
 
     /// Accept a request: validate it, create B (paused at its start, `gain.xfade` = −96,
     /// shared by every requested output), resolve any in-flight transition on an
-    /// overlapping output (R35/R36: pre-Running → superseded, A restored; Running →
+    /// overlapping output (pre-Running → superseded, A restored; Running →
     /// committed, B becomes the new A), and capture A per output. Nothing visible changes
     /// until B is ready.
     pub fn start(
@@ -769,7 +769,7 @@ impl Transitions {
             }
         }
 
-        // R85: a node with another (unrelated, e.g. already-handed-off) transition's own
+        // A node with another (unrelated, e.g. already-handed-off) transition's own
         // pending onset is about to become *this* request's outgoing "A" — force that
         // onset to start right now rather than leaving it to resolve invisibly later and
         // fight whatever this transition does to the same gain slot (`note_gain`/`release`
@@ -835,7 +835,7 @@ impl Transitions {
             align_deadline: None,
             waited_load: false,
         };
-        // align: end — A's current iteration is its last (unless shared, R34, or it never
+        // align: end — A's current iteration is its last (unless shared, or it never
         // ends: a still or a scene).
         if req.align == Align::End
             && let Some(li) = lead
@@ -868,7 +868,7 @@ impl Transitions {
         Ok(corr)
     }
 
-    /// Cancel an in-flight transition (R35): before Running → B destroyed and A restored
+    /// Cancel an in-flight transition: before Running → B destroyed and A restored
     /// exactly; Running → snap back to A (A unpaused, its gains back over 30 ms, B ramped
     /// to silence then destroyed). After handoff there is nothing to cancel.
     pub fn cancel(
@@ -928,7 +928,7 @@ impl Transitions {
                         self.ended.remove(id);
                     }
                 }
-                // M2: an A that errored mid-file holds its last frame and makes no more
+                // An A that errored mid-file holds its last frame and makes no more
                 // sound — for `align: end` it has ended (never waited on forever).
                 SourceEvent::Error { .. } => {
                     if self.active.iter().any(|t| t.lead_a() == Some(id.as_str())) {
@@ -937,7 +937,7 @@ impl Transitions {
                     }
                 }
                 SourceEvent::Rejected { .. } => {}
-                // R85: the onset ramp this id was waiting on (if any) starts now, for real.
+                // The onset ramp this id was waiting on (if any) starts now, for real.
                 SourceEvent::AudioFlowing => {
                     for tr in &mut self.active {
                         if tr.onset.as_ref().is_some_and(|o| &o.id == id) {
@@ -970,7 +970,7 @@ impl Transitions {
     }
 
     /// `(live transitions, graves, ended-tracking entries, restore onsets)` — the `loop`
-    /// probe's long-run `bounds` (C1).
+    /// probe's long-run `bounds`.
     pub fn bounds(&self) -> (usize, usize, usize, usize) {
         (
             self.active.len(),
@@ -980,12 +980,12 @@ impl Transitions {
         )
     }
 
-    /// Drain the event outbox (R37).
+    /// Drain the event outbox.
     pub fn drain_events(&mut self) -> Vec<TransitionEvent> {
         std::mem::take(&mut self.outbox)
     }
 
-    /// R59 — a newly added output joins the live transition covering `like` (an existing
+    /// A newly added output joins the live transition covering `like` (an existing
     /// output): its main layer becomes one of that transition's layers (on `like`'s side,
     /// so `like`'s A is not "shown outside" the request), it shows what the transition
     /// shows now — A before Running, the effect while Running (A until the swap for a cut),
@@ -1028,7 +1028,7 @@ impl Transitions {
         Some(corr)
     }
 
-    /// R60 — output `output` is gone (its main layer already destroyed with it). Every live
+    /// Output `output` is gone (its main layer already destroyed with it). Every live
     /// transition on it forgets it; a side left with no layer drops its effect/snapshot and
     /// releases its A (restored if shown elsewhere, else ramped out and destroyed); a
     /// transition left with no output at all is committed at once — the effects go, the
@@ -1093,7 +1093,7 @@ impl Transitions {
     fn commit_unseen(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         tr.pause_at = None;
-        // R85: a reveal/full-live onset from an earlier `begin_running` may still be
+        // A reveal/full-live onset from an earlier `begin_running` may still be
         // pending here — but nothing shows B any more ("B left exactly as it is"), so
         // there is no audible reason left to wait on it: drop it without ever starting the
         // ramp (B's gain stays exactly where `begin_running` set it, silent). Don't use the
@@ -1115,7 +1115,7 @@ impl Transitions {
         );
     }
 
-    /// What the `srcs:` alias needs (R50): per requested output (`out:<c>`), the sources
+    /// What the `srcs:` alias needs: per requested output (`out:<c>`), the sources
     /// each live transition holds — its B and its outgoing A's — plus every grave (released
     /// sources about to be destroyed). The runtime hands this to
     /// `Graph::set_transition_sources` after every start/cancel/tick.
@@ -1218,7 +1218,7 @@ impl Transitions {
     }
 
     /// Destroy every grave whose ramp is over. One that a layer shows again is not
-    /// destroyed but restored — playing, audible, its own loop (R43).
+    /// destroyed but restored — playing, audible, its own loop.
     fn bury(&mut self, g: &mut Graph, anim: &mut Animator, now: Duration) {
         let graves = std::mem::take(&mut self.graves);
         for gr in graves {
@@ -1249,7 +1249,7 @@ impl Transitions {
         events: &[(String, SourceEvent)],
         now: Duration,
     ) -> bool {
-        // R85: an onset ramp still waiting past its bound starts anyway — never held
+        // An onset ramp still waiting past its bound starts anyway — never held
         // open indefinitely for a confirmation that may never arrive.
         if let Some(onset) = &tr.onset
             && onset.timed_out(now)
@@ -1337,7 +1337,7 @@ impl Transitions {
             // reveal/frozen hold each A whose picture can still change as a still copy of
             // the frame on screen ("held where it is"): pausing a source doesn't freeze its
             // texture (a paused mpv presents queued frames ~100 ms late, measured 2–3
-            // frames), and a shared A keeps playing elsewhere anyway (R34). Stills and
+            // frames), and a shared A keeps playing elsewhere anyway. Stills and
             // ended A's can't change and are held as themselves. The copy is taken at the
             // start instant — or, for a shared looping A on `End`, while its last frame
             // shows (the effect then starts at the boundary). The host makes the copy on
@@ -1419,7 +1419,7 @@ impl Transitions {
         }
 
         if tr.phase == Phase::Handoff
-            && tr.onset.is_none() // R85: never Done while B's onset ramp is still pending
+            && tr.onset.is_none() // Never Done while B's onset ramp is still pending
             && now >= tr.settle_until
             && !self.graves.iter().any(|gr| gr.corr == tr.corr)
         {
@@ -1449,7 +1449,7 @@ impl Transitions {
             // never a wait for ALIGN_SLACK's fallback.
             return Some(now);
         }
-        // M2: never wait for an end that doesn't come (A errored without `Ended`, stalled,
+        // Never wait for an end that doesn't come (A errored without `Ended`, stalled,
         // no known duration): A's remaining play time at its speed + ALIGN_SLACK, then
         // start now. Recomputed after a speed change or a new lead (`align_deadline`).
         let deadline = *tr.align_deadline.get_or_insert_with(|| {
@@ -1585,7 +1585,7 @@ impl Transitions {
                 anim.compress_to(&path(fx, "progress"), &corr, now, target);
             }
         }
-        // R42: the gains still never move faster than a 30 ms ramp from t0.
+        // The gains still never move faster than a 30 ms ramp from t0.
         let gain_target = target.max(tr.t0 + ANTICLICK).min(tr.gain_end);
         if gain_target < tr.gain_end {
             for side in &tr.sides {
@@ -1643,7 +1643,7 @@ impl Transitions {
         t0: Duration,
         now: Duration,
     ) {
-        // Sharing can change while waiting (R43): a side now shown outside the request is
+        // Sharing can change while waiting: a side now shown outside the request is
         // left alone — and gets back whatever was already changed on it (End's loop) — and
         // one no longer shown elsewhere is ours to hold.
         let layers: Vec<String> = tr.sides.iter().flat_map(|s| s.layers.clone()).collect();
@@ -1670,7 +1670,7 @@ impl Transitions {
             // appears once a frame step is seen and must not read as a move
             tr.end_hold = tr.end_est.map(|e| (secs(tr.end_at) - e).max(0.0));
         }
-        // R42: gains never move faster than a 30 ms ramp, whatever the duration (the
+        // Gains never move faster than a 30 ms ramp, whatever the duration (the
         // picture may still cut instantly).
         let gd = tr.dur.max(ANTICLICK);
         tr.gain_end = t0 + gd;
@@ -1686,9 +1686,9 @@ impl Transitions {
                 // start at A's end, full-live as soon as B is ready) still reports the
                 // time_pos of its last frame, which the dropout probe would read as "A is
                 // there now" and expect its last moments of sound inside the pre-roll: a
-                // false drop (Phase 3 battery 2026-11-11, `scenes × reveal` tr-754, the
-                // start 88 ms after `Ended`). Its sound ended one clip frame after `Ended`
-                // (F3); past that, advance the snapshot by the time it has been over.
+                // false drop (seen with a start 88 ms after `Ended`). Its sound ended one
+                // clip frame after `Ended`; past that, advance the snapshot by the time it
+                // has been over.
                 if let Some(&(_, at)) = self.ended.get(&a) {
                     let over = secs(now.saturating_sub(at)) - frame_s(tr, g);
                     if over > 0.0 {
@@ -1785,7 +1785,7 @@ impl Transitions {
 
         match tr.method {
             Method::FullLive => {
-                // R85: B is un-paused now, but its xfade-in ramp waits for real audio
+                // B is un-paused now, but its xfade-in ramp waits for real audio
                 // (`SourceEvent::AudioFlowing`) — un-pausing at the instant the gain ramp
                 // starts runs most of the ramp on no audio at all (the owner's "flicker
                 // of silence"), since mpv/PipeWire's own output restart measurably lags.
@@ -1832,14 +1832,14 @@ impl Transitions {
                         ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
                     }
                 }
-                // Requirement #2 (Task 16c): A isn't actually paused until its ramp has
+                // Requirement #2: A isn't actually paused until its ramp has
                 // settled in the audio *output*, not just the graph's own ANTICLICK
                 // schedule — gain pushes are async and mpv's audio buffering lags the
                 // graph value by a few ms (dropout evidence: a ramp paused right at its
                 // nominal end truncated its last ~6 ms in the real output).
                 tr.pause_at = Some(t0 + ANTICLICK + AUDIO_SETTLE_TAIL);
                 if tr.method == Method::Reveal {
-                    // R85: same held-onset treatment as full-live, above.
+                    // Same held-onset treatment as full-live, above.
                     gset(g, &corr, &b, "paused", PropValue::Bool(false));
                     schedule_onset(
                         tr,
@@ -1903,7 +1903,7 @@ impl Transitions {
     }
 
     /// A no longer shown by these layers. Shown by some other layer → restored to how it
-    /// was (playing, audible, its own loop — R43). Otherwise destroyed once silent: at once
+    /// was (playing, audible, its own loop). Otherwise destroyed once silent: at once
     /// if paused; next iteration if already at −96 dB (its final value reaches the source
     /// first); when its xfade lands at −96 if that's within 30 ms; else after a 30 ms
     /// anti-click ramp.
@@ -1964,12 +1964,12 @@ impl Transitions {
     fn handoff(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         let (corr, b) = (tr.corr.clone(), tr.b.clone());
-        // R85: never move `settle_until` backward (see `commit_unseen`'s note) — reveal's
+        // Never move `settle_until` backward (see `commit_unseen`'s note) — reveal's
         // onset (begin_running, possibly resolved via `ONSET_TIMEOUT` well before this
         // method's own natural handoff) may still be mid-ramp.
         tr.settle_until = tr.settle_until.max(now).max(tr.gain_end);
         if tr.method == Method::Frozen && is_source(g, &b) {
-            // R85: this is *the* bug the owner reported — B has been paused through the
+            // This is the audible failure to avoid — B has been paused through the
             // whole effect; at handoff it un-pauses with essentially zero lead time for
             // mpv/PipeWire's audio-out to actually restart before a ramp needs it. Hold
             // the anticlick ramp-in until `SourceEvent::AudioFlowing` confirms it (or
@@ -2021,13 +2021,13 @@ impl Transitions {
         );
     }
 
-    /// Interrupt of a Running transition (brief step 7): B becomes current at once (held B
+    /// Interrupt of a Running transition: B becomes current at once (held B
     /// unpaused, its gains → 0 dB over 30 ms), A ramped to silence over 30 ms and destroyed.
     fn commit(&mut self, tr: &mut Tr, g: &mut Graph, anim: &mut Animator, now: Duration) {
         self.layers_to_b(tr, g, anim);
         let (corr, b) = (tr.corr.clone(), tr.b.clone());
         if is_source(g, &b) {
-            // R85: a `frozen` transition interrupted mid-Running still has B genuinely
+            // A `frozen` transition interrupted mid-Running still has B genuinely
             // paused (it only ever un-pauses at its own handoff) — committing it here is
             // the same real un-pause/onset-wait as `handoff`'s Frozen branch, never an
             // immediate ramp. reveal/full-live already un-paused B back at `begin_running`
@@ -2058,7 +2058,7 @@ impl Transitions {
             }
         }
         tr.pause_at = None;
-        // R85: `.max` — never shorten a reveal/full-live onset's already-committed wait.
+        // `.max` — never shorten a reveal/full-live onset's already-committed wait.
         tr.settle_until = tr.settle_until.max(now + ANTICLICK);
         let from = self.release_all(tr, g, anim, now);
         tr.phase = Phase::Handoff;
@@ -2074,9 +2074,9 @@ impl Transitions {
     }
 
     /// Put back exactly what the recipe changed on `a`: loop, pause, and each gain slot
-    /// (ramped over 30 ms to its recorded target, R41). `seek_if_ended`: an A whose loop
+    /// (ramped over 30 ms to its recorded target). `seek_if_ended`: an A whose loop
     /// we turned off and that has ended because of it is rewound so it loops on — only when
-    /// it stays current (cancel/failure); a superseded A is proceeded from as it is (R44).
+    /// it stays current (cancel/failure); a superseded A is proceeded from as it is.
     #[allow(clippy::too_many_arguments)]
     fn restore_a(
         &mut self,
@@ -2224,12 +2224,11 @@ impl Transitions {
 /// (`Tr::end_est`). `time_pos` is the shown frame's pts, so one sample over-estimates the end
 /// by its offset inside that frame — but the graph mirrors `time_pos` every tick, so the
 /// minimum is taken right after each frame change and sits within a tick of the true end.
-/// **F3 (2026-11-04):** this used to subtract half a frame "to centre the error", on the
-/// assumption that the samples fell anywhere inside a frame. Measured against mpv's `Ended`
-/// (A's last frame presented) + one clip frame, a 1 s full-live `align: end` handed off
-/// 10–14 ms *before* A's last frame had had its 33 ms (the Phase 3 battery: 7–20 ms after
-/// `Ended`) — B drawn over a frame the clip still owned. Aimed at the raw minimum the
-/// handoff lands 0…one output frame after it (`tests/api.rs::
+/// **Don't subtract half a frame "to centre the error"** on the assumption that the samples
+/// fall anywhere inside a frame: measured against mpv's `Ended` (A's last frame presented) +
+/// one clip frame, a 1 s full-live `align: end` then hands off 10–14 ms *before* A's last
+/// frame has had its 33 ms — B drawn over a frame the clip still owns. Aimed at the raw
+/// minimum the handoff lands 0…one output frame after it (`tests/api.rs::
 /// align_end_hands_off_as_a_last_frame_ends`).
 fn estimated_end(tr: &Tr) -> Option<f64> {
     tr.end_est
@@ -2281,7 +2280,7 @@ fn track_lead(tr: &mut Tr, g: &Graph, now: Duration) {
         // effect started late (speed storm).
         let n = secs(now);
         tr.end_est = tr.end_est.map(|e| n + (e - n).max(0.0) * s0 / speed);
-        tr.align_deadline = None; // M2: re-derive the fallback from the new speed
+        tr.align_deadline = None; // Re-derive the fallback from the new speed
     }
     if paused {
         tr.end_est = None;
@@ -2412,7 +2411,7 @@ mod tests {
         })
     }
 
-    /// R44: superseding an End-wait whose A already ended restores A's loop without a
+    /// Superseding an End-wait whose A already ended restores A's loop without a
     /// rewind (the new request proceeds from A's held last frame); cancelling one (A stays
     /// current) rewinds it so it loops on.
     #[test]
@@ -2502,7 +2501,7 @@ mod tests {
         assert!(mid > SILENT_DB && mid < 0.0, "A2 mid-ramp at +10 ms: {mid}");
     }
 
-    /// M2 (final review): an `align: end` A that never reaches its end (stalled — its
+    /// An `align: end` A that never reaches its end (stalled — its
     /// `time_pos` stops moving — or errored without `Ended`) doesn't hold the switch
     /// forever: after its remaining play time + ALIGN_SLACK it starts anyway
     /// (`transition.align_fallback`), not before.
@@ -2529,7 +2528,7 @@ mod tests {
         assert!(h.has(&t, "transition.started"), "never fell back");
     }
 
-    /// Phase 2 Task 9: a scene never ends (no duration, no `Ended`) — an `align: end` lead A
+    /// A scene never ends (no duration, no `Ended`) — an `align: end` lead A
     /// that is a scene is `Now` at once, like a still, for every method, instead of waiting
     /// out ALIGN_SLACK (10 s) and logging `transition.align_fallback`. Its (stored, inert)
     /// `loop` isn't touched. Unlike a still, reveal/frozen still hold it by a snapshot (its
@@ -2577,7 +2576,6 @@ mod tests {
     /// Corpus under load: a B that reports `loading` (a scene whose worker is alive inside its
     /// LWE load + build) is waited for past `READY_TIMEOUT`, up to `LOADING_READY_TIMEOUT`; a B
     /// that doesn't still fails at 10 s, and one that stops loading without a frame fails then.
-    /// RED before: every loading case failed at 10 s ("no first frame within 10 s").
     #[test]
     fn loading_b_is_waited_for_past_the_ready_timeout() {
         let failed = |h: &H, t: &CorrId| {
@@ -2881,8 +2879,8 @@ mod tests {
 
     /// The same speed-up 0.3 s before the planned start (A's end moves from +2.3 s to
     /// +0.575 s — the start instant, end − D, is now 1.4 s in the past): the effect starts at
-    /// once and runs compressed, ending with A. RED before: it ran the full 2 s, ending
-    /// 1.43 s after A.
+    /// once and runs compressed, ending with A (never the full 2 s, ending
+    /// 1.43 s after A).
     #[test]
     fn align_end_speed_up_inside_last_d_of_the_wait_ends_with_a() {
         let mut h = H::new(&["V1"]);
@@ -2968,7 +2966,7 @@ mod tests {
         );
     }
 
-    /// M2: an A that errors mid-file counts as ended for alignment (it makes no more
+    /// An A that errors mid-file counts as ended for alignment (it makes no more
     /// sound and holds its last frame) — the switch starts at once.
     #[test]
     fn align_end_a_error_counts_as_ended() {
@@ -2995,7 +2993,7 @@ mod tests {
     /// The dropout probe's A snapshot (`transition.started.a[].position`): an A that ended
     /// well before the start (a late B) is snapshotted past its end by the time it has been
     /// over beyond one clip frame — not at its last frame's stale time_pos, which made the
-    /// probe expect A's last sound inside the pre-roll (battery 2026-11-11, tr-754: a false
+    /// probe expect A's last sound inside the pre-roll (a false
     /// 20 ms drop). An on-time start (≤ one frame after `Ended`) keeps the plain time_pos.
     #[test]
     fn started_snapshot_of_a_long_ended_a_is_past_its_end() {
@@ -3063,7 +3061,7 @@ mod tests {
         assert!(h.g.kind_of(&snap).is_none());
     }
 
-    /// Task 16b: `note_gain`'s R41 bookkeeping must use `Animator::live_target_of`, not
+    /// `note_gain`'s restore bookkeeping must use `Animator::live_target_of`, not
     /// `target_of` — a *finished* animation's stale target must never win over a later
     /// direct `set` on the same path. A's `gain.xfade` is animated to −20 dB and left to
     /// finish, then `set` directly to −6 dB (e.g. a settings change); starting a
@@ -3113,7 +3111,7 @@ mod tests {
         );
     }
 
-    /// R85 (Task 16c): `frozen`'s B un-pauses at handoff with essentially zero lead time
+    /// `frozen`'s B un-pauses at handoff with essentially zero lead time
     /// for real audio — its anticlick ramp-in must not start (no `Animator` target at
     /// all) until `SourceEvent::AudioFlowing` confirms it, even though the picture/graph
     /// clock has already moved well past the nominal handoff instant.
@@ -3168,7 +3166,7 @@ mod tests {
         assert!(h.has(&t, "transition.done"), "done once the onset resolved");
     }
 
-    /// R85: unconfirmed past [`ONSET_TIMEOUT`], the onset ramps anyway rather than holding
+    /// Unconfirmed past [`ONSET_TIMEOUT`], the onset ramps anyway rather than holding
     /// the transition's `done` open forever.
     #[test]
     fn onset_timeout_ramps_anyway() {
@@ -3198,7 +3196,7 @@ mod tests {
         );
     }
 
-    /// R92 (review of Task 16c/16d): a video `kind` that mpv itself resolved to have
+    /// A video `kind` that mpv itself resolved to have
     /// **no audio track at all** (`has_audio` observed `false` — distinct from
     /// `no_audio`, our own request) must skip the onset wait entirely, exactly like a
     /// colour/image B — `b_has_audio` must be false for it, so `schedule_onset` never
@@ -3241,7 +3239,7 @@ mod tests {
         );
     }
 
-    /// R85: `full-live`/`reveal` un-pause B at `Running`'s very start (effect duration
+    /// `full-live`/`reveal` un-pause B at `Running`'s very start (effect duration
     /// ahead as lead time) — the same held-onset treatment applies there too.
     #[test]
     fn full_live_onset_waits_for_audio_flowing() {
@@ -3260,7 +3258,7 @@ mod tests {
         assert_eq!(h.anim.target_of(&path(&b, "gain.xfade")), Some(0.0));
     }
 
-    /// Requirement #2 (Task 16c): A's hold-then-pause (reveal/frozen) must not pause until
+    /// Requirement #2: A's hold-then-pause (reveal/frozen) must not pause until
     /// its anticlick ramp has settled — `ANTICLICK` elapsing alone is not enough; the extra
     /// `AUDIO_SETTLE_TAIL` must pass too.
     #[test]
@@ -3291,8 +3289,7 @@ mod tests {
         assert!(h.bool(&a, "paused"), "settle tail elapsed: paused now");
     }
 
-    /// Owner's list: "it probably shouldn't do transition when there was no wallpaper playing
-    /// before". With nothing on any requested output there is no A to go from: the requested
+    /// With nothing on any requested output there is no A to go from: the requested
     /// effect is dropped (a cut — B appears on its first frame, 30 ms audio ramp) and every
     /// event says so. Any A at all keeps the effect (the next test).
     #[test]

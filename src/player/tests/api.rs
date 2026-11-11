@@ -1,8 +1,8 @@
-//! Task 12: the runtime + command API end to end. Every test spawns the real binary —
+//! The runtime + command API end to end. Every test spawns the real binary —
 //! `liascape-player serve --no-supervise --headless --outputs 640x360@60,320x180@60 --clock
 //! stepped --ao null` — with a temp `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` (never the real
 //! ones), talks JSON lines over its socket, and kills the child on drop (also on panic).
-//! `--no-supervise` (Task 16): the spawned process *is* the compositor (pid checks, lock
+//! `--no-supervise`: the spawned process *is* the compositor (pid checks, lock
 //! owner, SIGTERM); supervision has its own suite (`tests/supervise.rs`). Skips (prints
 //! `SKIP: …`) only without an EGL device or a `transitions/` catalogue — fails instead
 //! under `LIASCAPE_REQUIRE_GPU=1` (`common::skip_gpu`).
@@ -60,7 +60,7 @@ fn new_root() -> PathBuf {
 /// a killed test run): `PR_SET_PDEATHSIG` — no stray `serve` ever outlives its test.
 fn die_with_parent(c: &mut Command) {
     use std::os::unix::process::CommandExt;
-    // Task 8: hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
+    // Hermetic VRAM — the low-VRAM rule never sees this machine's real GPU (a test
     // that drives it sets `fake:<file>` after this).
     c.env("LIASCAPE_PLAYER_VRAM_PROBE", "none");
     unsafe {
@@ -436,7 +436,7 @@ fn s(p: &Path) -> &str {
     p.to_str().unwrap()
 }
 
-// ---------------------------------------------------------------- brief tests
+// ---------------------------------------------------------------- core verbs and transitions
 
 #[test]
 fn hello_and_state() {
@@ -747,9 +747,9 @@ fn hotplug_mid_transition() {
     near(png_pixel(&p3, 160, 90), [0, 0, 255], 1, "VIRTUAL-3 shows B");
 }
 
-// ---------------------------------------------------------------- controller rulings
+// ---------------------------------------------------------------- recipe, player pause, client isolation, ctl
 
-/// R49: effect ids are checked against the catalogue; the error says how to list them.
+/// Effect ids are checked against the catalogue; the error says how to list them.
 #[test]
 fn unknown_effect_rejected() {
     let Some(srv) = Serve::start() else { return };
@@ -779,7 +779,7 @@ fn unknown_effect_rejected() {
     );
 }
 
-/// R48: same command script twice → byte-identical captures; the frame is the one the
+/// Same command script twice → byte-identical captures; the frame is the one the
 /// virtual clock says (frame-index marker).
 #[test]
 fn stepped_is_deterministic() {
@@ -840,7 +840,7 @@ fn stepped_is_deterministic() {
     assert!(a2 == b2, "capture 2 differs between runs");
 }
 
-/// R50: a global setting sent to `srcs:*` reaches the pending B of an in-flight
+/// A global setting sent to `srcs:*` reaches the pending B of an in-flight
 /// transition (not just what's on screen), in the graph and in mpv.
 #[test]
 fn settings_reach_pending_b() {
@@ -975,8 +975,8 @@ fn stepped_align_end_reveal() {
 /// TODO "a speed-up inside the last D of an `align:end` wait / a global speed change
 /// mid-effect", real libmpv on the virtual clock: a 1.5 s full-live fade aligned to the end
 /// of a 3 s A, A sped up 4× (`srcs:*.speed`, the backend's global path) 300 ms into the
-/// effect — the effect is compressed and hands off at A's new end. RED before: at the
-/// requested 1.5 s, ~0.9 s after A ended (A frozen on its last frame meanwhile).
+/// effect — the effect is compressed and hands off at A's new end. Failure it catches: a
+/// handoff at the requested 1.5 s, ~0.9 s after A ended (A frozen on its last frame meanwhile).
 #[test]
 fn align_end_speed_up_mid_effect_hands_off_at_a_end() {
     let Some(srv) = Serve::start() else { return };
@@ -1048,11 +1048,11 @@ fn probe_source<'a>(probe: &'a Value, id: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("{id} not in {probe}"))
 }
 
-/// Task 16b, R75: player-level pause freezes the Animator and `Transitions` — a
+/// Player-level pause freezes the Animator and `Transitions` — a
 /// full-live transition's effect progress, both sides' `gain.xfade` and both sides'
 /// `time_pos` all stay exactly where they were through a full second of stepped time,
 /// and both are *effectively* paused (`probe sources`) even though neither side's own
-/// `paused` node prop ever changes (full-live never pauses either side — R34/§10). (d):
+/// `paused` node prop ever changes (full-live never pauses either side). (d):
 /// `player.paused` is reflected in `get`, `state` and `probe sources` throughout. On
 /// resume the transition continues forward from where it paused (never restarts) and
 /// completes normally.
@@ -1161,7 +1161,7 @@ fn player_pause_freezes_full_live_transition() {
     c.step_until_event(32, 300, "transition.done", &corr);
 }
 
-/// Task 16b, R75: pausing mid-`frozen` hold must not disturb the recipe's own hold — A
+/// Pausing mid-`frozen` hold must not disturb the recipe's own hold — A
 /// and B are already held (`paused: true`) by the method itself, the player-level
 /// override is a no-op on top of that, and the handoff (driven by the frozen clock) must
 /// not fire while paused even once real step-time well past `duration_ms` has gone by.
@@ -1249,7 +1249,7 @@ fn player_pause_freezes_frozen_hold() {
     );
 }
 
-/// Task 16b, R75: pausing during an `align: end` wait holds A (via the generic
+/// Pausing during an `align: end` wait holds A (via the generic
 /// effective-pause override, not anything the recipe itself does) so it never reaches
 /// its own natural end while paused — the wait must not fire — and resumes once
 /// unpaused.
@@ -1321,12 +1321,12 @@ fn player_pause_freezes_align_end_wait() {
     );
 }
 
-/// Task 16c (R88): player-level pause/resume on a *plain* source (not part of any
+/// Player-level pause/resume on a *plain* source (not part of any
 /// transition) ramps `gain.anticlick` to silence over the ANTICLICK + settle-tail window
 /// before the source is actually paused, and — on resume — un-pauses immediately then
 /// ramps back in once real audio is confirmed flowing. Real clock (not stepped): the gate
 /// is timed off the wall clock on purpose (never the player clock, which freezes the
-/// instant `player.paused` does — R75), so it needs real time to pace against, the same
+/// instant `player.paused` does), so it needs real time to pace against, the same
 /// reason `destroy_ramps_audible_source_out` (above) uses `--clock real` too.
 #[test]
 fn player_pause_ramps_a_plain_source() {
@@ -1360,7 +1360,7 @@ fn player_pause_ramps_a_plain_source() {
     c.ok("set", json!({"path": "player.paused", "value": true}));
 
     // `probe sources`: `mpv_pause` is a synchronous, real read of mpv's own property —
-    // unlike `get id.paused` (the *node's* raw intent, deliberately never touched by R75
+    // unlike `get id.paused` (the *node's* raw intent, deliberately never touched by player-level pause
     // and so never reflects the gate either, same as the existing
     // `player_pause_freezes_*` tests' own `src["paused"]` checks).
     let mpv_paused = |c: &mut Client| -> bool {
@@ -1450,7 +1450,7 @@ fn player_pause_ramps_a_plain_source() {
     );
 }
 
-/// R93 (review of Task 16c/16d): destroying a plain source while its R88 player-pause
+/// Destroying a plain source while its player-pause
 /// anticlick gate is still open — in any of its four states (`Pausing`, `Paused`,
 /// `AwaitingFlow`, `Resuming`) — must never leak the gate or its dropout-probe window,
 /// and `retire`'s own 30 ms ramp must be the *only* writer left touching
@@ -1470,7 +1470,7 @@ fn r93_destroy_mid_gate_never_leaks() {
         let p = c.ok("probe", json!({"name": "sources"}));
         probe_source(&p, id)["mpv_pause"].as_str() == Some("yes")
     };
-    // The gate ramps its own slot (final review I2).
+    // The gate ramps its own slot.
     let anticlick = |c: &mut Client, id: &str| -> f64 {
         get(c, &format!("{id}.gain.pause"))["result"]["value"]
             .as_f64()
@@ -1536,7 +1536,7 @@ fn r93_destroy_mid_gate_never_leaks() {
         }
 
         c.ok("destroy", json!({ "id": id }));
-        // I1 (final review): the teardown runs on the unpaused clock — "Pausing"/"Paused"
+        // The teardown runs on the unpaused clock — "Pausing"/"Paused"
         // left the player paused, and the destroy must still complete (decoder freed)
         // without a resume.
 
@@ -1612,11 +1612,11 @@ fn r93_destroy_mid_gate_never_leaks() {
     }
 }
 
-/// R93 (review of Task 16c/16d, minor fix): under the stepped clock, `player.paused`
-/// must never open an R88 gate for a plain source at all — mpv itself stays paused for
-/// good there (§ Sources "Stepped mode"), and the gate's wall-clock (`Instant`) ramp has
-/// nothing meaningful to pace against. Pausing/resuming stays the ordinary, instant R75
-/// composition (`node.paused || player.paused`, § invariant #7) — no ramp, `gain.
+/// Under the stepped clock, `player.paused`
+/// must never open a pause gate for a plain source at all — mpv itself stays paused for
+/// good there (`docs/player/modules/runtime.md` § Stepped clock), and the gate's wall-clock (`Instant`) ramp has
+/// nothing meaningful to pace against. Pausing/resuming stays the ordinary, instant player-level pause
+/// composition (`node.paused || player.paused`, `docs/player/invariants.md` #7) — no ramp, `gain.
 /// anticlick` untouched, `probe loop`'s `pause_gates` stays 0 throughout. Default
 /// `Serve::start()` (`--clock stepped`).
 #[test]
@@ -1666,12 +1666,12 @@ fn stepped_player_pause_never_opens_a_gate() {
     assert_eq!(lp["pause_gates"], json!(0), "{lp}");
 }
 
-/// R92 (review of Task 16c/16d): a frozen transition onto a B that is a real `video`
+/// A frozen transition onto a B that is a real `video`
 /// with literally no audio stream (`ClipSpec::FrameIndex`, generated with no `-c:a`/
 /// audio input at all — not `no_audio`, which is our own request) must complete
 /// quickly, never waiting the full `ONSET_TIMEOUT` (150 ms) or logging
 /// `transition.onset_timeout` — `has_audio` resolves `false` once mpv loads the file,
-/// so `b_has_audio` already treats it like a colour/image B (R85's existing fast path).
+/// so `b_has_audio` already treats it like a colour/image B (the no-audio fast path).
 /// `--clock real`: the whole point is real wall-clock timing of the onset wait.
 #[test]
 fn r92_transition_onto_video_with_no_audio_skips_onset_wait() {
@@ -1742,11 +1742,11 @@ fn r92_transition_onto_video_with_no_audio_skips_onset_wait() {
     );
 }
 
-/// TODO "`transition.onset_timeout` on audio-less videos" (85 in the Task 20 re-run): EVERY
+/// `transition.onset_timeout` on audio-less videos: EVERY
 /// method × align onto a B that has nothing (more) to play — no audio stream at all, or a
-/// selected audio track that ends 30 ms in (RED before: the confirmation needed a SECOND
-/// `audio-pts` change ≥ 40 ms after the first, which never came, so every one of these
-/// waited out `ONSET_TIMEOUT` and warned) — must hand off without the timeout. A has audio
+/// selected audio track that ends 30 ms in (the trap: a confirmation that needs a SECOND
+/// `audio-pts` change ≥ 40 ms after the first never comes, so every one of these would
+/// wait out `ONSET_TIMEOUT` and warn) — must hand off without the timeout. A has audio
 /// (a 3 s clip, so `align: end` arrives quickly); `--clock real`. Then a `/next` storm.
 #[test]
 fn audio_less_b_never_times_out_its_onset_any_method_or_align() {
@@ -1849,7 +1849,7 @@ fn audio_less_b_never_times_out_its_onset_any_method_or_align() {
     );
 }
 
-/// R92/R88: a plain (non-transition) playing source with no audio track must pause and
+/// A plain (non-transition) playing source with no audio track must pause and
 /// resume *instantly* on `player.paused` — `source_has_audio` must be false for it, so
 /// `Runtime`'s anticlick gate never opens at all (no ramp, no `player.pause_gate` log
 /// event), exactly like a colour/image source.
@@ -1913,7 +1913,7 @@ fn r92_pause_gate_skips_video_with_no_audio() {
     }
 }
 
-/// Task 16b/16c review fix: `probe sources`' `effective_paused` must read `player.paused`
+/// `probe sources`' `effective_paused` must read `player.paused`
 /// straight off the graph, never the runtime's own cached field — which is only refreshed
 /// at the top of the next tick/step. A `set player.paused true` immediately followed by
 /// `probe sources`, *pipelined on the wire* (both written before either reply is read, so
@@ -2088,7 +2088,7 @@ fn bad_client_isolated() {
     good.ok("hello", json!({}));
 }
 
-/// R51: destroying a playing video never stalls the loop (mpv core teardown runs on the
+/// Destroying a playing video never stalls the loop (mpv core teardown runs on the
 /// reaper thread; only the render context is freed on the GL thread).
 #[test]
 fn destroy_never_stalls_the_loop() {
@@ -2302,7 +2302,7 @@ fn single_instance_stale_socket_and_quit() {
     srv.client().ok("hello", json!({}));
 }
 
-// ---------------------------------------------------------------- fix round 1
+// ---------------------------------------------------------------- hotplug, teardown, steps, capture, single instance
 
 fn create_src(c: &mut Client, props: Value) -> String {
     c.ok("create", json!({"kind": "source", "props": props}))["id"]
@@ -2357,7 +2357,7 @@ fn srcs_targets(c: &mut Client, prop: &str, v: Value) -> Vec<String> {
     t
 }
 
-/// R59: an output added before the transition runs joins it — at `done` every output
+/// An output added before the transition runs joins it — at `done` every output
 /// shows B, A is gone, exactly one source is audible.
 #[test]
 fn hotplug_added_before_running_joins_transition() {
@@ -2405,7 +2405,7 @@ fn hotplug_added_before_running_joins_transition() {
     );
 }
 
-/// R59: an output added while the effect runs shows the effect; a cancel snaps every
+/// An output added while the effect runs shows the effect; a cancel snaps every
 /// output back to A, B is destroyed, nothing dangles.
 #[test]
 fn hotplug_added_during_running_then_cancel() {
@@ -2454,7 +2454,7 @@ fn hotplug_added_during_running_then_cancel() {
     assert_eq!(audible(&mut c), vec![a.clone()]);
 }
 
-/// R60: a removed output's own wallpaper (shown nowhere else) is ramped out and
+/// A removed output's own wallpaper (shown nowhere else) is ramped out and
 /// destroyed; `srcs:*` never targets it.
 #[test]
 fn remove_output_retires_what_only_it_showed() {
@@ -2506,7 +2506,7 @@ fn remove_output_retires_what_only_it_showed() {
     );
 }
 
-/// R60: with no output left the current wallpaper is parked (paused, silent, reachable by
+/// With no output left the current wallpaper is parked (paused, silent, reachable by
 /// `srcs:*`); the next output shows it and it plays again.
 #[test]
 fn remove_all_outputs_parks_and_readd_resumes() {
@@ -2567,7 +2567,7 @@ fn remove_all_outputs_parks_and_readd_resumes() {
     assert!(t2 > t1 + 0.05, "it plays again: {t1} → {t2}");
 }
 
-/// R60: a transition whose outputs all disappear is committed; its B is parked.
+/// A transition whose outputs all disappear is committed; its B is parked.
 #[test]
 fn remove_all_outputs_mid_transition_commits_and_parks_b() {
     let Some(srv) = Serve::start() else { return };
@@ -3073,7 +3073,7 @@ fn ctl_times_out() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// Task 13: the `frames` probe. Headless outputs compose on every tick (policy
+/// The `frames` probe. Headless outputs compose on every tick (policy
 /// `every_tick`, never idle): both outputs report paced present intervals at the 60 Hz
 /// tick; `reset` clears the windows after reading.
 #[test]
@@ -3130,7 +3130,7 @@ fn frames_probe_reports_present_intervals() {
     }
 }
 
-/// Task 16 (Task 13 review items a + b): mixed content under the content redraw policy.
+/// Mixed content under the content redraw policy.
 /// Headless composes every tick by default, so this forces the Wayland policy with
 /// `--redraw-policy content` (no frame callbacks: an output that wants a frame presents on
 /// the next loop pass). A 30 fps video on VIRTUAL-1 presents at its frame rate while a
@@ -3209,9 +3209,9 @@ fn mixed_content_static_output_stays_idle() {
     );
 }
 
-/// Task 13: `serve` without `--headless` is the Wayland backend. `--outputs` is
-/// headless-only (exit 2), and an unreachable compositor is "not available yet" (Task
-/// 16b: exit [`EXIT_NO_COMPOSITOR`], not 1 — 1 is reserved for "never worth retrying",
+/// `serve` without `--headless` is the Wayland backend. `--outputs` is
+/// headless-only (exit 2), and an unreachable compositor is "not available yet" (exit
+/// [`EXIT_NO_COMPOSITOR`], not 1 — 1 is reserved for "never worth retrying",
 /// e.g. already running) with a hint, socket + lock removed — never a hang or a panic.
 /// `--no-supervise`: this checks the bare child's own behavior; the supervisor's retry
 /// of this same exit code has its own test, `tests/supervise.rs::
@@ -3258,18 +3258,18 @@ fn wayland_serve_args_and_missing_compositor() {
     assert!(!sock.with_extension("lock").exists(), "lock left behind");
 }
 
-// ---------------------------------------------------------------- audio bus (Task 14)
+// ---------------------------------------------------------------- audio bus
 
 /// The bus fallback (spec §5.3): when the bus can't be set up — here PipeWire is
 /// unreachable (an empty `PIPEWIRE_RUNTIME_DIR` and a socket name that doesn't exist) —
 /// `serve` still runs, logs `audio.bus.down {reason}`, the `bus` probe says `down` with a
 /// reason and `connecting: true`, sources open on the default device (mpv `audio-device`
 /// `auto`, no `audio-delay` bias), and the meter reports itself unavailable instead of
-/// passing silently. Since the cold-boot fix (2026-10-29) the first failure isn't final:
+/// passing silently. The first failure isn't final:
 /// the bus keeps retrying with the I7 backoff (`audio.bus.reconnecting` /
 /// `.reconnect_failed`) — `bus_comes_up_when_pipewire_starts_after_the_player` shows it come
 /// up. Default AO (`pipewire`, not `null`): that's what would route through the bus.
-/// The source is an image (no audio track), so the run stays silent (R26's intent).
+/// The source is an image (no audio track), so the run stays silent (as every test run should).
 #[test]
 fn bus_down_falls_back_to_default_device() {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -3362,7 +3362,7 @@ fn bus_down_falls_back_to_default_device() {
     assert_eq!(bus["connecting"], json!(true), "{bus}");
 }
 
-/// `--ao null` (every other test, R26): nothing would play through PipeWire, so no bus is
+/// `--ao null` (every other test): nothing would play through PipeWire, so no bus is
 /// created at all (nothing appears in the owner's session) — `bus` says why.
 #[test]
 fn ao_null_runs_without_bus() {
@@ -3380,18 +3380,18 @@ fn ao_null_runs_without_bus() {
     assert_eq!(logs["events"].as_array().unwrap().len(), 1, "{logs}");
 }
 
-// ---------------------------------------------------------------- Task 16d (R90): the
-// fast (>= 1 kHz) gain-only timer, independent of the output refresh.
+// ---------------------------------------------------------------- The fast
+// (>= 1 kHz) gain-only timer, independent of the output refresh.
 
 /// `gain_fast_timer_dense_pushes_at_60hz`'s floor: 5× the 2–3 evaluations a 30 ms ramp
 /// gets from a 60 Hz main timer alone.
 const MIN_FAST_PUSHES: u64 = 15;
 
-/// R90: a 30 ms anti-click gain ramp must land as a genuinely dense push sequence, not
-/// the 1-2 `Animator::tick` evaluations a 60 Hz main tick alone would give it (Task
-/// 16c's measured residual: held steps then an abrupt final jump). `--clock real`, the
-/// default headless outputs (`640x360@60,320x180@60`) — 60 Hz, same as the brief's own
-/// acceptance line. A colour source needs no mpv/audio device at all, so this is a pure,
+/// A 30 ms anti-click gain ramp must land as a genuinely dense push sequence, not
+/// the 1-2 `Animator::tick` evaluations a 60 Hz main tick alone would give it (measured:
+/// held steps then an abrupt final jump). `--clock real`, the
+/// default headless outputs (`640x360@60,320x180@60`) — 60 Hz, the case
+/// that needs the fast timer most. A colour source needs no mpv/audio device at all, so this is a pure,
 /// fast check of the push *mechanism* (graph.set + forward), independent
 /// of real audio hardware (the on-machine `dropout.sh` covers the real-audio case).
 #[test]
@@ -3418,11 +3418,11 @@ fn gain_fast_timer_dense_pushes_at_60hz() {
     let lp = c.ok("probe", json!({"name": "loop"}));
     let pushes = lp["gain_pushes"].as_u64().expect("gain_pushes");
     println!("R90: {pushes} gain pushes over a 30 ms ramp at 60 Hz output: {lp}");
-    // Unloaded: 29–30 (one per ms). The bound is what proves R90 — the main timer alone
+    // Unloaded: 29–30 (one per ms). The bound is what proves the fast timer runs — the main timer alone
     // gives a 30 ms ramp at most 2–3 evaluations at 60 Hz — while tolerating the single
     // loop thread being busy for a few ms at a time on a loaded machine (a late fire
     // pushes the value for *now*, it just skips the missed ms): measured once in seven
-    // full `tests/api.rs` runs with the owner's desktop busy, < 25 (Task 16d).
+    // full `tests/api.rs` runs with the owner's desktop busy, < 25.
     assert!(
         pushes >= MIN_FAST_PUSHES,
         "expected >= {MIN_FAST_PUSHES} distinct pushes, got {pushes}: {lp}"
@@ -3443,7 +3443,7 @@ fn gain_fast_timer_dense_pushes_at_60hz() {
         "expected >= {MIN_FAST_PUSHES} distinct values, got {}: {dbs:?}",
         distinct.len()
     );
-    // M6 (final review): the count above can't tell 500 Hz from 1 kHz — the median
+    // The count above can't tell 500 Hz from 1 kHz — the median
     // interval between consecutive pushes can: ≤ 1.5 ms (1 kHz; a 500 Hz timer is 2 ms).
     let ts: Vec<f64> = recent.iter().map(|p| p[0].as_f64().unwrap()).collect();
     let mut gaps: Vec<f64> = ts.windows(2).map(|w| w[1] - w[0]).collect();
@@ -3478,8 +3478,8 @@ fn gain_fast_timer_dense_pushes_at_60hz() {
     );
 }
 
-/// R90: while `player.paused`, the fast gain timer must make no progress at all on an
-/// in-flight ramp — `Runtime::now` is frozen (R75/invariant #7), so re-evaluating with
+/// While `player.paused`, the fast gain timer must make no progress at all on an
+/// in-flight ramp — `Runtime::now` is frozen (invariant #7), so re-evaluating with
 /// an unchanged `now` must push nothing new. Resuming must let it continue and finish.
 #[test]
 fn gain_fast_timer_paused_makes_no_progress() {
@@ -3499,7 +3499,7 @@ fn gain_fast_timer_paused_makes_no_progress() {
     c.ok("set", json!({"path": "player.paused", "value": true}));
     // Settle past the pause edge itself (the fast timer may legitimately fire once
     // more, still unpaused, if it was already queued in the same dispatch batch as the
-    // `set` — the same race `drive_pause_gates_pre_sync`'s own doc describes for R88's
+    // `set` — the same race `drive_pause_gates_pre_sync`'s own doc describes for the pause
     // gate) before taking the "now it's frozen" baseline below.
     std::thread::sleep(Duration::from_millis(30));
 
@@ -3508,7 +3508,7 @@ fn gain_fast_timer_paused_makes_no_progress() {
     let value_baseline = get(&mut c, &format!("{id}.gain.anticlick"))["result"]["value"]
         .as_f64()
         .unwrap();
-    // M1 (final review): a gain animation frozen by the player pause isn't moving — the
+    // A gain animation frozen by the player pause isn't moving — the
     // 1 kHz timer disarms for the pause instead of firing 1000×/s for nothing.
     assert!(
         before["gain_timer_armed"] == json!(false),
@@ -3516,7 +3516,7 @@ fn gain_fast_timer_paused_makes_no_progress() {
     );
 
     // Sample repeatedly across a 160 ms window: every sample must match the settled
-    // baseline exactly (frozen `now()` is bit-for-bit deterministic, R75) — not just the
+    // baseline exactly (frozen `now()` is bit-for-bit deterministic) — not just the
     // first and last point, which would miss a slow trickle a single before/after pair
     // could average away.
     for _ in 0..8 {
@@ -3623,7 +3623,7 @@ fn setting_gain_ramp_lands_while_paused() {
     );
 }
 
-// ---------------------------------------------------------------- final review fixes
+// ---------------------------------------------------------------- real-clock long runs, pause while switching, onsets, opens
 
 /// Poll `f` every 5 ms until it returns `Some`, failing after `limit`.
 fn wait_for<T>(limit: Duration, what: &str, mut f: impl FnMut() -> Option<T>) -> T {
@@ -3671,7 +3671,7 @@ fn mpv_pause_of(c: &mut Client, id: &str) -> Option<String> {
         .and_then(|s| s["mpv_pause"].as_str().map(str::to_string))
 }
 
-/// C1 (final review): 200 create → transition → destroy cycles; every per-source
+/// 200 create → transition → destroy cycles; every per-source
 /// collection the `loop` probe's `bounds` reports stays bounded — `GainHistory` (tracks
 /// and samples) by its caps, everything else back to a handful.
 #[test]
@@ -3735,7 +3735,7 @@ fn c1_long_run_switches_stay_bounded() {
     assert!(n("dropout_windows") <= 64, "{b}");
 }
 
-/// I1 (final review): `stop` ends the session's pause — pause → stop → a new switch plays
+/// `stop` ends the session's pause — pause → stop → a new switch plays
 /// and is audible (legacy semantics), and the stop's teardown finishes while paused.
 #[test]
 fn i1_pause_stop_then_switch_plays() {
@@ -4014,7 +4014,7 @@ fn i2_switch_while_gated_never_leaves_a_playing_source_silent() {
     }
 }
 
-/// I4 (final review): with no output at all, `transition` is accepted — each target
+/// With no output at all, `transition` is accepted — each target
 /// replaces the parked wallpaper — and when an output comes back the LAST target is shown
 /// and plays; an `align: end` request made meanwhile hands off only then.
 #[test]
@@ -4123,8 +4123,8 @@ fn now_ms(c: &mut Client) -> f64 {
         .unwrap()
 }
 
-/// I6 (final review): every un-pause-then-ramp-in path holds its ramp until the source's
-/// audio flows — unpark, snap-back (`restore_a`), the R88 resume, a frozen B's onset, and
+/// Every un-pause-then-ramp-in path holds its ramp until the source's
+/// audio flows — unpark, snap-back (`restore_a`), the resume, a frozen B's onset, and
 /// a restored source's fade-in — checked through `onset.started {reason}` against the
 /// source's own `source.audio_flowing`, with the slot silent meanwhile.
 #[test]
@@ -4176,7 +4176,7 @@ fn i6_every_onset_waits_for_flowing_audio() {
     c.ok("cancel", json!({ "corr": corr }));
     onset_after_flow(&mut c, &a, "anticlick", t1);
 
-    // The R88 resume.
+    // The pause gate's resume.
     wait_for(Duration::from_secs(3), "settled", || {
         let st = c.ok("state", json!({}));
         st["transitions"]
@@ -4235,7 +4235,7 @@ fn i6_every_onset_waits_for_flowing_audio() {
     println!("restore fade-in: {st}");
 }
 
-/// I5 (final review): what one switch costs the loop — per switch, the longest
+/// What one switch costs the loop — per switch, the longest
 /// synchronous stretch (`max_busy_ms`) and the synchronous source-open share
 /// (`max_open_ms`) around a cut to a fresh 1080p video. Prints every switch (the report's
 /// before/after numbers); asserts the bound the async open buys: with the core created on
@@ -4315,12 +4315,12 @@ fn switch_loop_busy(c: &mut Client) -> (Vec<f64>, Vec<f64>) {
 /// `liascape_player::sources::host::MAX_OPEN_WORKERS` (black-box: spelled out).
 const OPEN_WORKERS_CAP: u64 = 2;
 
-/// TODO "No explicit cap on concurrent `lia-open` worker threads" (final review I5): a burst
+/// TODO "No explicit cap on concurrent `lia-open` worker threads": a burst
 /// of creates starts at most [`OPEN_WORKERS_CAP`] core-making workers at once, the rest
 /// wait in order and none is lost; a node destroyed while queued never opens (its job is
 /// skipped — no core made), a prop changed while queued still reaches the source it opens
 /// (opened from the node's CURRENT props); quit with a burst still queued stays bounded and
-/// clean (no `mpv.reaper_stragglers`). RED before the cap: 16 `lia-open` threads at once.
+/// clean (no `mpv.reaper_stragglers`). Without the cap: 16 `lia-open` threads at once.
 #[test]
 fn i5_open_burst_is_capped_and_none_lost() {
     let Some(mut srv) = real_serve(&[]) else {
@@ -4438,7 +4438,7 @@ fn i5_open_burst_is_capped_and_none_lost() {
     );
 }
 
-/// Task 20d (R107): the I5 switch bound must hold whatever `hwdec` says. Two NVIDIA traps,
+/// The I5 switch bound must hold whatever `hwdec` says. Two NVIDIA traps,
 /// both on the loop thread: (1) mpv's render context loads the CUDA GL interop eagerly
 /// whenever `libcuda.so.1` is loadable from libmpv (the flake wrapper's `LD_LIBRARY_PATH`,
 /// or once libavutil has loaded it for `nvdec-copy`) — CUDA context creation inside
@@ -4451,7 +4451,7 @@ fn i5_open_burst_is_capped_and_none_lost() {
 /// the X-less case is the one that stalls). Per switch: the loop's longest synchronous
 /// stretch, and what mpv really decodes with: a LOOP-rendered source never a GL interop mode
 /// (`no` or a `-copy` mode, `sources::mpv::mpv_hwdec`); a source on the render worker with the
-/// worker's interop loaded (`hwdec_interop`, § Sources "Hardware decoding") decodes zero-copy
+/// worker's interop loaded (`hwdec_interop`, `docs/player/modules/sources.md` § Hardware decoding) decodes zero-copy
 /// — the interop's init (a CUDA context) runs on an `lia-render` lane, so the same bound must
 /// hold — and still asks for the copy twin as its fallback. Runs in both render modes
 /// (`LIASCAPE_PLAYER_RENDER_WORKER`).
@@ -4566,7 +4566,7 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
                 "T20d {label}, hwdec={hwdec}: max_busy_ms {busy:.1?} (warm median {median:.1}), \
                  mpv decodes with {picked:?}, interop {interop:?}"
             );
-            // Fixed, every mode costs what `hwdec=no` does (I5: 8–26 ms per switch; medians
+            // Fixed, every mode costs what `hwdec=no` does (8–26 ms per switch; medians
             // 16–36 ms here with the full suite and other GPU work running); the traps this
             // guards cost >= 65 ms. 50 keeps both margins.
             if median >= 50.0 {
@@ -4591,7 +4591,7 @@ fn t20d_hwdec_switch_never_stalls_the_loop() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Task 20b: per-switch allocator retention — the Task 20 soak's RSS slope (6.4 MiB/min
+/// Per-switch allocator retention — a soak's RSS slope without the allocator policy (6.4 MiB/min
 /// with malloc's in-use bytes flat). Fade between two playing 1080p clips: after `WARM`
 /// switches, `MEASURE` more must leave RSS nearly flat, and an on-demand `malloc_trim(0)`
 /// (`probe memory {trim: true}`) must find little to give back — glibc keeping freed
@@ -4682,7 +4682,7 @@ fn t20b_switch_loop_rss_stays_flat() {
     );
 }
 
-/// Task 20e: the live soak's in-use heap grew ~2 MiB/min (headless runs flat). Cause: every
+/// The live soak's in-use heap grew ~2 MiB/min (headless runs flat). Cause: every
 /// present on Wayland leaves one `wl_buffer.release` event (a ~224 B `wl_closure`) queued
 /// on an event queue nobody dispatches — NVIDIA egl-wayland2 ≤ 1.0.2 keeps its buffers on
 /// a per-swapchain queue it never dispatches under explicit sync, and upstream's fix moves
@@ -4774,7 +4774,7 @@ fn t20e_wayland_present_heap_stays_flat() {
     );
 }
 
-/// I7: the private PipeWire (`common::pw::PrivatePw`).
+/// The private PipeWire (`common::pw::PrivatePw`).
 #[test]
 fn i7_bus_reconnects_after_pipewire_restart() {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -4888,7 +4888,7 @@ fn i7_bus_reconnects_after_pipewire_restart() {
     onset_after_flow(&mut c, &id, "pause", t_down);
 }
 
-/// Cold boot (2026-10-29): `serve` started before the audio server was ready. It must answer
+/// Cold boot: `serve` started before the audio server was ready. It must answer
 /// at once (never wait on PipeWire), play on mpv's default device meanwhile, and bring the
 /// bus up **on its own** once PipeWire is there — the sources moving onto it through the I7
 /// route tracking, ramped in on flowing audio. `session_manager_first`: false = nothing
@@ -5057,7 +5057,7 @@ fn quit_while_the_bus_waits_for_wireplumber_is_prompt() {
     assert!(st.success(), "{st}");
 }
 
-/// M13 (final review): `animate` on a broadcast alias that matches nothing is a broadcast
+/// `animate` on a broadcast alias that matches nothing is a broadcast
 /// to nobody — `{targets: []}`, exactly like `set` — after the same schema check.
 #[test]
 fn m13_animate_and_set_agree_on_an_empty_wildcard() {
@@ -5085,7 +5085,7 @@ fn m13_animate_and_set_agree_on_an_empty_wildcard() {
     );
 }
 
-// ---------------------------------------------------------------- Phase 2: render worker
+// ---------------------------------------------------------------- render worker
 
 /// A real-clock server with extra environment for the child.
 fn real_serve_env(extra: &[&str], env: &[(&str, &Path)]) -> Option<Serve> {
@@ -5109,7 +5109,7 @@ fn source_probe(c: &mut Client, id: &str) -> Value {
         .unwrap_or_else(|| panic!("{id} not hosted: {p}"))
 }
 
-/// Phase 2 (§ Sources "Render worker"): `serve --render-worker on|off` (else
+/// `docs/player/modules/sources.md` § Render worker: `serve --render-worker on|off` (else
 /// `LIASCAPE_PLAYER_RENDER_WORKER`) decides where a real-clock player's mpv sources render — the
 /// flag wins over the environment —, a stepped player always renders on the loop (its
 /// captures stay deterministic), and the `sources` probe says which (`render_mode`, the
@@ -5200,7 +5200,7 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
     Ok(n)
 }
 
-/// Phase 2: the loop never samples a frame the render worker hasn't finished. Two Flash clips
+/// The loop never samples a frame the render worker hasn't finished. Two Flash clips
 /// (every frame one uniform grey, a level per frame) at two sizes play on the two outputs,
 /// one under speed jitter, while the test captures both sources and an output back to back:
 /// every capture must be ONE frame (a partial frame isn't uniform), on the ladder (an
@@ -5210,8 +5210,8 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
 /// of sight. RED: `LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT=publish-early` (each target handed to the
 /// loop before the worker renders into it). `no-fence` (frames published unfenced, before
 /// their flush) stays GREEN on NVIDIA 595: the driver serializes shared-texture access itself.
-/// Each case also with `hwdec: auto` — zero-copy through the worker's GL interop (§ Sources
-/// "Hardware decoding": CUDA writes mpv's textures, the lane renders them into ours, the fence
+/// Each case also with `hwdec: auto` — zero-copy through the worker's GL interop
+/// (`docs/player/modules/sources.md` § Hardware decoding: CUDA writes mpv's textures, the lane renders them into ours, the fence
 /// covers both) — the two sources on two lanes.
 #[test]
 fn render_worker_never_composes_a_torn_frame() {
@@ -5349,7 +5349,7 @@ fn render_worker_never_composes_a_torn_frame() {
     }
 }
 
-/// Phase 2: with the render worker on, a switch costs the loop about a frame. The render
+/// With the render worker on, a switch costs the loop about a frame. The render
 /// context's creation and its first render (shader compile, scaler LUTs, FBO setup) — 6–20 ms
 /// on the loop before, the bulk of `i5_switch_loop_busy`'s per-switch busy — run on the
 /// worker; the loop only adopts finished textures. Same 10 switches as I5. `LIASCAPE_RW_SWITCH=off`
@@ -5375,7 +5375,7 @@ fn render_worker_switch_keeps_the_loop_free() {
     );
 }
 
-/// Phase 2: quit stays bounded and clean with the worker on, with sources playing, being
+/// Quit stays bounded and clean with the worker on, with sources playing, being
 /// opened (a burst of creates, cores still attaching) and torn down at once: exit 0 well
 /// within the bounds, the worker frees every render context (`render_worker.stopped {left:
 /// 0}`) and no `mpv.reaper_stragglers`.
@@ -5439,7 +5439,7 @@ fn render_worker_quit_is_bounded() {
     );
 }
 
-/// Phase 2: a render worker that can't start (its shared context fails — test fault
+/// A render worker that can't start (its shared context fails — test fault
 /// `no-context`: the `lia-render` thread reports a failed start after creating it) never takes
 /// the player down: `render_worker.unavailable` is logged, every mpv source renders on the
 /// loop (`render_mode: loop`, no `render_worker` in the probe) and the picture is right.
@@ -5477,13 +5477,13 @@ fn render_worker_unavailable_falls_back_to_the_loop() {
     near(png_pixel(&png, 320, 180), [255, 0, 0], 3, "red on screen");
 }
 
-/// Phase 2: the render worker dying (a panic on `lia-render` — test fault `panic`, at its first
+/// The render worker dying (a panic on `lia-render` — test fault `panic`, at its first
 /// render) is a runtime failure like a lost compositor, never a silent freeze: before, the
 /// thread just ended — every picture froze on its last frame, each new open waited out the 3 s
 /// attach timeout, freed cores leaked — and the player kept serving. Now the loop sees it
 /// (`render_worker.died {reason}`), silences + tears down like `loop.failed` and exits
 /// `EXIT_RUNTIME` (3) — the supervisor restarts it with `--restore` — also when a leaked core
-/// makes it leave through `_exit` (that path used to exit 0, which ends supervision).
+/// makes it leave through `_exit` (exit 0 there would end supervision).
 #[test]
 fn render_worker_death_fails_the_player() {
     let Some(mut srv) = real_serve_env(
@@ -5522,7 +5522,7 @@ fn render_worker_death_fails_the_player() {
     );
 }
 
-// ------------------------------------------------- Phase 2: render worker A/B (measurement)
+// ------------------------------------------------- render worker A/B (measurement)
 
 const BENCH_1080P30: ClipSpec = ClipSpec::TestSrc {
     w: 1920,
@@ -5594,7 +5594,7 @@ fn frames_all(c: &mut Client) -> Value {
     f["outputs"][0]["all"].clone()
 }
 
-/// Phase 2 measurement (not a check — `cargo test --release --test api -- --ignored
+/// A measurement (not a check — `cargo test --release --test api -- --ignored
 /// bench_render_worker_ab --nocapture`; rounds `LIASCAPE_BENCH_ROUNDS`, default 3): the render
 /// worker off vs on, interleaved (off/on, then on/off, …), each run on a fresh server.
 /// Prints one `BENCH {json}` line per run:
@@ -5755,7 +5755,7 @@ fn bench_render_worker_ab() {
     }
 }
 
-/// Phase 2 on a real compositor (opt-in like t20e — it draws on that compositor's outputs for
+/// The render worker on a real compositor (opt-in like t20e — it draws on that compositor's outputs for
 /// ~10 s: `LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path>`; a nested headless sway is
 /// enough): with the render worker off and on, a video plays on every output (`render_mode`
 /// as asked, the right picture in `capture`, frame callbacks keep presents going), a fade to
@@ -5954,18 +5954,13 @@ impl Drop for Xvfb {
     }
 }
 
-/// Crash on rapid superseding switches (2026-10-26): the compositor died with SIGSEGV in
-/// `glBindFramebuffer` (compose) while mpv's clipboard thread was in `XCloseDisplay` →
-/// `_XIOError` → Xlib's default handler → `exit(1)`, whose atexit handlers tore NVIDIA's EGL
-/// down under the loop; its stderr: `X connection to :1 broken (explicit kill or server
-/// shutdown)`. mpv ≥ 0.40 gives every core a native clipboard — without `WAYLAND_DISPLAY`
-/// (that run's environment) its own X connection — and those connections broke (both live
-/// cores' at once, 2 ms after an Electron's scope ended: most likely a UI-matrix shard's
-/// private `Xvfb -displayfd`, which comes up as `:1` here, going away with its shard). A
-/// headless wallpaper player must not die with an X server it never needed.
+/// mpv ≥ 0.40 gives every core a native clipboard — without `WAYLAND_DISPLAY` its own X
+/// connection. When that X server goes away, mpv's clipboard thread hits `XCloseDisplay` →
+/// `_XIOError` → Xlib's default handler → `exit(1)`, whose atexit handlers tear NVIDIA's EGL
+/// down under the loop (SIGSEGV in `glBindFramebuffer`; stderr `X connection to :N broken`).
+/// A headless wallpaper player must not die with an X server it never needed.
 /// Here: a video plays (`DISPLAY` = a private `Xvfb`, no `WAYLAND_DISPLAY`), the X server
-/// goes away, the player plays on, switches and quits cleanly. RED before: SIGSEGV within
-/// ms of the X loss, `X connection to :N broken …` on its stderr.
+/// goes away, the player plays on, switches and quits cleanly.
 #[test]
 fn losing_the_x_server_never_kills_the_player() {
     let Some(mut probe) = Serve::start() else {
@@ -6027,12 +6022,12 @@ fn losing_the_x_server_never_kills_the_player() {
     assert!(!srv.stderr().contains("X connection"), "{}", srv.stderr());
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 5: scenes
+// ---------------------------------------------------------------- scenes
 
 use liascape_player::scene::synthetic::{Pattern, SyntheticSpec, marker_rgb};
 
-/// A server whose scene sources may play the synthetic renderer (D7:
-/// `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`, test-only).
+/// A server whose scene sources may play the synthetic renderer
+/// (`LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`, test-only).
 fn scene_serve(extra: &[&str]) -> Option<Serve> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
@@ -6145,8 +6140,8 @@ fn core_limit_of(pid: u64) -> u64 {
     }
 }
 
-/// Task 13 (the corpus: 4 broken LWE scenes = 16 real crashes, each one through
-/// systemd-coredump and a desktop crash notification): a scene worker runs with a soft
+/// A crashing scene must not go through systemd-coredump and a desktop crash notification
+/// each time: a scene worker runs with a soft
 /// `RLIMIT_CORE` of 1 — the kernel then skips a piped `core_pattern` — unless
 /// `LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the inherited limit for debugging. A crash is already
 /// recorded (crash record + log tail); it's an expected, handled event, not a desktop alert.
@@ -6196,7 +6191,7 @@ fn scene_worker_crashes_skip_the_core_handler() {
     assert_eq!(core_limit_of(pid), inherited, "opted out: inherited");
 }
 
-/// R75 for scenes: `player.paused` freezes `time_pos` and the picture (no latch), the
+/// Player-level pause for scenes: `player.paused` freezes `time_pos` and the picture (no latch), the
 /// node's own `paused` untouched, `effective_paused` in the probe; resuming continues.
 #[test]
 fn player_pause_freezes_scene() {
@@ -6401,7 +6396,7 @@ fn scene_parks_and_resumes_on_hotplug() {
     assert_eq!(w["pid"], pid, "same worker");
 }
 
-/// R25 for scenes: a captured scene source (and the output showing it) is upright — the
+/// Orientation for scenes: a captured scene source (and the output showing it) is upright — the
 /// scene's top row is the image's top.
 #[test]
 fn capture_scene_source_is_upright() {
@@ -6431,7 +6426,7 @@ fn capture_scene_source_is_upright() {
     let _ = marker_rgb(0);
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 7: real scenes
+// ---------------------------------------------------------------- real scenes
 
 /// `patches/lwe/tests/fixtures/<name>` (real LWE projects that need no WE assets).
 fn lwe_fixture(name: &str) -> PathBuf {
@@ -6583,7 +6578,7 @@ fn missing_scene_folder_fails_without_crash_record() {
     assert!(logs_of(&mut c, "worker.restart").is_empty());
     assert!(logs_of(&mut c, "worker.broken").is_empty());
     assert_eq!(crash_files(&srv), 0, "no crash record");
-    // Task 13: `probe workers {"log_tail": true}` keeps the stopped worker's output — its
+    // `probe workers {"log_tail": true}` keeps the stopped worker's output — its
     // fatal line, written to stderr just before the `Error` that stopped it (drained at the
     // stop, not lost with the pipe). Without the flag the entry has no tail.
     let w = worker_of(&mut c, &id);
@@ -6604,9 +6599,9 @@ fn missing_scene_folder_fails_without_crash_record() {
     );
 }
 
-/// Phase 2 Task 11 (the minimal half of Task 10's event): a scene whose worker crashes past its
+/// A scene whose worker crashes past its
 /// restart budget logs ONE `source.broken {id, path, scene_id, reason, restarts, record, signal}`
-/// — the backend adapter marks the item crashed from it and advances a rotation (D6).
+/// — the backend adapter marks the item crashed from it and advances a rotation.
 #[test]
 fn source_broken_event_names_the_scene() {
     let Some(mut srv) = scene_serve(&[]) else {
@@ -6643,7 +6638,7 @@ fn source_broken_event_names_the_scene() {
     assert_eq!(n, 1, "one source.broken per break");
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 10: crash policy
+// ---------------------------------------------------------------- crash policy
 
 /// A real-clock synthetic-scene server (`extra` args, `envs` added to its environment).
 fn scene_serve_real_env(extra: &[&str], envs: &[(&str, &Path)]) -> Option<Serve> {
@@ -6702,7 +6697,7 @@ fn crash_never_touches_other_outputs() {
     let base = frames(&mut c);
     println!("VIRTUAL-1 baseline: {base}");
     // The loop's own worst stretch without kills, over as long as the kills take: with the
-    // render worker off the video renders ON the loop (§ Sources "Render worker"), several ms
+    // render worker off the video renders ON the loop (`docs/player/modules/sources.md` § Render worker), several ms
     // per frame, and a kill's handling lands in the same tick — then the plan's 5 ms is what the
     // kills may ADD to that stretch; with it on, nothing over 5 ms at all.
     let worker_on = !c.ok("probe", json!({"name": "sources"}))["render_worker"].is_null();
@@ -6805,7 +6800,7 @@ fn crash_never_touches_other_outputs() {
 
 /// The hang timeout is the `LIASCAPE_SCENE_WORKER_HANG_MS` knob (300 here; else 2 s): a worker that
 /// stops answering (`hang_after_ms`) is seen as hung within it, SIGKILLed, gone, and restarted
-/// — the frame held, then playing on from it. RED before the knob: `waited_ms` ≈ 2000.
+/// — the frame held, then playing on from it. Without the knob: `waited_ms` ≈ 2000.
 #[test]
 fn hang_is_killed_and_restarted() {
     let Some(srv) = scene_serve_real_env(&[], &[("LIASCAPE_SCENE_WORKER_HANG_MS", Path::new("300"))])
@@ -7058,7 +7053,8 @@ fn pointer_enter_is_a_jump_and_rate_is_the_demand() {
     assert_eq!(w["pointer"], json!([480.0, 270.0, 0]));
 }
 
-/// WE's `fps` (2026-11-06, decoded from wallpaper64.exe's render loop): a scene ticks at
+/// WE's `fps` (decoded from wallpaper64.exe's render loop; `docs/decisions.md` § Default
+/// `scene_fps` to WE's own `fps` (15), not capped by the refresh rate): a scene ticks at
 /// `out:<c>.scene_fps` even above the output's refresh — WE sleeps to `fps` and presents without
 /// vsync — and its simulations step at that rate (`rate_sent`); the default is WE's own 15.
 #[test]
@@ -7172,7 +7168,7 @@ fn pw_nodes(pw: &PrivatePw) -> Vec<String> {
         .collect()
 }
 
-/// D4: the visualiser input is the system's audio (a mix of PipeWire playback streams) — a tone
+/// The visualiser input is the system's audio (a mix of PipeWire playback streams) — a tone
 /// played by another app reaches a scene that wants audio input (`input_level`), a scene
 /// without the flag gets none, and no capture stream exists while no scene wants one
 /// (private PipeWire; SKIP without the binaries).
@@ -7250,7 +7246,7 @@ fn visualiser_input_reaches_only_scenes_that_want_it() {
     let _ = tone.wait();
 }
 
-// ------------------------------------------------------------ Phase 2 Task 6: scene audio
+// ------------------------------------------------------------ scene audio
 
 /// A synthetic scene that plays a tone (`hz`, −20 dBFS peak → −23 on the bus meter).
 fn tone_scene(hz: f64) -> SyntheticSpec {
@@ -7372,7 +7368,7 @@ fn playing_tone_scene(c: &mut Client, name: &str, hz: f64) -> String {
     id
 }
 
-/// Plan Task 6: a scene's sound is a PipeWire stream on the player bus — opened with the
+/// A scene's sound is a PipeWire stream on the player bus — opened with the
 /// identity the plan names, linked to `liascape-player-bus`, at the scene's level (a −20 dBFS tone
 /// reads −23 on the meter).
 #[test]
@@ -7429,7 +7425,7 @@ fn scene_audio_on_bus_with_identity() {
     assert!((w["audio"]["envelope_dbfs"].as_f64().unwrap() + 23.0).abs() < 3.0);
 }
 
-/// Phase 2 Task 14: the bus meter's capture callback runs on PipeWire's real-time data
+/// The bus meter's capture callback runs on PipeWire's real-time data
 /// thread (`RT_PROCESS`), never the non-RT `lia-bus` main loop. On `lia-bus` it missed whole
 /// graph cycles under load — a timestamp jump, then silent blocks — at exactly the instants
 /// a switch loads the machine (a worker spawning, a source torn down): the on-machine matrix
@@ -7555,7 +7551,7 @@ fn settled(c: &mut Client) {
 /// Invariant #8 for scenes (`--ao null`: the worker's real-time pull timer is the stream): a
 /// frozen V→S holds B's ramp-in until B's own `source.audio_flowing`, a full-live one too, a
 /// scene without sound never waits (no `onset_timeout` either way), and every other onset
-/// path — unpark, a reveal's snap-back, the R88 resume — waits for a scene's flow.
+/// path — unpark, a reveal's snap-back, the resume — waits for a scene's flow.
 #[test]
 fn scene_audio_flowing_gates_every_onset() {
     let Some(srv) = scene_serve(&["--clock", "real", "--log-level", "debug"]) else {
@@ -7625,7 +7621,7 @@ fn scene_audio_flowing_gates_every_onset() {
     c.ok("cancel", json!({ "corr": corr }));
     onset_after_flow(&mut c, &a, "anticlick", t4);
     settled(&mut c);
-    // The R88 resume.
+    // The pause gate's resume.
     c.ok("set", json!({"path": "player.paused", "value": true}));
     wait_for(Duration::from_secs(2), "gated", || {
         (worker_of(&mut c, &a)["paused"] == json!(true)).then_some(())
@@ -7738,17 +7734,15 @@ fn scene_crossfades_are_equal_power_on_the_bus() {
     println!("crossfade curve error, all combos: ±{worst_all:.2} dB");
 }
 
-/// F7 (Phase 2 battery, `docs/player/reports/phase2.md` § 10): a scene worker that exits must
-/// leave the graph cleanly first — it used to `exit` with its stream still connected, and the
-/// bus then skipped whole graph cycles: an independent `pw-record` of the sink held 64–384
-/// samples of exact silence once per switch, in B's sound, as A's worker went (frozen S→S at
-/// 240 Hz: 60 of 61 switches). Full-live S→S switches between two tone scenes (A's worker
+/// A scene worker that exits must leave the graph cleanly first (`audio::Control::quit`) and
+/// its stream must be ASYNC (`node.async`): a worker exiting with its stream still connected,
+/// or a sync stream's deactivation race (see `audio::Control::quit`'s doc), makes the bus skip
+/// whole graph cycles — 64–384 samples of exact silence at the sink, in B's sound, as A's
+/// worker goes. Full-live S→S switches between two tone scenes (A's worker
 /// exits at each handoff while B plays at full level — frozen hides the instant: B is still
 /// silent when A's stream goes), the private sink recorded throughout: no run of exact
-/// silence inside sound. RED before the worker's clean leave (`audio::Control::quit`: every
-/// switch), RED before the worker's stream was ASYNC (`node.async`: 1 in ~10 switches —
-/// the deactivation race, see `audio::Control::quit`'s doc; 20 switches catch it in ~9 of
-/// 10 runs, each lost cycle one 64-frame quantum of zeros).
+/// silence inside sound. The async race shows in ~1 of 10 switches; 20 switches catch it in
+/// ~9 of 10 runs, each lost cycle one 64-frame quantum of zeros.
 #[test]
 fn scene_worker_exit_never_skips_bus_cycles() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -7805,16 +7799,15 @@ fn switch_and_wait(c: &mut Client, to: Value) {
     std::thread::sleep(Duration::from_millis(600));
 }
 
-/// F7 residual, the mpv side (Phase 3 battery: 23 single 64-frame runs of exact silence at
-/// the sink in 2874 s of program switches, V↔V among them): an mpv source's PipeWire stream
+/// The same for mpv sources: an mpv source's PipeWire stream
 /// leaves the graph at its teardown (`pw_stream_destroy` inside mpv's AO) and is deactivated
 /// on every pause (`pw_stream_set_active(false)` in its `reset`) — each a graph change with
 /// the same race as the worker's: libpipewire marks the stream INACTIVE in this process
 /// before the server has dropped it from the bus's dependency count, a cycle starting in
 /// that window waits for it in vain, the graph xruns, the sink gets one quantum of zeros.
 /// Full-live V→V switches between two looping tone clips (A torn down at each handoff while
-/// B plays at full level), the sink recorded: no run of exact silence inside sound. RED
-/// before the compositor's streams were ASYNC (`audio::bus::ASYNC_STREAMS`).
+/// B plays at full level), the sink recorded: no run of exact silence inside sound. Guarded by
+/// the compositor's streams being ASYNC (`audio::bus::ASYNC_STREAMS`).
 #[test]
 fn mpv_source_teardown_never_skips_bus_cycles() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -7853,7 +7846,7 @@ fn mpv_source_teardown_never_skips_bus_cycles() {
 /// The invariant behind the two recordings above, read off the graph: every stream that
 /// plays into the bus (a scene worker's, an mpv source's) is an ASYNC node, so its link into
 /// the bus is `link.async` — the bus never waits for it inside a cycle, and its leaving can't
-/// stall the bus. RED before: neither link carried the flag.
+/// stall the bus.
 #[test]
 fn bus_producers_link_asynchronously() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -7907,15 +7900,14 @@ fn bus_producers_link_asynchronously() {
     );
 }
 
-/// F3 (Phase 3 battery, `docs/player/reports/phase3.md` § 1): a full-live `align: end` effect
+/// A full-live `align: end` effect
 /// must hand off to B exactly when A's last frame has had its time — never cutting that frame
 /// short (B drawn over a frame the clip still owns), never holding it past its due. The
 /// reference is mpv's `Ended` (fired as A's last frame is presented, polled within a tick)
-/// plus one clip frame: the handoff must land within one 144 Hz output frame after it. RED
-/// before (the battery: handoff 7–20 ms after `Ended`, i.e. 13–26 ms into a 33 ms last frame,
-/// 28–33 ms before the clip's nominal end): the recipe aimed half a clip frame early on the
-/// assumption that its end estimate sat anywhere inside the last frame, while the minimum
-/// over a second of per-frame samples sits within a few ms of the true end.
+/// plus one clip frame: the handoff must land within one 144 Hz output frame after it. The
+/// trap: aiming half a clip frame early on the assumption that the end estimate sits anywhere
+/// inside the last frame — the minimum over a second of per-frame samples sits within a few
+/// ms of the true end, so that cuts the last frame short.
 #[test]
 fn align_end_hands_off_as_a_last_frame_ends() {
     let Some((serial, root, pw)) = private_pw() else {
@@ -8254,7 +8246,7 @@ fn loudest_after(c: &mut Client, what: &str) -> f64 {
     loudest
 }
 
-/// Scenes and the bus: the player-pause gate (R88) and parking (every output gone) both leave
+/// Scenes and the bus: the player-pause gate and parking (every output gone) both leave
 /// the bus silent and come back on flowing audio with the same worker; a destroy ramps the
 /// stream out before it goes (never a cut).
 #[test]
@@ -8360,7 +8352,7 @@ fn scene_reroutes_after_pipewire_restart() {
     assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
 }
 
-/// Cold boot (2026-10-29), the scene half: a scene opened while the bus is down plays its
+/// Cold boot, the scene half: a scene opened while the bus is down plays its
 /// worker stream on the default route (no PipeWire yet), and when the bus comes up on its
 /// own the worker is re-routed onto it (`ToWorker::Route`), same worker, its tone on the bus,
 /// the ramp-in held on flowing audio.
@@ -8512,7 +8504,7 @@ fn real_scene_sound_on_the_bus() {
     }
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 8: scene fps
+// ---------------------------------------------------------------- scene fps
 
 /// A real-clock, content-paced scene server (presents only on picture changes, like Wayland).
 fn paced_scene_serve() -> Option<Serve> {
@@ -8576,7 +8568,7 @@ fn gate_rates(c: &mut Client, id: &str, d: Duration) -> GateRates {
     }
 }
 
-/// Task 8: one scene worker serves both outputs (D1) and ticks at the faster one's rate; each
+/// One scene worker serves both outputs and ticks at the faster one's rate; each
 /// output presents its frames at most at its own `eff(scene_fps, refresh)` — VIRTUAL-1
 /// (scene_fps 60) every frame, VIRTUAL-2 (15) a quarter of them.
 #[test]
@@ -8602,7 +8594,7 @@ fn per_output_scene_fps_gates_presents() {
     r.check("VIRTUAL-2", r.v2, 15.0, 2.0);
 }
 
-/// Task 8: `out:<c>.scene_fps` is live — the worker's tick rate and each output's presents
+/// `out:<c>.scene_fps` is live — the worker's tick rate and each output's presents
 /// follow every change within 0.5 s, on the same worker (no respawn, no Ready).
 #[test]
 fn scene_fps_change_is_live_same_pid() {
@@ -8669,7 +8661,7 @@ fn scene_fps_change_is_live_same_pid() {
     assert_eq!(count("worker.restart"), 0, "{evs:?}");
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 8: VRAM
+// ---------------------------------------------------------------- VRAM
 
 /// A real-clock synthetic-scene server whose VRAM sampler reads `vram.json` in its root
 /// (`LIASCAPE_PLAYER_VRAM_PROBE=fake:…`), sampled every 50 ms with short holds
@@ -8743,7 +8735,7 @@ fn wait_event(c: &mut Client, seen: &mut Vec<Value>, name: &str, limit: Duration
     }
 }
 
-/// Task 8, the per-scene VRAM guard: off by default (a worker at 5000 MiB plays on); with
+/// The per-scene VRAM guard: off by default (a worker at 5000 MiB plays on); with
 /// `player.scene_vram_limit_mib` 1536 a spike shorter than the 1 s hold is ignored, a worker
 /// over it for the hold is stopped — `scene.vram_exceeded {used_mib, limit_mib}` and a
 /// `source.error` "stopped: used 1800 MiB > limit 1536 MiB" (so the backend can advance), but
@@ -8798,7 +8790,7 @@ fn scene_over_vram_limit_is_stopped_not_crashed() {
     assert_eq!(ev["id"], json!(id));
     assert_eq!(ev["used_mib"], json!(1800.0));
     assert_eq!(ev["limit_mib"], json!(1536.0));
-    // Phase 3 Task 9: kept in the outbox for a backend that's away
+    // Kept in the outbox for a backend that's away
     let seq = ev["outbox_seq"].as_u64().unwrap_or_else(|| panic!("{ev}"));
     let r = c.ok("outbox.read", json!({"after": seq - 1, "limit": 1}));
     assert_eq!(r["events"][0]["kind"], json!("scene.vram_exceeded"), "{r}");
@@ -8841,7 +8833,7 @@ fn video_and_scene(c: &mut Client, name: &str) -> (String, String) {
     (v, sc)
 }
 
-/// Task 8, the low-VRAM rule's default `stop`: free VRAM under the threshold for the enter hold
+/// The low-VRAM rule's default `stop`: free VRAM under the threshold for the enter hold
 /// → every source pauses silently, then the video's decoder and the scene's worker are freed
 /// (`vram.stopped`), each output keeping a still of its last frame and `player.paused` left as
 /// the user set it; free again (minus what resuming takes back) for the resume hold → both
@@ -8932,7 +8924,7 @@ fn low_vram_stop_frees_and_resumes_every_source() {
     assert_eq!(events_named(&seen, "vram.low").len(), 1, "one engage: {seen:?}");
 }
 
-/// Task 8, `pause` mode: the low VRAM pauses everything (same scene worker, nothing freed) and
+/// The low-VRAM rule's `pause` mode: the low VRAM pauses everything (same scene worker, nothing freed) and
 /// resumes after; a user pause made meanwhile survives the release.
 #[test]
 fn low_vram_pause_mode_pauses_without_freeing() {
@@ -8982,7 +8974,7 @@ fn low_vram_pause_mode_pauses_without_freeing() {
     wait_moving(&mut c, &v, t1);
 }
 
-// ---------------------------------------------------------------- Phase 2 Task 9: transitions × scenes
+// ---------------------------------------------------------------- transitions × scenes
 
 const T9_METHODS: [&str; 3] = ["full-live", "reveal", "frozen"];
 
@@ -9206,7 +9198,7 @@ fn rapid_interrupt_chain_mixed_kinds() {
     );
 }
 
-/// Task 9's align rule where no output is left (I4): with a parked scene there is no end to
+/// The align rule for scenes where no output is left: with a parked scene there is no end to
 /// wait for — an `align: end` switch is handed off at once, like `align: now`; from a parked
 /// video it still waits for an output (its end can't come while it is parked).
 #[test]
@@ -9250,7 +9242,7 @@ fn parked_scene_align_end_hands_off_at_once() {
     assert!(!handed(&corrs[1]), "from a parked video: waits: {evs:?}");
 }
 
-// ------------------------------------------- Phase 2: scene loudness learned on first play
+// ------------------------------------------- scene loudness learned on first play
 
 /// A real-clock `--ao null` server (the worker's real-time pull timer is the stream) whose scene
 /// loudness window is `window_s` seconds of audible play (`LIASCAPE_PLAYER_LOUDNESS_WINDOW_S`).
@@ -9304,7 +9296,7 @@ fn audible_s(c: &mut Client, id: &str) -> f64 {
         .unwrap_or(-1.0)
 }
 
-/// Owner decision (Phase 2): a scene's integrated loudness is learned over its first
+/// A scene's integrated loudness is learned over its first
 /// `window` seconds of audible play and reported ONCE as `scene.loudness {complete: true}` —
 /// a stereo 1 kHz tone at −20 dBFS peak reads −20 LUFS (BS.1770; ±1 LU asserted). Measured
 /// before the gain (a −30 dB `gain.user` doesn't move it) and at any speed (the stretch keeps
@@ -9339,13 +9331,14 @@ fn scene_loudness_is_learned_once_after_its_window() {
         // Learned after the window of real play, never before it.
         assert!(ev["t_mono_ms"].as_f64().unwrap() - t0 >= 2000.0, "{ev}");
         assert!(ev["state"]["counts"].is_array(), "the state to store: {ev}");
-        // Measuring goes on (2026-10-28), but the next report waits for another window.
+        // Measuring goes on, but the next report waits for another window.
         std::thread::sleep(Duration::from_millis(1500));
         assert_eq!(loudness_events(&mut c, Some(&id)).len(), 1, "not before the next window");
         let p = loudness_progress(&mut c, &id);
         assert_eq!(p["done"], json!(false), "{p}");
         assert!(p["seconds"].as_f64().unwrap() > secs + 1.0, "still measuring: {p}");
-        // Set once per play (owner 2026-11-06): the player reports, the backend decides — a report
+        // Set once per play (`docs/decisions.md` § Set scene normalization once per play): the
+        // player reports, the backend decides — a report
         // never moves the source's normalization itself (no ramp, no step; the worker's stream gain
         // is still the create values' sum), measured pre-gain whatever it is.
         let norm = c.ok("get", json!({"path": format!("{id}.gain.normalize")}))["value"].clone();
@@ -9372,8 +9365,7 @@ fn scene_loudness_is_learned_once_after_its_window() {
     }
 }
 
-/// Owner (2026-10-28): "keep measuring to get a more accurate measure when the scene is played
-/// in future". Play 1 reports its measurement's `state`; play 2 — a new source of the same
+/// Measuring continues across plays, so the estimate keeps improving. Play 1 reports its measurement's `state`; play 2 — a new source of the same
 /// scene seeded with it (`loudness_seed`, what the backend sends from the index) — continues
 /// it: its reports cover both plays (`seconds` = seed + its own, `seed_s`, `session_s`), and
 /// the integration is over both: a −20 dBFS play then a −23 dBFS play read their energy mean
@@ -9439,7 +9431,7 @@ fn scene_loudness_accumulates_over_two_plays() {
 /// the play's window report (the race) continues the end of that play; seeded with the
 /// up-to-date state it's the same — never counted twice; and a second source of a playing scene
 /// (a transition A → A') continues the first one's live measurement, which stops measuring.
-/// RED before: the reopen continued the window report (the stretch after it lost).
+/// Failure it catches: the reopen continuing the window report (the stretch after it lost).
 #[test]
 fn scene_reopen_continues_the_end_of_play_measurement() {
     let Some(srv) = loudness_serve("2") else {
@@ -9525,8 +9517,8 @@ fn scene_reopen_continues_the_end_of_play_measurement() {
 /// A second source of a playing scene that makes no sound yet (paused here; also: loading its
 /// worker, restored broken, past its restart budget) never silences the playing one: the
 /// first measures on until the second's first segment, then the second takes over (its
-/// session starting at everything measured so far). RED before: the second measured from its
-/// open, the first's sound — the only one playing — went unmeasured.
+/// session starting at everything measured so far). Failure it catches: the second measuring
+/// from its open while the first's sound — the only one playing — goes unmeasured.
 #[test]
 fn scene_silent_second_source_leaves_the_playing_one_measuring() {
     let Some(srv) = loudness_serve("2") else {
@@ -9574,8 +9566,9 @@ fn scene_silent_second_source_leaves_the_playing_one_measuring() {
 }
 
 /// A live `loudness_seed` on one of two sources of a path follows the join's rule — adopted
-/// only when it covers more — and never moves the measurement to that source. RED before: the
-/// path's measurement dropped back to the (older, shorter) seed and the reseeded source measured.
+/// only when it covers more — and never moves the measurement to that source. Failure it
+/// catches: the path's measurement dropping back to the (older, shorter) seed and the reseeded
+/// source measuring.
 #[test]
 fn scene_live_seed_on_a_two_source_path_never_shrinks_it() {
     let Some(srv) = loudness_serve("2") else {
@@ -9609,8 +9602,8 @@ fn scene_live_seed_on_a_two_source_path_never_shrinks_it() {
 /// a playing scene's folder joins its measurement (pending until it sounds), moving away hands
 /// it back to the one still playing; a source moved (with no seed) onto a folder no source plays
 /// starts that folder afresh (deleted and re-added, updated — its idle entry dropped); another
-/// spelling of a folder (a symlink, a trailing slash) is the same measurement. RED before: the
-/// moved source measured at once, the idle folder continued, the symlink read 0 s.
+/// spelling of a folder (a symlink, a trailing slash) is the same measurement. Failures it
+/// catches: the moved source measuring at once, the idle folder continuing, the symlink reading 0 s.
 #[test]
 fn scene_path_changes_and_folder_spellings_share_one_measurement() {
     let Some(srv) = loudness_serve("2") else {
@@ -9661,8 +9654,8 @@ fn scene_path_changes_and_folder_spellings_share_one_measurement() {
 /// leaves the old configuration's measurement (its rest reported with the OLD key), joins the
 /// new one's and drops the segments of the next 0.5 s (the stream still carries the old mix) —
 /// two configurations never share a histogram; toggled back, the old key continues its own
-/// measurement; every report carries its key. RED before: one measurement per path (the new
-/// key continued the old one's seconds, no `key` in the report, nothing dropped).
+/// measurement; every report carries its key. Failure it catches: one measurement per path
+/// (the new key continuing the old one's seconds, no `key` in the report, nothing dropped).
 #[test]
 fn scene_loudness_key_change_never_shares_a_histogram() {
     let Some(srv) = loudness_serve("2") else {
@@ -9747,7 +9740,7 @@ fn scene_loudness_key_change_never_shares_a_histogram() {
     c.ok("destroy", json!({"id": a}));
 }
 
-/// The cap (owner: "probably add a max cap for people who will never change wallpaper"): once
+/// The cap (so a wallpaper that is never changed doesn't meter forever): once
 /// the audible play over every session reaches it (`LIASCAPE_PLAYER_LOUDNESS_CAP_S`, 3 s here), one
 /// last report (`capped`) and the worker stops metering — no segment arrives any more, nothing
 /// at the end. A source seeded at the cap measures nothing from its start.
@@ -9938,8 +9931,8 @@ fn scene_loudness_survives_a_worker_restart() {
 /// An fps cap (`fps_cap`, the backend's `VideoFpsCap`, sent to `srcs:*` and in every create) never
 /// stalls a still: a transition to an image B with the cap on readies and hands off, the image
 /// is on screen; a colour and a scene B with the cap behave as without it; a capped video still
-/// plays. Both clocks. RED before the fix: the image B stayed `ready: false` and the switch sat
-/// in `waiting_ready` (TODO "An fps cap stalls a still image").
+/// plays. Both clocks. Failure it catches: the image B staying `ready: false` and the switch
+/// sitting in `waiting_ready`.
 #[test]
 fn fps_cap_never_stalls_a_still_any_kind() {
     let Some(mut srv) = scene_serve(&[]) else {
@@ -10046,7 +10039,7 @@ fn fps_cap_never_stalls_a_still_any_kind() {
     }
 }
 
-// ---------------------------------------------------------------- Phase 3 Task 6: the covered Signal
+// ---------------------------------------------------------------- the covered Signal
 
 /// Cover outputs through the headless fake source (`headless.cover`): `"*"` = every output.
 fn cover(c: &mut Client, output: &str, state: &str) {
@@ -10125,7 +10118,7 @@ fn cover_hold_pauses_when_every_output_is_covered() {
     assert!(time_pos(&mut c, &id) > held, "plays again after the release");
 }
 
-/// The hold is a pause like the user's (R88 gates): `gain.pause` ramps out before mpv pauses
+/// The hold is a pause like the user's (pause gates): `gain.pause` ramps out before mpv pauses
 /// and back in after the release. Real clock (the gates are wall-clock, as in
 /// `player_pause_ramps_a_plain_source`).
 #[test]
@@ -10601,7 +10594,7 @@ fn desktop_pointer_from_a_fake_hyprland() {
     assert_eq!(p["ok"], json!(false), "{p}");
 }
 
-// ---------------------------------------------- Phase 3 Task 9: the player outbox
+// ---------------------------------------------- the player outbox
 
 /// A real-clock synthetic-scene server in `root` whose scene loudness window is 1 s of audible
 /// play (`--ao null`: the worker's real-time pull timer is the stream).
@@ -10671,7 +10664,7 @@ fn learn_a_loudness(c: &mut Client, name: &str) -> (String, Value) {
     (id, ev)
 }
 
-/// Phase 3 Task 9 (plan designer call 6): what the backend must store while it is away —
+/// What the backend must store while it is away —
 /// `source.broken` and `scene.loudness` — goes to `<state>/outbox.jsonl` too. A restarted player
 /// still has it (`outbox.read`, the same seqs); `outbox.ack` empties it, the ack survives a
 /// restart, and the seq continues across one even with the file empty.
@@ -10753,7 +10746,7 @@ fn outbox_persists_across_restart_and_acks() {
     assert_eq!(outbox_seqs(&r).first(), Some(&(last + 1)), "{r}");
 }
 
-/// Phase 3 Task 9: the outbox keeps at most `OUTBOX_MAX` = 2000 entries — the oldest unacked
+/// The outbox keeps at most `OUTBOX_MAX` = 2000 entries — the oldest unacked
 /// ones are dropped (`outbox.dropped {n}`) and a read says so (`dropped_before`: everything
 /// before that seq past `after` is gone). A read returns ≤ `limit` (500 by default) per page.
 #[test]
@@ -10814,7 +10807,7 @@ fn outbox_is_bounded() {
     assert_eq!(r["dropped_before"], Value::Null, "an ack past the loss clears it: {r}");
 }
 
-/// Phase 3 Task 9: a live `source.broken` / `scene.loudness` carries `outbox_seq` — the seq of
+/// A live `source.broken` / `scene.loudness` carries `outbox_seq` — the seq of
 /// the outbox entry holding the same fields (the backend acks what it handled live).
 #[test]
 fn live_events_carry_outbox_seq() {

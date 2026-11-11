@@ -1,4 +1,4 @@
-//! Task 8 brief, Step 1: the gl-transitions effect catalogue compiles every one of the
+//! The gl-transitions effect catalogue compiles every one of the
 //! repo's 122 shared effects under desktop GL 3.3 core, and the one with no uniforms
 //! ("fade") renders a correct midpoint blend.
 //!

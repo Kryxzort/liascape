@@ -1,4 +1,4 @@
-//! Pitch-preserving time stretch for a scene's sound (Task 6; owner decision round 2: a
+//! Pitch-preserving time stretch for a scene's sound (a
 //! scene's `speed` scales its animation AND its audio, pitch kept). WSOLA — waveform-similarity
 //! overlap-add, the family of mpv's `scaletempo`/`scaletempo2`: the output is built from 20 ms
 //! Hann-windowed input segments overlapped by half (a 10 ms hop); segment `j` is taken near
@@ -361,7 +361,7 @@ mod tests {
             .collect()
     }
 
-    /// Owner: a scene's speed scales its audio with the pitch kept. A 440 Hz tone (a period
+    /// A scene's speed scales its audio with the pitch kept. A 440 Hz tone (a period
     /// of 109.09 frames — no hop is a whole number of periods, so the search must align the
     /// joins) stays 440 Hz at 0.5×, 1.5×, 0.73× and the 0.1×/4× ends of the range, its level
     /// stays steady, and the input is consumed at `speed` × the output.

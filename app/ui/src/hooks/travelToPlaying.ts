@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
-// "Travel to running wallpaper on app open" (owner todo, 2026-11-10): the first time a list shows the playing item in this
+// "Travel to running wallpaper on app open" (docs/decisions.md § "Travel to the playing wallpaper once per session, spotlit
+// in the playing green"): the first time a list shows the playing item in this
 // app session — the app opening on Library, or the first visit to the Library tab with something playing — its scroll
 // container jumps (no smooth glide: it's where the page opens) so the playing item sits in the middle of the view. Once
 // per session per list (`key`): coming back to the tab later, or a switch while the app is open, never moves the user's
@@ -42,8 +43,7 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
   }, [playingPath, count]); // eslint-disable-line
 }
 
-// "Go to the playing wallpaper" buttons (owner 2026-11-11: "a button in library and playlist bar that takes you to the current
-// running wallpaper") — the Library top bar's and the playlist bar head's. `glideTo` eases the scroll container so `selector`'s
+// "Go to the playing wallpaper" buttons — the Library top bar's and the playlist bar head's. `glideTo` eases the scroll container so `selector`'s
 // element sits mid-view: every frame it re-measures where the element is (the grid's `content-visibility` cards take their real
 // size as they come into view, so a target computed once would land off) and closes a fraction of the remaining distance
 // (exponential, ~0.5 s), stopping when it's there, after 1.5 s, or the moment the user wheels / presses in the container.
@@ -52,8 +52,7 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
 // Where an element can actually be SEEN: the window ∩ every clipping ancestor, minus the app's overlays that don't contain it
 // (the playlist bar over the grid's bottom, the top bar, a floating sidebar) — an overlay that spans the box's width cuts
 // its top / bottom, one that spans its height its left / right. The glide aims for this box's middle and the spotlight
-// draws only inside it (owner 2026-11-11: "the spotlight still keeps the spotlight and outline even when playlist bar is
-// overlaying over it").
+// draws only inside it (never its spotlight and outline over an overlay such as the playlist bar).
 type Box = { l: number; t: number; r: number; b: number };
 const OVERLAYS = ".playlist-bar, .topbar, .side-panel";
 function clipAncestors(el: HTMLElement): HTMLElement[] {
@@ -84,7 +83,7 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
   if (!sc || !target) return false;
   const TAU = 110, MAX_MS = 1500;
   let raf = 0, last = 0, t0 = 0, frames = 0, stopped = false;
-  // the spotlight dims the window from the click on (owner 2026-11-11), its hole riding the target through the glide
+  // the spotlight dims the window from the click on, its hole riding the target through the glide
   const fx = locateFx(target, smooth);
   const scAnc = clipAncestors(sc);
   const stop = () => {
@@ -120,8 +119,7 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
   return true;
 }
 
-// COOL: the "here it is" after a glide (owner 2026-11-11: "do some cool design to make the go-to-playing more apparent of where's
-// the wallpaper"). A fixed layer on <body> — above everything, never clipped by the grid / the bar's row — over the element's
+// COOL: the "here it is" after a glide. A fixed layer on <body> — above everything, never clipped by the grid / the bar's row — over the element's
 // box: the rest of the window dims (a hole: one huge spread shadow around the box, painted once), the element glows in the
 // accent (a pre-blurred shadow layer whose OPACITY animates), three accent rings ripple out of it (each scaled by its own
 // px-exact factors so a wide card and a small bar item ring out the same 26 px), then it all fades back — 1.5 s. Only
@@ -129,7 +127,7 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
 // frame (the bar's dock magnification moves it; a scroll). The element itself carries `.locate-flash` meanwhile: a static
 // accent outline (shows with "Glow effects" off; the matrix's travel:button reads it). Glow effects off → no glow layer, the
 // spotlight + rings stay; motion off → no animation: the dim, the outline and one still ring for 1.2 s, then gone at once.
-// Two phases (owner 2026-11-11: "make the spotlight dim be there from the moment you click the button"): `locateFx` puts up
+// Two phases (the dim is there from the moment of the click): `locateFx` puts up
 // the dim at once (a quick fade in, `.lfx-dim.in`) — its hole follows the element while `glideTo` scrolls it into place — and
 // `reveal()` on arrival adds the glow, edge and rings and starts the 1.5 s clock, the dim holding then fading with them.
 // `cancel()` (the user wheels / presses mid-glide) fades the dim straight out.
@@ -153,8 +151,8 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
     fx.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`; fx.style.width = `${r.width}px`; fx.style.height = `${r.height}px`;
     // the hole = the VISIBLE part of the item; none visible (still far off in the list, or under the bar) → a zero hole at
     // the nearest visible point, so the WHOLE window is dimmed (the dim's spread reaches 1.5× the window from the hole —
-    // a hole thousands of px off-screen left part of the window undimmed: owner 2026-11-11, "the dimming fails to apply to
-    // the full app if the current view state is very far away from the destination wallpaper") and the hole grows in from
+    // a hole thousands of px off-screen leaves part of the window undimmed when the destination is very far away) and the
+    // hole grows in from
     // the edge as the item arrives
     let hl = Math.max(r.left, v.l), ht = Math.max(r.top, v.t), hr = Math.min(r.right, v.r), hb = Math.min(r.bottom, v.b);
     if (hr <= hl || hb <= ht) {

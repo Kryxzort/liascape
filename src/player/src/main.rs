@@ -14,18 +14,18 @@
 //! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (`docs/player/modules/wayland.md`).
 //! `ctl` is the command API's client (`docs/player/modules/command-api.md`).
 //!
-//! `serve` is **supervised** by default (Task 16, `supervise.rs`, § Supervisor): this
+//! `serve` is **supervised** by default (`supervise.rs`, `docs/player/modules/persistence.md` § Supervisor): this
 //! process stays a small supervisor and runs the compositor as a child
 //! (`serve --supervised …`), restarting it with `--restore` after a crash. `--no-supervise`
 //! runs the compositor in this process (tests that don't test supervision). `--restore`
-//! restores `<state>/snapshot.json` (§ Snapshot); `--session-start` with it marks a session
+//! restores `<state>/snapshot.json` (`docs/player/modules/persistence.md`); `--session-start` with it marks a session
 //! start (boot / `liascape restore`): each restored program starts per its `start_mode`
-//! (§ Programs "Playlist start") — the supervisor gives it to its first child only, never
+//! (`docs/player/modules/programs.md` § Playlist start and resume points) — the supervisor gives it to its first child only, never
 //! to a restart. Exit codes: 0 clean, 1 refused at
 //! startup (never retried — e.g. already running), 2 usage, 3 compositor connection lost
 //! mid-run (restarted when supervised), 4 the supervisor gave up (5 real crashes in 60 s,
 //! or the compositor/EGL never became available), 5 compositor/EGL not available *yet*
-//! (retried with backoff when supervised, § Supervisor "Startup-failure classes").
+//! (retried with backoff when supervised, `docs/player/modules/persistence.md` § Supervisor).
 //! `--supervised` / `--restarted <spec>` are internal (the supervisor passes them).
 
 use std::process::ExitCode;
@@ -147,7 +147,7 @@ fn serve_main(args: &[String]) -> ExitCode {
     };
     if !no_supervise && !supervised {
         // The supervisor: nothing but fork + exec + wait from here on (no thread, no EGL,
-        // no PipeWire, no socket — R72).
+        // no PipeWire, no socket).
         let child: Vec<String> = args
             .iter()
             .filter(|a| *a != "--restore" && *a != "--session-start")
@@ -166,7 +166,7 @@ fn serve_main(args: &[String]) -> ExitCode {
     }
     // SAFETY: the compositor is still single-threaded here (no runtime, bus thread or libmpv
     // yet); every PipeWire stream this process connects — the bus loopback, the meter, mpv's
-    // AOs, and the scene workers it spawns with this environment — is an async node (F7).
+    // AOs, and the scene workers it spawns with this environment — is an async node.
     unsafe { liascape_player::audio::bus::set_async_streams_env() };
     let opts = ServeOpts {
         outputs,
@@ -310,7 +310,7 @@ fn scene_loudness(args: &[String]) -> ExitCode {
     }
 }
 
-/// `liascape-player scene-check [--assets <dir>]` (Phase 2 Task 7): can scenes play here? One JSON
+/// `liascape-player scene-check [--assets <dir>]`: can scenes play here? One JSON
 /// line `{worker, features, assets_dir, ok, reason}`, exit 0 = yes / 1 = no (the backend's
 /// adapter reads it when no player runs). The same rule as `hello`'s `scene` capability: the
 /// worker resolves and was built with LWE, and WE's assets dir resolves (`--assets`, else

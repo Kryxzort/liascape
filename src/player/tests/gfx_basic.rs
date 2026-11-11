@@ -1,4 +1,4 @@
-//! Task 7 brief, Step 1: clear a 64x64 FBO to a known color, read it back, and write it to
+//! Clear a 64x64 FBO to a known color, read it back, and write it to
 //! a decodable PNG. This is the one test that must run on the real GPU (not skipped) on
 //! the owner's NVIDIA 595.84 machine — see `tests/common::headless_gl` for the one
 //! condition under which it legitimately skips instead (no EGL device at all) — and
@@ -49,7 +49,7 @@ fn clear_readback() {
     let _ = std::fs::remove_file(&out);
 }
 
-/// Phase 2 Task 13: `capture` writes its PNG on the player's loop, and the png crate's default
+/// `capture` writes its PNG on the player's loop, and the png crate's default
 /// (`Balanced`) compression held the loop 820–875 ms for a 3840×1080 scene frame (release
 /// build; every output froze for it). `write_png` uses fdeflate's `Fast` mode (39–112 ms). Guard
 /// without an absolute bound (debug builds encode far slower): on the same noisy 1920×1080
@@ -129,7 +129,7 @@ fn write_png_is_fast_enough_for_the_loop() {
     );
 }
 
-/// Task 10 fix round: every surfaceless `Gfx` in a process shares one `EGLDisplay`.
+/// Every surfaceless `Gfx` in a process shares one `EGLDisplay`.
 /// Dropping one must not terminate that display under another: the survivor's context
 /// (not current at the time) must still be valid, re-currentable, and drawable.
 #[test]
@@ -139,7 +139,7 @@ fn two_gfx_on_one_display_survive_each_others_drop() {
     };
     let b = headless_gl().expect("second context"); // b is current now
     let keep_a = a.keep_alive();
-    drop(b); // previously: eglTerminate(display) → a's context destroyed
+    drop(b); // the trap: an unconditional eglTerminate(display) here destroys a's context
     let cur = keep_a.make_current();
     assert!(
         cur.is_current(),

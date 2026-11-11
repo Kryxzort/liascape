@@ -1,10 +1,10 @@
-//! The Task 11 loop harness (R4 + R32 + R33): Graph + Animator + SteppedClock + Gfx +
+//! The loop harness: Graph + Animator + SteppedClock + Gfx +
 //! `SourceHost` + `Transitions` + Composer. One [`Harness::tick`] is the runtime's loop
 //! iteration: `anim.tick` → `graph.set` each → `drain_changes` → `host.sync` →
 //! `host.update` → `transitions.tick(host.events())` → compose every virtual output
 //! (`VIRTUAL-n`, 640×360) into its own FBO.
 //!
-//! **Clock pacing (R33).** mpv plays in wall time, so each tick waits ≤ one 30 fps frame
+//! **Clock pacing.** mpv plays in wall time, so each tick waits ≤ one 30 fps frame
 //! on the sources' wake fds and steps the `SteppedClock` by the measured wall delta.
 //! [`Harness::tick_to`] lands exactly on a virtual instant (a capped step; the remainder
 //! is carried into the next tick, so the clock never drifts from wall time).
@@ -35,7 +35,7 @@ pub const OUT_W: u32 = 640;
 pub const OUT_H: u32 = 360;
 /// One 30 fps frame (the test clips' rate).
 pub const FRAME: Duration = Duration::from_micros(33_333);
-/// The longest a tick waits for a wake fd: one 60 Hz refresh (≤ one 30 fps frame, R33).
+/// The longest a tick waits for a wake fd: one 60 Hz refresh (≤ one 30 fps frame).
 /// Pumping at exactly the clips' 30 fps aliases with mpv's frame timing and drops frames;
 /// a real output refreshes at ≥ 60 Hz.
 pub const TICK_WAIT: Duration = Duration::from_micros(16_667);
@@ -112,8 +112,8 @@ impl Harness {
             outs.push((id, tex, fbo));
         }
         let mut base = Map::new();
-        base.insert("ao".into(), json!("null")); // R26: silent test runs
-        // Phase 2 Task 5: `kind: scene` sources play the synthetic renderer (D7) through
+        base.insert("ao".into(), json!("null")); // Silent test runs
+        // `kind: scene` sources play the synthetic renderer through
         // this crate's worker binary; crash records stay in a private dir.
         base.insert(
             "scene_worker".into(),
@@ -125,7 +125,7 @@ impl Harness {
         base.insert("scene_crash_dir".into(), json!(crashes));
         let mut host = SourceHost::new(base);
         // `LIASCAPE_PLAYER_RENDER_WORKER=on` (the switch `serve` reads): every source renders on a
-        // worker sharing this context, as in the real-clock runtime (§ Sources "Render worker").
+        // worker sharing this context, as in the real-clock runtime (`docs/player/modules/sources.md` § Render worker).
         if liascape_player::runtime::render_worker_enabled(None) {
             host.set_render_worker(Some(RenderWorker::start(&gfx).expect("render worker")));
         }
@@ -152,7 +152,7 @@ impl Harness {
         self.clock.now()
     }
 
-    /// One iteration, the clock step capped at `cap` (R33).
+    /// One iteration, the clock step capped at `cap`.
     pub fn tick_capped(&mut self, cap: Option<Duration>) {
         let since = self.last_wall.elapsed();
         if since < MIN_TICK {
@@ -223,7 +223,7 @@ impl Harness {
             }
         }
         let changes = self.graph.drain_changes();
-        // This harness doesn't model player-level pause (R75): always unpaused. Tests for
+        // This harness doesn't model player-level pause: always unpaused. Tests for
         // that go through the full binary (`tests/api.rs`), which drives it via `Runtime`.
         self.host.sync(&self.gfx, &self.graph, &changes, false);
         self.host.update(&self.gfx, &mut self.graph);
@@ -259,7 +259,7 @@ impl Harness {
             .expect("create source")
     }
 
-    /// A synthetic scene source (Phase 2, D7): `common::synthetic_scene(name, spec)` as a
+    /// A synthetic scene source: `common::synthetic_scene(name, spec)` as a
     /// `kind: scene` node with `extra` props. Not shown anywhere yet.
     pub fn scene(
         &mut self,
@@ -365,7 +365,7 @@ impl Harness {
         self.graph.ids_of(NodeKind::Source)
     }
 
-    /// Unpaused source nodes (R38's "live").
+    /// Unpaused source nodes ("live").
     pub fn live(&self) -> Vec<String> {
         self.sources()
             .into_iter()
@@ -383,7 +383,7 @@ impl Harness {
     // ---- pixels ----
 
     /// Red channel of a source texture's top-left 64×64 block (`FrameIndex`'s marker; image
-    /// top is at low y in a raw source texture — R25).
+    /// top is at low y in a raw source texture).
     pub fn corner(&self, id: &str) -> Option<u8> {
         self.host
             .texture(id)

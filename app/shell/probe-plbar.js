@@ -1,5 +1,5 @@
-// Playlist bar probe — `scripts/test-ui-matrix.sh --probe probe-plbar.js` (the matrix's hermetic stack). Owner 2026-11-11:
-// "i cant scroll on playlist bar, make it so it doesn't lose the hover thing in the gaps between playlist items".
+// Playlist bar probe — `scripts/test-ui-matrix.sh --probe probe-plbar.js` (the matrix's hermetic stack): the bar's row
+// scrolls on the wheel, and the hover survives the gaps between playlist items.
 //   bar:wheel        a real wheel over the bar's row scrolls it (the row overflows: a narrow window)
 //   bar:wheelReopen  collapse + expand the bar (the row unmounts / mounts again): the wheel still scrolls it
 //   bar:gap          pointer on item 1 → the gap → item 2: item 1 stays lifted (and glowing) in the gap, then item 2 takes over
@@ -138,8 +138,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("make only the initial and last playlist hover have the bounce, since when moving cursor fast it feels
-    // stuttery when all of them bounce", then "remove the hover bounce on slow too"): the item the pointer ENTERS on overshoots
+    // docs/decisions.md § "Bounce the playlist bar's dock only when entering, stopping or leaving": the item the pointer ENTERS on overshoots
     // (×1.16 → above it, then back); the items a sweep passes — fast or slow — don't (critically damped: never past ×1.16);
     // the item it STOPS on overshoots again.
     // Every frame's scale per item, sampled in the page.
@@ -183,8 +182,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11: "detecting mouse position, not the item its focused on — so the surrounding stuff moves even if you move the
-    // mouse on the same playlist item": the pointer on item 2's left quarter, then its right quarter → item 1 / item 3 trade lift
+    // the magnification follows the pointer's position, not the item it's on — the neighbours move while the pointer moves
+    // within one item: the pointer on item 2's left quarter, then its right quarter → item 1 / item 3 trade lift
     await cell("bar:continuous", async () => {
       const v = [];
       await page(`${row}.scrollLeft = 0;`); await sleep(300);
@@ -205,7 +204,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("its like really big, so its like colliding with the top"): the magnified item, at the PEAK of its bounce,
+    // the magnified item, at the PEAK of its bounce,
     // stays below the bar header's controls and inside the row (its clip) — sampled every frame through the rise
     // the first item sits at the row's left edge: magnified (the pointer on it) or a magnified neighbour's push must never cut it off
     await cell("bar:edge", async () => {

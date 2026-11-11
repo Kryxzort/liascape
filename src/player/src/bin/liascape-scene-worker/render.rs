@@ -1,9 +1,9 @@
 //! A real WE scene in the worker (`docs/player/modules/scene-lwe-core.md`
 //! § Rendering a real scene): LWE's core ([`lwe::Scene`]) loaded and built on the worker's GL
 //! context, rendered into a native-sized FBO (the core draws its final quad with
-//! `glViewport(0, 0, sceneW, sceneH)`, spike §2), then blitted into the export ring's slot at
+//! `glViewport(0, 0, sceneW, sceneH)`, `docs/player/spikes/lwe-core.md` §2), then blitted into the export ring's slot at
 //! the slot's (cover) size — never exported at the native size — with no flip (the core's
-//! output is y-down = R25) and alpha forced to 1 (the core leaves 0 in every pixel).
+//! output is y-down, the player's source layout) and alpha forced to 1 (the core leaves 0 in every pixel).
 
 use std::path::{Path, PathBuf};
 
@@ -120,7 +120,7 @@ impl LweScene {
         })
     }
 
-    /// The scene's sound for the audio thread (Task 6).
+    /// The scene's sound for the audio thread.
     pub fn audio_puller(&self) -> lwe::LwePull {
         self.scene.audio_puller()
     }
@@ -173,7 +173,7 @@ impl LweScene {
             } else {
                 glow::LINEAR
             };
-            // Row order kept: the core's row 0 is the image's top (R25) — no flip.
+            // Row order kept: the core's row 0 is the image's top — no flip.
             gl.blit_framebuffer(
                 0,
                 0,

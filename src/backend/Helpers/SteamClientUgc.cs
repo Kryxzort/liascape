@@ -11,16 +11,16 @@ using Liascape.Models;
 
 namespace Liascape.Helpers;
 
-// Workshop through the RUNNING Steam client, the way Wallpaper Engine itself does it (owner 2026-11-11: "do you think we could
-// like embed steam or like drive steam" → "yeah, try it"). Steam's ISteamUGC lets a program that is "the game" subscribe to
+// Workshop through the RUNNING Steam client, the way Wallpaper Engine itself does it (docs/decisions.md § "Drive the Steam
+// client through its own `steamclient.so`"). Steam's ISteamUGC lets a program that is "the game" subscribe to
 // an item and read Steam's own download progress (bytes done / total) and the item's real install folder. Opt-in
-// (`WorkshopDownloadMode` "steamapp", Settings "Use the Steam app" — owner 2026-11-11 "why is this a checkbox": a third way
-// to get wallpapers, so a third radio, not a switch inside "Subscribe via Steam"): the helper presents itself as Wallpaper Engine (431960) — Steam checks the account
+// (`WorkshopDownloadMode` "steamapp", Settings "Use the Steam app" — a way of its own to get wallpapers, so its own radio,
+// not a switch inside "Subscribe via Steam"): the helper presents itself as Wallpaper Engine (431960) — Steam checks the account
 // owns it, and shows "Playing Wallpaper Engine" while connected.
 //
 // - Straight through the Steam client's OWN steamclient.so (every Steam install has it: ~/.steam/sdk64/steamclient.so) —
-//   NOT Valve's libsteam_api.so, which is only a thin adapter over it and isn't ours to ship (owner: "what if other users dont
-//   got steamvr?" — a copy came only with SteamVR / old Protons). steamclient.so exports CreateInterface; the interfaces
+//   NOT Valve's libsteam_api.so, which is only a thin adapter over it and isn't ours to ship (a user's copy comes only with
+//   SteamVR / old Protons). steamclient.so exports CreateInterface; the interfaces
 //   are C++ vtables called by SLOT. The slots are Valve's public interface versions, which Steam keeps serving for old games;
 //   read from Valve's own libsteam_api wrappers (objdump: `mov (%rdi),%rax; jmp *0x220(%rax)` = slot 68), not guessed:
 //   ISteamClient "SteamClient020" CreateSteamPipe 0, BReleaseSteamPipe 1, ConnectToGlobalUser 2, ReleaseUser 4,
@@ -29,11 +29,11 @@ namespace Liascape.Helpers;
 // - In a SHORT-LIVED CHILD (`liascape-backend steam-ugc subscribe <id> <steamclient.so>…`, SteamAppId=431960 in ITS
 //   environment only): connected for the download's seconds, not the backend's lifetime, and a crash in Steam's library
 //   can't take the backend down. JSON lines on stdout; the parent closes its stdin to stop it (release → exit).
-// - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason, and the caller
-//   falls back to the existing paths (the signed-in web subscribe / the item's page in the Steam app).
+// - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason; the caller fails
+//   with `FailureMessage` and never switches method by itself (sources-steam.md § Workshop downloads).
 // - ONE subscribe/unsubscribe child at a time, app-wide (`Turn`; a bulk download waits with "Waiting for the Steam app…").
 //   `steam-ugc probe` (connect, release, exit) answers the Steam to-do's "Let the Steam app do all N" (Web/SteamTodo.cs).
-// Measured on the owner's machine (prototype, 2026-11-11): a 2.1 MB item subscribed 0.5 s, bytes 0.8 → 1.1 → 2.1 MB,
+// Measured (prototype): a 2.1 MB item subscribed 0.5 s, bytes 0.8 → 1.1 → 2.1 MB,
 // installed 4.5 s, the folder on the library Steam chose (/mnt/Games/… — no symlink guessing).
 public static class SteamClientUgc
 {
@@ -61,7 +61,7 @@ public static class SteamClientUgc
     public sealed record Result(string? Folder, string? Fallback);
 
     /// What the user reads when the Steam app couldn't do it — the mode FAILS there, it never switches to the sign-in or the
-    /// page (owner 2026-11-11: "instead of fallbacks for when direct steam connection fails, i want failures there").
+    /// page — a quiet fallback would hide why the chosen mode didn't work.
     public static string FailureMessage(string? why) =>
         $"Couldn't use the Steam app: {(string.IsNullOrWhiteSpace(why) ? "Steam didn't answer" : why)}. Start Steam (signed in to an " +
         "account that owns Wallpaper Engine), or pick another way under Settings → Getting Workshop wallpapers.";

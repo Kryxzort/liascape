@@ -1,6 +1,6 @@
 // Settings levels + playlist start probe — `scripts/test-ui-matrix.sh --probe probe-expert.js` (the matrix's hermetic stack:
 // private backend + headless liascape-player + this tree's UI). Settings levels (.claude/rules/ui/state-and-api.md
-// § Settings page) + Phase 3 Task 10 (plan 2026-10-29 § Playlist start):
+// § Settings page) + the playlist start (docs/decisions.md § "Fold "Resume from last" into the playlist start setting"):
 //   1. Standard is the default: the level picker sits in the top bar (Basic · Standard · Advanced · Expert), no
 //      Advanced / Expert row renders
 //   2. each level shows its own rows and every row below it (tagged Advanced / Expert); the choice is saved and survives a reload

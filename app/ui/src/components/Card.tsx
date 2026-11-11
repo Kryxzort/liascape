@@ -4,8 +4,8 @@ import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client"
 import { useStore } from "../store";
 
 // The card's short words for a Workshop download's step (WS download-progress `status`, the store's downloadStatus — the
-// sidebar shows the whole sentence). Owner 2026-11-11: a 458 MB item said "Downloading…" over an empty bar for a minute,
-// the same look as a hang — the card now says whose turn it is.
+// sidebar shows the whole sentence). A bare "Downloading…" over an empty bar for a minute on a big item looks like a hang,
+// so the card says whose turn it is (docs/decisions.md § "Report Workshop download phases, not a percent").
 export function shortDownloadStatus(status: string | undefined): string {
   if (!status) return "Downloading…";
   // waiting for its page's turn in the Steam to-do (components/SteamTodoPanel.tsx) / for the Steam client (one helper at a time)
@@ -20,7 +20,7 @@ export function shortDownloadStatus(status: string | undefined): string {
 }
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
-// title overlay. Interactions (WE-style sidebar, 2026-11-10): click / right-click → focus (the Browse sidebar shows it:
+// title overlay. Interactions (docs/decisions.md § "Focus Browse cards on click, download on double-click"): click / right-click → focus (the Browse sidebar shows it:
 // the preview, the numbers, Download & Apply); double-click → download & apply; the hover download button (bottom-right,
 // where the Library card's trash sits) → download & apply; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
@@ -65,14 +65,12 @@ export const Card = memo(function Card({
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover download button (bottom-right, the Library card's trash spot): a solid accent arrow on a dark round chip (index.css
-            `.dl-btn` — the hollow breathing outline it was got lost on bright thumbnails). It was a whole-card overlay while a click
-            downloaded; a click now opens the sidebar. */}
-        {/* not on a card the library already has (owner 2026-11-11: "whats the point of a download button on the wallpapers
-            … it knows is 'in library'"): it only applied the library's copy — double-click / Enter / the sidebar's Apply still do */}
+            `.dl-btn` — a hollow outline gets lost on bright thumbnails). A click on the card opens the sidebar. */}
+        {/* not on a card the library already has: it would only apply the library's copy — double-click / Enter / the sidebar's Apply do that */}
         {!downloading && !inLibrary && (
           <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
             onDoubleClick={(e) => e.stopPropagation()}>
-            <svg className="dl-glyph" viewBox="0 -2.5 24 24" /* the arrow spans y 3–16: shifted so ITS centre is the box centre (owner 2026-11-11: "why are your icons always uncentred") */ fill="none" aria-hidden>
+            <svg className="dl-glyph" viewBox="0 -2.5 24 24" /* the arrow spans y 3–16: shifted so ITS centre is the box centre, not the path's box */ fill="none" aria-hidden>
               <path d="M19 9h-4V3H9v6H5l7 7 7-7z"
                 stroke="currentColor" strokeWidth="0.85" strokeLinejoin="round" strokeLinecap="round" />
             </svg>

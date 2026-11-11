@@ -12,8 +12,7 @@
      "Live wallpaper behind all tabs" toggle). Single knob → change .bg-live below to retune everything. */
   --tr: 100%; --tr-strong: 100%;
   /* the item sidebar's own background: in live-wallpaper mode fully see-through, like the Settings page — its section cards,
-     stage and tiles carry the darkness (owner 2026-11-11: "make it more like the settings page, the background is 100%
-     see-through while the actual settings section is what has the darkness") */
+     stage and tiles carry the darkness */
   --tr-side: 100%;
   /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
   --glow-sm: 0 0 12px -2px var(--accent);
@@ -23,7 +22,7 @@
 :root.bg-live { --tr: 65%; --tr-strong: 85%; --tr-side: 0%; }
 * { box-sizing: border-box; }
 /* focus rings: none — not the system's yellow one, not after a click + a key — unless navigating with Tab (`.kbd-nav`,
-   hooks/focusRing.ts), then the app's accent ring (owner 2026-11-11: "we never want those pesky yellow outlines anywhere") */
+   hooks/focusRing.ts), then the app's accent ring (docs/decisions.md § "Show focus rings only while tabbing") */
 :root:not(.kbd-nav) :focus-visible { outline: none !important; }
 :root.kbd-nav :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html, body, #root { margin: 0; height: 100%; }
@@ -35,8 +34,8 @@ body {
   overflow: hidden;
 }
 /* padding: 0 — Chromium's own button padding (1px 6px) stayed on every button that didn't restate it, squeezing a small fixed-size
-   icon button's content box below its icon, which then overflowed to the right: centring silently failed (owner 2026-11-11: "why
-   are your icons always uncentred" — the filter switches 2 px off, the playlist bar's ✕ 2.5 px). A button pads only as its own
+   icon button's content box below its icon, which then overflowed to the right: centring silently failed (the filter switches
+   2 px off, the playlist bar's ✕ 2.5 px). A button pads only as its own
    rule says. Guard: probe-layout `look:iconsCentred`. */
 button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
 
@@ -58,7 +57,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 /* ---- app shell ---- */
 .app { display: flex; flex-direction: column; height: 100vh; position: relative; }
-/* any tiled size (owner 2026-11-10): the top bar wraps onto a second row when its controls don't fit (tabs + pills
+/* any tiled size: the top bar wraps onto a second row when its controls don't fit (tabs + pills
    first, then the status / search / sort row) instead of pushing them off the window; nothing in it is fixed-width
    beyond the tabs. The status has a 0 basis (min 140 px): it fills whatever a row leaves and truncates. */
 .topbar {
@@ -90,7 +89,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes tab-in-l { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
 
 .spacer { flex: 1; }
-/* the search field takes 240 px when there's room and gives way down to 120 (owner 2026-11-10: "the search bar resizes") */
+/* the search field takes 240 px when there's room and gives way down to 120 */
 .search {
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
   border-radius: 8px; padding: 7px 12px; flex: 0 1 240px; width: 240px; min-width: 120px; outline: none;
@@ -143,24 +142,23 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   opacity: 0; transform: translateY(100%); transition: opacity .15s, transform .15s; box-shadow: var(--glow);
 }
 .thumb-wrap:hover .dl { opacity: 1; transform: translateY(0); }
-/* Browse hover download button, bottom-right where the Library card's trash sits (a click on the card opens the sidebar since
-   2026-11-10). A round dark CHIP with an accent ring behind a SOLID accent arrow (owner 2026-11-11: "make the download button
-   on browse wallpapers easier to see … but a smaller size"): it was a 40 px hollow outline drawn straight on the picture at 70 %
-   opacity — lost on any bright / busy thumbnail. The chip gives its own contrast; 30 px (22 on small cards). Calm at rest (no
+/* Browse hover download button, bottom-right where the Library card's trash sits (a click on the card opens the sidebar).
+   A round dark CHIP with an accent ring behind a SOLID accent arrow, small but easy to see: a hollow outline drawn straight
+   on the picture is lost on any bright / busy thumbnail. The chip gives its own contrast; 30 px (22 on small cards). Calm at rest (no
    per-card breathing glow — a grid of them was paint for nothing); hover is where it comes alive. */
-/* above the 44 px title strip at every card size (it was drawn over the button's lower half) and on its own layer (z 3: over
+/* above the 44 px title strip at every card size (else the strip covers the button's lower half) and on its own layer (z 3: over
    the strip; the bloom's z -1 stays inside the button instead of falling behind the thumbnail) */
 .dl-btn { position: absolute; right: 6px; bottom: 50px; z-index: 3; width: 30px; height: 30px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; opacity: 0;
   background: color-mix(in srgb, var(--bg-crust) 78%, transparent);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent), 0 2px 8px rgba(0,0,0,.45);
   transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1), background .15s, box-shadow .2s;
-  /* its own compositing layer at rest too (owner 2026-11-11: "off-center but gets correctly centered once you hover on it" —
-     at a fractional card position the resting arrow was rasterised pixel-snapped while the ring sat on the fraction; the
-     hover's transform made a layer drawn at the exact offset). Guard: probe-steam look:dlCentre (pixels, three sizes). */
+  /* its own compositing layer at rest too: without one, at a fractional card position the resting arrow is rasterised
+     pixel-snapped while the ring sits on the fraction — off-centre until a hover's transform makes a layer drawn at the
+     exact offset. Guard: probe-steam look:dlCentre (pixels, three sizes). */
   will-change: transform; }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
-/* COOL: hovered (owner 2026-11-11: "add hover effects on the download button") — it lifts + grows, the chip fills with the accent,
+/* COOL: hovered — it lifts + grows, the chip fills with the accent,
    an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down,
    again and again */
 .dl-btn::before { content: ""; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; z-index: -1;
@@ -172,7 +170,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .dl-btn:hover::before { opacity: 1; }
 .dl-btn:hover .dl-glyph { color: var(--accent-fg); animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
 @keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
-/* WHOLE-pixel sizes with EVEN margins (owner 2026-11-11: off-centre at 1920×1080, fine on a small window): 58 % made a 17.4 px
+/* WHOLE-pixel sizes with EVEN margins (a percentage is off-centre at some window sizes): 58 % makes a 17.4 px
    glyph in the 30 px chip — 6.3 px margins, rounded to an off-centre arrow (measured (0.85, 0.44) px); 18 in 30 and 14 in 24 leave
    6 / 5 px each side. The path itself is centred in its viewBox (Card.tsx). Guard: probe-steam look:dlCentre. */
 .dl-glyph { color: var(--accent); width: 18px; height: 18px; fill: currentColor; stroke: none; transform-origin: center;
@@ -269,17 +267,17 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   transition: opacity .12s, color .15s; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 .card.lib:hover .pl-toggle, .pl-toggle.on { opacity: 1; }
 .pl-toggle:hover { color: var(--accent-hover); filter: drop-shadow(0 0 5px var(--accent)); }
-.pl-toggle-svg { display: block; } /* no grow on hover (owner 2026-11-11: "a checkbox enlarging feels strange") */
+.pl-toggle-svg { display: block; } /* no grow on hover: a checkbox that enlarges feels wrong */
 /* COOL: animated preview layer (gif/webp <img> or hover <video>) over the static thumb.
    transition (not keyframe) so the browse opacity-toggle fades without remount → no gif restart. */
 .thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
 .card.selected { outline: 2px solid var(--accent); box-shadow: var(--glow); } /* COOL: selected glow */
 /* the card the item sidebar shows (keyboard / click focus): an accent ring OFF the card (3 px gap) + the hover's accent glow — the
-   theme colour, like hover (owner 2026-11-11: "not just plain white"); distinct from the selection's flush outline. Focused
+   theme colour, like hover, never plain white; distinct from the selection's flush outline. Focused
    inside a selection: both (the flush ring as a shadow). Glow effects off → the ring alone. */
 /* the card the sidebar is open on: held in its hover state — lifted 3 px, the accent outline FLUSH on its edge, the glow
-   (owner 2026-11-11: the ring floating 3 px off the card "feels kind of out of place" — every other card state sits on the
-   card's own edge). The lift is what tells it from a selected card (flat, same outline) */
+   (not a ring floating off the card — every other card state sits on the card's own edge). The lift is what tells it from a
+   selected card (flat, same outline) */
 .card.focused { outline: 2px solid var(--accent); outline-offset: 0; transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
   display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
@@ -295,8 +293,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .mini-sel:hover { color: var(--text); box-shadow: var(--glow-sm); }
 
 /* download overlay (browse) — #CC000000, label + bar + cancel-X top-right */
-/* one column 72 % of the CARD wide (owner 2026-11-11: "why is the loading bar so micro" — the column was as wide as its widest
-   item, so under a "1%" label the bar's 72 % was ~15 px); the bar fills it, a long label wraps inside it */
+/* one column 72 % of the CARD wide (a column as wide as its widest item makes the bar under a "1%" label ~15 px); the bar
+   fills it, a long label wraps inside it */
 .dl-overlay { position: absolute; inset: 0; display: grid; grid-template-columns: 72%; place-content: center; gap: 8px; justify-items: center;
   background: rgba(0,0,0,.8); color: #fff; font-weight: 700; }
 .dl-label { font-size: 12px; font-weight: 600; text-align: center; }
@@ -362,7 +360,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
      hooks/useDockLift.ts (springs over the pointer's distance, so no CSS transition on transform); its own compositor layer →
      it moves at sub-pixel steps (no whole-pixel judder) */
   transform: var(--dock, none); transform-origin: 50% 100%; will-change: transform; }
-/* COOL: dock-style hover (owner 2026-11-10; by pointer position + "more in your face" 2026-11-11) — every item magnifies by
+/* COOL: dock-style hover, by pointer position — every item magnifies by
    its distance from the pointer (hooks/useDockLift.ts → --dock above): 1.16× + 4 px under it, the neighbours about half and
    parting around it, a little bounce. The glow is the fixed .pl-hover-glow layer (escapes the row clip).
    `.hov` (the glow, the remove button, the motion-off lift below) is the row's hovered item (PlaylistBar.tsx), kept in the gaps. */
@@ -385,10 +383,11 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    layer, opacity only), an accent edge, three rings rippling out (transform: scale by --sx/--sy, the px-exact factors locateFx
    computes, + opacity), all gone after 1.5 s. Its own composited layers: nothing in the grid repaints. The element keeps a static
    accent outline meanwhile (`.locate-flash`). */
-/* flush on the item's edge like the focused card (owner 2026-11-11: the rings floating off the card felt out of place — the
-   3 px-off outline + a 3 px border 6 px off stacked into one thick band, and the clear hole was 10 px bigger than the item) */
+/* flush on the item's edge like the focused card (rings off the card — a 3 px-off outline + a 3 px border 6 px off — stack
+   into one thick band, and the clear hole comes out 10 px bigger than the item) */
 /* the spotlight's colour = the PLAYING colour (it finds what's playing; the target already pulses green — an accent glow on
-   it fought that ring), not the accent (interaction) — owner 2026-11-11 asked; agreed */
+   it fights that ring), not the accent (interaction) — docs/decisions.md § "Travel to the playing wallpaper once per
+   session, spotlit in the playing green" */
 .locate-flash, .locate-fx { --lfx-c: var(--success); }
 .locate-flash { outline: 2px solid var(--lfx-c); outline-offset: 0; }
 .locate-fx { position: fixed; left: 0; top: 0; z-index: 85; pointer-events: none; will-change: transform; }
@@ -539,8 +538,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .s-reset:hover { color: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
 .sctl { display: flex; align-items: center; gap: 8px; }
 .settings input[type=range] { width: 200px; accent-color: var(--accent); transition: filter .2s; }
-/* checkboxes + radios: the themed `.ck` look below (owner 2026-11-11: "i wonder if a white checkbox matches the rest of the
-   app or we just overlooked this part of the ui" — overlooked: Settings kept the browser's controls, white when off) */
+/* checkboxes + radios: the themed `.ck` look below (the browser's own controls are white when off — foreign to the app) */
 /* COOL: glow the native slider on hover (drop-shadow works on the accent-colored control) */
 .settings input[type=range]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
 /* no system focus ring on a slider (a key pressed while one is held flipped it to keyboard focus → a yellow
@@ -735,8 +733,8 @@ input[type=range]:focus-visible { outline: none; }
   display: inline-grid; place-content: center; cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s; }
 :is(.ck, .settings, .side-panel) input[type=checkbox] { border-radius: 6px; }
 :is(.ck, .settings, .side-panel) input[type=radio] { border-radius: 50%; }
-/* the tick = a stroked path in a 12×12 mask, centred by its geometry (x 2–10, y 3.2–8.8 → both centres at 6) — owner
-   2026-11-11 "is it just me or the tick is off-center": it was a rotated border-L nudged by hand. Guard: look:toggles (pixels). */
+/* the tick = a stroked path in a 12×12 mask, centred by its geometry (x 2–10, y 3.2–8.8 → both centres at 6) — not a
+   rotated border-L nudged by hand, which sits off-centre. Guard: look:toggles (pixels). */
 :is(.ck, .settings, .side-panel) input[type=checkbox]::after { content: ""; width: 12px; height: 12px; background: var(--accent-fg);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l2.8 2.8L10 3.2' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l2.8 2.8L10 3.2' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
@@ -887,10 +885,10 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
 :root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; }
 
-/* ---- the item sidebar (WE-style, 2026-11-10 — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
+/* ---- the item sidebar (WE-style — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
    An <aside> beside the page under the top bar (--topbar-h, measured by App), docked from 900 px (the grid and the playlist
    bar end at its edge — the grid re-fits its columns), floating over the page below that with a scrim. It scrolls on its
-   own; the head (title + tools + close) stays. Look (owner 2026-11-11: "very untasteful compared to the rest of the app"):
+   own; the head (title + tools + close) stays. Look:
    the Settings page's language — an accent pool in its corner, the picture in a framed stage with a soft accent glow,
    action tiles with glowing icon chips, section cards (`.side-sec`, like `.ssection`), accent-filled sliders.
    COOL motion (transform + opacity only): a slightly springy slide in (an overshooting curve), the content following in a
@@ -911,10 +909,10 @@ input[type=range]:focus-visible { outline: none; }
 :root.bg-live .side-panel { background: transparent; }
 /* the loose small controls on a bright wallpaper: the head's tools and the "global" tags get the cards' dark fill */
 :root.bg-live .side-head .side-tool:not(.on):not(.accent):not(:hover), :root.bg-live .side-global { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
-/* like Netflix's subtitles (owner 2026-11-11): a soft black shadow hugging the letters, no offset — Netflix's look is
+/* like Netflix's subtitles: a soft black shadow hugging the letters, no offset — Netflix's look is
    `text-shadow: #000000 0px 0px 7px` (a fan recreation's value; Netflix doesn't publish it). NOT as a text-shadow on the h2:
-   its two-line clamp needs `overflow: hidden`, which cut the blur off at the box edge (owner: "the left of the text shadow is
-   being clipped"). A filter on the unclipped wrapper draws it around the clipped text instead; drop-shadow's blur is a
+   its two-line clamp needs `overflow: hidden`, which cuts the blur off at the box edge (the left of the shadow clipped).
+   A filter on the unclipped wrapper draws it around the clipped text instead; drop-shadow's blur is a
    standard deviation (text-shadow's is 2σ), so 3.5px here = text-shadow's 7px — measured identical, pixel for pixel, in
    Electron 42 */
 :root.bg-live .side-head-text { filter: drop-shadow(0 0 3.5px #000); }
@@ -969,7 +967,7 @@ input[type=range]:focus-visible { outline: none; }
 .side-media > .sm-full.on, .side-media > .sm-anim.on { opacity: 1; }
 .side-media > .yt-stage { border-radius: 12px; animation: side-fade .28s ease; }
 @keyframes side-fade { from { opacity: 0; } }
-/* the picture itself is the Play control (owner 2026-11-11: no icon — clicking the picture to set it is intuitive);
+/* the picture itself is the Play control (docs/decisions.md § "Make the sidebar's picture the Play control" — no icon);
    the hover cue is the frame's lift + glow above; keyboard focus gets the accent edge */
 .side-play { position: absolute; inset: 0; z-index: 3; padding: 0; border: 0; border-radius: inherit; background: none; cursor: pointer; }
 .side-play:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -980,8 +978,8 @@ input[type=range]:focus-visible { outline: none; }
 .side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .side-mute.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 :root.no-glow .side-mute:hover { box-shadow: none; }
-/* the preview switch (GIF / Video / YouTube / Picture): a strip attached to the stage's top edge, above the picture (owner
-   2026-11-11: not an overlay) — it bleeds to the stage's border, a hairline under it; equal segments, the active one accent + glow */
+/* the preview switch (GIF / Video / YouTube / Picture): a strip attached to the stage's top edge, above the picture (not an
+   overlay) — it bleeds to the stage's border, a hairline under it; equal segments, the active one accent + glow */
 .side-stage.has-switch { flex-direction: column; align-items: center; padding-top: 0; }
 .side-switch { align-self: stretch; display: flex; gap: 4px; margin: 0 -12px 12px; padding: 5px;
   border-radius: 15px 15px 0 0; background: color-mix(in srgb, var(--bg-crust) 70%, transparent);
@@ -1070,8 +1068,8 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   font-size: 12.5px; font-weight: 700; line-height: 1.2; color: var(--text); text-decoration: none;
   background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
   transition: border-color .15s, background .15s, box-shadow .2s, transform .15s; }
-/* hover = a tint layered OVER the tile's own dark fill — never instead of it (owner 2026-11-11: hovering made the tile see-through
-   in live-wallpaper mode); danger likewise, not the opaque --danger-bg (it went solid there) */
+/* hover = a tint layered OVER the tile's own dark fill — never instead of it (else the hovered tile turns see-through in
+   live-wallpaper mode); danger likewise, not the opaque --danger-bg (it goes solid there) */
 .side-tile:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--surface1));
   background: linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 12%, transparent)),
     color-mix(in srgb, var(--bg-crust) 50%, transparent);
@@ -1187,10 +1185,10 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 }
 
-/* ---- the Workshop filter column (components/WorkshopFilterColumn.tsx; owner 2026-11-11: Wallpaper Engine's left column, a
-   three-way switch per tag + click-to-cycle names). Docked left of the grid from 1100 px (WF_DOCK_QUERY — the grid gets a
+/* ---- the Workshop filter column (components/WorkshopFilterColumn.tsx; docs/decisions.md § "Filter the Workshop in a column
+   of three-way switches"). Docked left of the grid from 1100 px (WF_DOCK_QUERY — the grid gets a
    margin-left, its columns re-fit, like the item sidebar's margin-right), a drawer over the grid with a scrim below that.
-   Calm by design (the owner: 40 switches could look "like a mixing desk"): an untouched row's switch is faint — no fill, muted
+   Calm by design (40 switches must not look like a mixing desk): an untouched row's switch is faint — no fill, muted
    glyphs, half opacity — and only the active segment of an include / exclude row is coloured (accent / danger). */
 .app { --wf-w: 240px; }
 .wf-col { position: absolute; top: var(--topbar-h, 56px); left: 0; bottom: 0; width: var(--wf-w); z-index: 30;
@@ -1219,11 +1217,11 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform .28s cubic-bezier(.2, 1.3, .36, 1); }
 .wf-open:not(.open) .wf-chev { transform: rotate(180deg); }
 /* the docked title IS the pill (hooks/filterMorph.ts): it carries the pill's own classes (`pill ico wf-open`) — no type or shape
-   of its own — so the ghost flies between two identical buttons and never stretches (owner 2026-11-11: "the filter button
-   changing font and stuff feels weird": a `.wf-title` rule later in this file had made it 12 px / 800 / uppercase) */
+   of its own — so the ghost flies between two identical buttons and never stretches or changes font (no `.wf-title` type
+   rule may reach it) */
 .wf-title-btn { flex: none; }
-/* folding: the ghost carries the title down to the pill — the column sliding out must not take a second copy with it (owner
-   2026-11-11: "it duplicates the button instead of it staying the same one, i still see the old one quietly sliding out") */
+/* folding: the ghost carries the title down to the pill — the column sliding out must not take a second copy with it (it
+   would read as a duplicate button, the old one quietly sliding out) */
 .wf-col.closing [data-wf-title] { visibility: hidden; transition: none; }
 .wf-morph { display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
 .wf-col[data-mode="drawer"] { width: min(280px, 88vw); z-index: 46; outline: none;
@@ -1303,7 +1301,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 :root.bg-live .wf-title, :root.bg-live .wf-clear { filter: drop-shadow(0 0 3.5px #000); }
 :root.bg-live .wf-col[data-mode="drawer"] { background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); }
 
-/* ---- narrow windows (owner 2026-11-10: "any tiled size") ---- */
+/* ---- narrow windows (any tiled size) ---- */
 /* below 760 px the source pills join the top bar's own rows (each wraps on its own, the search fills a row's end)
    instead of a pill block that spans the width */
 @media (max-width: 760px) {
