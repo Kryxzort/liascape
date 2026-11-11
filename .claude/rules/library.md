@@ -62,7 +62,8 @@ A scene's `VideoPath` **is its item folder** (`workshop/<id>` or `local/<id>`) �
   `loudnessSkip` (no audio track / silent); applied as ONE fixed gain for the whole play (`LoudnormAf` →
   `lavfi=[volume=<g>dB]`), **Spotify's rule** (owner 2026-11-11): `g = target − I`, but a boost only as far as the
   true peak allows with 1 dB of headroom (`min(target − I, −1 − TP)`) — a quiet item with big peaks plays under the
-  target rather than be limited. **Never ffmpeg's `loudnorm` at playback**: even `linear=true` with the measurements
+  target rather than be limited (owner checked by ear 2026-11-11: the worst two, 3170457299 at ~14 dB and 2102734753 at
+  ~7.5 dB under the target, sound fine next to the rest — keep it). **Never ffmpeg's `loudnorm` at playback**: even `linear=true` with the measurements
   falls back to its DYNAMIC mode (a 3 s look-ahead volume rider — ramps, pumping, a lurch at the loop) when the gain
   would cross its TP or LRA > its target LRA; 62 of the owner's 189 videos did (3019725456: +3 dB hot at the start,
   climbing to +4.4 dB over its last 4 s). `loudnorm` stays only as the pass-1 MEASUREMENT.
