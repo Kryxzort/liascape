@@ -29,6 +29,8 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   the same commit; a probe still reading the old property fails for the wrong reason, or worse, passes.
 - Set tolerances above the measurement's resolution: pixel reads are ±0.5 css px at any fractional position, timers jitter
   by a frame. Below that, the check fails or passes by where the layout happened to land.
+- Express a smoothness budget in frames of the measured refresh rate, never a fixed 16 ms: the matrix's Xvfb runs at
+  60 Hz, real monitors at 144–240 Hz (4.2 ms a frame). Sample the refresh first (a short rAF count), then judge.
 - Measuring must not cause what it measures: a `requestAnimationFrame` meter forces a frame every refresh. Sample on
   demand, count callbacks, or read Chromium's own metrics (`Performance.getMetrics`, a trace).
 
