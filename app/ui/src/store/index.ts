@@ -45,6 +45,21 @@ export function loadBrowseFilter(): WorkshopFilter {
 
 // Applies a theme's 16 colors to :root as CSS vars (ThemeService color keys).
 // COOL: --accent also drives every glow in the app.
+// PERF: a library re-read (closing the item sidebar re-reads it, a sync, a WS reopen) keeps every item object whose content
+// didn't change — and the whole array when nothing did — so the grid's memo'd cards and the playlist bar's items don't all
+// re-render for a reload that changed nothing. Guard: probe-layout perf:sidebar (close).
+function keepSame(prev: LibraryItem[], next: LibraryItem[]): LibraryItem[] {
+  const old = new Map(prev.map((i) => [i.videoPath, i]));
+  let same = prev.length === next.length;
+  const out = next.map((n, k) => {
+    const o = old.get(n.videoPath);
+    const keep = o && JSON.stringify(o) === JSON.stringify(n) ? o : n;
+    if (keep !== prev[k]) same = false;
+    return keep;
+  });
+  return same ? prev : out;
+}
+
 function applyThemeVars(t: Theme) {
   const r = document.documentElement.style;
   const set = (k: string, v: string) => r.setProperty(k, v);
@@ -353,7 +368,10 @@ export const useStore = create<State>((set, get) => ({
   dismissError() { set({ error: null }); },
 
   // ---- library ----
-  async loadLibrary() { set({ libraryItems: await api.library(), undoDepth: (await api.undoDepth()).depth }); },
+  async loadLibrary() {
+    const items = await api.library(), depth = (await api.undoDepth()).depth;
+    set({ libraryItems: keepSame(get().libraryItems, items), undoDepth: depth });
+  },
   // optimistic per-item patch (volume/speed override etc.) so consumers — incl. the live WallpaperBg —
   // reflect a change instantly without waiting for a full library reload.
   patchLibraryItem(path, partial) { set((s) => ({ libraryItems: s.libraryItems.map((i) => i.videoPath === path ? { ...i, ...partial } : i) })); },
@@ -651,7 +669,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
   if (cur) { p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
-  if (lib) p.libraryItems = lib.v;
+  if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
   }

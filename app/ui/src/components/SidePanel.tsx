@@ -77,8 +77,11 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
     return () => clearTimeout(t);
   }, [exit]);
   // a new item scrolls the panel back to its top (the old one's scroll position means nothing for it)
+  // PERF: only when it IS scrolled (tracked from its scroll events): a scrollTo forces a layout of the panel's just-swapped
+  // content inside the right-click / key press. Guard: probe-layout perf:sidebar.
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }); }, [id]);
+  const scrolled = useRef(false);
+  useEffect(() => { if (scrolled.current) scrollRef.current?.scrollTo({ top: 0 }); }, [id]);
   return (
     <>
       {/* narrow windows: the panel floats over the page; a click beside it closes it (index.css shows it < 900 px only) */}
@@ -97,7 +100,7 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
             moves there */}
         {/* the content scrolls BELOW the head (not under a sticky one): in live-wallpaper mode the panel is as see-through as
             the cards' name bars, and content sliding under a translucent head would show through it */}
-        <div className="side-scroll" ref={scrollRef}>
+        <div className="side-scroll" ref={scrollRef} onScroll={(e) => { scrolled.current = e.currentTarget.scrollTop > 0; }}>
         <div className="side-track">
           <div className={`side-content ${id === first ? "opening" : dir ? IN[dir] : "swapping"}`} key={id}>
             <HeadSlot.Provider value={slot}>{children}</HeadSlot.Provider>

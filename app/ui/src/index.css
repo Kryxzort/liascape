@@ -364,6 +364,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
      hooks/useDockLift.ts (springs over the pointer's distance, so no CSS transition on transform); its own compositor layer →
      it moves at sub-pixel steps (no whole-pixel judder) */
   transform: var(--dock, none); transform-origin: 50% 100%; will-change: transform; }
+/* PERF: --dock is the item's own transform, never its children's: not inherited, a frame's write restyles only the items
+   it moves, not their thumbnails, titles and buttons (an unregistered custom property inherits). Unset → the `none` fallback. */
+@property --dock { syntax: "*"; inherits: false; }
 /* COOL: dock-style hover, by pointer position — every item magnifies by
    its distance from the pointer (hooks/useDockLift.ts → --dock above): 1.16× + 4 px under it, the neighbours about half and
    parting around it, a little bounce. The glow is the fixed .pl-hover-glow layer (escapes the row clip).

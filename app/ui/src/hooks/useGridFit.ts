@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import { useStore } from "../store";
 
 // UX: card-size = a target VISIBLE COUNT (N), not a fixed card width. Holding count constant
@@ -10,12 +10,20 @@ import { useStore } from "../store";
 const COUNT: Record<string, number> = { Small: 54, Medium: 35, Large: 20 };
 const MIN_CARD_W = 100; // px — hard floor that only rescues genuinely tiny windows; lets Small stay small
 
-export function useGridFit(ref: RefObject<HTMLElement | null>) {
+// the column count each grid (`key`) last fit to: a page mounting again (a tab switch) starts with it
+const lastCols = new Map<string, string>();
+
+export function useGridFit(ref: RefObject<HTMLElement | null>, key: string) {
   const size = (useStore((s) => s.settings?.cardSize as string)) ?? "Medium";
   const aspectStr = (useStore((s) => s.settings?.thumbnailAspect as string)) ?? "16:9";
   const aspect = aspectStr === "1:1" ? 1 : 16 / 9; // w/h
   const n = COUNT[size] ?? 20;
-  useEffect(() => {
+  // PERF: no measuring at mount — the ResizeObserver's first callback fits the grid (it runs after the frame's layout,
+  // before its paint, so the first painted frame has the right columns). Measuring in a mount effect forced a layout of
+  // the whole new page inside the tab switch, and the first layout ran with the default column count, then again with the
+  // fitted one; the last fit's count goes on before that layout instead, so it's usually right the first time.
+  // Guard: probe-layout perf:tabs.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const apply = () => {
@@ -43,11 +51,14 @@ export function useGridFit(ref: RefObject<HTMLElement | null>) {
       // enforce a minimum card width — drop columns until each card is ≥ MIN_CARD_W so small windows
       // (or the Small setting) don't produce a hideous grid of unusably tiny cards.
       while (best > 1 && (w - (best - 1) * gap) / best < MIN_CARD_W) best--;
-      el.style.setProperty("--cols", String(best));
+      // unchanged → no write: even a same-value write may restyle the grid
+      if (el.style.getPropertyValue("--cols") !== String(best)) el.style.setProperty("--cols", String(best));
+      lastCols.set(key, String(best));
     };
-    apply();
+    const prev = lastCols.get(key);
+    if (prev) el.style.setProperty("--cols", prev);
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     return () => { ro.disconnect(); el.style.removeProperty("--cols"); };
-  }, [ref, aspect, n]);
+  }, [ref, aspect, n, key]);
 }

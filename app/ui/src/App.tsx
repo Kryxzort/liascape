@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
 import { LocateFixed, RefreshCw, Square, Undo2, Upload } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
+import { useStableFn } from "./hooks/useStableFn";
 import { useStore } from "./store";
 import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
-import { PlaylistBar } from "./components/PlaylistBar";
+import { PlaylistBar as PlaylistBarView } from "./components/PlaylistBar";
 import { useMotion } from "./components/motion";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
@@ -17,7 +18,11 @@ import { Select } from "./components/Select";
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
 // views import them).
-const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings })));
+// PERF: memo'd like the other pages and the playlist bar: App reads the whole store, so without it every store change
+// (a sidebar focus, a status line, a download tick) re-rendered the page — the playlist bar's every item with it
+// (dnd-kit's context reaches each one past its memo). Guard: probe-layout perf:sidebar.
+const Settings = memo(lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings }))));
+const PlaylistBar = memo(PlaylistBarView);
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
@@ -33,12 +38,21 @@ const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Sc
 export default function App() {
   const s = useStore();
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
-  const [tab, setTabNow] = useState<Tab>("library");
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
   // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → none). No direction until
   // the first switch, so the app's first page doesn't slide in.
-  const [tabDir, setTabDir] = useState<"l" | "r" | null>(null);
-  const setTab = (t: Tab) => { if (t !== tab) setTabDir(TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(tab) ? "r" : "l"); setTabNow(t); };
+  // PERF: `picked` is the tab the user chose — the pill and the tab's label follow it in the click's own frame; `tab` (the
+  // page, its top-bar controls and the slide direction) follows it in a background render (useDeferredValue), which
+  // React splits into short slices: building a page (the library's ~170 cards) no longer holds the click's frame, the
+  // pill already glides meanwhile. The direction travels with the page: changing it under the old page would restart
+  // its slide-in. Guard: probe-layout perf:tabs, tabs:slide.
+  const [picked, setPicked] = useState<{ tab: Tab; dir: "l" | "r" | null }>({ tab: "library", dir: null });
+  const shown = useDeferredValue(picked);
+  const tab = shown.tab, tabDir = shown.dir;
+  const setTab = (t: Tab) => {
+    if (t !== picked.tab) setPicked({ tab: t, dir: TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(picked.tab) ? "r" : "l" });
+  };
+  const showInLibrary = useStableFn((p: string) => { s.focusLib(p); setTab("library"); });
   const importRef = useRef<HTMLInputElement>(null);
   // the item sidebar starts under the top bar, whose height changes as it wraps (any window size): --topbar-h on .app
   const appRef = useRef<HTMLDivElement>(null);
@@ -165,10 +179,10 @@ export default function App() {
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
       {(tab === "settings" || bgAllTabs) && <WallpaperBg />}
       <div className="topbar" ref={topbarRef}>
-        <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(tab) } as React.CSSProperties}>
+        <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(picked.tab) } as React.CSSProperties}>
           <span className="tab-pill" aria-hidden />
           {TAB_ORDER.map((t) => (
-            <button key={t} className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
+            <button key={t} className={`tab${picked.tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -233,7 +247,7 @@ export default function App() {
 
       {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>
-        {tab === "browse" && <Browse onShowInLibrary={(p) => { s.focusLib(p); setTab("library"); }} />}
+        {tab === "browse" && <Browse onShowInLibrary={showInLibrary} />}
         {tab === "library" && <Library />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
 

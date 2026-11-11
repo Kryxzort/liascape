@@ -9,6 +9,7 @@ import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "..
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
+import { useStableFn } from "../hooks/useStableFn";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
@@ -58,7 +59,7 @@ export const Library = memo(function Library() {
   const anchor = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useSmoothScroll(scrollRef);
-  useGridFit(scrollRef);
+  useGridFit(scrollRef, "library");
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
 
@@ -155,6 +156,13 @@ export const Library = memo(function Library() {
     if (sel.size && (t.classList.contains("scroll") || t.classList.contains("grid"))) setSel(new Set());
   };
 
+  // PERF: one function per action for every card (each takes its item) — the cards' memo holds when the focus, the
+  // selection or the playing item changes; only the cards whose own props flip re-render. Guard: probe-layout perf:sidebar.
+  const cardClick = useStableFn(onCardClick);
+  const cardTrash = useStableFn((it: LibraryItem) => doTrash(targetsFor(it)));
+  const cardToggle = useStableFn(doToggle);
+  const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath));
+
   // the sidebar: the focused item (kept for its exit slide after the focus clears)
   const shown = useLinger(libFocus, SIDE_CLOSE_MS, motion);
   const sideItem = shown.value ? byPath[shown.value] ?? null : null;
@@ -172,10 +180,7 @@ export const Library = memo(function Library() {
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
             autoPlayGifs={autoPlayGifs}
-            onClick={(e) => onCardClick(it, e)}
-            onTrash={() => doTrash(targetsFor(it))}
-            onToggle={() => doToggle(it)}
-            onContextFocus={() => focusFromCard(it.videoPath)} />
+            onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
       </div>
     </div>

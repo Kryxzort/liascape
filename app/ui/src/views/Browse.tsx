@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Card } from "../components/Card";
 import { WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
@@ -11,6 +11,7 @@ import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
+import { useStableFn } from "../hooks/useStableFn";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper } from "../api/client";
@@ -31,7 +32,8 @@ function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
   }
 }
 
-export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) => void }) {
+// PERF: memo'd (App passes a stable onShowInLibrary) — App's re-renders don't reach the grid
+export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) => void }) {
   const wallpapers = useStore((s) => s.wallpapers);
   const loadMore = useStore((s) => s.loadMore);
   const playingPath = useStore((s) => s.playingPath);
@@ -65,7 +67,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
   useSmoothScroll(scrollRef);
-  useGridFit(scrollRef);
+  useGridFit(scrollRef, "browse");
 
   useEffect(() => {
     const el = sentinel.current;
@@ -130,6 +132,16 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
     if (sel.size && (t.classList.contains("scroll") || t.classList.contains("grid"))) setSel(new Set());
   };
 
+  // PERF: one function per action for every card (each takes its card's wallpaper) — the cards' memo holds when the focus,
+  // the selection or a download changes; only the cards whose own props flip re-render. Guard: probe-layout perf:sidebar.
+  const cardCancel = useStableFn((x: Wallpaper) => cancelDownload(x.pageUrl));
+  const cardClick = useStableFn(onCardClick);
+  const cardDownload = useStableFn(dlApply);
+  const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl)); // right-click → the sidebar too
+  const cardMiddle = useStableFn((x: Wallpaper) => x.pageUrl.startsWith("http") // middle-click → open source page/location
+    ? openExternal({ url: x.pageUrl })
+    : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId }));
+
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
   // the Workshop filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
   const docked = useFilterDocked();
@@ -171,13 +183,7 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
               selected={sel.has(w.pageUrl)} focused={w.pageUrl === browseFocus} inLibrary={inLibrary(libKeys, w)}
               progress={downloads[w.pageUrl]}
               autoPlayGifs={autoPlayGifs}
-              onCancel={(x) => cancelDownload(x.pageUrl)}
-              onClick={onCardClick}
-              onDownload={dlApply}
-              onContext={(x) => focusFromCard(x.pageUrl)} /* right-click → the sidebar too */
-              onMiddle={(x) => x.pageUrl.startsWith("http") /* middle-click → open source page/location */
-                ? openExternal({ url: x.pageUrl })
-                : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId })} />
+              onCancel={cardCancel} onClick={cardClick} onDownload={cardDownload} onContext={cardContext} onMiddle={cardMiddle} />
           ))}
           {/* INFINITE FEEL: while more pages exist, always render a block of placeholder cards right
               after the real ones (they flow inline, filling the last partial row — no gap). The first
@@ -210,4 +216,4 @@ export function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) =>
     )}
     </>
   );
-}
+});

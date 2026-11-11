@@ -23,15 +23,19 @@ export function useSmoothScroll(ref: RefObject<HTMLElement | null>, axis: "y" | 
     // PERF: the scroll extent (scrollHeight/scrollWidth) is a *layout-dependent* read. With
     // content-visibility:auto cards toggling visibility mid-scroll, layout is dirty every frame, so
     // reading it inside the rAF loop forced a synchronous reflow 60×/s (self-inflicted scroll jank).
-    // Cache `max` and refresh it only on wheel + ResizeObserver — never in the frame loop.
-    let max = 0;
+    // Cache `max` and refresh it only on wheel + after a resize — never every frame.
+    // PERF: a resize only marks it stale; it's read at the next wheel / glide frame. Reading it at mount or inside the
+    // ResizeObserver callback forced a whole-view layout in the middle of a tab switch (the new page's mount effect; the
+    // observer runs after another one has already dirtied the layout, e.g. the playlist bar's --playlist-bar-h on :root).
+    // Guard: probe-layout perf:tabs.
+    let max = 0, stale = true;
     const measure = () => {
+      stale = false;
       max = axis === "x"
         ? Math.max(0, el.scrollWidth - el.clientWidth)
         : Math.max(0, el.scrollHeight - el.clientHeight);
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => { stale = true; });
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild); // content grows (LoadMore) → re-measure
 
@@ -41,6 +45,7 @@ export function useSmoothScroll(ref: RefObject<HTMLElement | null>, axis: "y" | 
       last = t;
       velocity *= Math.pow(FRICTION, dt / 16);
       if (Math.abs(velocity) < STOP) { animating = false; velocity = 0; return; }
+      if (stale) measure();
       const cur = axis === "x" ? el.scrollLeft : el.scrollTop;
       const n = Math.min(max, Math.max(0, cur + velocity * (dt / 16)));
       if (n <= 0 || n >= max) velocity = 0; // hit a boundary → kill momentum

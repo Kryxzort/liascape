@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors,
@@ -19,16 +19,38 @@ import { hasGifAsset, hasVideoPreview } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
-import { useDockLift } from "../hooks/useDockLift";
+import { useDockLift, dockOwnsFrame } from "../hooks/useDockLift";
 import { useMotion } from "./motion";
 import { revealCard } from "../hooks/gridKeys";
 
 // The hovered item is the ROW's state (the hover must survive the gaps between playlist items):
 // entering an item hovers it, the 10 px gaps between items keep the last one, and leaving the row (or the empty space past
 // its ends) clears it. A CSS :hover drops in every gap, so the dock lift would sink and re-rise crossing from item to item.
-type SetHover = Dispatch<SetStateAction<string | null>>;
-const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHover }:
-  { path: string; item?: LibraryItem; index: number; playing: boolean; hover: boolean; setHover: SetHover }) {
+// PERF: it lives outside PlaylistBar's React state — a hover change re-renders only the item it leaves and the one it
+// enters, not the bar (its DndContext, modals and every item's props). Each item holds its own `hover` state, set from
+// the same event handlers as before (same render timing). Guard: probe-plbar bar:sweepCost.
+type Hover = { get: () => string | null; set: (p: string | null) => void; item: (path: string, on: (v: boolean) => void) => () => void };
+function hoverStore(): Hover {
+  let cur: string | null = null;
+  const items = new Map<string, (v: boolean) => void>();
+  return {
+    get: () => cur,
+    set(p) {
+      if (p === cur) return;
+      if (cur !== null) items.get(cur)?.(false);
+      cur = p;
+      if (p !== null) items.get(p)?.(true);
+    },
+    item(path, on) {
+      items.set(path, on); on(cur === path);
+      return () => { if (items.get(path) === on) items.delete(path); };
+    },
+  };
+}
+const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
+  { path: string; item?: LibraryItem; index: number; playing: boolean; hv: Hover }) {
+  const [hover, setHoverOn] = useState(() => hv.get() === path);
+  useEffect(() => hv.item(path, setHoverOn), [hv, path]);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
@@ -41,6 +63,8 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
   // zero row padding. While hovered a rAF loop writes the item's box straight into the glow's style — a transform, so it
   // sits at the same sub-pixel position as the lifting item (left/top would snap to whole pixels and shimmer against it),
   // and no React render per frame. The first write happens before paint (layout effect): no frame at 0,0.
+  // While the dock animates, the box is read only in its "dockframe" signal (after its writes; hooks/useDockLift.ts
+  // dockOwnsFrame): the loop's own read would land before or after them and force a recalc / layout per frame.
   const boxRef = useRef<HTMLDivElement | null>(null);
   const glowRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -55,16 +79,16 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
       g.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`;
       g.style.width = `${r.width}px`; g.style.height = `${r.height}px`;
     };
-    const tick = () => { write(); raf = requestAnimationFrame(tick); };
-    write();
-    raf = requestAnimationFrame(tick);
     // the dock magnification moves the item in ITS rAF callback — which may run after this one in a frame: it signals each
     // frame it wrote, so the glow re-reads the box in that same frame (never a frame behind the growing item)
     const row = boxRef.current?.parentElement;
+    const tick = (t: number) => { if (!dockOwnsFrame(row, t)) write(); raf = requestAnimationFrame(tick); };
+    write();
+    raf = requestAnimationFrame(tick);
     row?.addEventListener("dockframe", write);
     return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
-  const onEnter = () => setHover(path);
+  const onEnter = () => hv.set(path);
   const active = !!item && (hover || (autoPlayGifs && hasGifAsset(item)));
   // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
   const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item));
@@ -99,6 +123,14 @@ function PlItemOverlay({ item }: { item?: LibraryItem }) {
   );
 }
 
+// --playlist-bar-h on :root: the library scroll's bottom margin (index.css .lib-scroll)
+let barH = -1;
+function setBarH(h: number) {
+  if (h === barH) return;
+  barH = h;
+  document.documentElement.style.setProperty("--playlist-bar-h", `${h}px`);
+}
+
 export function PlaylistBar() {
   const playlist = useStore((s) => s.playlist);
   const items = useStore((s) => s.libraryItems);
@@ -125,7 +157,7 @@ export function PlaylistBar() {
   // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolls
   const rowShown = !collapsed && playlist.length > 0;
   useSmoothScroll(rowRef, "x", [rowShown]);
-  const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const [hv] = useState(hoverStore);
   const motion = useMotion();
   // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
   // the remove button, the preview — and the lift's fallback with motion off
@@ -134,24 +166,26 @@ export function PlaylistBar() {
   // …and above the items' strip (the row reaches up into the head for the magnified items' headroom) = off them too
   const onRowMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const row = e.currentTarget;
-    if (e.target !== row || !hoverPath) return;
+    if (e.target !== row || !hv.get()) return;
     const first = row.firstElementChild?.getBoundingClientRect(), last = row.lastElementChild?.getBoundingClientRect();
     const top = row.getBoundingClientRect().top + (parseFloat(getComputedStyle(row).paddingTop) || 0);
-    if (!first || !last || e.clientX < first.left || e.clientX > last.right || e.clientY < top) setHoverPath(null);
+    if (!first || !last || e.clientX < first.left || e.clientX > last.right || e.clientY < top) hv.set(null);
   };
   // …and the playlist bar's playing item (horizontal; once per session)
   useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);
   // expose the playlist bar's live height as --playlist-bar-h so the library scroll can pad its bottom enough to
   // reveal the last row above the bar — whether it's collapsed or expanded.
+  // PERF: from the observer's own size (its first callback lands after the frame's layout, before its paint), written only
+  // when it changed and kept while the bar is away (only the library page, shown with the bar, reads it): reading
+  // offsetHeight at mount forced a layout inside the tab switch, and each write on :root restyles the whole page.
+  // Guard: probe-layout perf:tabs.
   const playlistBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = playlistBarRef.current;
     if (!el) return;
-    const apply = () => document.documentElement.style.setProperty("--playlist-bar-h", `${Math.round(el.offsetHeight)}px`);
-    apply();
-    const ro = new ResizeObserver(apply);
+    const ro = new ResizeObserver(([e]) => setBarH(Math.round(e.borderBoxSize[0].blockSize)));
     ro.observe(el);
-    return () => { ro.disconnect(); document.documentElement.style.removeProperty("--playlist-bar-h"); };
+    return () => ro.disconnect();
   }, []);
 
   const onDragStart = (e: DragStartEvent) => setDragId(String(e.active.id));
@@ -172,7 +206,7 @@ export function PlaylistBar() {
     <div className="playlist-bar" ref={playlistBarRef}>
       <div className="playlist-bar-head">
         <button className="mini" aria-label={collapsed ? "Expand" : "Collapse"}
-          onClick={() => { setHoverPath(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
+          onClick={() => { hv.set(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
         <span className="playlist-bar-label">PLAYLIST</span>
         <span className="playlist-bar-count">{playlist.length}</span>
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
@@ -192,9 +226,8 @@ export function PlaylistBar() {
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
           <SortableContext items={playlist} strategy={horizontalListSortingStrategy}>
-            <div className="playlist-bar-row" ref={rowRef} onMouseMove={onRowMove} onMouseLeave={() => setHoverPath(null)}>
-              {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath}
-                hover={hoverPath === p} setHover={setHoverPath} />)}
+            <div className="playlist-bar-row" ref={rowRef} onMouseMove={onRowMove} onMouseLeave={() => hv.set(null)}>
+              {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath} hv={hv} />)}
             </div>
           </SortableContext>
           {/* DragOverlay portal'd to <body> → the picked-up item floats ABOVE all UI (the playlist bar's

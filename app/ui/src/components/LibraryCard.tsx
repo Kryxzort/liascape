@@ -15,7 +15,10 @@ export const LibraryCard = memo(function LibraryCard({
   item, playing, selected, focused, inPlaylist, autoPlayGifs, onClick, onTrash, onToggle, onContextFocus,
 }: {
   item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; autoPlayGifs: boolean;
-  onClick: (e: React.MouseEvent) => void; onTrash: () => void; onToggle: () => void; onContextFocus: () => void;
+  // PERF: each takes the item, so the list passes the same function to every card (Library.tsx useStableFn) and a
+  // focus / selection change re-renders only the cards whose own props changed
+  onClick: (item: LibraryItem, e: React.MouseEvent) => void; onTrash: (item: LibraryItem) => void; onToggle: (item: LibraryItem) => void;
+  onContextFocus: (item: LibraryItem) => void;
 }) {
   const [hover, setHover] = useState(false);
   const active = hover || (autoPlayGifs && hasGifAsset(item));
@@ -28,16 +31,16 @@ export const LibraryCard = memo(function LibraryCard({
       {/* right-click = the item sidebar on this card WITHOUT applying it (docs/decisions.md § "Open the item sidebar on
           right-click; no context menus"); the sidebar has Open in file manager / Delete / Delete from
           source. Library.tsx keeps the card where it was while the docked sidebar re-fits the grid (gridKeys.ts keepCardInView). */}
-      <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={onClick}
-        onContextMenu={(e) => { e.preventDefault(); onContextFocus(); }}
+      <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={(e) => onClick(item, e)}
+        onContextMenu={(e) => { e.preventDefault(); onContextFocus(item); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
        >
         <MotionThumb item={item} active={active} autoVideo={autoVideo} />
         {item.isScene && <span className="badge">SCENE</span>}
         {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
-          onClick={(e) => { e.stopPropagation(); onToggle(); }}><PlaylistToggle on={inPlaylist} /></button>
-        <button className="del" aria-label="Delete" onClick={(e) => { e.stopPropagation(); onTrash(); }}><Trash2 size={24} /></button>
+          onClick={(e) => { e.stopPropagation(); onToggle(item); }}><PlaylistToggle on={inPlaylist} /></button>
+        <button className="del" aria-label="Delete" onClick={(e) => { e.stopPropagation(); onTrash(item); }}><Trash2 size={24} /></button>
         {/* bottom title bar, 2-line clamp, centered white over #66000000 */}
         <div className="lib-title" data-title={item.title}><span>{item.title}</span></div>
       </div>

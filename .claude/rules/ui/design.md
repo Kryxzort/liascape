@@ -12,6 +12,8 @@ paths:
 # UI design rules (React renderer, `app/ui/src`)
 
 The owner's look-and-feel decisions and why: `docs/decisions.md` § UI.
+The bar: the UI itself is a work of art (`docs/decisions.md` § "Make the UI itself a work of art") — consistent and correct is
+the floor; a new element is designed to delight within the toggles and the frame budget.
 
 ## Every new UI element (a panel, row, control, badge or overlay) — done only when all hold
 - **Theme**: colours only from the theme vars (`--accent`, `--accent-fg`, `--accent-hover`, `--text`, `--subtext*`, `--bg-*`, `--surface*`, `--danger`, `--success`, `--warn`); never a hard-coded colour.
@@ -26,6 +28,8 @@ The owner's look-and-feel decisions and why: `docs/decisions.md` § UI.
 ## Performance
 - Keep `content-visibility:auto` + `contain-intrinsic-size` on every grid card.
 - Cards are `memo`'d and read their own slice (`useStore(s => …)`); never lift per-card state into a parent that re-renders the list. Stable keys (`pageUrl` / `videoPath`).
+- Hand a list's cards one handler per action that takes the item (`app/ui/src/hooks/useStableFn.ts`), never a fresh closure per card: it re-renders every card on any change of the list. Guard: probe-layout `perf:sidebar`.
+- Never measure layout in a mount effect (it forces the new page's layout inside the click): size from a ResizeObserver callback, or read on the user's next input. Guard: probe-layout `perf:tabs`.
 - Animate transform / opacity / filter only. Glow is a static shadow toggled by state (pulse via opacity on a composited layer); never animate a blur radius. No `backdrop-filter: blur`.
 - Decode or animate nothing while `!appActive` (the store's focus/visibility flag) — it caused the main-thread freeze.
 - Bulk-autoplay only gif/webp previews; video previews play on hover (or under "Autoplay video thumbnails", capped at `AUTOPLAY_VIDEO_CAP`, on-screen only).

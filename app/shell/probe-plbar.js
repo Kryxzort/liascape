@@ -5,6 +5,7 @@
 //   bar:gap          pointer on item 1 → the gap → item 2: item 1 stays lifted (and glowing) in the gap, then item 2 takes over
 //   bar:leave        pointer off the row: nothing stays lifted, no glow left behind
 //   bar:bounce       the bounce on entering + on the item the pointer stops on, none on the items a sweep (fast or slow) passes
+//   bar:sweepCost    a sweep forces no layout from script, restyles only the moved items, re-renders only the hovered items
 // Real input events (webContents.sendInputEvent), not synthetic DOM events: :hover and the wheel listener see them as a user's.
 // Screenshots: <LIASCAPE_OUT>/plbar-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
@@ -259,6 +260,91 @@ app.whenReady().then(async () => {
       const lifted = s.items.filter((i) => i.lift < -0.1 || i.mag > 1.002).length;
       if (lifted) v.push(`${lifted} item(s) still lifted after the pointer left the row`);
       if (s.glow) v.push("a hover glow stayed after the pointer left the row");
+      return v;
+    });
+
+    // what a pointer sweep costs the renderer, read from Chromium's own trace (no rAF meter of ours): the dock's frame reads
+    // cached geometry and the hovered item's glow reads the item's box once per dock frame, after the dock's writes — so no
+    // script forces a layout, and the style recalc it does force (the glow's read) restyles only the moved items (--dock
+    // doesn't inherit). The dock frame's live scrollLeft read adds one while a CSS transition runs (a hover change's glow
+    // fade): style is dirty from the frame's animation update by then. A hover change re-renders only the items it moves
+    // between (the hovered item lives outside PlaylistBar's state), counted through a React DevTools hook. Runs last: it
+    // reloads the page with the hook installed.
+    await cell("bar:sweepCost", async () => {
+      const v = [];
+      const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3");
+      // components that rendered per commit: a fiber not in the previous commit's tree (React cloned it) with PerformedWork
+      // (flag 1) set — a cloned fiber that bailed out has it cleared
+      await d.sendCommand("Page.enable");
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+        const S = window.__rc = { on: false, commits: 0, renders: 0 }; let seen = new WeakSet();
+        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { supportsFiber: true, renderers: new Map(), inject: () => 1, checkDCE() {},
+          onScheduleFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
+          onCommitFiberRoot(id, root) { const next = new WeakSet(); let n = 0; const st = [root.current];
+            while (st.length) { const x = st.pop(); next.add(x); if (!seen.has(x) && (x.flags & 1) && [0, 1, 11, 14, 15].includes(x.tag)) n++;
+              if (x.child) st.push(x.child); if (x.sibling) st.push(x.sibling); }
+            seen = next; if (S.on) { S.commits++; S.renders += n; } } };
+      })();` });
+      await win.loadURL(withToken(U + "/"));
+      await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+      for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.pl-item').length`) >= 3) break; await sleep(100); }
+      if (!(await js(`!!window.__rc`))) return ["the React DevTools hook wasn't installed before the page loaded"];
+      win.setContentSize(1000, 800); move(5, 5); await sleep(1200);
+      await page(`${row}.scrollLeft = 0;`); await sleep(300);
+      const s = await state();
+      const W = await js("innerWidth");
+      const its = s.items.filter((i) => i.x + i.w < W);
+      if (its.length < 3) return ["fewer than 3 items on screen"];
+      const y = its[0].y + its[0].h / 2, x0 = its[0].x + 4, x1 = its[its.length - 1].x + its[its.length - 1].w - 4;
+      const evs = []; let done;
+      const onMsg = (_e, method, params) => { if (method === "Tracing.dataCollected") evs.push(...params.value); else if (method === "Tracing.tracingComplete") done(); };
+      d.on("message", onMsg);
+      await d.sendCommand("Performance.enable");
+      const metrics = async () => Object.fromEntries((await d.sendCommand("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
+      await page(`window.__rc.on = true; window.__hov = 0;
+        window.__mo = new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains("hov") !== m.oldValue?.split(" ").includes("hov")) window.__hov++; });
+        window.__mo.observe(${row}, { subtree: true, attributeFilter: ["class"], attributeOldValue: true });`);
+      await d.sendCommand("Tracing.start", { categories: "devtools.timeline", transferMode: "ReportEvents" });
+      const m0 = await metrics();
+      // the bar:sweep sweep (~60 moves/s, there and back), then a slow one (~4 moves per item pitch per frame-ish)
+      for (let k = 0; k < 2; k++) for (let i = 0; i <= 60; i++) { const t = k ? 1 - i / 60 : i / 60; move(x0 + (x1 - x0) * t, y); await sleep(16); }
+      for (let i = 0; i <= 150; i++) { move(x0 + (x1 - x0) * (i / 150), y); await sleep(16); }
+      await sleep(600);
+      const m1 = await metrics();
+      const complete = new Promise((r) => { done = r; });
+      await d.sendCommand("Tracing.end"); await complete;
+      d.removeListener("message", onMsg);
+      const rc = await page(`window.__rc.on = false; window.__mo.disconnect(); return { ...window.__rc, hov: window.__hov };`);
+      // the renderer's main thread: the one that fired the dock's frames
+      const by = new Map();
+      for (const e of evs) if (e.name === "EventDispatch" && e.args?.data?.type === "dockframe") { const k = `${e.pid}:${e.tid}`; by.set(k, (by.get(k) || 0) + 1); }
+      const main = [...by.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (!main) return ["no dock frame in the trace — the sweep proved nothing"];
+      const xs = evs.filter((e) => `${e.pid}:${e.tid}` === main && e.ph === "X").sort((a, b) => a.ts - b.ts || (b.dur || 0) - (a.dur || 0));
+      const SCRIPT = new Set(["FunctionCall", "EventDispatch", "FireAnimationFrame", "TimerFire", "FireIdleCallback", "EvaluateScript", "v8.callFunction"]);
+      const whoS = {}; const stack = []; let frames = 0, fStyle = 0, fLayout = 0, styleN = 0, styleEls = 0, layoutN = 0, ioN = 0;
+      for (const e of xs) {
+        while (stack.length && stack[stack.length - 1].ts + (stack[stack.length - 1].dur || 0) <= e.ts) stack.pop();
+        const forced = stack.some((p) => SCRIPT.has(p.name));
+        if (e.name === "EventDispatch" && e.args?.data?.type === "dockframe") frames++;
+        else if (e.name === "UpdateLayoutTree") { styleN++; styleEls += e.args?.elementCount || 0; if (forced) fStyle++;
+          if (forced) { const p = [...stack].reverse().find((q) => SCRIPT.has(q.name)); const k = `${p.name}:${p.args?.data?.type || p.args?.data?.functionName || ""}@${p.args?.data?.lineNumber ?? ""}:${p.args?.data?.columnNumber ?? ""}`; whoS[k] = (whoS[k] || 0) + 1; } }
+        else if (e.name === "Layout") { layoutN++; if (forced) fLayout++; }
+        else if (e.name === "IntersectionObserverController::computeIntersections") ioN++;
+        stack.push(e);
+      }
+      const per = (n) => (n / frames).toFixed(2);
+      console.log(`        ${frames} dock frames: style recalcs ${styleN} (${fStyle} forced by script, ${per(fStyle)}/frame; ${per(styleEls)} elements/frame), layouts ${layoutN} (${fLayout} forced, ${per(fLayout)}/frame);`
+        + ` metrics: RecalcStyleCount +${m1.RecalcStyleCount - m0.RecalcStyleCount}, LayoutCount +${m1.LayoutCount - m0.LayoutCount},`
+        + ` IntersectionObserver passes ${ioN}, script ${Math.round((m1.ScriptDuration - m0.ScriptDuration) * 1000)} ms, task ${Math.round((m1.TaskDuration - m0.TaskDuration) * 1000)} ms`);
+      console.log(`        forced recalcs by (script@line:col): ${JSON.stringify(whoS)}`);
+      console.log(`        React: ${rc.commits} commits, ${rc.renders} component renders for ${rc.hov} .hov class toggles (${rc.hov ? (rc.renders / rc.hov).toFixed(1) : "-"} per toggle)`);
+      if (frames < 40) v.push(`only ${frames} dock frames during the sweep — it proved nothing`);
+      if (rc.hov < 2 * (its.length - 1)) v.push(`only ${rc.hov} hover changes across ${its.length} items — the sweep proved nothing`);
+      if (fLayout > frames * 0.1) v.push(`script forced ${fLayout} layouts in ${frames} dock frames (expected ~0: the dock's geometry is cached and the glow reads after the dock writes)`);
+      if (fStyle > frames * 1.7) v.push(`script forced ${fStyle} style recalcs in ${frames} dock frames (expected ~1 per frame — the glow's read after the dock's writes — plus one while a transition runs)`);
+      if (styleEls > frames * 15) v.push(`${per(styleEls)} elements restyled per dock frame (expected only the moved items and the glow: --dock must not inherit)`);
+      if (rc.hov && rc.renders / rc.hov > 6) v.push(`${(rc.renders / rc.hov).toFixed(1)} component renders per .hov toggle (expected only the items the hover moves between)`);
       return v;
     });
   } catch (e) {
