@@ -89,7 +89,7 @@ and visual seams cannot happen regardless of timing.
 - **Packaging**: must build via the existing Nix flake **and** `scripts/install.sh` (Arch/Ubuntu/Fedora). The native
   toolchain is already a hard requirement; `cargo`/`rustc` join it. **(my call)** `scripts/PKGBUILD` and
   `scripts/build-appimage.sh` are out of scope: they still build the pre-rewrite Avalonia app and are already broken
-  (`.claude/rules/distribution.md`). Fixing them is separate work.
+  (`.claude/rules/build-and-packaging.md`). Fixing them is separate work.
 - **(my call)** Build requirements follow the project's "never silently degrade" rule (commit `e93df0e`):
   - The **scene worker** (vendored LWE core: CMake, glm, FFmpeg, GL, …) builds by default. If its dependencies are
     missing, `install.sh` **hard-fails** with per-distro instructions, unless the user passes an explicit
@@ -355,14 +355,14 @@ UPSTREAM.md                 per vendored repo: URL, pinned commit, patch list, h
 
 - **Path-scoped Claude rules**, one per component (`.claude/rules/player-*.md`, `paths:` frontmatter matching that
   component's directories): purpose, the blocks it implements, invariants, gotchas with measured evidence, how to test
-  it. Same style as the existing `player.md`, but kept per component so a model loads only what it touches.
+  it. Same style as the existing `.claude/rules/backend/legacy-engine.md`, but kept per component so a model loads only what it touches.
 - `docs/player/architecture.md`: the block model, the process model and the recipes (§4), with the invariant first.
 - `docs/player/invariants.md`: a short numbered list, each item with *why* and *how it is enforced or tested*. For
   example: never hand off an audible stream; gains are dB; never ramp a percent; worker frames never block the
   compositor; every setting is a live property.
 - `docs/player/debugging.md`: a playbook — symptom → which probe or log query shows it → likely cause. Seeded with
   today's findings: audio dropouts, seams, worker crashes, wrong output, NVIDIA buffer import.
-- `UPSTREAM.md` (§7). The existing `.claude/rules/player.md`, `CLAUDE.md` and `README.md` are updated at switch-over;
+- `UPSTREAM.md` (§7). The existing `.claude/rules/backend/legacy-engine.md`, `CLAUDE.md` and `README.md` are updated at switch-over;
   legacy sections are deleted with the legacy code.
 - Docs ship in the same commit as the behaviour they describe.
 
@@ -402,8 +402,8 @@ Goal: a model can find out *what happened and why* from text, deterministically,
 
 ## 10. Parity inventory (must all work before switch-over)
 
-Map every current capability to properties/recipes. Today's sources of truth: `.claude/rules/session.md`,
-`player.md`, `library.md`, `AppSettings`.
+Map every current capability to properties/recipes. Today's sources of truth: `.claude/rules/backend/state-files.md`,
+`.claude/rules/backend/legacy-engine.md`, `.claude/rules/backend/library.md`, `AppSettings`.
 
 - **Modes**: single apply, Play All playlist, timed playlist (interval), advance-on-video-end, wait-for-video-end,
   combined interval + advance, shuffle (no immediate repeat), random, `--restore`, history prev/next.

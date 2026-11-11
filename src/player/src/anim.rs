@@ -302,8 +302,8 @@ impl Animator {
 
     /// Like [`tick`](Self::tick), but only evaluates/emits animations whose target is a
     /// `gain.*` path (R90, Task 16d: the fast gain timer's own ≥ 1 kHz driver, run
-    /// independent of the output refresh — `.claude/rules/player-core.md` § Runtime "The
-    /// fast gain timer"). Shares the same per-[`Entry`] `done` flag and `finished_queue`
+    /// independent of the output refresh — `docs/player/modules/runtime.md` § The fast
+    /// gain timer). Shares the same per-[`Entry`] `done` flag and `finished_queue`
     /// as `tick`: whichever call reaches an animation's end first (this one, or the
     /// ordinary `tick` the main loop timer still runs every cycle, R47 unchanged — it
     /// evaluates every path, gain included) finalizes it; the other sees `done` already

@@ -12,7 +12,7 @@ paths:
 
 Everything here applies only when `PlayerEngine.IsLiascapePlayer` is false; the liascape-player branch at the top of
 each `PlayerHelper` primitive is `.claude/rules/backend/player-adapter.md`. Rotation semantics (minimum / maximum /
-scene timing) live there too. Narrative, measurements and the transition-mode walkthrough: `docs/history/legacy-engine.md`.
+scene timing) live there too. Why behind the choices here: `docs/decisions.md` § Legacy engine.
 
 ## Processes and IPC
 - `PlayerHelper` is the single entry point for mpvpaper; it kills existing mpvpaper processes before starting one.
@@ -28,6 +28,7 @@ scene timing) live there too. Narrative, measurements and the transition-mode wa
 - User switches go through `pending_action.txt` (atomic write + rename), consumed only by the tick owner. `restart` relaunches without advancing or resetting the countdown.
 - Start an end-of-video wait only through `ArmVideoEndWait`; call `PostSwitch` after every timed switch; use `PlayingHistoryIndex` (the pre-fetch makes `_historyIndex` one ahead).
 - `DoVideoEndWait` first waits until mpv's `path` equals `_lastSwitchTarget` (≤ 8 s) — without it a bailed transition re-fires every ~85 ms.
+- `DoVideoEndWait` gives up on an empty time-remaining only after 30 polls (3 s), never sooner: `docs/decisions.md` § Give `DoVideoEndWait` 3 s of empty readings before it gives up.
 - `RandomAndLaunch` re-seats both cursors (`_timedIndex` = the pick, forward history dropped). Guard: matrix `seq:random+next` / `seq:random+prev`.
 - `UpdateTimedSettings` keeps the elapsed time proportionally; it never restarts the current wallpaper.
 - A superseded aligned switch re-arms for A's end (backoff), it never switches now.
@@ -38,7 +39,7 @@ scene timing) live there too. Narrative, measurements and the transition-mode wa
 
 ## Mute and auto-mute (`AudioMonitor`)
 - `SetMute` (auto) never unmutes while the user muted (`_userMuted` or `user_mute.state`); `toggle-mute` uses `SetUserMute`.
-- Monitor each stream with `parec --monitor-stream=<id>`; never `@DEFAULT_MONITOR@` (it hears our own audio → mute/unmute oscillation).
+- Monitor each stream with `parec --monitor-stream=<id>`; never `@DEFAULT_MONITOR@` (it hears our own audio → mute/unmute oscillation). Keep `--latency-msec=10` (parec's default buffering delays the first data ~2 s).
 - Classify a stream (ours / LWE / mpv / foreign) before counting its level; remember our ids until their `remove`.
 - Reset `_aboveThresholdCount` at the top of `WatchStreamsAsync`, not in `Stop()`.
 - `monitor-daemon` (app closed) is legacy only; under liascape-player the player's Signal mutes.
@@ -51,6 +52,7 @@ scene timing) live there too. Narrative, measurements and the transition-mode wa
 - The backend's ready-wait must exceed the renderer's worst case (~6.5 s).
 - Killing an in-flight overlay unpauses mpvpaper; `Stop()` calls `TransitionService.ClearInProgress()`.
 - libmpv in the renderer: set `vo=libmpv` and free `mpv_render_context` with the GL context current.
+- Launch the primary monitor's LWE with its audio device open (`--volume 0` under NoAudio), never `--silent` (no sink-input to unmute → a relaunch); secondary monitors are `--silent`. A non-transition scene launch holds its volume with `CorrectSceneVolume` (PulseAudio's stream-restore replays a fade value).
 - `liascape-audio` must skip re-applying a stream already at the wanted volume/mute (else a change-event loop wedges PulseAudio) and evict its client→pid cache on `remove`.
 - 0 monitors detected → no transition (`transition SKIPPED`). `MonitorDetector` order: hyprctl → swaymsg → wlr-randr → `liascape-transition --list-outputs` → xrandr.
 - Launch-only under legacy (LWE can't reconfigure live): `SceneMonitors` fps/primary and scene user properties (`--set-property`). Every other setting must apply live (`ApplyPlaybackSettingsLive`).

@@ -9,7 +9,8 @@ paths:
 
 # UI state and backend API (`app/ui/src/api`, `app/ui/src/store`)
 
-The backend's side of every contract: `.claude/rules/backend/api.md`. Walkthroughs: `docs/history/ui.md`.
+The backend's side of every contract: `.claude/rules/backend/api.md`. Why behind the choices here: `docs/decisions.md` § UI
+and § Settings & state.
 
 ## Talking to the backend
 - Every request carries the API token: `fetch` through `authHeaders()` (`jget` / `jpost` do), every src/WS URL through `withToken(url)` (`img`, `media`, `anim`, `still`, the transition preview URLs, `useEvents` do). A hand-built API URL or a direct `fetch` that skips them gets 401.

@@ -13,7 +13,7 @@ namespace Liascape.Helpers;
 // first frame (`to`), then run a gl-transitions GLSL effect between them on an opaque per-output
 // wlr-layer-shell surface (the `liascape-transition` native renderer), and hand off to the live wallpaper
 // underneath. The overlay covers only the wallpaper region (real windows stay on top), exactly like
-// Wallpaper Engine. See .claude/rules/player.md + transitions/README.md.
+// Wallpaper Engine. See .claude/rules/backend/legacy-engine.md + transitions/README.md.
 //
 // This service is the orchestration layer PlayerHelper.SwitchToFile calls: it picks the effect,
 // captures the two frames per output (ffmpeg for video, grim for a live scene, the item's preview

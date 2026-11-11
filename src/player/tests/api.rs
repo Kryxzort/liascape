@@ -482,7 +482,7 @@ fn error_shape() {
     // An unknown verb names the verb list.
     let e = c.err("frobnicate", json!({}));
     assert_eq!(e["code"], "no_such_verb", "{e}");
-    assert!(e["hint"].as_str().unwrap().contains("Command API"), "{e}");
+    assert!(e["hint"].as_str().unwrap().contains("docs/player/modules/command-api.md"), "{e}");
     // step needs the stepped clock — it's on here; a bad arg is still bad_request.
     let e = c.err("step", json!({"ms": "x"}));
     assert_eq!(e["code"], "bad_request", "{e}");
@@ -7452,7 +7452,7 @@ fn meter_capture_runs_on_the_rt_data_thread() {
 /// A gain ramp (`animate gain.user` 0 → −20 dB over 300 ms) reaches the bus smoothly:
 /// monotonic, no step, ending at −43. (Flaked ~2/10 until the worker's stream got
 /// `RT_PROCESS`: its non-RT callback missed 64-frame cycles under load — a quantum of silence
-/// on the bus; player-core.md § Scene audio → "RT process callback".)
+/// on the bus; docs/player/modules/scene-audio.md § The stream.)
 #[test]
 fn scene_gain_ramp_reaches_the_bus() {
     let Some((serial, root, pw)) = private_pw() else {

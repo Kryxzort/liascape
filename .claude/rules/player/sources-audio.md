@@ -163,6 +163,8 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
 - Keep the identity constants in `audio::bus` verbatim (`SINK_NAME`, `PLAYBACK_NAME`, `APP_NAME`, `MEDIA_ROLE`,
   `SINK_DESCRIPTION`): auto-mute excludes the bus by them. mpv streams share `application.name`, so exclude by
   ownership/target, never by that name alone.
+- Start the bus (`Audio::start` in `runtime::serve`) only after the socket bind and the compositor connection: a
+  second instance or a start still waiting for its compositor must never load a sink into the session.
 - `Bus::start` never blocks; serve waits for the first session at most `BUS_STARTUP_WAIT`, then runs regardless.
   Never give up on the bus (except `--ao` ≠ pipewire or `LIASCAPE_PLAYER_BUS=off`): failures retry with backoff.
 - Drive retargeting by "last requested vs default", never by the momentary link set. Never fight a session policy

@@ -2,7 +2,7 @@
 //! output's main layer — a single source, or an effect blending two sources — into the
 //! caller's target [`Fbo`], applying the layer's `fit`/`viewport` transform and `opacity`.
 //!
-//! See `.claude/rules/player-core.md`'s "Composition" section for the fit-semantics
+//! See `docs/player/modules/composition.md` § Composer for the fit-semantics
 //! table, the viewport/span rule, the coordinate conventions, the premultiplied-opacity
 //! contract, and rulings R19/R20 this module implements.
 //!

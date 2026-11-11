@@ -2,10 +2,12 @@
 # Checks the agent-facing rules against .claude/rules/writing-rules.md:
 #  - every .claude/rules/**/*.md starts with YAML frontmatter whose only key is `paths:` = a list of quoted globs
 #    (invalid YAML would make Claude Code load the rule on every task), each glob matching a tracked file;
-#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; every SKILL.md has name + description;
+#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md has name + description;
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
-#  - no "see memory X" pointers (auto memory is invisible to subagents).
+#  - no "see memory X" pointers (auto memory is invisible to subagents);
+#  - no dead citations: every `.claude/rules/….md` or `docs/….md` path named in any tracked or new text file (code
+#    comments included) exists — one problem per missing path, with its count and the files citing it.
 # Uses PyYAML when installed; otherwise a strict parser for the one allowed shape (any file it accepts is valid YAML).
 # Usage: bash scripts/check-rules.sh    Exit 0 = clean; prints every problem.
 set -uo pipefail
@@ -102,6 +104,15 @@ if text.count("\n") > 100: bad("CLAUDE.md", f"{text.count(chr(10))} lines > 100"
 check_paths("CLAUDE.md", text)
 print(f"CLAUDE.md: {text.count(chr(10))} lines, {len(text)} chars")
 
+# Doc budgets (writing-rules.md § Files): reference docs ≤ 15,000 chars, the decision log ≤ 30,000. Reports and spikes
+# under docs/player/ are dated data, not reference material, so they're exempt.
+if os.path.exists("docs/decisions.md"):
+    n = len(open("docs/decisions.md", encoding="utf-8").read())
+    if n > 30000: bad("docs/decisions.md", f"{n} chars > 30,000")
+for f in sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md")):
+    n = len(open(f, encoding="utf-8").read())
+    if n > 15000: bad(f, f"{n} chars > 15,000 (reference doc)")
+
 for f in sorted(glob.glob(".claude/skills/*/SKILL.md")):
     t = open(f, encoding="utf-8").read()
     m = re.match(r"---\n(.*?)\n---\n", t, re.S)
@@ -109,6 +120,26 @@ for f in sorted(glob.glob(".claude/skills/*/SKILL.md")):
         bad(f, "skill frontmatter needs `name:` and `description:`")
     check_paths(f, t)
     print(f"{f}: {t.count(chr(10))} lines")
+
+# Dead citations: every `.claude/rules/….md` / `docs/….md` path named in a tracked (or new, not ignored) text file —
+# code comments, docs, rules — must exist. One problem per missing path, with its count and where it is cited.
+listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                        capture_output=True, text=True, check=True).stdout.split("\0")
+CITE = re.compile(r"(?<![\w./-])((?:\.claude/rules|docs)/[\w./-]*[\w-]\.md)\b")
+SKIP_DIRS = ("node_modules/", "target/", "bin/", "obj/", "dist/", ".git/")
+dead = {}
+for f in sorted(set(listed)):
+    if not f or any(("/" + f).find("/" + d) >= 0 for d in SKIP_DIRS) or not os.path.isfile(f): continue
+    try:
+        with open(f, "rb") as fh: raw = fh.read()
+    except OSError: continue
+    if b"\0" in raw[:8192]: continue
+    for p in CITE.findall(raw.decode("utf-8", "replace")):
+        if not os.path.exists(p): dead.setdefault(p, []).append(f)
+for p, where in sorted(dead.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+    files = sorted(set(where))
+    bad(p, f"dead citation: {len(where)}× in {len(files)} file(s): {', '.join(files[:6])}{' …' if len(files) > 6 else ''}")
+print(f"dead citations: {len(dead)} missing path(s), {sum(len(w) for w in dead.values())} citation(s)")
 
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)

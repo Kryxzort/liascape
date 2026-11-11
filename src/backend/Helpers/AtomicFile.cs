@@ -31,7 +31,7 @@ public static class AtomicFile
 
     // Like WriteAllText, but the file is the user's alone (0600) from the moment it exists: the temp file is created 0600
     // and the rename keeps that mode — never a window where another user could read it (settings.json, the secret
-    // store's fallback file: web-backend.md § Local API security).
+    // store's fallback file: .claude/rules/backend/api.md § Security).
     public static void WritePrivate(string path, string text)
     {
         var dir = Path.GetDirectoryName(Path.GetFullPath(path))!;

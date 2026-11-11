@@ -163,7 +163,7 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       `wl_buffer.release` (~224 B) per present with explicit sync (upstream fix 6235dd8, 2026-09-09, unreleased),
       so `serve` defaults `__NV_DISABLE_EXPLICIT_SYNC=1` (cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, loop tick
       p99 ~0.3 → 1.6 ms, 0 missed) and drains libwayland's default queue every iteration. With a fixed driver
-      the drain alone is leak-free: drop the env default (keep the drain). `player-core.md` § Wayland NVIDIA notes.
+      the drain alone is leak-free: drop the env default (keep the drain). `docs/player/modules/wayland.md` § Wayland NVIDIA notes.
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.

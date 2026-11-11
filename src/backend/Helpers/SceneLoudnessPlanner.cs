@@ -9,7 +9,7 @@ using Liascape.Player;
 
 namespace Liascape.Helpers;
 
-// A WE scene's OFFLINE loudness estimate (library.md § Loudness, player-adapter.md § Scenes → "Loudness"): runs
+// A WE scene's OFFLINE loudness estimate (.claude/rules/backend/library.md § Loudness, player-adapter.md § Scenes → "Loudness"): runs
 // `liascape-player scene-loudness <scene dir> --props '<its scene_props>'` — the player's own estimator (its sound
 // objects → a play plan → each audio file decoded once by ffmpeg, cached per file in ~/.cache/liascape/scene-loudness →
 // the live learner) — and stores the result per audio configuration (LibMeta.SceneLoudness[fingerprint]). One child

@@ -153,7 +153,7 @@ CAPS=$RESULTS/captures
 mkdir -p "$CAPS"
 echo "scene_corpus: ${#ITEMS[@]} scenes from $DIR → $RESULTS" >&2
 
-unset LD_LIBRARY_PATH # the stray one on this machine breaks native links (player-core.md)
+unset LD_LIBRARY_PATH # the stray one on this machine breaks native links (.claude/rules/player/core.md)
 
 # ---------------------------------------------------------------- cleanup (our pids only)
 SERVE_PID=

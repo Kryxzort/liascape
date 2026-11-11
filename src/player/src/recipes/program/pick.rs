@@ -45,7 +45,7 @@ fn cfg_err(code: &'static str, message: String) -> ApiError {
         code,
         message,
         hint: "transition = {enabled, effects: [ids], shuffle, duration_ms, duration_max_ms, \
-               method: full-live|reveal|frozen}; see .claude/rules/player-core.md \u{a7} Programs"
+               method: full-live|reveal|frozen}; see docs/player/modules/programs.md"
             .to_string(),
     }
 }

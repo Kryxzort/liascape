@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic integration test of the backend's liascape-player adapter (PlayerEngine=liascape-player).
-# See .claude/rules/player-adapter.md § Integration test.
+# See docs/player/adapter.md § Integration test.
 #
 # It runs the REAL `liascape serve` backend against a PRIVATE `liascape-player serve --headless --clock
 # real --ao null` (SUPERVISED — `$SP` is the supervisor, `$CP`/`comp_pid` is its compositor child, see
-# player-core.md § Supervisor) and drives everything over HTTP, checking the result with `liascape-player ctl`:
+# docs/player/modules/persistence.md § Supervisor) and drives everything over HTTP, checking the result with `liascape-player ctl`:
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
@@ -82,7 +82,7 @@ ln -s "$B" "$T/bin/liascape-player"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
-# per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
+# per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -227,7 +227,7 @@ lib_import() { curl -sf -m 60 -X POST -H 'Content-Type: application/json' -d "{\
 cur()  { ctl get "{\"path\":\"cur:*.$1\"}" 2>/dev/null | jq -r '.value'; }
 # R75 (final): pause is PLAYER-level (`player.paused`), not a per-source prop — `cur:*.paused` (the
 # node's own raw value) never changes, by design (a recipe-held source must stay exactly as the
-# recipe left it; see player-core.md § Graph & properties "Player node paused").
+# recipe left it; see docs/player/modules/graph-properties.md § Player-level pause).
 playerPaused() { ctl get '{"path":"player.paused"}' | jq -r .value; }
 srcPaused() { ctl probe '{"name":"sources"}' | jq -r --arg id "$1" '.sources[] | select(.id==$id) | .effective_paused'; }
 srcIdForPath() { ctl state | jq -r --arg p "$1" '.graph | to_entries[] | select((.key | startswith("src")) and .value.path==$p) | .key' | head -1; }   # a source: a program node has a `path` too
@@ -697,8 +697,8 @@ echo "== pause during an in-flight transition (R75 final: ONE set player.paused 
 # scheduled/pending B at frame 0 (its own `paused`, nothing to do with player.paused) regardless of our
 # toggle, same as before R75; it only comes off hold at its own handoff. So A is the one that proves the
 # toggle (it's genuinely playing, not recipe-held) — B's effective_paused must stay true continuously,
-# proving the hold survives an unrelated player.paused flip rather than fighting it (player-core.md §
-# Graph & properties "Player node paused": a recipe-held source's own `paused` is never touched by the
+# proving the hold survives an unrelated player.paused flip rather than fighting it (docs/player/modules/graph-properties.md
+# § Player-level pause: a recipe-held source's own `paused` is never touched by the
 # override, so a resume doesn't un-pause what the RECIPE is deliberately holding).
 TA=$(srcIdForPath "$LD")
 pause_reads() { pp=$(playerPaused); pa=$(srcPaused "$TA"); pb=$(srcPaused "$TB"); [ "$pp" = "$1" ] && [ "$pa" = "$1" ]; }
@@ -806,8 +806,8 @@ stop_now
 ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
 
 echo "== Task 20c: /next /prev /random skip scenes under liascape-player (never a 500, never land on one)"
-# Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (library.md /
-# player.md): a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
+# Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (.claude/rules/backend/library.md /
+# .claude/rules/backend/legacy-engine.md): a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
 # what IsSceneFolder checks, and exactly what makes PlayerHelper.IsScenePath (no media extension) true
 # for that folder's path. No linux-wallpaperengine / scene.pkg needed to be *recognized* as a scene —
 # only to actually render one, which these never attempt (they must be SKIPPED, not launched).

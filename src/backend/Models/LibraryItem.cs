@@ -21,7 +21,7 @@ public class LibraryItem
     public int? VolumeOverride { get; init; }
     public double? SpeedOverride { get; init; }
     public DateTime AddedAt { get; init; }
-    // A scene's loudness under liascape-player (its CURRENT audio configuration — library.md § Loudness): the applied
+    // A scene's loudness under liascape-player (its CURRENT audio configuration — .claude/rules/backend/library.md § Loudness): the applied
     // LUFS, whether it is the offline estimate (no live measurement of this configuration yet), the audible seconds
     // measured, the estimate's confidence and — when low — its first note. All null for a video / nothing known.
     public double? LoudnessLufs { get; init; }

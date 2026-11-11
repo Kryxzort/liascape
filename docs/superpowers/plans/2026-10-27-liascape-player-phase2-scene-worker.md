@@ -23,7 +23,7 @@ pipewire-rs 0.10 · C# .NET 10 (adapter) · Nix flake + `scripts/install.sh`.
 
 **Spec:** `docs/superpowers/specs/2026-10-20-utopia-player-design.md` (§4.1, §4.3, §5.2, §5.3, §6.1, §6.3, §10,
 §11, §12). Evidence it argues from: `docs/player/spikes/lwe-core.md`, `docs/player/spikes/dmabuf.md`. What Phase 1
-built: `.claude/rules/player-core.md`, `.claude/rules/player-adapter.md`. Executors read all of these.
+built: `.claude/rules/player/core.md`, `.claude/rules/backend/player-adapter.md`. Executors read all of these.
 
 ---
 
@@ -57,7 +57,7 @@ task text where they differ:
   through the worker protocol), persist per item in the library index (`LibMeta`), re-applied at every open. Matrix
   cells for set → live → persisted → survives a switch/restart. **+L task** (backend + worker + UI).
   **Done (2026-10-28)** — the worker side was Task 7's `scene_props`; this added the rest
-  (`.claude/rules/library.md` § "Scene properties", `player-adapter.md` § Scenes, `web-backend.md`, `web-ui.md`):
+  (`.claude/rules/backend/library.md` § Scene properties, `player-adapter.md` § Scenes, `.claude/rules/backend/api.md`, `.claude/rules/ui/design.md`):
   `Helpers/SceneProperties.cs` (parse — order/index, types, HTML/`ui_*` labels —, coerce/encode, a JS-subset
   `condition` evaluator), `LibMeta.SceneProps` (WE encoding, field-level, == default dropped), `GET/POST
   /library/scene-props` + `/preview` (the drag twin), `scene_props` as a per-source value of the R61 resolver (every
@@ -85,8 +85,8 @@ task text where they differ:
 - **Loudness: learn on first play**: measure a scene's integrated loudness over its first ~60 s of play (from the
   worker's stream on the bus), store it in the index like a video's `loudness*`, apply normalization from then on.
   **+M task.**
-  **Done (2026-10-28)** (`.claude/rules/player-core.md` § Scene worker → "Scene loudness", `player-adapter.md` §
-  Scenes → "Loudness", `library.md` § Loudness). The player measures, the backend stores + applies (the video path's
+  **Done (2026-10-28)** (`docs/player/modules/scene-loudness.md` §"Scene loudness", `player-adapter.md` §
+  Scenes → "Loudness", `.claude/rules/backend/library.md` § Loudness). The player measures, the backend stores + applies (the video path's
   split). Worker: `audio::loudness::SegmentMeter` K-weights the scene's sound after the stretch, **before the gate
   and the gain**, only for buffers that really played it (not paused / `no_audio` / a fade-out / the PipeWire-down
   fallback) → `FromWorker::Loudness {segments}` per 100 ms (`PROTOCOL` 3). Compositor: a `Learner` per
@@ -361,7 +361,7 @@ channels). 0003's pull never waits for decoding (safe in a PipeWire RT callback)
 pulled per host second set the speed — the hook for the owner's pitch-corrected scene speed
 (Task 6's time-stretch). RED seen: compile failure (no symbols), SIGSEGV on the 2nd render
 (before 0004), `double free or corruption` (before 0006). Real-scene smoke: `liascape-scene-worker
---lwe-smoke` (`lwe.rs`, the seed of Task 7's renderer). `.claude/rules/player-core.md` § Scene
+--lwe-smoke` (`lwe.rs`, the seed of Task 7's renderer). `.claude/rules/player/core.md` § Scene
 worker → "LWE core".
 
 **Size: M–L** (1–1.5 days; LWE's decode threading is the unknown — Risk 3).
@@ -561,7 +561,7 @@ pub const LOG_TAIL: usize = 50; pub const MAX_CRASH_RECORDS: usize = 20;
   and off: `LIASCAPE_PLAYER_RENDER_WORKER=off cargo test -q`).
 - [x] **Step 5:** Commit `Add Scene Source Kind`.
 
-**Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "The
+**Done (2026-10-27) — deviations** (`docs/player/modules/scene-worker.md` §"The
 `scene` Source kind"): `SceneSource::open` takes the node id too (`open(gfx, id, node, base)`;
 Task 4's direct path is `open_opts`); the clock runs from the load's first frame (Ready = the
 frame of exactly `position`); scene speed scales the clock (owner decision; audio is Task 6);
@@ -614,7 +614,7 @@ and the supervise test's new-worker checks.
 - [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
 - [x] **Step 5:** Commit `Add Scene Audio On The Player Bus`.
 
-**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Scene
+**Done (2026-10-28) — deviations** (`docs/player/modules/scene-worker.md` §"Scene
 audio (Task 6)"): the owner's speed decision is in — a WSOLA stage (`stretch.rs`, bit-exact
 passthrough at 1×) and a new `ToWorker::Speed`; `PROTOCOL` 2 (`Start` gained `id`, `gain_db`,
 `no_audio`, `speed`; `Gain`/`NoAudio`/`Speed` fold into the restart's `Start`); the worker's
@@ -685,7 +685,7 @@ quantum). `PrivatePw` lives in `tests/common/pw.rs`.
 - [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS (the opt-in ones with the 431960 folder).
 - [x] **Step 5:** Commit `Render WE Scenes In The Scene Worker`.
 
-**Done (2026-10-27) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Real scenes
+**Done (2026-10-27) — deviations** (`docs/player/modules/scene-source.md` §"Real scenes
 (Task 7)"): the load runs on the renderer thread while a second worker thread (`lia-scene-proto`)
 answers pings (LWE's GL objects must be built and rendered on one context — a loader thread with
 its own context can't share VAOs/FBOs), bounded by `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`; no assets → the
@@ -727,7 +727,7 @@ time (three far-apart ticks don't move particles).
 - [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS. (The on-machine numbers are Task 14 step 4.)
 - [x] **Step 5:** Commit `Add Scene FPS And Worker GPU Budget`.
 
-**Done (2026-10-28) — with the owner's VRAM decisions folded in** (`.claude/rules/player-core.md`
+**Done (2026-10-28) — with the owner's VRAM decisions folded in** (`docs/player/modules/scene-gpu-budget.md`
 § Scene worker → "GPU budget and VRAM (Task 8)"; invariant #7 gained the VRAM hold):
 - **As planned:** `scene/budget.rs` (`Budget::observe`, the plan's thresholds; plus `SETTLE` 2 s
   between cuts — the 2 s miss window must hold only frames made at the new rate — and each
@@ -797,7 +797,7 @@ Nothing else in the recipe is kind-specific: a scene is not a still (reveal/froz
 - [x] **Step 2:** → FAIL (the align one at least). **Step 3:** implement. **Step 4:** → PASS.
 - [x] **Step 5:** Commit `Make Every Transition Work With Scenes`.
 
-**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Transitions
+**Done (2026-10-28) — deviations** (`docs/player/modules/scene-worker.md` §"Transitions
 with scenes (Task 9)"): the rule is `never_ends` (still | scene) in `start_instant`, End's
 loop-off and `follows_a_end`; the same rule found missing in the runtime's parked path
 (`transition_parked`: an `align: end` from a parked scene waited for an output) — fixed +
@@ -840,7 +840,7 @@ broken worker is already a `SourceEvent::Error`).
 - [x] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** → PASS.
 - [x] **Step 5:** Commit `Hold Frames And Restart Crashed Scene Workers`.
 
-**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Crash
+**Done (2026-10-28) — deviations** (`docs/player/modules/scene-worker.md` §"Crash
 policy (Task 10)"; invariant #9): **resume** = the scene clock stopped at the held frame's `t` from
 `Hung`/`Exited`/`Restarted` until a frame of the next worker generation latched, one resume tick at
 it (the worker ignores `Start.position` — it renders `Tick.t` — so the clock was the fix; a `position`
@@ -888,7 +888,7 @@ GPU context losses (the record's `reason` starts "GL context lost").
   legacy-only), `Web/ServerHost.cs` (`/settings`: a `SceneMonitors` diff → `ApplySceneFps` live; `/player-engine` +
   `scenes {available, reason, assets_dir}`), `app/ui/src/views/Settings.tsx` (under liascape-player: hide "Scene
   transition delay" and the primary radio, label the fps "fps (live)"), `Player/LiascapePlayerSelfTest.cs`,
-  `scripts/test-liascape-player-adapter.sh`, `.claude/rules/player-adapter.md`
+  `scripts/test-liascape-player-adapter.sh`, `.claude/rules/backend/player-adapter.md`
 
 `LweVolume` is read by neither engine (scenes follow Volume / the item override), so there is nothing to port.
 
@@ -904,7 +904,7 @@ pause (`player.paused` stays false — don't mirror it into the UI's pause state
 setting → `get player.<prop>` live; with `LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>` a scene over the limit
 advances the rotation without a crash mark.
 
-- [x] **Done (2026-10-28), commit `Wire Scene GPU Budget And VRAM Settings`** (`.claude/rules/player-adapter.md` §
+- [x] **Done (2026-10-28), commit `Wire Scene GPU Budget And VRAM Settings`** (`.claude/rules/backend/player-adapter.md` §
   Scenes → "GPU / VRAM settings"): `AppSettings.AutoThrottleScenes` (true), `LimitVramPerScene` (false) +
   `SceneVramLimitMib` (1536, 64–1048576, kept while off), `VramLowMode` (`stop`); `/settings` diff →
   `LiascapePlayerMedia.ApplyGpuSettings` (coalescible `player:<prop>`), re-asserted per player process with the scene fps;
@@ -932,7 +932,7 @@ advances the rotation without a crash mark.
   `cd app/ui && npm run build` ok.
 - [x] **Step 5:** Commit `Play Scenes Under liascape-player In The Backend`.
 
-**Done (2026-10-28) — deviations** (`.claude/rules/player-adapter.md` § Scenes): every player-side name the
+**Done (2026-10-28) — deviations** (`.claude/rules/backend/player-adapter.md` § Scenes): every player-side name the
 task assumed matched the code (`hello.capabilities` `scene`, `kind: "scene"`, `preview`, `out:<c>.scene_fps`,
 `liascape-player scene-check` `{worker, features, assets_dir, ok, reason}`, worker streams `liascape-player-scene.<id>`)
 except **`source.broken`, which didn't exist** (Task 10 isn't done): the player now logs it — the minimal
@@ -971,7 +971,7 @@ library before the backend starts: s1 red + 440 Hz, s2 blue + 660 Hz, s3 crashin
   skips, plus the new cells).
 - [x] **Step 5:** Commit `Cover Scenes In The UI Matrix`.
 
-**Done (2026-10-28)** (`.claude/rules/web-ui.md` § "Scene cells"): 29 scene cells — the plan's list + `itemSpd:scene`,
+**Done (2026-10-28)** (`.claude/rules/ui/shell-and-probes.md` § Probes and the UI matrix): 29 scene cells — the plan's list + `itemSpd:scene`,
 `settings:autoThrottleScenes|vramLimit|vramLowMode` (Task 8's settings), `vram:exceeded` (the fake VRAM probe), `trash:
 playingScene` in a playlist too. **Deviations:** scene support stays OFF in the baseline settings (with it on, the
 library-stepping / random cells landed on scenes nondeterministically, s3 included) — the opt-in scene states
@@ -1008,7 +1008,7 @@ Full matrix (`--jobs 2`): first 744 pass / 3 fail / 29 skip (the two fixture ass
 
 **Size: M** (≈ 1 day).
 
-**Done (2026-10-28) — deviations** (`.claude/rules/player-core.md` § Scene worker → "Scene corpus (Task 13)"):
+**Done (2026-10-28) — deviations** (`docs/player/modules/scene-lwe-core.md` §"Scene corpus (Task 13)"):
 96 scenes in 481 s: **86 ok, 1 static (a still image + a sound — by design), 1 blank, 4 load_failed, 4 broken**,
 0 renderer_failed/crashed/timeout (`docs/player/reports/scene-corpus.md`). Every failure reproduces with
 `liascape-scene-worker --lwe-smoke` (LWE's core alone, no worker/compositor) and is an LWE cause — 3D/perspective
@@ -1073,7 +1073,7 @@ corpus-runner fix; open findings in `docs/TODO.md` → "Phase 2 battery findings
 `latch_never_waits_on_an_unsignalled_fence`; #10 "a worker's audio is a gain on a stream that keeps running"),
 `docs/player/debugging.md` (rows: scene black → `probe workers`/`source.error`; scene frozen → `latched` vs
 `stale_reuses`; scene silent → bus links + `has_audio`; crash loop → `crashes/*.json`; throttled →
-`scene.throttled`), `.claude/rules/player-core.md` (§ Scene worker, § Sources scene rows — each earlier task already
+`scene.throttled`), `.claude/rules/player/core.md` (§ Scene worker, § Sources scene rows — each earlier task already
 added its own), `CLAUDE.md` (scenes play under liascape-player; `SceneMonitors` is no longer launch-only there; the new
 build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items and the deferred items below)
 
@@ -1083,7 +1083,7 @@ build dependencies), `docs/TODO.md` (tick Phase 2; add the Phase 6 corpus items 
 **Done (2026-10-28) — deviations:** invariant numbers are **#10** (worker frame never blocks the compositor) and
 **#11** (worker audio is a gain on a stream that keeps running) — #9 was taken by Task 10's crash policy. The
 architecture doc's "one worker per output" text became "one per scene source, shared by outputs" (D1); the
-`player-core.md` Scene worker section got its header/`PROTOCOL` 3 note and the stale "dmabuf imports land on the
+`.claude/rules/player/core.md` Scene worker section got its header/`PROTOCOL` 3 note and the stale "dmabuf imports land on the
 `lia-render` thread" sentence corrected (they run on the loop's context). No `CLAUDE.md` claim was wrong; it gained
 the Rust/`libclang`/PipeWire build line, the WE `assets/` requirement for liascape-player scenes and `--no-scenes`.
 

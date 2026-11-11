@@ -34,7 +34,7 @@ public static class WorkshopTags
 
     public static readonly Group Age = new("Age", Mode.Any, ["Everyone", "Questionable", "Mature"]);
     public static readonly Group Type = new("Type", Mode.Any, ["Video", "Scene"]);
-    // the filter bar's lists (app/ui/src/components/WorkshopFilterBar.tsx — Steam's own, sources.md "Full filter taxonomy")
+    // the filter column's lists (app/ui/src/components/workshopFilter.ts `WF_GROUPS` — Steam's own tag names)
     public static readonly Group Resolution = new("Resolution", Mode.Any, [
         "Standard Definition", "1280 x 720", "1366 x 768", "1920 x 1080", "2560 x 1440", "3840 x 2160",
         "Ultrawide Standard Definition", "Ultrawide 2560 x 1080", "Ultrawide 3440 x 1440",
@@ -50,7 +50,7 @@ public static class WorkshopTags
         "Approved", "Audio responsive", "HDR", "3D", "Customizable", "Media Integration", "Puppet Warp", "Video Texture"]);
     public static readonly Group[] Groups = [Age, Type, Resolution, Genre, Features];
 
-    // types that never play here (sources.md: skipped always)
+    // types that never play here (.claude/rules/backend/sources-steam.md § Scrapers)
     public static readonly string[] Unplayable = ["Web", "Application", "Preset"];
 
     private static readonly Dictionary<string, (Group G, string Tag)> _byTag =

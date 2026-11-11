@@ -18,7 +18,7 @@ const cp = require("child_process");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const K = JSON.parse(E.LIASCAPE_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -2198,7 +2198,7 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     return v;
   } };
 
-// --- the order a shuffle plays. Contract (session.md § Timed Playlist, PlayerHelper.AdvanceToNext): each CYCLE plays
+// --- the order a shuffle plays. Contract (.claude/rules/backend/legacy-engine.md § Timed playlist, PlayerHelper.AdvanceToNext): each CYCLE plays
 // every item of the playlist once, in a fresh random order; a new cycle never starts with the item the last one ended
 // on (no immediate repeat); turning Shuffle on mid-session keeps what plays and plays the REST once (in random order)
 // before the first full cycle; previous walks back through what actually played. Sequential = the playlist bar's order.

@@ -1,6 +1,4 @@
-//! VRAM: measuring it and the two rules built on it (Phase 2 Task 8; owner decisions "VRAM
-//! guard" and "VRAM, round 3"; `.claude/rules/player-core.md` § Scene worker → "GPU budget and
-//! VRAM (Task 8)").
+//! VRAM: measuring it and the two rules built on it (`docs/player/modules/scene-gpu-budget.md`).
 //!
 //! **Measuring ([`Probe`]).** System-wide total/free VRAM and per-process use, from (first that
 //! works, `LIASCAPE_PLAYER_VRAM_PROBE=auto`): NVIDIA's NVML (`libnvidia-ml.so.1`, **dlopened** — never

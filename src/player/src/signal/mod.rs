@@ -22,7 +22,7 @@
 //!   audio with the picture. It releases at the first tick the rule stops holding.
 //!   `player.cover_hold_active` mirrors it; `cover.engaged` / `cover.released` log it.
 //!
-//! See `.claude/rules/player-core.md` § Signals.
+//! See `docs/player/modules/signals.md`.
 
 pub mod automute;
 pub mod covered;

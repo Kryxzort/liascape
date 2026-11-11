@@ -6,7 +6,7 @@
 // playback requests the UI tried to send. `/open` is stubbed as well (no real file manager).
 // Usage: electron app/shell/probe-plmenu.js "http://127.0.0.1:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const url = process.argv.slice(2).find((a) => /^https?:/.test(a)) || process.env.LIASCAPE_URL || "http://127.0.0.1:5173/?api=5174"; // LIASCAPE_URL: scripts/test-ui-matrix.sh --probe probe-plmenu.js
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 

@@ -1,7 +1,7 @@
 //! Scene loudness, learned on first play (Phase 2, owner decision: "measure a scene's
 //! integrated loudness over its first ~60 s of play (from the worker's stream on the bus),
 //! store it in the index like a video's `loudness*`, apply normalization from then on").
-//! `.claude/rules/player-core.md` § Scene worker → "Scene loudness".
+//! `docs/player/modules/scene-loudness.md`.
 //!
 //! ITU-R BS.1770-4 / EBU R128, split across the two processes:
 //!
@@ -514,7 +514,7 @@ pub const BOOK_IDLE_KEEP: usize = 64;
 /// Paths are keys as the caller gives them — `SceneSource` canonicalizes (`/home` vs its
 /// physical path, a trailing slash, a `local/<id>` symlink share one entry). In memory only: a
 /// player crash/restart starts from the backend's seeds again (the documented bounded loss —
-/// player-core.md § "Scene loudness").
+/// docs/player/modules/scene-loudness.md).
 #[derive(Debug, Default)]
 pub struct Book {
     paths: HashMap<String, Measure>,

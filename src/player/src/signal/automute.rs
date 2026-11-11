@@ -29,7 +29,7 @@
 //!   deadline is a calloop timer at that instant (no polling tick). Times are the buffers'
 //!   cycle times (CLOCK_MONOTONIC), so the delay counts from the first audible sample.
 //!
-//! See `.claude/rules/player-core.md` § Signals → Auto-mute.
+//! See `docs/player/modules/signals.md` § Auto-mute.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;

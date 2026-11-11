@@ -1,4 +1,4 @@
-// The backend's API token (web-backend.md § Local API security): `liascape serve` writes it to serve.token beside
+// The backend's API token (.claude/rules/backend/api.md § Security): `liascape serve` writes it to serve.token beside
 // serve.port (0600). main.js hands it to the page as ?token= (the page keeps it, sends X-Liascape-Token); the probes use
 // the same helpers for the pages they load and their own requests. Read fresh each call: a backend may have written a
 // new one (a first start, an app launch) since.

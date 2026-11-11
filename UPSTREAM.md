@@ -19,7 +19,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 - **Relationship**: **absorbed, not vendored.** mpvpaper is small (~2k lines of C); its value to
   this project is proven techniques, not code to pull in wholesale. No mpvpaper source file is
   copied into this repo — each row below is reimplemented in Rust against its own measured
-  constraints, documented in full in `.claude/rules/player-core.md`.
+  constraints, documented in full in `.claude/rules/player/core.md`.
 - **Last reviewed**: commit `fc5ed28` (2026-08-28). A periodic look at mpvpaper's changelog
   replaces a code sync — there is nothing to merge, only techniques to notice.
 
@@ -29,7 +29,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 |---|---|---|---|
 | Fence-leak mitigation: hand libmpv's render API a `get_proc_address` whose `glFenceSync` always returns a null sync, so mpv's fence bookkeeping for buffer reuse (direct rendering / PBO uploads) turns into a no-op instead of accumulating real GL sync objects — safe only because neither direct rendering nor PBO uploads are enabled here | `src/player/src/sources/mpv.rs:stub_fence_sync` | mpvpaper 1.9, [PR #132](https://github.com/GhostNaN/mpvpaper/pull/132) by manv-3 | GPL-3.0 |
 | One `wlr-layer-shell` surface per output, each independently configurable | `src/player/src/wl.rs:WlState::make_surface` | mpvpaper's per-monitor launch model | GPL-3.0 |
-| Configurable layer-shell layer (background / bottom / top / overlay) | `src/player/src/wl.rs` (`out:<connector>.layer` property, `.claude/rules/player-core.md` § Wayland) | mpvpaper's `-layer` flag | GPL-3.0 |
+| Configurable layer-shell layer (background / bottom / top / overlay) | `src/player/src/wl.rs` (`out:<connector>.layer` property, `docs/player/modules/wayland.md` § Wayland) | mpvpaper's `-layer` flag | GPL-3.0 |
 | Auto-pause / auto-stop when the wallpaper is hidden, and pause when a window is fullscreen/maximized/active (`wlr-foreign-toplevel`) | **not implemented yet — Phase 3**, `docs/player/architecture.md` § 6 | mpvpaper's `--auto-pause` / `--auto-stop` | GPL-3.0 |
 
 ### How to resync
@@ -40,7 +40,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 2. If a technique above changed (e.g. the fence stub becomes unnecessary on a newer libmpv, or
    mpvpaper adds a new per-output capability worth having): update the row above, re-verify the
    corresponding Rust code against the new measurement (the "why it's safe" reasoning in
-   `.claude/rules/player-core.md` § Sources "Fence-leak mitigation" must still hold), and bump this file's
+   `docs/player/modules/sources.md` § Sources "Fence-leak mitigation" must still hold), and bump this file's
    *Last reviewed* commit + date.
 3. Nothing here is a patch to re-apply — there is no mpvpaper source in this tree to diff against.
    "Resync" means re-reading mpvpaper's source for the four techniques above, not merging commits.
@@ -53,7 +53,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 - **License**: GPL-3.0
 - **Relationship**: **forked + pinned, built from source** (Phase 2, owner decision D3). The core
   library (`linux-wallpaperengine-core`, its C API `include/linux-wallpaperengine/*.h`) is what
-  `liascape-scene-worker` links (`.claude/rules/player-core.md` § Scene worker → "LWE core"); the
+  `liascape-scene-worker` links (`docs/player/modules/scene-lwe-core.md` §"LWE core"); the
   frontend, dev-viewer and CEF webhelper are not built. Evidence: `docs/player/spikes/lwe-core.md`.
   - **Fork**: <https://github.com/Kryxzort/linux-wallpaperengine>, branch **`livepaper/next-v2`** =
     upstream `next-v2` at the base commit + our patches as commits. The build fetches the fork **by
@@ -214,6 +214,6 @@ it inside this repo's devShell). The source cache is `~/.cache/liascape/src/lwe-
 2. Run `src/player/tests/effects_all.rs` (`cargo test --test effects_all`, from `src/player/`) — it compiles every
    catalogue entry under desktop GL 3.3 core and fails loudly if a new effect body needs a
    compatibility shim `Catalogue::program`'s assembly step doesn't yet provide
-   (`.claude/rules/player-core.md` § Effects "Measured: no compatibility shim needed...").
+   (`docs/player/modules/composition.md` § Effects "Measured: no compatibility shim needed...").
 3. Re-run the UI's own effect preview check (`app/ui`) — the same regenerated `transitions/` feeds
    both consumers from one source of truth.

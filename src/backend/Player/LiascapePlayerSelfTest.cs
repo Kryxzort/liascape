@@ -759,7 +759,7 @@ public static class LiascapePlayerSelfTest
     // ---- Task 20c: next/prev/random's scene-skip decision point ------------------------------
     // TryStepLibrary/ApplyRandom/AdvanceToNext (PlayerHelper) skip a path exactly when
     // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
-    // private IsSkippedPath uses, reused here rather than invented (.claude/rules/player.md /
+    // private IsSkippedPath uses, reused here rather than invented (.claude/rules/backend/legacy-engine.md /
     // player-adapter.md: "skipped exactly like AllowScenes=false"). Needs no player, no
     // mpvpaper, no `serve` — pure decision logic, so this also covers the "legacy engine
     // check that scenes are still reachable when AllowScenes=true" requirement without needing

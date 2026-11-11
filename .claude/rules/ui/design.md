@@ -11,7 +11,7 @@ paths:
 
 # UI design rules (React renderer, `app/ui/src`)
 
-The look-and-feel history, every owner decision and each component's walkthrough: `docs/history/ui.md`.
+The owner's look-and-feel decisions and why: `docs/decisions.md` § UI.
 
 ## Every new UI element (a panel, row, control, badge or overlay) — done only when all hold
 - **Theme**: colours only from the theme vars (`--accent`, `--accent-fg`, `--accent-hover`, `--text`, `--subtext*`, `--bg-*`, `--surface*`, `--danger`, `--success`, `--warn`); never a hard-coded colour.

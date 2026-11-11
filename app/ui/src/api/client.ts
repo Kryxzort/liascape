@@ -5,7 +5,7 @@ const port = params.get("api") || localStorage.getItem("liascape_api_port") || "
 if (port) localStorage.setItem("liascape_api_port", port);
 export const API = port ? `http://127.0.0.1:${port}` : "";
 
-// API: the backend's token (web-backend.md § Local API security — every request but the static UI and /health needs it).
+// API: the backend's token (.claude/rules/backend/api.md § Security — every request but the static UI and /health needs it).
 // The shell (app/shell/main.js) opens the window with ?token=<~/.config/liascape/serve.token>; browser dev: append
 // &token=… yourself. Kept in sessionStorage (a reload keeps it) and taken out of the address bar at once.
 const TOKEN_KEY = "liascape_token";
@@ -256,7 +256,7 @@ export const api = {
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
   workshopUnsubscribe: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; batch: string | null }>("/workshop/unsubscribe", { workshopId, title }),
-  // API: the Steam to-do (the pages the user clicks in the Steam app, one at a time — web-ui.md § Steam to-do)
+  // API: the Steam to-do (the pages the user clicks in the Steam app, one at a time — .claude/rules/backend/sources-steam.md § Workshop downloads)
   steamTodo: () => jget<SteamTodo>("/steam-todo"),
   steamTodoAction: (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => jpost<{ error?: string | null } | void>(`/steam-todo/${a}`),
   open: (body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }) => jpost("/open", body),

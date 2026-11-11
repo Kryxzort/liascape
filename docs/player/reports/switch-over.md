@@ -63,7 +63,7 @@ The night battery's scenes and maximum cells failed four checks; what they were:
   3840×1080 Kimi scene (2371103399), which now takes ~2.5 s to build (warm `--lwe-smoke`: 2.35–2.78 s on every pin
   from 7bbd6de to 5cb69c7; the 11-03 pin 0.86–1.13 s, 10-28's 0.69 s — a real slowdown of the WE port, § 5). The cell
   gives B ~2 s (a 4 s clip minus the previous 1 s effect minus this 1 s effect). A B that isn't ready by the planned
-  start starts at once and A holds its last frame for the difference — the design (`player-core.md` § Align). The
+  start starts at once and A holds its last frame for the difference — the design (`docs/player/modules/transitions.md` § Align). The
   report now tells such a switch apart (`b_late_*`) and checks it against that design; on the night's own events: 13 on
   time (≤ 32.64 ms, +0.7…+3.48 ms), 12 late started 0.0–3.9 ms after B's ready.
 - **scenes × reveal, 1 drop — the detector.** tr-754 was the only end-aligned start more than 40 ms after A's

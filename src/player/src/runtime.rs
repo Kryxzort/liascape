@@ -80,7 +80,7 @@ pub const BUS_STARTUP_WAIT: Duration = Duration::from_millis(500);
 /// anti-click ramp (invariant #4) into a genuinely smooth push sequence in the real
 /// audio output instead of the 1–2 `Animator::tick` evaluations a 60 Hz main tick alone
 /// gives it (measured, Task 16c's report: held steps then an abrupt final jump, 5–7 ms
-/// `micro_gaps`). See `.claude/rules/player-core.md` § Runtime "The fast gain timer".
+/// `micro_gaps`). See `docs/player/modules/runtime.md` § The fast gain timer.
 const GAIN_TICK_PERIOD: Duration = Duration::from_millis(1);
 /// R90: how many recent fast-timer gain pushes the `loop` probe keeps — a test/
 /// diagnostic hook for counting or inspecting real pushes within a ramp without logging
@@ -881,8 +881,7 @@ pub(crate) enum HoldPhase {
 /// anyway.
 const VRAM_RESUME_WAIT: Duration = Duration::from_secs(5);
 
-/// Task 16c (R88) — see `pause_gates`' doc and `.claude/rules/player-core.md` § Runtime
-/// "Player pause/resume anticlick gate". Final review (I2): the gate ramps its **own**
+/// See `pause_gates`' doc and `docs/player/modules/runtime.md` § Three clocks for gains. The gate ramps its **own**
 /// slot, `gain.pause` — never `gain.anticlick`, which the recipe, retire and park ramp on
 /// other clocks — so it composes with every transition phase (a source waiting on an
 /// `align: end` switch, both sides of a full-live crossfade, a ramping grave) and nothing
@@ -3481,7 +3480,7 @@ impl Runtime {
         let kind = req.to.get("kind").and_then(Value::as_str).unwrap_or("");
         let path = req.to.get("path").and_then(Value::as_str).unwrap_or("");
         let hint =
-            "see .claude/rules/player-core.md \u{a7} Runtime \"Outputs\"; `liascape-player ctl state`";
+            "see docs/player/modules/runtime.md \u{a7} Outputs, hotplug and parking; `liascape-player ctl state`";
         if req.effect_id.as_deref() == Some("") {
             return Err(ApiError {
                 code: "out_of_range",

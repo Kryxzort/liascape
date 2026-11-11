@@ -133,7 +133,7 @@ fn unsupported(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "unsupported",
         message: msg.into(),
-        hint: "see .claude/rules/player-core.md \u{a7} Graph & properties".to_string(),
+        hint: "see docs/player/modules/graph-properties.md".to_string(),
     }
 }
 

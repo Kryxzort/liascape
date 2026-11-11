@@ -1,5 +1,5 @@
-//! `capture` off the loop (`.claude/rules/player-core.md` § GFX / EGL → "`capture` never stalls
-//! the loop"). The loop only **starts** the GPU readback (`Gfx::start_read_back`:
+//! `capture` off the loop (`docs/player/modules/gfx-egl.md` § Capture off
+//! the loop). The loop only **starts** the GPU readback (`Gfx::start_read_back`:
 //! `glReadPixels` into a pixel-pack buffer + a fence — the picture as of the request, GL runs
 //! commands in order), polls the fence on later iterations ([`Capturer::pump`]: after every
 //! dispatch, and on a 1 ms timer while one is on the GPU) and, once the copy is done, maps the

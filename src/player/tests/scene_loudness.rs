@@ -1,5 +1,5 @@
 //! `liascape-player scene-loudness` (the offline scene loudness estimate's CLI —
-//! `.claude/rules/player-core.md` § Scene worker → "Scene loudness" → "Offline estimate"): a
+//! `docs/player/modules/scene-loudness.md` § Offline estimate): a
 //! generated packaged scene, end to end through the binary. Needs ffmpeg (SKIP without it).
 
 use std::path::PathBuf;

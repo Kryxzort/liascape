@@ -15,7 +15,7 @@
 //! property changes (`graph::Graph::drain_changes`) to [`Source::apply`], calls
 //! [`Source::update`] each tick (never blocks), and collects [`Source::poll_events`] for
 //! the recipes and the command API's `ready`/`ended`/`position`/`error` events. See
-//! `.claude/rules/player-core.md` § Sources.
+//! `docs/player/modules/sources.md`.
 
 pub mod color;
 pub mod host;
@@ -112,7 +112,7 @@ pub(crate) fn unsupported(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "unsupported",
         message: msg.into(),
-        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+        hint: "see docs/player/modules/sources.md".to_string(),
     }
 }
 
@@ -120,7 +120,7 @@ pub(crate) fn bad_type(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "bad_type",
         message: msg.into(),
-        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+        hint: "see docs/player/modules/sources.md".to_string(),
     }
 }
 
@@ -128,7 +128,7 @@ pub(crate) fn out_of_range(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "out_of_range",
         message: msg.into(),
-        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+        hint: "see docs/player/modules/sources.md".to_string(),
     }
 }
 
@@ -136,7 +136,7 @@ pub(crate) fn io_error(msg: impl Into<String>) -> ApiError {
     ApiError {
         code: "io",
         message: msg.into(),
-        hint: "see .claude/rules/player-core.md \u{a7} Sources".to_string(),
+        hint: "see docs/player/modules/sources.md".to_string(),
     }
 }
 

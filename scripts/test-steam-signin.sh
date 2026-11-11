@@ -108,7 +108,7 @@ cat > "$T/drive.mjs" <<'EOF'
 // (drops the item into the Workshop folder once its page was "opened")
 import fs from "node:fs";
 const [U, T] = [process.env.U, process.env.T];
-// the backend's API token (serve.token beside serve.port; web-backend.md § Local API security) on every request + the WS
+// the backend's API token (serve.token beside serve.port; .claude/rules/backend/api.md § Security) on every request + the WS
 const TOKEN = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/serve.token`, "utf8").trim();
 const realFetch = globalThis.fetch;
 globalThis.fetch = (u, o = {}) => realFetch(u, { ...o, headers: { ...(o.headers || {}), "X-Liascape-Token": TOKEN } });

@@ -154,7 +154,7 @@ public static class AppOps
     }
 
     // ffprobe the video length in seconds.
-    // ---- scene user properties (the card settings modal's "Scene properties"; library.md) ----
+    // ---- scene user properties (the card settings modal's "Scene properties"; .claude/rules/backend/library.md) ----
     private static bool IsSceneItem(string path) =>
         !string.IsNullOrEmpty(path) && PlayerHelper.IsScenePath(path) && Directory.Exists(path);
 
@@ -470,7 +470,7 @@ public static class AppOps
     {
         if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
         {
-            // Task 7 (web-backend.md § Trash): the program's items lose it (the bar's survivors), then the rotation goes
+            // Task 7 (.claude/rules/backend/api.md § Session and playlist operations): the program's items lose it (the bar's survivors), then the rotation goes
             // on to the next survivor at once — the item after the trashed one's place (the reorder rule)
             var keep = (pl?.VideoPaths ?? LiascapePlayerProgram.Paths?.ToList() ?? []).Where(x => !del.Contains(x)).ToList();
             if (keep.Count > 0)

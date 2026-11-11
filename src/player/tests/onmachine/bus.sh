@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Task 14 on-machine check: the player audio bus + bus meter, with REAL audio on the owner's
-# PipeWire session (R56). Exit 0 = pass. Spec §5.3; .claude/rules/player-core.md § Audio bus.
+# PipeWire session. Exit 0 = pass. Spec §5.3; docs/player/modules/audio-bus.md.
 #
 #   1. `serve` creates the bus: `pactl list sinks short` has exactly one liascape-player-bus; the
 #      identity contract (pw-dump + `pactl list sink-inputs`); `pw-link -l` shows the bus

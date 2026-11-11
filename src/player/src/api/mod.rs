@@ -7,7 +7,7 @@
 //! - [`capture`] — `capture`'s GPU readback, encode and write, off the loop.
 //!
 //! The loop that drives all of it is `crate::runtime`; the shell client is `crate::ctl`.
-//! Reference: `.claude/rules/player-core.md` § Command API.
+//! Reference: `docs/player/modules/command-api.md`.
 
 pub mod capture;
 pub mod handlers;

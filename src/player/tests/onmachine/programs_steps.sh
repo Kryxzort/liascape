@@ -101,7 +101,7 @@ dropout_cell() { # <cell> <method> <props json> <seconds per switch>
             "$HANDOFF_CUT_MS … +$HANDOFF_HOLD_MS ms (never cut, held ≤ one output frame)" "$(pyb "$lo >= $HANDOFF_CUT_MS and $hi <= $HANDOFF_HOLD_MS")"
     fi
     # A B not ready by the planned start (2026-11-11: the 3840×1080 Kimi scene takes ~2.5 s to build, the scenes
-    # cell gives it ~2 s) is not a precision sample: by design (player-core.md § Align) its effect starts as B
+    # cell gives it ~2 s) is not a precision sample: by design (docs/player/modules/transitions.md § Align) its effect starts as B
     # becomes ready and A holds its last frame for the difference — checked as that.
     if [[ $method == full-live && $(jq -r '.b_late_n // 0' <<<"$c") -gt 0 ]]; then
         local wlo whi

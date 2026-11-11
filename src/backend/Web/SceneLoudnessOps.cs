@@ -10,7 +10,7 @@ using Liascape.Player;
 
 namespace Liascape.Web;
 
-// The background scene-loudness queue (web-backend.md § Scene loudness; docs/TODO.md "Offline scene loudness →
+// The background scene-loudness queue (.claude/rules/backend/api.md § Scene loudness queue; docs/TODO.md "Offline scene loudness →
 // integration"): ONE `liascape-player scene-loudness` child at a time under `nice -n 19 ionice -c3`
 // (SceneLoudnessPlanner), never on a request thread, never touching playback. Fed by an import (a WE local import,
 // a Workshop download, the auto-add sync + `/library/sync` — every library scene still without an estimate, so a

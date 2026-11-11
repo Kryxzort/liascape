@@ -14,7 +14,7 @@ using Liascape.Models;
 namespace Liascape.Player;
 
 // The media primitives PlayerHelper dispatches to under PlayerEngine=liascape-player
-// (.claude/rules/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
+// (.claude/rules/backend/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
 // a switch is ONE `transition` request (a cut when transitions are off); every setting reaches the live
 // sources through ONE resolver (`ResolveNow`, "the effective-settings resolver" below): each live source
 // — on screen, either side of an effect, a pending B — gets ITS OWN item's effective value, diffed
@@ -302,7 +302,7 @@ public static class LiascapePlayerMedia
     }
 
     // ---- scene GPU budget + VRAM (Phase 2 Task 8) ---------------------------------------------------
-    // Three player-level props, all live (player-core.md § Scene worker → "GPU budget and VRAM"):
+    // Three player-level props, all live (docs/player/modules/scene-gpu-budget.md):
     // `player.scene_throttle` ← AutoThrottleScenes, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
     // LimitVramPerScene (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
     // (coalescible per prop, `player:<prop>`); a new player process gets every one (`AssertSceneFps`).
@@ -507,7 +507,7 @@ public static class LiascapePlayerMedia
     // belongs to the dead process → forget them (the waits end as failed → the caller's fallback).
     // R81: the new process's graph starts from its own snapshot (which may be stale — a save that
     // hadn't caught up before the crash — or, from the 4th restart in a 60 s window, not restored at
-    // all, player-core.md § Supervisor "Budget") — never from what the backend's MODEL says should be
+    // all, docs/player/modules/persistence.md § Supervisor) — never from what the backend's MODEL says should be
     // showing. Re-apply every current effective setting through the ordered queue so neither gap can
     // leave a stale value on screen. Fire-and-forget: this runs ON the client's event-reading callback
     // (inside LiascapePlayerClient.Call's lock for the request-connection case), so it must never block —
@@ -795,7 +795,7 @@ public static class LiascapePlayerMedia
     // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
     public static Dictionary<string, object?> SourceProps(string path, AppSettings s)
     {
-        bool scene = PlayerHelper.IsScenePath(path); // a scene's play path is its item folder (library.md)
+        bool scene = PlayerHelper.IsScenePath(path); // a scene's play path is its item folder (.claude/rules/backend/library.md)
         var props = new Dictionary<string, object?>
         {
             ["path"] = path,
@@ -803,7 +803,7 @@ public static class LiascapePlayerMedia
             ["loop"] = s.Loop,
         };
         // Phase 2: what the player shows while no worker frame exists (a crash before the first frame,
-        // a broken scene — player-core.md § Scene worker); the video-only props are stored, no effect
+        // a broken scene — docs/player/modules/scene-crash-policy.md); the video-only props are stored, no effect
         if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
         // the scene's loudness measured over its earlier plays of its current audio configuration (`loudness_key`, a
         // resolver value), else that configuration's estimate (10 s of play): this source continues it (create only —
@@ -920,7 +920,7 @@ public static class LiascapePlayerMedia
     // Phase 3 Task 7: a rotation program switches inside the player, and under advance-on-end its next end-of-video
     // switch is armed right after each handoff — the 10 s check never finds a quiet moment. So at each program commit
     // (`program.current`): once its effect handed off — only an ARMED switch left, which the program's snapshot re-arms
-    // for A's end after the restart (player-core.md § Programs, Persistence) — a stale player is upgraded.
+    // for A's end after the restart (docs/player/modules/programs.md § Persistence) — a stale player is upgraded.
     private static int _upgradeAtCommit;
     public static void UpgradeAfterCommit()
     {
@@ -1670,8 +1670,7 @@ public static class LiascapePlayerMedia
         return true;
     }
 
-    // R75 (final): player-level pause. The Player node's `paused` (player-core.md § Graph & properties
-    // "Player node paused") freezes every source's EFFECTIVE pause (`node.paused || player.paused`,
+    // Player-level pause. The Player node's `paused` (docs/player/modules/graph-properties.md § Player-level pause) freezes every source's EFFECTIVE pause (`node.paused || player.paused`,
     // never the node's own raw value, so a recipe-held side like reveal/frozen's A stays exactly as the
     // recipe left it) AND the transition recipe's own clock (`Runtime::now()` excises paused time), so
     // one `set player.paused` now freezes a pending B and an in-flight effect too — the interim R75a

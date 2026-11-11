@@ -1,4 +1,4 @@
-//! Pure scene helpers (Phase 2; `.claude/rules/player-core.md` § Scene worker): the export
+//! Pure scene helpers (`docs/player/modules/scene-worker.md`): the export
 //! size of a scene's frame ring ([`cover_size`]), the synthetic test scene's spec
 //! ([`synthetic`], D7), WE's assets dir ([`assets`], Task 7), the pointer → scene mapping
 //! ([`pointer`], Task 7), the worker GPU budget ([`budget`], Task 8), the `scene.pkg` reader

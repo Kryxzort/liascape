@@ -8,7 +8,7 @@
 //! (`paths`), shell client (`ctl`), the supervisor (`supervise`), the state snapshot
 //! (`snapshot`), the backend's outbox (`outbox`, Phase 3) and the scene worker's compositor side (`worker`, Phase 2). Later tasks
 //! append modules here — see
-//! `.claude/rules/player-core.md` for the map.
+//! `.claude/rules/player/core.md` for the map.
 
 pub mod anim;
 pub mod api;

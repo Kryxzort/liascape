@@ -25,7 +25,7 @@ public sealed class LibMeta
     public double? LoudnessLRA { get; set; }    // loudness range (LU)
     public double? LoudnessThresh { get; set; } // measurement threshold
     public bool? LoudnessSkip { get; set; }     // true = no audio track → nothing to normalize, don't retry
-    // A WE scene's loudness (liascape-player only — library.md § Loudness): kept PER AUDIO CONFIGURATION, keyed by
+    // A WE scene's loudness (liascape-player only — .claude/rules/backend/library.md § Loudness): kept PER AUDIO CONFIGURATION, keyed by
     // the offline estimator's `fingerprint` of the scene's sound under its user properties (`liascape-player
     // scene-loudness`; a property that changes no sound keeps it). Each entry holds the estimate (computed from the
     // scene's files on import / Settings → Sound → "Pre-measure scenes") and the live measurement (the player's `scene.loudness`

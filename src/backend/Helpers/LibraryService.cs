@@ -55,7 +55,7 @@ public static class LibraryService
         LibraryStore.SetMeta(mediaPath, m => m.Speed = speed);
     }
 
-    // ---------- scene user properties (SceneProperties; library.md § "Scene properties") ----------
+    // ---------- scene user properties (SceneProperties; .claude/rules/backend/library.md § Scene properties) ----------
     public static Dictionary<string, JsonElement>? ReadSceneProps(string scenePath) => LibraryStore.GetMeta(scenePath)?.SceneProps;
 
     // One property's override (`value` null = back to the scene's default), or every one (`name` null). A value
@@ -133,11 +133,11 @@ public static class LibraryService
     private const double PeakCeilingDb = -1.0;
 
     // ---- a WE scene's loudness, per audio configuration: estimated offline, learned live (liascape-player) ----
-    // LibMeta.SceneLoudness[fingerprint] = {estimate, live} (library.md § Loudness). The fingerprint is the offline
+    // LibMeta.SceneLoudness[fingerprint] = {estimate, live} (.claude/rules/backend/library.md § Loudness). The fingerprint is the offline
     // estimator's (`liascape-player scene-loudness`, SceneLoudnessPlanner) of the scene's sound under its user
     // properties: toggling a sound off and back on returns to the measurement that configuration already had, a
     // never-played combination starts from its estimate. The player measures (BS.1770, pre-gain, AUDIBLE play —
-    // player-core.md § Scene worker → "Scene loudness"; one measurement per (path, `loudness_key`)): the first report
+    // docs/player/modules/scene-loudness.md; one measurement per (path, `loudness_key`)): the first report
     // after ~60 s, then one per further 60 s and at the end of each play, each covering EVERY play of that
     // configuration so far, until its cap (30 min). The resolver turns the applied value into the scene source's
     // `gain.normalize` (LiascapePlayerMedia.SceneNormalizeDb).

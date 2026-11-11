@@ -1,5 +1,4 @@
-//! The scene worker's wire protocol (Phase 2 Task 3; `.claude/rules/player-core.md` § Scene
-//! worker): one JSON object per `SOCK_SEQPACKET` datagram (≤ [`MAX_MSG`] = 64 KiB), file
+//! The scene worker's wire protocol (`docs/player/modules/scene-worker.md`): one JSON object per `SOCK_SEQPACKET` datagram (≤ [`MAX_MSG`] = 64 KiB), file
 //! descriptors (dmabuf planes, sync_file fences) riding `SCM_RIGHTS` on the same datagram.
 //! Both ends use these types — the compositor (`worker::WorkerHost`) and `liascape-scene-worker`.
 //!

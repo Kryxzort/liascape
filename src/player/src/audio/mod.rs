@@ -1,7 +1,6 @@
 //! Audio (spec §5.3; Task 14): the player audio bus ([`Bus`], `bus.rs`) — one in-process
 //! PipeWire loopback sink every wallpaper plays into, forwarded to the default sink — and
-//! the bus meter ([`Meter`], `meter.rs`) on its monitor. See `.claude/rules/player-core.md`
-//! § Audio bus.
+//! the bus meter ([`Meter`], `meter.rs`) on its monitor. See `docs/player/modules/audio-bus.md`.
 //!
 //! [`Audio::start`] is what `serve` runs: the bus + its meter (the bus thread connects in
 //! the background — it never blocks `serve`, and retries until PipeWire is there), or — when

@@ -161,7 +161,7 @@
 
       # 3c) liascape-player (Rust): the "utopia player" compositor that will replace mpvpaper +
       # liascape-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
-      # .claude/rules/player-core.md. bindgenHook + pkg-config are wired now even though this
+      # .claude/rules/player/core.md. bindgenHook + pkg-config are wired now even though this
       # task doesn't bindgen anything yet, so Task 10 (libmpv FFI) doesn't have to touch the
       # flake again.
       liascape-player = pkgs.rustPlatform.buildRustPackage {
@@ -199,7 +199,7 @@
 
       # 4) Electron shell sources (plain JS; electron comes from nixpkgs, not the bundled prebuilt
       # which can't dlopen its libs on NixOS). Keep the 42.x pin — older crash-loops the GPU on
-      # NVIDIA + kernel ≥6.12 (see .claude/rules/distribution.md).
+      # NVIDIA + kernel ≥6.12 (see .claude/rules/build-and-packaging.md).
       shellSrc = pkgs.runCommand "liascape-shell-src" { } ''
         mkdir -p $out
         cp -r ${./app/shell}/. $out/

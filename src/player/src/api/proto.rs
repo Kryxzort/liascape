@@ -7,7 +7,7 @@
 //! - event (connections that `subscribe`d) `{"event":"<kind>","corr":…,"t_mono_ms":…, …}` —
 //!   an event-log record with `kind` renamed to `event`
 //!
-//! Lines are capped at [`MAX_LINE`]; see `.claude/rules/player-core.md` § Command API.
+//! Lines are capped at [`MAX_LINE`]; see `docs/player/modules/command-api.md`.
 
 use serde_json::{Map, Value, json};
 
@@ -18,7 +18,7 @@ use crate::graph::ApiError;
 pub const MAX_LINE: usize = 1024 * 1024;
 
 /// Where every error's hint points when there's nothing more specific to say.
-pub const DOC: &str = ".claude/rules/player-core.md \u{a7} Command API";
+pub const DOC: &str = "docs/player/modules/command-api.md";
 
 /// One parsed request.
 #[derive(Debug, Clone)]

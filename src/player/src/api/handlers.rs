@@ -3,7 +3,7 @@
 //! `probe`/`effects`/`hello`), the backend's outbox (`outbox.read`/`outbox.ack`), `capture`,
 //! lifecycle (`stop`/`quit`), and the headless-only
 //! `step` + `headless.*`. Each verb is documented, with a `ctl` example, in
-//! `.claude/rules/player-core.md` § Command API — keep [`VERBS`] and that table in step.
+//! `docs/player/modules/command-api.md`.
 
 use std::time::Duration;
 

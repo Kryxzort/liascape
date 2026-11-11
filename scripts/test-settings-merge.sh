@@ -52,7 +52,7 @@ mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
-# per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
+# per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -273,7 +273,7 @@ PF='["librarySortIndex","lweVolume","sceneTransitionDelayMs","fullLiveSyncOffset
 lost=$(python3 - "$U" "$PF" <<'PY'
 import http.client, json, os, sys, threading
 host, port = sys.argv[1].split("//")[1].split(":"); fields = json.loads(sys.argv[2]); lost = 0
-# the API token (web-backend.md § Local API security) — without it every request was a 401 ("80 of 80 lost")
+# the API token (.claude/rules/backend/api.md § Security) — without it every request was a 401 ("80 of 80 lost")
 TOKEN = open(os.environ["XDG_CONFIG_HOME"] + "/liascape/serve.token").read().strip()
 def req(method, body=None):
     c = http.client.HTTPConnection(host, int(port), timeout=10)

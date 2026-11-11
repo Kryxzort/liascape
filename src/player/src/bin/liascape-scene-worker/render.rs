@@ -1,5 +1,5 @@
-//! A real WE scene in the worker (Phase 2 Task 7; `.claude/rules/player-core.md` § Scene
-//! worker → "Real scenes"): LWE's core ([`lwe::Scene`]) loaded and built on the worker's GL
+//! A real WE scene in the worker (`docs/player/modules/scene-lwe-core.md`
+//! § Rendering a real scene): LWE's core ([`lwe::Scene`]) loaded and built on the worker's GL
 //! context, rendered into a native-sized FBO (the core draws its final quad with
 //! `glViewport(0, 0, sceneW, sceneH)`, spike §2), then blitted into the export ring's slot at
 //! the slot's (cover) size — never exported at the native size — with no flip (the core's

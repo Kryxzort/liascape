@@ -10,7 +10,7 @@
 //!   [`EffectProgram`].
 //! - [`compose`] — layer composition (Task 9): [`Composer`], [`fit_rect`], [`UvRect`].
 //!
-//! See `.claude/rules/player-core.md`'s "GFX / EGL", "Effects" and "Composition" sections
+//! See `docs/player/modules/gfx-egl.md` and `docs/player/modules/composition.md`
 //! for the display-selection order, the surfaceless requirement, the `read_rgba`/
 //! `write_png` coordinate-origin conventions, the effect-catalogue header-rewrite/
 //! uniform-binding contract, and the composer's fit/viewport/opacity rules later tasks

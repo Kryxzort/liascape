@@ -122,7 +122,7 @@ sealed class Program
     }
 
     // liascape-player mutations are queued (fire-and-forget off the caller's thread — see
-    // LiascapePlayerMedia.Queue / .claude/rules/player-adapter.md § Threading) so the long-lived `serve`
+    // LiascapePlayerMedia.Queue / .claude/rules/backend/player-adapter.md § Threading) so the long-lived `serve`
     // backend's _lock never waits on the player. A one-shot CLI invocation (`kill`, a keybind action,
     // `restore`) has no such lifetime: if the process exits right after enqueueing a switch/set, the
     // queued work may never actually run (the whole CLR goes with it) — the exact gap this closes,

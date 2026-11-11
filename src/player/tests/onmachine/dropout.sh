@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Task 15 on-machine check: the reference-based dropout detector, with REAL audio on the
 # owner's PipeWire session. Exit 0 = pass. Spec §5.3, §9 "debug mode";
-# .claude/rules/player-core.md § Audio bus / § Command API; docs/player/debugging.md.
+# docs/player/modules/audio-bus.md, docs/player/modules/command-api.md; docs/player/debugging.md.
 #
 #   1. `serve --headless --debug` (R71: debug mode on) plays a 440 Hz tone (clip A), then a
 #      1000 ms full-live fade to a 660 Hz tone (clip B): once `transition.done` fires, the

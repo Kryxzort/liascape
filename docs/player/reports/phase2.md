@@ -319,7 +319,7 @@ playing on both outputs (e.g. 2371103399 — it has sound — on DP-1, 172690211
   compositor's own loop was blocked for ≥ 4.4 s of the VRAM save (a driver call while the GPU was busy saving), and
   its first heartbeat after the stall judged the worker by a deadline that ran out while the compositor itself
   couldn't run.
-- **The false hang and its fix** (2026-10-29; player-core.md § Scene worker → WorkerHost → Heartbeat). "Hung" now
+- **The false hang and its fix** (2026-10-29; docs/player/modules/scene-worker.md §WorkerHost → Heartbeat). "Hung" now
   means the worker is the reason no frame comes: (1) **starved** — while the compositor holds every slot of the
   worker's ring (it tracks the ring's `buffer`s and the slots between `frame` and `release`) the outstanding ticks'
   age doesn't count and liveness is a ping, which the idle renderer answers (and, robust, checks the reset status
@@ -526,7 +526,7 @@ to confirm on a quiet one).** `perf trace` of the main thread (base = `2fec9e1`,
   dropout probe's 1 kHz gain history cloned every source id.
 
 Fixes ("Update Only The Source A Wake Was For", "Drop The Scene Transport's Idle Syscalls", "Stop Allocating On Every
-Graph Write"; `player-core.md` § Sources "Per-frame cost"): a wake updates only the sources whose fd fired (the tick
+Graph Write"; `docs/player/modules/sources.md` § Sources "Per-frame cost"): a wake updates only the sources whose fd fired (the tick
 still updates all), `sync_sources` runs after a dispatch only when due (`sync_due`), routing is cached per
 `Graph::demand_rev` (`redraw::Routes`), a scene reads its worker only when its epoll says so and `waitpid`s only an
 ending worker (else every 100 ms), the GL context is made current only for GL work, a signalled acquire fence is

@@ -249,13 +249,13 @@ fi
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
-# per call — a restarted backend may have written it since; web-backend.md § Local API security). /health needs none.
+# per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions LIASCAPE_UI_DIR=$T/ui
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 # restart:initDown loads the built UI from file:// (the dev topology: the UI on another origin than the backend — Chromium
 # sends Origin "null" on its fetches, "file://" on its WebSocket); a backend that serves its own UI admits no other
-# origin unless told (web-backend.md § Local API security)
+# origin unless told (.claude/rules/backend/api.md § Security)
 export LIASCAPE_DEV_ORIGINS=null,file://
 # Phase 2 scenes: the private player (and any the backend starts) plays synthetic scene folders with this build's worker,
 # and measures VRAM through a fake probe the scene cells drive (healthy by default: 6000 of 8192 MiB free — the

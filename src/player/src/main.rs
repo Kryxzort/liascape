@@ -11,8 +11,8 @@
 //! liascape-player ctl subscribe <prefix…>
 //! ```
 //!
-//! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (Task 13,
-//! `.claude/rules/player-core.md` § Wayland). See § Command API for `ctl`.
+//! `serve` without `--headless` draws on every `wl_output` of `$WAYLAND_DISPLAY` (`docs/player/modules/wayland.md`).
+//! `ctl` is the command API's client (`docs/player/modules/command-api.md`).
 //!
 //! `serve` is **supervised** by default (Task 16, `supervise.rs`, § Supervisor): this
 //! process stays a small supervisor and runs the compositor as a child
@@ -233,7 +233,7 @@ fn main() -> ExitCode {
 
 /// `liascape-player scene-loudness <scene dir> [--assets <dir>] [--props '<json>'] [--model lwe|we]
 /// [--seed-seconds S] [--horizon S] [--cache <dir>|--no-cache]` — the OFFLINE loudness estimate of
-/// a WE scene (`scene::loudness_estimate`; player-core.md § Scene worker → "Scene loudness" →
+/// a WE scene (`scene::loudness_estimate`; docs/player/modules/scene-loudness.md §"Scene loudness" →
 /// "Offline estimate"): one JSON object `{path, estimated: true, model, fingerprint, lufs,
 /// lufs_if_coherent, peak_dbfs, audible_s, horizon_s, state, seed {weight_s, state}, confidence
 /// {level, notes}, sounds, files, cache, ms}` — `state`/`seed.state` are the live learner's

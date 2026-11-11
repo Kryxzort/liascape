@@ -1,7 +1,7 @@
 //! Wallpaper Engine's `scene.pkg` container (read-only), for the offline loudness estimate
 //! ([`super::loudness_estimate`]). Layout (little-endian; LWE's `PackageParser`, confirmed on
-//! every `scene.pkg` of the owner's Workshop library — `.claude/rules/player-core.md` § Scene
-//! worker → "Scene loudness" → "Offline estimate"):
+//! every `scene.pkg` of the owner's Workshop library — `docs/player/modules/scene-loudness.md`
+//! § Offline estimate):
 //!
 //! ```text
 //! u32 n, n bytes   header "PKGV00xx" (xx = 01…24 seen; one layout for all of them)

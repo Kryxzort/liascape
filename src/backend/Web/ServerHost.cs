@@ -56,7 +56,7 @@ public static class ServerHost
         builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, fixedPort));
         var app = builder.Build();
 
-        // Local API security (web-backend.md § Local API security; owner 2026-11-11 "make the app as a whole more secure"):
+        // Local API security (.claude/rules/backend/api.md § Security):
         // the token, the Host check and the origin rule, ahead of everything — the error handler below included, so a refusal
         // never runs an endpoint. The static UI (LIASCAPE_UI_DIR) needs no token: its page gets one from its URL (main.js).
         var uiDir = Environment.GetEnvironmentVariable("LIASCAPE_UI_DIR");
@@ -538,7 +538,7 @@ public static class ServerHost
             TrailerOps.Kick("sync");
             return Results.Json(new { added });
         });
-        // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; web-backend.md § Scene loudness):
+        // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; .claude/rules/backend/api.md § Scene loudness queue):
         // queue {paths?: [...] (none = every scene), force?: recalculate what's already estimated} → {queued}
         app.MapPost("/library/scene-loudness/estimate", (SceneLoudnessReq? r) =>
             Results.Json(new { queued = SceneLoudnessOps.Enqueue(r?.Paths is { Count: > 0 } p ? p : null, r?.Force == true, "request") }));
@@ -559,7 +559,7 @@ public static class ServerHost
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
             LibraryItem item;
             try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl); }
-            // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (web-ui.md § Steam to-do)
+            // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
             catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
             if (r.Apply) { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
                 SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } }); }
@@ -660,7 +660,7 @@ public static class ServerHost
         app.MapPost("/workshop/unsubscribe", (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
-        // the Steam to-do (Web/SteamTodo.cs; sources.md § Download): the pages the user clicks in the Steam app, one at a time
+        // the Steam to-do (Web/SteamTodo.cs; .claude/rules/backend/sources-steam.md § Workshop downloads): the pages the user clicks in the Steam app, one at a time
         app.MapGet("/steam-todo", () => Results.Json(SteamTodo.Payload()));
         app.MapPost("/steam-todo/next", () => { SteamTodo.Next(); return Results.Ok(); });
         app.MapPost("/steam-todo/reopen", () => { SteamTodo.Reopen(); return Results.Ok(); });
@@ -697,7 +697,7 @@ public static class ServerHost
         // the engine can't, or crashed and not whitelisted) are skipped (PlayerHelper.IsSkippedPath), but when
         // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()
         // an unplayable path. Catch that domain exception here so it's a clear 409, never an
-        // unhandled 500 (player-adapter.md / player.md: never invent a new skip mechanism).
+        // unhandled 500 (player-adapter.md / .claude/rules/backend/legacy-engine.md: never invent a new skip mechanism).
         app.MapPost("/next", () =>
         {
             try { PlayerHelper.NextWallpaper(); return Results.Ok(); }

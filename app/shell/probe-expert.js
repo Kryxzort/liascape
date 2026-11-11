@@ -1,6 +1,6 @@
 // Settings levels + playlist start probe — `scripts/test-ui-matrix.sh --probe probe-expert.js` (the matrix's hermetic stack:
-// private backend + headless liascape-player + this tree's UI). Settings levels (owner 2026-11-06, web-ui.md § "Settings
-// levels") + Phase 3 Task 10 (plan 2026-10-29 § Playlist start):
+// private backend + headless liascape-player + this tree's UI). Settings levels (.claude/rules/ui/state-and-api.md
+// § Settings page) + Phase 3 Task 10 (plan 2026-10-29 § Playlist start):
 //   1. Standard is the default: the level picker sits in the top bar (Basic · Standard · Advanced · Expert), no
 //      Advanced / Expert row renders
 //   2. each level shows its own rows and every row below it (tagged Advanced / Expert); the choice is saved and survives a reload
@@ -16,7 +16,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));

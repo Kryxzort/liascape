@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 1.96 (edition 2024, the `liascape-player` crate) · smithay-client-toolkit 0.21 (+ `wayland-protocols-wlr` `zwlr_foreign_toplevel_manager_v1` v3, the fallback cover source) · Hyprland / Sway IPC sockets (std `UnixStream`) · C# .NET 10 (adapter) · React (one Settings row) · the existing hermetic scripts.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-utopia-player-design.md`: §4.2 Program/Signal/Clock rows, §4.3 recipes ("Video-end-aligned advance", "Pause when fullscreen"), §4.4 (the backend's role), §10 parity (modes, keybinds, compose matrix), §11 bar, §12 item 3. What exists already: `.claude/rules/player-core.md` (§ Graph, § Transition recipe, § Runtime, § Command API, § Supervisor, § Snapshot), `.claude/rules/player-adapter.md` (§ Dispatch points, § Rotation, § Reconnection, § Lifecycle), `.claude/rules/session.md` § Timed Playlist, `.claude/rules/player.md` § Centralized Helpers / § One timer owner / § Restart Daemon. Executors read all of these. The C# code being ported is the reference for every rule this plan names: `src/backend/Helpers/PlayerHelper.cs` (`Tick`, `ItemPlayRule`, `HoldForMinPlay`, `AdvanceToNext`, `RandomAndLaunch`, `StepBackAndLaunch`, `ReorderPlaylist`, `UpdateTimedSettings`, `PostSwitch`, `DispatchPendingAction`) and `TransitionService.PickEffect/PickDuration/Pick`.
+**Spec:** `docs/superpowers/specs/2026-10-20-utopia-player-design.md`: §4.2 Program/Signal/Clock rows, §4.3 recipes ("Video-end-aligned advance", "Pause when fullscreen"), §4.4 (the backend's role), §10 parity (modes, keybinds, compose matrix), §11 bar, §12 item 3. What exists already: `.claude/rules/player/core.md` (§ Graph, § Transition recipe, § Runtime, § Command API, § Supervisor, § Snapshot), `.claude/rules/backend/player-adapter.md` (§ Dispatch points, § Rotation, § Reconnection, § Lifecycle), `.claude/rules/backend/legacy-engine.md` § Timed playlist, `.claude/rules/backend/legacy-engine.md` § Centralized Helpers / § One timer owner / § Restart Daemon. Executors read all of these. The C# code being ported is the reference for every rule this plan names: `src/backend/Helpers/PlayerHelper.cs` (`Tick`, `ItemPlayRule`, `HoldForMinPlay`, `AdvanceToNext`, `RandomAndLaunch`, `StepBackAndLaunch`, `ReorderPlaylist`, `UpdateTimedSettings`, `PostSwitch`, `DispatchPendingAction`) and `TransitionService.PickEffect/PickDuration/Pick`.
 
 ---
 
@@ -86,7 +86,7 @@
 
 ## Global Constraints
 
-- **Invariant:** never hand an audible or visible stream between owners; only ramp gains/opacities on streams that keep running. Programs only *request* transitions; the recipe (`player-core.md` § Transition recipe) stays the one place a switch happens. Invariants #1–#11 (`docs/player/invariants.md`) hold unchanged.
+- **Invariant:** never hand an audible or visible stream between owners; only ramp gains/opacities on streams that keep running. Programs only *request* transitions; the recipe (`docs/player/modules/transitions.md` § Transition recipe) stays the one place a switch happens. Invariants #1–#11 (`docs/player/invariants.md`) hold unchanged.
 - Gains are dB; silent = −96 dB; ≤ 30 ms anti-click ramps; audio follows the picture; equal-power crossfades.
 - **Rotation contract (verbatim from `player-adapter.md` § Rotation, owner-approved 2026-10-28):**
   - "Switch when video ends" off → `interval` is "Switch every": a plain timer, speed-scaled by the playing item's speed (scenes included), switching `align:now` even mid-video. The maximum does not apply.
@@ -99,7 +99,7 @@
   - A **1-item** session never switches by itself; next/random switch to its one item with its transition; previous steps back through its history.
   - A timer interval change keeps the proportional remaining exactly as `UpdateTimedSettings` computes it: `elapsed = max(0, old − remaining)`; `remaining = elapsed ≥ new ? new : new − elapsed`.
   - A new minimum re-arms an armed or held switch to the same B. A new maximum, or new scene timing, is read at the next tick.
-- **Shuffle and history contract** (session.md, UI matrix `shuffle:*`):
+- **Shuffle and history contract** (.claude/rules/backend/state-files.md, UI matrix `shuffle:*`):
   - Each cycle is one pass in a fresh order; the new cycle's first item ≠ the old cycle's last.
   - Turning shuffle on mid-session plays the rest once first.
   - Sequential = the playlist bar's order.
@@ -297,7 +297,7 @@ pub fn pick(cfg: &TransitionCfg, last_effect: Option<&str>, defaults_of: &dyn Fn
 > - A program node never moves `picture_rev`/`demand_rev` on create/destroy; a `set` on it still does (the `Graph::apply_set` lines are mid-edit by F6b — left alone).
 > - The `transition`/`cancel` verbs and an output removal used to drain-and-drop the transition outbox; they now stash it (`Runtime::stash_tr_events`) so the programs see every event with the next tick.
 > - No event field may be called `kind`: it overwrites the log record's own `kind` (the event name).
-> - The Task 2 docs (`player-core.md` § Programs + Command API rows) landed inside commit 40b7402 — another agent committed the whole working-tree file.
+> - The Task 2 docs (`docs/player/modules/command-api.md` § Programs + Command API rows) landed inside commit 40b7402 — another agent committed the whole working-tree file.
 
 **Size: M.**
 
@@ -563,7 +563,7 @@ Events: `cover.changed {output, covered, app_id, pid, source}`, `cover.engaged {
 
 **Files:**
 - Create: `src/backend/Player/LiascapePlayerProgram.cs`
-- Modify: `src/backend/Helpers/PlayerHelper.cs` (dispatches below), `src/backend/Player/LiascapePlayerMedia.cs` (`Desired` split into `DesiredGlobal()` + `DesiredItem(path)`; every resolver pass that changes a global also queues `LiascapePlayerProgram.PushDefaults()`; per-item changes queue `PushItem(path)`; `ReconcileShown` skips while a program is active — the player owns the intent; event subscription + `program.`), `src/backend/Player/LiascapePlayerClient.cs` (`Topics` + `program.`), `src/backend/Web/{AppOps.cs, ServerHost.cs}` (route through the dispatches), `src/backend/Player/LiascapePlayerSelfTest.cs`, `scripts/test-liascape-player-adapter.sh`, `.claude/rules/player-adapter.md` (§ Rotation rewritten: where each rule now lives)
+- Modify: `src/backend/Helpers/PlayerHelper.cs` (dispatches below), `src/backend/Player/LiascapePlayerMedia.cs` (`Desired` split into `DesiredGlobal()` + `DesiredItem(path)`; every resolver pass that changes a global also queues `LiascapePlayerProgram.PushDefaults()`; per-item changes queue `PushItem(path)`; `ReconcileShown` skips while a program is active — the player owns the intent; event subscription + `program.`), `src/backend/Player/LiascapePlayerClient.cs` (`Topics` + `program.`), `src/backend/Web/{AppOps.cs, ServerHost.cs}` (route through the dispatches), `src/backend/Player/LiascapePlayerSelfTest.cs`, `scripts/test-liascape-player-adapter.sh`, `.claude/rules/backend/player-adapter.md` (§ Rotation rewritten: where each rule now lives)
 
 **Interfaces:**
 ```csharp
@@ -598,7 +598,7 @@ public static class LiascapePlayerProgram {
 | `ApplyTimedPlaylist`, `ApplyPlaylist` (> 1 item or any scene), `AppOps.PlayPlaylist/PlayFrom` | `Load(BuildSpec(…), from, index, keep)` — Play → `from` = the effective start mode (§ Playlist start), play-from → `index`; `_history`/`_timedPaths` not kept; `QueueNewSession` (I1) as today |
 | `NextWallpaper` / `PreviousWallpaper` / `ApplyRandom` (session active) | `BeforeUserSwitch` as today, then `Next/Prev/Random(keep)` — never `WritePendingAction` |
 | `UpdateTimedSettings`, `ApplyRotationLive`, `ApplyPlayLimitsLive`, `RearmAlignedSwitch`, `SetPlaylistShuffle` | `SetRotation` / `SetLimits` / `SetTransition` / `SetOrder` |
-| `ReorderPlaylist`, `SyncAdvanceOnEndPlaylist`, `AppendToActivePlaylist`, trash/undo of a listed item | `SetItems(paths)`; a trashed shown/incoming item then `Next(false)` (web-backend.md § Trash) |
+| `ReorderPlaylist`, `SyncAdvanceOnEndPlaylist`, `AppendToActivePlaylist`, trash/undo of a listed item | `SetItems(paths)`; a trashed shown/incoming item then `Next(false)` (.claude/rules/backend/api.md § Session and playlist operations) |
 | `OnSceneBroken`, `OnSceneVramStopped` | persistence + WS only (`MarkCrashed`, `scene-crashed` / `scene-vram-stopped`) — the player already advanced; whitelisting → `PushItem` (skip false) |
 | `Stop`, `Apply` (single) | `stop` / a plain switch; both end the program (`stop` destroys it; `Apply` sends `destroy prog:main` first) |
 | `TogglePause` | `TogglePause` only (no `UpdateTimerPaused` / timed-state write) |
@@ -641,7 +641,7 @@ public static class LiascapePlayerProgram {
 ### Task 8: Retire the timer and restart daemons, the pending file and pid ownership
 
 **Files:**
-- Modify: `src/backend/Web/ServerHost.cs` (startup / `ApplicationStopping`), `src/backend/Program.cs` (`restore`, `kill`, the keybind path), `src/backend/Helpers/PlayerHelper.cs` (`Restore`, `SpawnTimerDaemon`, `SpawnRestartDaemon`, `UpdateRestartTimer`, `WriteGuiTimerPid`, `ReleaseTimer`, `SignalTimerStop` — no-ops under liascape-player, logged once), `src/backend/Player/LiascapePlayerClient.cs` (`EnsureRunning(restore: bool)` — the FIRST start may pass `--restore`), `scripts/test-liascape-player-adapter.sh`, `.claude/rules/{session.md, player.md}`, `CLAUDE.md` (CLI: `timer-daemon` / `restart-daemon` legacy-only)
+- Modify: `src/backend/Web/ServerHost.cs` (startup / `ApplicationStopping`), `src/backend/Program.cs` (`restore`, `kill`, the keybind path), `src/backend/Helpers/PlayerHelper.cs` (`Restore`, `SpawnTimerDaemon`, `SpawnRestartDaemon`, `UpdateRestartTimer`, `WriteGuiTimerPid`, `ReleaseTimer`, `SignalTimerStop` — no-ops under liascape-player, logged once), `src/backend/Player/LiascapePlayerClient.cs` (`EnsureRunning(restore: bool)` — the FIRST start may pass `--restore`), `scripts/test-liascape-player-adapter.sh`, `.claude/rules/backend/state-files.md`, `.claude/rules/backend/legacy-engine.md`, `CLAUDE.md` (CLI: `timer-daemon` / `restart-daemon` legacy-only)
 
 **Behaviour under liascape-player:**
 - **serve startup:** kill a leftover `timer-daemon` / `restart-daemon` (from a legacy session or an older build: `KillTimerDaemon`, `KillRestartDaemon`). Do not write `gui_timer.pid`, do not call `ResumeTimedTimer`; `LiascapePlayerProgram.Sync()` reads `state.programs` to seed the mirror.
@@ -736,7 +736,7 @@ public static class LiascapePlayerProgram {
 - `app/ui/src/components/PlaylistSettingsModal.tsx` ("When the playlist starts again" under its override, showing the global value it overrides).
 - `app/ui/src/components/` (the `Row` `expert` prop + `ExpertSection`, its deviated marker — designer call 12).
 - `app/ui/src/{store/index.ts, api/client.ts}` (the new keys).
-- `scripts/test-settings-merge.sh`, `.claude/rules/{session.md, web-ui.md}` (§ "Expert options": how to mark a row expert, for future settings).
+- `scripts/test-settings-merge.sh`, `.claude/rules/backend/state-files.md`, `.claude/rules/ui/state-and-api.md` (§ "Expert options": how to mark a row expert, for future settings).
 
 - [ ] **Step 1: Write failing checks:**
   - `test-settings-merge.sh`:
@@ -757,7 +757,7 @@ public static class LiascapePlayerProgram {
 
 ### Task 11: UI × player-state matrix — programs at the seams
 
-**Files:** `app/shell/probe-matrix.js` (the step wait for "a queued keybind (`pending_action.txt`)" becomes "the program took it": a `program.current` after the step, or `prog:main.path` moved; the fuzz rule follows), `scripts/test-ui-matrix.sh` (opt-in states `programArmed`, `programHeld`, `coverHeld`; `headless.cover` driver), `scripts/matrix-cells-for.sh` (`recipes/program` → FULL), `.claude/rules/web-ui.md` § the matrix
+**Files:** `app/shell/probe-matrix.js` (the step wait for "a queued keybind (`pending_action.txt`)" becomes "the program took it": a `program.current` after the step, or `prog:main.path` moved; the fuzz rule follows), `scripts/test-ui-matrix.sh` (opt-in states `programArmed`, `programHeld`, `coverHeld`; `headless.cover` driver), `scripts/matrix-cells-for.sh` (`recipes/program` → FULL), `.claude/rules/ui/shell-and-probes.md` § Probes and the UI matrix
 
 - [x] **Step 1: Add cells** (each RED first, against the base commit's backend via `LIASCAPE_MATRIX_DLL`, where the behaviour is new):
   - `programHeld × next|prev|random|plMinPlay|plMaxPlay|trash:shown`
@@ -815,9 +815,9 @@ public static class LiascapePlayerProgram {
   - **#12** "A rotation's clock is the player's: it never advances while the picture is paused or held; while no output shows it, it does exactly what `while_parked` says" — enforced by `pause_freezes_the_rotation`, `cover_hold_freezes_a_program`, `parked_keeps_rotating_invisibly_by_default`, `parked_hold_mode_holds_and_resumes`.
   - **#13** "One owner of a session's schedule — the player; the backend only requests" — enforced by the IT's origin check and the `legacy rotation path reached` guard.
 - `docs/player/debugging.md`: rows for "didn't switch" → `probe programs` phase/played/remaining; "switched early" → `program.current.reason`; "stuck after failures" → `backoff_ms`; "paused by itself" → `cover.engaged` / `player.cover_hold_active`.
-- `.claude/rules/player-core.md`: § Program, § Signals, § Outbox, the Snapshot/Command API rows.
-- `.claude/rules/player-adapter.md`: § Rotation now says where each rule lives; § Dispatch points; § Reconnection (`Reapply` program).
-- `.claude/rules/{session.md, player.md, web-backend.md}`: the daemons and pending IPC are legacy-only.
+- `.claude/rules/player/core.md`: § Program, § Signals, § Outbox, the Snapshot/Command API rows.
+- `.claude/rules/backend/player-adapter.md`: § Rotation now says where each rule lives; § Dispatch points; § Reconnection (`Reapply` program).
+- `.claude/rules/backend/state-files.md`, `.claude/rules/backend/legacy-engine.md`, `.claude/rules/backend/api.md`: the daemons and pending IPC are legacy-only.
 - `CLAUDE.md`: the CLI section, the architecture note.
 - `docs/TODO.md`: tick Phase 3; add the deferred items below.
 
@@ -875,7 +875,7 @@ Owner (2026-10-29): the current auto-mute works fine; the rework may be done **i
   - api (private PipeWire, `tests/common/pw.rs`): `automute_mutes_on_a_foreign_stream`, `automute_ignores_own_switches_every_combo`, `automute_delays_and_threshold`, `automute_new_source_comes_up_muted`, `automute_survives_a_crash_restart`, `automute_spawns_no_processes`.
 - [ ] **Step 2:** → FAIL. **Step 3:** implement. **Step 4:** The crate suite in both modes PASS; the adapter IT § auto-mute PASS on both engines; `measure-automute-latency.py --engine both` → criterion 3/4 numbers.
 - [x] **Step 5 (on-machine):** criteria 1–10 on the owner's session (a real browser video, a real `mpv`, Spotify via MPRIS if installed). Write them as a section of `docs/player/reports/phase3.md`.
-- [x] **Step 6:** All ten pass → flip `AutoMuteParityPassed`, retire `monitor-daemon` under liascape-player (not spawned; a leftover one killed at serve start), update `player.md` § Auto-Mute + `player-adapter.md`. Any fails → leave the flag off and file the TODO.
+- [x] **Step 6:** All ten pass → flip `AutoMuteParityPassed`, retire `monitor-daemon` under liascape-player (not spawned; a leftover one killed at serve start), update `.claude/rules/backend/legacy-engine.md` § Mute and auto-mute + `player-adapter.md`. Any fails → leave the flag off and file the TODO.
 - [x] **Step 7:** Commit `Add The In-Player Auto-Mute Signal` (+ `Replace AudioMonitor Under liascape-player` only when step 6 flips it).
 
 > **Implementer note 2026-10-30 (Task 14, player side; the backend switch-over waits for Task 7):**

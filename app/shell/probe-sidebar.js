@@ -44,7 +44,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
 const OUT = E.LIASCAPE_OUT;

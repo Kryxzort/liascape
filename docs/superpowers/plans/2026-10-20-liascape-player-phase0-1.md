@@ -175,7 +175,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Create: `src/player/Cargo.toml`, `src/player/build.rs`, `src/player/src/{main.rs,lib.rs,log.rs}`, `src/player/.gitignore` (`target/`)
 - Modify: `flake.nix`: new `liascape-player` package (`rustPlatform.buildRustPackage`, `cargoLock.lockFile = ./src/player/Cargo.lock`, `nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ]`, `buildInputs = [ mpv-unwrapped wayland libGL libxkbcommon pipewire ]`); add it to `packages`; add `cargo rustc clippy rustfmt rust-analyzer` and `inputsFrom = [ … liascape-player ]` to the devShell
 - Modify: `scripts/dev.sh`: `cargo build --release --manifest-path src/player/Cargo.toml` next to the native `make`s
-- Create: `.claude/rules/player-core.md` (frontmatter `paths: ["src/player/**"]`): purpose, the invariant, module map; later tasks append their sections
+- Create: `.claude/rules/player/core.md` (frontmatter `paths: ["src/player/**"]`): purpose, the invariant, module map; later tasks append their sections
 
 **Interfaces:**
 - Produces:
@@ -261,7 +261,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 
 **Files:**
 - Create: `src/player/src/graph/mod.rs`, `src/player/src/graph/props.rs`
-- Modify: `.claude/rules/player-core.md` (section "Graph & properties": the id scheme and the alias rules)
+- Modify: `.claude/rules/player/core.md` (section "Graph & properties": the id scheme and the alias rules)
 
 **Interfaces:**
 - Consumes: `units::Gains`, `anim::PropPath`
@@ -394,7 +394,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
   - `ClipSpec::Solid { rgb, secs, tone_hz, tone_dbfs }`: 1920×1080 @ 30 fps, stereo 48 kHz sine
   - `ClipSpec::FrameIndex { frames }`: frame n has the top-left 64×64 = `(n,n,n)`, for frame-exact checks
   - `ClipSpec::Image { rgb }` (PNG)
-- Modify: `.claude/rules/player-core.md` (section "Sources": the libmpv gotchas)
+- Modify: `.claude/rules/player/core.md` (section "Sources": the libmpv gotchas)
 
 **Interfaces:**
 - Consumes: `Gfx`, `Tex`, `units::{Gains, mpv_volume_gain}`, graph property schema (Task 6)
@@ -509,7 +509,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 
 **Files:**
 - Create: `src/player/src/runtime.rs`, `src/player/src/headless.rs`, `src/player/src/api/{proto.rs,server.rs,handlers.rs}`, `src/player/src/ctl.rs`, `src/player/tests/api.rs`
-- Modify: `src/player/src/main.rs` (subcommands), `.claude/rules/player-core.md` (section "Command API": the full verb list + examples)
+- Modify: `src/player/src/main.rs` (subcommands), `.claude/rules/player/core.md` (section "Command API": the full verb list + examples)
 
 **Interfaces:**
 - Consumes: everything above.
@@ -549,7 +549,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 
 **Files:**
 - Create: `src/player/src/wl.rs`
-- Modify: `src/player/src/runtime.rs` (window outputs), `.claude/rules/player-core.md` (section "Wayland")
+- Modify: `src/player/src/runtime.rs` (window outputs), `.claude/rules/player/core.md` (section "Wayland")
 
 **Interfaces:**
 - Consumes: `Gfx::new_wayland`, `Gfx::window_target`, `Graph` outputs
@@ -685,7 +685,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
 - Modify: `src/backend/Web/ServerHost.cs` (`/settings`: a `PlayerEngine` change → `PlayerHelper.SwitchEngineLive(prev, cur)` = stop the old engine, replay `LastSession` on the new one)
 - Modify: `src/backend/Program.cs`: hidden `player-selftest` (runs `MpvPropertyMap` assertions + a protocol round-trip against `liascape-player serve --headless`, prints `PASS`/`FAIL <reason>`, exits 0/1)
 - Modify: `app/ui/src/views/Settings.tsx` (advanced row "Player engine": Legacy / liascape-player (experimental)), `app/ui/src/store/index.ts` (default `playerEngine: "legacy"`)
-- Create: `.claude/rules/player-adapter.md` (`paths: ["src/backend/Player/**"]`): the dispatch points, the property map, the event flow
+- Create: `.claude/rules/backend/player-adapter.md` (`paths: ["src/backend/Player/**"]`): the dispatch points, the property map, the event flow
 
 **Interfaces:**
 - Consumes: liascape-player wire protocol (Task 12), `TransitionReq` fields (Task 11)
@@ -736,7 +736,7 @@ C# adapter (backend): `src/backend/Player/{PlayerEngine.cs,LiascapePlayerClient.
   - `cargo build --release --locked --manifest-path src/player/Cargo.toml`
   - install `liascape-player` to `~/.local/share/liascape-web/bin/` and export `LIASCAPE_PLAYER_BIN` in both wrappers
 - Modify: `flake.nix`: `--set LIASCAPE_PLAYER_BIN ${liascape-player}/bin/liascape-player` in the `liascape-ui` and `liascape-cli` wrappers
-- Modify: `.claude/rules/distribution.md` (liascape-player build + resolution order)
+- Modify: `.claude/rules/build-and-packaging.md` (liascape-player build + resolution order)
 
 **Interfaces:**
 - Consumes: Task 3 package.

@@ -19,7 +19,7 @@
 //!   runtime keeps the surface pointer (`wl_pointer` over the wallpaper's own surface, entries
 //!   as jumps — the behaviour before). It retries every [`RETRY`].
 //!
-//! See `.claude/rules/player-core.md` § Scene worker → "The desktop pointer".
+//! See `docs/player/modules/scene-source.md` § Assets, properties, inputs.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

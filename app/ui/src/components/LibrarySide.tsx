@@ -21,7 +21,7 @@ function fmtDur(s: number): string {
   return parts.length === 1 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
 }
 
-// A scene's loudness line (liascape-player; library.md § Loudness): "≈ −14.6 LUFS (estimated)" — the offline estimate
+// A scene's loudness line (liascape-player; .claude/rules/backend/library.md § Loudness): "≈ −14.6 LUFS (estimated)" — the offline estimate
 // of its current properties' sound, not played that way yet — or "−15.2 LUFS (measured, 30 min)" (its own measurement
 // over that much audible play). null = nothing known (a silent scene, never estimated).
 function sceneLoudnessText(i: LibraryItem): string | null {

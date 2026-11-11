@@ -20,7 +20,7 @@ namespace Liascape.Web;
 
 // The loopback API is the app's own (owner 2026-11-11: "make the app as a whole more secure"). Loopback is NOT private:
 // every web page open in the user's browser can send requests to 127.0.0.1 (and read the answers when CORS lets it, or
-// via DNS rebinding), and every other local user can connect. So (web-backend.md § Local API security):
+// via DNS rebinding), and every other local user can connect. So (.claude/rules/backend/api.md § Security):
 //  • a secret token in ~/.config/liascape/serve.token (0600, beside serve.port) on every request — header
 //    X-Liascape-Token, or ?token= on a GET (an <img>/<video> src, the WebSocket) — the static UI files and /health excepted;
 //  • the Host header must be 127.0.0.1:<port> / localhost:<port> (DNS rebinding: a foreign name pointing at us);

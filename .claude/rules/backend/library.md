@@ -14,7 +14,7 @@ paths:
 # Library
 
 Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own folder; per-source metadata in
-`<source>/index.json` (`LibraryStore`, one `LibMeta` per key). Narrative and measurements: `docs/history/library.md`.
+`<source>/index.json` (`LibraryStore`, one `LibMeta` per key). Why behind the choices here: `docs/decisions.md` § Library.
 
 ## Layout and identity
 - Identity = the folder name: `<id>` for `workshop/` and `local/`, `<name>` for web sources and `imported/`.

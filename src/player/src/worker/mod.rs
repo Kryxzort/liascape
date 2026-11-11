@@ -1,5 +1,4 @@
-//! Compositor side of the scene worker (Phase 2 Tasks 3–4; `.claude/rules/player-core.md`
-//! § Scene worker): [`WorkerHost`] spawns and supervises one `liascape-scene-worker` process over a
+//! Compositor side of the scene worker (`docs/player/modules/scene-worker.md`): [`WorkerHost`] spawns and supervises one `liascape-scene-worker` process over a
 //! `SOCK_SEQPACKET` socketpair ([`proto`]), [`dmabuf`] imports its frames.
 //!
 //! **Lifecycle.** `spawn` → `Starting` (no `Hello` yet) → `Running` (the host answers `Hello`

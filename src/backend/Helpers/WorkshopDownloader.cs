@@ -783,7 +783,7 @@ public static class WorkshopDownloader
 
         // Wrap in a shell command so the terminal stays open after steamcmd exits. The values are the script's positional
         // arguments ($1–$3), never pasted into its text: the username (and the steamcmd path) come from the settings, and
-        // pasted in quotes a `"; …` in them ran as shell commands (web-backend.md § Local API security).
+        // pasted in quotes a `"; …` in them ran as shell commands (.claude/rules/backend/api.md § Security).
         const string innerCmd =
             "\"$1\" +force_install_dir \"$2\" +login \"$3\" +quit" +
             "; echo; echo 'Sign-in complete. Press Enter to close.'; read";

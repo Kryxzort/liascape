@@ -1,5 +1,4 @@
-//! dmabuf scene-frame transport (Phase 2 Task 4; `.claude/rules/player-core.md` § Scene
-//! worker → "Frame transport"; evidence `docs/player/spikes/dmabuf.md`). GPU: each test
+//! dmabuf scene-frame transport (`docs/player/modules/scene-frame-transport.md`; evidence `docs/player/spikes/dmabuf.md`). GPU: each test
 //! drives a [`SceneSource`] whose `liascape-scene-worker` renders `liascape-synthetic.json` (D7) into a
 //! 3-slot ring of exported `GL_RGBA8` textures; the source imports them once and latches
 //! only frames whose acquire fence already signalled. SKIP without EGL (`LIASCAPE_REQUIRE_GPU=1`
@@ -697,7 +696,7 @@ impl Drop for Counter {
 /// checked. Prints the numbers the rules doc quotes.
 ///
 /// The worker's CPU is measured as the cost of its work, not of where the scheduler put it
-/// (`.claude/rules/player-core.md` § Frame transport → "Measured"): its threads are pinned to
+/// (`docs/player/modules/scene-frame-transport.md` § Measured): its threads are pinned to
 /// the performance cores of a hybrid CPU (the same work — a constant ~178 k user instructions a
 /// frame — took 214–231 µs of CPU on a P-core and 276–290 µs on an E-core of this i9-12900K),
 /// its run time is read per thread from `schedstat` (ns), and the asserted figure is the
@@ -2065,7 +2064,7 @@ fn context_lost_is_a_restart() {
     assert!(h.bool(&format!("{id}.broken")));
 }
 
-// ---- Scene loudness: the shared `Book` across sources (player-core.md § "Scene loudness") ----
+// ---- Scene loudness: the shared `Book` across sources (docs/player/modules/scene-loudness.md) ----
 
 fn tone_spec() -> SyntheticSpec {
     SyntheticSpec {

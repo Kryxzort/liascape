@@ -13,7 +13,7 @@ namespace Liascape.Helpers;
 // tool is missing, with whether it works HERE, why not, and the settings (camelCase AppSettings keys, what the UI's
 // rows carry as `rk`) it breaks — the UI puts a warning icon with the reason on each of those rows.
 // `ok`: true = works, false = won't work (reason says why + what to install), null = not known (e.g. the GPU interop
-// before a player ran). The player's own pieces come from its `hello.health` (player-core.md § health), else from
+// before a player ran). The player's own pieces come from its `hello.health` (docs/player/modules/command-api.md), else from
 // `liascape-player health` / `scene-check` in this backend's environment (what a player it starts would see).
 public static class FeatureHealth
 {
@@ -122,7 +122,7 @@ public static class FeatureHealth
                 // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause behind windows" can't act
                 var (cok, cwhy) = Part(i.PlayerHealth, "cover");
                 f.Add(new("cover", "Pause behind windows", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
-                // the player's own PipeWire audio bus (player-core.md § Audio bus): down → the sources play on mpv's default
+                // the player's own PipeWire audio bus (docs/player/modules/audio-bus.md): down → the sources play on mpv's default
                 // device (nothing stops, but no bus meter and no in-player auto-mute). No setting of its own to mark: it
                 // shows in the Settings summary only. Unknown while the first session is being set up / before a player ran.
                 var (bok, bwhy) = Part(i.PlayerHealth, "bus");

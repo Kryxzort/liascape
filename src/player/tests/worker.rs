@@ -1,5 +1,5 @@
-//! Scene worker protocol + process lifecycle (Phase 2 Task 3; `.claude/rules/player-core.md`
-//! § Scene worker). No GPU: every worker here is `liascape-scene-worker --stub`, whose behaviour the
+//! Scene worker protocol + process lifecycle (`docs/player/modules/scene-worker.md`).
+//! No GPU: every worker here is `liascape-scene-worker --stub`, whose behaviour the
 //! `LIASCAPE_SCENE_WORKER_TEST` knobs script (`crash_after_ms`, `hang_after_ms`, `exit_code`,
 //! `ignore_quit`, `spam_stderr`). Crash records go to a private dir under `temp_dir()`; the
 //! stub sets its own `RLIMIT_CORE` 1 before `abort()` (no systemd-coredump / DrKonqi popups).

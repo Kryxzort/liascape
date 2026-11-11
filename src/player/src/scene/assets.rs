@@ -1,6 +1,6 @@
 //! Where WE's `assets/` (shaders, materials, fonts every real scene needs — spike `lwe-core.md`
-//! §2) lives, resolved explicitly (Phase 2 Task 7; `.claude/rules/player-core.md` § Scene worker
-//! → "Real scenes"). LWE's own auto-detection only looks for WE in Steam's *primary* library;
+//! §2) lives, resolved explicitly (`docs/player/modules/scene-source.md`
+//! § Assets, properties, inputs). LWE's own auto-detection only looks for WE in Steam's *primary* library;
 //! on this machine (and any with a second library) WE sits in another one, so the player
 //! resolves the dir itself and passes it to every worker.
 //!

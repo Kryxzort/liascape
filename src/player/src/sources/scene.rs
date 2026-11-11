@@ -1,5 +1,5 @@
-//! `SceneSource` — a WE scene rendered by an `liascape-scene-worker` process (Phase 2; `.claude/
-//! rules/player-core.md` § Scene worker). Task 4 built the **texture path**: spawn the
+//! `SceneSource` — a WE scene rendered by an `liascape-scene-worker` process (`docs/player/
+//! modules/scene-source.md`). The **texture path**: spawn the
 //! worker ([`WorkerHost`]), import its exported ring once ([`ImportedRing`]), tick it, latch
 //! only frames whose fence already signalled ([`Latch`]) and return each replaced slot with a
 //! release fence. The latched texture survives the worker's death (spike §6); a restarted

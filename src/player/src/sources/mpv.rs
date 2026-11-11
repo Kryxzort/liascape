@@ -2,7 +2,7 @@
 //! libmpv gotchas, §5.3 audio). One [`MpvSource`] = one mpv core + one render context,
 //! rendering each new frame into its own FBO texture at the video's native display size.
 //!
-//! See `.claude/rules/player-core.md` § Sources for the gotchas this encodes (vo=libmpv,
+//! See `docs/player/modules/sources.md` for the gotchas this encodes (vo=libmpv,
 //! render-context teardown with GL current, FLIP_Y, the `glFenceSync` stub, `volume` at
 //! 100 + `volume-gain` in dB, async-only core calls after `open`, load fencing, `ao=null`
 //! in tests, the wake-fd contract).

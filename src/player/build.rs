@@ -1,8 +1,7 @@
 //! libmpv FFI (spec §5.1, Task 10): bindgen over `mpv/client.h` + `mpv/render.h` +
 //! `mpv/render_gl.h`, found through pkg-config `mpv` — which also emits the
 //! `cargo:rustc-link-lib=mpv` + `-L` that nixpkgs auto-rpaths (same mechanism the
-//! `khronos-egl` `static` feature relies on for libEGL; see `.claude/rules/player-core.md`
-//! § GFX / EGL). The flake's `liascape-player` derivation carries `pkg-config` +
+//! `khronos-egl` `static` feature relies on for libEGL; see `docs/player/modules/gfx-egl.md`). The flake's `liascape-player` derivation carries `pkg-config` +
 //! `rustPlatform.bindgenHook` (libclang) for this.
 
 use std::env;

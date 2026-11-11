@@ -24,5 +24,5 @@ Stack reuse: debug player + scene worker + backend build reflink-copied from ano
 8. **GREEN.** probe-sidebar + probe-layout; port `probe-matrix.js` helpers (`openSide`, slider lookups, close) and the
    other probes that opened the modal; `matrix-cells-for.sh` mapping; full matrix (`--jobs 6`) unless the owner's battery
    is running (then `--changed` single cells only).
-9. **Docs.** web-ui.md (the sidebar section replaces the modal / morph sections), TODO.md (item closed → TODO-done.md),
+9. **Docs.** .claude/rules/ui/design.md (the sidebar section replaces the modal / morph sections), TODO.md (item closed → TODO-done.md),
    NIGHT-NOTES.md. Screenshots after (same sizes). Merge lp-player, ff-only main checkout, push.

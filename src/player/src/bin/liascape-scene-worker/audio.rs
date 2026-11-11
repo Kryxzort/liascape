@@ -1,5 +1,4 @@
-//! The scene's sound as a stream on the player bus (Task 6; `.claude/rules/player-core.md`
-//! § Scene worker → "Scene audio (Task 6)").
+//! The scene's sound as a stream on the player bus (`docs/player/modules/scene-audio.md`).
 //!
 //! One PipeWire playback stream per worker — F32 stereo 48 kHz, `node.latency 256/48000`,
 //! `node.name = liascape-player-scene.<source id>`, `media.role = Wallpaper`, `target.object =

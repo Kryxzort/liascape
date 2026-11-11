@@ -47,7 +47,7 @@ public static class SettingsService
         if (settings.LegacySteamRefreshToken == "") settings.LegacySteamRefreshToken = null;
         if (settings.LegacySteamAccessToken == "") settings.LegacySteamAccessToken = null;
         if (settings.LegacySteamLoginSecure == "") settings.LegacySteamLoginSecure = null;
-        // atomic + 0600 from its creation (web-backend.md § Local API security)
+        // atomic + 0600 from its creation (.claude/rules/backend/api.md § Security)
         AtomicFile.WritePrivate(ConfigPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
     }
 

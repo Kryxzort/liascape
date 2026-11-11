@@ -30,8 +30,8 @@
 //!
 //! **Writing** (`Writer`): atomic — `snapshot.json.tmp` written + `fsync`ed, renamed over
 //! `snapshot.json`, the directory `fsync`ed — on a writer thread (`lia-snapshot`), so an
-//! `fsync` never stalls the render loop. When to write is the runtime's call (§ Snapshot in
-//! `.claude/rules/player-core.md`): [`DEBOUNCE`] after the first unsaved graph change,
+//! `fsync` never stalls the render loop. When to write is the runtime's call (`docs/player/modules/persistence.md`
+//! § Snapshot): [`DEBOUNCE`] after the first unsaved graph change,
 //! every [`REFRESH`] while a video plays, and once more on a clean exit.
 
 use std::collections::{BTreeMap, BTreeSet};

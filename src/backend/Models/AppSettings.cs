@@ -58,7 +58,7 @@ public class AppSettings
     public bool AutoPlayVideoThumbs { get; set; } = false;   // UI: video-only library/playlist thumbnails play without a hover (on screen, capped — components/autoplay.ts)
     public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
-    // UI: how much of Settings shows — basic | standard (default) | advanced | expert (web-ui.md § "Settings levels"). Hidden
+    // UI: how much of Settings shows — basic | standard (default) | advanced | expert (.claude/rules/ui/state-and-api.md § Settings page). Hidden
     // rows keep their values and stay live; nothing here reads it. Replaced AdvancedSettings + ShowExpertOptions (2026-11-06).
     public string SettingsLevel { get => _settingsLevel; set => _settingsLevel = Level(value); }
     private string _settingsLevel = "standard";
@@ -133,7 +133,7 @@ public class AppSettings
     public int FullLiveSyncOffsetMs { get; set; } = -30;
     // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE) or "liascape-player" (the
     // Rust player, experimental — videos/images only in Phase 1; scenes are skipped). Switching applies
-    // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/player-adapter.md.
+    // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/backend/player-adapter.md.
     public string PlayerEngine { get; set; } = "legacy";
     // What the volume keybinds (`liascape volume up|down`, `/volume {delta}`) move — Advanced setting:
     // "auto" = the playing wallpaper's own volume when it has one, else the global; "item" = always the

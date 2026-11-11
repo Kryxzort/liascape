@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// DEV ONLY (`vite serve`): hand the page the backend's API token (web-backend.md § Local API security). The app's shell
+// DEV ONLY (`vite serve`): hand the page the backend's API token (.claude/rules/backend/api.md § Security). The app's shell
 // passes it as ?token=, but a shell from before the token (an installed build loading this dev server — the owner's setup,
 // 2026-11-11) doesn't, and every request would 401. `/__liascape/token` answers with serve.token (0600, the user's own)
 // ONLY to a same-origin request (`Sec-Fetch-Site`, set by the browser — a script can't forge it): another site's fetch is

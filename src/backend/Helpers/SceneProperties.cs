@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 namespace Liascape.Helpers;
 
 // A Wallpaper Engine scene's user properties (`project.json` → `general.properties`) — what the item
-// settings modal edits. `.claude/rules/library.md` § "Scene properties".
+// settings modal edits. `.claude/rules/backend/library.md` § Scene properties.
 //
 // Values are kept in WE's own encoding (what `project.json` and LWE's `--set-property name=value` use):
 // bool → true/false, slider → a number, color → "r g b" (0–1 floats), combo → the option's key (a string; a
@@ -207,7 +207,7 @@ public static class SceneProperties
         var (x, y) => Equals(x, y),
     };
 
-    // WE encoding → what the player's `scene_props` carries (player-core.md § Scene worker → "User properties").
+    // WE encoding → what the player's `scene_props` carries (docs/player/modules/scene-source.md).
     public static object? ToPlayer(SceneProp p, JsonNode? v) => p.Type switch
     {
         "bool" => Truthy(v),

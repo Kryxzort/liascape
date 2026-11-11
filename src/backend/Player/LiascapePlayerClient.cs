@@ -19,8 +19,7 @@ public sealed class LiascapePlayerException(string code, string message, string 
     public override string ToString() => $"{Code}: {Message} (hint: {Hint})";
 }
 
-// The liascape-player Command API client: JSON Lines over the unix socket (.claude/rules/player-core.md
-// § Command API). One persistent request connection (serialized; reconnects after any error/timeout)
+// The liascape-player Command API client: JSON Lines over the unix socket (docs/player/modules/command-api.md). One persistent request connection (serialized; reconnects after any error/timeout)
 // + one subscribed event connection read on a background thread (reconnects with backoff when the
 // player restarts).
 public sealed class LiascapePlayerClient
@@ -61,7 +60,7 @@ public sealed class LiascapePlayerClient
     public int? PlayerPid { get; private set; }
     // The supervisor's own pid from `hello.supervisor_pid` — null when unsupervised (`--no-supervise`)
     // or before the first `hello`. Kill/stop fallbacks target THIS pid when it's set (.claude/rules/
-    // player-core.md § Supervisor; player-adapter.md).
+    // docs/player/modules/persistence.md § Supervisor; .claude/rules/backend/player-adapter.md).
     public int? SupervisorPid { get; private set; }
     // Bumped whenever a connection reaches a different COMPOSITOR process (a restart, supervised or
     // not — corr ids restart at tr-1 either way) → waiters re-check.
@@ -69,7 +68,7 @@ public sealed class LiascapePlayerClient
     // Last start/request failure, for /player-engine (null = fine).
     public string? LastError { get; private set; }
     // `hello.capabilities` of the player this client last greeted (empty before the first hello) —
-    // `scene` when its liascape-scene-worker AND WE's assets dir resolve (player-core.md § Scene worker).
+    // `scene` when its liascape-scene-worker AND WE's assets dir resolve (docs/player/modules/scene-source.md).
     public IReadOnlySet<string> Capabilities { get; private set; } = new HashSet<string>();
     // the capabilities are from the CURRENT request connection's `hello` (a dropped connection — the player
     // quit, crashed, was restarted with another environment — may lead to another process: greet it first)
@@ -729,7 +728,7 @@ public sealed class LiascapePlayerClient
         }
     }
 
-    // The supervisor's own stop bound (player-core.md § Supervisor: SIGTERM → its child gets STOP_WAIT 10 s,
+    // The supervisor's own stop bound (docs/player/modules/persistence.md § Supervisor: SIGTERM → its child gets STOP_WAIT 10 s,
     // then SIGKILL) + margin: the escalation steps of an upgrade's quit.
     private const int SupervisorStopWaitMs = 12_000;
     // A new player's first hello: an exec, its EGL init, a --restore (a source per output) — seconds under load.
@@ -876,7 +875,7 @@ public sealed class LiascapePlayerClient
         }
     }
 
-    // item 3: liascape-player's own exit codes (.claude/rules/player-core.md § Supervisor / § Runtime) — a
+    // liascape-player's own exit codes (docs/player/modules/runtime.md § `serve` and its exit codes) — a
     // giving-up/unavailable state must be SURFACED (this string ends up in LastError → `/player-engine`
     // `reason` + this log line), never crash the backend.
     private static string ExitHint(int code) => code switch
@@ -996,7 +995,7 @@ public sealed class LiascapePlayerClient
         }
     }
 
-    // ---- the player's outbox (Phase 3 Task 9; player-core.md § Outbox) -------------------------
+    // ---- the player's outbox (docs/player/modules/persistence.md § Outbox) -------------------------
     // What the backend must store happened while it wasn't listening (the app closed, a reconnect gap): the player
     // keeps those facts in `<state>/outbox.jsonl` until acked. At least once: an ack only ever covers what was stored.
     // On every subscription: read every unacked entry (pages of 500), hand each to OutboxEvent in seq order, then ack.

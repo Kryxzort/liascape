@@ -39,7 +39,7 @@
 //!   accumulate and apply on `done` into a [`Toplevels`]; [`OutputBackend::take_cover`] hands the
 //!   per-connector map over when it changed. Not advertised → the source is unavailable.
 //!
-//! See `.claude/rules/player-core.md` § Wayland.
+//! See `docs/player/modules/wayland.md`.
 
 use std::ffi::c_void;
 use std::time::{Duration, Instant};

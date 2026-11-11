@@ -9,8 +9,8 @@ paths:
 
 `src/backend/Player/` drives the Rust player (`.claude/rules/player/core.md`) when `AppSettings.PlayerEngine` is
 `liascape-player`; `PlayerHelper` dispatches to it with `if (PlayerEngine.IsLiascapePlayer) { … }` at the top of each
-primitive, the legacy code below it unchanged (`.claude/rules/backend/legacy-engine.md`). Walkthrough, history and the
-full IT coverage list: `docs/player/adapter.md`.
+primitive, the legacy code below it unchanged (`.claude/rules/backend/legacy-engine.md`). How the adapter works (client,
+queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 
 ## Threading: nothing waits on the player under `PlayerHelper._lock`
 - Queue every mutation through `LiascapePlayerMedia` (one ordered worker): switches, stops, property sets, resolver passes. Never call the player synchronously inside `_lock` except the quick queries (`LiascapePlayerClient.QuickMs`, 300 ms).
@@ -88,6 +88,9 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 
 ## Auto-mute under liascape-player
 - The player's own Signal is the auto-mute (`AudioMonitor.AutoMuteInPlayer` = the `automute` capability); `AudioMonitor` runs only while `serve` runs and the player lacks it. It mutes `gain.automute`, so `gain.mute` and `PlayerHelper.IsMuted` stay the user's.
+- Ask for the `automute` capability on `AudioMonitor._probe` (its own client, `AutoSpawn = false`), never the shared
+  client: a `hello` there discovers a new player from the timer thread and races the restart's reapply, and its
+  timeout opens the shared stall breaker.
 - `AudioMonitor` must classify a stream before counting its level and skip the player's own streams by ownership (`OwnStreamFilter`: compositor pid, `node.name` prefix `liascape-player-`, the bus sink). Guard: IT § "auto-mute never hears our own switches".
 
 ## Verify

@@ -80,7 +80,7 @@
 #                           interrupt/commit path (same mechanism as next-mid-transition, at
 #                           this method's own 30 s)
 #   <method>/long-shortA-end a clip SHORTER than the 30 s effect, raw `ctl transition` with
-#                           align:"end" -- the short-A-hold fallback (player-core.md "Align":
+#                           align:"end" -- the short-A-hold fallback (docs/player/modules/transitions.md § Align:
 #                           "if it's already past at the first evaluation... it starts at once
 #                           and A holds its last frame")
 #   <method>/long-pause-resume  player.paused true for 3 s mid-effect then false -- frozen
@@ -303,7 +303,7 @@ probe_frames_raw() { ctl probe '{"name":"frames"}' 2>/dev/null; }
 #
 # battery-script fix #1 (found analysing task20-final-run): `ok` used to ALSO require `missed ==
 # 0`. `missed` counts presents > 1.5 refresh periods apart within the probe's rolling 2 s window --
-# which a switch itself routinely produces on purpose: player-core.md's Runtime "Switch cost" /
+# which a switch itself routinely produces on purpose: docs/player/modules/runtime.md § Bounds and costs /
 # final-review I5 measures the render-context-create + first-render cost of opening a new source
 # at ~1-26 ms on the loop, i.e. "one to five missed frames at 240 Hz on every output per switch",
 # and says explicitly "Task 20's pacing criterion should exclude the switch frame". Requiring
@@ -318,7 +318,7 @@ probe_frames_raw() { ctl probe '{"name":"frames"}' 2>/dev/null; }
 # battery-script fix #2 (found analysing the SAME run's raw frames field, after fix #1):
 # `.paced.mean_ms` is `null` -- not a small number -- for a switch sampled before the output has
 # presented >= 2 frames BACK TO BACK within the probe's own 2 s window (`paced` = "intervals
-# between presents made back to back", player-core.md § Wayland "frames probe"). This probe is
+# between presents made back to back", docs/player/modules/wayland.md § Redraw policy). This probe is
 # called from `evaluate_known_corr()` right as a switch reaches its terminal event -- for most
 # modes (manual-next, timed-interval, every `fast-*`/`long-*` extremes cell...) that is BEFORE 2
 # presents have happened yet, so `.paced.mean_ms // 0` silently became a literal `0`, which then
@@ -332,12 +332,12 @@ probe_frames_raw() { ctl probe '{"name":"frames"}' 2>/dev/null; }
 # What's left after both fixes, NOT a bug (documented in the report, not re-fixed here): once a
 # switch DOES have enough real paced samples (wait-for-end's own clips, which keep playing for
 # 10-30s), `mean_ms` reflects the SOURCE's own frame rate (these SFW clips are ~24-25 fps, i.e.
-# ~40 ms apart), not the display's 144/240 Hz refresh -- player-core.md's own "Frame pacing"
+# ~40 ms apart), not the display's 144/240 Hz refresh -- docs/player/modules/wayland.md's own redraw-policy
 # section documents exactly this as CORRECT, by-design content-paced behaviour (its own measured
 # "60 fps test clip" row: "60.0 presents/s (content-paced, idle between frames)", not a defect).
 # The brief's "+/- 0.5 ms of refresh" bar is only meaningful for genuinely display-rate content
 # (an opacity/gain animation, or a high-fps clip) -- exactly what `outputs.sh` checks with its own
-# dedicated synthetic 240 fps clip + opacity animation (matching player-core.md's measured
+# dedicated synthetic 240 fps clip + opacity animation (matching docs/player/modules/wayland.md's measured
 # 6.94/4.17 ms numbers). battery.sh's per-switch frame probe can't meaningfully re-validate the
 # refresh-matching bar against arbitrary real video content; `outputs.sh` is the authority for it.
 evaluate_frames() {
@@ -1075,7 +1075,7 @@ run_extra_cell() {
 
     long-shortA-end)
       # A clip SHORTER than the 30 s effect, align:"end" -- the short-A-hold fallback
-      # (player-core.md "Align": "if it's already past at the first evaluation... it starts
+      # (docs/player/modules/transitions.md § Align: "if it's already past at the first evaluation... it starts
       # at once and A holds its last frame"). /next doesn't expose align, so this goes through
       # raw `ctl transition`, same pattern permonitor already uses.
       build_alt_targets

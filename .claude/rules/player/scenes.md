@@ -164,6 +164,9 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   Guards: `book_reopen_continues_the_last_source_never_twice`,
   `tests/api.rs::scene_path_changes_and_folder_spellings_share_one_measurement`,
   `scene_loudness_key_change_never_shares_a_histogram`.
+- On a live `loudness_key` change report the old key's rest under the old key, join the new key without
+  `Book::forget_idle`, and drop segments for `KEY_CHANGE_SETTLE` (the stream still carries the old mix). Guard:
+  `tests/api.rs::scene_loudness_key_change_never_shares_a_histogram`.
 - Stop metering at the cap (`LoudnessMeter {on: false}`). Guards: `cap_stops_measuring`,
   `tests/api.rs::scene_loudness_stops_at_the_cap`.
 - A report never moves the playing source's `gain.normalize` (the backend applies it once per play). Guard:

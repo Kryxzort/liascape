@@ -144,7 +144,7 @@ def dropout(d, t0, t1, cell, method, recs_path):
             en = [e for e in ended if e.get("id") == a.get("id") and st["_w"] - 1 <= e["_w"] <= ho["_w"] + 2]
             if en:
                 d_ended = (ho["_w"] - en[0]["_w"]) * 1000.0
-            # A late B (designed: player-core.md § Align — "if it's already past at the first
+            # A late B (designed: docs/player/modules/transitions.md § Align — "if it's already past at the first
             # evaluation (A shorter than D, or B late) it starts at once and A holds its last
             # frame for the difference"): B's `source.ready` (log clock → player clock through the
             # started event's own pair) after the effect's planned start (A's end − D). Such a

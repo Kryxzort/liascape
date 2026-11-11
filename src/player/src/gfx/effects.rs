@@ -8,7 +8,7 @@
 //! assets are shared with the UI, and this module's whole job is adapting them at load
 //! time, not changing them in place.
 //!
-//! See `.claude/rules/player-core.md`'s "Effects" section for the directory-resolution
+//! See `docs/player/modules/composition.md` § Effect catalogue for the directory-resolution
 //! order, the header-rewrite/fail-loud rule, the uniform type mapping, and the
 //! draw-into-whatever-FBO-is-bound contract.
 
@@ -439,7 +439,7 @@ impl EffectProgram {
 
 /// Normalize one `params` value to the manifest's `default`-array shape: a JSON array is
 /// read element-by-element (numbers and bools both accepted, matching how the manifest
-/// itself encodes `bool` defaults as `[0.0]`/`[1.0]` — see `.claude/rules/player-core.md`'s
+/// itself encodes `bool` defaults as `[0.0]`/`[1.0]` — see `docs/player/modules/composition.md`'s
 /// "Effects" section); a bare number or bool is treated as a 1-element array (brief: "a
 /// bare number is accepted as a 1-element array"). Anything else (string, object, null)
 /// yields an empty vec, which [`EffectProgram::draw`] then treats the same as "absent" and

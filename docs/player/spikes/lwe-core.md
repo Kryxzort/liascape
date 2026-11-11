@@ -407,4 +407,4 @@ A deterministic **broken build** needs no missing assets either: `fail-scene` (o
 The patched core (`patches/lwe/0001–0006`, `UPSTREAM.md`) rendered real scenes through
 `liascape-scene-worker --lwe-smoke` with the host audio driver: 2371103399 (3840×1080, 0 GL errors,
 one sound stream pulled by the host, no SDL device) and 1726902114 (2048×1423) — frames upright
-and matching the previews (`.claude/rules/player-core.md` § Scene worker → "LWE core").
+and matching the previews (`docs/player/modules/scene-lwe-core.md` §"LWE core").

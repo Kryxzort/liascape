@@ -1,6 +1,5 @@
-//! Phase 2 Task 1–2: LWE's core as the scene worker links it (`third_party/lwe/PIN`,
-//! `patches/lwe/`, the flake's `lwe-core`, `scripts/lwe.sh`). `.claude/rules/player-core.md`
-//! § Scene worker → "LWE core".
+//! LWE's core as the scene worker links it (`third_party/lwe/PIN`,
+//! `patches/lwe/`, the flake's `lwe-core`, `scripts/lwe.sh`). `docs/player/modules/scene-lwe-core.md`.
 //!
 //! The core tests SKIP without `LIASCAPE_LWE_CORE_DIR` (it is set by the devShell and the flake's
 //! package) and FAIL then under `LIASCAPE_REQUIRE_SCENES=1`; the repo tests SKIP when the crate is

@@ -111,7 +111,7 @@ else
     case "$RESULTS/" in "$REPO"/*) die "--results must be outside the repo (captures are never committed)" ;; esac
 fi
 
-unset LD_LIBRARY_PATH # the stray one on this machine breaks native links (player-core.md)
+unset LD_LIBRARY_PATH # the stray one on this machine breaks native links (.claude/rules/player/core.md)
 
 run_all() {
     if [[ -z $BIN ]]; then

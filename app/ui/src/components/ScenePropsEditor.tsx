@@ -7,7 +7,7 @@ import { rangeFill } from "./sidePreview";
 
 // "Scene properties" in the item sidebar (LibrarySide): a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
-// Same drag contract as the volume/speed sliders (web-ui.md): every change → the local value at once +
+// Same drag contract as the volume/speed sliders (.claude/rules/ui/design.md): every change → the local value at once +
 // a throttled live preview (~90 ms, /library/scene-props/preview — nothing saved) + a debounced persist
 // (250 ms after the last tick, /library/scene-props); a toggle / combo / reset persists at once. The persist's
 // answer is the new list (overridden flags, condition visibility). Unmount flushes pending persists.

@@ -68,7 +68,7 @@ async function startBackend() {
   let prev = null;
   try { prev = parseInt(fs.readFileSync(portFile, "utf8").trim(), 10) || null; } catch { /* first run */ }
   try { fs.unlinkSync(portFile); } catch { /* fresh */ }
-  // a fresh API token for every app launch: the backend makes one when the file is gone (web-backend.md § Local API security)
+  // a fresh API token for every app launch: the backend makes one when the file is gone (.claude/rules/backend/api.md § Security)
   try { fs.unlinkSync(tokenFile()); } catch { /* none yet */ }
   const env = { ...process.env };
   if (!env.LIASCAPE_PORT && prev && (await portFree(prev))) env.LIASCAPE_PORT = String(prev);
@@ -100,7 +100,7 @@ function viteUp(cb) {
   req.setTimeout(400, () => { req.destroy(); cb(false); });
 }
 
-// ── Hardening (web-backend.md § Local API security; owner 2026-11-11 "make the app as a whole more secure") ────────────
+// ── Hardening (.claude/rules/backend/api.md § Security) ────────────
 // The window shows the app's own UI and nothing else: a link / window.open / a page trying to navigate elsewhere goes to
 // the user's browser (http(s) only) — before, an "Open on Steam" link opened steamcommunity.com INSIDE the app, with the
 // preload's bridge and the app's session. No permissions but the clipboard write (Copy ID) and the trailer's fullscreen.

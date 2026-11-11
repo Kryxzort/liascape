@@ -1,4 +1,4 @@
-//! Phase 2 render worker (`.claude/rules/player-core.md` § Sources "Render worker"): one
+//! The render worker (`docs/player/modules/sources.md` § Render worker): one
 //! `lia-render` thread with its own EGL context in the compositor's share group owns every
 //! worker-mode `MpvSource`'s libmpv render context — its creation, its first render (shader
 //! compile, scaler LUTs, FBO setup: 6–20 ms on the loop before) and every later render into

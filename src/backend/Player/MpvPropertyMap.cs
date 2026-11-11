@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Liascape.Player;
 
-// Legacy mpv IPC property commands → liascape-player graph properties (see .claude/rules/player-adapter.md
+// Legacy mpv IPC property commands → liascape-player graph properties (see .claude/rules/backend/player-adapter.md
 // § Property map). PlayerHelper still speaks mpv (`SendCommand("set_property", "volume", 80)`); under
 // PlayerEngine=liascape-player its dispatch hands those args here and LiascapePlayerMedia.Mpv routes the result
 // (volume/speed/mute → the effective-settings resolver, layer props → `lay:*:main`, the rest → `srcs:*`).

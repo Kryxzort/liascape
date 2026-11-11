@@ -24,7 +24,7 @@
 # LIASCAPE_LWE_CORE_DIR (install dir of `build`; default <repo>/build/lwe-core).
 #
 # `--nix` first: run inside this repo's flake devShell (cmake + every dep), minus the stray
-# LD_LIBRARY_PATH some shells carry (it breaks native links — .claude/rules/player-core.md).
+# LD_LIBRARY_PATH some shells carry (it breaks native links — .claude/rules/player/core.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

@@ -14,7 +14,7 @@ paths:
 
 `Web/` wraps the scrapers, helpers and daemons for the Electron/React UI. Kestrel binds `127.0.0.1:0` (or
 `LIASCAPE_PORT`), writes `serve.token` then `serve.port` to `~/.config/liascape/`. Endpoint list: read
-`ServerHost.cs`. Narrative and the full security write-up: `docs/history/backend-web.md`.
+`ServerHost.cs`. Why behind the choices here: `docs/decisions.md` § Backend/API.
 
 ## Security (`Web/ApiSecurity.cs`, the first middleware)
 - Every request presents the token: header `X-Liascape-Token`, or `?token=` on a GET/HEAD only (img/video src, the WebSocket). Writes use the header. Exempt: `GET /health` and the static UI files.

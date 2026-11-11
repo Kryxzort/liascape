@@ -16,8 +16,8 @@ paths:
 # Wallpaper sources and Steam
 
 Sources (the order of `ServerHost`'s providers array = the UI's source pills): motionbgs, moewalls, desktophut,
-Wallpaper Engine (Local), Wallpaper Engine (Workshop). Selectors, URLs, the tag taxonomy and the design history:
-`docs/history/sources.md` and `docs/history/backend-web.md`.
+Wallpaper Engine (Local), Wallpaper Engine (Workshop). Selectors and URLs: the scrapers themselves. Why behind the
+choices here: `docs/decisions.md` § Steam & sources.
 
 ## Scrapers (HTTP + HtmlAgilityPack)
 - Send the Firefox User-Agent from `HttpClientProvider` and share one `HttpClient`; never one per request.
@@ -56,6 +56,7 @@ Wallpaper Engine (Local), Wallpaper Engine (Workshop). Selectors, URLs, the tag 
 - Every Steam page the user must click goes through ONE app-wide queue, one page at a time: the Steam to-do (`Web/SteamTodo.cs`). Never open several pages at once or the subscriptions list.
 - A to-do subscribe entry ends by itself only when its item was absent at its turn and its files then appear (`ItemOnDisk`, `WatchDisk`); otherwise it waits for the user's Next. Unsubscribe entries always wait for Next.
 - A queued unsubscribe stays `pending` until Next → `MarkBlocked`; Skip/Stop → `Unblock` (kept subscribed).
+- The no-sign-in unsubscribe (`UnsubscribeInSteamApp`) opens a page only for ids with a folder in a Steam Workshop root; the rest are blocked at once, no page (an owned `workshop/<id>` copy was never a subscription).
 - Poll every Workshop root for the media file, tracking stability PER PATH (Steam's folder may be reachable through a symlink); report phases, not a percent. Compare folders as real paths (`RealPath`).
 - `steamcmd` never stores the password; the one-time sign-in runs in a terminal with values as `$1..$3`.
 - Dedup on both `SourceId == PageUrl` and `WorkshopId`.

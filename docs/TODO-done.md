@@ -46,7 +46,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         (`systemd-run --user --scope`), or don't restart the unit by hand.
 - [x] `POST /settings` replaces the whole `AppSettings` — a partial body resets every other field to its C# default
       (bit an agent on 2026-10-22: ~15 fields incl. SceneMonitors). Make it merge (PATCH semantics) or reject partial bodies.
-      — done 2026-10-26: it merges (`SettingsService.Patch` → `Merge`, `web-backend.md`): keys in the body overwrite
+      — done 2026-10-26: it merges (`SettingsService.Patch` → `Merge`, `.claude/rules/backend/api.md`): keys in the body overwrite
       the saved values, the rest are kept; an array or object replaces its field whole, an explicit null sets null,
       unknown keys are ignored, a bad value is a 400 that saves nothing; one poster at a time. RED before: a partial
       `{"Theme":"Nord"}` reset 26 other fields incl. `PlayerEngine` (→ the engine switched to legacy).
@@ -58,7 +58,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       the rotation follows the globals live, transitions off). The UI always posts the whole playlist bar; decide merge vs
       reject (`/playlist/play`'s `settings` is per-play by design — defaults intended there).
 - [x] Remove the dead `LweSilent` setting (no consumers).
-      — done 2026-10-26: gone from `AppSettings` and `session.md` (nothing in src/, app/, scripts/ read it). A
+      — done 2026-10-26: gone from `AppSettings` and `.claude/rules/backend/state-files.md` (nothing in src/, app/, scripts/ read it). A
       settings.json that still has it loads (unknown keys are ignored) and the next save drops it.
 - [x] Delete stale branches (2026-11-06: those were already gone; the remote has only `lp-player` + `main`; 50 merged local agent branches + their worktrees cleaned up the same day): `transitions-full-live` (ancestor of current), `merge-fix/*`, `pr/*-temp`, `ui/compact-cards`.
 
@@ -66,7 +66,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] **Wallpaper Engine-style sidebar** (owner 2026-11-10: "instead of a settings menu when clicking right click and
   settings, it should open a sidebar when you focus a card and thats what has all the 4 options from the right click menu.
   same for the browse tab") — done 2026-11-10 (spec `docs/superpowers/specs/2026-11-10-we-sidebar-design.md`, plan
-  `docs/superpowers/plans/2026-11-10-we-sidebar.md`; web-ui.md § "Item sidebar"). Checked against the history first: nothing
+  `docs/superpowers/plans/2026-11-10-we-sidebar.md`; .claude/rules/ui/design.md). Checked against the history first: nothing
   sidebar-like existed; the morph-replay fix (`1bccff26`, `open` = the item's path) is kept as the sidebar's identity rule.
   - Library: focusing a card (a click — which still applies it —, Ctrl/Shift-click, the arrow keys, the
     right-click menu's "Settings", the playlist bar's "Settings") opens a docked right-hand sidebar with everything the settings modal had (volume, speed,
@@ -142,7 +142,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
     scene" + "a playlist's min 5 s + max 2 s", matrix `global:sceneTiming` / `playlist:sceneTiming` (RED on the old UI: no
     scene rule in either hint).
   - "Travel to running wallpaper on app open": **new** — `hooks/travelToPlaying.ts`: the first time a session's Library
-    grid / playlist bar shows the playing item it jumps there (mid-view), once per session (web-ui.md). Matrix
+    grid / playlist bar shows the playing item it jumps there (mid-view), once per session (.claude/rules/ui/design.md). Matrix
     `travel:appOpen` (RED on the old UI: grid and bar at scroll 0 with the playing item out of view).
   - "Keybind toggle to infinite loop current wallpaper": **new** — `liascape loop-current` toggles the player program's
     `keep` (no rotation away from what plays, it loops; again → rotate on, the item's clocks start over); kept by the
@@ -151,7 +151,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
     "Looping <title> …" / "Rotation resumed", the status line ", looping this one". Tests: `tests/program.rs`
     `keep_holds_the_current_item_and_loops_it`, `keep_stops_the_timer_and_resets_it_when_lifted` (RED: unknown prop),
     matrix `cli:loopCurrent` (on / off / app closed / backend restart / Play lifts it). player-adapter.md § Rotation,
-    player-core.md § Programs.
+    docs/player/modules/programs.md § Programs.
   - "Mark the wallpapers already downloaded in Wallpaper Engine local tab of Browse": **new** — Browse cards carry an
     "In library" badge when the library holds the item (by Workshop id for Workshop + WE-local, else the page URL).
     Matrix `browse:inLibrary` (RED on the old UI: no badge).
@@ -184,7 +184,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       & memory, Look & feel, Wallpaper Engine, Scene monitors, Getting Workshop wallpapers, Under the hood, the raw commands,
       Keyboard shortcuts, Housekeeping) and rows renamed plainly ("Even out loudness", "Hush when other audio plays", "Pause
       behind windows", "Ease off heavy scenes", "Play scenes", …); the rotation labels kept (the playlist modal shares them).
-      web-ui.md § "Settings levels". Tests: probe-expert 6/0 (levels), probe-health 9/0, settings-merge 135/0, the matrix's
+      .claude/rules/ui/state-and-api.md § Settings page. Tests: probe-expert 6/0 (levels), probe-health 9/0, settings-merge 135/0, the matrix's
       affected cells 784 + the 47 load-hit ones rerun 46/1 → `parked:hold` (its 3 s interval had run out during the slower UI
       steps before parking — the cell now sets the interval from what the held item already played) 2/2 twice.
 - [x] **Cold boot: the player blocked 10 s on PipeWire and then had no bus for good** (owner's machine, 2026-10-29
@@ -197,7 +197,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       the I7 reconnect backoff, and sources/scene workers/the meter move onto the bus when it comes up
       (`audio.bus.up {reconnected: true}`); the `bus` probe says `down`, `connecting: true` and what it waits for.
       Measured: `hello` 5212 ms → 644–707 ms after spawn with a daemon but no WirePlumber (210–247 ms with no audio
-      server). `player-core.md` § Audio bus → Fallback. Guards `tests/api.rs::bus_comes_up_when_pipewire_starts_after_the_player`,
+      server). `docs/player/modules/audio-bus.md` § Audio bus → Fallback. Guards `tests/api.rs::bus_comes_up_when_pipewire_starts_after_the_player`,
       `serve_answers_at_once_while_wireplumber_isnt_up_yet`, `scene_moves_onto_a_bus_that_comes_up_late`,
       `quit_while_the_bus_waits_for_wireplumber_is_prompt`.
 - [x] **Cold boot (2026-10-29 08:34): a starting player tripped the stall breaker, and the restore "upgraded" the player
@@ -229,11 +229,11 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         `waiting_ready` — nothing showed. Root cause: mpv's `fps` vf never emits the one frame of a still shown
         with `image-display-duration=inf` (`filter input EOF` → `filter output EOF`). The player now never sends
         the `vf` to a still (the extension's guess, corrected by mpv's image flag); the node keeps `fps_cap`.
-        Scenes/colours only store it. `player-core.md` § Sources "An fps cap never reaches a still"; guards
+        Scenes/colours only store it. `docs/player/modules/sources.md` § Sources "An fps cap never reaches a still"; guards
         `tests/sources.rs::fps_cap_never_stalls_an_image`, `tests/api.rs::fps_cap_never_stalls_a_still_any_kind`,
         the adapter IT's "VideoFpsCap 30 × an image"; `test-settings-merge.sh` runs its image check with a cap again.
 - [x] **Missing libraries fail loudly** (owner todo, 2026-10-28): `GET /health/features` (FeatureHealth.cs; the
-      table in web-backend.md — liascape-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
+      table in .claude/rules/backend/api.md — liascape-player, scenes, transitions, VRAM probe, hwdec interop, auto-mute pactl/parec,
       MPRIS playerctl, ffmpeg/ffprobe, steamcmd), fed by the player's new `hello.health` / `liascape-player health`; a warning
       icon with the reason on every affected Settings row (control kept), a summary of what's broken and in use.
       Guards: `--probe probe-health.js` (RED on the base UI), adapter IT (`LIASCAPE_SCENE_WORKER_BIN=/nonexistent`), self-test.
@@ -274,7 +274,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       the runtime + headless mode, the Command API + `ctl`, Wayland outputs, the player audio bus, the
       supervisor + state snapshot/restore, the C# backend adapter behind `PlayerEngine`, and packaging
       (flake + `install.sh`). Default engine stays `legacy`; `liascape-player` is opt-in/experimental.
-      `docs/player/architecture.md`, `.claude/rules/player-core.md` / `player-adapter.md`.
+      `docs/player/architecture.md`, `.claude/rules/player/core.md` / `player-adapter.md`.
 - [x] **Phase 1 on-machine battery + report** (Task 20): ≥ 50 switches × {method} × {mode} on the owner's
       machine, a 1 h soak, the per-monitor isolation check. `docs/player/reports/phase1.md` — done: dropout
       0/0 everywhere, frame pacing/outputs/permonitor PASS, 4 product findings fixed (Tasks 20b–20e), final
@@ -311,7 +311,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         src/player/tests/onmachine/scenes.sh budget` on a quiet machine.
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
   - [x] **Corpus under load**: at load 12–14 two scenes needed 18.7 s / > 20 s to Ready (1.5 s / 6.1 s on a quiet
-        machine), and a transition waits only 10 s for its B. **Done 2026-11-03** (player-core.md § Scene worker →
+        machine), and a transition waits only 10 s for its B. **Done 2026-11-03** (docs/player/modules/scene-worker.md §
         "Real scenes" LoadGate, § "Transitions with scenes"): a heavy scene's build is ONE CPU-bound thread
         (3.5–4.9 s of CPU) that waits in the run queue on a busy CPU — re-measured 7.1 s quiet, 13.1 s with 24
         busy threads + 3 scenes playing, 16.4–19.8 s with 48. A scene B whose worker is alive and loading (new
@@ -335,7 +335,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         switches (0 frozen): at the worker's `set_active(false)` (moved with it when the disconnect was delayed
         150 ms), through the in-process bus loopback (a `pw-play` killed into the bus: 1/10, straight into the
         sink: 0/10). `target.delay.sec` on the loopback didn't help (5/60).
-        **Root cause found and fixed 2026-11-04 ("Make Every Bus Stream An Async Node"; player-core.md § Audio
+        **Root cause found and fixed 2026-11-04 ("Make Every Bus Stream An Async Node"; .claude/rules/player/core.md § Audio
         bus → "Async streams").** The private server's profiler (`scenes.sh onsetrec`, `ONSET_PROFILE=1`,
         release, 240 Hz, full-live S→S) showed every lost cycle: the bus `not-triggered`, A's stream gone, B's
         stream `finished` a whole cycle late, position jump 128 — 7 of 7 in 60 switches, each 1.5–6 ms after A's
@@ -364,7 +364,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         `pw-record` check looked for a phase step, which a cycle of zeros in place doesn't make); with F7 fixed,
         switches with an `unmeasured` stretch fell 60/60 → 5/60 (frozen) and 30/30 → 2/60 (full-live).
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] **A suspend no longer kills the scene worker as "hung"** (2026-10-29; `phase2.md` § 8, player-core.md §
+  - [x] **A suspend no longer kills the scene worker as "hung"** (2026-10-29; `phase2.md` § 8, docs/player/modules/scene-worker.md §
         Scene worker → WorkerHost → Heartbeat). Both on-machine suspends SIGKILLed a live worker: after the resume
         the compositor held every slot of its ring (fences not signalled yet) and the idle worker waited for a
         `Release` (08:16, `waited_ms 2001`), and the VRAM save blocked the compositor's own loop ~6.4 s (08:35,
@@ -377,10 +377,10 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         `liascape-scene-worker`, §4 rows, §6 roadmap, invariants 9–11), `docs/player/invariants.md` #10 (a worker frame
         never blocks the compositor) + #11 (a worker's audio is a gain on a stream that keeps running),
         `docs/player/debugging.md` § Scenes (black / frozen / silent / crash loop / throttled / VRAM / loudness,
-        `probe workers {"log_tail":true}`), `.claude/rules/player-core.md` + `CLAUDE.md` consistency.
+        `probe workers {"log_tail":true}`), `.claude/rules/player/core.md` + `CLAUDE.md` consistency.
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] **Scene loudness learned on first play** (2026-10-28, player-core.md § Scene worker → "Scene loudness",
-        player-adapter.md § Scenes → "Loudness", library.md § Loudness): the worker K-weights what the scene really
+  - [x] **Scene loudness learned on first play** (2026-10-28, docs/player/modules/scene-loudness.md §"Scene loudness",
+        player-adapter.md § Scenes → "Loudness", .claude/rules/backend/library.md § Loudness): the worker K-weights what the scene really
         plays (pre-gain; paused / `no_audio` / fallback excluded) into 100 ms segments (`PROTOCOL` 3), the compositor
         gates + integrates them (BS.1770-4) over 60 s of AUDIBLE play → `scene.loudness` once (a partial from 20 s
         when switched away early); the backend stores it in the index (learned once; a partial until a complete
@@ -411,7 +411,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         end-of-play `scene.loudness` (`finish`, ≥ 5 s new) is stored off the event thread AFTER the new source's
         `SourceProps` read the index — the new source continued the older seed, the stretch between the two reports
         lost (and a rest < 5 s at the end never reached the index at all). **Fixed 2026-10-29 in the player**
-        (player-core.md § "Scene loudness" → "One measurement per path", player-adapter.md § Scenes → "Loudness"):
+        (docs/player/modules/scene-loudness.md"Scene loudness" → "One measurement per path", player-adapter.md § Scenes → "Loudness"):
         the compositor keeps one measurement per scene path (`audio::loudness::Book`, owned by `SourceHost`); a new
         source continues it — the last one left (a reopen) or the live one (a transition A → A' of one scene: only
         the newest source of a path measures from then on) — unless its `loudness_seed` covers more (adopted then:
@@ -422,7 +422,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         `seed_s` ≥ play 1's last report and ≈ its play time: the end report + a rest < window/12, or — a reopen during
         the stop's fade-out, seen in 1 of 4 runs — play 1's live measurement handed over), then the index catching up.
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] **Offline scene loudness estimate — the player half** (2026-10-29, player-core.md § "Scene loudness" →
+  - [x] **Offline scene loudness estimate — the player half** (2026-10-29, docs/player/modules/scene-loudness.md"Scene loudness" →
         "Offline estimate"): `scene::loudness_estimate` + `scene::pkg` + `liascape-player scene-loudness <dir>
         [--props '<scene_props>'] [--model lwe|we]` — a scene's sound objects → a play plan → each audio file decoded
         once (ffmpeg) to per-100 ms K-weighted powers (cached per file, `~/.cache/liascape/scene-loudness`) → mixed as
@@ -440,7 +440,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         25 a literal ≠ 1), so no property changes a scene's sound under liascape-player today (next entry).
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
   - [x] **LWE ignores a sound object's `volume` (and its user property), `startsilent` and the playlist modes**
-        (found 2026-10-29 with the estimate). **Fixed 2026-10-29 by fork patch 0018** (player-core.md § "LWE core";
+        (found 2026-10-29 with the estimate). **Fixed 2026-10-29 by fork patch 0018** (docs/player/modules/scene-lwe-core.md"LWE core";
         spec `docs/player/spikes/we-sound-semantics.md` § 4): `sound` string or list, ONE random file per start,
         `volume²` per stream as a live `DynamicValue` (unclamped), `loop` back to back / `random` + a
         `mintime`..`maxtime` gap / `single` once, on the host clock; a rise from 0 restarts a stopped non-`single`
@@ -463,9 +463,9 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         unaffected relearn too), then they relearn on their next play (and the player restarted, so its `Book`
         holds no old measurement).
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] **Offline scene loudness → integration** (design 2026-10-29; **built 2026-10-29** — player-core.md § "Scene
-        loudness" → "Per audio configuration", player-adapter.md § Scenes → "Loudness", web-backend.md § Scene loudness,
-        library.md § Loudness, web-ui.md; owner decisions folded in: estimate on import + a "recalculate all" button;
+  - [x] **Offline scene loudness → integration** (design 2026-10-29; **built 2026-10-29** — .claude/rules/player/core.md § "Scene
+        loudness" → "Per audio configuration", player-adapter.md § Scenes → "Loudness", .claude/rules/backend/api.md § Scene loudness queue,
+        .claude/rules/backend/library.md § Loudness, .claude/rules/ui/design.md; owner decisions folded in: estimate on import + a "recalculate all" button;
         property-aware loudness). **As built:** backend `Helpers/SceneLoudnessPlanner.cs` (the CLI run + store) +
         `Web/SceneLoudnessOps.cs` (the queue, endpoints, WS); `LibMeta.SceneLoudness` / `SceneLoudnessFp` replaced the
         flat `loudnessState/Seconds/Partial`; the player's `loudness_key` prop + `Book` per (path, key) + 0.5 s settle;
@@ -547,7 +547,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
   - [x] **Scene normalization set once per play** (2026-11-06, owner: "make scene audio normalization not do the real-time
         normalization where it just changes every second and just make it how you said where it checks for 60s and
         calculates rest of the scene for future"; player-adapter.md § Scenes → "Loudness" → "Set once per play",
-        library.md § Loudness, player-core.md § "Scene loudness" → "Applying it"). **What moved the gain:** the backend,
+        .claude/rules/backend/library.md § Loudness, docs/player/modules/scene-loudness.md"Scene loudness" → "Applying it"). **What moved the gain:** the backend,
         on every `scene.loudness` report whose applied value moved ≥ 0.5 LU (`OnLoudnessMeasured` → `ApplyEffective` → a
         500 ms `gain.normalize` ramp) — reports come at the window and after each further 60 s of audible play, so a first
         play moved at ~50/60 s, ~120 s, ~180 s… (the owner's adapter log: 209 such live moves since 05:50, 2951169110 and
@@ -571,8 +571,8 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         at +12 dB by the player (`units::MAX_DB`) while `SceneNormalizeDb` allows +24: a very quiet scene's normalization
         stops at +12 (2951169110's 13.01 played as 12.0).
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] **Scene properties editor** (2026-10-28, library.md § "Scene properties", player-adapter.md § Scenes,
-        web-ui.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
+  - [x] **Scene properties editor** (2026-10-28, .claude/rules/backend/library.md § Scene properties, player-adapter.md § Scenes,
+        .claude/rules/ui/design.md): a WE scene's `project.json` `general.properties` in the card settings modal (bool / slider / colour /
         combo / text input; labels; JS-ish `condition` visibility), saved per item (`LibMeta.SceneProps`), live on
         the scene's source(s) (`scene_props`, the resolver — at every open, R81, a reset sends the default), a
         no-persist drag twin; legacy: LWE `--set-property` at launch only. **Open:** `scenetexture` / `file` /
@@ -587,7 +587,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         (86/96 ok; every non-ok one fails in LWE alone); its LWE findings are Phase 6 items under "Scene
         compatibility programme" below.
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
-  - [x] `tests/scene.rs::transport_meets_the_spike_budget` red in most full-suite runs (2026-10-28, player-core.md
+  - [x] `tests/scene.rs::transport_meets_the_spike_budget` red in most full-suite runs (2026-10-28, docs/player/modules/scene-frame-transport.md
         § Frame transport → "What the worker's CPU figure is"): **the machine, not the work** — a constant 175–178 k
         user instructions + 4 wake-ups per frame read 2.1–25 % CPU with core type (P/E +30 %), clock (`powersave`
         cores at 0.8–1.4 GHz) and memory contention (7×). The features cost ≤ 0.15 % (GPU timer 7 k instructions;
@@ -596,13 +596,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         budget, reporting an over-budget CPU figure with the work in budget as the machine.
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
   - [x] **Phase 2 Task 11 — scenes playable under liascape-player in the backend** (2026-10-28,
-        `.claude/rules/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
+        `.claude/rules/backend/player-adapter.md` § Scenes): `ScenesPlayable` = AllowScenes && the player's `scene`
         capability (else `liascape-player scene-check`, cached 30 s); a scene item → `kind: scene` + its preview;
         `SceneMonitors` fps live (`out:<c>.scene_fps`); `source.broken` → marked crashed (D6: skipped unless
         whitelisted), WS `scene-crashed`, a rotation playing it advances at once; `/player-engine.scenes`;
         Settings hides the scene delay + primary radio under liascape-player. The player emits `source.broken` now
         (the event half of Task 10). **Follow-ups:** Task 10's rest (preview while no frame / broken, a broken
-        scene in the snapshot); ~~Task 12 (matrix scene cells)~~ (done 2026-10-28, web-ui.md § Scene cells); ~~the Task 8 settings' backend wiring~~ (done
+        scene in the snapshot); ~~Task 12 (matrix scene cells)~~ (done 2026-10-28, .claude/rules/ui/shell-and-probes.md § Probes and the UI matrix); ~~the Task 8 settings' backend wiring~~ (done
         2026-10-28, below); `player.scene_assets` has no
         setting yet (auto-resolve only); ~~the scene properties editor (`scene_props`) is its own task~~ (done
         2026-10-28, below); a
@@ -618,15 +618,15 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         skipped for a while (it isn't broken). The low-VRAM hold has only a Settings status line (no tray/toast).
 - Under "Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signa":
   - [x] **A VRAM-stopped scene kept its imported ring** (~3 × its export size of GPU memory, the Task 8 gap;
-        2026-10-28, player-core.md § GPU budget and VRAM → per-scene guard): only the shown slot stays imported.
+        2026-10-28, docs/player/modules/scene-gpu-budget.md § GPU budget and VRAM → per-scene guard): only the shown slot stays imported.
 - [x] AI docs + debug mode per §8/§9; `UPSTREAM.md`; per-component Claude rules — `docs/player/architecture.md`,
       `docs/player/invariants.md`, `UPSTREAM.md`, `CREDITS.md` (generated, `scripts/gen-credits.py`),
-      `.claude/rules/player-core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
+      `.claude/rules/player/core.md` / `player-adapter.md` (Task 19), `docs/player/debugging.md` (Tasks 15/16c/d).
 - [x] **Final-review fixes**: GainHistory bounded (C1), pause lifetime (I1/I3), the pause gate on its own slot
       (I2), switches with no output (I4), async mpv core open (I5), one onset helper (I6), bus reconnect (I7).
 - [x] **Phase 2: render worker** — move every `MpvSource` render context (creation + first render, the
       residual ~6–25 ms per switch on the loop after I5) to a worker thread with a shared EGL context;
-      `.claude/rules/player-core.md` § Runtime "Switch cost and the Phase 2 render worker".
+      `docs/player/modules/runtime.md` § Runtime "Switch cost and the Phase 2 render worker".
       — done 2026-10-26 (`sources/render_worker.rs`, § Sources "Render worker"), **default on**
       (`--render-worker off` / `LIASCAPE_PLAYER_RENDER_WORKER=off` = the loop renderer): the switch loop's warm median
       max_busy 16.3 → 1.3–3.6 ms; missed frames at 2× 1080p120 on a 240 Hz content-paced output 2.2/3.3/3.2 →
@@ -646,7 +646,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       Needs an actual rebuild from this branch, not a code change — **owner action:**
       `sudo nixos-rebuild switch --impure` (the module builds from the local flake, `git+file`).
 - [x] **No explicit cap on concurrent `lia-open` worker threads** (final review I5's async mpv-core-open
-      mechanism, `.claude/rules/player-core.md` § Sources "Async opens") — a burst of near-simultaneous
+      mechanism, `docs/player/modules/sources.md` § Sources "Async opens") — a burst of near-simultaneous
       switches/creates has no ceiling on how many `lia-open` threads it can spin up at once. Not exercised by
       anything in Task 20's battery (every cell opens sources well below any plausible concurrency ceiling);
       worth a bound + a test before Phase 2 leans on this path harder.
@@ -666,13 +666,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       PipeWire, credits) stay skips. GPU-less machine simulated (`__EGL_VENDOR_LIBRARY_FILENAMES` naming no
       file): the suite passed in ~3 s with 133 SKIPs; with `LIASCAPE_REQUIRE_GPU=1` those 133 fail.
       `tests/gfx_basic.rs::require_gpu_turns_a_missing_gpu_into_a_failure` (RED: the old binary passed).
-      `player-core.md` § GFX / EGL.
+      `docs/player/modules/gfx-egl.md` § GFX / EGL.
 - [x] **Zero-copy hwdec back (Phase 2 render worker)** — Task 20d runs every mpv core with
       `gpu-hwdec-interop=no` and maps `hwdec` to copy modes (`auto` → `nvdec-copy,vaapi-copy,auto-copy`),
       because interop init (a CUDA context per render context, 65–90 ms) and `vulkan-copy`'s device creation
       (230–320 ms without an X server) ran on the loop at every switch. Cost: 4K60 nvdec interop ~11 % of a
       core → nvdec-copy ~56 % (flake build); the copy upload also runs on the loop (8–13 ms at 4K60). Once
-      render contexts live on the render worker, re-enable interop there. `player-core.md` § Sources
+      render contexts live on the render worker, re-enable interop there. `docs/player/modules/sources.md` § Sources
       "Hardware decoding".
       — done (2026-10-27): a worker render context loads the GPU's interop (`cuda` on NVIDIA, `vaapi` on
       AMD/Intel; libcuda preloaded for the dev binary) for a source whose `hwdec` would use it, `hwdec` maps to
@@ -753,7 +753,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       (before a switch, or from a 10 s check while nothing is armed — player-adapter.md § Lifecycle).
 - [x] **Two timer owners across a backend restart** (dotnet watch, app relaunch): switch storm every 1–16 s;
       the stopping backend now releases the timer first, a backend yields to a newer one, a superseded
-      aligned switch re-arms instead of switching now (player.md § One timer owner).
+      aligned switch re-arms instead of switching now (.claude/rules/backend/legacy-engine.md § Timed playlist).
 - [x] **`bin/Debug/liascape-backend.runtimeconfig.json` vanished once** after the adapter IT's `dotnet build` ran
       next to the owner's `dotnet watch` (same `obj/`) — the next watch restart (`dotnet run --no-build`)
       can't start without it. A plain `dotnet build` brought it back; cause not pinned down.
@@ -865,7 +865,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
 - [x] **Rapid switches: "no first frame within 10 s"** (2026-10-27) — a paused B's only frame went unrendered
       past mpv's 200 ms VO flip timeout (loop busy: 8 switches + live sets in 300 ms, debug build) and mpv dropped
       it; a paused source has no next frame. `MpvSource::refetch_lost_frame` re-seeks to where it is after 300 ms
-      (player-core.md § Sources). Matrix `race:settingsDuringApply` RED 4/4 → GREEN; repro 3/8 → 0/10.
+      (docs/player/modules/sources.md § Sources). Matrix `race:settingsDuringApply` RED 4/4 → GREEN; repro 3/8 → 0/10.
 - [x] **A crash restart can bring back the previous wallpaper** (found 2026-10-27 by the flake-hardening agent under
       IO load): the snapshot lagged a switch by 2.4 s (fsync under load), the supervised restart restored dee instead
       of `a`, and R81 re-applies only settings, never the wallpaper — the backend's model and the screen disagree.
@@ -887,13 +887,13 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
       — done 2026-10-28: a tick for every timed session (the tick is the queue's one consumer — only the timer owner
       may switch; a second consumer would race it across processes); a 1-item session takes next/random (a switch to
       its one item) and `restart`, and never rotates by itself (`CanRotate`). Shared with legacy (its leak restart is
-      now taken). Matrix `seq:plPlayOne+next|random` RED 2/2 → GREEN (session.md § Timed Playlist).
+      now taken). Matrix `seq:plPlayOne+next|random` RED 2/2 → GREEN (.claude/rules/backend/legacy-engine.md § Timed playlist).
 - [x] **"Library is empty" after a backend restart under the open app** (owner, 2026-10-28 13:11): a cherry-pick
       changed `api/client.ts` + the backend → Vite's HMR re-created the store and re-ran `init` while `dotnet watch`
       had the backend down; `init` failed (the library read became `[]`) and nothing ever re-read it. A plain restart
       under a production page left the library / playlist bar / settings stale too (whatever changed in the gap).
       — done 2026-10-28: `store.resync()` (one read of everything mirrored, each piece applied only when its read
-      succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`web-ui.md`).
+      succeeded), `init` retries it while the backend is unreachable, every WS reopen re-runs it (`.claude/rules/ui/design.md`).
       Matrix `restart:backend` (idle/playlist), `restart:midLibrary`, `restart:initDown` RED 4/4 → GREEN; the HMR
       incident itself (a scratch Vite probe: HMR during the restart → 0 cards before, 7 after).
 - [x] **A rejected `af` silences the video** (owner 2026-11-06 21:35: "why is my current wallpaper silent" — right after
@@ -1265,7 +1265,7 @@ finished item mean this file. When you finish an item in `docs/TODO.md`, tick it
         fragment's inputs from the vertex unit's varyings. Fix: add the missing varying declarations to the fragment.
         This is batch B9 of the gap audit above.
 - Under "Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#6":
-  - [x] **`ctl capture` still encodes on the loop** (2026-10-28, player-core.md § GFX / EGL "`capture` never
+  - [x] **`ctl capture` still encodes on the loop** (2026-10-28, docs/player/modules/gfx-egl.md § GFX / EGL "`capture` never
         stalls the loop"): the loop starts a PBO readback (~0.1 ms), `lia-capture` maps → encodes → writes, the
         reply is deferred until written (like `step`'s). Loop max busy around a 3840×1080 capture 810 ms (debug)
         → 0.07–0.10 ms per repeat (4.5–5 ms the first at a size: the driver pins the buffer); guard

@@ -1,5 +1,5 @@
 //! `liascape-scene-worker --fd N --parent-pid P [--stub]` — renders one WE scene for liascape-player in its
-//! own process (Phase 2; `.claude/rules/player-core.md` § Scene worker). Spawned by
+//! own process (`docs/player/modules/scene-worker.md`). Spawned by
 //! `worker::WorkerHost`, never by hand: fd `N` is its end of a `SOCK_SEQPACKET` socketpair
 //! (`worker::proto`), `P` the compositor's pid.
 //!

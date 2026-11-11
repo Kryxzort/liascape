@@ -153,7 +153,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             // R75 (Task 16b): player-level pause. `SourceHost` applies an *effective*
             // pause (`node.paused || player.paused`) to every video/image source, and the
             // runtime excises paused time from the clock it feeds the Animator and
-            // `Transitions` — see `.claude/rules/player-core.md` § Graph & properties
+            // `Transitions` — see `docs/player/modules/graph-properties.md`
             // "Player node `paused`" and § Runtime "Player-level pause".
             ("paused", def(PropType::Bool, false, PropValue::Bool(false))),
             (
@@ -885,7 +885,7 @@ pub(crate) fn no_such_prop(prop: &str) -> ApiError {
     ApiError {
         code: "no_such_prop",
         message: format!("no such property: {prop:?}"),
-        hint: "see .claude/rules/player-core.md \u{a7} Graph & properties for the schema"
+        hint: "see src/player/src/graph/props.rs for the schema"
             .to_string(),
     }
 }

@@ -23,7 +23,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));

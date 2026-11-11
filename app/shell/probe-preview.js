@@ -7,7 +7,7 @@
 // what the UI tried to send.
 // Usage: electron app/shell/probe-preview.js "http://localhost:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");
-const { withToken } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const url = process.argv[2] || "http://localhost:5173/?api=5174";
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 

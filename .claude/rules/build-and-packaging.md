@@ -21,7 +21,7 @@ paths:
 # Build, packaging and the launcher
 
 The install layout and every build knob are documented in the header of `scripts/install.sh` (read it); the launcher
-is `scripts/liascape`. Old narrative: `docs/history/distribution.md`.
+is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distribution).
 
 ## One build, one layout
 - `scripts/install.sh` is the only imperative build: `PKGBUILD` and `scripts/build-appimage.sh` run it (`DESTDIR=… PREFIX=/usr`). Add a new file, dependency or helper there, not in a package script. The flake is the one exception: it builds the same layout declaratively — change both.

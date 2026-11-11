@@ -7,7 +7,7 @@
 #
 #   bash src/player/tests/onmachine/outputs.sh        # exit 0 = pass
 #
-# What it touches, and how it puts it back (see .claude/rules/player-core.md § Wayland):
+# What it touches, and how it puts it back (see docs/player/modules/wayland.md):
 # - draws solid colours / a synthetic test clip on every monitor (briefly on the overlay
 #   layer for the grim pixel check, otherwise on the background layer);
 # - warps the cursor over the (overlay) surface to check pointer input, then puts it back

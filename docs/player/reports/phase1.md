@@ -24,7 +24,7 @@ run in §4.
 (`dropout_available: true` throughout — lane B's detector is merged on this build). **No
 unexpected `transition.failed`** anywhere, including the extremes block and realism cell.
 
-**Frame pacing: PASS, via `outputs.sh` (§3) — matches `player-core.md`'s own measured numbers
+**Frame pacing: PASS, via `outputs.sh` (§3) — matches `.claude/rules/player/core.md`'s own measured numbers
 exactly** (6.94/4.17 ms mean on DP-1/DP-2 for display-rate content, correct content-pacing for
 ordinary video). `battery.sh`'s own per-switch frame check had two bugs (fixed, §1.1) and, even
 fixed, cannot meaningfully re-validate this bar against arbitrary real video content —
@@ -60,7 +60,7 @@ bugs in `battery.sh` compounded into this:
 
 **Bug A — `missed` required to be 0.** `ok` required BOTH the paced mean within ±0.5 ms of the
 output's refresh period AND `missed == 0` for the `frames` probe's rolling 2 s window. Opening a
-new source costs the loop ~1-26 ms synchronously (final-review I5 / `player-core.md` § Runtime
+new source costs the loop ~1-26 ms synchronously (final-review I5 / `docs/player/modules/runtime.md` § Runtime
 "Switch cost and the Phase 2 render worker": "one to five missed frames at 240 Hz on every
 output per switch... Task 20's pacing criterion should exclude the switch frame") — the
 `missed` count right after a switch is a *documented, accepted* cost, not a pacing defect.
@@ -83,7 +83,7 @@ as `insufficient` for visibility.
 samples — `wait-for-end`'s own clips, which keep playing 10-30 s between switches — `mean_ms`
 correctly reflects the real SFW clips' own frame rate (24-25 fps measured, ~40 ms apart), not
 the display's 144/240 Hz refresh, so those cells still show `frame_violations == switches` even
-after the fix (§1.2's re-run: 8/8 on all three methods). `player-core.md`'s own "Frame pacing"
+after the fix (§1.2's re-run: 8/8 on all three methods). `docs/player/modules/wayland.md`'s own "Frame pacing"
 section documents this as *correct*, by-design content-paced behaviour (its measured "60 fps
 test clip" row: "60.0 presents/s (content-paced, idle between frames)" — not a defect). The
 brief's "±0.5 ms of refresh" bar is only meaningful for genuinely display-rate content (an
@@ -116,7 +116,7 @@ transition.cancelled {reason:"cancelled"}                                     --
 
 — i.e. the switch was genuinely still in flight, correctly waiting on A's natural end
 (`align:"end"`), when **the C# adapter's own backstop cancelled it** —
-`LiascapePlayerMedia.SwitchAndWait`'s `AlignBackstopSlackSec` = 15 s (`.claude/rules/player-adapter.md`
+`LiascapePlayerMedia.SwitchAndWait`'s `AlignBackstopSlackSec` = 15 s (`.claude/rules/backend/player-adapter.md`
 § `DoVideoEndWait`: "the aligned wait itself is bounded... behind the player's own 10 s
 `align_fallback`"). The battery's own `term_timeout()` is `EFFECT_DURATION_MS/1000 + 10`
 (12 s at the `--effect-ms 2000` the main matrix ran at) — correct for a plain cut/effect switch,
@@ -271,7 +271,7 @@ day, tracked in `docs/TODO.md`.
 **Two script bugs found and fixed, then PASS on every check.**
 
 - **Bug (socket never existed).** `run_permonitor()`'s `setup_live_backend()` only flips the
-  `PlayerEngine` setting — `player-adapter.md`'s `EnsureRunning()` is explicit that "only a
+  `PlayerEngine` setting — `.claude/rules/backend/player-adapter.md`'s `EnsureRunning()` is explicit that "only a
   switch calls it — queries/sets never spawn." Without an actual HTTP switch first, no
   `liascape-player serve` process (and no socket) exists when the raw `ctl` calls that follow run, so
   every one of them failed with `io`/"can't connect to .../liascape-player.sock: No such file or
@@ -306,7 +306,7 @@ day, tracked in `docs/TODO.md`.
 ## 3. `outputs.sh`
 
 **PASS** (`RESULT: PASS`, exit 0), release build, real DP-1 (144 Hz)/DP-2 (240 Hz), screens on
-throughout (no DPMS handling needed, per this task's brief). Matches `player-core.md`'s own
+throughout (no DPMS handling needed, per this task's brief). Matches `.claude/rules/player/core.md`'s own
 measured "Frame pacing" table closely:
 
 | check | DP-1 (144 Hz, want 6.9 ± 0.5 ms) | DP-2 (240 Hz, want 4.2 ± 0.5 ms) |
@@ -355,7 +355,7 @@ the first 5 min.
   `wl_buffer.release` (~224 B) per present on a queue it never dispatches when explicit sync is
   on (fixed upstream after 1.0.2, unreleased). Fix: `__NV_DISABLE_EXPLICIT_SYNC=1` by default
   (caller's value wins) + dispatch libwayland's default queue every iteration
-  (`player-core.md` § Wayland NVIDIA notes; cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, 0 missed).
+  (`docs/player/modules/wayland.md` § Wayland NVIDIA notes; cost: 240 Hz interval p95 ~4.7 → ~5.2 ms, 0 missed).
 - **Run 3 (final, 2026-10-25 06:53–07:54):** RSS 424 → ~590 MiB in the first 5 min (warm-up:
   two 1080p60 decoders, 15 s effects), then flat 588–606 MiB for 55 min — slope **0.31 MiB/min**;
   malloc in-use (live) slope 0.05 MiB/min; `trim_ms_max` 1.74 ms; live hwdec `nvdec-copy`,

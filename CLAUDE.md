@@ -27,7 +27,8 @@ Every command below is hermetic unless marked; run anything over ~30 s in the ba
 - Shared state files (settings, playlist state, library `index.json`) are written field-level and atomically: `.claude/rules/backend/state-files.md`.
 - Never break a CLI command or flag, or a state-file format: an old file must still load.
 - Every new UI element follows the app's design and its toggles (theme, glow / `no-glow`, motion / `no-motion`, translucency / `bg-live`, themed controls, a probe): the checklist at the top of `.claude/rules/ui/design.md`. Put it in every UI agent's brief.
-- Commit messages: short, title-case, no period (`Fix App Name`, `Add Shuffle Toggle`).
+- Commit messages: short, title-case, no period (`Fix App Name`, `Add Shuffle Toggle`); the story (what broke, who asked, dates) goes in the body.
+- Code comments say why, never history — no dates, owner quotes or R/Phase/Task numbers: `.claude/rules/writing-rules.md` § Code comments.
 
 ## Where the rule for X lives
 Path-scoped rules load when you read or edit matching files; open one directly when your task touches its area.
@@ -52,6 +53,6 @@ Path-scoped rules load when you read or edit matching files; open one directly w
 | Electron shell, probes, UI matrix | `.claude/rules/ui/shell-and-probes.md` |
 
 ## Reference docs (read on demand)
-- `docs/player/architecture.md` (the player's design), `docs/player/invariants.md`, `docs/player/debugging.md`, `docs/player/modules/` (per-module walkthroughs), `docs/player/adapter.md` (the C# adapter's walkthrough).
-- `docs/history/` — what happened and why: the old rule files with their incidents, measurements and owner decisions (`docs/history/README.md` maps old rule paths that code comments still cite).
+- `docs/player/architecture.md` (the player's design), `docs/player/invariants.md`, `docs/player/debugging.md`, `docs/player/modules/` (how each player module works now: one file per module, `scene-*.md` for the scene worker, `persistence.md` for snapshot/outbox/supervisor), `docs/player/adapter.md` (the C# adapter's walkthrough).
+- `docs/decisions.md` — why things are the way they are: the choices that ruled out a tempting alternative (read before "fixing" one back).
 - Status and to-do: `docs/TODO.md` (done items: `docs/TODO-done.md`).

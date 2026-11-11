@@ -15,7 +15,8 @@ you touch before changing a recipe, a source or the runtime.
 - `.claude/rules/player/runtime-api.md` — the runtime loop, command API, probes, signals.
 - `.claude/rules/player/scenes.md` — scene worker, scene sources, GPU budget, loudness.
 - Rotation and reconnection semantics (C# side): `.claude/rules/backend/player-adapter.md`.
-- Walkthroughs, measurements and history per module: `docs/player/modules/<name>.md` (archived; the code wins).
+- How each module works, with measurements that still hold: `docs/player/modules/<name>.md` (snapshot, outbox and
+  supervisor: `docs/player/modules/persistence.md`; memory: `docs/player/modules/runtime.md`).
 - Design and the block model: `docs/player/architecture.md`.
 
 ## Build and test

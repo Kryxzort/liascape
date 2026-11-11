@@ -11,7 +11,7 @@
 //!
 //! It only ever issues graph `create`/`set`/`destroy` and `Animator::add` — nothing here
 //! renders or talks to a live source (`SourceHost` and the compositor do that). See
-//! `.claude/rules/player-core.md` § Transition recipe for the rules (methods' audio,
+//! `docs/player/modules/transitions.md` for the rules (methods' audio,
 //! align, interrupt/cancel/failure, shared A) and `docs/player/invariants.md` #5/#6.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -625,7 +625,7 @@ fn api_err(code: &'static str, message: String) -> ApiError {
     ApiError {
         code,
         message,
-        hint: "see .claude/rules/player-core.md \u{a7} Transition recipe; `liascape-player ctl state` \
+        hint: "see docs/player/modules/transitions.md; `liascape-player ctl state` \
                shows the live graph"
             .to_string(),
     }

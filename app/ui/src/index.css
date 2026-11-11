@@ -871,7 +871,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 
-/* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, web-ui.md § "Settings levels") */
+/* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* ---- "Smooth window animations" OFF or prefers-reduced-motion (<html class="no-motion">, App.tsx) ----

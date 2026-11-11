@@ -65,7 +65,7 @@ public static class AudioMonitor
     }
 
     // The engine (plan Phase 3 Task 14, parity passed on the owner's machine 2026-11-02): under liascape-player the player
-    // runs auto-mute itself (the `automute` Signal, player-core.md § Signals) whenever it has the `automute` capability.
+    // runs auto-mute itself (the `automute` Signal, docs/player/modules/signals.md) whenever it has the `automute` capability.
     // Capability absent (the player's `LIASCAPE_PLAYER_AUTOMUTE=0`, its audio bus down) → this monitor keeps the job while
     // `serve` runs (criterion 10; with the app closed there is no monitor-daemon under liascape-player). Legacy: this
     // monitor, as always.

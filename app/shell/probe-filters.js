@@ -36,7 +36,7 @@ const path = require("path");
 
 const E = process.env;
 const U = E.LIASCAPE_URL;
-const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (web-backend.md § Local API security)
+const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,7 +52,7 @@ const post = (p, b = {}) => http("POST", p, b);
 async function setSettings(patch) { const s0 = (await http("GET", "/settings")).json; await post("/settings", { ...s0, ...patch }); }
 
 // fake Workshop thumbnails (served by /media): a few colours — in the stack's private cache dir, since /media serves only
-// where the app keeps wallpapers (its data dir, its caches, the Workshop folder; web-backend.md § Local API security)
+// where the app keeps wallpapers (its data dir, its caches, the Workshop folder; .claude/rules/backend/api.md § Security)
 const THUMBS = [];
 function makeThumbs() {
   const d = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "wf-thumbs"); fs.mkdirSync(d, { recursive: true });
