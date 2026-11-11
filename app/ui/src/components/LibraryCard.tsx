@@ -30,15 +30,15 @@ export const LibraryCard = memo(function LibraryCard({
       <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={onClick}
         onContextMenu={(e) => { e.preventDefault(); onContextFocus(); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-        title="Click: apply + details · Ctrl/Shift: select · Right-click: details">
+       >
         <MotionThumb item={item} active={active} autoVideo={autoVideo} />
         {item.isScene && <span className="badge">SCENE</span>}
         {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
           onClick={(e) => { e.stopPropagation(); onToggle(); }}><PlaylistToggle on={inPlaylist} /></button>
-        <button className="del" title="Delete" onClick={(e) => { e.stopPropagation(); onTrash(); }}><Trash2 size={24} /></button>
+        <button className="del" aria-label="Delete" onClick={(e) => { e.stopPropagation(); onTrash(); }}><Trash2 size={24} /></button>
         {/* bottom title bar, 2-line clamp, centered white over #66000000 */}
-        <div className="lib-title" title={item.title}><span>{item.title}</span></div>
+        <div className="lib-title" data-title={item.title}><span>{item.title}</span></div>
       </div>
     </div>
   );

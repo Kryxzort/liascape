@@ -71,8 +71,8 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`}
-      {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
+    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`} data-title={item?.title}
+      {...attributes} {...listeners} onClick={() => playFrom(index)}
       onMouseEnter={onEnter}
       // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (owner 2026-11-11: "no
       // context menu anywhere" — the sidebar has the playlist toggle, Open in file manager, Delete)
@@ -80,7 +80,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHove
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
-      <button className="pl-remove" title="Remove from playlist"
+      <button className="pl-remove" aria-label="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
       {hover && glows && !playing && !isDragging && createPortal(<div className="pl-hover-glow" ref={glowRef} />, document.body)}
     </div>
@@ -171,7 +171,7 @@ export function PlaylistBar() {
   return (
     <div className="playlist-bar" ref={playlistBarRef}>
       <div className="playlist-bar-head">
-        <button className="mini" title={collapsed ? "Expand" : "Collapse"}
+        <button className="mini" aria-label={collapsed ? "Expand" : "Collapse"}
           onClick={() => { setHoverPath(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
         <span className="playlist-bar-label">PLAYLIST</span>
         <span className="playlist-bar-count">{playlist.length}</span>

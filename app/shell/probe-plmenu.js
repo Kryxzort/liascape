@@ -53,12 +53,7 @@ app.whenReady().then(async () => {
   const opened = await js(`({ side: document.querySelector('.side-panel[data-side="library"]')?.dataset.sideId ?? null,
     item: document.querySelector('.pl-item')?.dataset.morphId?.replace(/^pl-/, '') ?? null, menu: !!document.querySelector('.ctx-menu, .pl-ctx') })`);
   results.rightClick = await js(`window.__sent.slice()`);
-  // the sidebar's own controls that a portal'd menu used to bubble through: the playlist toggle (twice: back as it was)
-  for (const k of ["toggle", "toggleBack"]) {
-    await js(`window.__sent = []; document.querySelector('.side-panel [data-side-playlist]')?.click()`);
-    await new Promise((r) => setTimeout(r, 400));
-    results[k] = await js(`window.__sent.slice()`);
-  }
+  // (the sidebar's playlist toggle that a portal'd menu used to bubble through is gone — owner 2026-11-11)
   await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
   await new Promise((r) => setTimeout(r, 400));
   if (opened.menu) results.menu = ["a context menu opened"];

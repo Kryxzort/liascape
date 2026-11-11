@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Monitor, Star, Heart, Eye, HardDrive, User, ExternalLink, Copy, Download, Check, Library as LibraryIcon, Play, X, FolderOpen, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
-import { usePreview } from "./sidePreview";
+import { usePreview, useOnline } from "./sidePreview";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -39,7 +39,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const previewVid = detail?.full && VIDEO_RE.test(detail.full.split("?")[0]) ? thumb(detail.full, w.pageUrl) : null;
   const fullSrc = detail?.full && !previewVid ? thumb(detail.full, w.pageUrl) : null;
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
-  const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt });
+  const online = useOnline();
+  const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt && online });
   const downloading = progress !== undefined;
   const web = w.pageUrl.startsWith("http");
   // the About card only for a description; tags alone sit in a plain row (owner 2026-11-11: a card for one property felt strange)
@@ -73,11 +74,11 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
               <button className="btn ghost ico" onClick={onCancel}><X size={14} /> Cancel</button>
             </div>
           ) : libItem ? (
-            <button className="btn accent ico side-go" onClick={() => onApplyLib(libItem.videoPath)} title="Play the copy in your library"><Play size={15} fill="currentColor" /> Apply</button>
+            <button className="btn accent ico side-go" onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
           ) : (
             <>
-              <button className="btn accent ico side-go" onClick={() => onDownload(true)} title="Download it to your library and play it (double-click / Enter)"><span className="side-dl-ico"><Download size={16} /></span> Download &amp; Apply</button>
-              <button className="btn ghost ico side-go" onClick={() => onDownload(false)} title="Download it to your library only"><span className="side-dl-ico"><Download size={15} /></span> Download</button>
+              <button className="btn accent ico side-go" onClick={() => onDownload(true)}><span className="side-dl-ico"><Download size={16} /></span> Download &amp; Apply</button>
+              <button className="btn ghost ico side-go" onClick={() => onDownload(false)}><span className="side-dl-ico"><Download size={15} /></span> Download</button>
             </>
           )}
         </div>

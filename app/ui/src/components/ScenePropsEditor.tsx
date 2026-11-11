@@ -121,7 +121,7 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
     <section className="scene-props side-sec" data-scene-props>
       <div className="sp-head">
         <h3 className="side-sec-title sp-title"><span className="side-sec-ico"><Wand2 size={15} /></span>Scene properties</h3>
-        {anyOverridden && <button className="mini ico" title="Every property back to the scene's default" onClick={() => reset()}><RotateCcw size={13} /> Reset all</button>}
+        {anyOverridden && <button className="mini ico" onClick={() => reset()}><RotateCcw size={13} /> Reset all</button>}
       </div>
       {data.note && <div className="shint sp-note">{data.note}</div>}
       {data.props.map(row)}

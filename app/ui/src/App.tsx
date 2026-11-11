@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
-import { LEVELS, LEVEL_HINT, LEVEL_LABEL, levelOf } from "./settingsLevel";
+import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
 import { LocateFixed, RefreshCw, Square, Undo2, Upload } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
@@ -158,9 +158,9 @@ export default function App() {
         </div>
 
         {tab === "settings" && (
-          <div className="pills level-pills" data-settings-level={levelOf(s.settings?.settingsLevel)} title="How much of Settings to show — hidden settings keep working">
+          <div className="pills level-pills" data-settings-level={levelOf(s.settings?.settingsLevel)}>
             {LEVELS.map((l) => (
-              <button key={l} className={`pill${levelOf(s.settings?.settingsLevel) === l ? " active" : ""}`} data-level={l} title={LEVEL_HINT[l]}
+              <button key={l} className={`pill${levelOf(s.settings?.settingsLevel) === l ? " active" : ""}`} data-level={l}
                 onClick={() => s.setSetting("settingsLevel", l)}>{LEVEL_LABEL[l]}</button>
             ))}
           </div>
@@ -171,7 +171,7 @@ export default function App() {
               <button key={x.index} className={`pill${s.activeSource === x.index ? " active" : ""}`}
                 onClick={() => s.setSource(x.index)}>{x.name}</button>
             ))}
-            <button className="mini" title="Refresh" onClick={() => s.reload()}><RefreshCw size={16} /></button>
+            <button className="mini" aria-label="Refresh" onClick={() => s.reload()}><RefreshCw size={16} /></button>
           </div>
         )}
 
@@ -184,7 +184,7 @@ export default function App() {
         {s.undoDepth > 0 && <button className="btn ghost ico glow-pulse" onClick={() => s.undo()}><Undo2 size={14} /> Undo</button>}
 
         {/* Stop — red/danger with a soft glow */}
-        {s.playingPath && <button className="btn danger ico glow-stop" title="Stop playback" onClick={() => s.stop()}><Square size={14} fill="currentColor" /> Stop</button>}
+        {s.playingPath && <button className="btn danger ico glow-stop" onClick={() => s.stop()}><Square size={14} fill="currentColor" /> Stop</button>}
 
         {tab === "browse" && src?.supportsSearch && (
           <input className="search" placeholder={`Search ${src.name}…`} value={s.query}
@@ -201,7 +201,7 @@ export default function App() {
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>
               <LocateFixed size={16} /></button>
-            <button className="btn ghost ico" title="Import a local wallpaper" onClick={() => importRef.current?.click()}><Upload size={14} /> Import</button>
+            <button className="btn ghost ico" onClick={() => importRef.current?.click()}><Upload size={14} /> Import</button>
             <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
               style={{ display: "none" }} onChange={onImportFile} />
             <input className="search" placeholder="Search library…" value={s.libQuery}

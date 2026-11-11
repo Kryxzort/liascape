@@ -1,22 +1,15 @@
-import { useId } from "react";
-
-// Playlist toggle — unchecked = rounded-square accent ring;
-// checked = accent fill with a checkmark *cut clean through* (see-through, shows the thumbnail).
-// Uses a <mask> (white box minus black checkmark) — guaranteed transparent tick in Chromium, where
-// a single evenodd path can render filled. currentColor → parent button brightens accent→hover.
+// Playlist toggle — unchecked = a rounded-square accent ring; checked = an accent square with the tick in the theme's
+// contrast colour (`--accent-fg`). The tick used to be CUT THROUGH the square (an SVG mask — the thumbnail showing in it):
+// on hover the square turns the paler `--accent-hover`, and the see-through tick (a mid-grey thumbnail, say) all but
+// vanished into it — "the checkmarks … become a invisible fill on hover" (owner 2026-11-11; rendered old vs new in
+// Electron 42: the masked tick lost its contrast, the square itself stayed). A solid dark tick keeps it on any thumbnail.
 export function PlaylistToggle({ on, size = 18 }: { on: boolean; size?: number }) {
-  const id = "pt" + useId().replace(/[^a-zA-Z0-9]/g, "");
   return (
     <svg className="pl-toggle-svg" width={size} height={size} viewBox="0 0 20 20" aria-hidden focusable="false">
       {on ? (
         <>
-          <defs>
-            <mask id={id}>
-              <rect x="0" y="0" width="20" height="20" rx="3.3" ry="3.3" fill="white" />
-              <path d="M3 10L7 16L18 5L17 4L7 13L4 9Z" fill="black" />
-            </mask>
-          </defs>
-          <rect x="0" y="0" width="20" height="20" rx="3.3" ry="3.3" fill="currentColor" mask={`url(#${id})`} />
+          <rect x="0" y="0" width="20" height="20" rx="3.3" ry="3.3" fill="currentColor" />
+          <path d="M3 10L7 16L18 5L17 4L7 13L4 9Z" fill="var(--accent-fg)" />
         </>
       ) : (
         <rect x="1" y="1" width="18" height="18" rx="3" ry="3" fill="none" stroke="currentColor" strokeWidth="2" />

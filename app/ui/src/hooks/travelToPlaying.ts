@@ -49,6 +49,36 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
 // (exponential, ~0.5 s), stopping when it's there, after 1.5 s, or the moment the user wheels / presses in the container.
 // Motion off → one jump, re-aimed over 3 frames like the app-open travel. Then `locateFx` spotlights it (below).
 // Returns false when the element isn't in the list (nothing playing, the item filtered out / not in the playlist).
+// Where an element can actually be SEEN: the window ∩ every clipping ancestor, minus the app's overlays that don't contain it
+// (the playlist bar over the grid's bottom, the top bar, a floating sidebar) — an overlay that spans the box's width cuts
+// its top / bottom, one that spans its height its left / right. The glide aims for this box's middle and the spotlight
+// draws only inside it (owner 2026-11-11: "the spotlight still keeps the spotlight and outline even when playlist bar is
+// overlaying over it").
+type Box = { l: number; t: number; r: number; b: number };
+const OVERLAYS = ".playlist-bar, .topbar, .side-panel";
+function clipAncestors(el: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+    const cs = getComputedStyle(a);
+    if (cs.overflowX !== "visible" || cs.overflowY !== "visible") out.push(a);
+  }
+  return out;
+}
+export function visibleBox(el: HTMLElement, ancestors = clipAncestors(el), self = false): Box {
+  let b: Box = { l: 0, t: 0, r: window.innerWidth, b: window.innerHeight };
+  const cut = (q: DOMRect) => { b = { l: Math.max(b.l, q.left), t: Math.max(b.t, q.top), r: Math.min(b.r, q.right), b: Math.min(b.b, q.bottom) }; };
+  for (const a of self ? [el, ...ancestors] : ancestors) cut(a.getBoundingClientRect());
+  for (const ov of document.querySelectorAll<HTMLElement>(OVERLAYS)) {
+    if (ov.contains(el) || el.contains(ov)) continue;
+    const q = ov.getBoundingClientRect();
+    if (!q.width || !q.height || q.right <= b.l || q.left >= b.r || q.bottom <= b.t || q.top >= b.b) continue;
+    const wide = q.left <= b.l + 1 && q.right >= b.r - 1, tall = q.top <= b.t + 1 && q.bottom >= b.b - 1;
+    if (wide) { if (q.top > b.t) b.b = Math.min(b.b, q.top); else b.t = Math.max(b.t, q.bottom); }
+    else if (tall) { if (q.left > b.l) b.r = Math.min(b.r, q.left); else b.l = Math.max(b.l, q.right); }
+  }
+  return b;
+}
+
 export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y", smooth: boolean): boolean {
   const target = sc?.querySelector<HTMLElement>(selector);
   if (!sc || !target) return false;
@@ -56,6 +86,7 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
   let raf = 0, last = 0, t0 = 0, frames = 0, stopped = false;
   // the spotlight dims the window from the click on (owner 2026-11-11), its hole riding the target through the glide
   const fx = locateFx(target, smooth);
+  const scAnc = clipAncestors(sc);
   const stop = () => {
     if (stopped) return;
     stopped = true; cancelAnimationFrame(raf);
@@ -67,9 +98,10 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
     const el = sc.querySelector<HTMLElement>(selector);
     if (!el) { interrupt(); return; }
     if (!t0) t0 = t;
-    const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
+    // the middle of what's VISIBLE of the list (the playlist bar may cover the grid's bottom)
+    const v = visibleBox(sc, scAnc, true), r = el.getBoundingClientRect();
     const cur = axis === "y" ? sc.scrollTop : sc.scrollLeft;
-    const delta = axis === "y" ? r.top - s.top - (s.height - r.height) / 2 : r.left - s.left - (s.width - r.width) / 2;
+    const delta = axis === "y" ? r.top - v.t - (v.b - v.t - r.height) / 2 : r.left - v.l - (v.r - v.l - r.width) / 2;
     const dt = last ? Math.min(t - last, 64) : 16;
     last = t;
     // the browser clamps at the list's ends (an item at the very end can't be centred): no own max — scrollWidth − clientWidth
@@ -109,11 +141,30 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
   fx.className = `locate-fx${motion ? "" : " still"}`;
   fx.setAttribute("aria-hidden", "true");
   fx.style.setProperty("--r", getComputedStyle(el).borderRadius || "10px");
-  fx.innerHTML = `<div class="lfx-dim in"></div>`;
+  // the dim, then a clip box holding the glow / edge / rings (added on arrival) — clipped to where the item is visible
+  fx.innerHTML = `<div class="lfx-dim in"></div><div class="lfx-clip"></div>`;
+  const dim = fx.firstElementChild as HTMLElement, clip = fx.lastElementChild as HTMLElement, anc = clipAncestors(el);
   let raf = 0, last = "", t = 0, phase: "travel" | "shown" | "gone" = "travel";
   const place = () => {
-    const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
-    if (k !== last) { last = k; fx.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`; fx.style.width = `${r.width}px`; fx.style.height = `${r.height}px`; }
+    const r = el.getBoundingClientRect(), v = visibleBox(el, anc);
+    const k = `${r.left},${r.top},${r.width},${r.height},${v.l},${v.t},${v.r},${v.b}`;
+    if (k === last) return;
+    last = k;
+    fx.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`; fx.style.width = `${r.width}px`; fx.style.height = `${r.height}px`;
+    // the hole = the VISIBLE part of the item; none visible (still far off in the list, or under the bar) → a zero hole at
+    // the nearest visible point, so the WHOLE window is dimmed (the dim's spread reaches 1.5× the window from the hole —
+    // a hole thousands of px off-screen left part of the window undimmed: owner 2026-11-11, "the dimming fails to apply to
+    // the full app if the current view state is very far away from the destination wallpaper") and the hole grows in from
+    // the edge as the item arrives
+    let hl = Math.max(r.left, v.l), ht = Math.max(r.top, v.t), hr = Math.min(r.right, v.r), hb = Math.min(r.bottom, v.b);
+    if (hr <= hl || hb <= ht) {
+      hl = hr = Math.min(Math.max((r.left + r.right) / 2, v.l), v.r);
+      ht = hb = Math.min(Math.max((r.top + r.bottom) / 2, v.t), v.b);
+    }
+    Object.assign(dim.style, { left: `${hl - r.left}px`, top: `${ht - r.top}px`, width: `${hr - hl}px`, height: `${hb - ht}px` });
+    // the glow / edge / rings: cut where the item is covered or scrolled away, free (glowing out) elsewhere
+    const side = (d: number) => (d > 0.5 ? `${d}px` : "-400px");
+    clip.style.clipPath = `inset(${side(v.t - r.top)} ${side(r.right - v.r)} ${side(r.bottom - v.b)} ${side(v.l - r.left)})`;
   };
   const tick = () => { if (!el.isConnected) { done(); return; } place(); raf = requestAnimationFrame(tick); };
   const done = () => {
@@ -132,8 +183,8 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
     const r0 = el.getBoundingClientRect(), D = 26;
     fx.style.setProperty("--sx", String((r0.width + 2 * D) / Math.max(1, r0.width)));
     fx.style.setProperty("--sy", String((r0.height + 2 * D) / Math.max(1, r0.height)));
-    fx.firstElementChild!.className = "lfx-dim";
-    fx.insertAdjacentHTML("beforeend", `${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
+    dim.className = "lfx-dim";
+    clip.insertAdjacentHTML("beforeend", `${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
       (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`));
     el.classList.add("locate-flash");
     t = window.setTimeout(done, motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
@@ -142,7 +193,7 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
     if (phase !== "travel") return;
     phase = "gone"; clearTimeout(t);
     if (!motion) { done(); return; }
-    fx.firstElementChild!.className = "lfx-dim out";
+    dim.className = "lfx-dim out";
     t = window.setTimeout(done, LOCATE_OUT_MS);
   };
   place();

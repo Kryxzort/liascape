@@ -22,6 +22,10 @@
 /* live wallpaper behind every tab → let the chrome go translucent so it shows through */
 :root.bg-live { --tr: 65%; --tr-strong: 85%; --tr-side: 0%; }
 * { box-sizing: border-box; }
+/* focus rings: none — not the system's yellow one, not after a click + a key — unless navigating with Tab (`.kbd-nav`,
+   hooks/focusRing.ts), then the app's accent ring (owner 2026-11-11: "we never want those pesky yellow outlines anywhere") */
+:root:not(.kbd-nav) :focus-visible { outline: none !important; }
+:root.kbd-nav :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html, body, #root { margin: 0; height: 100%; }
 body {
   /* Inter 14. */
@@ -253,7 +257,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   transition: opacity .12s, color .15s; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 .card.lib:hover .pl-toggle, .pl-toggle.on { opacity: 1; }
 .pl-toggle:hover { color: var(--accent-hover); filter: drop-shadow(0 0 5px var(--accent)); }
-.pl-toggle-svg { display: block; }
+.pl-toggle-svg { display: block; } /* no grow on hover (owner 2026-11-11: "a checkbox enlarging feels strange") */
 /* COOL: animated preview layer (gif/webp <img> or hover <video>) over the static thumb.
    transition (not keyframe) so the browse opacity-toggle fades without remount → no gif restart. */
 .thumb.anim { position: absolute; inset: 0; transition: opacity .2s ease; }
@@ -261,8 +265,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* the card the item sidebar shows (keyboard / click focus): an accent ring OFF the card (3 px gap) + the hover's accent glow — the
    theme colour, like hover (owner 2026-11-11: "not just plain white"); distinct from the selection's flush outline. Focused
    inside a selection: both (the flush ring as a shadow). Glow effects off → the ring alone. */
-.card.focused { outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
-.card.focused.selected { box-shadow: 0 0 0 2px var(--accent), 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
+/* the card the sidebar is open on: held in its hover state — lifted 3 px, the accent outline FLUSH on its edge, the glow
+   (owner 2026-11-11: the ring floating 3 px off the card "feels kind of out of place" — every other card state sits on the
+   card's own edge). The lift is what tells it from a selected card (flat, same outline) */
+.card.focused { outline: 2px solid var(--accent); outline-offset: 0; transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 26px -2px var(--accent); }
 .sel-toolbar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55;
   display: flex; gap: 12px; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
   border-radius: 12px; padding: 10px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); }
@@ -361,21 +367,27 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    layer, opacity only), an accent edge, three rings rippling out (transform: scale by --sx/--sy, the px-exact factors locateFx
    computes, + opacity), all gone after 1.5 s. Its own composited layers: nothing in the grid repaints. The element keeps a static
    accent outline meanwhile (`.locate-flash`). */
-.locate-flash { outline: 3px solid var(--accent); outline-offset: 3px; }
+/* flush on the item's edge like the focused card (owner 2026-11-11: the rings floating off the card felt out of place — the
+   3 px-off outline + a 3 px border 6 px off stacked into one thick band, and the clear hole was 10 px bigger than the item) */
+/* the spotlight's colour = the PLAYING colour (it finds what's playing; the target already pulses green — an accent glow on
+   it fought that ring), not the accent (interaction) — owner 2026-11-11 asked; agreed */
+.locate-flash, .locate-fx { --lfx-c: var(--success); }
+.locate-flash { outline: 2px solid var(--lfx-c); outline-offset: 0; }
 .locate-fx { position: fixed; left: 0; top: 0; z-index: 85; pointer-events: none; will-change: transform; }
-.locate-fx > div { position: absolute; inset: 0; border-radius: var(--r, 10px); }
-.locate-fx > .lfx-dim { inset: -10px; border-radius: calc(var(--r, 10px) + 10px); box-shadow: 0 0 0 150vmax rgba(0,0,0,.58);
+.locate-fx div { position: absolute; inset: 0; border-radius: var(--r, 10px); }
+.locate-fx > .lfx-clip { border-radius: 0; } /* its clip-path is set per frame (travelToPlaying.ts place) */
+.locate-fx > .lfx-dim { inset: auto; box-shadow: 0 0 0 150vmax rgba(0,0,0,.58);
   animation: lfx-dim 1.5s ease both; }
-.locate-fx > .lfx-glow { box-shadow: 0 0 34px 4px var(--accent), 0 0 90px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+.locate-fx .lfx-glow { box-shadow: 0 0 34px 4px var(--lfx-c), 0 0 90px 12px color-mix(in srgb, var(--lfx-c) 45%, transparent);
   animation: lfx-glow 1.5s ease both; }
-.locate-fx > .lfx-edge { inset: -6px; border-radius: calc(var(--r, 10px) + 6px); border: 3px solid var(--accent);
+.locate-fx .lfx-edge { inset: -2px; border-radius: calc(var(--r, 10px) + 2px); border: 2px solid var(--lfx-c); /* = the outline */
   animation: lfx-dim 1.5s ease both; }
-.locate-fx > .lfx-ring { inset: -6px; border-radius: calc(var(--r, 10px) + 6px); border: 2px solid var(--accent);
-  box-shadow: 0 0 14px -2px var(--accent), inset 0 0 14px -4px var(--accent); opacity: 0;
+.locate-fx .lfx-ring { inset: -2px; border-radius: calc(var(--r, 10px) + 2px); border: 2px solid var(--lfx-c); /* ripples out of the edge */
+  box-shadow: 0 0 14px -2px var(--lfx-c), inset 0 0 14px -4px var(--lfx-c); opacity: 0;
   animation: lfx-ring .85s cubic-bezier(.2, .7, .3, 1) both; }
-.locate-fx > .lfx-ring + .lfx-ring { animation-delay: .36s; }
-.locate-fx > .lfx-ring + .lfx-ring + .lfx-ring { animation-delay: .6s; }
-.locate-fx > .lfx-edge + .lfx-ring { animation-delay: .12s; }
+.locate-fx .lfx-ring + .lfx-ring { animation-delay: .36s; }
+.locate-fx .lfx-ring + .lfx-ring + .lfx-ring { animation-delay: .6s; }
+.locate-fx .lfx-edge + .lfx-ring { animation-delay: .12s; }
 @keyframes lfx-dim { 0% { opacity: 0; } 14% { opacity: 1; } 72% { opacity: 1; } 100% { opacity: 0; } }
 /* the dim's phases: `.in` from the click (fades up, holds through the glide), then the plain class holds it from opacity 1 and
    fades it with the rest; `.out` = the glide was interrupted */
@@ -388,8 +400,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes lfx-glow { 0% { opacity: 0; } 16% { opacity: 1; } 38% { opacity: .65; } 58% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes lfx-ring { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(var(--sx, 1.2), var(--sy, 1.2)); } }
 /* motion off / reduced: the same picture standing still for 1.2 s — the dim, the edge, one ring a little further out */
-.locate-fx.still > div { animation: none; }
-.locate-fx.still > .lfx-ring { inset: -13px; border-radius: calc(var(--r, 10px) + 13px); opacity: .65; }
+.locate-fx.still div { animation: none; }
+.locate-fx.still .lfx-ring { inset: -13px; border-radius: calc(var(--r, 10px) + 13px); opacity: .65; }
 .pl-remove { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border-radius: 999px;
   background: none; color: #fff; opacity: 0; transition: opacity .12s, color .15s, filter .2s;
   filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); display: grid; place-items: center; }
@@ -419,9 +431,6 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* YouTube trailer overlay — fills the stage, centers a 16:9 player (the video's own aspect) */
 .yt-stage { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: #000; border-radius: 14px; overflow: hidden; }
 .yt-frame { width: 100%; aspect-ratio: 16 / 9; max-height: 100%; border: 0; display: block; }
-.yt-close { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 8px;
-  display: grid; place-items: center; background: rgba(0,0,0,.55); color: #fff; transition: background .15s, box-shadow .2s; }
-.yt-close:hover { background: var(--danger); box-shadow: var(--glow-sm); }
 /* the Library sidebar's "Scene properties" (components/ScenePropsEditor.tsx) */
 .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .sp-note { margin-bottom: 6px; }
@@ -515,7 +524,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* no system focus ring on a slider (a key pressed while one is held flipped it to keyboard focus → a yellow
    outline); keyboard focus shows the same accent glow as hover instead — never while it's held (hooks/rangeDrag.ts) */
 input[type=range]:focus-visible { outline: none; }
-:root:not(.range-dragging) input[type=range]:focus-visible { filter: drop-shadow(0 0 4px var(--accent)); }
+:root.kbd-nav:not(.range-dragging) input[type=range]:focus-visible { filter: drop-shadow(0 0 4px var(--accent)); }
 .settings select, .num, .text { background: var(--surface1); border: 1px solid var(--surface2); color: var(--text);
   border-radius: 7px; padding: 5px 9px; outline: none; transition: border-color .15s, box-shadow .2s; }
 .settings select:hover, .num:hover, .text:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
@@ -751,21 +760,19 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .settings input[type=range]:hover, :root.no-glow .settings input[type=checkbox]:hover,
 :root.no-glow .settings input[type=radio]:hover, :root.no-glow:not(.range-dragging) input[type=range]:focus-visible { filter: none; }
 /* a keyboard-focused slider still shows where focus is: an outline instead of the glow (never while it's held) */
-:root.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root.kbd-nav.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root.no-glow .mpv { box-shadow: none; }
 /* the focused card: its accent ring only; the download button: lift + nudge, no bloom; the locator: dim + edge + rings, no glow */
 :root.no-glow .card.focused { box-shadow: 0 1px 3px rgba(0,0,0,.4); }
-:root.no-glow .card.focused.selected { box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0,0,0,.4); }
 :root.no-glow .dl-btn::before { display: none; }
 :root.no-glow .dl-btn:hover .dl-glyph { filter: drop-shadow(0 0 2px rgba(0,0,0,.6)); animation-name: dl-nudge; }
 :root.no-glow .go-playing:hover:not(:disabled) svg { filter: none; }
-:root.no-glow .locate-fx > .lfx-ring { box-shadow: none; }
+:root.no-glow .locate-fx .lfx-ring { box-shadow: none; }
 :root.no-glow .side-sec::before { box-shadow: none; }
 :root.no-glow .side-glow { opacity: 0 !important; }
 :root.no-glow .side-sec-ico, :root.no-glow .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 :root.no-glow .side-tile.danger .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
-:root.no-glow .side-badge, :root.no-glow .side-dot { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
@@ -808,8 +815,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.bg-live .side-panel { background: transparent; }
 /* the loose small controls on a bright wallpaper: the head's tools and the "global" tags get the cards' dark fill */
 :root.bg-live .side-head .side-tool:not(.on):not(.accent):not(:hover), :root.bg-live .side-global { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
-:root.bg-live .side-tool.side-pl.on { background: linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)),
-  color-mix(in srgb, var(--bg-crust) 60%, transparent); }
 /* like Netflix's subtitles (owner 2026-11-11): a soft black shadow hugging the letters, no offset — Netflix's look is
    `text-shadow: #000000 0px 0px 7px` (a fan recreation's value; Netflix doesn't publish it). NOT as a text-shadow on the h2:
    its two-line clamp needs `overflow: hidden`, which cut the blur off at the box edge (owner: "the left of the text shadow is
@@ -841,10 +846,6 @@ input[type=range]:focus-visible { outline: none; }
 .side-tool.accent { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
 .side-tool.accent:hover { box-shadow: var(--glow); }
 .side-tool.accent svg { margin-left: 2px; }
-.side-tool.side-pl { color: var(--accent); }
-.side-tool.side-pl:hover { color: var(--accent-hover); }
-.side-tool.side-pl.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.side-tool.side-pl .pl-toggle-svg { width: 16px; height: 16px; }
 .side-close:hover { color: var(--danger); border-color: var(--danger); box-shadow: 0 0 12px -3px var(--danger); }
 
 .side-content { padding: 4px 16px 22px; }
@@ -876,12 +877,13 @@ input[type=range]:focus-visible { outline: none; }
    the hover cue is the frame's lift + glow above; keyboard focus gets the accent edge */
 .side-play { position: absolute; inset: 0; z-index: 3; padding: 0; border: 0; border-radius: inherit; background: none; cursor: pointer; }
 .side-play:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.side-badge { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px 4px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; letter-spacing: .2px;
-  background: rgba(0,0,0,.66); color: #fff; border: 1px solid color-mix(in srgb, var(--success) 60%, transparent);
-  box-shadow: 0 0 14px -4px var(--success); }
-.side-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent), 0 0 8px var(--success); }
+/* the Video preview's mute toggle: a round dark chip in the picture's corner, above the click-to-play layer; on = sound */
+.side-mute { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.18);
+  transition: background .15s, color .15s, box-shadow .2s, border-color .15s; }
+.side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.side-mute.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+:root.no-glow .side-mute:hover { box-shadow: none; }
 /* the preview switch (GIF / Video / YouTube / Picture): a strip attached to the stage's top edge, above the picture (owner
    2026-11-11: not an overlay) — it bleeds to the stage's border, a hairline under it; equal segments, the active one accent + glow */
 .side-stage.has-switch { flex-direction: column; align-items: center; padding-top: 0; }

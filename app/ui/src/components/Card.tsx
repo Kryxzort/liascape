@@ -36,7 +36,7 @@ export const Card = memo(function Card({
         onContextMenu={(e) => { e.preventDefault(); onContext(w); }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // stop middle-click autoscroll
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onMiddle(w); } }}
-        title="Click: details · Double-click: download & apply · Middle-click: open source">
+       >
         <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
         {gifSrc && mounted && (
           // backgroundImage = the static frame → the gif's loop-gap shows the thumbnail, not black flicker
@@ -45,7 +45,7 @@ export const Card = memo(function Card({
         )}
         {w.isScene && <span className="badge">SCENE</span>}
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
-        {inLibrary && <span className="badge inlib ico" data-in-library title="Already in your library"><Check size={11} strokeWidth={3} />In library</span>}
+        {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover download button (bottom-right, the Library card's trash spot): the OUTLINE of a SOLID download glyph — we
             stroke a filled silhouette with no fill, so it traces the shape's inner+outer contour (hollow), breathing + glowing.
             It was a whole-card overlay while a click downloaded; a click now opens the sidebar. */}
@@ -62,11 +62,11 @@ export const Card = memo(function Card({
           <div className="dl-overlay">
             <span className="dl-label">{progress! > 0 ? `${Math.round(progress! * 100)}%` : "Downloading…"}</span>
             <div className="dl-bar"><div className="dl-fill" style={{ width: `${Math.round((progress || 0) * 100)}%` }} /></div>
-            <button className="dl-x" title="Cancel" onClick={(e) => { e.stopPropagation(); onCancel(w); }}><X size={14} /></button>
+            <button className="dl-x" aria-label="Cancel the download" onClick={(e) => { e.stopPropagation(); onCancel(w); }}><X size={14} /></button>
           </div>
         )}
         {/* bottom title bar, 2-line clamp, centered white (same as Library) */}
-        <div className="lib-title" title={w.title}><span>{w.title}</span></div>
+        <div className="lib-title" data-title={w.title}><span>{w.title}</span></div>
       </div>
     </div>
   );

@@ -8,12 +8,14 @@
 //   lib:reflow           a right-click on a card in a scrolled grid while the sidebar is closed: the docked sidebar re-fits the
 //                        grid's columns, the card stays in view near where it was (real input events)
 //   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete from source (a Workshop item)
-//   lib:play             the picture is the Play control: a hover shows the round Play button, a click applies the item, then the
-//                        "Playing now" badge instead; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
+//   lib:play             the picture is the Play control (no icon): a click applies the item, then the green frame — no
+//                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
 //   lib:slide            an item switch slides like a carousel by where the new card sits: the same row, right → in from the
 //                        right (the old out left), left mirrored; a row below → rises from below, above → mirrored; the outgoing copy inert + after the live one, gone after ~0.3 s; motion off → no slide
+//   look:plCheck         a card's CHECKED playlist box, hovered: still accent, with a dark visible tick (pixels)
+//   look:focusRing       a click + a letter: no focus ring on the clicked button; Tab: the accent ring; a click ends it
 //   look:liveBg          live wallpaper behind the tabs → the panel fully see-through (like Settings), its section cards dark, a see-through head,
 //                        the content scrolling below it; opaque without
 //   lib:volume           its volume slider persists the item's own volume
@@ -65,9 +67,9 @@ const js = (code) => win.webContents.executeJavaScript(code);
 const PAGE = `window.__sb = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
-  card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === t); },
+  card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
   thumb(t) { return this.card(t)?.querySelector(".thumb-wrap"); },
-  bar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
+  bar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.dataset.title === t); },
   ctx(el) { if (!el) throw new Error("no element to right-click"); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   menu() { return document.querySelector(".ctx-menu, .lib-ctx, .pl-ctx"); },
@@ -151,7 +153,7 @@ app.whenReady().then(async () => {
       const r = await page(`await m.sleep(400); return { title: m.sideTitle(), ranges: m.side().querySelectorAll("input[type=range]").length,
         btns: ["Open in file manager", "Delete"].filter((t) => m.sideBtn(t)), play: !!m.side().querySelector("[data-side-play], [data-side-playing]"),
         modal: !!document.querySelector(".modal-backdrop"),
-        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.title) };`);
+        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.dataset.title) };`);
       const v = [];
       if (r.title !== "k2") v.push(`the sidebar shows "${r.title}", not k2`);
       if (r.ranges < 2) v.push(`${r.ranges} sliders in the sidebar (volume + speed)`);
@@ -206,7 +208,7 @@ app.whenReady().then(async () => {
         // the lowest fully visible card that isn't playing
         const t = await page(`const sc = document.querySelector(".lib-scroll").getBoundingClientRect(); const cur = ${JSON.stringify(T(await current()))};
           const vis = [...document.querySelectorAll(".card.lib")].filter((c) => { const b = c.getBoundingClientRect(); return b.top >= sc.top && b.bottom <= sc.bottom; })
-            .map((c) => c.querySelector(".lib-title")?.title).filter((x) => x && x !== cur);
+            .map((c) => c.querySelector(".lib-title")?.dataset.title).filter((x) => x && x !== cur);
           return vis[vis.length - 1] ?? null;`);
         if (!t) return ["no fully visible card in the scrolled grid"];
         const b0 = await page(`const sc = document.querySelector(".lib-scroll"); return { r: m.rect(m.card(${JSON.stringify(t)})), top: sc.getBoundingClientRect().top, h: sc.clientHeight, scroll: sc.scrollTop, cols: getComputedStyle(sc).getPropertyValue("--cols") };`);
@@ -293,7 +295,7 @@ app.whenReady().then(async () => {
 
     await cell("lib:keys", async () => {
       const v = [];
-      const order = await page(`return [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.title);`);
+      const order = await page(`return [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.dataset.title);`);
       const cols = await page(`return +getComputedStyle(document.querySelector(".lib-scroll")).getPropertyValue("--cols") || 1;`);
       const i0 = order.indexOf("k2");
       await page(`await m.openSide("k2"); await m.sleep(300); document.activeElement?.blur?.();`);
@@ -414,7 +416,7 @@ app.whenReady().then(async () => {
       const b = await page(SLIDE("k1")); console.log(`        k3 → k1: ${J(b)}`);
       if (b.live !== "slide-prev" || b.exit !== "to-right") v.push(`k3 → k1 (earlier): live ${b.live}, exit ${b.exit} — expected slide-prev / to-right`);
       if (!(b.x0 < -40)) v.push(`k3 → k1: the new content doesn't start off to the left (x ${b.x0})`);
-      if (await page(`return m.side().querySelectorAll(".side-head-tools [data-side-playlist]").length;`) !== 1) v.push("the head has more / fewer than one playlist toggle after the slides");
+      if (await page(`return m.side().querySelectorAll("[data-side-playlist], .side-head-tools > *").length;`) !== 0) v.push("the head has tools after the slides (an outgoing copy's leaked, or the playlist toggle is back)");
       // owner 2026-11-11: "it should also slide differently based on whether the next one is above or below" — a card in a
       // row below rises in from below (the old one leaves upwards), back up → mirrored
       win.setContentSize(1000, 800); await sleep(300); await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(500);`); // the grid wraps (≈3 columns beside the docked panel)
@@ -451,7 +453,8 @@ app.whenReady().then(async () => {
       if (r0.label !== "Play k3") v.push(`its accessible name is "${r0.label}", not "Play k3"`);
       if (r0.tag !== "BUTTON" || r0.tab < 0) v.push(`it isn't keyboard-reachable (${r0.tag}, tabIndex ${r0.tab})`);
       if (r0.old) v.push(`the old Play / In playlist buttons are still there (${r0.old})`);
-      if (r0.pl !== "true") v.push(`the head's playlist toggle says aria-pressed=${r0.pl} for k3 (in the playlist)`);
+      // owner 2026-11-11: "remove the playlist checkmark from title area and let the title occupy more of the empty space"
+      if (r0.pl !== null) v.push(`the head still has a playlist toggle (aria-pressed=${r0.pl})`);
       if (r0.icon || (r0.bg && r0.bg !== "none")) v.push(`the picture shows a Play icon / tint (owner: no icon; ${r0.icon} icons, bg ${r0.bg})`);
       const cx = r0.media.x + r0.media.w / 2, cy = r0.media.y + r0.media.h / 2;
       await mv(cx - 20, cy, 80); await mv(cx, cy, 500);
@@ -464,16 +467,31 @@ app.whenReady().then(async () => {
       let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== K[2]; i++) await sleep(100);
       if (cur !== K[2]) v.push(`a click on the picture didn't play k3 (/current ${T(cur)})`);
       let r2 = null;
-      for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); return { play: !!s.querySelector("[data-side-play]"), badge: s.querySelector("[data-side-media] [data-side-playing]")?.textContent ?? null };`); if (r2.badge) break; await sleep(100); }
-      if (!r2.badge || !/Playing now/.test(r2.badge)) v.push(`playing: no "Playing now" badge on the picture (${JSON.stringify(r2)})`);
+      // playing → the green frame only (owner 2026-11-11: the "Playing now" pill was redundant — the card and the frame say it);
+      // "looping this one" is a hero chip, shown only while loop-current is on
+      for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); const f = s.querySelector(".side-frame");
+          return { play: !!s.querySelector("[data-side-play]"), frame: !!f?.matches(".is-playing[data-side-playing]"),
+            pill: !!s.querySelector("[data-side-media] .side-badge, [data-side-media] [data-side-playing]") || /Playing now/.test(s.querySelector("[data-side-media]")?.textContent ?? ""),
+            looping: !!s.querySelector("[data-side-looping]") };`); if (r2.frame) break; await sleep(100); }
+      if (!r2.frame) v.push(`playing: the picture's frame isn't marked playing (${JSON.stringify(r2)})`);
+      if (r2.pill) v.push(`playing: a "Playing now" pill is back on the picture (${JSON.stringify(r2)})`);
+      if (r2.looping) v.push("playing (not looping): a Looping chip shows");
+      // loop-current on → the chip shows; off again → gone. Only a rotating playlist can loop-current (a lone wallpaper
+      // already stays: the backend answers "no playlist is rotating" and keeps nothing) → k3 first in a playlist
+      await post("/playlist/play", { paths: [K[2], K[0]] });
+      for (let i = 0; i < 50 && (await current()) !== K[2]; i++) await sleep(100);
+      await sleep(800);
+      await post("/action", { name: "loop-current" });
+      let lp = null; for (let i = 0; i < 30 && !(lp = await page(`return !!m.side().querySelector("[data-side-looping]");`)); i++) await sleep(100);
+      await post("/action", { name: "loop-current" });
+      if (!lp) v.push("loop-current on: no Looping chip in the sidebar's hero");
+      let gone = false; for (let i = 0; i < 30 && !(gone = await page(`return !m.side().querySelector("[data-side-looping]");`)); i++) await sleep(100);
+      if (!gone) v.push("loop-current off again: the Looping chip stays");
+      await post("/apply", { path: K[2] }); await sleep(800); // back to a lone wallpaper for the cells after
       if (r2.play) v.push("playing: the Play overlay is still there");
-      // the head's playlist toggle takes k3 out of the playlist and puts it back
-      await page(`m.side().querySelector("[data-side-playlist]").click(); await m.sleep(500);`);
-      const out = await page(`return { pressed: m.side().querySelector("[data-side-playlist]").getAttribute("aria-pressed"), bar: !!m.bar("k3") };`);
-      if (out.pressed !== "false" || out.bar) v.push(`the head's toggle didn't take k3 out of the playlist (${JSON.stringify(out)})`);
-      await page(`m.side().querySelector("[data-side-playlist]").click(); await m.sleep(500);`);
-      const back = await page(`return { pressed: m.side().querySelector("[data-side-playlist]").getAttribute("aria-pressed"), bar: !!m.bar("k3") };`);
-      if (back.pressed !== "true" || !back.bar) v.push(`the head's toggle didn't put k3 back (${JSON.stringify(back)})`);
+      // the title takes the head's width (only close beside it)
+      const hd = await page(`const h = m.side().querySelector(".side-head"); return { tools: h.querySelectorAll(".side-head-tools > *").length, textW: Math.round(h.querySelector(".side-head-text").getBoundingClientRect().width), headW: Math.round(h.getBoundingClientRect().width) };`);
+      if (hd.tools !== 0 || hd.headW - hd.textW > 80) v.push(`the title doesn't take the head's free width (${JSON.stringify(hd)})`);
       await mv(5, 5);
       await post("/playlist/state", { videoPaths: K.slice(0, 4), settings: null, name: null });
       await post("/apply", { path: K[0] }); await sleep(1200);
@@ -507,6 +525,24 @@ app.whenReady().then(async () => {
         if (r.opts.includes("video")) {
           const p = await pick("video");
           if (p.mode !== "video" || !(p.lay.video > 0.9) || !(p.lay.gif < 0.1)) v.push(`k1 → Video: mode ${p.mode}, layers ${J(p.lay)}`);
+          // owner 2026-11-11: "in video, show a button to mute/unmute" — muted by default; the button toggles the preview's
+          // sound and never applies the wallpaper. (Silent either way: the stack's audio is private, and the volume is 0 first.)
+          const cur0 = await current();
+          const mu = await page(`const s = m.side(), b = s.querySelector("[data-side-mute]"), vd = s.querySelector('video[data-preview-layer="video"]');
+            if (!b || !vd) return { btn: !!b, video: !!vd };
+            const before = { muted: vd.muted, pressed: b.getAttribute("aria-pressed") };
+            vd.volume = 0; b.click(); await m.sleep(250);
+            const on = { muted: vd.muted, pressed: s.querySelector("[data-side-mute]").getAttribute("aria-pressed") };
+            s.querySelector("[data-side-mute]").click(); await m.sleep(250);
+            return { btn: true, video: true, before, on, after: { muted: vd.muted } };`);
+          console.log(`        mute: ${JSON.stringify(mu)}`);
+          if (!mu.btn) v.push(`Video: no mute button (${JSON.stringify(mu)})`);
+          else {
+            if (!mu.before.muted || mu.before.pressed !== "false") v.push(`Video: the preview doesn't start muted (${JSON.stringify(mu.before)})`);
+            if (mu.on.muted || mu.on.pressed !== "true") v.push(`Video: the button didn't unmute it (${JSON.stringify(mu.on)})`);
+            if (!mu.after.muted) v.push("Video: the button didn't mute it again");
+          }
+          if ((await current()) !== cur0) v.push("Video: the mute button applied the wallpaper");
           await shot("lib-preview-video");
         }
         r = await look("k2");
@@ -527,8 +563,46 @@ app.whenReady().then(async () => {
           if (p.mode !== "youtube" || !p.yt || !/youtube\.com\/embed\//.test(p.yt)) v.push(`s1 → YouTube: no embed (${J(p)})`);
           else if (!/[?&]mute=1/.test(p.yt)) v.push(`the YouTube embed isn't muted (${p.yt})`);
           if (!(p.lay.youtube > 0.5)) v.push(`the YouTube layer isn't shown (${J(p.lay)})`);
-          if (!p.headPlay || p.picPlay) v.push(`on the trailer, Play belongs in the head (head ${p.headPlay}, picture ${p.picPlay})`);
+          // owner 2026-11-11: no Play in the head even on the trailer, and the trailer has no close button of its own
+          if (p.headPlay || p.picPlay) v.push(`on the trailer: a Play button shows (head ${p.headPlay}, picture ${p.picPlay})`);
+          if (await page(`return !!m.side().querySelector(".yt-close, .yt-stage button");`)) v.push("the trailer has a close button");
           await shot("lib-preview-youtube");
+          // owner 2026-11-11: the trailer REMEMBERS its mute + volume (YouTube's embed messages; faked here — no network)
+          const ym = await page(`const s = m.side(), f = s.querySelector("iframe"); if (!f) return null;
+            const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
+            const out = { src: f.src };
+            say({ muted: false, volume: 40 }); await m.sleep(50);
+            out.saved = { muted: localStorage.getItem("liascape_yt_muted"), volume: localStorage.getItem("liascape_yt_volume") };
+            // a message from anywhere else never counts
+            window.dispatchEvent(new MessageEvent("message", { origin: "https://evil.example", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info: { muted: true } }) }));
+            await m.sleep(50); out.foreign = localStorage.getItem("liascape_yt_muted");
+            window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "onStateChange", info: 0 }) }));
+            await m.sleep(50); out.loops = f.parentElement.dataset.ytLoops ?? null;
+            return out;`);
+          console.log(`        trailer memory: ${JSON.stringify(ym)}`);
+          if (!ym) v.push("YouTube: no iframe");
+          else {
+            if (!/[?&]enablejsapi=1/.test(ym.src)) v.push(`the trailer can't report its state (no enablejsapi: ${ym.src})`);
+            // it loops at its REAL end — we restart it on the player's "ended", not YouTube's playlist loop (owner 2026-11-11:
+            // that one "loops prematurely")
+            if (/[?&](loop|playlist)=/.test(ym.src)) v.push(`the trailer still uses YouTube's own loop (it restarts early: ${ym.src})`);
+            if (ym.loops !== "1") v.push(`the player's "ended" didn't restart the trailer (data-yt-loops ${ym.loops})`);
+            if (ym.saved.muted !== "0" || ym.saved.volume !== "40") v.push(`the trailer's unmute / volume 40 wasn't remembered (${JSON.stringify(ym.saved)})`);
+            if (ym.foreign !== "0") v.push("a message from another origin changed the remembered mute");
+          }
+          // the next trailer opens unmuted, and its first (default-100) report doesn't overwrite the saved 40
+          await pick("image"); await pick("youtube");
+          const y2 = await page(`const f = m.side().querySelector("iframe"); if (!f) return null;
+            const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
+            const out = { src: f.src }; say({ muted: false, volume: 100 }); await m.sleep(50); out.afterDefault = localStorage.getItem("liascape_yt_volume");
+            say({ muted: false, volume: 40 }); await m.sleep(50); say({ muted: false, volume: 55 }); await m.sleep(50); out.afterMove = localStorage.getItem("liascape_yt_volume");
+            localStorage.removeItem("liascape_yt_muted"); localStorage.removeItem("liascape_yt_volume"); return out;`);
+          console.log(`        next trailer: ${JSON.stringify(y2)}`);
+          if (y2) {
+            if (!/[?&]mute=0/.test(y2.src)) v.push(`the next trailer didn't open unmuted (${y2.src})`);
+            if (y2.afterDefault !== "40") v.push(`the player's default-100 report overwrote the saved volume (${y2.afterDefault})`);
+            if (y2.afterMove !== "55") v.push(`a volume change after the restore wasn't remembered (${y2.afterMove})`);
+          }
           const q = await pick("image");
           if (q.yt) v.push("Picture: the YouTube embed is still mounted");
           if (q.mode !== "image") v.push(`s1 → Picture: mode ${q.mode}`);
@@ -569,12 +643,14 @@ app.whenReady().then(async () => {
       const v = [];
       await mv(5, 5, 100);
       const r = await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const c = document.querySelector(".card.lib.focused"); if (!c) return null;
-        const cs = getComputedStyle(c); const out = { acc: m.accent(), oc: cs.outlineColor, os: cs.outlineStyle, ow: parseFloat(cs.outlineWidth), off: parseFloat(cs.outlineOffset), bs: cs.boxShadow };
+        const cs = getComputedStyle(c); const out = { acc: m.accent(), oc: cs.outlineColor, os: cs.outlineStyle, ow: parseFloat(cs.outlineWidth), off: parseFloat(cs.outlineOffset), bs: cs.boxShadow, lift: new DOMMatrix(cs.transform).m42 };
         document.documentElement.classList.add("no-glow"); await m.sleep(60); const c2 = getComputedStyle(c); out.ng = { oc: c2.outlineColor, bs: c2.boxShadow };
         document.documentElement.classList.remove("no-glow"); return out;`);
       if (!r) return ["no focused card"];
       if (r.oc !== r.acc || r.os === "none" || !(r.ow >= 1.5)) v.push(`the focused card's ring: ${r.os} ${r.ow}px ${r.oc}, expected the accent ${r.acc}`);
-      if (!(r.off >= 2)) v.push(`the ring sits on the card (offset ${r.off}px) — the selection's outline does`);
+      // owner 2026-11-11: the ring 3 px off the card felt out of place → flush, and the card held lifted like its hover
+      if (Math.abs(r.off) > 0.5) v.push(`the focused card's outline floats ${r.off}px off its edge — it sits flush`);
+      if (!(r.lift <= -2)) v.push(`the focused card isn't lifted (translateY ${r.lift}) — the lift is what tells it from a selected card`);
       if (!r.bs.includes(r.acc)) v.push(`no accent glow on the focused card (box-shadow ${r.bs})`);
       if (r.ng.oc !== r.acc) v.push(`Glow effects off: the ring is ${r.ng.oc}`);
       if (r.ng.bs.includes(r.acc)) v.push(`Glow effects off: the focused card still glows (${r.ng.bs})`);
@@ -594,13 +670,65 @@ app.whenReady().then(async () => {
           for (const r of rs) { const tf = getComputedStyle(r).transform; if (tf && tf !== "none") { const mm = new DOMMatrix(tf); out.scale = Math.max(out.scale, mm.a, mm.d); } }
           if (fx.querySelector(".lfx-glow")) out.glow = true;
           out.anims = Math.max(out.anims, fx.getAnimations({ subtree: true }).length);
-          const el = document.querySelector(".locate-flash"); if (el) out.outline = getComputedStyle(el).outlineColor; }
+          const el = document.querySelector(".locate-flash"); if (el) { out.outline = getComputedStyle(el).outlineColor; out.olOff = parseFloat(getComputedStyle(el).outlineOffset);
+            const a = d?.getBoundingClientRect(), b = el.getBoundingClientRect();
+            if (a) out.holeOff = Math.max(out.holeOff ?? 0, Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.right - b.right), Math.abs(a.bottom - b.bottom)); }
+          // the hole never leaves the window — from the click on (owner 2026-11-11: far off in the bar, part of the app stayed lit)
+          if (d) { const a = d.getBoundingClientRect(); out.holeOut = Math.max(out.holeOut ?? 0, -a.left, -a.top, a.right - innerWidth, a.bottom - innerHeight); } }
         else if (out.seen != null && out.gone == null) out.gone = Math.round(t);
         if (t < 2800) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
-      out.acc = m.accent(); out.left = !!document.querySelector(".locate-fx, .locate-flash"); return out;`;
+      out.acc = (() => { const d = document.createElement("div"); d.style.color = "var(--success)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; })(); out.left = !!document.querySelector(".locate-fx, .locate-flash"); return out;`;
     // owner 2026-11-11: "the background is too opaque for the transparency mode" → then "make it more like the settings page":
     // live wallpaper behind the tabs → the panel has no fill, its section cards hold the darkness; the head is see-through
     // too, and the content scrolls below it (never under it)
+    // owner 2026-11-11: "the buttons get the yellow focus outline when you click a letter after clicking them … we never want
+    // those pesky yellow outlines anywhere" — a click + a key: no ring; Tab: the accent ring (never the system's yellow)
+    // owner 2026-11-11: "make it so the checkmarks dont just become a invisible fill on hover" (the CHECKED one) — the tick
+    // was cut through the square (the thumbnail showing in it) and lost its contrast against the paler hover colour:
+    // hovered, the box must still be accent AND carry a dark tick (counted in real pixels, not computed styles)
+    await cell("look:plCheck", async () => {
+      const v = [];
+      await page(`await m.closeAll();`); await tab("Library");
+      const r = await page(`const t = m.card("k1")?.querySelector(".pl-toggle.on"); return t ? m.rect(t) : null;`);
+      if (!r) return ["no checked playlist box on k1's card (k1 is in the playlist)"];
+      const acc = (await page(`return m.accent();`)).match(/\d+/g).map(Number);
+      const count = async () => { const img = await win.webContents.capturePage({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.w), height: Math.round(r.h) });
+        const b = img.toBitmap(); let n = 0, dark = 0; const tot = b.length / 4;
+        for (let i = 0; i < b.length; i += 4) { const d = Math.abs(b[i + 2] - acc[0]) + Math.abs(b[i + 1] - acc[1]) + Math.abs(b[i] - acc[2]); if (d < 90) n++;
+          if (b[i + 2] + b[i + 1] + b[i] < 180) dark++; }
+        return { acc: n / tot, tick: dark / tot }; };
+      await mv(r.x + r.w / 2, r.y - 30, 400); // on the card, not the box
+      const rest = await count();
+      await mv(r.x + r.w / 2, r.y + r.h / 2, 500); // on the box
+      const hov = await count();
+      console.log(`        the checked box: card hovered ${JSON.stringify(rest)}, box hovered ${JSON.stringify(hov)}`);
+      if (rest.acc < 0.3) v.push(`the checked box isn't a filled accent square (${rest.acc.toFixed(2)} of its pixels)`);
+      if (hov.acc < 0.3) v.push(`hovered, the checked box loses its fill (${hov.acc.toFixed(2)} accent)`);
+      // the tick is thin: ~5 % of the 20 px box is dark when it's solid; a see-through tick over k1's bright bars is ~0
+      if (hov.tick < 0.03) v.push(`hovered, the tick vanishes into the fill (${hov.tick.toFixed(3)} dark pixels)`);
+      await mv(5, 5, 100);
+      return v;
+    });
+
+    await cell("look:focusRing", async () => {
+      const v = [];
+      const r = await page(`await m.closeAll(); return m.rect(document.querySelector('[data-go-playing="library"]'));`);
+      await mv(r.x + r.w / 2, r.y + r.h / 2, 150);
+      send({ type: "mouseDown", x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2), button: "left", clickCount: 1 }); await sleep(40);
+      send({ type: "mouseUp", x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2), button: "left", clickCount: 1 }); await sleep(2200);
+      send({ type: "keyDown", keyCode: "j" }); send({ type: "char", keyCode: "j" }); send({ type: "keyUp", keyCode: "j" }); await sleep(200);
+      const a = await page(`const e = document.activeElement; const cs = getComputedStyle(e); return { tag: e.tagName, fv: e.matches(":focus-visible"), os: cs.outlineStyle, ow: parseFloat(cs.outlineWidth) };`);
+      console.log(`        click + "j": ${JSON.stringify(a)}`);
+      if (a.os !== "none" && a.ow > 0) v.push(`a click then a letter: the clicked ${a.tag} shows a focus ring (${a.os} ${a.ow}px)`);
+      send({ type: "keyDown", keyCode: "Tab" }); send({ type: "keyUp", keyCode: "Tab" }); await sleep(200);
+      const b = await page(`const e = document.activeElement; const cs = getComputedStyle(e); return { tag: e.tagName, os: cs.outlineStyle, oc: cs.outlineColor, acc: m.accent() };`);
+      console.log(`        Tab: ${JSON.stringify(b)}`);
+      if (b.tag !== "BODY" && (b.os === "none" || b.oc !== b.acc)) v.push(`Tab: the focused ${b.tag} has no accent ring (${b.os} ${b.oc}, accent ${b.acc})`);
+      await mv(5, 5, 50); send({ type: "mouseDown", x: 5, y: 300, button: "left", clickCount: 1 }); send({ type: "mouseUp", x: 5, y: 300, button: "left", clickCount: 1 }); await sleep(200);
+      if (await page(`return document.documentElement.classList.contains("kbd-nav");`)) v.push("a pointer press didn't end keyboard mode");
+      return v;
+    });
+
     await cell("look:liveBg", async () => {
       const v = [];
       const read = () => page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const p = m.side();
@@ -668,7 +796,12 @@ app.whenReady().then(async () => {
         if (r.dim < 0.8) v.push(`${btn}: the rest never dimmed (dim opacity ${r.dim})`);
         if (r.rings < 3 || r.scale < 1.05) v.push(`${btn}: no rippling rings (${r.rings} rings, scale ≤ ${r.scale.toFixed(2)})`);
         if (!r.glow) v.push(`${btn}: no glow layer`);
-        if (r.outline !== r.acc) v.push(`${btn}: the item's outline ${r.outline}, not the accent ${r.acc}`);
+        // the PLAYING colour, not the accent (owner 2026-11-11: it finds what's playing; the target already pulses green)
+        if (r.outline !== r.acc) v.push(`${btn}: the item's outline ${r.outline}, not the playing colour ${r.acc}`);
+        // owner 2026-11-11: flush on the item like the focused card — no ring floating off it, the clear hole = the item
+        if (Math.abs(r.olOff ?? 99) > 0.5) v.push(`${btn}: the item's outline floats ${r.olOff}px off its edge`);
+        if (!(r.holeOff <= 1.5)) v.push(`${btn}: the spotlight's clear hole is off the item by ${r.holeOff}px`);
+        if (!(r.holeOut <= 0.5)) v.push(`${btn}: the spotlight's hole went ${r.holeOut}px outside the window — part of the app stays undimmed`);
       }
       // Glow effects off: still the spotlight and the rings, no glow
       await page(`document.documentElement.classList.add("no-glow");`);

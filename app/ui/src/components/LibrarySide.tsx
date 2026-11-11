@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Play, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check } from "lucide-react";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, FolderOpen, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check, Repeat } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
-import { SideMedia, SideHeadTools, SideSection } from "./SidePanel";
-import { usePreview, rangeFill } from "./sidePreview";
-import { PlaylistToggle } from "./PlaylistToggle";
+import { SideMedia, SideSection } from "./SidePanel";
+import { usePreview, rangeFill, useOnline } from "./sidePreview";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
 
@@ -45,12 +44,12 @@ const READY_CAP_MS = 450;
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
 // `targets` = the multi-selection it's part of (volume / speed / delete repeat to it), else [item].
 export function LibrarySide({
-  item, targets, playing, keepCurrent, inPlaylist, showDeleteFromSource, globalVolume, globalSpeed,
-  onPlay, onToggle, onReveal, onTrash, onDeleteSource,
+  item, targets, playing, keepCurrent, showDeleteFromSource, globalVolume, globalSpeed,
+  onPlay, onReveal, onTrash, onDeleteSource,
 }: {
-  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; inPlaylist: boolean; showDeleteFromSource: boolean;
+  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; showDeleteFromSource: boolean;
   globalVolume: number; globalSpeed: number;
-  onPlay: () => void; onToggle: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void;
+  onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void;
 }) {
   const [vol, setVol] = useState(0);
   const [spd, setSpd] = useState(1);
@@ -152,7 +151,8 @@ export function LibrarySide({
   const gifSrc = anim && !VIDEO_RE.test(anim) ? animUrl(anim) : null;
   // the preview switch's "Video": the item's own video file (a scene has none); else a video preview the source shipped
   const vidSrc = item.isScene ? null : VIDEO_RE.test(p) ? media(p) : anim && VIDEO_RE.test(anim) ? media(anim) : null;
-  const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl });
+  const online = useOnline();
+  const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl && online });
   const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
@@ -165,23 +165,16 @@ export function LibrarySide({
 
   return (
     <>
-      {/* the head's tools (SidePanel's slot, before close): the playlist toggle — the card's own look — and, while the picture
-          shows the trailer (the embed takes the picture's clicks), Play */}
-      <SideHeadTools>
-        {preview.mode === "youtube" && !playing && (
-          <button className="side-tool accent" data-side-play aria-label={`Play ${item.title}`} title="Play it now (Enter)" onClick={onPlay}>
-            <Play size={15} fill="currentColor" /></button>
-        )}
-        <button className={`side-tool side-pl${inPlaylist ? " on" : ""}`} data-side-playlist aria-pressed={inPlaylist}
-          aria-label={inPlaylist ? "Remove from playlist" : "Add to playlist"} title={inPlaylist ? "Remove from playlist" : "Add to playlist"}
-          onClick={onToggle}><PlaylistToggle on={inPlaylist} /></button>
-      </SideHeadTools>
+      {/* nothing in the head but close (owner 2026-11-11: no playlist toggle there, and no Play either — not even while the
+          YouTube trailer covers the picture: play it from the card / Enter, or switch the picture back) */}
       <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc} youtube={item.youtubeUrl}
         preview={preview} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
       <div className={`side-body${ready ? "" : " wait"}`}>
         {/* the hero line: what it is (chips) and its numbers (pills) */}
         <div className="side-hero">
           {item.isScene && <span className="side-chip accent">SCENE</span>}
+          {/* "keep playing this one" is on — the only thing the old "Playing now" pill said that nothing else does */}
+          {playing && keepCurrent && <span className="side-chip accent" data-side-looping><Repeat size={12} /> Looping this one</span>}
           {item.hasCrashed && <span className="side-chip danger"><AlertTriangle size={12} /> Crashed — won't be played</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}
           {!item.isScene && <span className="side-pill" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={13} /> {dur || "0 seconds"}</span>}
@@ -216,12 +209,12 @@ export function LibrarySide({
           )}
           <div className="srow" data-side-row="volume"><div className="slabel"><span className="slabel-row">Volume{!volOv && <span className="side-global">global</span>}</span><span className="side-val">{vol}</span></div>
             <div className="sctl"><input type="range" min={0} max={100} value={vol} style={rangeFill(vol, 0, 100)} onChange={(e) => setVolume(+e.target.value)} />
-              {volOv && <button className="mini ico" title="Back to the global volume" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
+              {volOv && <button className="mini ico" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
           {/* legacy scenes render at 1× (linux-wallpaperengine has no speed control) → no no-op slider there */}
           {showSpeed && (
             <div className="srow" data-side-row="speed"><div className="slabel"><span className="slabel-row">Speed{!spdOv && <span className="side-global">global</span>}</span><span className="side-val">{spd}×</span></div>
               <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} style={rangeFill(spd, 0.1, 4)} onChange={(e) => setSpeed(+e.target.value)} />
-                {spdOv && <button className="mini ico" title="Back to the global speed" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
+                {spdOv && <button className="mini ico" onClick={resetSpeed}><RotateCcw size={13} /> Global</button>}</div></div>
           )}
           {showLoud && (
             <div className="side-line" data-scene-loudness-line data-side-row="loudness" title="the scene's loudness under its current properties — normalization matches it to the target">

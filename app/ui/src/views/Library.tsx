@@ -186,11 +186,9 @@ export const Library = memo(function Library() {
           sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
           <LibrarySide item={sideItem} targets={targets}
             playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}
-            inPlaylist={playlist.includes(sideItem.videoPath)}
             showDeleteFromSource={!!sideItem.workshopId && !autoImport}
             globalVolume={gVol} globalSpeed={gSpd}
             onPlay={() => applyItem(sideItem.videoPath)}
-            onToggle={() => doToggle(sideItem)}
             onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
             onTrash={() => { focusLib(null); doTrash(targets); }}
             onDeleteSource={() => { focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }} />

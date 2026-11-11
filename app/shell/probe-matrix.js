@@ -100,8 +100,15 @@ function readIndex() { try { return JSON.parse(fs.readFileSync(INDEX, "utf8")); 
 const keyOf = (p) => path.basename(path.dirname(p));
 const LOUD = ["loudnessI", "loudnessTP", "loudnessLRA", "loudnessThresh"];
 const measured = (idx, p) => { const m = p && idx[keyOf(p)]; return m && LOUD.every((k) => typeof m[k] === "number") ? m : null; };
-// LibraryService.LoudnormAf: C#'s invariant double formatting is the shortest round-trip, like JS's
-const loudnormAf = (m, target) => `loudnorm=I=${target}:TP=-1.5:LRA=11:measured_I=${m.loudnessI}:measured_TP=${m.loudnessTP}:measured_LRA=${m.loudnessLRA}:measured_thresh=${m.loudnessThresh}:linear=true`;
+// LibraryService.LoudnormAf — ONE fixed gain, Spotify's rule (owner 2026-11-11; ffmpeg's loudnorm fell back to its dynamic
+// rider): target − I, a boost only into −1 dBTP of headroom; Math.Round(…, 2) is half-to-even in C#; C#'s invariant double
+// formatting is the shortest round-trip, like JS's
+const roundEven2 = (x) => { const y = x * 100, f = Math.floor(y), d = y - f; const r = Math.abs(d - 0.5) < 1e-9 ? (f % 2 === 0 ? f : f + 1) : Math.round(y); return r / 100; };
+const loudnormAf = (m, target) => {
+  const t = Math.min(0, Math.max(-70, Number.isFinite(target) ? target : -14));
+  let g = t - m.loudnessI; if (Number.isFinite(m.loudnessTP)) g = Math.min(g, -1 - m.loudnessTP);
+  const r = roundEven2(g); return `lavfi=[volume=${Object.is(r, -0) ? "-0" : String(r)}dB]`;
+};
 // measure every clip once (the backend's own backfill: normalization on for a moment, nothing playing)
 async function measureAll(ms = 30000) {
   if (K.every((p) => measured(readIndex(), p))) return true;
@@ -162,7 +169,7 @@ function oracle(snap, exp) {
     // (unmeasured: nothing to check — the backend measures it in the background)
     const lm = s.normalizeAudio && !s.noAudio && measured(snap.idx || {}, n.path);
     if (lm && (n.af ?? "") !== loudnormAf(lm, s.normalizeTargetLufs))
-      v.push(`${who} af "${String(n.af ?? "").slice(0, 60)}" ≠ its own loudnorm at ${s.normalizeTargetLufs} LUFS (normalization on, measured I=${lm.loudnessI})`);
+      v.push(`${who} af "${String(n.af ?? "").slice(0, 60)}" ≠ its own normalization gain at ${s.normalizeTargetLufs} LUFS (want "${loudnormAf(lm, s.normalizeTargetLufs)}") (normalization on, measured I=${lm.loudnessI})`);
     const wantMute = snap.muted || exp.autoMuted;
     if (!near(gm, wantMute ? -96 : 0, 0.5)) v.push(`${who} gain.mute ${gm} but user mute is ${snap.muted ? "on" : "off"}${exp.autoMuted ? " (auto-muted)" : ""}`);
   }
@@ -189,8 +196,8 @@ const PAGE = `window.__mx = {
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
   click(el, what) { if (!el) throw new Error("not found: " + what); el.click(); },
   tab(name) { this.click(this.byText(".tab", name), "tab " + name); },
-  card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === t); },
-  playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.title === t); },
+  card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
+  playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.dataset.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   // a right-click on a card / a playlist bar item = the item's Library sidebar, nothing applied (owner 2026-11-11: "no context menu anywhere")
@@ -213,7 +220,7 @@ const PAGE = `window.__mx = {
   modalReset(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] button'); },
   closeModal() { this.click(this.side()?.querySelector("[data-side-close]"), "sidebar close"); },
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
-  playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.title) }; },
+  playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.dataset.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.dataset.title) }; },
 }; true`;
 async function loadUi() {
   await win.loadURL(U + "/");
@@ -649,7 +656,7 @@ C["travel:appOpen"] = { states: ["idle"], switch: true, exp: { paused: false }, 
       // title Z→A: the scenes first, so the last video (k1) is the grid's last card
       c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
       win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
-      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
+      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.dataset.title)`);
       const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene); // the scenes are off here (s3 crashes)
       const last = vids[vids.length - 1]?.videoPath;
       // the scenes pad the bar (they're skipped while scene support is off) so its row overflows too
@@ -691,7 +698,7 @@ C["travel:button"] = { states: ["idle"], switch: true, exp: { paused: false }, a
       await post("/settings", { ...s0, cardSize: "Large" });
       c.sort0 = await js(`localStorage.getItem("liascape.libSort")`); await js(`localStorage.setItem("liascape.libSort", "1"); true`);
       win.setContentSize(480, 430); await sleep(300); await loadUi(); await sleep(400); // 430: one Large card fits the grid under the playlist bar (its head gap grew for the dock magnification, 2026-11-11)
-      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.title)`);
+      const order = await js(`[...document.querySelectorAll(".lib-scroll .card.lib .lib-title")].map((e) => e.dataset.title)`);
       const vids = order.map((t) => lib.find((i) => i.title === t)).filter((i) => i && !i.isScene);
       const last = vids[vids.length - 1]?.videoPath;
       const bar = [...lib.filter((i) => i.videoPath !== last).map((i) => i.videoPath), last];
@@ -1011,7 +1018,7 @@ async function playlistBarDrag(fromTitle, toTitle) {
   send({ type: "mouseUp", ...at(r.bx, r.by), button: "left", clickCount: 1 });
   await sleep(900); // the playlist bar's debounced /playlist/state save (200 ms) + the backend's live reorder
 }
-const playlistBarTitles = () => ui(`return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`);
+const playlistBarTitles = () => ui(`return [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title);`);
 const moved = (list, from, to) => { const l = [...list]; const [x] = l.splice(from, 1); l.splice(to, 0, x); return l; };
 for (const [name, fromIdx, toIdx] of [["lastToSecond", -1, 1], ["firstToEnd", 0, -1]]) {
   const plan = (c) => { const s = c.before.ps?.videoPaths || []; const f = fromIdx < 0 ? s.length + fromIdx : fromIdx, t = toIdx < 0 ? s.length + toIdx : toIdx; return { s, f, t, want: moved(s, f, t) }; };
@@ -1049,9 +1056,10 @@ function afterRemove(c) {
 for (const t of ["shown", "other", "off"]) {
   if (t === "off") C["playlistBarRemove:off"] = { states: PL_STATES, async run(c) { c.target = playlistBarOff(c); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}).querySelector(".pl-remove"), "remove");`); await sleep(900); }, check: afterRemove };
-  // the bar's right-click menu ("Remove from playlist") is gone (2026-11-11): its twin is the item sidebar's playlist toggle
-  C[`playlistBarRemoveSide:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
-    await ui(`await m.openSideBar(${JSON.stringify(TITLE(c.target))}); m.click(m.side()?.querySelector("[data-side-playlist]"), "the sidebar's playlist toggle"); await m.sleep(300); m.closeModal();`); await sleep(900); }, check: afterRemove };
+  // the bar's right-click menu ("Remove from playlist") is gone (2026-11-11), and so is the item sidebar's playlist toggle
+  // (owner: "remove the playlist checkmark from title area"): the twin is the Library card's own playlist checkbox
+  C[`playlistBarRemoveCard:${t}`] = { states: PL_STATES, async run(c) { c.target = removeTarget(c, t); if (!c.target || !(await playlistBarHas(c, c.target))) return c.skip = "not in playlist bar";
+    await ui(`if (!m.card(${JSON.stringify(TITLE(c.target))})) { m.tab("Library"); await m.sleep(600); } m.click(m.card(${JSON.stringify(TITLE(c.target))})?.querySelector(".pl-toggle"), "the card's playlist checkbox");`); await sleep(900); }, check: afterRemove };
 }
 // remove what plays (or is incoming), then next: the rotation goes on from the removed item's place in the playlist bar
 for (const t of ["shown", "other"]) C[`seq:playlistBarRemove+next:${t}`] = { states: t === "shown" ? PL_STATES : ["effect"], switch: true, async run(c) {
@@ -1602,7 +1610,7 @@ C["seq:pause+plInterval"] = { states: ["playlist"], rearms: true, async run(c) {
 // --- keyboard selection: Ctrl+click + Shift+click a range, then the Delete key; Ctrl+A, Delete, then Undo
 const key = (k, mods = {}) => `window.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true, ...${JSON.stringify(mods)} })); await m.sleep(150);`;
 C["selRange+Delete"] = { states: SEL_STATES, switch: true, async run(c) {
-    const order = await ui(`return [...document.querySelectorAll(".card.lib")].map((e) => e.querySelector(".lib-title")?.title);`);
+    const order = await ui(`return [...document.querySelectorAll(".card.lib")].map((e) => e.querySelector(".lib-title")?.dataset.title);`);
     const i = order.indexOf(TITLE(c.shown)); const j = i + 1 < order.length ? i + 1 : i - 1;
     c.targets = [c.shown, [...K, ...SC].find((p) => TITLE(p) === order[j])]; c.exp.paused = false; // the neighbour may be a scene card
     const shift = `m.card(${JSON.stringify(order[j])})?.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true })); await m.sleep(150);`;
@@ -1985,7 +1993,7 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
 const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
   return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
     cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
-    gifCard: !!([...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.title === "k1")?.querySelector("video, img.thumb.anim")) }; })()`;
+    gifCard: !!([...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.dataset.title === "k1")?.querySelector("video, img.thumb.anim")) }; })()`;
 C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
     const count = () => js(VT_COUNT);
     const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
@@ -2891,8 +2899,8 @@ function editJson(file, fn) {
 }
 const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name[0].toUpperCase() + name.slice(1);
 // what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
-const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.title).sort(),
-  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].map((e) => e.title),
+const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.dataset.title).sort(),
+  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title),
   aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
 const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
 // k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)
@@ -3714,7 +3722,7 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
     if (p && cur && !p.cards.includes(cur)) v.push(`UI marks ${JSON.stringify(p.cards)} as playing, backend plays ${cur}`);
   }
   // the playlist bar the UI shows == the backend's playlist (a stale playlistBar saves itself back over it)
-  const playlistBar = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.title);`).catch(() => null);
+  const playlistBar = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
@@ -3808,7 +3816,7 @@ const FUZZ_RULES = [
   [/^plAdvanceOff$/, { when: (x) => x.ps.overrideGlobalSettings !== false }], // the modal's checkbox is disabled while the playlist follows the globals
   [/^(selToggle:add|cardToggle:add)$/, { when: notInPlaylistBar }], // adds an item the playlist bar doesn't hold
   [/^selToggle:remove$/, { when: notInPlaylistBar, shrinks: true, removes: (x) => x.other }],
-  [/^(playlistBarRemove|playlistBarRemoveSide):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
+  [/^(playlistBarRemove|playlistBarRemoveCard):(shown|other|off)$/, { shrinks: true, removes: (x, n) => removeTarget(x, n.split(":")[1]) }],
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both

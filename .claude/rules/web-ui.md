@@ -36,6 +36,21 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `store.applyThemeVars` from `/themes` (32 themes, ThemeService color keys).
 - Glow = **static `box-shadow`/`drop-shadow` toggled by state** (hover/playing/selected), never
   animated blur radius (paint storms). Pulsing glow animates opacity/box-shadow on a composited layer.
+- **Tooltips (`title=`) only when they tell something you can't see** (owner 2026-11-11: "the tooltips everywhere is really
+  annoying and redundant, not everything needs a tooltip"): an icon-only control whose icon isn't self-evident (go to
+  playing, the playlist bar head's settings / save / load, the card's playlist toggle and download button, the Workshop ID
+  pill's copy), a warning's reason (`FeatureWarn`, a crashed scene), a setting's explanation (the playlist modal's rotation
+  rows, Estimate / Recalculate all, the loudness line), a value a short form hides (Browse's stat pills, the clamped sidebar
+  title). NEVER one that repeats the visible label, explains a click ("Click: … · Right-click: …"), or names an obvious icon
+  (×, trash, refresh, a chevron) — and none on things the pointer rests on while browsing (cards, the bar's items, the
+  sidebar picture). An icon-only control without a tooltip still gets an `aria-label`. Tests find items by `data-title`
+  (`.lib-title`, `.pl-item`), never by a tooltip.
+- **Focus rings: only while tabbing** (`hooks/focusRing.ts`, installed in `main.tsx`; owner 2026-11-11: "we never want those
+  pesky yellow outlines anywhere"). Chromium's own ring (the system colour — yellow here) shows on `:focus-visible`, and a
+  click followed by ANY key flips the clicked button into it. `:root:not(.kbd-nav) :focus-visible` → no outline
+  (`!important`, every component's own focus rule included); Tab / Shift+Tab sets `.kbd-nav`, any pointer press clears it;
+  with it, the accent ring (2 px, offset 2). The grid's arrow keys don't set it (cards: `.focused`). Never add a focus style
+  that bypasses `.kbd-nav`. Guard: probe-sidebar `look:focusRing`.
 - The item sidebar (Library + Browse, "Item sidebar" below) slides in (springy) / staggers its content / re-staggers on a
   switch / slides out on transform + opacity — the card → modal morphs it replaced are gone (2026-11-10; the WAAPI flight code
   is in git history, last in `c87376bb`).
@@ -155,8 +170,16 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   go-to-playing more apparant of where's the wallpaper"): `locateFx(el, motion)` puts ONE fixed layer on `<body>` (`.locate-fx`,
   z 85, above the sidebar and the bar, never clipped by the grid / the bar's row) over the element's box, re-placed every frame
   (`translate3d` + size: the dock magnification or a scroll moves it): `.lfx-dim` (the rest of the window dims — a hole made of one
-  `0 0 0 150vmax` spread shadow — enough from any corner, painted once, opacity-animated), `.lfx-glow` (a pre-blurred accent shadow layer, opacity only),
-  `.lfx-edge` (an accent border) and three `.lfx-ring`s rippling out (`transform: scale(var(--sx), var(--sy))` — px-exact factors
+  `0 0 0 150vmax` spread shadow — enough from any corner, painted once, opacity-animated), `.lfx-glow` (a pre-blurred shadow layer, opacity only — every spotlight colour is `--lfx-c` = the PLAYING green
+  `--success`, not the accent: it finds what's playing and the target already pulses green; owner 2026-11-11),
+  `.lfx-edge` (a 2 px accent border FLUSH on the item = its `.locate-flash` outline, offset 0; the hole = the VISIBLE part of the item's own
+  box (`visibleBox`: the window ∩ clipping ancestors, minus the playlist bar / top bar / a floating sidebar that cover it — the
+  glide aims at that box's middle, the glow / edge / rings are clipped to it by `.lfx-clip`'s per-frame clip-path; owner
+  2026-11-11: the spotlight drew over the playlist bar), and when none of it is visible a ZERO hole at the nearest visible
+  point — the dim's spread reaches 1.5× the window from the hole, so a hole thousands of px off in the bar's row left part
+  of the app lit (owner: "the dimming fails to apply to the full app if … very far away"); guard: `look:locator` hole never
+  outside the window — owner 2026-11-11: a ring 3 px off + a border 6 px off stacked into a thick floating band, the hole was 10 px larger;
+  now like the focused card; guard: `look:locator` outline offset 0, hole within 1.5 px) and three `.lfx-ring`s rippling out (`transform: scale(var(--sx), var(--sy))` — px-exact factors
   so a wide card and a small bar item ring out the same 26 px — + opacity, 120 / 360 / 600 ms apart), all gone after 1.5 s
   (`LOCATE_FX_MS`); the element carries `.locate-flash` meanwhile (a static accent outline; matrix `travel:button` reads it).
   Glow effects off (`:root.no-glow`, read at the call) → no glow layer, the dim + edge + rings stay; motion off → `.still`: no
@@ -351,11 +374,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     drop-shadow; Glow effects off → no bloom, the lift + nudge stay; motion off → the arrow sits 2 px down, no loop. Guard:
     probe-sidebar `look:dlHover` (a real pointer: on the card, then on the button — transform, the `::before` opacity and the
     glyph's animation change; the Browse sidebar's Download & Apply too; RED on the old UI). A right-click on a playlist bar
-    item = `focusLib` + the card scrolled into view, nothing plays. **The focused card** is `.focused`: an accent outline 3 px OFF
-    the card + the hover's accent glow (owner 2026-11-11: "the theme color like hover color, not just plain white"), distinct from
-    the selection's flush outline (focused + selected: both — the flush ring as a box-shadow); Glow effects off → the ring alone
-    (guard: probe-sidebar `look:focus` — the outline colour = the computed `--accent`, offset ≥ 2 px, the accent in its
-    box-shadow; with `no-glow` not; RED on the old UI: a light ring). **Keys** (`hooks/gridKeys.ts` `gridOwnsKey` — never with a
+    item = `focusLib` + the card scrolled into view, nothing plays. **The focused card** is `.focused`: held in its hover state —
+    lifted 3 px (`translateY(-3px)`), the accent outline FLUSH on its edge + the hover's accent glow (owner 2026-11-11: "the
+    theme color like hover color, not just plain white"; then the earlier ring 3 px off the card "feels kind of out of place" —
+    every other card state sits on the card's own edge). The lift tells it from a selected card (flat, the same flush outline;
+    focused + selected = lifted). Glow effects off → the outline + lift (guard: probe-sidebar `look:focus` — the outline colour
+    = the computed `--accent`, offset 0, lifted ≥ 2 px, the accent in its box-shadow; with `no-glow` not). **Keys** (`hooks/gridKeys.ts` `gridOwnsKey` — never with a
     menu / dropdown / modal open, a slider held, or — for arrows / Enter — a field or button focused): ← → one card, ↑ ↓ one
     row (`--cols`), the first arrow with nothing focused = the playing card; Enter = Play (Library) / Download & Apply or the
     library copy's Apply (Browse); Escape = close + clear the selection.
@@ -377,11 +401,19 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     **The picture is the Play control** (owner 2026-11-11: the Play / In playlist row was "redundant clutter" — gone): an
     invisible `<button>` over the whole picture (`.side-play` `[data-side-play]`, `aria-label` "Play <title>",
     keyboard-reachable, accent edge on focus) — **no Play icon** (owner 2026-11-11: clicking the picture to set it is
-    intuitive); the hover cue is the picture scaling 1.025× with its glow up; a click applies the item. Already playing → no
-    overlay, the "Playing now · looping this one" badge on the picture (`[data-side-playing]`, `keepCurrent`) and a green frame.
-    On the YouTube trailer the embed takes the clicks: Play moves to the head (`.side-tool.accent` `[data-side-play]`). Enter
-    still plays. **In playlist** = the head's `PlaylistToggle` (`.side-tool.side-pl` `[data-side-playlist]`, `aria-pressed`,
-    tooltip "Add to playlist" / "Remove from playlist"; a selection's targets like the card's toggle). Guard: probe-sidebar
+    intuitive); the hover cue is the picture scaling 1.025× with its glow up; a click applies the item. Already playing → not clickable,
+    a green frame (`.side-frame.is-playing[data-side-playing]`) — **no "Playing now" pill** (owner 2026-11-11: redundant,
+    the card and the frame already say it); loop-current on (`keepCurrent`) → a "Looping this one" chip in the hero
+    (`[data-side-looping]`), the one thing the pill said that nothing else did.
+    On the YouTube trailer the embed takes the clicks and there's no Play button anywhere (owner 2026-11-11) — Enter or the card plays it. Enter
+    still plays. **No playlist toggle in the sidebar** (owner 2026-11-11: "remove the playlist checkmark from title area and let
+    the title occupy more of the empty space") — the card's own checkbox and the playlist bar add / remove; the head holds
+    only close — no Play even while the YouTube trailer covers the picture (owner 2026-11-11) — the title takes the rest. **The checkbox itself**
+    (`PlaylistToggle`): unchecked an accent ring; checked an accent square + the tick in `--accent-fg` — a solid tick, no SVG
+    mask (the tick used to be cut through the square, showing the thumbnail: on hover the square turns the paler
+    `--accent-hover` and that see-through tick lost its contrast — "the checkmarks … become a invisible fill on hover";
+    rendered old vs new in Electron 42); hover only brightens + glows — no grow ("a checkbox enlarging feels strange"). Guard: probe-sidebar `look:plCheck` (hovered, the box is
+    still mostly accent AND its tick is dark — counted in pixels). Guard: probe-sidebar
     `lib:play` (the button's name + tabIndex, no icon or tint before or on a real hover, the picture scaled, a real click plays k3,
     then the badge and no button; the head toggle out / back in; RED on the old UI). **The preview switch** (owner 2026-11-11: "a
     button to switch between gif preview, mp4 preview and youtube video preview"; `usePreview` in `components/sidePreview.ts`):
@@ -395,7 +427,13 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     sidebar, not shared — Browse items rarely have a video, so a Browse "Video" pick would otherwise mean nothing). Layers
     cross-fade on opacity (the video mounts the first time it's shown and stays, paused while hidden); the trailer
     (`YouTubeEmbed`, `autoplay=1&mute=1` — never audible on its own, the desktop owns the sound) mounts only while picked, so a
-    switch / an item change / closing stops it; its × goes back to the default. Hooks: `[data-preview-src=gif|video|youtube|image]`
+    switch / an item change / closing stops it; no close button of its own (owner 2026-11-11 — the switch leaves it). **The trailer loops** like the other previews (`loop=1&playlist=<its own id>` — `loop` alone is ignored for one
+    video). **The trailer remembers its mute + volume**
+    (owner 2026-11-11, `YouTubeEmbed`): `enablejsapi=1` + a `listening` post on load → YouTube's `infoDelivery` messages
+    (only from that iframe AND youtube.com) carry `info.muted` / `info.volume` → localStorage `liascape_yt_muted` (default
+    muted) / `liascape_yt_volume`; the next trailer opens `mute=0|1` and gets `setVolume` once the player answers — its
+    first default-100 reports are ignored until one carries the saved level (≤ 10 tries, never a loop). Guard: `lib:preview`
+    (faked messages — the stack has no network). **Video's sound**: a round mute toggle in the picture's corner (`.side-mute` `[data-side-mute]`, `aria-pressed`, z 4 above the click-to-play layer — a press never applies), muted by default, unmuted at the app's global volume; a new item starts muted (guard: `lib:preview`, silent — the stack's audio is private and the test zeroes the volume first). Hooks: `[data-preview-src=gif|video|youtube|image]`
     (the chips), `[data-preview-layer=…]` (the layers), `[data-side-media][data-preview-mode]`. Guard: probe-sidebar `lib:preview`
     (k1 GIF + Video, Video → its layer shown + the gif hidden, kept for k1's next open; k2 none; s2 none; s1 with a trailer —
     written into its index — Picture + YouTube: the embed muted, Play in the head; youtube.com requests cancelled). **Settings levels**
@@ -420,7 +458,7 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     the Browse sidebar, a download button hovered (`side-look-<size>-*.png`). + probe-layout `resize:side:*`; the matrix cells that
     opened the modal (`itemVol*`, `itemSpd*`, `selVol`, `keys:sliderHeld`, `cli:volume-up:modalOpen`, `sceneProp:*`,
     `appear:morphs`, `appear:videoThumbs`, …) open the sidebar (`m.openSide(t)`: a right-click on the card; `m.openSideBar(t)`: on
-    the bar item) and read `[data-side-row]` sliders; `playlistBarRemoveSide:*` (was `…RemoveMenu:*`) removes through the
+    the bar item) and read `[data-side-row]` sliders; `playlistBarRemoveCard:*` (was `…RemoveMenu:*`) removes through the
     sidebar's playlist toggle.
 
 ## Hardware GL on NVIDIA (2026-10-28 — now the DEFAULT: ANGLE `gles-egl`)

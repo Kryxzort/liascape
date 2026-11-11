@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Repeat } from "lucide-react";
+import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { captureSource, sourceEl, useMotion } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
-import { type PreviewKind } from "../store";
+import { useStore, type PreviewKind } from "../store";
 import { type usePreview } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (owner 2026-11-10: "instead of a settings menu when clicking right click
@@ -93,7 +93,7 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
             {sub}
           </div>
           <div className="side-head-tools" ref={setSlot} />
-          <button className="side-tool side-close" data-side-close title="Close (Esc)" aria-label="Close" onClick={onClose}><X size={16} /></button>
+          <button className="side-tool side-close" data-side-close aria-label="Close" onClick={onClose}><X size={16} /></button>
         </div>
         {/* keyed by the item: a switch remounts the content (its per-item state) and slides / staggers it in; the outgoing
             one keeps its key (no remount) in the exit layer — same element types in both slots, so nothing remounts as it
@@ -138,7 +138,7 @@ const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, vide
 // card's loaded image when the item is focused, else from an earlier visit, else 16:9 until the still loads — capped in
 // height (index.css `.side-media`). `play`: the Library sidebar's picture is its Play control (owner 2026-11-11: the Play /
 // In playlist row was "redundant clutter") — no icon (owner: clicking the picture is intuitive), the hover cue is the frame lifting 1.025× with its glow; already
-// playing → the "Playing now" badge instead; on the trailer the embed takes the clicks (Play moves to the head).
+// playing → the green frame (no badge: owner 2026-11-11, the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
 export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, play }: {
   id: string; cardId: string | null; base: string; full: string | null; gif: string | null; video: string | null; youtube: string | null;
@@ -149,11 +149,16 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const [aspect, setAspect] = useState<number | null>(() => src.aspect ?? aspects.get(id) ?? null);
   const [fullOn, setFullOn] = useState<string | null>(null);
   const [vidOn, setVidOn] = useState<string | null>(null);
-  const { mode, options, def, pick } = preview;
+  const { mode, options, pick } = preview;
   // the video mounts the first time it's shown and stays (a switch back cross-fades instead of restarting); paused while hidden
   const [vidMounted, setVidMounted] = useState(false);
   if (mode === "video" && video && !vidMounted) setVidMounted(true);
   const vidRef = useRef<HTMLVideoElement>(null);
+  // the Video preview's sound (owner 2026-11-11: "in video, show a button to mute/unmute"): muted by default — the desktop's
+  // wallpaper owns the sound — unmuted at the app's global volume; a new item (a remount) starts muted again
+  const [vidMuted, setVidMuted] = useState(true);
+  const appVolume = useStore((s) => Number(s.settings?.volume ?? 100));
+  useEffect(() => { const v = vidRef.current; if (v) v.volume = Math.max(0, Math.min(1, (Number.isFinite(appVolume) ? appVolume : 100) / 100)); }, [appVolume, vidMounted]);
   useEffect(() => { const v = vidRef.current; if (!v) return; if (mode === "video") v.play().catch(() => {}); else v.pause(); }, [mode, vidMounted]);
   const a = aspect ?? 16 / 9;
   const known = (w: number, h: number) => { if (!w || !h) return; const r = w / h; aspects.set(id, r); if (aspect == null) setAspect(r); };
@@ -167,29 +172,30 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
         <div className="side-switch" role="radiogroup" aria-label="Preview">
           {options.map((k) => (
             <button key={k} role="radio" aria-checked={mode === k} className={`side-sw${mode === k ? " on" : ""}`} data-preview-src={k}
-              title={`Show the ${LABEL[k] === "Picture" ? "still picture" : LABEL[k]}`} onClick={() => pick(k)}>{ICON[k]}{LABEL[k]}</button>
+              onClick={() => pick(k)}>{ICON[k]}{LABEL[k]}</button>
           ))}
         </div>
       )}
-      <div className={`side-frame${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`} style={{ aspectRatio: String(a), width: `min(100%, calc(var(--side-media-h) * ${a}))` }}>
+      <div className={`side-frame${playable ? " playable" : ""}${play?.playing ? " is-playing" : ""}`} data-side-playing={play?.playing ? "" : undefined} style={{ aspectRatio: String(a), width: `min(100%, calc(var(--side-media-h) * ${a}))` }}>
         <div className="side-glow" aria-hidden />
         <div className="side-media" data-side-media data-preview-mode={mode}>
           {base && <img src={base} alt="" data-preview-layer="image" onLoad={(e) => known(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />}
           {full && <img className={`sm-full${fullOn === full ? " on" : ""}`} src={full} alt=""
             onLoad={(e) => { known(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight); setFullOn(full); }} />}
           {gif && <img className={`sm-anim${mode === "gif" ? " on" : ""}`} src={gif} alt="" data-preview-layer="gif" />}
-          {video && vidMounted && <video ref={vidRef} className={`sm-anim${mode === "video" && vidOn === video ? " on" : ""}`} src={video} muted loop autoPlay playsInline
+          {video && vidMounted && <video ref={vidRef} className={`sm-anim${mode === "video" && vidOn === video ? " on" : ""}`} src={video} muted={vidMuted} loop autoPlay playsInline
             data-preview-layer="video"
             onLoadedMetadata={(e) => { const v = e.currentTarget; if (src.videoTime != null && v.duration) v.currentTime = src.videoTime % v.duration; }}
             onPlaying={() => setVidOn(video)} />}
-          {yt && <YouTubeEmbed url={youtube} onClose={() => pick(def)} />}
-          {playable && (
-            <button className="side-play" data-side-play aria-label={play.label} title={`${play.label} (Enter)`} onClick={play.onPlay} />
+          {yt && <YouTubeEmbed url={youtube} />}
+          {/* above the click-to-play layer (z 3): a press here never applies the wallpaper */}
+          {mode === "video" && video && vidOn === video && (
+            <button className={`side-mute${vidMuted ? "" : " on"}`} data-side-mute aria-pressed={!vidMuted} aria-label={vidMuted ? "Unmute the preview" : "Mute the preview"}
+              onClick={(e) => { e.stopPropagation(); setVidMuted((m) => !m); }}>
+              {vidMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
           )}
-          {play?.playing && (
-            <span className="side-badge playing" data-side-playing>
-              <span className="side-dot" />Playing now{play.looping && <><Repeat size={12} /> looping this one</>}
-            </span>
+          {playable && (
+            <button className="side-play" data-side-play aria-label={play.label} onClick={play.onPlay} />
           )}
         </div>
       </div>

@@ -5,12 +5,6 @@
 export type Level = "basic" | "standard" | "advanced" | "expert";
 export const LEVELS: Level[] = ["basic", "standard", "advanced", "expert"];
 export const LEVEL_LABEL: Record<Level, string> = { basic: "Basic", standard: "Standard", advanced: "Advanced", expert: "Expert" };
-export const LEVEL_HINT: Record<Level, string> = {
-  basic: "Just the essentials",
-  standard: "The everyday knobs",
-  advanced: "For tinkerers: decoding, buffers, engine and transition internals",
-  expert: "Everything, down to debug switches and the raw commands",
-};
 export const levelOf = (v: unknown): Level => (LEVELS as string[]).includes(v as string) ? (v as Level) : "standard";
 export const rank = (l: Level) => LEVELS.indexOf(l);
 
