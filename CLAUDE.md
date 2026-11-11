@@ -94,6 +94,8 @@ app/
 
 WE-style **transitions** animate every wallpaper switch (gl-transitions GLSL) — see `.claude/rules/player.md`. v1: video→video, **full-live** (both sides keep playing through the effect — libmpv decodes A+B in the renderer; frozen stills are the warmup/scene fallback).
 
+**Every new UI element follows the app's design and its toggles** (theme vars, glow → `no-glow`, morph / glide / slide → `no-motion`, `--tr` translucency → `bg-live`, the themed controls, a probe for each): the checklist in `.claude/rules/web-ui.md` § "Every new UI element" (owner 2026-11-11). Put it in every UI agent's brief.
+
 The Avalonia UI (`Views/`, `ViewModels/`, `App.axaml`) was **removed** in the Electron rewrite — don't reference it. `Web/` only wraps the unchanged scrapers/helpers/daemons; UI lives in `app/`. See `.claude/rules/web-backend.md` + `web-ui.md`.
 
 **Player engine.** `AppSettings.PlayerEngine` = `legacy` (default: mpvpaper + `liascape-transition` + per-monitor LWE +

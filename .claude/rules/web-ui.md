@@ -31,6 +31,31 @@ cache dir). Probes load pages with `withToken(U + "/")` and send `authHeaders()`
 **Links** (`<a target=_blank>`, `window.open`) open in the user's browser (main.js `setWindowOpenHandler` → `shell.openExternal`,
 http(s) only); the window never navigates away from the app's origin.
 
+## Every new UI element: the app's design + its toggles (owner 2026-11-11 — a RULE, not a polish pass)
+Owner: "new elements should follow app design like themes, morphs, transparency, glow and follow the respective toggles for
+those stuff" — after the Steam to-do panel shipped with no glide / morph / slide and Settings had kept the browser's white
+checkboxes. A new panel, row, control, badge or overlay is NOT done until every line holds (agents: this is part of your brief):
+- **Theme**: colours only from the theme vars (`--accent`, `--accent-fg`, `--accent-hover`, `--text`, `--subtext*`, `--bg-*`,
+  `--surface*`, `--danger`, `--success`, `--warn`…) — never a hard-coded colour (a theme switch must restyle it).
+- **Glow**: hover / active / focused / "on" states glow like their neighbours, through `var(--glow)` / `var(--glow-sm)` (zeroed by
+  `:root.no-glow`) — or the element's hard-coded glow gets its override in the `no-glow` block (§ Appearance toggles).
+- **Motion** — nothing pops: appearing / leaving (transform + opacity; exits kept mounted with `useLinger`), position changes
+  (a glide, not a jump — e.g. clearing the playlist bar), size changes and state swaps (a morph — framer `layout` or a FLIP like
+  `hooks/filterMorph.ts`), content changes (a slide / cross-fade like the item sidebar's carousel), chevrons ROTATE with the
+  springy overshoot (never an icon swap), numbers / bars ease. Transform + opacity only, the app's curves. **`:root.no-motion`
+  (the "Smooth window animations" toggle AND `prefers-reduced-motion`) → all of it instant** — CSS under `:root.no-motion`,
+  components through `useMotion()` (`components/motion.ts`), never `settings.morphs`.
+- **Transparency**: panel / menu fills through `--tr` / `--tr-strong` (`color-mix(… P%)`); under **`:root.bg-live`** ("live
+  wallpaper behind every tab") it follows § Round-3: no fill of its own where the Settings page / item sidebar have none, its
+  cards carry the darkness, text over the wallpaper gets the drop-shadow.
+- **Controls**: the themed checkbox / radio (`.ck`, `.settings`, `.side-panel` — never the browser's), `Select.tsx` (never a
+  native `<select>`), `NumInput`, lucide icons (no emoji) CENTRED (measure it — `look:toggles` style, not by eye), tooltips only
+  per § Glow + motion's rule, `aria-label` on icon-only buttons, focus rings only through `.kbd-nav`.
+- **Placement**: a fixed overlay inside a card / the bar / a transformed parent portals to `<body>` (§ Round-2); z-index
+  against the item sidebar (45/46), the bar, the locator (85).
+- **Proof**: a probe cell for it covering motion on / off (per-frame samples that it passes through in-between states — a still
+  screenshot can't show a missing animation), `no-glow`, and `bg-live`; mid-animation screenshots LOOKED AT before calling it done.
+
 ## PERF rules (non-negotiable — the bench proved these)
 - **`content-visibility:auto` + `contain-intrinsic-size`** on every grid card — skips offscreen
   render+decode. This is what makes a dense animated grid hit 135–240fps. Do not remove.
