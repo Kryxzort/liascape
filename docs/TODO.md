@@ -41,6 +41,10 @@ Tick items off in the commit that does them and move them to `docs/TODO-done.md`
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI — owner's Todoist, clarified 2026-11-10
+- [ ] `npm run lint` (app/ui) is not clean: 35 errors from before 2026-11-11 — react-hooks `refs` 11 (10 in `WallpaperBg.tsx`),
+      `react-refresh/only-export-components` 12, `set-state-in-effect` 6, `purity` 3, `no-unused-expressions` 3. Fix them
+      without losing the PERF patterns (refs read in render on purpose — rewrite with the hooks the rules expect, re-bench),
+      then make lint part of the pre-commit check in CLAUDE.md.
 - [ ] Matrix `playlistMark:shufflePlay:resume` is flaky by design: under "Resume" every Play can land on k1 and the cell
       FAILs its own "proved nothing" guard ("every shuffled Play started on k1") — 1 of 4 runs on the pre-sidebar UI
       (c87376bb), 2 of 4 after it (2026-11-11; the cell never opens the sidebar). Make its first pick deterministic (seed
