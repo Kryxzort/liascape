@@ -205,6 +205,9 @@ export const useStore = create<State>((set, get) => ({
       const list = await api.browse(activeSource, 1, query || undefined, filter);
       if (gen !== browseGen) return;
       set({ wallpapers: list, hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
+    } catch (e) {
+      // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
+      if (gen === browseGen) get().setStatus(e instanceof Error ? e.message : String(e), true);
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async loadMore() {
@@ -224,6 +227,8 @@ export const useStore = create<State>((set, get) => ({
       const fresh = list.filter((w) => !existing.has(w.pageUrl));
       if (fresh.length === 0) { set({ page: next, hasMore: false }); return; }
       set({ wallpapers: [...wallpapers, ...fresh], page: next, hasMore: list.length > 0 });
+    } catch (e) {
+      if (gen === browseGen) get().setStatus(e instanceof Error ? e.message : String(e), true); // e.g. Steam's cooldown
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async download(source, w, apply) {

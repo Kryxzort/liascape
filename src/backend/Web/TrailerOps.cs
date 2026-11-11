@@ -17,10 +17,10 @@ namespace Liascape.Web;
 //   - the page read, no trailer → `trailerCheckedAt` (unix s), re-checked after RecheckDays (an author may add one);
 //   - couldn't check (offline, Steam down, an error page) → NOTHING stored, tried again at the next start. Wallpaper
 //     Engine's own offline-mode bug is reporting "can't tell" as "nothing there"; a failed check is never a "no".
-// One page at a time, PaceMs apart — gentle on purpose: this is a ONE-TIME fill (cached after), and Steam rate-limits
-// steamcommunity.com per IP for a long while once tripped (2026-11-11: a burst of ~150 quick reads → 429s for 30+ min,
-// for the owner's own browser too). A 429 waits BackoffMin minutes (MaxBackoffs times), then the run stops and the next
-// start continues; only real failures (no connection, timeouts, error pages) count toward MaxFailsInARow (offline).
+// Paced by SteamGate (every steamcommunity.com request is): background requests start ≥ 4 s apart and stay 10 s behind the
+// user's own browsing; a 429 starts an app-wide cooldown that survives restarts. This lookup is a ONE-TIME fill (cached
+// after). On a cooldown it stops and re-schedules itself for when the cooldown ends (no waiting loop, no request sent);
+// only real failures (no connection, timeouts, error pages) count toward MaxFailsInARow (offline → stop, next start).
 // Faster routes, checked 2026-11-11: IPublishedFileService/GetDetails (100 items a request, with additional previews)
 // needs a Web API key or a signed-in access token (401 without); the keyless ISteamRemoteStorage/GetPublishedFileDetails
 // has no previews at all.
@@ -28,10 +28,22 @@ namespace Liascape.Web;
 // {path, youtubeUrl}` (the grid / sidebar merge it). Adapter log: `trailers: …`.
 public static class TrailerOps
 {
-    private const int PaceMs = 4000, MaxFailsInARow = 3, RecheckDays = 30, MaxBackoffs = 3, BackoffMin = 5;
-    private static int _running;
+    private const int MaxFailsInARow = 3, RecheckDays = 30;
+    private static int _running, _scheduled;
 
-    public static void Kick(string why) => _ = Task.Run(async () => { try { await RunAsync(why).ConfigureAwait(false); } catch { } });
+    public static void Kick(string why)
+    {
+        // Steam asked us to wait (a cooldown, possibly from before a restart): come back when it's over — once
+        if (SteamGate.CooldownRemaining is { } cd && cd > TimeSpan.Zero) { ScheduleAfter(cd, why); return; }
+        _ = Task.Run(async () => { try { await RunAsync(why).ConfigureAwait(false); } catch { } });
+    }
+
+    private static void ScheduleAfter(TimeSpan wait, string why)
+    {
+        if (Interlocked.Exchange(ref _scheduled, 1) == 1) return;
+        Console.WriteLine($"trailers: Steam cooldown — resuming in {Math.Ceiling(wait.TotalMinutes)} min");
+        _ = Task.Run(async () => { await Task.Delay(wait + TimeSpan.FromSeconds(5)).ConfigureAwait(false); Interlocked.Exchange(ref _scheduled, 0); Kick(why + ", after cooldown"); });
+    }
 
     public static async Task RunAsync(string why)
     {
@@ -45,18 +57,17 @@ public static class TrailerOps
                 .ToList();
             if (todo.Count == 0) return;
             Console.WriteLine($"trailers: checking {todo.Count} item(s) ({why})");
-            int found = 0, none = 0, fails = 0, inARow = 0, backoffs = 0;
+            int found = 0, none = 0, fails = 0, inARow = 0;
             foreach (var item in todo)
             {
-                var (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!).ConfigureAwait(false);
-                while (r == SteamWorkshopScraper.PageCheck.RateLimited && backoffs < MaxBackoffs)
+                var (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!, SteamGate.Kind.Background).ConfigureAwait(false);
+                if (r == SteamWorkshopScraper.PageCheck.RateLimited)
                 {
-                    var wait = TimeSpan.FromMinutes(BackoffMin); backoffs++;
-                    Console.WriteLine($"trailers: Steam rate limit — waiting {wait.TotalMinutes:0} min");
-                    await Task.Delay(wait).ConfigureAwait(false);
-                    (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(item.WorkshopId!).ConfigureAwait(false);
+                    var cd = SteamGate.CooldownRemaining;
+                    Console.WriteLine($"trailers: stopped by the Steam cooldown — {found} found, {none} without so far");
+                    if (cd > TimeSpan.Zero) ScheduleAfter(cd, why);
+                    return;
                 }
-                if (r == SteamWorkshopScraper.PageCheck.RateLimited) { Console.WriteLine("trailers: still rate-limited — stopping, retried next start"); break; }
                 if (r != SteamWorkshopScraper.PageCheck.Ok)
                 {
                     fails++;
@@ -70,7 +81,6 @@ public static class TrailerOps
                     if (url != null) { found++; EventBus.Broadcast("library-item-changed", new { path = item.VideoPath, youtubeUrl = url }); }
                     else none++;
                 }
-                await Task.Delay(PaceMs).ConfigureAwait(false);
             }
             Console.WriteLine($"trailers: finished — {found} found, {none} without, {fails} couldn't be checked");
         }

@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
+using Liascape.Helpers;
 using Liascape.Models;
 
 namespace Liascape.Scrapers;
@@ -19,7 +20,7 @@ public static class SteamWorkshopScraper
 
     // Returns the YouTube trailer URL for a workshop item if its Steam page has one, else null (also when the page
     // couldn't be read). The item page exposes it as a JS var `YOUTUBE_VIDEO_ID: "<id>"`.
-    public static async Task<string?> GetYoutubeUrlAsync(string workshopId) => (await TryGetYoutubeUrlAsync(workshopId).ConfigureAwait(false)).Url;
+    public static async Task<string?> GetYoutubeUrlAsync(string workshopId) => (await CheckYoutubeAsync(workshopId, SteamGate.Kind.Interactive).ConfigureAwait(false)).Url;
 
     public enum PageCheck { Ok, Failed, RateLimited }
 
@@ -27,13 +28,8 @@ public static class SteamWorkshopScraper
     // page, a removed item): the trailer cache (Web/TrailerOps) stores the first and retries the second. `Ok` needs the
     // page to BE an item page (its title block), not just a 200 — Steam answers some errors with a 200 page. `RateLimited`
     // = Steam's 429 (it limits page reads: ~100+ quick reads in a row trip it) — wait and retry, it isn't "offline".
-    public static async Task<(bool Ok, string? Url)> TryGetYoutubeUrlAsync(string workshopId)
-    {
-        var (r, url) = await CheckYoutubeAsync(workshopId).ConfigureAwait(false);
-        return (r == PageCheck.Ok, url);
-    }
-
-    public static async Task<(PageCheck Result, string? Url)> CheckYoutubeAsync(string workshopId)
+    // Through SteamGate (every steamcommunity request is): a cooldown → RateLimited without sending anything.
+    public static async Task<(PageCheck Result, string? Url)> CheckYoutubeAsync(string workshopId, SteamGate.Kind kind)
     {
         try
         {
@@ -41,7 +37,7 @@ public static class SteamWorkshopScraper
                 HttpMethod.Get, $"https://steamcommunity.com/sharedfiles/filedetails/?id={workshopId}");
             req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
             using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
-            using var resp = await HttpClientProvider.Client.SendAsync(req, cts.Token).ConfigureAwait(false);
+            using var resp = await SteamGate.SendAsync(req, kind, cts.Token).ConfigureAwait(false);
             if ((int)resp.StatusCode == 429) return (PageCheck.RateLimited, null);
             if (!resp.IsSuccessStatusCode) return (PageCheck.Failed, null);
             var html = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
@@ -49,6 +45,7 @@ public static class SteamWorkshopScraper
             var m = _youtubeRegex.Match(html);
             return (PageCheck.Ok, m.Success ? $"https://www.youtube.com/watch?v={m.Groups[1].Value}" : null);
         }
+        catch (SteamCooldownException) { return (PageCheck.RateLimited, null); }
         catch { return (PageCheck.Failed, null); }
     }
 
@@ -59,7 +56,10 @@ public static class SteamWorkshopScraper
         using (var req = new HttpRequestMessage(HttpMethod.Get, url))
         {
             req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-            using var resp = await HttpClientProvider.Client.SendAsync(req).ConfigureAwait(false);
+            // through SteamGate: spaced with every other Steam Community request; a cooldown throws SteamCooldownException
+            // ("try again in N min") before anything is sent
+            using var resp = await SteamGate.SendAsync(req, SteamGate.Kind.Interactive).ConfigureAwait(false);
+            if ((int)resp.StatusCode == 429) throw new SteamCooldownException(SteamGate.CooldownRemaining);
             resp.EnsureSuccessStatusCode();
             html = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
         }

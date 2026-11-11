@@ -156,6 +156,19 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
 reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, …only the changed fields} (a volume keybind moved an item's own volume → `volumeOverride`; a scene's loudness estimate / report → `loudness*`) · scene-loudness-progress {done,total,currentId,finished?,cancelled?} · steam-qr {png}
 · steam-signed-in {…status} · steam-qr-error {message}`.
 
+## Steam Community rate limits (`Helpers/SteamGate.cs`)
+**Every** request to steamcommunity.com goes through `SteamGate.SendAsync(req, Kind)` (owner 2026-11-11: "make sure you obey
+the rate limits so user dont face ip issues"): Steam limits it per IP and, once tripped, refused for 30+ min — the
+owner's browser included. Request STARTS are spaced app-wide (Interactive 0.5 s — Browse pages, the Browse detail's
+trailer read, subscribe/unsubscribe; Background 4 s and ≥ 10 s behind the last interactive one — the trailer cache);
+a 429 (or the subscribe 403 "too many", via `Trip`) starts an app-wide cooldown — Steam's `Retry-After`, else 10 min
+doubling per repeat (cap 60), reset by a success — saved in `$XDG_CACHE_HOME/liascape/steam-cooldown.json` so a restart
+keeps honouring it. During it nothing is sent: `SteamCooldownException` ("Steam is limiting requests from this
+connection — try again in N min") → `/browse` answers 429 `{error}` (the UI's `jpost` shows a backend `{error}` in its
+own words; Browse puts it in the status bar), the unsubscribe drain stops (`SteamRateLimitException`), the trailer
+cache stops and re-schedules itself for the cooldown's end (`TrailerOps.ScheduleAfter`). Never call steamcommunity.com
+around it. Not gated: the Steam sign-in (once, user-driven) and api.steampowered.com (another host, its own limits).
+
 ## Rules
 - Endpoints stay **thin** — push real logic into `AppOps`/`SteamOps`/existing helpers, not lambdas.
 - `SettingsService.Load()` per request (no cached singleton) — daemons may have changed the file.

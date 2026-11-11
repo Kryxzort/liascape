@@ -50,7 +50,12 @@ async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSigna
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  // an error the backend explains ({error}: e.g. Steam's cooldown — "try again in N min") is shown as its own words
+  if (!r.ok) {
+    let msg: string | null = null;
+    if (r.headers.get("content-type")?.includes("json")) { try { msg = (await r.json())?.error ?? null; } catch { /* not JSON after all */ } }
+    throw new Error(msg ?? `${path} → ${r.status}`);
+  }
   return (r.headers.get("content-type")?.includes("json") ? r.json() : undefined) as Promise<T>;
 }
 

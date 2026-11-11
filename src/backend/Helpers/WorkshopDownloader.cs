@@ -120,15 +120,17 @@ public static class WorkshopDownloader
             ["sessionid"] = sessionId,
         });
 
-        using var resp = await HttpClientProvider.Client.SendAsync(req, ct);
+        HttpResponseMessage resp;
+        try { resp = await SteamGate.SendAsync(req, SteamGate.Kind.Interactive, ct); } // spaced app-wide; a cooldown sends nothing
+        catch (SteamCooldownException) { throw new SteamRateLimitException(); }
+        using var _resp = resp;
         var body = await resp.Content.ReadAsStringAsync(ct);
 
         // Rate-limited → distinct exception so the drain can stop early instead of hammering the
         // rest of the queue (they'd all 429 too). 429, or Steam's 403 + empty/"too many" body.
-        if ((int)resp.StatusCode == 429
-            || (resp.StatusCode == System.Net.HttpStatusCode.Forbidden
-                && body.Contains("too many", StringComparison.OrdinalIgnoreCase)))
-            throw new SteamRateLimitException();
+        if ((int)resp.StatusCode == 429) throw new SteamRateLimitException(); // the gate already started the cooldown
+        if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden && body.Contains("too many", StringComparison.OrdinalIgnoreCase))
+        { SteamGate.Trip(); throw new SteamRateLimitException(); } // Steam's 403 flavour: start the app-wide cooldown too
 
         // Steam returns {"success":1} on success (1 also = already in that state). Anything else
         // (non-2xx, or a success code that isn't 1) means the request didn't take.

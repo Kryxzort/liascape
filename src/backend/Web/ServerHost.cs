@@ -291,10 +291,15 @@ public static class ServerHost
             var p = Providers[r.Source];
             ConfigureProvider(p, SettingsService.Load(), r.Filter); // refresh AllowScenes/path/filter from live settings
             var page = r.Page <= 0 ? 1 : r.Page;
-            var list = !string.IsNullOrWhiteSpace(r.Query) && p.SupportsSearch
-                ? await p.SearchAsync(r.Query!, page)
-                : await p.GetLatestAsync(page);
-            return Results.Json(list);
+            try
+            {
+                var list = !string.IsNullOrWhiteSpace(r.Query) && p.SupportsSearch
+                    ? await p.SearchAsync(r.Query!, page)
+                    : await p.GetLatestAsync(page);
+                return Results.Json(list);
+            }
+            // Steam asked us to slow down (SteamGate): say when to retry — nothing more was sent
+            catch (SteamCooldownException e) { return Results.Json(new { error = e.Message }, statusCode: 429); }
         });
 
         app.MapPost("/detail", async (DetailReq r) =>
