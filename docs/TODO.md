@@ -12,7 +12,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        var(--thumb-aspect)`, so Widescreen items are 112 × 63 (small) and the bar's height changes with the shape. Fix the
        height at 112 px and let the width follow the shape (Square 112 × 112, Widescreen ≈ 199 × 112). `useDockLift`'s
        bell is tuned to a 122 px pitch (SIGMA 104, PUSH, REACH): derive them from the measured pitch so the dock feels
-       the same at both shapes. Probe-plbar bounce/sweep cells at both shapes; the bar's height equal at both.
+       the same at both shapes. The headroom gap above the items is 22 px while a widescreen item rises only 14 px at
+       full magnification (8 px unused); a fixed 1.16× on 112 px items would rise 22 px. Aim the dock at a fixed RISE
+       (~12 px incl. the 4 px lift → the scale follows the item height) and shrink the gap to rise + 4 px clearance
+       (~16 px), equal at both shapes. Probe-plbar bounce/sweep cells at both shapes; the bar's height equal at both;
+       a magnified item never reaches the header buttons (clearance ≥ 3 px).
 3. [ ] **Smooth scrolling actually on**: `useSmoothScroll` binds once at mount, but the Library (and Browse while its
        first page loads) renders a placeholder first, so the wheel listener never attaches (0 listeners on `.lib-scroll`
        live). Make it follow the element (callback ref / element in state); with motion off or reduced motion scroll
