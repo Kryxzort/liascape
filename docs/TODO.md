@@ -8,11 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-3. [ ] **Smooth scrolling actually on**: `useSmoothScroll` binds once at mount, but the Library (and Browse while its
-       first page loads) renders a placeholder first, so the wheel listener never attaches (0 listeners on `.lib-scroll`
-       live). Make it follow the element (callback ref / element in state); with motion off or reduced motion scroll
-       natively; pass touchpad (fine pixel) scrolling through natively, glide only notched wheels. Guard: a probe cell
-       that boots into the Library and checks the wheel glides — red on today's code first.
 4. [ ] **Sidebar preview strip**: the image / video / YouTube switcher becomes a flat strip fused to the preview's top
        edge (one shape: rounded strip top, rounded picture bottom, no gap), equal-width options, the picked one
        accent-filled (slides on switch; jumps with motion off); glow wraps the unit (off with glow off); the stage's

@@ -156,7 +156,7 @@ export function PlaylistBar() {
   // the row only exists while the bar is expanded and the playlist has items (it loads after the first render): re-attach the
   // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolls
   const rowShown = !collapsed && playlist.length > 0;
-  useSmoothScroll(rowRef, "x", [rowShown]);
+  const rowSmooth = useSmoothScroll(rowRef, "x");
   const [hv] = useState(hoverStore);
   const motion = useMotion();
   // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
@@ -226,7 +226,7 @@ export function PlaylistBar() {
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
           <SortableContext items={playlist} strategy={horizontalListSortingStrategy}>
-            <div className="playlist-bar-row" ref={rowRef} onMouseMove={onRowMove} onMouseLeave={() => hv.set(null)}>
+            <div className="playlist-bar-row" ref={rowSmooth} onMouseMove={onRowMove} onMouseLeave={() => hv.set(null)}>
               {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath} hv={hv} />)}
             </div>
           </SortableContext>

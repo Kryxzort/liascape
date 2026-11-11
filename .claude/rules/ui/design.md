@@ -48,7 +48,7 @@ the floor; a new element is designed to delight within the toggles and the frame
 - A Settings row whose only control is a checkbox/radio is a `<label>` (click anywhere ticks it).
 - A missing dependency shows a `WarnIcon` on its row (`components/FeatureWarn.tsx`); the control stays usable.
 - The password field in `components/SteamPasswordModal.tsx` is uncontrolled: read once on submit, emptied, never in React state or the store.
-- Smooth wheel scrolling: `useSmoothScroll(ref, axis)` on every `.scroll` container and the playlist bar row. Never set `scrollbar-width` / `scrollbar-color` (Chromium then ignores `::-webkit-scrollbar`).
+- Smooth wheel scrolling: every `.scroll` container and the playlist bar row takes the ref `useSmoothScroll(ref, axis)` returns (it fills `ref` too, and binds whenever the element appears); notched wheels glide, touchpads and motion off scroll natively. Never set `scrollbar-width` / `scrollbar-color` (Chromium then ignores `::-webkit-scrollbar`).
 - Settings levels: a row's level comes from `LEVEL_OF_KEY` in `src/settingsLevel.ts` (or `Row`'s `lv`); hidden settings stay saved and live. Tests find rows by label (`m.row(label)`), so a rename updates `app/shell/probe-*.js` too.
 
 ## Comment tags (grep these)

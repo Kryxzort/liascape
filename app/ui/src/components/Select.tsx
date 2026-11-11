@@ -16,7 +16,7 @@ export function Select({ value, options, onChange, className = "", title, disabl
   const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const pop = useRef<HTMLDivElement>(null);
-  useSmoothScroll(pop, "y", [open]); // momentum scroll inside the list, matching the rest of the app
+  const popSmooth = useSmoothScroll(pop); // momentum scroll inside the list, matching the rest of the app
   const cur = options.find((o) => String(o.value) === String(value));
 
   const place = () => { const r = btn.current?.getBoundingClientRect(); if (r) setRect({ left: r.left, top: r.bottom + 4, width: r.width }); };
@@ -42,7 +42,7 @@ export function Select({ value, options, onChange, className = "", title, disabl
       {open && rect && createPortal(
         <>
           <div className="sel-backdrop" onClick={() => setOpen(false)} onContextMenu={(e) => { e.preventDefault(); setOpen(false); }} />
-          <div ref={pop} className="sel-pop" style={{ left: rect.left, top: rect.top, minWidth: rect.width }}>
+          <div ref={popSmooth} className="sel-pop" style={{ left: rect.left, top: rect.top, minWidth: rect.width }}>
             {options.map((o) => (
               <button key={o.value} type="button" className={`sel-opt${String(o.value) === String(value) ? " on" : ""}`}
                 onClick={() => { onChange(o.value); setOpen(false); }}>{o.label}</button>

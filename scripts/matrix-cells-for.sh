@@ -65,7 +65,10 @@ for f in $FILES; do
     app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts)
       add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts)
-      add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, perf:tabs, perf:dockRepaint)" ;;
+      add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, scroll:, perf:tabs, perf:dockRepaint)" ;;
+    # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)
+    app/ui/src/components/Segmented.tsx)
+      add "$PL|plStart|$MODAL|sceneProp|appear" "$f (+ --probe probe-layout.js seg:, probe-sidebar.js look:strip, probe-expert.js)" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr|travel:|global:sceneTiming|playlist:sceneTiming" "$f" ;;
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;

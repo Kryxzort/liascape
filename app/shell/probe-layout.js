@@ -11,6 +11,19 @@
 //                         no easing
 //   tabs:slide[:off|:reduced] switching tabs slides the active pill (transform) and slides/fades the page in
 //                         (transform + opacity); off / prefers-reduced-motion → it jumps, nothing animates
+//   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
+//                         scroll's wheel listener
+//   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
+//                         scrollTop keeps moving well after the event, ending ~1.5× the tick's native step
+//   scroll:touchpad       a touchpad stream (precise, fractional deltas — one whole 120 mid-gesture) scrolls natively: never
+//                         cancelled, lands on the summed deltas within a few frames of the last event, no coast
+//   scroll:off[:reduced]  "Smooth window animations" off / prefers-reduced-motion: a notch scrolls natively (not cancelled,
+//                         the native step, no long coast)
+//   seg:glide:<w>x<h>     the segmented control (the Settings level picker): Basic → Expert, its highlight glides on transform
+//                         through in-between frames with a spring's small overshoot and lands centred on Expert at its width;
+//                         seg:jump:<w>x<h> / seg:jump:reduced — motion off / reduced motion: it jumps. Screenshots seg-*-midglide.png
+//   seg:keys              arrows / Home / End move the choice and the focus, the key is taken, only the checked option is a Tab stop
+//   seg:glow              the highlight glows, none under no-glow; the track goes translucent under bg-live
 //   perf:idle             an idle page asks for no frames
 //   perf:tabs             on a PERF_N-item library: each real tab click forces no layout from script (an effect / handler
 //                         measuring the new page before its frame does); prints the longest task and what mounted
@@ -43,8 +56,11 @@ const post = (p, b = {}) => http("POST", p, b);
 async function setSettings(patch) { const s0 = (await http("GET", "/settings")).json; await post("/settings", { ...s0, ...patch }); }
 // "Smooth window animations" through its own Settings row (a /settings POST from here doesn't reach the open page's store)
 async function setMotion(on) {
+  // (Settings is a lazy chunk: a first visit can take seconds to mount)
   await page(`m.byText(".tab", "Settings").click(); await m.sleep(700);
-    const row = [...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel")?.textContent.includes("Smooth window animations"));
+    const find = () => [...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel")?.textContent.includes("Smooth window animations"));
+    for (let w = 0; w < 8000 && !find(); w += 100) await m.sleep(100);
+    const row = find();
     if (!row) throw new Error("no Smooth window animations row");
     const cb = row.querySelector("input[type=checkbox]"); if (cb.checked !== ${on}) cb.click(); await m.sleep(500);`);
 }
@@ -119,7 +135,9 @@ const RC_HOOK = `(() => {
     } };
 })();`;
 const dbg = () => { const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3"); return d; };
+let perfReady = false;
 async function perfSetup() {
+  if (perfReady) return; perfReady = true;
   const dir = path.join(OUT, "perf-lib"); fs.mkdirSync(dir, { recursive: true });
   const src = K[K.length - 1];
   const paths = [];
@@ -188,6 +206,29 @@ async function perfStep(fn) {
     // who forced it: the JS frame that asked (file:line:col of the bundle)
     forcedBy: forced.map((e) => { const f = e.args?.beginData?.stackTrace?.[0]; return f ? `${f.functionName || "?"}@${String(f.url).split("/").pop()}:${f.lineNumber}:${f.columnNumber}` : "?"; }).join(", "),
     rendered: rc1.rendered - rc0.rendered, mounted: rc1.mounted - rc0.mounted, who: rc1.who };
+}
+
+// Wheel events through Chromium's input pipeline (webContents.sendInputEvent → a real WebMouseWheelEvent) at the scroller's
+// left edge (clear of sliders), with scrollTop sampled every frame from 0. Returns the travel, when it last moved (ms after
+// the first event), how many frames moved, the measured frame interval, and what the page saw of each event (cancelled?).
+async function wheelRun(sel, evs, dur = 2200) {
+  const at = await page(`const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollTop = 0; await m.sleep(300);
+    const b = e.getBoundingClientRect(); return { x: Math.round(b.x + 12), y: Math.round(b.y + b.height / 2), room: e.scrollHeight - e.clientHeight };`);
+  if (!at) throw new Error(`no ${sel} (tabs ${await js(`[...document.querySelectorAll('.tab')].map((t) => t.textContent + (t.classList.contains('active') ? '*' : '')).join(' ')`)}; scrollers ${await js(`[...document.querySelectorAll('.scroll')].map((e) => e.className).join(' | ')`)})`);
+  win.webContents.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y }); await sleep(400);
+  await js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); window.__ws = []; window.__wl = []; const t0 = window.__wt0 = performance.now();
+    if (!window.__wlOn) { window.__wlOn = true; addEventListener("wheel", (e) => window.__wl.push({ t: performance.now() - window.__wt0, dp: e.defaultPrevented, dy: e.deltaY, wdy: e.wheelDeltaY, mode: e.deltaMode }), { passive: true }); }
+    const tick = () => { const t = performance.now() - t0; window.__ws.push([t, el.scrollTop]); if (t < ${dur}) requestAnimationFrame(tick); }; requestAnimationFrame(tick); })()`);
+  await sleep(100);
+  for (const [i, ev] of evs.entries()) { win.webContents.sendInputEvent({ type: "mouseWheel", x: at.x, y: at.y, canScroll: true, ...ev }); if (i < evs.length - 1) await sleep(8); }
+  await sleep(dur + 200);
+  const { s, l } = await js(`({ s: window.__ws, l: window.__wl })`);
+  const t0 = l[0]?.t ?? 0;
+  let lastMove = 0, moves = 0;
+  for (let i = 1; i < s.length; i++) if (s[i][1] !== s[i - 1][1]) { moves++; lastMove = s[i][0] - t0; }
+  const dts = s.slice(1).map((x, i) => x[0] - s[i][0]).sort((a, b) => a - b);
+  console.log(`        ${sel}: events ${JSON.stringify(l.map((e) => ({ dy: +e.dy.toFixed(2), wdy: e.wdy, mode: e.mode, cancelled: e.dp })))}; travel ${(s.at(-1)[1] - s[0][1]).toFixed(1)} px, ${moves} frames moved, last at ${lastMove.toFixed(0)} ms`);
+  return { room: at.room, events: l, travel: s.at(-1)[1] - s[0][1], lastMove, moves, lastEvent: (l.at(-1)?.t ?? 0) - t0, frame: dts[dts.length >> 1] ?? 16.7 };
 }
 
 app.whenReady().then(async () => {
@@ -379,6 +420,75 @@ app.whenReady().then(async () => {
       return v;
     });
     await reducedMotion(false); await setMotion(true);
+
+    // ---- smooth wheel scrolling (hooks/useSmoothScroll.ts) on a library that scrolls ----
+    if (!ONLY || ONLY.test("scroll:bound") || ONLY.test("scroll:glide") || ONLY.test("scroll:touchpad") || ONLY.test("scroll:off")) {
+      await perfSetup();
+      // the real boot: a fresh load lands on the Library, which renders its "empty" placeholder until the items arrive
+      await win.loadURL(withToken(U + "/"));
+      for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= PERF_N) break; await sleep(100); }
+      await js(PAGE); await sleep(1200);
+    }
+    await cell("scroll:bound", async () => {
+      const d = dbg();
+      const { result } = await d.sendCommand("Runtime.evaluate", { expression: `document.querySelector(".lib-scroll")` });
+      if (!result.objectId) return ["no .lib-scroll after boot"];
+      const { listeners } = await d.sendCommand("DOMDebugger.getEventListeners", { objectId: result.objectId });
+      await d.sendCommand("Runtime.releaseObject", { objectId: result.objectId });
+      const wheel = listeners.filter((l) => l.type === "wheel" && !l.passive);
+      console.log(`        .lib-scroll after boot: ${wheel.length} non-passive wheel listener(s)`);
+      return wheel.length ? [] : ["no wheel listener on .lib-scroll after booting into the Library — the smooth scroll never bound"];
+    });
+    const NOTCH = { deltaX: 0, deltaY: -120, wheelTicksX: 0, wheelTicksY: -1, hasPreciseScrollingDeltas: false };
+    const notchRun = (sel) => wheelRun(sel, [NOTCH]);
+    for (const [name, t, sel] of [["scroll:glide", "Library", ".lib-scroll"], ["scroll:glide:browse", "Browse", ".scroll:not(.lib-scroll):not(.settings)"], ["scroll:glide:settings", "Settings", ".scroll.settings"]]) {
+      await cell(name, async () => {
+        await tab(t);
+        // Settings is a lazy chunk: its first visit mounts seconds later on the matrix's software GL
+        for (let w = 0; w < 8000 && !(await js(`!!document.querySelector(${JSON.stringify(sel)})`)); w += 100) await sleep(100);
+        await sleep(500);
+        const r = await notchRun(sel);
+        const v = [];
+        if (r.room < 600) return [`${sel} can scroll only ${r.room} px — proved nothing`];
+        if (!r.events.length) return ["no wheel event reached the page — proved nothing"];
+        if (!r.events[0].dp) v.push("the notch was not cancelled (the browser scrolled it natively)");
+        const ratio = r.travel / Math.abs(r.events[0].dy);
+        if (ratio < 1.25 || ratio > 1.75) v.push(`travel ${r.travel.toFixed(0)} px = ${ratio.toFixed(2)}× the ${Math.abs(r.events[0].dy)} px step (1.25–1.75×)`);
+        if (r.lastMove < 700) v.push(`scrollTop stopped ${r.lastMove.toFixed(0)} ms after the tick (a glide coasts ≥ 700 ms)`);
+        if (r.moves < 15) v.push(`only ${r.moves} frames moved`);
+        return v;
+      });
+    }
+    await cell("scroll:touchpad", async () => {
+      await tab("Library"); await sleep(400);
+      // a two-finger swipe: fractional precise deltas from rest, one landing on a whole 120 mid-gesture (a fast frame)
+      const dys = [2.3, 5.1, 9.7, 13.4, 120, 12.2, 8.6, 4.1];
+      const r = await wheelRun(".lib-scroll", dys.map((dy) => ({ deltaX: 0, deltaY: -dy, wheelTicksX: 0, wheelTicksY: -dy / 120, hasPreciseScrollingDeltas: true })));
+      const v = [];
+      const sum = dys.reduce((a, b) => a + b, 0);
+      if (r.events.length !== dys.length) return [`${r.events.length} of ${dys.length} wheel events reached the page — proved nothing`];
+      const cancelled = r.events.filter((e) => e.dp).map((e) => e.dy);
+      if (cancelled.length) v.push(`touchpad events cancelled (glided): ${cancelled.join(", ")}`);
+      if (Math.abs(r.travel - sum) > 3) v.push(`travel ${r.travel.toFixed(1)} px, the deltas sum to ${sum.toFixed(1)} (native)`);
+      const settle = r.lastMove - r.lastEvent;
+      if (settle > 4 * r.frame) v.push(`scrollTop still moved ${settle.toFixed(0)} ms after the last event (≤ 4 frames of ${r.frame.toFixed(1)} ms: no coast)`);
+      return v;
+    });
+    const off = async (mode) => {
+      if (mode === "off") await setMotion(false); else await reducedMotion(true);
+      await tab("Library"); await sleep(400);
+      const r = await notchRun(".lib-scroll");
+      if (mode === "off") await setMotion(true); else await reducedMotion(false);
+      const v = [];
+      if (!r.events.length) return ["no wheel event reached the page — proved nothing"];
+      if (r.events[0].dp) v.push("the notch was cancelled (the smooth scroll took it)");
+      if (Math.abs(r.travel - Math.abs(r.events[0].dy)) > 2) v.push(`travel ${r.travel.toFixed(1)} px, native is the ${Math.abs(r.events[0].dy)} px step`);
+      if (r.lastMove > 500) v.push(`scrollTop moved until ${r.lastMove.toFixed(0)} ms after the tick (native settles < 500 ms)`);
+      return v;
+    };
+    await cell("scroll:off", () => off("off"));
+    await cell("scroll:off:reduced", () => off("reduced"));
+    await reducedMotion(false);
 
     // ---- perf: tab switches and the item sidebar on a full library ----
     if (!ONLY || ONLY.test("perf:tabs") || ONLY.test("perf:sidebar") || ONLY.test("perf:dockRepaint")) await perfSetup();

@@ -113,7 +113,7 @@ export function WorkshopFilterColumn({ mode, closing = false, entering = false, 
   const clear = useStore((s) => s.clearTags);
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  useSmoothScroll(scrollRef);
+  const smoothRef = useSmoothScroll(scrollRef);
   const states = new Map<string, TagState>();
   for (const x of f.include) states.set(x, "inc");
   for (const x of f.exclude) states.set(x, "exc");
@@ -147,7 +147,7 @@ export function WorkshopFilterColumn({ mode, closing = false, entering = false, 
           <button type="button" className="wf-clear" data-wf-clear disabled={!n} onClick={clear}>Clear all</button>
           {mode === "drawer" && <button type="button" className="mini wf-close" aria-label="Close filters" onClick={onClose}><X size={16} /></button>}
         </div>
-        <div className="wf-scroll" ref={scrollRef}>
+        <div className="wf-scroll" ref={smoothRef}>
           {WF_GROUPS.map((g) => <GroupBox key={g.id} g={g} states={states} />)}
         </div>
       </aside>

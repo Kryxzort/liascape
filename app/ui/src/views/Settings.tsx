@@ -161,7 +161,7 @@ export const Settings = memo(function Settings() {
   const themeName = useStore((s) => s.theme?.name ?? "");
   const applyTheme = useStore((s) => s.applyTheme);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useSmoothScroll(scrollRef);
+  const smoothRef = useSmoothScroll(scrollRef);
   const [mpv, setMpv] = useState("");
   const [lwe, setLwe] = useState("");
   const [clearArm, setClearArm] = useState(-1); // -1 idle, >0 counting, 0 ready-to-confirm
@@ -286,7 +286,7 @@ export const Settings = memo(function Settings() {
 
   return (
     <HealthCtx.Provider value={warnings}>
-    <div className="scroll settings" ref={scrollRef}>
+    <div className="scroll settings" ref={smoothRef}>
       {broken.length > 0 && (
         <div className="health-sum" data-health-summary>
           <div className="health-sum-head"><AlertTriangle size={14} />

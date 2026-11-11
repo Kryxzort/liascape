@@ -58,7 +58,7 @@ export const Library = memo(function Library() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useSmoothScroll(scrollRef);
+  const smoothRef = useSmoothScroll(scrollRef);
   useGridFit(scrollRef, "library");
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
@@ -171,7 +171,7 @@ export const Library = memo(function Library() {
 
   return (
     <>
-    <div className="scroll lib-scroll" ref={scrollRef} onClick={onBgClick}>
+    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick}>
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}

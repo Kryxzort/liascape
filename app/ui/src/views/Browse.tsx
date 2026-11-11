@@ -66,7 +66,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const sentinel = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
-  useSmoothScroll(scrollRef);
+  const smoothRef = useSmoothScroll(scrollRef);
   useGridFit(scrollRef, "browse");
 
   useEffect(() => {
@@ -175,7 +175,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   return (
     <>
     {isWorkshop && docked && dockCol.value && <WorkshopFilterColumn mode="dock" closing={dockCol.closing} entering={shift?.dir === "in"} onFold={toggleCol} />}
-    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={scrollRef} onClick={onBgClick}>
+    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={smoothRef} onClick={onBgClick}>
       {isWorkshop && <WorkshopSortRow drawer={!docked} open={docked && !colHidden} onOpenFilters={() => docked ? toggleCol() : setDrawerOpen(true)} />}
       <div className="grid">
           {sorted.map((w) => (
