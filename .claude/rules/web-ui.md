@@ -160,9 +160,16 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
 - **Dock-style playlist bar hover** (owner todo 2026-11-10): the hovered `.pl-item` lifts 4 px, its neighbours 2 px, the next ones
   0.75 px — CSS only (`+` for the ones after it, `:has(+ …)` for the ones before), transform with a 180 ms ease-out. A playing item
   neither lifts nor lifts its neighbours (its green ring). The row has `padding-top: 6px; margin-top: -4px` (it clips vertically:
-  room for the lift, same height as before); the portal'd `.pl-hover-glow` re-reads the item's box on its `transitionend`.
+  room for the lift, same height as before); the portal'd `.pl-hover-glow` follows the item's box (below).
   `:root.no-motion` → the hovered item alone, 2 px, no easing; `:root.no-glow` → no glow layer, the lift stays. Guard:
   `probe-layout.js` `dock:hover` / `:off` (computed `translateY` of the items).
+  **The hovered item is the row's state, not CSS `:hover`** (owner 2026-11-11: "doesn't lose the hover thing in the gaps"):
+  `PlaylistBar`'s `hoverPath` — an item's `mouseenter` sets it, the 10 px gaps keep it, the row's `mouseleave` or the pointer
+  past the first / last item clears it — → `.pl-item.hov` (the lift, the remove button) and the item's preview. The glow follows
+  the hovered item's box with a rAF loop (the eased lift and the row's smooth scroll fire no mousemove). **The row's wheel
+  listener re-attaches when the row mounts** (`useSmoothScroll(rowRef, "x", [rowShown])`): attached once at the bar's mount,
+  before the playlist had loaded, the bar never scrolled. Guard: `--probe probe-plbar.js` — `bar:wheel`, `bar:wheelReopen`
+  (collapse + expand), `bar:gap`, `bar:leave`, real input events in a narrow window (RED before: 3/4).
 - **Any window size** (owner todo 2026-11-10, "responsive at any tiled size"): the `.topbar` is `flex-wrap: wrap` (a second row
   instead of controls past the window's edge); `.status` = `flex: 1000 1 0; min-width: min(140px, 100%)` (fills a row's end,
   truncates, never forces a wrap by its text); `.search` = `flex: 0 1 240px; min-width: 120px` (≤ 640 px: `1 1 140px`, fills its

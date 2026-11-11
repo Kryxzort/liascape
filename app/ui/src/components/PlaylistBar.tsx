@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors,
@@ -20,7 +20,12 @@ import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { revealCard } from "../hooks/gridKeys";
 
-function PlItem({ path, item, index, playing }: { path: string; item?: LibraryItem; index: number; playing: boolean }) {
+// The hovered item is the ROW's state (owner 2026-11-11: "doesn't lose the hover thing in the gaps between playlist items"):
+// entering an item hovers it, the 10 px gaps between items keep the last one, and leaving the row (or the empty space past
+// its ends) clears it. A CSS :hover dropped in every gap, so the dock lift sank and re-rose crossing from item to item.
+type SetHover = Dispatch<SetStateAction<string | null>>;
+const PlItem = memo(function PlItem({ path, item, index, playing, hover, setHover }:
+  { path: string; item?: LibraryItem; index: number; playing: boolean; hover: boolean; setHover: SetHover }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: path });
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
@@ -30,17 +35,29 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   const [menu, setMenu] = useState<{ x: number; y: number; el: HTMLElement } | null>(null);
-  const [hover, setHover] = useState(false);
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
   // a position:fixed layer portal'd to <body> at the item's rect → it floats OVER the playlist bar chrome with
   // zero row padding. rAF-throttled rect tracking so it follows the item while the row scrolls.
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const [glow, setGlow] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const rafRef = useRef(0);
-  // getBoundingClientRect already reflects the hover lift transform — don't offset, or the glow drifts up.
-  const place = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setGlow({ x: r.left, y: r.top, w: r.width, h: r.height }); };
-  const onEnter = (e: React.MouseEvent<HTMLDivElement>) => { setHover(true); place(e.currentTarget); };
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => { const el = e.currentTarget; if (rafRef.current) return; rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; place(el); }); };
-  const onLeave = () => { setHover(false); setGlow(null); if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; } };
+  // While hovered, a rAF loop follows the item's box (the eased dock lift, the row's smooth scroll — neither fires a
+  // mousemove); state is only set when the box moved. getBoundingClientRect already includes the lift: don't offset.
+  useEffect(() => {
+    if (!hover) return;
+    let raf = 0, last = "";
+    const tick = () => {
+      const el = boxRef.current;
+      if (el) {
+        const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
+        if (k !== last) { last = k; setGlow({ x: r.left, y: r.top, w: r.width, h: r.height }); }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); setGlow(null); }; // no stale box shown on the next hover
+  }, [hover]);
+  const onEnter = () => setHover(path);
+  const onLeave = () => setHover((cur) => (cur === path ? null : cur));
   // The portal'd menu is this item's React child, so going from it to elsewhere fires no leave here: closing off the item is the leave.
   const closeMenu = (e: React.MouseEvent) => { if (menu && !pointerOver(menu.el, e)) onLeave(); setMenu(null); };
   useEffect(() => {
@@ -52,23 +69,21 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
   // an open menu holds the preview, as on a library card
   const active = !!item && (hover || !!menu || (autoPlayGifs && hasGifAsset(item)));
   // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
-  const boxRef = useRef<HTMLDivElement | null>(null);
   const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}`} data-morph-id={`pl-${path}`}
+    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`}
       {...attributes} {...listeners} onClick={() => playFrom(index)} title={item?.title}
-      onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
-      onTransitionEnd={(e) => { if (hover && e.target === e.currentTarget && e.propertyName === "transform") place(e.currentTarget); }} /* the glow follows the eased dock lift */
+      onMouseEnter={onEnter}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, el: e.currentTarget }); }}>
       {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" title="Remove from playlist"
         onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
-      {glow && glows && !playing && !isDragging && createPortal(
+      {hover && glow && glows && !playing && !isDragging && createPortal(
         <div className="pl-hover-glow" style={{ left: glow.x, top: glow.y, width: glow.w, height: glow.h }} />, document.body)}
       {menu && item && createPortal(
         // React bubbles a portal's events through the React tree, i.e. into this .pl-item's
@@ -87,7 +102,7 @@ function PlItem({ path, item, index, playing }: { path: string; item?: LibraryIt
         </div>, document.body)}
     </div>
   );
-}
+});
 
 // The thing shown floating under the cursor while dragging — rendered in a DragOverlay portal'd to
 // <body>, so it sits ABOVE all UI (not clipped by the playlist bar's overflow / backdrop-filter containing block).
@@ -122,7 +137,19 @@ export function PlaylistBar() {
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const rowRef = useRef<HTMLDivElement>(null);
-  useSmoothScroll(rowRef, "x");
+  // the row only exists while the bar is expanded and the playlist has items (it loads after the first render): re-attach the
+  // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolled (owner 2026-11-11: "i cant scroll on
+  // playlist bar")
+  const rowShown = !collapsed && playlist.length > 0;
+  useSmoothScroll(rowRef, "x", [rowShown]);
+  const [hoverPath, setHoverPath] = useState<string | null>(null);
+  // the pointer on the row itself (not on an item): inside the run of items = a gap (keep), past either end = off them
+  const onRowMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const row = e.currentTarget;
+    if (e.target !== row || !hoverPath) return;
+    const first = row.firstElementChild?.getBoundingClientRect(), last = row.lastElementChild?.getBoundingClientRect();
+    if (!first || !last || e.clientX < first.left || e.clientX > last.right) setHoverPath(null);
+  };
   // …and the playlist bar's playing item (horizontal; once per session)
   useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);
   // expose the playlist bar's live height as --playlist-bar-h so the library scroll can pad its bottom enough to
@@ -156,7 +183,7 @@ export function PlaylistBar() {
     <div className="playlist-bar" ref={playlistBarRef}>
       <div className="playlist-bar-head">
         <button className="mini" title={collapsed ? "Expand" : "Collapse"}
-          onClick={() => setSetting("isPlaylistBarCollapsed", !collapsed)}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
+          onClick={() => { setHoverPath(null); setSetting("isPlaylistBarCollapsed", !collapsed); }}>{collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}</button>
         <span className="playlist-bar-label">PLAYLIST</span>
         <span className="playlist-bar-count">{playlist.length}</span>
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
@@ -172,8 +199,9 @@ export function PlaylistBar() {
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
           <SortableContext items={playlist} strategy={horizontalListSortingStrategy}>
-            <div className="playlist-bar-row" ref={rowRef}>
-              {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath} />)}
+            <div className="playlist-bar-row" ref={rowRef} onMouseMove={onRowMove} onMouseLeave={() => setHoverPath(null)}>
+              {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath}
+                hover={hoverPath === p} setHover={setHoverPath} />)}
             </div>
           </SortableContext>
           {/* DragOverlay portal'd to <body> → the picked-up item floats ABOVE all UI (the playlist bar's
