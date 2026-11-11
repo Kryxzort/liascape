@@ -803,9 +803,26 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   `cancelPwLogin` (POST `/steam/login/cancel` once a request is out); a click outside does nothing (it'd lose what was typed).
   Tab order: account → password → Cancel → Sign in. Look: `.pw-modal` (the playlist modals' `--tr-strong` panel), the key icon
   with an accent drop-shadow (`no-glow` → none).
-- **"Use the Steam app directly"** (`workshopViaSteamClient`, Basic, off by default; under Subscribe via Steam only, above the
-  Steam row): the running Steam client subscribes + downloads (sources.md § Download) — the card shows Steam's own percent.
-  Guard: probe-steam `steam:row:viaClient`.
+- **Four download modes, one radio group** (`workshopDownloadMode`, `[data-wsmode]`, in this order): **Use the Steam app**
+  (`steamapp` — the running Steam client subscribes + downloads, sources.md § Download; a note says it needs Steam + WE in the
+  account and falls back to the item's page), **Open in the Steam app** (`steampage` — always the page, you click Subscribe),
+  **Subscribe with your Steam sign-in** (`subscribe`, the default — the Steam sign-in row shows only under it), **Download via
+  steamcmd** (`steamcmd`). Owner 2026-11-11: "why is this a checkbox" (the Steam app route was first a switch inside Subscribe),
+  then "should have 4 options not 3, the 4th being the one which opens the wallpaper in your app". Guard: probe-steam
+  `steam:row:steamApp`.
+- **Every checkbox + radio is the themed control** (`:is(.ck, .settings, .side-panel)` in index.css — a dark rounded box /
+  circle, accent fill + a tick / an accent dot when on; owner 2026-11-11: "i wonder if a white checkbox matches the rest of the
+  app or we just overlooked this part of the ui" — overlooked: Settings and the item sidebar kept the browser's white
+  controls). The tick is a stroked path in a 12×12 mask centred by its geometry (owner: "is it just me or the tick is
+  off-center" — it was a rotated border-L nudged by hand). A new checkbox / radio elsewhere: put it in one of those
+  containers or a `.ck` label. **A Settings row whose only control is a checkbox / radio is a `<label>`** (`Row` →
+  `.srow.toggle[data-row-toggle]`, pointer cursor): a click anywhere on it — the name, the hint, the space between — ticks it
+  (owner 2026-11-11: "do you think clicking on name or the entire box of a specific setting should tick/untick it?" — yes, like
+  the filter column's names); its reset button still only resets (a click on interactive content never activates a label);
+  rows with a slider / field / select / button stay plain `div`s. Guard: probe-steam `look:toggles` (appearance none, dark
+  when off, the tick's pixel bounding box within ½ px of the box's centre — measured (0.14, 0.04); a real click on a radio
+  row's hint picks it, on a checkbox row's name flips it and back, a slider row's name changes nothing; shots
+  `steam-toggles.png`, `steam-tick.png` 8×).
 - **A download waiting on the Steam app**: WS `download-progress.status` → the store's `downloadStatus[pageUrl]` → the Browse
   card's label in short words (`Card.tsx` `shortDownloadStatus`, `[data-dl-label]`: "Click Subscribe in Steam" / "Steam is
   downloading…" / "Steam is finishing…" / "Subscribing…" / "Waiting for Steam…"; its own store selector) over an indeterminate

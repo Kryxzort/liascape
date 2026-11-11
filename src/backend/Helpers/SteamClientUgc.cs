@@ -14,7 +14,8 @@ namespace Liascape.Helpers;
 // Workshop through the RUNNING Steam client, the way Wallpaper Engine itself does it (owner 2026-11-11: "do you think we could
 // like embed steam or like drive steam" → "yeah, try it"). Steam's ISteamUGC lets a program that is "the game" subscribe to
 // an item and read Steam's own download progress (bytes done / total) and the item's real install folder. Opt-in
-// (`AppSettings.WorkshopViaSteamClient`): the helper presents itself as Wallpaper Engine (431960) — Steam checks the account
+// (`WorkshopDownloadMode` "steamapp", Settings "Use the Steam app" — owner 2026-11-11 "why is this a checkbox": a third way
+// to get wallpapers, so a third radio, not a switch inside "Subscribe via Steam"): the helper presents itself as Wallpaper Engine (431960) — Steam checks the account
 // owns it, and shows "Playing Wallpaper Engine" while connected.
 //
 // - Straight through the Steam client's OWN steamclient.so (every Steam install has it: ~/.steam/sdk64/steamclient.so) —

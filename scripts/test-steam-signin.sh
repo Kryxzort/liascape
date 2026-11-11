@@ -182,7 +182,7 @@ if [ -z "$CC" ]; then bad "no C compiler for the fake steamclient.so"; else
 privhome "$T/h3"
 mkdir -p "$T/ws3/431960" "$T/steamlib"
 : > "$T/xdg-open.urls"
-printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"subscribe","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"WorkshopViaSteamClient":true}\n' \
+printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 (cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1) & BP3=$!

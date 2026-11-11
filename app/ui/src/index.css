@@ -509,6 +509,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   transition: background .15s, box-shadow .15s; }
 .srow:first-of-type { border-top: 0; }
 .srow:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+/* a checkbox / radio row is one big target (Settings Row → <label>): the pointer says so; a disabled one doesn't */
+.srow.toggle { cursor: pointer; user-select: none; }
+.srow.toggle.disabled { cursor: default; }
 /* LIFE: an accent bar that grows from the left on row hover (tactile) */
 .srow::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px;
   background: var(--accent); box-shadow: 0 0 8px -1px var(--accent);
@@ -526,9 +529,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .s-reset:hover { color: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
 .sctl { display: flex; align-items: center; gap: 8px; }
 .settings input[type=range] { width: 200px; accent-color: var(--accent); transition: filter .2s; }
-.settings input[type=checkbox], .settings input[type=radio] { width: 17px; height: 17px; accent-color: var(--accent); transition: filter .2s; }
-/* COOL: glow native toggles/sliders on hover (drop-shadow works on the accent-colored control) */
-.settings input[type=range]:hover, .settings input[type=checkbox]:hover, .settings input[type=radio]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
+/* checkboxes + radios: the themed `.ck` look below (owner 2026-11-11: "i wonder if a white checkbox matches the rest of the
+   app or we just overlooked this part of the ui" — overlooked: Settings kept the browser's controls, white when off) */
+/* COOL: glow the native slider on hover (drop-shadow works on the accent-colored control) */
+.settings input[type=range]:hover { filter: drop-shadow(0 0 4px var(--accent)); }
 /* no system focus ring on a slider (a key pressed while one is held flipped it to keyboard focus → a yellow
    outline); keyboard focus shows the same accent glow as hover instead — never while it's held (hooks/rangeDrag.ts) */
 input[type=range]:focus-visible { outline: none; }
@@ -660,16 +664,31 @@ input[type=range]:focus-visible { outline: none; }
 .segbtn:hover:not(.on) { border-color: var(--accent); color: var(--text); box-shadow: var(--glow-sm); }
 .segbtn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); box-shadow: var(--glow-sm); }
 .ck { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); margin: 8px 0; }
-/* custom checkbox — rounded accent box with a cut-in tick + glow on hover/checked */
-.ck input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; flex: 0 0 auto;
-  border-radius: 6px; border: 1.5px solid var(--surface2); background: color-mix(in srgb, var(--surface0) 75%, transparent);
+/* custom checkbox + radio — a dark rounded box / circle, accent-filled with a tick / an accent dot when on, glow on hover/on.
+   EVERY checkbox and radio the app draws (`.ck` labels, Settings, the item sidebar — its whitelist box, scene properties):
+   one look, never the browser's white control. */
+:is(.ck, .settings, .side-panel) :is(input[type=checkbox], input[type=radio]) { appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; flex: 0 0 auto; margin: 0;
+  border: 1.5px solid var(--surface2); background: color-mix(in srgb, var(--surface0) 75%, transparent);
   display: inline-grid; place-content: center; cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s; }
-.ck input[type=checkbox]::after { content: ""; width: 5px; height: 9px; border: solid var(--accent-fg);
-  border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-0.5px, -1px); opacity: 0; transition: opacity .12s; }
-.ck input[type=checkbox]:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
-.ck input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); box-shadow: var(--glow-sm); }
-.ck input[type=checkbox]:checked::after { opacity: 1; }
-.ck input[type=checkbox]:disabled { opacity: .5; cursor: default; box-shadow: none; }
+:is(.ck, .settings, .side-panel) input[type=checkbox] { border-radius: 6px; }
+:is(.ck, .settings, .side-panel) input[type=radio] { border-radius: 50%; }
+/* the tick = a stroked path in a 12×12 mask, centred by its geometry (x 2–10, y 3.2–8.8 → both centres at 6) — owner
+   2026-11-11 "is it just me or the tick is off-center": it was a rotated border-L nudged by hand. Guard: look:toggles (pixels). */
+:is(.ck, .settings, .side-panel) input[type=checkbox]::after { content: ""; width: 12px; height: 12px; background: var(--accent-fg);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l2.8 2.8L10 3.2' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l2.8 2.8L10 3.2' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  opacity: 0; transition: opacity .12s; }
+:is(.ck, .settings, .side-panel) input[type=radio]::after { content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); transform: scale(.4); opacity: 0; transition: opacity .12s, transform .18s cubic-bezier(.3,1.5,.5,1); }
+:is(.ck, .settings, .side-panel) :is(input[type=checkbox], input[type=radio]):hover:not(:disabled) { border-color: var(--accent); box-shadow: var(--glow-sm); }
+:is(.ck, .settings, .side-panel) input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); box-shadow: var(--glow-sm); }
+:is(.ck, .settings, .side-panel) input[type=checkbox]:checked::after { opacity: 1; }
+:is(.ck, .settings, .side-panel) input[type=radio]:checked { border-color: var(--accent); box-shadow: var(--glow-sm); }
+:is(.ck, .settings, .side-panel) input[type=radio]:checked::after { opacity: 1; transform: none; }
+:is(.ck, .settings, .side-panel) :is(input[type=checkbox], input[type=radio]):disabled { opacity: .5; cursor: default; box-shadow: none; }
+:root.no-motion :is(.ck, .settings, .side-panel) :is(input[type=checkbox], input[type=radio]),
+:root.no-motion :is(.ck, .settings, .side-panel) :is(input[type=checkbox], input[type=radio])::after { transition: none; }
 .ovr { display: flex; flex-direction: column; gap: 2px; }
 .ovr.dim { opacity: .45; }
 .pl-modal .hms input[type=number] { accent-color: var(--accent); }
@@ -1022,7 +1041,6 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   transition: transform .15s cubic-bezier(.2, 1.4, .4, 1), box-shadow .2s; }
 .side-panel input[type=range]:hover::-webkit-slider-thumb, .side-panel input[type=range]:active::-webkit-slider-thumb {
   transform: scale(1.18); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent), 0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 16px var(--accent); }
-.side-panel input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 
 /* the stagger (open) and the quicker re-stagger (an item switch) — transform + opacity, backwards fill only: nothing is left
    transformed once it landed. The body's children start when its `.wait` (no pop-in) lifts. */

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderOpen, X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
@@ -83,8 +83,15 @@ function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onRe
     : (rk !== undefined && cur !== undefined && JSON.stringify(cur) !== JSON.stringify(d));
   const reset = onReset ?? (() => { if (rk !== undefined) set(rk, d); });
   const tag = own === "advanced" || own === "expert";
+  // a row whose ONLY control is a checkbox / radio is a <label>: a click anywhere on it (the name, the hint, the space
+  // between) ticks it (owner 2026-11-11: "do you think clicking on name or the entire box of a specific setting should
+  // tick/untick it?" — yes, like the filter column's names). The reset button inside still only resets (a click on
+  // interactive content never activates a label). Rows with sliders, fields, selects or buttons stay plain.
+  const toggle = isValidElement<{ type?: string }>(children) && children.type === "input" && (children.props.type === "checkbox" || children.props.type === "radio");
+  const Tag = toggle ? "label" : "div";
   return (
-    <div className={`srow${disabled ? " disabled" : ""}`} data-level={own} data-expert={own === "expert" ? "" : undefined}>
+    <Tag className={`srow${disabled ? " disabled" : ""}${toggle ? " toggle" : ""}`} data-level={own} data-expert={own === "expert" ? "" : undefined}
+      data-row-toggle={toggle ? "" : undefined}>
       <div className="slabel">
         <span className="slabel-row">{label}
           {tag && <span className="s-expert" data-expert-tag>{LEVEL_LABEL[own]}</span>}
@@ -94,7 +101,7 @@ function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onRe
         {hint && <span className="shint">{hint}</span>}
       </div>
       <div className="sctl">{children}</div>
-    </div>
+    </Tag>
   );
 }
 // a whole section can sit at a level too (`lv`); a section's rows still filter themselves
@@ -450,16 +457,20 @@ export const Settings = memo(function Settings() {
       )}
 
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
-        <Row label="Subscribe via Steam" hint="stays in sync and updates itself">
-          <input type="radio" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
+        {/* four ways, one radio group (owner 2026-11-11 "why is this a checkbox" — the Steam app route had been a switch inside
+            Subscribe via Steam; then "should have 4 options not 3, the 4th being the one which opens the wallpaper in your app" —
+            opening the page had only been Subscribe's silent fallback) */}
+        <Row label="Use the Steam app" hint="one click, real progress — Steam shows you as playing Wallpaper Engine for those seconds" wk="workshopDownloadMode">
+          <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
+        <Row label="Open in the Steam app" hint="the wallpaper's page opens in Steam — click Subscribe there and it downloads">
+          <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
+        <Row label="Subscribe with your Steam sign-in" hint="subscribes from here — sign in once with QR or a password">
+          <input type="radio" data-wsmode="subscribe" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
         <Row label="Download via steamcmd" hint="a one-off copy, no syncing" wk="workshopDownloadMode">
-          <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
-        {mode === "subscribe" && (
-          /* owner 2026-11-11 ("drive steam" → "yeah, try it"): the running Steam client subscribes + downloads, its own byte
-             progress on the card; Steam not running / Wallpaper Engine not owned → the rows below (sign-in or the Steam app's page) */
-          <Row label="Use the Steam app directly" rk="workshopViaSteamClient"
-            hint="one click, real progress, no sign-in here — Steam shows you as playing Wallpaper Engine for those seconds">
-            <input type="checkbox" checked={g("workshopViaSteamClient", false)} onChange={(e) => set("workshopViaSteamClient", e.target.checked)} /></Row>
+          <input type="radio" data-wsmode="steamcmd" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
+        {mode === "steamapp" && (
+          <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated —
+            nothing to sign in to here. If Steam can't be reached, the item's page opens in Steam instead.</Help>
         )}
         {mode === "subscribe"
           /* Signing in is optional (owner 2026-11-11: "is it a dead end for users without mobile guard?"): without a usable
@@ -474,13 +485,13 @@ export const Settings = memo(function Settings() {
                       /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) —
                          it used to keep saying "Signed in as …" while every download failed (owner 2026-11-11) */
                       ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again. Until then, downloads open in the Steam app.</span>
-                      : <span className="shint">Not signed in — downloads open in the Steam app, where you click Subscribe.</span>}
+                      : <span className="shint">Not signed in — until you are, downloads open in the Steam app, where you click Subscribe.</span>}
                     <span className="steam-row-btns">
                       <button className="btn accent" onClick={startQr} data-steam-signin="qr">Sign in with QR</button>
                       <button className="btn ghost" onClick={openPwLogin} data-steam-signin="password">Sign in with password</button>
                     </span></div>}
             </Row>
-          : <>
+          : mode === "steamcmd" && <>
               <Help>Downloads a one-off copy with steamcmd — no subscription. Needs steamcmd and a one-time sign-in.</Help>
               <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath">
                 <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />

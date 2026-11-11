@@ -61,4 +61,19 @@ ac.abort(); await pc; await sleep(1500);
 const pid3 = childPid();
 out(!alive(pid3) && released().length >= r0 + 2 && !(await lib()).some((i) => i.workshopId === "710000003"),
   "cancelled mid-download: the child released Steam + exited, nothing imported", `pid ${pid3} alive ${alive(pid3)}, released +${released().length - r0}`);
+// d. "Open in the Steam app" (steampage): the page opens even though the Steam client would answer — no helper started
+const settings = await (await fetch(U + "/settings")).json();
+await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settings, workshopDownloadMode: "steampage" }) });
+const pidBefore = childPid();
+n0 = urls().length;
+const pd = download("710000004");
+u = null;
+for (let i = 0; i < 100 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes("710000004")) ?? null; }
+out(u === "steam://url/CommunityFilePage/710000004" && childPid() === pidBefore, "Open in the Steam app: the page opens, the Steam-client helper isn't used", `${u ?? "nothing opened"}, helper pid ${childPid() === pidBefore ? "unchanged" : "NEW"}`);
+const st4 = (ev[pageUrl("710000004")] ?? []).map((e) => e.status).filter(Boolean);
+out(st4.includes("Click Subscribe in Steam, then it downloads by itself…"), "…its status says to click Subscribe", st4.join(" | "));
+const d4 = `${T}/ws3/431960/710000004`; fs.mkdirSync(d4, { recursive: true });
+fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000004" }));
+r = await Promise.race([pd, sleep(20000).then(() => null)]);
+out(r?.status === 200, "…and finishes once Steam has it", r ? String(r.status) : "timed out");
 ws.close();

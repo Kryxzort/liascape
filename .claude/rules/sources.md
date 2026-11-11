@@ -113,8 +113,9 @@ Workshop wallpapers"):
     signed this app out — …", "Steam turned down the subscribe request — …"). Log `workshop: <id>: <why> — opened its page in
     the Steam app, waiting for the download`. An item already on disk with no usable sign-in opens nothing (imported at once).
     A rate limit (`SteamRateLimitException`) does NOT fall back — the app's page is steamcommunity.com from the same connection.
-  - **Through the Steam client (opt-in, `WorkshopViaSteamClient`, Settings "Use the Steam app directly"; owner 2026-11-11: "drive
-    steam" → "yeah, try it")** — tried FIRST when on: `Helpers/SteamClientUgc.cs` runs a short-lived child
+  - **Through the Steam client (`WorkshopDownloadMode` `"steamapp"`, Settings "Use the Steam app" — the first of three radios,
+    opt-in; owner 2026-11-11: "drive steam" → "yeah, try it", then "why is this a checkbox")** — tried FIRST in that mode, then
+    the `"subscribe"` paths below: `Helpers/SteamClientUgc.cs` runs a short-lived child
     (`liascape-backend steam-ugc subscribe <id> <steamclient.so>…`, `SteamAppId=431960` in its environment only) that loads the
     Steam client's OWN `steamclient.so` (`~/.steam/sdk64/`, the Steam dir, Flatpak; `SteamClientLibPath` overrides) — never
     Valve's `libsteam_api.so` (an adapter over it, not ours to ship, and only SteamVR / Proton 9 carry a copy: owner "what if
@@ -128,10 +129,13 @@ Workshop wallpapers"):
     <why>` and the paths below run as before. Cancel closes the child's stdin → it releases its user + pipe and exits (3 s,
     then killed). Measured live (Python prototype through `steamclient.so` + libsteam_api): subscribe 0.5 s, bytes 0.8 → 1.1 →
     2.1 MB, installed 4.5 s. Guard: `test-steam-signin.sh` § 3 (a fake `steamclient.so`, `scripts/test-fixtures/`).
-  - **Decision: automatic, no third mode.** "Subscribe via Steam" is the one mode; signing in only makes it one click. A
-    third radio ("Subscribe in the Steam app") would split one behaviour in two and leave the user to work out which applies —
-    instead the Settings Steam row says what happens now ("Not signed in — downloads open in the Steam app, where you click
-    Subscribe"), WE-shaped (WE's own Workshop opens in Steam too).
+  - **Four modes, the user's choice** (owner 2026-11-11: "getting workshop wallpapers should have 4 options not 3, the 4th being
+    the one which opens the wallpaper in your app" — it overturned the earlier "automatic, no third mode" call, under which
+    opening the page was only the sign-in's silent fallback): `steamapp` (the Steam client, below), **`steampage`** (always
+    the item's page in the Steam app — never the sign-in, even when there is one; status "Click Subscribe in Steam, then it
+    downloads by itself…"; Delete from source unsubscribes in the Steam app too), `subscribe` (the sign-in; without one it
+    still falls back to the page, so a download is never a dead end) and `steamcmd`. Settings shows the sign-in row under
+    `subscribe` only.
   - Either way it then polls every Workshop root (the WE folder, `~/.cache/liascape/steamcmd_workshop/…`, standard + Flatpak
     Steam, every `libraryfolders.vdf` library) every 3 s (`LIASCAPE_WORKSHOP_POLL_MS` shortens it for the test) until the
     media file exists, is non-empty and has the same size on two polls — tracked PER PATH (owner 2026-11-11: Steam's `~/.local/share/Steam/…/content/431960` a symlink to another library's folder → two paths to one folder; one shared "last size" slot alternated between them and the download said "Downloading…" for the full 10 min; guard: `test-steam-signin.sh` "Workshop folder reached through a symlink"); while it waits it reports the phase as the `download-progress` status — "Steam is downloading it…" once Steam's staging folder `<workshop>/downloads/431960/<id>` exists (each content root's `../../downloads`; Steam moves it to `content/` at the end), "Steam is finishing…" once the files are in but not yet steady — phases only, no percent (Steam may reserve a staged file's full size before writing it; owner 2026-11-11: a 458 MB item showed "Downloading…" over an empty bar for a minute); 10 min timeout (its message says to click Subscribe

@@ -53,9 +53,9 @@ public static class WorkshopDownloader
         IProgress<(double, string)>? progress,
         CancellationToken ct)
     {
-        // Opted in: the running Steam client does it (one click, its own progress, no sign-in here); any reason it can't →
-        // the paths below, as before
-        if (settings.WorkshopViaSteamClient)
+        // "Use the Steam app": the running Steam client does it (one click, its own progress, no sign-in here); any reason it
+        // can't → the paths below, as before
+        if (settings.WorkshopDownloadMode == "steamapp")
         {
             var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
             if (viaClient.Folder != null)
@@ -70,7 +70,11 @@ public static class WorkshopDownloader
 
         string? why = null; // set = no usable sign-in: subscribe in the Steam app, and this is why
         string? cookie = null;
-        try
+        // "Open in the Steam app" (owner 2026-11-11: "getting workshop wallpapers should have 4 options not 3, the 4th being the
+        // one which opens the wallpaper in your app"): always the item's page in Steam — never the sign-in, even when there is one
+        bool pageMode = settings.WorkshopDownloadMode == "steampage";
+        if (pageMode) why = "Set to open items in the Steam app";
+        else try
         {
             cookie = await SteamAuthService.GetCookieAsync(settings, ct);
             if (string.IsNullOrWhiteSpace(cookie)) why = "Not signed in to Steam here";
@@ -104,7 +108,8 @@ public static class WorkshopDownloader
         {
             if (!OpenInSteamApp($"steam://url/CommunityFilePage/{workshopId}"))
                 throw new InvalidOperationException($"{why}, and the Steam app couldn't be opened (xdg-open steam://…). Sign in under Settings → Getting Workshop wallpapers, or open the item on Steam and subscribe there.");
-            waitingFor = $"{why} — click Subscribe in Steam, then it downloads by itself…";
+            waitingFor = pageMode ? "Click Subscribe in Steam, then it downloads by itself…"
+                                  : $"{why} — click Subscribe in Steam, then it downloads by itself…";
             Console.WriteLine($"workshop: {workshopId}: {why} — opened its page in the Steam app, waiting for the download");
         }
         progress?.Report((-1, waitingFor));
@@ -314,6 +319,7 @@ public static class WorkshopDownloader
     {
         var pending = WorkshopUnsubQueue.SnapshotPending();
         if (pending.Count == 0) return new DrainResult();
+        if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
         if (!SteamAuthService.HasUsableSignIn(settings)) return UnsubscribeInSteamApp(settings, pending, Why(settings));
         int total = pending.Count, done = 0;
         for (int i = 0; i < pending.Count; i++)

@@ -10,7 +10,11 @@
 //   steam:row:rejected    a sign-in Steam turned down: the warning (in the warn colour), both sign-in buttons, no Sign out
 //   steam:row:signedIn    "Signed in as …" + Sign out, no sign-in buttons
 //   steam:row:steamcmd    "Download via steamcmd" → no Steam row (the steamcmd rows instead)
-//   steam:row:viaClient   "Use the Steam app directly": under Subscribe via Steam, off by default, a click saves it; not under steamcmd
+//   look:toggles          every Settings checkbox / radio is the themed control: dark when off, accent when on, the tick centred
+//                         (pixels); a click anywhere on a checkbox / radio row ticks it, a slider row's name doesn't
+//                         (shots steam-toggles.png, steam-tick.png)
+//   steam:row:steamApp    the four download-mode radios (steamapp, steampage, subscribe, steamcmd): a click saves each, the
+//                         Steam app's note, the sign-in row only under subscribe
 //   steam:modal:email     the password button → the modal (a labelled dialog: account name autocomplete=username focused,
 //                         password type=password autocomplete=current-password); real typing + Enter → POST /steam/login once
 //                         with both, the field emptied at once, "Signing in…"; WS email step → its text + the hint, the code field
@@ -211,20 +215,111 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // owner 2026-11-11 ("drive steam" → "yeah, try it"): "Use the Steam app directly" — a Basic row under Subscribe via Steam,
-    // off by default, saved by a click; hidden under steamcmd
-    await cell("steam:row:viaClient", async () => {
-      const v = []; await setSettings({ workshopDownloadMode: "subscribe", workshopViaSteamClient: false }); await load(SIGNED_OUT); await tab("Settings");
-      const box = `[...document.querySelectorAll(".srow, [data-level]")].find((r) => /Use the Steam app directly/.test(r.textContent))?.querySelector('input[type="checkbox"]')`;
-      const r0 = await page(`const b = ${box}; return b ? { checked: b.checked } : null;`);
-      if (!r0) return ["no \"Use the Steam app directly\" row under Subscribe via Steam"];
-      if (r0.checked) v.push("on by default (it's opt-in)");
-      await page(`${box}.click();`); await sleep(900); // the store's debounced settings save
-      const saved = (await http("GET", "/settings")).json?.workshopViaSteamClient;
-      if (saved !== true) v.push(`a click saved workshopViaSteamClient = ${saved}`);
-      await setSettings({ workshopDownloadMode: "steamcmd" }); await load(SIGNED_OUT); await tab("Settings");
-      if (await page(`return !!(${box});`)) v.push("the row shows under steamcmd");
-      await setSettings({ workshopDownloadMode: "subscribe", workshopViaSteamClient: false });
+    // owner 2026-11-11 ("drive steam" → "yeah, try it", then "why is this a checkbox"): "Use the Steam app" is the FIRST of the
+    // three download-mode radios; picking it saves workshopDownloadMode "steamapp", shows its note and hides the Steam
+    // sign-in row (only Subscribe via Steam uses it)
+    await cell("steam:row:steamApp", async () => {
+      const v = []; await setSettings({ workshopDownloadMode: "subscribe" }); await load(SIGNED_OUT); await tab("Settings");
+      const radios = await page(`return [...document.querySelectorAll("[data-wsmode]")].map((r) => ({ m: r.dataset.wsmode, type: r.type, name: r.closest(".srow")?.textContent.slice(0, 40) }));`);
+      console.log(`        ${J(radios)}`);
+      if (radios.map((r) => r.m).join() !== "steamapp,steampage,subscribe,steamcmd" || radios.some((r) => r.type !== "radio"))
+        v.push(`the modes: ${J(radios)} (expected four radios steamapp, steampage, subscribe, steamcmd)`);
+      await page(`document.querySelector('[data-wsmode="steamapp"]').click();`); await sleep(900); // the debounced save
+      const saved = (await http("GET", "/settings")).json?.workshopDownloadMode;
+      if (saved !== "steamapp") v.push(`a click saved workshopDownloadMode = ${saved}`);
+      const after = await page(`return { checked: document.querySelector('[data-wsmode="steamapp"]').checked,
+        note: /Needs Steam running/.test(document.querySelector(".settings")?.textContent ?? ""), steamRow: !!document.querySelector("[data-steam-state]") };`);
+      if (!after.checked) v.push("the radio isn't checked after the click");
+      if (!after.note) v.push("no note under Use the Steam app");
+      if (after.steamRow) v.push("the Steam sign-in row shows under Use the Steam app");
+      // "Open in the Steam app": saved, no sign-in row either
+      await page(`document.querySelector('[data-wsmode="steampage"]').click();`); await sleep(900);
+      const saved2 = (await http("GET", "/settings")).json?.workshopDownloadMode;
+      if (saved2 !== "steampage") v.push(`the Open in the Steam app click saved ${saved2}`);
+      if (await page(`return !!document.querySelector("[data-steam-state]");`)) v.push("the Steam sign-in row shows under Open in the Steam app");
+      await setSettings({ workshopDownloadMode: "subscribe" });
+      return v;
+    });
+
+    // owner 2026-11-11 ("i wonder if a white checkbox matches the rest of the app or we just overlooked this part of the ui"):
+    // every Settings checkbox + radio is the app's themed control — dark when off (never the browser's white), the accent when on
+    await cell("look:toggles", async () => {
+      const v = []; await setSettings({ workshopDownloadMode: "subscribe" }); await load(SIGNED_OUT); await tab("Settings");
+      const r = await page(`const lum = (c) => { const m = c.match(/[\\d.]+/g).map(Number); const k = c.startsWith("color(") ? 1 : 255; /* color(srgb …) is 0–1, rgb() 0–255 */ return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / k; };
+        const all = [...document.querySelectorAll('.settings input[type=checkbox], .settings input[type=radio]')];
+        const info = (e) => { const cs = getComputedStyle(e); return { type: e.type, checked: e.checked, appearance: cs.appearance, bg: cs.backgroundColor, lum: +lum(cs.backgroundColor).toFixed(2), border: cs.borderColor }; };
+        const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+        return { n: all.length, accent, off: all.filter((e) => !e.checked).slice(0, 40).map(info), onBox: all.filter((e) => e.checked && e.type === "checkbox").slice(0, 3).map(info),
+          onRadio: all.filter((e) => e.checked && e.type === "radio").slice(0, 3).map(info) };`);
+      console.log(`        ${r.n} controls; off e.g. ${J(r.off[0])}; on box ${J(r.onBox[0])}; on radio ${J(r.onRadio[0])}`);
+      if (r.n < 10) v.push(`only ${r.n} checkboxes / radios in Settings`);
+      const native = [...r.off, ...r.onBox, ...r.onRadio].filter((c) => c.appearance !== "none");
+      if (native.length) v.push(`${native.length} still the browser's own control (appearance ${native[0].appearance})`);
+      const white = r.off.filter((c) => c.lum > 0.5);
+      if (white.length) v.push(`${white.length} unchecked controls are light (e.g. ${white[0].bg})`);
+      if (r.onBox[0] && r.onBox[0].lum < 0.05) v.push(`a ticked checkbox isn't filled (${r.onBox[0].bg})`);
+      // the tick's own pixels, centred in its box (owner: "is it just me or the tick is off-center") — a ticked box, captured
+      // at the device scale, the tick = pixels much darker than the accent fill around it
+      const box = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked);
+        if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+      if (!box) v.push("no ticked checkbox in Settings to measure");
+      else {
+        await sleep(300);
+        const b2 = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        const img = await win.webContents.capturePage({ x: Math.floor(b2.x), y: Math.floor(b2.y), width: Math.ceil(b2.w) + 1, height: Math.ceil(b2.h) + 1 });
+        const { width: W, height: H } = img.getSize(), px = img.toBitmap(); // BGRA
+        const sc = W / (Math.ceil(b2.w) + 1);
+        // the fill = the most common colour inside; tick pixels = far from it (≥ 120 in summed channel distance)
+        const at = (x, y) => { const i = (y * W + x) * 4; return [px[i], px[i + 1], px[i + 2]]; };
+        const inset = Math.round(3 * sc), fill = at(Math.round(W / 2), inset);
+        // the tick's BOUNDING box (what the eye holds against the box's edges — its centre of mass sits ~½ px low by shape:
+        // the long arm outweighs the short one)
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, sw = 0;
+        for (let y = inset; y < H - inset; y++) for (let x = inset; x < W - inset; x++) {
+          const c = at(x, y), d = Math.abs(c[0] - fill[0]) + Math.abs(c[1] - fill[1]) + Math.abs(c[2] - fill[2]);
+          if (d >= 200) { sw++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        }
+        // box centre in captured pixels: the element starts at (b2.x − floor(b2.x)) inside the capture
+        const cx = ((b2.x - Math.floor(b2.x)) + b2.w / 2) * sc, cy = ((b2.y - Math.floor(b2.y)) + b2.h / 2) * sc;
+        const tx = sw ? (x0 + x1 + 1) / 2 : NaN, ty = sw ? (y0 + y1 + 1) / 2 : NaN;
+        const dx = (tx - cx) / sc, dy = (ty - cy) / sc;
+        console.log(`        tick's bounding box off the box centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px (${Math.round(sw)} tick px, scale ${sc.toFixed(2)})`);
+        fs.writeFileSync(path.join(OUT, "steam-tick.png"), img.resize({ width: W * 8, quality: "good" }).toPNG());
+        if (!sw) v.push("no tick pixels found in a ticked box");
+        // ±0.5 css px: at most half a pixel of rounding
+        else if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) v.push(`the tick is off-centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px`);
+      }
+      // owner 2026-11-11 ("clicking on name or the entire box of a specific setting should tick/untick it?"): a real click on a
+      // radio row's HINT text picks it, on a checkbox row's NAME flips it (twice: back); a slider row's name changes nothing
+      const rowPt = (sel, part) => page(`const row = ${sel}; if (!row) return null; row.scrollIntoView({ block: "center" });
+        const t = row.querySelector(${J(part)}); const r = t.getBoundingClientRect(); return { x: r.x + Math.min(20, r.width / 2), y: r.y + r.height / 2 };`);
+      const click = async (p) => { win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 });
+        win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 }); await sleep(900); };
+      const pageRow = `document.querySelector('[data-wsmode="steampage"]')?.closest(".srow")`;
+      let pt = await rowPt(pageRow, ".shint"); await sleep(300); pt = await rowPt(pageRow, ".shint");
+      if (!pt) v.push("no Open in the Steam app row");
+      else { await click(pt); const m = (await http("GET", "/settings")).json?.workshopDownloadMode;
+        if (m !== "steampage") v.push(`a click on the radio row's hint saved ${m} (expected steampage)`); }
+      const ckRow = `[...document.querySelectorAll(".srow[data-row-toggle]")].find((r) => r.querySelector('input[type=checkbox]:not(:disabled)'))`;
+      const before = await page(`return ${ckRow}?.querySelector("input").checked ?? null;`);
+      pt = await rowPt(ckRow, ".slabel-row"); await sleep(300); pt = await rowPt(ckRow, ".slabel-row");
+      if (before === null || !pt) v.push("no checkbox row to click");
+      else {
+        await click(pt); const mid = await page(`return ${ckRow}.querySelector("input").checked;`);
+        await click(pt); const end = await page(`return ${ckRow}.querySelector("input").checked;`);
+        if (mid === before || end !== before) v.push(`a click on a checkbox row's name: ${before} → ${mid} → ${end} (expected a flip and back)`);
+      }
+      const rangeRow = `[...document.querySelectorAll(".srow")].find((r) => r.querySelector("input[type=range]"))`;
+      const rv0 = await page(`return ${rangeRow}?.querySelector("input[type=range]").value ?? null;`);
+      const rowIsLabel = await page(`return ${rangeRow}?.tagName ?? null;`);
+      pt = await rowPt(rangeRow, ".slabel-row");
+      if (pt) { await click(pt); const rv1 = await page(`return ${rangeRow}.querySelector("input[type=range]").value;`);
+        if (rv1 !== rv0 || rowIsLabel === "LABEL") v.push(`a slider row reacted to a click on its name (${rv0} → ${rv1}, ${rowIsLabel})`); }
+      const nToggle = await page(`return document.querySelectorAll(".srow[data-row-toggle]").length;`);
+      console.log(`        ${nToggle} rows click anywhere to tick`);
+      await setSettings({ workshopDownloadMode: "subscribe" });
+      await page(`[...document.querySelectorAll(".ssection")].find((x) => /Getting Workshop wallpapers/i.test(x.textContent))?.scrollIntoView({ block: "center" });`);
+      await sleep(400); await shot("toggles");
       return v;
     });
 

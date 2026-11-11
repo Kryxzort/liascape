@@ -164,12 +164,12 @@ public class AppSettings
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     public bool AutoAddWeWallpapersToLibrary { get; set; } = false;
     public bool IsPlaylistBarCollapsed { get; set; } = false;
-    // "subscribe" (real Steam subscription via community endpoint) or "steamcmd" (direct download).
+    // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs; owner 2026-11-11:
+    // one click, Steam's own progress; it falls back to "subscribe"'s paths when Steam can't be reached), "subscribe" (real
+    // Steam subscription via the community endpoint with the sign-in, or the item's page in the Steam app without one),
+    // "steampage" (always the item's page in the Steam app — the user clicks Subscribe there) or "steamcmd" (direct download).
     public string WorkshopDownloadMode { get; set; } = "subscribe";
-    // Subscribe through the RUNNING Steam client as Wallpaper Engine (Helpers/SteamClientUgc.cs): one click, Steam's own
-    // progress, no sign-in here. Opt-in (owner 2026-11-11) — the app presents itself as WE for the download's seconds.
-    public bool WorkshopViaSteamClient { get; set; } = false;
-    // The Steam client's steamclient.so to use for it; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
+    // The Steam client's steamclient.so for "steamapp"; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
     public string SteamClientLibPath { get; set; } = "";
     // QR sign-in: refresh token (~1yr) + steamid; access token (~24h) cached + auto-minted.
     public string SteamRefreshToken { get; set; } = "";
