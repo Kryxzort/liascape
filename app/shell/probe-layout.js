@@ -249,6 +249,21 @@ app.whenReady().then(async () => {
       if (raf > 12) v.push(`a requestAnimationFrame loop keeps running while idle (${raf} callbacks in 3 s)`);
       return v;
     });
+    // An app, not a page: Ctrl+A (or a drag) highlights none of the chrome; what you type and the text worth copying stays
+    // selectable. Reads what the user would see: the live selection's text after selectAll, and computed user-select.
+    await cell("select:chrome", async () => {
+      const v = [];
+      await tab("Browse"); await sleep(400);
+      const r = await js(`(() => { document.getSelection().removeAllRanges(); document.execCommand("selectAll");
+        const sel = document.getSelection().toString().trim(); document.getSelection().removeAllRanges();
+        const us = (q) => { const e = document.querySelector(q); return e ? getComputedStyle(e).userSelect : null; };
+        return { sel: sel.slice(0, 80), tab: us("button.tab"), pill: us(".pill"), search: us("input.search, .search input, input[type=search]") }; })()`);
+      console.log(`        ${JSON.stringify(r)}`);
+      if (r.sel) v.push(`Ctrl+A highlights app chrome: "${r.sel}"`);
+      if (r.tab !== "none" || r.pill !== "none") v.push(`tabs / pills selectable (tab ${r.tab}, pill ${r.pill})`);
+      if (r.search && r.search === "none") v.push("the search field's text can't be selected");
+      return v;
+    });
     await reducedMotion(false); await setMotion(true);
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });

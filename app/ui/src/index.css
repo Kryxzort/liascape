@@ -26,6 +26,10 @@
 :root:not(.kbd-nav) :focus-visible { outline: none !important; }
 :root.kbd-nav :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html, body, #root { margin: 0; height: 100%; }
+/* An app, not a page: a drag or Ctrl+A never highlights the chrome (tabs, pills, buttons, labels). Text worth copying opts
+   back in: what you type, the sidebar's title / author / values, error messages. Guard: probe-layout select:chrome. */
+body { user-select: none; -webkit-user-select: none; }
+:is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
 body {
   /* Inter 14. */
   background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%);
