@@ -24,7 +24,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        240 px filter column mostly just drops a column. Take the card size from the grid as if no panel were open; with a
        panel open pick the column count whose card width is closest to it (≈ ±4 %, no edge gap). Same for both panels.
        Probe: card width with / without each panel within 5 %, at 1920 and 1100 px.
-5. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
+5. [ ] **Box (marquee) selection in Library and Browse**: a drag that starts on empty grid space draws a rectangle and
+       selects the cards it touches — the SAME selection Ctrl/Shift-click build, so every bulk action applies unchanged.
+       Plain drag replaces, Ctrl+drag adds, Escape cancels (restores the previous selection); cards light up live (the
+       existing selected look); auto-scroll near the top / bottom edge; a drag under ~4 px is a click (clears as today);
+       a drag starting on a card keeps today's card drag. Look: accent-tinted translucent fill + thin accent border, glow
+       under the glow toggle, no fade under motion off. Probe cells: box-select → a bulk action, Ctrl+drag, Escape,
+       auto-scroll.
+6. [ ] UI matrix `playlistMark:shufflePlay:resume` fails at random (1–2 runs in 4): under "Resume" every Play can land on
        k1, so its own "proved nothing" guard fires. Make the first pick deterministic (seed the program's shuffle, or start
        the session on k3 before the rounds) so it always proves something.
 
