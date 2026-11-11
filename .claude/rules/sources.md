@@ -122,7 +122,7 @@ Workshop wallpapers"):
     other users dont got steamvr?") — and calls ISteamClient `SteamClient020` / ISteamUGC `STEAMUGC_INTERFACE_VERSION018` by
     vtable slot (read from Valve's own wrappers with objdump, the slots in the file's header). SubscribeItem, then
     GetItemState / GetItemDownloadInfo (Steam's bytes → a real percent on the card, "Steam is downloading it…") until
-    installed; GetItemInstallInfo = the folder Steam chose (imported from there — no folder polling). Needs Steam running +
+    installed; GetItemInstallInfo = the folder Steam chose (imported from there — no folder polling; `DownloadHelper` compares it with the WE folder setting as REAL paths — `RealPath` — so a setting that reaches Steam's folder through a symlink still LINKS the item into `local/` instead of copying it to `workshop/`: owner 2026-11-11, a 369 MB duplicate). Needs Steam running +
     signed in to an account that OWNS Wallpaper Engine (installed: probably — Steam puts Workshop items in the game's library;
     unverified); Steam shows "Playing Wallpaper Engine" while the child is connected. Steam refusing (not running / not owned
     → `ConnectToGlobalUser` 0), no `steamclient.so` → logged `workshop: <id>: not through the Steam app's Workshop interface —

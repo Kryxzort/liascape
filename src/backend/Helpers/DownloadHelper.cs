@@ -29,8 +29,11 @@ public static class DownloadHelper
             key = detail.WorkshopId!;
             weSteamDir = detail.IsScene ? (Directory.Exists(detail.DownloadUrl) ? detail.DownloadUrl : null)
                                         : Path.GetDirectoryName(detail.DownloadUrl);
+            // compared as REAL paths (owner 2026-11-11: a 369 MB duplicate) — the Steam client reports an item's real folder
+            // (/mnt/Games/…/content/431960/<id>) while the WE folder setting can name it through a symlink
+            // (~/.local/share/Steam/…/content/431960 → /mnt/Games/…): as text "not under it" → an owned COPY instead of the link
             bool underWeDir = weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)
-                && Path.GetFullPath(weSteamDir).StartsWith(Path.GetFullPath(settings.WorkshopFolder), StringComparison.Ordinal);
+                && IsUnder(RealPath(weSteamDir), RealPath(settings.WorkshopFolder));
             source = underWeDir ? LibraryStore.Local : LibraryStore.Workshop;
         }
         else
@@ -213,5 +216,30 @@ public static class DownloadHelper
     {
         var invalid = Path.GetInvalidFileNameChars();
         return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
+    }
+
+    // `child` inside (or equal to) `dir`, by whole path segments (…/4319600 isn't under …/431960)
+    static bool IsUnder(string child, string dir)
+    {
+        dir = Path.TrimEndingDirectorySeparator(dir);
+        return child == dir || child.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    // realpath(3): every symlink along the path resolved (a link's target may itself hold links); a part that doesn't
+    // exist (or can't be read) is kept as it is
+    internal static string RealPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var parts = full.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        string cur = Path.DirectorySeparatorChar.ToString();
+        for (int i = 0, hops = 0; i < parts.Length; i++)
+        {
+            var next = Path.Combine(cur, parts[i]);
+            FileSystemInfo? target = null;
+            try { target = new FileInfo(next).LinkTarget != null ? new FileInfo(next).ResolveLinkTarget(true) : null; } catch { }
+            if (target != null && hops++ < 40) { cur = Path.GetFullPath(target.FullName); continue; }
+            cur = next;
+        }
+        return Path.TrimEndingDirectorySeparator(cur);
     }
 }

@@ -76,4 +76,14 @@ const d4 = `${T}/ws3/431960/710000004`; fs.mkdirSync(d4, { recursive: true });
 fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000004" }));
 r = await Promise.race([pd, sleep(20000).then(() => null)]);
 out(r?.status === 200, "…and finishes once Steam has it", r ? String(r.status) : "timed out");
+// e. owner 2026-11-11 (a 369 MB duplicate): the WE folder setting names Steam's folder THROUGH A SYMLINK, the Steam client
+// reports the real folder → still linked into the library (local/<id>), never copied (workshop/<id>)
+fs.symlinkSync(`${T}/steamlib`, `${T}/wslink`);
+const cur = await (await fetch(U + "/settings")).json();
+await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...cur, workshopDownloadMode: "steamapp", workshopFolder: `${T}/wslink` }) });
+r = await Promise.race([download("710000005"), sleep(20000).then(() => null)]);
+body = r ? await r.json() : null;
+const vp = body?.videoPath ?? "";
+const linked = /\/library\/local\/710000005(\/|$)/.test(vp) && fs.lstatSync(vp.replace(/\/[^/]*$/, "")).isSymbolicLink();
+out(r?.status === 200 && linked, "a Workshop folder setting through a symlink: the item is LINKED (local/), not copied", vp || (r ? String(r.status) : "timed out"));
 ws.close();
