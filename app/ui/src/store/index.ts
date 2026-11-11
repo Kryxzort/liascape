@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
+  steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
 } from "../api/client";
 
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
@@ -83,6 +83,15 @@ interface State {
   steamTodo: SteamTodo | null; setSteamTodo(t: SteamTodo | null): void;
   // the background scene-loudness queue's progress (WS scene-loudness-progress; null = idle)
   sceneLoudness: { done: number; total: number; currentId: string } | null;
+  // the Browse sidebar's subscription toggle: a Subscribe's step per Workshop id (WS subscribe-progress; gone at its end), and
+  // a counter bumped on every event that can change a subscription (the toggle re-reads /workshop/state on it)
+  subProgress: Record<string, { value: number; status: string | null }>;
+  wsStateTick: number; bumpWsState(): void;
+  setSubProgress(id: string, p: { value: number; status: string | null } | null): void;
+  subscribeWorkshop(id: string, title: string): Promise<void>;
+  unsubscribeWorkshop(id: string, title: string): Promise<void>;
+  // "Open on Steam": the item's page in the Steam app; its https page in the browser when that couldn't be opened
+  openOnSteam(workshopId: string): Promise<void>;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
   // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
@@ -206,6 +215,7 @@ export const useStore = create<State>((set, get) => ({
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null,
+  subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
@@ -494,6 +504,41 @@ export const useStore = create<State>((set, get) => ({
   setSceneLoudness(p) { set({ sceneLoudness: p }); },
 
   openExternal(body) { api.open(body).catch(() => {}); },
+  async openOnSteam(workshopId) {
+    let ok = false;
+    try { ok = (await api.openSteamPage(workshopId)).ok; } catch { /* the backend refused / is away: the browser below */ }
+    // the Steam app couldn't be opened: the page in the user's browser (main.js' window-open handler → shell.openExternal)
+    if (!ok) window.open(steamPageUrl(workshopId), "_blank", "noreferrer");
+  },
+
+  bumpWsState() { set({ wsStateTick: get().wsStateTick + 1 }); },
+  setSubProgress(id, p) {
+    const next = { ...get().subProgress };
+    if (p) next[id] = p; else delete next[id];
+    set({ subProgress: next });
+  },
+  async subscribeWorkshop(id, title) {
+    get().setSubProgress(id, { value: 0, status: "Subscribing…" });
+    try {
+      const r = await api.workshopSubscribe(id, title);
+      // the page route: the to-do panel has the step; the status bar says what to click
+      get().setStatus(r.inSteamTodo ? `${title}: click Subscribe in Steam, then Next` : `Subscribed: ${title}`, !r.inSteamTodo);
+      if (r.subscribed) get().setSubProgress(id, null);
+    } catch (e) {
+      get().setSubProgress(id, null);
+      get().setStatus(`Subscribing failed: ${(e as Error).message}`);
+    }
+    get().bumpWsState();
+  },
+  async unsubscribeWorkshop(id, title) {
+    try {
+      const r = await api.workshopUnsubscribe(id, title);
+      // an item in the library went to the trash like Delete from source — the library + the status bar's Undo follow
+      if (r.inLibrary) await get().loadLibrary();
+      get().setStatus(r.inLibrary ? `Unsubscribing ${title} — removed from your library` : `Unsubscribing ${title}`);
+    } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
+    get().bumpWsState();
+  },
 
   // closing re-reads the library (the modal did too: what its edits saved, whatever the optimistic patches missed)
   focusLib(path) { const was = get().libFocus; set({ libFocus: path }); if (was && !path) get().loadLibrary().catch(() => {}); },

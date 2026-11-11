@@ -640,6 +640,24 @@ public static class ServerHost
         });
         app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items) }));
         app.MapPost("/workshop/drain", () => { SteamOps.StartDrain(); return Results.Ok(); });
+        // "Open on Steam" → the item's page in the Steam CLIENT (owner 2026-11-11: "open on steam doesn't open in real steam") — its
+        // own route, never /open (http(s) only): a digits-only id becomes steam://url/CommunityFilePage/<id>, nothing else.
+        // {ok: false} = the Steam app couldn't be opened → the UI opens the https page in the browser instead.
+        app.MapPost("/steam/open-page", (WorkshopIdReq r) =>
+        {
+            if (!WorkshopSubOps.ValidId(r.WorkshopId)) return Results.BadRequest(new { error = "workshopId must be digits" });
+            bool ok = WorkshopDownloader.OpenInSteamApp(SteamTodo.PageUrl(r.WorkshopId!));
+            Console.WriteLine($"workshop: {r.WorkshopId}: Open on Steam — {(ok ? "opened its page in the Steam app" : "the Steam app couldn't be opened")}");
+            return Results.Json(new { ok });
+        });
+        // the Browse sidebar's Subscribe / Unsubscribe toggle (Web/WorkshopSubOps.cs)
+        app.MapPost("/workshop/state", (IdsReq r) => Results.Json(WorkshopSubOps.State(r.Ids ?? [])));
+        app.MapPost("/workshop/subscribe", async (WorkshopIdReq r) =>
+            !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
+                : Results.Json(await WorkshopSubOps.SubscribeAsync(r.WorkshopId!, r.Title)));
+        app.MapPost("/workshop/unsubscribe", (WorkshopIdReq r) =>
+            !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
+                : Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
         // the Steam to-do (Web/SteamTodo.cs; sources.md § Download): the pages the user clicks in the Steam app, one at a time
         app.MapGet("/steam-todo", () => Results.Json(SteamTodo.Payload()));
         app.MapPost("/steam-todo/next", () => { SteamTodo.Next(); return Results.Ok(); });
@@ -905,6 +923,8 @@ public static class ServerHost
     public record ValueReq(int? Delta, int? Value);
     public record MuteReq(bool User, bool Value);
     public record TrashReq(List<LibraryItem> Items);
+    public record WorkshopIdReq(string? WorkshopId, string? Title = null);
+    public record IdsReq(List<string>? Ids);
     // not a record: a record's ToString prints every property — the password must never be printable
     public sealed class LoginReq
     {

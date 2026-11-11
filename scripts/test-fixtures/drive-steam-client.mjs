@@ -164,7 +164,9 @@ await setMode("steampage");
 let h0 = helpersLog().length;
 n0 = urls().length; todo.length = 0;
 const ids3 = ["720000001", "720000002", "720000003"];
-const dl3 = ids3.map((id) => download(id));
+// started one after another (each in the to-do before the next request): concurrent requests reach the to-do in any order
+const dl3 = [];
+for (const [k, id] of ids3.entries()) { dl3.push(download(id)); await waitTodo((x) => x?.total === k + 1); }
 let t = await waitTodo((x) => x?.total === 3);
 await sleep(800);
 out(urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001",
@@ -173,16 +175,16 @@ out(t?.action === "subscribe" && t.index === 1 && t.total === 3 && t.remaining =
   "…WS steam-todo: subscribe, 1 of 3, the first item's id + title", JSON.stringify(t));
 out(statuses("720000002").at(-1)?.includes("Steam to-do") && statuses("720000003").at(-1)?.includes("Steam to-do") && /click Subscribe/i.test(statuses("720000001").at(-1) ?? ""),
   "…the queued ones say \"In the Steam to-do\", the current one \"click Subscribe\"", ids3.map((id) => statuses(id).at(-1)).join(" | "));
+out(t?.autoNext === true, "…item 1 wasn't on disk when its page opened → autoNext", JSON.stringify(t));
 dropItem("720000001"); // Steam delivers item 1 (the user clicked Subscribe)
 const r1 = await settle(dl3[0]);
-await sleep(800);
 out(r1?.status === 200 && r1.body?.workshopId === "720000001", "…item 1 arrives in the Workshop folder → its download finishes", JSON.stringify(r1)?.slice(0, 120));
-out(urls().length === n0 + 1 && lastTodo()?.current?.id === "720000001" && lastTodo()?.delivered === true,
-  "…nothing advances by itself: page 2 waits for the user's Next", `${urls().length - n0} opened, ${JSON.stringify(lastTodo())}`);
-await post("/steam-todo/next");
+// owner 2026-11-11 ("make it auto detect then if its flawless"): files that weren't there when its page opened = Steam downloading
+// it = subscribed → the to-do moves on by itself, no POST /steam-todo/next
 const opened2 = await waitUrl("720000002", n0);
 t = await waitTodo((x) => x?.current?.id === "720000002");
-out(opened2 && urls().length === n0 + 2 && t?.index === 2 && t?.total === 3 && t?.remaining === 2, "Next → the second page opens, 2 of 3", `${urls().slice(n0).join(" ")} | ${JSON.stringify(t)}`);
+out(opened2 && urls().length === n0 + 2 && t?.index === 2 && t?.total === 3 && t?.remaining === 2,
+  "Steam delivered item 1 after its page opened → the second page opens by itself (no Next), 2 of 3", `${urls().slice(n0).join(" ")} | ${JSON.stringify(t)}`);
 const tSkip = Date.now();
 await post("/steam-todo/skip");
 const r2 = await settle(dl3[1], 5000);
@@ -264,4 +266,127 @@ const overlaps = iv.filter((x, i) => i > 0 && x.open < iv[i - 1].close).length;
 out(iv.length >= 3 && overlaps === 0, "…no two Steam-client helpers ever ran at the same time (the fake's start/end log)", `${iv.length} helpers, ${overlaps} overlaps`);
 out(idsC.filter((id) => statuses(id).includes("Waiting for the Steam app…")).length >= 2, "…the queued ones said \"Waiting for the Steam app…\"",
   idsC.map((id) => statuses(id).join(" > ")).join(" || "));
+
+// i. the Browse sidebar (owner 2026-11-11: "open on steam doesn't open in real steam, and make it so browse > wallpaper engine
+// (local) has option to unsubscribe / same for browse > workshop / … a button that lets you subscribe/unsubscribe in the sidebar")
+const subEv = []; ws.addEventListener("message", (m) => { const e = JSON.parse(m.data); if (e.type === "subscribe-progress") subEv.push(e.payload); });
+const state = async (ids) => (await post("/workshop/state", { ids })).json();
+const undoDepth = async () => (await (await fetch(U + "/library/undo-depth")).json()).depth;
+const unsubDone = async () => { for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100); };
+// Open on Steam → the Steam CLIENT (steam://), its own route; /open stays http(s)-only
+n0 = urls().length;
+const ro = await post("/steam/open-page", { workshopId: "760000001" });
+const bo = await ro.json().catch(() => null);
+await waitUrl("760000001", n0, 3000);
+out(ro.status === 200 && bo?.ok === true && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/760000001",
+  "Open on Steam: POST /steam/open-page opens steam://url/CommunityFilePage/<id> in the Steam app", `${ro.status} ${JSON.stringify(bo)} | ${urls().slice(n0).join(" ")}`);
+n0 = urls().length;
+const badIds = ["76x", "1;id", "", "https://example.com", "../1", "123456789012345678901234"];
+const rb = await Promise.all(badIds.map((id) => post("/steam/open-page", { workshopId: id })));
+const rb2 = await post("/open", { url: "steam://url/CommunityFilePage/760000001" });
+await sleep(500);
+out(rb.every((x) => x.status === 400) && rb2.status === 400 && urls().length === n0,
+  "…a non-digit id → 400 and nothing opens; /open still refuses a steam:// URL", `${rb.map((x) => x.status)} /open ${rb2.status}, ${urls().length - n0} opened`);
+
+// Subscribe without importing — steamapp: through the (fake) Steam client
+await setMode("steamapp");
+let libN = (await lib()).length;
+let rs = await post("/workshop/subscribe", { workshopId: "760000002", title: "sub-only 2" });
+let bs = await rs.json().catch(() => null);
+out(rs.status === 200 && bs?.subscribed === true && fs.existsSync(`${T}/steamlib/sub-760000002`) && (await lib()).length === libN && !(await item("760000002")),
+  "Subscribe (Use the Steam app): subscribed through the Steam client, nothing imported into /library", `${rs.status} ${JSON.stringify(bs)}`);
+out(subEv.some((e) => e.id === "760000002" && e.done && !e.error), "…WS subscribe-progress ends done", JSON.stringify(subEv.filter((e) => e.id === "760000002").at(-1) ?? null));
+let st = await state(["760000002", "799999999", "740000001"]);
+out(st["760000002"]?.subscribed === true && st["760000002"].pending === null && st["760000002"].inLibrary === false,
+  "/workshop/state: subscribed, not in the library", JSON.stringify(st["760000002"]));
+out(st["799999999"]?.subscribed === false && st["799999999"].pending === null && st["799999999"].inLibrary === false,
+  "/workshop/state: not subscribed (no folder in any Steam root)", JSON.stringify(st["799999999"]));
+out(st["740000001"]?.subscribed === true && st["740000001"].inLibrary === true, "/workshop/state: subscribed + in the library", JSON.stringify(st["740000001"]));
+const stBad = await state(["abc", "1;2"]);
+out(Object.keys(stBad).length === 0, "/workshop/state ignores non-digit ids", JSON.stringify(stBad));
+
+// Unsubscribe of an item NOT in the library (a WE-local folder): no trash, the Steam client unsubscribes it
+let ud = await undoDepth();
+unsub.length = 0;
+ru = await post("/workshop/unsubscribe", { workshopId: "760000002", title: "sub-only 2" });
+let bu = await ru.json().catch(() => null);
+await unsubDone();
+st = await state(["760000002"]);
+out(ru.status === 200 && bu?.inLibrary === false && !fs.existsSync(`${T}/steamlib/sub-760000002`) && (await undoDepth()) === ud && (await lib()).length === libN,
+  "Unsubscribe (not in the library): unsubscribed through the Steam client, nothing trashed, no undo batch", `${JSON.stringify(bu)}, sub ${fs.existsSync(`${T}/steamlib/sub-760000002`)}`);
+out(st["760000002"]?.subscribed === false && st["760000002"].pending === null && st["760000002"].onDisk === true,
+  "…state: not subscribed while its folder lingers (Steam deletes it later)", JSON.stringify(st["760000002"]));
+
+// Unsubscribe of a library item = Delete from source: trashed + unsubscribed, undoable; Undo subscribes it again
+ud = await undoDepth();
+unsub.length = 0;
+ru = await post("/workshop/unsubscribe", { workshopId: "740000001", title: "ws-740000001" });
+bu = await ru.json().catch(() => null);
+await unsubDone();
+out(bu?.inLibrary === true && !!bu.batch && !(await item("740000001")) && !fs.existsSync(`${T}/steamlib/sub-740000001`) && (await undoDepth()) === ud + 1,
+  "Unsubscribe (in the library): trashed like Delete from source + unsubscribed through the Steam client, one undo batch", `${JSON.stringify(bu)}, sub ${fs.existsSync(`${T}/steamlib/sub-740000001`)}`);
+await post("/library/undo");
+for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-740000001`); i++) await sleep(100);
+out(!!(await item("740000001")) && fs.existsSync(`${T}/steamlib/sub-740000001`) && !(await queue()).includes("740000001"),
+  "…Undo: back in the library and subscribed again through the Steam client", `in library ${!!(await item("740000001"))}, sub ${fs.existsSync(`${T}/steamlib/sub-740000001`)}`);
+await sleep(1500); // the re-subscribe's helper lets go before the mode changes
+
+// "Open in the Steam app" (steampage): the toggle goes through the Steam to-do — never the Steam client
+await setMode("steampage");
+h0 = helpersLog().length; todo.length = 0;
+n0 = urls().length;
+ru = await post("/workshop/unsubscribe", { workshopId: "740000002", title: "ws-740000002" });
+t = await waitTodo((x) => x?.current?.id === "740000002");
+st = await state(["740000002"]);
+out(t?.action === "unsubscribe" && urls().slice(n0).includes("steam://url/CommunityFilePage/740000002") && st["740000002"]?.pending === "unsubscribe",
+  "Unsubscribe (Open in the Steam app): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])}`);
+await post("/steam-todo/next");
+t = await waitTodo((x) => x?.finished);
+st = await state(["740000002"]);
+out(t?.finished === true && !(await queue()).includes("740000002") && st["740000002"]?.subscribed === false && st["740000002"].pending === null,
+  "…Next → unsubscribed (off pending), state not subscribed", JSON.stringify(st["740000002"]));
+
+// Subscribe (Open in the Steam app): a to-do subscribe entry without a download; Next finishes it, nothing imported
+libN = (await lib()).length; n0 = urls().length; todo.length = 0;
+rs = await post("/workshop/subscribe", { workshopId: "760000003", title: "sub-only 3" });
+bs = await rs.json().catch(() => null);
+t = await waitTodo((x) => x?.current?.id === "760000003");
+await waitUrl("760000003", n0); // the stub xdg-open runs detached (setsid) — its line lands a moment later
+st = await state(["760000003"]);
+out(rs.status === 200 && bs?.inSteamTodo === true && bs.subscribed === false && t?.action === "subscribe" && t?.autoNext === true
+  && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/760000003" && st["760000003"]?.pending === "subscribe",
+  "Subscribe (Open in the Steam app): a Steam to-do subscribe entry (no download), its page opened, state pending subscribe", `${JSON.stringify(bs)} | ${JSON.stringify(t)}`);
+await post("/steam-todo/next");
+t = await waitTodo((x) => x?.finished);
+for (let i = 0; i < 40 && !subEv.some((e) => e.id === "760000003" && e.done); i++) await sleep(50);
+st = await state(["760000003"]);
+out(t?.finished === true && subEv.some((e) => e.id === "760000003" && e.done && !e.skipped) && st["760000003"]?.subscribed === true
+  && (await lib()).length === libN && helpersLog().length === h0,
+  "…Next finishes it: subscribed, nothing imported, no Steam-client helper", JSON.stringify(st["760000003"]));
+
+// owner 2026-11-11 ("make it auto detect then if its flawless"): a subscribe-only entry moves on by itself when its folder appears
+todo.length = 0; n0 = urls().length;
+await post("/workshop/subscribe", { workshopId: "760000004", title: "sub-only 4" });
+t = await waitTodo((x) => x?.current?.id === "760000004");
+const absentFirst = t?.autoNext === true;
+await sleep(400);
+fs.mkdirSync(`${T}/steamlib/760000004`, { recursive: true }); // Steam starts downloading it
+t = await waitTodo((x) => x?.finished, 5000);
+out(absentFirst && t?.finished === true, "Subscribe-only: its Steam folder appears after its page opened → the to-do moves on by itself (no Next)", JSON.stringify(t));
+// …and one whose folder was there before its turn (a lingering folder) does NOT: it waits for Next even after Steam delivers
+const pre = `${T}/steamlib/760000005`; fs.mkdirSync(pre, { recursive: true });
+fs.writeFileSync(`${pre}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-760000005" })); // no media yet
+todo.length = 0;
+const d5 = download("760000005");
+t = await waitTodo((x) => x?.current?.id === "760000005");
+const autoFlag = t?.autoNext;
+fs.copyFileSync(`${T}/clip.mp4`, `${pre}/v.mp4`);
+const r5 = await settle(d5);
+await sleep(1500);
+t = lastTodo();
+out(autoFlag === false && r5?.status === 200 && t?.current?.id === "760000005" && t?.delivered === true,
+  "…a download whose folder existed before its turn: delivered, but the to-do waits for Next (no proof)", `${JSON.stringify(r5)?.slice(0, 80)} | ${JSON.stringify(t)}`);
+await post("/steam-todo/next");
+t = await waitTodo((x) => x?.finished);
+out(t?.finished === true, "…Next moves on");
 ws.close();

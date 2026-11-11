@@ -14,9 +14,14 @@ namespace Liascape.Web;
 // one, the rest were lost) and a bulk Delete from source opened the whole subscriptions list (~320 items) with "unsubscribe the
 // N you deleted there".
 //
-// Advancing is the user's: **Next** ("I clicked it") opens the next page — nothing is detected (owner: "lets just have them
-// click 'next' or smth themselves" — reading Steam's own state would mean connecting to the Steam client, which the user who
-// chose "Open in the Steam app" may have chosen precisely to avoid; and "not on disk does not always mean unsubscribed").
+// Advancing is the user's: **Next** ("I clicked it") opens the next page (owner: "lets just have them click 'next' or smth
+// themselves" — reading Steam's own state would mean connecting to the Steam client, which the user who chose "Open in the
+// Steam app" may have chosen precisely to avoid; and "not on disk does not always mean unsubscribed"). The one exception,
+// disk-only and unambiguous (owner 2026-11-11: "make it auto detect then if its flawless"): a SUBSCRIBE entry whose item was
+// NOT on disk when it became current (`Turn`) and whose files then appear (its download delivered — `Finish` —, or for one
+// without a download its Steam folder / staging folder — `WatchDisk`) is Done by itself: only Steam downloading it puts them
+// there, and Steam downloads only what's subscribed. On disk already at its turn → no proof, it waits for Next. Unsubscribe
+// entries always wait for Next.
 // - Next on a subscribe entry: the item's /download keeps waiting for Steam's files (AcquireViaSubscribeAsync's poll, its own
 //   10-minute limit). On an unsubscribe entry: unsubscribed → `WorkshopUnsubQueue.MarkBlocked` (not when its page opens).
 // - Skip / Stop: a subscribe entry's waiting /download ends as skipped (`WorkshopDownloader.SkippedException`); an
@@ -39,8 +44,14 @@ public static class SteamTodo
         public bool HasDownload { get; init; }
         /// Its page was opened (it is the current entry).
         public volatile bool IsCurrent;
-        /// Its download finished while it was the current entry — Steam has it; the user's Next still moves on.
+        /// Its download finished while it was the current entry — Steam has it; the user's Next still moves on (unless it was
+        /// absent at its turn: then the delivery itself is Done — `Finish`).
         public volatile bool Delivered;
+        /// Was the item on disk (a Steam Workshop folder or Steam's staging folder) the moment it became current? -1 = not known
+        /// yet, 0 = absent (files appearing now can only be Steam downloading it → it's subscribed: auto-Done), 1 = present (a
+        /// lingering folder, an update — no proof; waits for Next). Subscribe entries only.
+        internal volatile int OnDiskAtTurn = -1;
+        internal bool AbsentAtTurn => OnDiskAtTurn == 0;
         volatile Outcome _outcome = Outcome.Waiting;
         public Outcome Outcome => _outcome;
         TaskCompletionSource _wake = New();
@@ -99,6 +110,12 @@ public static class SteamTodo
         lock (_gate) return [.. _queue.Where(e => e.Action == Kind.Unsubscribe).Select(e => e.Id)];
     }
 
+    /// The ids a subscribe entry is waiting on (a download's page route, an undo, the Browse sidebar's Subscribe) — "Subscribing…".
+    public static HashSet<string> QueuedSubscribes()
+    {
+        lock (_gate) return [.. _queue.Where(e => e.Action == Kind.Subscribe).Select(e => e.Id)];
+    }
+
     static (Entry E, bool OpenFailed) Add(Entry e)
     {
         bool current;
@@ -110,12 +127,50 @@ public static class SteamTodo
             current = _queue.Count == 1;
             if (current) { e.IsCurrent = true; _message = null; }
         }
+        if (current) Turn(e);
         bool failed = current && !OpenCurrent(e);
         Console.WriteLine($"workshop: {e.Id}: {(e.Action == Kind.Subscribe ? "subscribe" : "unsubscribe")} in the Steam to-do{(current ? failed ? " — the Steam app couldn't be opened" : " — opened its page in the Steam app" : "")}");
         Broadcast();
         e.Poke();
         return (e, failed);
     }
+
+    /// Is the item on disk now (a Steam Workshop folder or Steam's staging folder for it)? Disk only — never the Steam client
+    /// (the page route must not connect to it). WorkshopDownloader.ItemOnDisk; a seam for tests.
+    internal static Func<string, bool> OnDisk = id => WorkshopDownloader.ItemOnDisk(SettingsService.Load().WorkshopFolder, id);
+
+    // An entry's turn (it's about to be the current one, its page opens next): a subscribe entry records whether the item is on
+    // disk already. A subscribe entry with no download waiting on it (the Browse sidebar's Subscribe, an undo's re-subscribe) has
+    // no wait loop of its own to notice Steam's files — watch the disk for it.
+    static void Turn(Entry e)
+    {
+        if (e.Action != Kind.Subscribe) return;
+        bool present;
+        try { present = OnDisk(e.Id); } catch { present = true; } // unknown = no proof
+        e.OnDiskAtTurn = present ? 1 : 0;
+        if (!present && !e.HasDownload) WatchDisk(e);
+    }
+
+    static void WatchDisk(Entry e) => _ = Task.Run(async () =>
+    {
+        try
+        {
+            while (true)
+            {
+                var wake = e.Wake;
+                if (e.Outcome != Outcome.Waiting) return;
+                await Task.WhenAny(Task.Delay(WorkshopDownloader.PollMs), wake);
+                if (e.Outcome != Outcome.Waiting) return;
+                if (OnDisk(e.Id))
+                {
+                    Console.WriteLine($"workshop: {e.Id}: Steam is downloading it (its folder appeared after its page opened) — the Steam to-do moves on");
+                    Resolve(e, Outcome.Done);
+                    return;
+                }
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"workshop: {e.Id}: the Steam to-do's disk watch failed: {ex.Message}"); }
+    });
 
     static bool OpenCurrent(Entry e)
     {
@@ -208,7 +263,14 @@ public static class SteamTodo
     public static void Finish(Entry e, bool delivered)
     {
         lock (_gate) if (!_queue.Contains(e)) return;
-        if (delivered && e.IsCurrent) { e.Delivered = true; Broadcast(); return; }
+        if (delivered && e.IsCurrent)
+        {
+            // its files appeared after its page opened: only Steam downloading it puts them there, and Steam downloads only what's
+            // subscribed — the user clicked Subscribe; Done without the click on Next (owner 2026-11-11: "make it auto detect
+            // then if its flawless"). Already on disk at its turn → no proof: it waits for Next as before.
+            if (e.AbsentAtTurn) { Console.WriteLine($"workshop: {e.Id}: Steam delivered it after its page opened — the Steam to-do moves on"); Resolve(e, Outcome.Done); return; }
+            e.Delivered = true; Broadcast(); return;
+        }
         Resolve(e, Outcome.Dropped);
     }
 
@@ -239,7 +301,7 @@ public static class SteamTodo
         e.Set(o);
         SideEffects(e, o);
         Console.WriteLine($"workshop: {e.Id}: the Steam to-do — {o switch { Outcome.Done => "done", Outcome.Skipped => "skipped", _ => "left" }}");
-        if (next != null) { OpenCurrent(next); next.Poke(); }
+        if (next != null) { Turn(next); OpenCurrent(next); next.Poke(); }
         Broadcast();
     }
 
@@ -272,6 +334,8 @@ public static class SteamTodo
                 action = c.Action == Kind.Subscribe ? "subscribe" : "unsubscribe",
                 index = _finished + 1, total = _finished + _queue.Count, remaining = _queue.Count,
                 current = new { id = c.Id, title = c.Title }, delivered = c.Delivered, message = _message, busy = _busy,
+                // it moves on by itself when Steam's files for it appear (absent when its page opened — Turn)
+                autoNext = c.Action == Kind.Subscribe && c.AbsentAtTurn,
             };
         }
     }

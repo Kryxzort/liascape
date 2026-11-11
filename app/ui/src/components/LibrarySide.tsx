@@ -58,6 +58,7 @@ export function LibrarySide({
   const [wl, setWl] = useState(false);
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
+  const openOnSteam = useStore((s) => s.openOnSteam);
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound — owner decision); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
@@ -194,7 +195,10 @@ export function LibrarySide({
         {/* the right-click menu's actions (owner: "all the 4 options from the right click menu"), as tiles */}
         <div className="side-tiles">
           <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</button>
-          {steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
+          {/* a Workshop item: the Steam CLIENT (POST /steam/open-page; the browser when that couldn't open); else its page link */}
+          {item.workshopId ? (
+            <button className="side-tile" data-open-steam onClick={() => openOnSteam(item.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>
+          ) : steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
           <button className="side-tile danger" onClick={onTrash}><span className="side-tile-ico"><Trash2 size={15} /></span>Delete</button>
           {showDeleteFromSource && (
             <button className="side-tile danger" title="Unsubscribe on Steam and delete — Delete from source (unsubscribe)" onClick={onDeleteSource}>

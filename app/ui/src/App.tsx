@@ -56,7 +56,13 @@ export default function App() {
 
   // backend push events → targeted store updates
   const onEvent = useCallback((e: LiascapeEvent) => {
-    if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value, e.payload.status);
+    if (e.type === "download-progress") { s.setDownload(e.payload.id, e.payload.value, e.payload.status); if (e.payload.done) s.bumpWsState(); }
+    // the Browse sidebar's Subscribe: its step while it runs, then the toggle re-reads its state
+    else if (e.type === "subscribe-progress") {
+      const p = e.payload;
+      s.setSubProgress(p.id, p.done ? null : { value: p.value, status: p.status });
+      if (p.done) { s.bumpWsState(); if (p.error) s.setStatus(`Subscribing failed: ${p.error}`); }
+    }
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
     else if (e.type === "loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
@@ -71,9 +77,10 @@ export default function App() {
       // no usable sign-in: the backend opened the item(s) in the Steam app — say what to click there (held, not a flash)
       if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
       else if (e.payload.finished && e.payload.error) s.setStatus("Removing from Steam failed: " + e.payload.error);
+      if (e.payload.finished) s.bumpWsState();
     }
-    else if (e.type === "steam-todo") s.setSteamTodo(e.payload);
-    else if (e.type === "library-synced") s.loadLibrary();
+    else if (e.type === "steam-todo") { s.setSteamTodo(e.payload); s.bumpWsState(); }
+    else if (e.type === "library-synced") { s.loadLibrary(); s.bumpWsState(); }
     else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
     // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
     else if (e.type === "scene-loudness-progress") {

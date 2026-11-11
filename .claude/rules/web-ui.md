@@ -543,8 +543,31 @@ checkboxes. A new panel, row, control, badge or overlay is NOT done until every 
   - **Browse sidebar** (`BrowseSide`): picture (above, the same switch), the hero (In your library + Show in Library, SCENE, the
     numbers as pills), **Download & Apply** · **Download** (`.side-cta` `.side-go`: big, a lift + more glow on hover, the glyph
     nudging down like the card's button — the only way to download from there; or **Apply** for an item the library has; the
-    progress + Cancel while it downloads), **About** (description, tags), tiles Open on Steam / Open page / Open in file manager
-    (the middle-click target), Copy ID. ("Play YouTube" buttons are gone from both sidebars: the switch has the trailer.)
+    progress + Cancel while it downloads), **the subscription toggle** (below), **About** (description, tags), tiles Open on Steam /
+    Open page / Open in file manager (the middle-click target), Copy ID. ("Play YouTube" buttons are gone from both sidebars: the
+    switch has the trailer.)
+  - **Subscribe / Unsubscribe in the Browse sidebar** (`components/SubToggle.tsx`, `[data-side-sub][data-state=not-subscribed|
+    subscribed|subscribing|unsubscribing|unsubscribed]`; owner 2026-11-11: "make it so browse > wallpaper engine (local) has option
+    to unsubscribe / same for browse > workshop / it needs to be in the sidebar / probably a button that lets you subscribe/
+    unsubscribe in the sidebar"): every Browse item with a `workshopId` (WE Local + Workshop), under the CTA row. A card like the
+    tiles (crust 50 % — under `bg-live` it carries the darkness; the label gets the drop-shadow): a status chip (`.side-sub-ico`:
+    CloudCheck green + glow when subscribed, a spinning LoaderCircle in the accent while pending, CloudOff muted), the label
+    (`[data-side-sub-label]`, one line: "Subscribed" / "Not subscribed" / "Subscribing…" / "Unsubscribing…" / "Unsubscribed" —
+    a WE-local folder Steam hasn't deleted yet) + a sub-line under the row (`[data-side-sub-hint]`: in the library → "Unsubscribing also removes it
+    from your library"; not → "Subscribe without adding it to your library"; the Subscribe's step while it runs), and the button
+    (`[data-side-sub-btn=subscribe|unsubscribe]`: `btn accent` Subscribe / `btn danger` Unsubscribe, a lift on hover; none while
+    pending). State = `POST /workshop/state` re-read on the store's `wsStateTick` (bumped by `unsub-progress` finished,
+    `steam-todo`, `download-progress` done, `library-synced`, `subscribe-progress` done, after each click) and every 4 s while
+    something moves (pending / a lingering unsubscribed folder); a WE-local item whose folder is gone → `reload()` (it leaves the
+    list). Subscribe → `store.subscribeWorkshop` (`POST /workshop/subscribe`; `subProgress[id]` from WS `subscribe-progress` → a slim
+    bar `[data-side-sub-progress]`, indeterminate without a percent); Unsubscribe → `store.unsubscribeWorkshop` (`POST
+    /workshop/unsubscribe`; an in-library item went to the trash → `loadLibrary` + the status bar's Undo). No tooltips. Motion
+    (§ "Every new UI element"): the words slide in / out on a state swap (framer, x ±14 + opacity), the box glides to its new
+    height (`layout`), the bar eases in / out; `useMotion()` off → instant; `no-glow` → the chip's glow off. Guard: probe-steam
+    `steam:subToggle:workshop|weLocal` (shots `steam-subtoggle*.png`).
+  - **"Open on Steam" opens the Steam app** (owner 2026-11-11: "open on steam doesn't open in real steam"): a `.side-tile` BUTTON
+    (`[data-open-steam]`, same look) in both sidebars for a Workshop item → `store.openOnSteam(id)` → `POST /steam/open-page`; on
+    `ok: false` (or an error) → `window.open(<https page>)` (main.js → the browser). A non-Workshop library item keeps its page link.
   - Guard: `scripts/test-ui-matrix.sh --probe probe-sidebar.js` — `lib:click` / `lib:rightClick` (the sidebar, no menu, nothing
     applied) / `lib:reflow` / `lib:fourOptions` (the sidebar's tiles: `/open` stubbed; Delete + Undo; Delete from source on s1) /
     `lib:volume` / `lib:still` / `lib:keys` / `lib:selection` / `bar:settings` (a right-click on a bar item: its sidebar, nothing
@@ -859,20 +882,34 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   "Waiting for the Steam app…" (`steamapp`: another helper holds the Steam client's turn).
 - **The Steam to-do panel** (`components/SteamTodoPanel.tsx`, lazy in App's Suspense; owner 2026-11-11 picked the "Guided"
   mockup, then "lets just have them click 'next'"; backend `web-backend.md` § The Steam to-do): the store's `steamTodo` (WS
-  `steam-todo` → `setSteamTodo`, `finished` → null; `resync` reads `GET /steam-todo`). Portal'd to `<body>`, `position: fixed`
-  bottom-right (16 px; lifted over the playlist bar when it shows — its top measured every 500 ms while the panel is up), z 46:
+  `steam-todo` → `setSteamTodo`, `finished` → null; `resync` reads `GET /steam-todo`). Portal'd to `<body>` in a fixed dock
+  (`.steam-todo-dock[data-steam-todo-dock]`) bottom-right (16 px; lifted over the playlist bar by the dock's `translateY` that
+  GLIDES — 320 ms on the springy curve — when the bar appears / folds / a tab switch / a resize: its top measured every 150 ms;
+  owner 2026-11-11: "why does to-do panel have no morph and stuff or a smooth movement when switching tabs or anything"), z 46:
   above the item sidebar (40) and the bar's hover glow (45), under the modals (50). Rows: "STEAM TO-DO" + a fold chevron
   (`aria-label`, folds to a pill that keeps the step), the step **"Subscribe in Steam · 2 of 5"** / "Unsubscribe in Steam · …"
   (`[data-st-step]`, the current entry's action), the title (`[data-st-title]`), a `.dl-bar` at index/total, the hint ("Click
-  Subscribe on the page Steam opened, then Done — next." / "Steam has it — click Done to go on." when `delivered`), the
+  Subscribe on the page Steam opened, then Done — next." / with `autoNext` "Click Subscribe on the page Steam opened — this moves
+  on by itself once Steam downloads it." / "Steam has it — click Done to go on." when `delivered`), the
   backend's `message` (`role=alert`, warn colour), then the buttons `[data-st=next|reopen|skip|stop]` — **Done — next** (the
   accent one, full width; "Done" on the last), Open again, Skip, Stop — and, while `remaining ≥ 2`, the footer line **"Let the
-  Steam app do all N →"** (`[data-st=use-steam-app]`, N = remaining incl. the current; "Asking the Steam app…" while `busy`).
-  Each button → `api.steamTodoAction(a)` (`POST /steam-todo/<a>`); nothing advances in the UI by itself. Look: the sidebar's
+  Steam app do all N →"** (`[data-st=use-steam-app]`, N = remaining incl. the current; "Asking the Steam app…" while `busy`; a
+  hover lift + the accent drop-shadow) with its note under it (`[data-st-use-note]`, muted: "Needs Steam running with Wallpaper
+  Engine in your account — Steam shows you as playing it meanwhile." — owner 2026-11-11: "should mention that it needs WE and it
+  will show you as playing and stuff"). Each button → `api.steamTodoAction(a)` (`POST /steam-todo/<a>`); the UI never advances by
+  itself (the backend's auto-Done arrives as a `steam-todo` event). Look: the sidebar's
   language — `--tr-strong` mantle fill + an accent corner pool, an accent-tinted border, `var(--glow-sm)` (→ none under
-  `no-glow`, the footer's hover drop-shadow too), lucide icons, no tooltips. Enter / exit: framer-motion y 24 px + opacity (a
-  spring in, 160 ms out); `useMotion()` off → none. `/download`'s `{skipped: true}` → "Skipped: <title>" in the status bar, the
-  card leaves its download state. Guard: probe-steam `steam:todo` (+ `steam:dlStatus`'s two new labels); shot `steam-todo.png`.
+  `no-glow`, the footer's hover drop-shadow too), lucide icons, no tooltips. **Motion** (§ "Every new UI element"): enter / exit
+  framer-motion y 24 px + opacity (a spring in, 160 ms out); the dock's lift glides (above); fold ⇄ unfold MORPHS the box (framer
+  `layout` — size + corners 14 ↔ 999 px; the head rides with `layout="position"`, the body fades out first / in after) and the
+  chevron (`.st-chev`, ONE icon) turns 0 ↔ 180° with a springy overshoot; a new current entry (Next / Skip / auto-Done) SLIDES like
+  the item sidebar's carousel — `.st-track` / `.st-entry` (step + title + hint) out to the left, in from the right, 280 ms; the
+  folded pill's step too; the bar's fill eases its width. `useMotion()` off → all instant (no transition, no layout animation).
+  `/download`'s `{skipped: true}` → "Skipped: <title>" in the status bar, the card leaves its download state. Guard: probe-steam
+  `steam:todo` (+ the note, + `steam:dlStatus`'s two new labels), `steam:todoMotion:on|off` (per-frame: the dock's translateY passes
+  through in-between values when a bar appears, the width through in-between sizes on fold and unfold, the new entry's x off its
+  place for ≥ 3 frames; off: none of it; mid-animation shots `steam-todo-glide.png`, `steam-todo-fold.png`, `steam-todo-slide.png`);
+  shot `steam-todo.png`.
 - Guard: `scripts/test-ui-matrix.sh --probe probe-steam.js` (a script injected before the page's own via CDP stubs
   `/steam/*`, `/browse`, `/download` and wraps the page's WebSocket to push fake events — no Steam anywhere):
   `steam:row:signedOut|rejected|signedIn|steamcmd`, `steam:modal:email|device|confirm|error|cancel|keys` (real typing; the

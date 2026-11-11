@@ -35,7 +35,18 @@
 //                         5", the title, the hint, Done — next / Open again / Skip / Stop + "Let the Steam app do all 4" (remaining);
 //                         no tooltips, aria-label on the icon-only fold, fixed bottom-right on <body> above the item sidebar; each
 //                         button → one POST /steam-todo/<action>; folds to a pill; the last entry: "Done", no Steam-app line, the
-//                         message; gone after `finished`. Shot steam-todo.png
+//                         message; gone after `finished`; the "Let the Steam app" note (needs WE, shows you playing). Shot
+//                         steam-todo.png
+//   steam:todoMotion:on|off  per frame: a playlist bar appearing → the dock's translateY passes through in-between values; fold /
+//                         unfold → the panel's height too; the chevron is one icon turned 180°; a new current entry → its x off
+//                         its place for ≥ 3 frames. off (Smooth window animations off): all instant. Mid-animation shots
+//                         steam-todo-glide.png / -fold.png / -slide.png
+//   steam:subToggle:workshop  the Browse sidebar's subscription toggle per a stubbed /workshop/state: Not subscribed → Subscribe
+//                         (POST /workshop/subscribe {workshopId, title}) → Subscribing… + the bar (WS subscribe-progress) →
+//                         Subscribed (danger Unsubscribe) → in the library: "also removes it from your library" → Unsubscribe
+//                         (POST) → Unsubscribing…; Open on Steam → POST /steam/open-page, ok:false → window.open(https page)
+//   steam:subToggle:weLocal   a WE-local item: Subscribed → Unsubscribe → "Unsubscribed" (folder still there), the words slide
+//                         (per frame); no-glow (the chip's glow off) + bg-live (the card keeps its own fill). Shots steam-subtoggle*.png
 // Screenshots: <LIASCAPE_OUT>/steam-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -89,7 +100,23 @@ const STUB = `(() => {
     // the Steam to-do: idle at load, every button's POST recorded (steam:todo)
     if (p === "/steam-todo") return res({ finished: true });
     if (p.startsWith("/steam-todo/") && m === "POST") { st.calls.push({ p, body: null }); return res(p.endsWith("use-steam-app") ? { error: null } : null); }
-    if (p === "/browse" && m === "POST") { const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items); }
+    // the Browse sidebar's subscription toggle (steam:subToggle): the state a cell sets in window.__wsState, every write recorded
+    if (p === "/workshop/state" && m === "POST") {
+      const ids = JSON.parse(o.body).ids || [], s = window.__wsState || {}, r = {};
+      for (const id of ids) r[id] = s[id] ?? { subscribed: false, pending: null, inLibrary: false, onDisk: false };
+      return res(r);
+    }
+    if ((p === "/workshop/subscribe" || p === "/workshop/unsubscribe") && m === "POST") {
+      st.calls.push({ p, body: JSON.parse(o.body) });
+      return res(p.endsWith("unsubscribe") ? { inLibrary: !!(window.__wsState?.[JSON.parse(o.body).workshopId]?.inLibrary), batch: null }
+        : { subscribed: false, inSteamTodo: true, message: "Click Subscribe in Steam, then Next…" });
+    }
+    if (p === "/browse" && m === "POST") {
+      const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items);
+      // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
+      if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
+        pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
+    }
     if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "", needsReferrer: false });
     if (p === "/download" && m === "POST") {
       return new Promise((resolve, reject) => {
@@ -512,13 +539,14 @@ app.whenReady().then(async () => {
       const TITLE = "Re:Zero Rem – Edit";
       const panel = () => page(`const p = document.querySelector("[data-steam-todo]"); if (!p) return null;
         const btn = (k) => p.querySelector('[data-st="' + k + '"]');
-        const cs = getComputedStyle(p), side = document.querySelector(".side-panel");
+        const dock = p.closest("[data-steam-todo-dock]"), cs = getComputedStyle(dock || p), side = document.querySelector(".side-panel");
         return { step: p.querySelector("[data-st-step]")?.textContent ?? null, title: p.querySelector("[data-st-title]")?.textContent ?? null,
           hint: p.querySelector("[data-st-hint]")?.textContent ?? null, next: btn("next")?.textContent.trim() ?? null,
           reopen: btn("reopen")?.textContent.trim() ?? null, skip: btn("skip")?.textContent.trim() ?? null, stop: btn("stop")?.textContent.trim() ?? null,
           use: btn("use-steam-app")?.textContent.trim() ?? null, titles: p.querySelectorAll("[title]").length,
           iconOnlyNoLabel: [...p.querySelectorAll("button")].filter((b) => !b.textContent.trim() && !b.getAttribute("aria-label")).length,
-          fixed: cs.position, z: +cs.zIndex, sideZ: side ? +getComputedStyle(side).zIndex : 40, inBody: p.parentElement === document.body,
+          fixed: cs.position, z: +cs.zIndex, sideZ: side ? +getComputedStyle(side).zIndex : 40, inBody: !!dock && dock.parentElement === document.body,
+          useNote: p.querySelector("[data-st-use-note]")?.textContent ?? null,
           rect: (() => { const r = p.getBoundingClientRect(); const bar = document.querySelector(".playlist-bar"); return { r: innerWidth - r.right, b: innerHeight - r.bottom, w: r.width, barLift: bar ? innerHeight - bar.getBoundingClientRect().top : 0 }; })(),
           emoji: /\\p{Extended_Pictographic}/u.test(p.textContent), icons: p.querySelectorAll("svg.lucide").length };`);
       if (await panel()) v.push("a panel showed before any steam-todo event");
@@ -532,6 +560,8 @@ app.whenReady().then(async () => {
       if (!/Click Subscribe on the page Steam opened, then Done — next/.test(p.hint ?? "")) v.push(`the hint reads "${p.hint}"`);
       if (p.next !== "Done — next" || p.reopen !== "Open again" || p.skip !== "Skip" || p.stop !== "Stop") v.push(`the buttons read ${J([p.next, p.reopen, p.skip, p.stop])}`);
       if (p.use !== "Let the Steam app do all 4") v.push(`the Steam-app line reads "${p.use}" (4 remaining)`);
+      // owner 2026-11-11: "'Let the Steam app do all N' should mention that it needs WE and it will show you as playing and stuff"
+      if (!/Wallpaper Engine/.test(p.useNote ?? "") || !/playing/.test(p.useNote ?? "") || !/Steam running/.test(p.useNote ?? "")) v.push(`the Steam-app note reads "${p.useNote}"`);
       if (p.titles) v.push(`${p.titles} element(s) with a title (tooltip) in the panel`);
       if (p.iconOnlyNoLabel) v.push(`${p.iconOnlyNoLabel} icon-only button(s) without an aria-label`);
       // bottom-right: 16 px from the edge, lifted over the playlist bar when it shows (Library)
@@ -559,6 +589,188 @@ app.whenReady().then(async () => {
       // finished → gone (after its exit)
       await ev("steam-todo", { finished: true }); await sleep(600);
       if (await panel()) v.push("the panel stayed after a finished event");
+      return v;
+    });
+
+    // ---- per-frame sampling: run `act` (page statements), then read `expr` every animation frame for `ms` ----
+    const frames = (act, expr, ms = 600) => page(`const out = []; const t0 = performance.now(); try { out.push(${expr}); } catch { out.push(null); }
+      ${act}
+      await new Promise((res) => { const f = () => { try { out.push(${expr}); } catch { out.push(null); } if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+      return out;`);
+    // how many samples lie strictly between the first and the last value (an animation passes through them; a jump doesn't)
+    const between = (xs, eps = 1.5) => { const ys = xs.filter((x) => x != null); if (ys.length < 2) return 0; const a = ys[0], b = ys.at(-1);
+      const lo = Math.min(a, b) + eps, hi = Math.max(a, b) - eps; return ys.filter((y) => y > lo && y < hi).length; };
+    const shotDuring = async (name, run, at = 110) => { const p = run(); await sleep(at); await shot(name); return p; };
+    const STEP2 = { action: "subscribe", index: 2, total: 5, remaining: 4, current: { id: "930001", title: "Rem – Edit" }, delivered: false, message: null, busy: false, autoNext: true };
+    const DOCK_Y = `new DOMMatrix(getComputedStyle(document.querySelector("[data-steam-todo-dock]")).transform).m42`;
+    const PANEL_W = `document.querySelector("[data-steam-todo]")?.getBoundingClientRect().height ?? null`;
+    // the newest entry block's x offset (the carousel slide): the live one is the last [data-st-entry] with the new id
+    const ENTRY_X = (id) => `(() => { const e = [...document.querySelectorAll('[data-st-entry="${id}"]')].at(-1); return e ? new DOMMatrix(getComputedStyle(e).transform).m41 : null; })()`;
+    const fakeBar = `if (!document.querySelector(".playlist-bar")) { const b = document.createElement("div"); b.className = "playlist-bar"; b.id = "__fakebar";
+      b.style.cssText = "position:fixed;left:0;bottom:0;width:40px;height:130px;pointer-events:none"; document.body.append(b); }`;
+
+    // owner 2026-11-11: "why does to-do panel have no morph and stuff or a smooth movement when switching tabs or anything" — the lift
+    // GLIDES (a playlist bar appearing), fold ⇄ unfold MORPHS (widths in between), a new current entry SLIDES (the carousel);
+    // under no-motion all three are instant. Mid-animation shots: steam-todo-glide.png, steam-todo-fold.png, steam-todo-slide.png
+    for (const motion of [true, false]) {
+      await cell(`steam:todoMotion:${motion ? "on" : "off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion });
+        await load(SIGNED_OUT); await tab("Browse");
+        await page(`document.getElementById("__fakebar")?.remove(); document.querySelector(".playlist-bar") && (window.__realBar = true);`);
+        await ev("steam-todo", { ...STEP2, current: { id: "930001", title: "Rem – Edit" } }); await sleep(900);
+        if (await js(`!!window.__realBar`)) console.log("        (a playlist bar already shows on Browse — the glide is measured against the fake one anyway)");
+        // (a) the lift: a bar appears → the dock glides up to it (re-measured every 150 ms)
+        const lift = await (motion ? shotDuring("todo-glide", () => frames(fakeBar, DOCK_Y, 900), 260) : frames(fakeBar, DOCK_Y, 900));
+        const liftEnd = lift.filter((x) => x != null).at(-1);
+        const nLift = between(lift);
+        console.log(`        lift: ${lift[0]} → ${liftEnd}, ${nLift} frame(s) in between`);
+        if (!(Math.abs(liftEnd - lift[0]) > 50)) v.push(`the dock didn't lift over the bar (${lift[0]} → ${liftEnd})`);
+        if (motion && nLift < 4) v.push(`the lift jumped (${nLift} in-between frames)`);
+        if (!motion && nLift > 1) v.push(`no-motion: the lift animated (${nLift} in-between frames)`);
+        await page(`document.getElementById("__fakebar")?.remove();`); await sleep(700);
+        // (b) fold ⇄ unfold: the box's width passes through sizes in between
+        // heights: the folded pill keeps about the open width (its head), the height is what folds
+        const fold = await (motion ? shotDuring("todo-fold", () => frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700), 90)
+          : frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700));
+        const unfold = await frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700);
+        const nF = between(fold), nU = between(unfold);
+        console.log(`        fold: ${fold[0]?.toFixed(0)} → ${fold.at(-1)?.toFixed(0)} (${nF} between); unfold → ${unfold.at(-1)?.toFixed(0)} (${nU} between)`);
+        if (!(fold.at(-1) < fold[0] - 40) || Math.abs(unfold.at(-1) - fold[0]) > 2) v.push(`fold heights ${fold[0]} → ${fold.at(-1)} → ${unfold.at(-1)}`);
+        if (motion && (nF < 3 || nU < 3)) v.push(`the fold popped (${nF} / ${nU} in-between frames)`);
+        if (!motion && (nF > 1 || nU > 1)) v.push(`no-motion: the fold animated (${nF} / ${nU})`);
+        // the chevron turns (one icon, rotated) — 180° folded
+        await page(`document.querySelector("[data-steam-todo] .st-fold").click();`); await sleep(motion ? 600 : 100);
+        const chev = await page(`const c = document.querySelector("[data-steam-todo] .st-chev"); return { n: document.querySelectorAll("[data-steam-todo] .st-fold svg").length, a: new DOMMatrix(getComputedStyle(c).transform).a, tr: getComputedStyle(c).transitionDuration };`);
+        if (chev.n !== 1 || !(chev.a < -0.99)) v.push(`the folded chevron: ${J(chev)} (one icon turned 180°)`);
+        if (motion && chev.tr === "0s") v.push("the chevron has no transition");
+        await page(`document.querySelector("[data-steam-todo] .st-fold").click();`); await sleep(700);
+        // (c) a new current entry: the content slides in (transform)
+        const slide = await (motion
+          ? shotDuring("todo-slide", () => frames(`window.__fakeWs("steam-todo", ${J({ ...STEP2, index: 3, remaining: 3, current: { id: "930002", title: "Emilia – Loop" } })});`, ENTRY_X("930002"), 600), 90)
+          : frames(`window.__fakeWs("steam-todo", ${J({ ...STEP2, index: 3, remaining: 3, current: { id: "930002", title: "Emilia – Loop" } })});`, ENTRY_X("930002"), 600));
+        const moved = slide.filter((x) => x != null && Math.abs(x) > 1.5).length;
+        console.log(`        slide x: [${slide.slice(0, 10).map((x) => x == null ? "–" : x.toFixed(1))}…] ${moved} offset frame(s)`);
+        if (motion && moved < 3) v.push(`the new entry didn't slide in (${moved} frames off its place)`);
+        if (!motion && moved > 0) v.push(`no-motion: the new entry slid (${moved} frames)`);
+        if (slide.at(-1) == null || Math.abs(slide.at(-1)) > 0.5) v.push(`the new entry didn't land (x ${slide.at(-1)})`);
+        await ev("steam-todo", { finished: true }); await sleep(500);
+        return v;
+      });
+    }
+    await setSettings({ morphs: true });
+
+    // owner 2026-11-11: "make it so browse > wallpaper engine (local) has option to unsubscribe / same for browse > workshop / it needs
+    // to be in the sidebar / probably a button that lets you subscribe/unsubscribe in the sidebar" + "open on steam doesn't open in
+    // real steam". The Browse sidebar's toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
+    // → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-subtoggle*.png
+    const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll .card:not(.skel-card) .thumb-wrap")[${n}].click();`); await sleep(800); };
+    const sub = () => page(`const s = document.querySelector("[data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");
+      const ico = s.querySelector(".side-sub-ico");
+      return { state: s.dataset.state, label: [...s.querySelectorAll("[data-side-sub-label]")].at(-1)?.textContent ?? null, hint: [...s.querySelectorAll("[data-side-sub-hint]")].at(-1)?.textContent ?? null,
+        btn: b?.dataset.sideSubBtn ?? null, btnText: b?.textContent.trim() ?? null, btnClass: b?.className ?? "", progress: !!s.querySelector("[data-side-sub-progress]"),
+        titles: s.querySelectorAll("[title]").length, bg: getComputedStyle(s).backgroundColor, icoShadow: ico ? getComputedStyle(ico).boxShadow : null,
+        icons: s.querySelectorAll("svg.lucide").length };`);
+    const setWs = (id, st) => js(`window.__wsState = { ...(window.__wsState || {}), ${J(id)}: ${J(st)} }; true`);
+    const bump = () => ev("steam-todo", { finished: true }); // any event that can change a subscription → the toggle re-reads
+    await cell("steam:subToggle:workshop", async () => {
+      const v = []; await load(SIGNED_OUT);
+      const srcs = (await http("GET", "/sources")).json;
+      const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
+      await tab("Browse");
+      await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
+      await openSide(0);
+      let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
+      console.log(`        not subscribed: ${J(s)}`);
+      if (!s || s.state !== "not-subscribed" || s.label !== "Not subscribed" || s.btn !== "subscribe" || s.btnText !== "Subscribe" || !/accent/.test(s.btnClass))
+        v.push(`not subscribed: ${J(s)}`);
+      if (s && !/without adding it to your library/.test(s.hint ?? "")) v.push(`the hint reads "${s?.hint}"`);
+      if (s?.titles) v.push(`${s.titles} tooltip(s) in the toggle`);
+      // Subscribe → POST /workshop/subscribe {workshopId, title}; WS subscribe-progress → "Subscribing…" + the bar; done → Subscribed
+      let n0 = (await calls()).length;
+      await page(`document.querySelector("[data-side-sub-btn]").click();`); await sleep(300);
+      let got = (await calls()).slice(n0);
+      if (got.length !== 1 || got[0].p !== "/workshop/subscribe" || got[0].body?.workshopId !== "930000" || got[0].body?.title !== "ws-1") v.push(`Subscribe posted ${J(got)}`);
+      await ev("subscribe-progress", { id: "930000", value: 0, status: "Click Subscribe in Steam, then Next…" }); await sleep(400);
+      s = await sub();
+      if (s?.state !== "subscribing" || s.label !== "Subscribing…" || !s.progress || s.btn) v.push(`while subscribing: ${J(s)}`);
+      await shot("subtoggle-subscribing");
+      await setWs("930000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+      await ev("subscribe-progress", { id: "930000", value: 1, status: "Subscribed", done: true }); await sleep(600);
+      s = await sub();
+      if (s?.state !== "subscribed" || s.label !== "Subscribed" || s.btn !== "unsubscribe" || s.btnText !== "Unsubscribe" || !/danger/.test(s.btnClass)) v.push(`subscribed: ${J(s)}`);
+      // in the library: the sub-line says Unsubscribe also removes it
+      await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true }); await bump(); await sleep(500);
+      s = await sub();
+      if (!/also removes it from your library/.test(s?.hint ?? "")) v.push(`in the library, the hint reads "${s?.hint}"`);
+      await shot("subtoggle");
+      n0 = (await calls()).length;
+      await page(`document.querySelector("[data-side-sub-btn]").click();`); await sleep(300);
+      got = (await calls()).slice(n0);
+      if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe" || got[0].body?.workshopId !== "930000") v.push(`Unsubscribe posted ${J(got)}`);
+      await setWs("930000", { subscribed: false, pending: "unsubscribe", inLibrary: false, onDisk: true }); await bump(); await sleep(500);
+      s = await sub();
+      if (s?.state !== "unsubscribing" || s.label !== "Unsubscribing…" || s.btn) v.push(`pending unsubscribe: ${J(s)}`);
+      // Open on Steam → POST /steam/open-page; the browser only when the Steam app couldn't be opened
+      await page(`window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; window.__replies = { ...(window.__replies || {}), "/steam/open-page": { body: { ok: true } } };`);
+      n0 = (await calls()).length;
+      await page(`document.querySelector("[data-open-steam]").click();`); await sleep(400);
+      got = (await calls()).slice(n0);
+      let opened = await js(`window.__opened`);
+      if (got.length !== 1 || got[0].p !== "/steam/open-page" || got[0].body?.workshopId !== "930000" || opened.length) v.push(`Open on Steam (ok): ${J(got)}, browser ${J(opened)}`);
+      await page(`window.__replies["/steam/open-page"] = { body: { ok: false } };`);
+      await page(`document.querySelector("[data-open-steam]").click();`); await sleep(400);
+      opened = await js(`window.__opened`);
+      if (J(opened) !== J(["https://steamcommunity.com/sharedfiles/filedetails/?id=930000"])) v.push(`Open on Steam (ok:false) → the browser got ${J(opened)}`);
+      if (await page(`return !!document.querySelector('.side-panel a[href*="steamcommunity.com"]');`)) v.push("a plain steamcommunity.com link is still in the sidebar");
+      return v;
+    });
+    await cell("steam:subToggle:weLocal", async () => {
+      const v = [];
+      await js(`localStorage.setItem("__probe_we_local", "1"); true`);
+      await load(SIGNED_OUT);
+      const srcs = (await http("GET", "/sources")).json;
+      const local = srcs.find((s) => /Local/i.test(s.name) && !s.supportsTagFilter)?.name;
+      if (!local) return ["no Wallpaper Engine (Local) source"];
+      await tab("Browse");
+      await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+      await openSide(0);
+      let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
+      console.log(`        WE local: ${J(s)}`);
+      if (s?.state !== "subscribed" || s.btn !== "unsubscribe") v.push(`a WE-local subscription: ${J(s)}`);
+      const n0 = (await calls()).length;
+      // the state swap animates (the words slide) — per frame, the new words' x passes through offsets
+      const xs = await frames(`document.querySelector("[data-side-sub-btn]").click(); window.__wsState["931000"] = { subscribed: false, pending: null, inLibrary: false, onDisk: true };`,
+        `(() => { const t = [...document.querySelectorAll("[data-side-sub] [data-side-sub-label]")].at(-1); return t && t.textContent === "Unsubscribed" ? new DOMMatrix(getComputedStyle(t).transform).m41 : null; })()`, 900);
+      const got = (await calls()).slice(n0);
+      if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe" || got[0].body?.workshopId !== "931000") v.push(`Unsubscribe posted ${J(got)}`);
+      s = await sub();
+      if (s?.state !== "unsubscribed" || s.label !== "Unsubscribed" || s.btn !== "subscribe") v.push(`after the unsubscribe (folder still there): ${J(s)}`);
+      const slid = xs.filter((x) => x != null && Math.abs(x) > 1).length;
+      console.log(`        swap x: [${xs.filter((x) => x != null).slice(0, 8).map((x) => x.toFixed(1))}] ${slid} offset frame(s)`);
+      if (slid < 2) v.push(`the state swap didn't slide (${slid} frames)`);
+      await shot("subtoggle-welocal");
+      // no-glow: the subscribed chip has no glow; bg-live: the card keeps its own dark fill
+      await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+      await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+      await load(SIGNED_OUT); await tab("Browse");
+      await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await js(`window.__wsState = { "931000": { subscribed: true, pending: null, inLibrary: false, onDisk: true } }; true`);
+      await openSide(0);
+      s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
+      const html = await js(`document.documentElement.className`);
+      console.log(`        no-glow + bg-live: ${J({ html, bg: s?.bg, ico: s?.icoShadow })}`);
+      if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
+      if (s && /0px 0px 10px/.test(s.icoShadow ?? "")) v.push(`no-glow: the chip still glows (${s.icoShadow})`);
+      if (!s || /rgba\(0, 0, 0, 0\)|transparent/.test(s.bg)) v.push(`bg-live: the toggle has no fill of its own (${s?.bg})`);
+      await shot("subtoggle-live");
+      await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+      await js(`localStorage.removeItem("__probe_we_local"); true`);
       return v;
     });
   } catch (e) {

@@ -233,7 +233,10 @@ public static class AppOps
         {
             var ap = new Progress<(double, string)>(t =>
                 EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
-            string dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
+            string dir;
+            // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
+            using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
+                dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
             string url = dir;
             if (!detail.IsScene)
             {

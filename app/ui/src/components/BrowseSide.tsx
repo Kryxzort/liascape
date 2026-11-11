@@ -4,6 +4,7 @@ import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
+import { SubToggle } from "./SubToggle";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -47,6 +48,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   // Steam, then it downloads by itself…" while it waits on the Steam app (WorkshopDownloader)
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
+  const openOnSteam = useStore((s) => s.openOnSteam);
   // the About card only for a description; tags alone sit in a plain row (owner 2026-11-11: a card for one property felt strange)
   const tagRow = w.tags && w.tags.length > 0 ? <div className="tags side-tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
 
@@ -86,6 +88,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             </>
           )}
         </div>
+        {/* a Workshop item's subscription (Browse > Wallpaper Engine (Local) and (Workshop)) — Subscribe / Unsubscribe */}
+        {w.workshopId && <SubToggle id={w.workshopId} title={w.title} weLocal={!web} />}
         {w.description ? (
           <SideSection icon={<Info size={15} />} title="About">
             <p className="desc">{w.description}</p>
@@ -94,7 +98,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
         ) : tagRow}
         <div className="side-tiles">
           {w.workshopId ? (
-            <a className="side-tile" href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${w.workshopId}`} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>
+            // the Steam CLIENT (steam://…, POST /steam/open-page); the https page in the browser when that couldn't be opened
+            <button className="side-tile" data-open-steam onClick={() => openOnSteam(w.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>
           ) : (
             // the middle-click target: the page it came from, or a local folder
             <button className="side-tile" onClick={onOpenSource}>{web ? <><span className="side-tile-ico"><ExternalLink size={15} /></span>Open page</> : <><span className="side-tile-ico"><FolderOpen size={15} /></span>Open in file manager</>}</button>

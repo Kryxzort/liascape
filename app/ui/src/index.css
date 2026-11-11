@@ -590,7 +590,13 @@ input[type=range]:focus-visible { outline: none; }
 
 /* ---- the Steam to-do (components/SteamTodoPanel.tsx): floating bottom-right, above the item sidebar (40) + the bar's hover
    glow (45), under the modals (50); `bottom` inline (lifted over the playlist bar). Glow = var(--glow*) → none under no-glow ---- */
-.steam-todo { position: fixed; right: 16px; z-index: 46; width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column;
+/* the dock: fixed bottom-right, lifted over the playlist bar by a translateY that GLIDES (the app's springy curve) — a tab switch /
+   the bar folding / a resize never makes it jump; the panel inside keeps framer's enter / exit + fold morph (no fight: two elements) */
+.steam-todo-dock { position: fixed; right: 16px; bottom: 16px; z-index: 46; display: flex; flex-direction: column; align-items: flex-end;
+  pointer-events: none; transition: transform .32s cubic-bezier(.2, 1.22, .36, 1); }
+.steam-todo-dock.still, :root.no-motion .steam-todo-dock { transition: none; }
+.steam-todo-dock > * { pointer-events: auto; }
+.steam-todo { position: relative; overflow: hidden; width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column;
   gap: 8px; padding: 12px 14px 12px; border-radius: 14px; font-size: 13px; color: var(--text);
   background:
     radial-gradient(260px 160px at 100% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
@@ -602,8 +608,19 @@ input[type=range]:focus-visible { outline: none; }
 .st-name { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
 .st-head .st-step { color: var(--subtext); font-size: 12px; font-weight: 600; }
 .st-fold { margin-left: auto; }
-.steam-todo > .st-step { font-weight: 700; font-size: 14px; }
+/* the chevron turns (folded = up) with a springy overshoot — one icon, never swapped */
+.st-chev { display: block; transition: transform .38s cubic-bezier(.34, 1.56, .64, 1); }
+.steam-todo.folded .st-chev { transform: rotate(180deg); }
+:root.no-motion .st-chev { transition: none; }
+.st-body { display: flex; flex-direction: column; gap: 8px; }
+/* the current entry's words: the carousel's track (old out left, new in from the right — framer, transform + opacity) */
+.st-track { position: relative; overflow: hidden; margin: 0 -4px; padding: 0 4px; }
+.st-entry { display: flex; flex-direction: column; gap: 8px; }
+.st-entry > .st-step { font-weight: 700; font-size: 14px; }
 .st-title { color: var(--subtext); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -4px; }
+.st-head .st-step { white-space: nowrap; }
+.st-use-wrap { display: flex; flex-direction: column; gap: 3px; }
+.st-use-note { margin: 0 2px; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
 .st-bar { height: 5px; border-radius: 999px; }
 .st-hint, .st-msg { margin: 0; line-height: 1.4; color: var(--muted); font-size: 12px; }
 .st-msg { color: var(--warn, #f9e2af); }
@@ -613,12 +630,14 @@ input[type=range]:focus-visible { outline: none; }
 .st-btns .st-stop:hover:not(:disabled) { color: var(--danger); }
 .st-use { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; padding: 9px 2px 0;
   border: 0; border-top: 1px solid var(--surface1); background: none; color: var(--accent); font: inherit; font-weight: 700;
-  cursor: pointer; text-align: left; transition: color .15s; }
+  cursor: pointer; text-align: left; transition: color .15s, transform .18s cubic-bezier(.2, 1.3, .4, 1), filter .2s; }
 .st-use svg { transition: transform .18s; }
 .st-use:hover:not(:disabled) svg { transform: translateX(3px); }
 .st-use:hover:not(:disabled) { color: var(--accent-hover, var(--accent)); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent)); }
 .st-use:disabled { color: var(--muted); cursor: default; }
-:root.no-motion .st-use svg { transition: none; }
+.st-use:hover:not(:disabled) { transform: translateY(-1px); }
+.st-use:active:not(:disabled) { transform: scale(.98); }
+:root.no-motion .st-use, :root.no-motion .st-use svg { transition: none; }
 :root.no-glow .st-use:hover:not(:disabled) { filter: none; }
 
 /* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
@@ -1004,6 +1023,39 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-go:hover .side-dl-ico { animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
 .side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
 .side-dl .dl-bar { flex: 1; width: auto; }
+/* the Browse sidebar's Subscribe / Unsubscribe toggle (components/SubToggle.tsx): a card like the tiles (its own dark fill — under
+   bg-live it carries the darkness like .side-sec), a status chip (green subscribed / muted / accent while moving), the words, the
+   button (accent Subscribe, danger Unsubscribe); a slim bar while a Subscribe runs */
+.side-sub { display: flex; flex-direction: column; gap: 8px; padding: 9px 10px; border-radius: 11px; min-height: 52px;
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1); }
+.side-sub[data-state="loading"] { opacity: .5; }
+.side-sub-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.side-sub-ico { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--subtext);
+  background: color-mix(in srgb, var(--surface0) 70%, transparent); transition: color .2s, background .2s, box-shadow .2s; }
+.side-sub-ico > svg { display: block; }
+.side-sub-ico.subscribed { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent), 0 0 10px -3px var(--success); }
+.side-sub-ico.subscribing, .side-sub-ico.unsubscribing { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), var(--glow-sm); }
+.side-sub-spin { animation: side-sub-spin 1s linear infinite; }
+@keyframes side-sub-spin { to { transform: rotate(360deg); } }
+.side-sub-text { flex: 1; min-width: 0; display: flex; overflow: hidden; }
+.side-sub-text b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-sub-hintrow { display: flex; overflow: hidden; margin-top: -2px; }
+.side-sub-text b { font-size: 13px; font-weight: 700; color: var(--text); }
+.side-sub-hint { font-size: 11.5px; color: var(--subtext); line-height: 1.3; }
+.side-sub-btn { flex: none; padding: 6px 11px; font-size: 12.5px; border-radius: 9px;
+  transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
+.side-sub-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.side-sub-btn:active:not(:disabled) { transform: scale(.97); transition-duration: .08s; }
+.side-sub-btn:disabled { opacity: .6; cursor: default; }
+.side-sub-bar { transform-origin: 0 50%; height: 3px; }
+:root.no-motion .side-sub-spin { animation: none; }
+:root.no-glow .side-sub-ico.subscribed { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent); }
+:root.no-glow .side-sub-ico.subscribing, :root.no-glow .side-sub-ico.unsubscribing { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+:root.bg-live .side-sub-text b, :root.bg-live .side-sub-hint { filter: drop-shadow(0 0 3px #000); }
+/* the outline-only danger button keeps a dark base over the live wallpaper (red text on a bright frame was unreadable) */
+:root.bg-live .side-sub-btn.danger { background: color-mix(in srgb, var(--bg-crust) 70%, transparent); }
 /* action tiles (the old right-click menu's actions + the source links): an icon chip + the label; danger = red */
 .side-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .side-tile { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 7px 10px; border-radius: 11px; text-align: left;

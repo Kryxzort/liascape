@@ -62,10 +62,15 @@ async function jget<T>(path: string): Promise<T> {
 // WS steam-todo / GET /steam-todo (Web/SteamTodo.cs): the current entry + the count, or `finished` (idle). `delivered` = Steam
 // already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
 // reached; `busy` = "Let the Steam app do all N" is asking Steam.
+// POST /workshop/state: a Workshop item's subscription as the Browse sidebar shows it (disk + the unsubscribe queue + the to-do)
+export type WorkshopSubState = { subscribed: boolean; pending: "subscribe" | "unsubscribe" | null; inLibrary: boolean; onDisk: boolean };
+export const steamPageUrl = (workshopId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`;
 export type SteamTodo =
   | { finished: true }
   | { finished?: false; action: "subscribe" | "unsubscribe"; index: number; total: number; remaining: number;
-      current: { id: string; title: string }; delivered?: boolean; message?: string | null; busy?: boolean };
+      current: { id: string; title: string }; delivered?: boolean; message?: string | null; busy?: boolean;
+      // the current subscribe entry moves on by itself once Steam's files for it appear (they weren't there when its page opened)
+      autoNext?: boolean };
 
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
@@ -242,6 +247,15 @@ export const api = {
   deleteFromSource: (items: LibraryItem[]) => jpost<{ batch: string }>("/workshop/delete-from-source", { items }),
   drain: () => jpost("/workshop/drain"),
   workshopQueue: () => jget<{ pending: string[]; hasPending: boolean }>("/workshop/queue"),
+  // API: "Open on Steam" → the Steam CLIENT (steam://url/CommunityFilePage/<id>, its own route — /open is http(s) only);
+  // ok:false = the Steam app couldn't be opened → the caller falls back to the https page (openOnSteam below)
+  openSteamPage: (workshopId: string) => jpost<{ ok: boolean }>("/steam/open-page", { workshopId }),
+  // API: the Browse sidebar's subscription toggle (Web/WorkshopSubOps.cs) — state from disk + the queue + the to-do only
+  workshopState: (ids: string[]) => jpost<Record<string, WorkshopSubState>>("/workshop/state", { ids }),
+  workshopSubscribe: (workshopId: string, title: string) =>
+    jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
+  workshopUnsubscribe: (workshopId: string, title: string) =>
+    jpost<{ inLibrary: boolean; batch: string | null }>("/workshop/unsubscribe", { workshopId, title }),
   // API: the Steam to-do (the pages the user clicks in the Steam app, one at a time — web-ui.md § Steam to-do)
   steamTodo: () => jget<SteamTodo>("/steam-todo"),
   steamTodoAction: (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => jpost<{ error?: string | null } | void>(`/steam-todo/${a}`),

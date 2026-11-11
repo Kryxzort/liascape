@@ -77,7 +77,11 @@ the first middleware (before the error handler — a refusal never runs an endpo
   refused by the same rule).
 - **`POST /open`**: `url` must be http(s) (→ `xdg-open` with one argument; else 400); otherwise only `{path, reveal: true}`
   with the path (and `copiedSceneDir`) passing `MediaAllowed` and a digits-only `workshopId` (403) — no bare path (xdg-open
-  runs a `.desktop` file), no `file:`/custom scheme. (A Steam-client `steam://` route would be its own endpoint.)
+  runs a `.desktop` file), no `file:`/custom scheme. The Steam-client `steam://` route IS its own endpoint: **`POST
+  /steam/open-page {workshopId}`** (owner 2026-11-11: "open on steam doesn't open in real steam") — the id must be 1–20 ASCII
+  digits (`WorkshopSubOps.ValidId`, else **400**, nothing opened); the only URL it can open is
+  `steam://url/CommunityFilePage/<digits>` (`OpenInSteamApp`: one `xdg-open` argument via `setsid sh -c 'exec xdg-open "$0"'`).
+  `/open` still refuses `steam://` (400). `/workshop/subscribe|unsubscribe|state` take digits-only ids the same way.
 - **Secrets out of the API**: `GET /settings` returns `SettingsService.Redacted` — `SteamRefreshToken`,
   `SteamAccessToken`, `SteamLoginSecure` empty (the UI never read them; `/steam/status` says signed in or not; POST
   `/settings` keeps the saved ones whatever the body says, so the UI posting its copy back changes nothing). `settings.json`
@@ -164,14 +168,18 @@ the first middleware (before the error handler — a refusal never runs an endpo
   status (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time; without a usable sign-in its
   items go into the Steam to-do — `sources.md` § Unsubscribe).
 - **`Web/SteamTodo.cs`** — the Steam to-do (owner 2026-11-11, `sources.md` § Download): ONE app-wide queue of the Workshop
-  pages the user clicks in the Steam app, one at a time; only the user's Next moves on. Its endpoints are one-line wrappers.
+  pages the user clicks in the Steam app, one at a time; Next — or Steam delivering files that weren't there when the page opened
+  — moves on. Its endpoints are one-line wrappers.
+- **`Web/WorkshopSubOps.cs`** — the Browse sidebar's Subscribe / Unsubscribe toggle (`sources.md` § Download → "The Browse
+  sidebar's Subscribe / Unsubscribe"): `State(ids)`, `SubscribeAsync(id, title)`, `Unsubscribe(id, title)`, `Subscribing(id)`
+  (the "Subscribing…" mark a Workshop download holds too).
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
 `GET /health /health/features /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
 /playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path= /library/scene-loudness/status`,
 `POST /browse /detail /settings /apply /stop /action /next /prev /random /pause /volume /mute /download /open
 /preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview,scene-loudness/estimate,scene-loudness/cancel} /playlist/{state,save,load,play,play-from}
-/steam/{qr/start,qr/cancel,signout,login,login/code,login/cancel} /workshop/{delete-from-source,drain}
+/steam/{qr/start,qr/cancel,signout,login,login/code,login/cancel,open-page} /workshop/{delete-from-source,drain,state,subscribe,unsubscribe}
 /steam-todo/{next,reopen,skip,stop,use-steam-app}`, `GET /steam-todo`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
@@ -258,7 +266,10 @@ every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume
 Steam…", or without a usable sign-in "Not signed in to Steam here — click Subscribe in Steam, then it downloads by itself…")
 · unsub-progress {done,total,currentId,finished?, openedInSteam?, message?, error?} (the finishing one: `message` = what to click in the Steam app when it
 did the unsubscribing, or that Steam is rate-limiting) · steam-todo {action: subscribe|unsubscribe, index, total, remaining,
-current: {id, title}, delivered, message, busy} | {finished: true} (the Steam to-do, on every change — below) · library-synced {count} (the startup one fires before any open page has
+current: {id, title}, delivered, message, busy, autoNext} | {finished: true} (the Steam to-do, on every change — below) ·
+subscribe-progress {id, value, status, done, error, skipped} (the Browse sidebar's Subscribe: its step — Steam's bytes under
+steamapp, "Click Subscribe in Steam, then Next…" on the page route —, `done` at the end: subscribed / `skipped` (its to-do entry
+skipped or stopped) / `error`) · library-synced {count} (the startup one fires before any open page has
 reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, …only the changed fields} (a volume keybind moved an item's own volume → `volumeOverride`; a scene's loudness estimate / report → `loudness*`) · scene-loudness-progress {done,total,currentId,finished?,cancelled?} · steam-qr {png}
 · steam-signed-in {…status} · steam-qr-error {message} · steam-login-code {kind: email|device|confirm, hint, retry} ·
 steam-login-error {message, rateLimited} · steam-login-cancelled` (the password sign-in, below).
@@ -267,7 +278,17 @@ steam-login-error {message, rateLimited} · steam-login-cancelled` (the password
 - **State**: an ordered list of entries `{id, title, action, hasDownload}`, `[0]` = the current one (its page was opened);
   `index` = entries finished in this run + 1, `total` = finished + remaining (back to 0 when it empties). `delivered` = the
   current entry's download already finished (Steam had it) — it still waits for Next; `message` = the Steam app couldn't be
-  opened / reached; `busy` = "Let the Steam app do all N" is probing Steam.
+  opened / reached; `busy` = "Let the Steam app do all N" is probing Steam; `autoNext` = the current SUBSCRIBE entry's item was
+  not on disk when it became current, so Steam's files appearing for it end it as Done by itself (owner 2026-11-11: "make it auto
+  detect then if its flawless" — disk only, `sources.md` § Download; on disk at its turn, or an unsubscribe → Next only).
+- **`POST /workshop/state {ids}`** → `{<id>: {subscribed, pending: "subscribe" | "unsubscribe" | null, inLibrary, onDisk}}`
+  (read-only: disk + the unsubscribe queue + the to-do; ≤ 500 ids, non-digit ids dropped). **`POST /workshop/subscribe
+  {workshopId, title}`** → `{subscribed, inSteamTodo, message}` (waits for the Steam client under steamapp; the page route answers
+  at once and WS `subscribe-progress` ends it later); a failure → 500 `{error}` + `subscribe-progress {done, error}`.
+  **`POST /workshop/unsubscribe {workshopId, title}`** → `{inLibrary, batch}` (in the library: Delete from source, `batch` = the
+  undo batch; else the queue alone) and starts the drain. Logs `workshop: <id>: unsubscribe from the Browse sidebar …`,
+  `… subscribed through the Steam client (Subscribe, no download)`, `… subscribed with the sign-in (Subscribe, no download)`,
+  `… Open on Steam — opened its page in the Steam app`.
 - **`GET /steam-todo`** → that payload (or `{finished: true}`) — the UI's `resync` reads it (a page opened mid-to-do).
 - **`POST /steam-todo/next`** (the user did it: a subscribe entry's download keeps waiting; an unsubscribe → `MarkBlocked`, false
   → re-subscribed), **`/skip`** (subscribe: its `/download` ends `{skipped: true}`; unsubscribe: `Unblock`), **`/stop`** (every
@@ -279,8 +300,14 @@ steam-login-error {message, rateLimited} · steam-login-cancelled` (the password
   `workshop: <id>: subscribe|unsubscribe in the Steam to-do — opened its page in the Steam app`, `… the Steam to-do — done |
   skipped | left`, `the Steam to-do was stopped (N left: …)`, `the Steam to-do hands N to the Steam app (…)`, `… can't use the
   Steam app — <why>`.
-- Guards: `scripts/test-steam-signin.sh` (§ 1 selftest: unsubscribes; § 2 + § 3 `h.`: downloads, Skip / Stop, Delete from
-  source, "use the Steam app", no `steam-ugc` child on the page route) and `probe-steam.js` `steam:todo` (the panel).
+- Guards: `scripts/test-steam-signin.sh` (§ 1 selftest: unsubscribes; § 2 + § 3 `h.`: downloads, auto-Done on delivery, Skip /
+  Stop, Delete from source, "use the Steam app", no `steam-ugc` child on the page route; § 3 `i.`: `/steam/open-page` (opens
+  `steam://url/CommunityFilePage/<id>`, non-digit → 400 + nothing opened, `/open` still refuses steam://), `/workshop/state`
+  subscribed / not / pending / in-library, Subscribe-only via steamapp (the fake's `sub-<id>`, nothing imported) and via the page
+  route (a to-do entry without a download; Next; its folder appearing auto-Dones it), Unsubscribe of a library item (trashed +
+  unsubscribed + Undo re-subscribes) and of a non-library one (no trash), the page-mode unsubscribe entry, a download whose folder
+  existed before its turn waits for Next) and `probe-steam.js` `steam:todo` / `steam:todoMotion:on|off` (the panel) +
+  `steam:subToggle:workshop|weLocal` (the sidebar toggle, Open on Steam).
 
 ## Steam sign-in by password (`SteamOps.StartPasswordLogin` / `SubmitLoginCode` / `CancelPasswordLogin`)
 Owner 2026-11-11: "is it a dead end for users without mobile guard?" — the QR sign-in needs the Steam mobile app. He chose

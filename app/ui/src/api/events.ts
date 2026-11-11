@@ -15,6 +15,9 @@ export type LiascapeEvent =
   // finished without a usable sign-in: `openedInSteam` items were opened in the Steam app and `message` says what to click
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; openedInSteam?: number; message?: string | null; error?: string } }
   | { type: "steam-todo"; payload: SteamTodo }
+  // the Browse sidebar's Subscribe (Web/WorkshopSubOps.cs): its step while it runs; `done` at the end (`skipped` = the user
+  // skipped its Steam to-do entry, `error` = it failed)
+  | { type: "subscribe-progress"; payload: { id: string; value: number; status: string | null; done?: boolean; error?: string | null; skipped?: boolean } }
   | { type: "library-synced"; payload: { count: number } }
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)

@@ -164,6 +164,9 @@ Orchestrated in **`Web/AppOps.cs`**:
 
 - **Delete** (`AppOps.Trash`): soft-delete to `.trash/`, undoable. **Keeps** the Steam subscription. **Exception:** when `AutoAddWeWallpapersToLibrary` is on, a plain delete of a workshop item would be re-imported next launch, so it enqueues the unsubscribe for any item with a `WorkshopId`.
 - **Delete from Source** (`AppOps.DeleteFromSource`, `POST /workshop/delete-from-source`): enqueues the workshop id + soft-deletes. Applies to any workshop item — symlink OR copy (`WorkshopId != null`); the drain works by id. The UI hides this when auto-import is on (the trash button already does it).
+  The Browse sidebar's **Unsubscribe** (owner 2026-11-11; `POST /workshop/unsubscribe`, `Web/WorkshopSubOps.cs`, sources.md §
+  Download) on an item the library holds (every `LibraryItem` with that `WorkshopId`) IS this — same trash batch, same Undo; on
+  one it doesn't hold, only the queue (no batch). A drain asked for while one runs runs once more after it (`SteamOps.StartDrain`).
 
 **We never delete the workshop folder ourselves.** Unsubscribing makes Steam remove the folder + its `appworkshop_431960.acf` entry together on its next sync. A `blocked` set keeps AutoImport from resurrecting the lingering folder until Steam cleans it.
 

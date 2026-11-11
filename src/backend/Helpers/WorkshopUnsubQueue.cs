@@ -145,6 +145,16 @@ public static class WorkshopUnsubQueue
         }
     }
 
+    // One read of both lists (the Browse sidebar's subscription state — Web/WorkshopSubOps.State).
+    public static (HashSet<string> Pending, HashSet<string> Blocked) Snapshot()
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            return (new HashSet<string>(s.Pending, StringComparer.Ordinal), new HashSet<string>(s.Blocked, StringComparer.Ordinal));
+        }
+    }
+
     // Drop blocked ids whose workshop folder Steam has finished removing. `folderExists` is called
     // once per blocked id; the caller hoists any expensive lookup (e.g. libraryfolders.vdf parse).
     public static void PruneBlocked(Func<string, bool> folderExists)

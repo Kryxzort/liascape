@@ -22,7 +22,11 @@
 #     /download as skipped at once, Stop the rest; a bulk Delete from source (one page at a time, no page for an item with no
 #     Steam folder, Next / Skip); "Let the Steam app do all 2" with Steam unreachable (unchanged + the message) and reachable
 #     (downloads and unsubscribes through the fake client, the saved mode unchanged); the page route never starts a
-#     `steam-ugc` child (the fake's helpers.log); 3 steamapp downloads at once never run two helpers at the same time.
+#     `steam-ugc` child (the fake's helpers.log); 3 steamapp downloads at once never run two helpers at the same time. A
+#     subscribe entry whose files weren't on disk when its page opened finishes by itself once Steam delivers (no Next); one
+#     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
+#     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
+#     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one.
 # Never signs in to Steam, never subscribes anything, never talks to steamcommunity.com, never touches ~/.config/liascape
 # (temp HOME + every XDG dir), never prints settings.json. Everything it started is stopped on exit.
 #
@@ -138,13 +142,12 @@ async function viaSteam(id, why, label) {
   const body = r ? await r.json() : null;
   out(r?.status === 200 && body?.workshopId === id, `${label}: once Steam has it, the download finishes into the library`, r ? `${r.status} ${JSON.stringify(body).slice(0, 160)}` : "timed out");
   out(await inLib(id), `${label}: /library has it`);
-  // the Steam to-do (Web/SteamTodo.cs): a queue of 1 — Steam delivered it, the entry waits for the user's Next all the same
-  const td = todo.at(-1);
-  out(td && !td.finished && td.current?.id === id && td.delivered === true && td.index === 1 && td.total === 1,
-    `${label}: the Steam to-do holds it (1 of 1, delivered) until Next`, JSON.stringify(td ?? null));
-  await fetch(U + "/steam-todo/next", { method: "POST" });
-  for (let i = 0; i < 30 && !todo.at(-1)?.finished; i++) await sleep(50);
-  out(todo.at(-1)?.finished === true, `${label}: Next → the to-do finished`);
+  // the Steam to-do (Web/SteamTodo.cs): a queue of 1 whose files weren't there when its page opened — Steam delivering them is
+  // the proof it's subscribed → it finishes by itself (owner 2026-11-11: "make it auto detect then if its flawless"), no Next
+  for (let i = 0; i < 40 && !todo.at(-1)?.finished; i++) await sleep(50);
+  const mine = todo.filter((x) => x.current?.id === id);
+  out(mine.length > 0 && mine.every((x) => x.index === 1 && x.total === 1 && x.autoNext === true) && todo.at(-1)?.finished === true,
+    `${label}: the Steam to-do (1 of 1, autoNext) finished by itself once Steam delivered — no Next`, JSON.stringify(mine.at(-1) ?? null));
 }
 
 await viaSteam("700000001", "Not signed in", "no sign-in");

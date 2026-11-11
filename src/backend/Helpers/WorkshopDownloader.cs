@@ -205,7 +205,7 @@ public static class WorkshopDownloader
     }
 
     // The poll interval (3 s); LIASCAPE_WORKSHOP_POLL_MS shortens it for the hermetic test.
-    private static int PollMs =>
+    internal static int PollMs =>
         int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_POLL_MS"), out var ms) && ms is >= 100 and <= 3000 ? ms : 3000;
 
     /// Opens a steam:// URL in the Steam app (`xdg-open`, which starts Steam when it isn't running), detached in its own
@@ -308,6 +308,74 @@ public static class WorkshopDownloader
         foreach (var libRoot in ReadSteamLibraryRoots())
             roots.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960"));
         return roots;
+    }
+
+    /// The Workshop roots that are STEAM's (the WE folder setting, standard + Flatpak Steam, every library) — not our steamcmd
+    /// cache: an item there is an owned download, never a subscription. Its folder in one of them = Steam has it subscribed
+    /// (until an unsubscribe makes Steam delete it).
+    public static System.Collections.Generic.List<string> SteamWorkshopRoots(string workshopBasePath)
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return WorkshopContentRoots(workshopBasePath).FindAll(r => !r.StartsWith(Path.Combine(home, ".cache", "liascape"), StringComparison.Ordinal));
+    }
+
+    /// Is the item on disk in Steam's hands: its folder in a Steam Workshop root, or Steam's staging folder for it (a download
+    /// under way)? The Steam to-do's "Steam delivered it" signal (Web/SteamTodo.cs) — disk only, never the Steam client.
+    public static bool ItemOnDisk(string workshopBasePath, string workshopId) =>
+        WorkshopFolderExists(SteamWorkshopRoots(workshopBasePath), workshopId) || SteamStaging(workshopBasePath, workshopId);
+
+    /// Does Steam have this item in one of its own Workshop folders? (pass SteamWorkshopRoots once for many ids)
+    public static bool InSteamWorkshop(System.Collections.Generic.List<string> steamRoots, string workshopId) => WorkshopFolderExists(steamRoots, workshopId);
+
+    /// What the Browse sidebar's Subscribe did: Subscribed = Steam took it (the Steam client, or the sign-in's web call);
+    /// else Todo = it waits in the Steam to-do for the user's click + Next.
+    public sealed record SubscribeOnlyResult(bool Subscribed, string Message, SteamTodo.Entry? Todo = null);
+
+    /// Subscribe WITHOUT importing anything into the library (owner 2026-11-11: "a button that lets you subscribe/unsubscribe in
+    /// the sidebar") — routed by the download mode like a download's subscribe: `steamapp` → the Steam client (it waits for the
+    /// install, reporting Steam's bytes), else a usable sign-in (not under `steampage`) → the website's subscribe call (done —
+    /// Steam downloads it by itself), else → a Steam to-do subscribe entry without a download (the user clicks Subscribe on its
+    /// page, then Next). `steamcmd` isn't a subscription mode, but this is an explicit Subscribe click: the sign-in / to-do route.
+    /// Unblocks the id (wanted again). A rate limit throws (no page — it's steamcommunity.com from the same connection).
+    public static async Task<SubscribeOnlyResult> SubscribeOnlyAsync(string workshopId, string? title, AppSettings settings,
+        IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        WorkshopUnsubQueue.Unblock(workshopId);
+        SteamTodo.DropUnsubscribe(workshopId); // its unsubscribe still waited in the Steam to-do: nothing to click any more
+        string mode = settings.WorkshopDownloadMode;
+        if (mode == "steamapp")
+        {
+            var r = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
+            if (r.Folder != null)
+            {
+                Console.WriteLine($"workshop: {workshopId}: subscribed through the Steam client (Subscribe, no download)");
+                return new(true, "Subscribed — Steam has it");
+            }
+            Console.WriteLine($"workshop: {workshopId}: not subscribed through the Steam client — {r.Fallback}");
+        }
+        if (mode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
+        {
+            try
+            {
+                progress?.Report((-1, "Subscribing on Steam…"));
+                var cookie = await SteamAuthService.GetCookieAsync(settings, ct);
+                if (!string.IsNullOrWhiteSpace(cookie))
+                {
+                    await SubscribeAsync(workshopId, cookie, subscribe: true, ct);
+                    Console.WriteLine($"workshop: {workshopId}: subscribed with the sign-in (Subscribe, no download)");
+                    return new(true, "Subscribed — Steam downloads it by itself");
+                }
+            }
+            catch (SteamRateLimitException) { throw; }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e) { Console.WriteLine($"workshop: {workshopId}: subscribing with the sign-in failed ({e.Message}) — the Steam to-do"); }
+        }
+        var todo = SteamTodo.EnqueueSubscribe(workshopId, title, hasDownload: false, out bool openFailed);
+        if (openFailed)
+            throw new InvalidOperationException("The Steam app couldn't be opened (xdg-open steam://…) — open the item on Steam and subscribe there.");
+        const string msg = "Click Subscribe in Steam, then Next…";
+        progress?.Report((-1, msg));
+        return new(false, msg, todo);
     }
 
     // All places a downloaded workshop item might already live (every Steam library + steamcmd).
@@ -472,8 +540,7 @@ public static class WorkshopDownloader
     /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`).
     private static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
     {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var roots = WorkshopContentRoots(settings.WorkshopFolder).FindAll(r => !r.StartsWith(Path.Combine(home, ".cache", "liascape"), StringComparison.Ordinal));
+        var roots = SteamWorkshopRoots(settings.WorkshopFolder);
         var inSteam = ids.FindAll(id => WorkshopFolderExists(roots, id));
         foreach (var id in ids) if (!inSteam.Contains(id)) WorkshopUnsubQueue.MarkBlocked(id); // not a subscription: nothing to click
         if (inSteam.Count == 0) return new DrainResult();

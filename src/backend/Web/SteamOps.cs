@@ -12,6 +12,7 @@ public static class SteamOps
 {
     private static CancellationTokenSource? _qrCts;
     private static int _draining; // Interlocked guard — one drain at a time
+    private static int _drainAgain; // asked again while one ran → one more pass after it
 
     public static object Status()
     {
@@ -212,18 +213,31 @@ public static class SteamOps
     // on the finishing event say so (WorkshopDownloader.DrainUnsubQueueAsync).
     public static void StartDrain()
     {
+        // asked while one runs (the Browse sidebar's Unsubscribe right after a Delete from source): that run may have read the
+        // queue already — run once more after it, or the new id waited for the next launch
+        Interlocked.Exchange(ref _drainAgain, 1);
         if (Interlocked.CompareExchange(ref _draining, 1, 0) != 0) return;
         _ = Task.Run(async () =>
         {
             try
             {
-                var progress = new Progress<(int Done, int Total, string CurrentId)>(t =>
-                    EventBus.Broadcast("unsub-progress", new { done = t.Done, total = t.Total, currentId = t.CurrentId }));
-                var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), progress, CancellationToken.None);
-                EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = r.OpenedInSteam, message = r.Message });
+                while (Interlocked.Exchange(ref _drainAgain, 0) == 1)
+                {
+                    try
+                    {
+                        var progress = new Progress<(int Done, int Total, string CurrentId)>(t =>
+                            EventBus.Broadcast("unsub-progress", new { done = t.Done, total = t.Total, currentId = t.CurrentId }));
+                        var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), progress, CancellationToken.None);
+                        EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = r.OpenedInSteam, message = r.Message });
+                    }
+                    catch (Exception e) { EventBus.Broadcast("unsub-progress", new { error = e.Message, finished = true }); }
+                }
             }
-            catch (Exception e) { EventBus.Broadcast("unsub-progress", new { error = e.Message, finished = true }); }
-            finally { Interlocked.Exchange(ref _draining, 0); }
+            finally
+            {
+                Interlocked.Exchange(ref _draining, 0);
+                if (Volatile.Read(ref _drainAgain) == 1) StartDrain(); // asked between the loop's last check and here
+            }
         });
     }
 }

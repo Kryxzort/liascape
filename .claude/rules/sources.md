@@ -142,13 +142,23 @@ Workshop wallpapers"):
     user enqueues instead: the download's page route (`steampage`, `subscribe` without a usable sign-in, `steamapp` when the
     Steam client can't be reached), the unsubscribe drain's page route, `ResubscribeAsync`'s page route (undo). An entry =
     `{id, title, action: subscribe|unsubscribe}`; the current one's page opens (`OpenInSteamApp`), a single item is a to-do of 1.
-    **Only the user's Next moves on** — nothing is detected (owner: "lets just have them click 'next' or smth themselves" — reading
-    Steam's own subscribed state would mean connecting to the Steam client, which someone who chose "Open in the Steam app" may
-    have chosen precisely to avoid, and "not on disk does not always mean unsubscribed"; a design that watched the folders /
-    Steam's state was dropped the same day). Next on a subscribe entry: the item's `/download` keeps waiting through the media
-    poll above (unchanged — it finishes when Steam delivers, its 10 minutes counted from when its page opened: a queued one's
-    clock doesn't run). A delivered download (Steam had it) leaves its entry current until Next all the same (`delivered: true`,
-    the panel says "Steam has it"); a cancelled / failed one leaves the to-do (the next page opens if it was current). Its status
+    **Next — or Steam delivering files that weren't there when the page opened — moves on** (owner: "lets just have them click
+    'next' or smth themselves" — reading Steam's own subscribed state would mean connecting to the Steam client, which someone
+    who chose "Open in the Steam app" may have chosen precisely to avoid, and "not on disk does not always mean unsubscribed"; a
+    design that watched the folders / Steam's state was dropped the same day; then 2026-11-11 "after Steam delivers, the entry
+    still waits for your Done — make it auto detect then if its flawless"). The one unambiguous signal, disk-only: when a
+    SUBSCRIBE entry becomes current (`SteamTodo.Turn`, before its page opens) it records whether the item is on disk
+    (`WorkshopDownloader.ItemOnDisk`: its folder in a Steam Workshop root — not our steamcmd cache — or Steam's staging folder);
+    ABSENT then and its files appear later (its `/download` delivered → `Finish`; an entry with no download — the Browse sidebar's
+    Subscribe, an undo's re-subscribe — `WatchDisk` polls the folders every `PollMs`) → Done by itself, the next page opens (new
+    files can only come from Steam downloading it, and Steam downloads only subscribed items). PRESENT at its turn (a lingering
+    folder after an unsubscribe, an update) → no proof: it waits for Next. Unsubscribe entries always wait for Next. The payload's
+    `autoNext` says which (the panel's hint). Log `workshop: <id>: Steam delivered it after its page opened — the Steam to-do moves
+    on` / `… Steam is downloading it (its folder appeared after its page opened) …`. Never the Steam client. Next on a subscribe
+    entry: the item's `/download` keeps waiting through the media poll above (unchanged — it finishes when Steam delivers, its 10
+    minutes counted from when its page opened: a queued one's clock doesn't run). A delivered download whose files were there at
+    its turn leaves its entry current until Next (`delivered: true`, the panel says "Steam has it"); a cancelled / failed one
+    leaves the to-do (the next page opens if it was current). Its status
     while queued: "In the Steam to-do — its page opens in Steam when it's its turn…" (card "In the Steam to-do"); its turn:
     "Click Subscribe in Steam, then it downloads by itself…". **Skip / Stop** on a subscribe entry end its waiting `/download` at
     once as skipped (`WorkshopDownloader.SkippedException` → `/download` 200 `{skipped: true, message}`, the card leaves with
@@ -161,10 +171,33 @@ Workshop wallpapers"):
     Open again re-opens the current page; xdg-open failing on a later entry → the panel's message ("Open again to retry, or
     Skip"); on the first entry of a download → the download fails as before. WS `steam-todo`, `/steam-todo/*` — web-backend.md.
     Guards: `test-steam-signin.sh` § 1 (unsubscribes: one page at a time, Next / Open again / Skip / Stop, a no-folder id gets no
-    page), § 2 (each single download a to-do of 1: delivered, held until Next), § 3 `h.` (bulk subscribe of 3: only page 1 opens,
-    item 1 delivered → page 2 still waits, Next → page 2, Skip → page 3 + item 2's `/download` skipped in < 3 s, Stop → the rest;
+    page), § 2 (each single download a to-do of 1, `autoNext`: Steam delivers → finished with no Next), § 3 `h.` (bulk subscribe
+    of 3: only page 1 opens, item 1 delivered → page 2 opens by itself, Skip → page 3 + item 2's `/download` skipped in < 3 s, Stop → the rest;
     bulk Delete from source; "Let the Steam app do all 2" unreachable → unchanged, reachable → both through the fake client, the
-    mode unchanged; the page route never starts a `steam-ugc` child — the fake's `helpers.log` untouched).
+    mode unchanged; the page route never starts a `steam-ugc` child — the fake's `helpers.log` untouched), `i.` (a subscribe-only
+    entry auto-Done when its folder appears; a download whose folder existed before its turn: delivered, still waits for Next).
+  - **The Browse sidebar's Subscribe / Unsubscribe** (`Web/WorkshopSubOps.cs`; owner 2026-11-11: "make it so browse > wallpaper
+    engine (local) has option to unsubscribe / same for browse > workshop / it needs to be in the sidebar / probably a button that
+    lets you subscribe/unsubscribe in the sidebar") for "Wallpaper Engine (Local)" (the WE folder's items — subscriptions unless put
+    there by hand) and "Wallpaper Engine (Workshop)". **State** without a Steam-client connection (`POST /workshop/state`): subscribed
+    = its folder in a Steam Workshop root (`SteamWorkshopRoots` — the steamcmd cache excluded) or subscribed here this session (a
+    web subscribe returns before Steam made the folder), and not blocked / pending in `WorkshopUnsubQueue`; pending `subscribe` = a
+    subscribe running (this toggle, or a Workshop download's — `AppOps.DownloadAsync` marks it, not under steamcmd) or a to-do
+    subscribe entry; pending `unsubscribe` = queued / draining or a to-do unsubscribe entry. **Subscribe** =
+    `WorkshopDownloader.SubscribeOnlyAsync` — nothing imported: `steamapp` → `SteamClientUgc.SubscribeAsync` (waits for the install,
+    Steam's bytes → WS `subscribe-progress`), else a usable sign-in (not under `steampage`) → the web `SubscribeAsync`, else → a
+    Steam to-do subscribe entry with `hasDownload: false`; `steamcmd` (not a subscription mode, but an explicit click) → the
+    sign-in / to-do route. `Unblock` + drops a to-do unsubscribe of it first. **Unsubscribe**: an item IN the library (any
+    `LibraryItem.WorkshopId` match — a `local/<id>` link or a copy) = exactly `AppOps.DeleteFromSource` (trash + the queued
+    unsubscribe, undoable — the status bar's Undo, which re-subscribes per `Restore` / `ResubscribeAsync`); NOT in it =
+    `WorkshopUnsubQueue.AddPending` alone (no trash, no undo batch — re-subscribing is the Subscribe button); both then
+    `SteamOps.StartDrain` (routed by mode like Delete from source: steamapp → the client helper, a sign-in → the web call, else
+    the to-do). `StartDrain` asked while a drain runs now runs once more after it (it used to return — the new id waited for
+    the next launch). Titles go to `SteamTodo.RememberTitle`. Guard: `test-steam-signin.sh` § 3 `i.`.
+  - **"Open on Steam" opens the Steam CLIENT** (owner 2026-11-11: "open on steam doesn't open in real steam"): `POST
+    /steam/open-page {workshopId}` → `OpenInSteamApp("steam://url/CommunityFilePage/<id>")` → `{ok}`; the UI's `openOnSteam` falls
+    back to the https page in the browser on `ok: false`. A plain "show me the page" — NOT a Steam to-do entry. Every "Open on Steam"
+    for a Workshop item (Browse + Library sidebars).
   - **`steamapp`: one Steam-client helper at a time, app-wide** (`SteamClientUgc.Turn`, a `SemaphoreSlim` around every
     `steam-ugc subscribe|unsubscribe` child): a bulk download spawned a child per item at once (N processes each presenting
     themselves as Wallpaper Engine to one Steam client). A queued one's card says "Waiting for the Steam app…". The probe is
