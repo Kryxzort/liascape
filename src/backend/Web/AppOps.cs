@@ -536,9 +536,22 @@ public static class AppOps
             if (!paths.SequenceEqual(pl.VideoPaths))
                 SavePlaylistState(new CustomPlaylist { VideoPaths = paths, Settings = pl.Settings, Name = pl.Name });
         }
-        // undoing a "Delete from Source" un-queues the unsubscribe (a no-op for a plain delete), like the old app
+        // undoing a "Delete from Source" un-queues the unsubscribe (a no-op for a plain delete), like the old app — and one
+        // Steam already carried out is undone too: subscribed again (owner 2026-11-11: "what if i unsubscribe + undo / does it
+        // resubscribe? it doesn't right?" — it didn't: the item came back while Steam deleted its folder)
+        var resub = new List<string>();
         foreach (var i in batch.Items)
-            if (i.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid);
+            if (i.WorkshopId is string wid && WorkshopUnsubQueue.Restore(wid)) resub.Add(wid);
+        if (resub.Count > 0)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var msg = await WorkshopDownloader.ResubscribeAsync(resub, SettingsService.Load(), CancellationToken.None);
+                    if (msg != null) EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = resub.Count, message = msg });
+                }
+                catch (Exception e) { Console.WriteLine($"workshop: re-subscribing after undo failed: {e.Message}"); }
+            });
         return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
     }
 

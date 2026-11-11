@@ -320,6 +320,18 @@ public static class WorkshopDownloader
     {
         var pending = WorkshopUnsubQueue.SnapshotPending();
         if (pending.Count == 0) return new DrainResult();
+        var undone = new System.Collections.Generic.List<string>(); // unsubscribed after an Undo restored them → re-subscribed at the end
+        try { return await DrainCoreAsync(); }
+        finally
+        {
+            if (undone.Count > 0)
+            {
+                Console.WriteLine($"workshop: {string.Join(", ", undone)}: unsubscribed after an Undo restored it — subscribing again");
+                _ = ResubscribeAsync(undone, SettingsService.Load(), CancellationToken.None);
+            }
+        }
+        async Task<DrainResult> DrainCoreAsync()
+        {
         // "Use the Steam app": the running Steam client unsubscribes (owner 2026-11-11: "clicked the unsubscribe button but for
         // some reason it took me to the steam page instead of handling it itself"); whatever it can't confirm → the paths below
         if (settings.WorkshopDownloadMode == "steamapp")
@@ -328,7 +340,9 @@ public static class WorkshopDownloader
             progress?.Report((0, total0, pending[0]));
             var (confirmed, fallback) = await SteamClientUgc.UnsubscribeAsync(pending, settings, id =>
             {
-                WorkshopUnsubQueue.MarkBlocked(id); // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile
+                // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile. Not pending any more = undone
+                // while this ran → subscribe it again
+                if (!WorkshopUnsubQueue.MarkBlocked(id)) lock (undone) undone.Add(id);
                 progress?.Report((++n, total0, id));
             }, ct);
             if (fallback != null) Console.WriteLine($"workshop: unsubscribe not through the Steam app's Workshop interface — {fallback}");
@@ -346,7 +360,7 @@ public static class WorkshopDownloader
             try
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
-                WorkshopUnsubQueue.MarkBlocked(id);   // unsubscribed → Steam will delete the folder
+                if (!WorkshopUnsubQueue.MarkBlocked(id)) undone.Add(id); // unsubscribed → Steam deletes the folder; undone meanwhile → back
             }
             catch (SteamSignInRejectedException)
             {
@@ -368,6 +382,43 @@ public static class WorkshopDownloader
             try { await Task.Delay(300, ct); } catch { break; } // throttle
         }
         return new DrainResult();
+        }
+    }
+
+    /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them (owner 2026-11-11: "what if i
+    /// unsubscribe + undo / does it resubscribe? it doesn't right?") — the way the download mode subscribes: the Steam client
+    /// (steamapp), the sign-in (subscribe), else the item's page in the Steam app. Null = all done; else what the user still
+    /// has to click (the status bar shows it). steamcmd: nothing (no subscription).
+    public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct)
+    {
+        if (settings.WorkshopDownloadMode == "steamcmd" || ids.Count == 0) return null;
+        var toPage = new System.Collections.Generic.List<string>();
+        foreach (var id in ids)
+        {
+            try
+            {
+                if (settings.WorkshopDownloadMode == "steamapp")
+                {
+                    var r = await SteamClientUgc.SubscribeAsync(id, settings, null, ct);
+                    if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam client (undo)"); continue; }
+                    Console.WriteLine($"workshop: {id}: not re-subscribed through the Steam client — {r.Fallback}");
+                }
+                if (settings.WorkshopDownloadMode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
+                {
+                    await SetSubscribedAsync(id, settings, subscribe: true, ct);
+                    Console.WriteLine($"workshop: {id}: subscribed again with the sign-in (undo)"); continue;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e) { Console.WriteLine($"workshop: {id}: re-subscribing failed ({e.Message}) — opening it in the Steam app"); }
+            toPage.Add(id);
+        }
+        if (toPage.Count == 0) return null;
+        foreach (var id in toPage.Take(5)) OpenInSteamApp($"steam://url/CommunityFilePage/{id}");
+        // the page route can't know whether the user clicked Unsubscribe there — the words cover both
+        return toPage.Count == 1
+            ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set)."
+            : $"Undone — to keep them subscribed, click Subscribe on the {toPage.Count} pages Steam opened (any that say Subscribed are set).";
     }
 
     private static string Why(AppSettings s) =>

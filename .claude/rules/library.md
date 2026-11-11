@@ -167,9 +167,19 @@ Orchestrated in **`Web/AppOps.cs`**:
 
 **We never delete the workshop folder ourselves.** Unsubscribing makes Steam remove the folder + its `appworkshop_431960.acf` entry together on its next sync. A `blocked` set keeps AutoImport from resurrecting the lingering folder until Steam cleans it.
 
+**Undo of a Delete from Source** (owner 2026-11-11: "what if i unsubscribe + undo / does it resubscribe? it doesn't right?" — it
+didn't: the item came back while Steam deleted its folder): `AppOps.Undo` → `WorkshopUnsubQueue.Restore(id)` per item — true when
+Steam had ALREADY unsubscribed it (blocked, no longer pending) → `WorkshopDownloader.ResubscribeAsync` in the background, the way
+the download mode subscribes: `steamapp` the Steam client, `subscribe` the sign-in, else / on failure the item's page in the
+Steam app + WS `unsub-progress {finished, message}` for the status bar ("Undone — to keep it subscribed, click Subscribe on the
+page Steam opened (if it says Subscribed, you're set)" — the page route can't know whether the user clicked Unsubscribe);
+`steamcmd` nothing. An unsubscribe that completes AFTER an Undo restored the item (`MarkBlocked` returns false — it wasn't pending
+any more) blocks nothing and re-subscribes it at the end of the drain. Guard: `test-steam-signin.sh` § 3 (undo after the Steam
+client unsubscribed → subscribed again; Steam unreachable → the page + the message).
+
 ### `WorkshopUnsubQueue` (`Helpers/WorkshopUnsubQueue.cs`)
 - Persisted JSON `~/.config/liascape/workshop_unsub.json`: `{ Pending[], Blocked[] }`. `pending` = awaiting the unsubscribe POST; `blocked` = unsubscribed, AutoImport skips while Steam's cleanup lags.
-- API: `AddPending`, `RemovePending` (undo), `MarkBlocked` (pending→blocked), `Unblock` (re-subscribe / WE-Local re-add: drop from both), `SnapshotPending`, `HasPending`, `SnapshotBlockedSet` (one read per pass), `PruneBlocked(folderExists)`. Thread-safe (re-reads under a lock per call).
+- API: `AddPending`, `RemovePending` (undo), `MarkBlocked` (pending→blocked; false = no longer pending — undone meanwhile), `Restore` (undo: drop from both, true = already unsubscribed), `Unblock` (re-subscribe / WE-Local re-add: drop from both), `SnapshotPending`, `HasPending`, `SnapshotBlockedSet` (one read per pass), `PruneBlocked(folderExists)`. Thread-safe (re-reads under a lock per call).
 - **AutoImport** (`SyncWallpaperEngine`) snapshots `pending ∪ blocked` once into a `HashSet` and skips matches (never `IsBlocked` per folder).
 
 ### Drain (`WorkshopDownloader.DrainUnsubQueueAsync`)

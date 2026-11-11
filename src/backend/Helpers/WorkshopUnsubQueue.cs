@@ -84,15 +84,30 @@ public static class WorkshopUnsubQueue
         }
     }
 
-    // Drain step succeeded: unsubscribed → block (Steam will delete the folder on its next sync).
-    public static void MarkBlocked(string id)
+    // Drain step succeeded: unsubscribed → block (Steam will delete the folder on its next sync). False = it wasn't pending any
+    // more — an Undo restored the item while this unsubscribe was running: nothing is blocked, the caller re-subscribes it.
+    public static bool MarkBlocked(string id)
     {
         lock (_gate)
         {
             var s = Load();
-            bool changed = s.Pending.Remove(id);
-            if (!s.Blocked.Contains(id)) { s.Blocked.Add(id); changed = true; }
-            if (changed) Save(s);
+            if (!s.Pending.Remove(id)) return false;
+            if (!s.Blocked.Contains(id)) s.Blocked.Add(id);
+            Save(s);
+            return true;
+        }
+    }
+
+    // Undo of a Delete from source: wanted again → out of both lists. True = Steam had ALREADY unsubscribed it (blocked, no
+    // longer pending): the caller re-subscribes it (owner 2026-11-11: "what if i unsubscribe + undo / does it resubscribe?").
+    public static bool Restore(string id)
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            bool done = s.Blocked.Contains(id) && !s.Pending.Contains(id);
+            if (s.Pending.Remove(id) | s.Blocked.Remove(id)) Save(s);
+            return done;
         }
     }
 

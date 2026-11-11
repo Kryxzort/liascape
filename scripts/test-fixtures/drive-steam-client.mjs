@@ -112,4 +112,30 @@ const ok1 = await dropAndDrain("710000001");
 const opened = urls().slice(n0);
 out(ok1 && opened.some((x) => x.includes("710000001")), "…Steam unreachable: the unsubscribe falls back to the item's page in the Steam app", opened.join(" ") || "nothing opened");
 fs.rmSync(`${T}/steamlib/fail-init`);
+
+// g. owner 2026-11-11 ("what if i unsubscribe + undo / does it resubscribe? it doesn't right?"): Undo after Steam already
+// unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (its page route — Steam was
+// unreachable), 710000005 the one before (the Steam client unsubscribed it).
+const undo = async () => (await (await fetch(U + "/library/undo", { method: "POST" })).json());
+// 710000001: Steam is reachable again → the Steam client subscribes it again. Its unsubscribe went through the PAGE route, so
+// the fake never saw it: play the user's click on that page (drop the fake's subscription) — else the check proves nothing
+fs.rmSync(`${T}/steamlib/sub-710000001`, { force: true });
+const relBefore = released().length;
+await undo();
+for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-710000001`); i++) await sleep(100);
+// the re-subscribe's helper runs until Steam reports it installed — let it finish before Steam goes "unreachable" below
+for (let i = 0; i < 100 && released().length < relBefore + 2; i++) await sleep(100);
+out(fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001") && !!(await item("710000001")),
+  "Undo after Steam unsubscribed it: subscribed again through the Steam client, back in the library, off the queue",
+  `subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}, in library ${!!(await item("710000001"))}`);
+// 710000005 with Steam unreachable → its page opens for the user to click Subscribe, the status bar says so
+fs.writeFileSync(`${T}/steamlib/fail-init`, "");
+n0 = urls().length; unsub.length = 0;
+await undo();
+for (let i = 0; i < 100 && !urls().slice(n0).some((x) => x.includes("710000005")); i++) await sleep(100);
+await sleep(300);
+const msg = unsub.find((e) => e.message)?.message ?? "";
+out(urls().slice(n0).join() === "steam://url/CommunityFilePage/710000005" && /click Subscribe/.test(msg) && !!(await item("710000005")),
+  "…Steam unreachable: the item's page opens to subscribe again, the status bar says so", `${urls().slice(n0).join(" ") || "nothing opened"} | ${msg}`);
+fs.rmSync(`${T}/steamlib/fail-init`);
 ws.close();
