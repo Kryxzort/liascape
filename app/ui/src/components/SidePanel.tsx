@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X, Play, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Repeat } from "lucide-react";
+import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Repeat } from "lucide-react";
 import { captureSource } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { type PreviewKind } from "../store";
@@ -81,7 +81,7 @@ const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, vide
 // unmounted on a switch / close, which stops it). Layers cross-fade on opacity. At the picture's own aspect: read from the
 // card's loaded image when the item is focused, else from an earlier visit, else 16:9 until the still loads — capped in
 // height (index.css `.side-media`). `play`: the Library sidebar's picture is its Play control (owner 2026-11-11: the Play /
-// In playlist row was "redundant clutter") — on hover a round accent Play button over a slightly scaled picture; already
+// In playlist row was "redundant clutter") — no icon (owner: clicking the picture is intuitive), the hover cue is the frame lifting 1.025× with its glow; already
 // playing → the "Playing now" badge instead; on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
 export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, play }: {
@@ -118,9 +118,7 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
             onPlaying={() => setVidOn(video)} />}
           {yt && <YouTubeEmbed url={youtube} onClose={() => pick(def)} />}
           {playable && (
-            <button className="side-play" data-side-play aria-label={play.label} title={`${play.label} (Enter)`} onClick={play.onPlay}>
-              <span className="side-play-ring"><Play size={22} fill="currentColor" /></span>
-            </button>
+            <button className="side-play" data-side-play aria-label={play.label} title={`${play.label} (Enter)`} onClick={play.onPlay} />
           )}
           {play?.playing && (
             <span className="side-badge playing" data-side-playing>

@@ -50,19 +50,22 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
 // Motion off → one jump, re-aimed over 3 frames like the app-open travel. Then `locateFx` spotlights it (below).
 // Returns false when the element isn't in the list (nothing playing, the item filtered out / not in the playlist).
 export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y", smooth: boolean): boolean {
-  if (!sc || !sc.querySelector(selector)) return false;
+  const target = sc?.querySelector<HTMLElement>(selector);
+  if (!sc || !target) return false;
   const TAU = 110, MAX_MS = 1500;
   let raf = 0, last = 0, t0 = 0, frames = 0, stopped = false;
+  // the spotlight dims the window from the click on (owner 2026-11-11), its hole riding the target through the glide
+  const fx = locateFx(target, smooth);
   const stop = () => {
     if (stopped) return;
     stopped = true; cancelAnimationFrame(raf);
-    sc.removeEventListener("wheel", stop); sc.removeEventListener("pointerdown", stop);
+    sc.removeEventListener("wheel", interrupt); sc.removeEventListener("pointerdown", interrupt);
   };
-  const flash = () => { const el = sc.querySelector<HTMLElement>(selector); if (el) locateFx(el, smooth); };
+  const interrupt = () => { stop(); fx.cancel(); };
   const step = (t: number) => {
     if (stopped) return;
     const el = sc.querySelector<HTMLElement>(selector);
-    if (!el) { stop(); return; }
+    if (!el) { interrupt(); return; }
     if (!t0) t0 = t;
     const s = sc.getBoundingClientRect(), r = el.getBoundingClientRect();
     const cur = axis === "y" ? sc.scrollTop : sc.scrollLeft;
@@ -76,11 +79,11 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
     const moved = Math.abs((axis === "y" ? sc.scrollTop : sc.scrollLeft) - cur);
     frames++;
     const done = smooth ? Math.abs(delta) < 0.75 || (frames > 2 && moved < 0.25) : frames >= 4;
-    if (done || t - t0 > MAX_MS) { stop(); flash(); return; }
+    if (done || t - t0 > MAX_MS) { stop(); fx.reveal(); return; }
     raf = requestAnimationFrame(step);
   };
-  sc.addEventListener("wheel", stop, { passive: true });
-  sc.addEventListener("pointerdown", stop);
+  sc.addEventListener("wheel", interrupt, { passive: true });
+  sc.addEventListener("pointerdown", interrupt);
   raf = requestAnimationFrame(step);
   return true;
 }
@@ -94,32 +97,57 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
 // frame (the bar's dock magnification moves it; a scroll). The element itself carries `.locate-flash` meanwhile: a static
 // accent outline (shows with "Glow effects" off; the matrix's travel:button reads it). Glow effects off → no glow layer, the
 // spotlight + rings stay; motion off → no animation: the dim, the outline and one still ring for 1.2 s, then gone at once.
+// Two phases (owner 2026-11-11: "make the spotlight dim be there from the moment you click the button"): `locateFx` puts up
+// the dim at once (a quick fade in, `.lfx-dim.in`) — its hole follows the element while `glideTo` scrolls it into place — and
+// `reveal()` on arrival adds the glow, edge and rings and starts the 1.5 s clock, the dim holding then fading with them.
+// `cancel()` (the user wheels / presses mid-glide) fades the dim straight out.
 let fxCleanup: (() => void) | null = null;
-export const LOCATE_FX_MS = 1500, LOCATE_STATIC_MS = 1200;
-export function locateFx(el: HTMLElement, motion: boolean) {
+export const LOCATE_FX_MS = 1500, LOCATE_STATIC_MS = 1200, LOCATE_OUT_MS = 160;
+export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void; cancel: () => void } {
   fxCleanup?.();
-  const glow = !document.documentElement.classList.contains("no-glow");
   const fx = document.createElement("div");
-  fx.className = `locate-fx${motion ? "" : " still"}${glow ? "" : " flat"}`;
+  fx.className = `locate-fx${motion ? "" : " still"}`;
   fx.setAttribute("aria-hidden", "true");
-  const radius = getComputedStyle(el).borderRadius || "10px";
-  const r0 = el.getBoundingClientRect(), D = 26;
-  fx.style.setProperty("--r", radius);
-  fx.style.setProperty("--sx", String((r0.width + 2 * D) / Math.max(1, r0.width)));
-  fx.style.setProperty("--sy", String((r0.height + 2 * D) / Math.max(1, r0.height)));
-  fx.innerHTML = `<div class="lfx-dim"></div>${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
-    (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`);
-  let raf = 0, last = "";
+  fx.style.setProperty("--r", getComputedStyle(el).borderRadius || "10px");
+  fx.innerHTML = `<div class="lfx-dim in"></div>`;
+  let raf = 0, last = "", t = 0, phase: "travel" | "shown" | "gone" = "travel";
   const place = () => {
     const r = el.getBoundingClientRect(), k = `${r.left},${r.top},${r.width},${r.height}`;
     if (k !== last) { last = k; fx.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`; fx.style.width = `${r.width}px`; fx.style.height = `${r.height}px`; }
   };
   const tick = () => { if (!el.isConnected) { done(); return; } place(); raf = requestAnimationFrame(tick); };
+  const done = () => {
+    phase = "gone"; cancelAnimationFrame(raf); clearTimeout(t); fx.remove(); el.classList.remove("locate-flash");
+    if (fxCleanup === done) fxCleanup = null;
+  };
+  const born = performance.now(), DIM_IN_MS = 180;
+  const reveal = () => {
+    if (phase !== "travel") return;
+    // a short glide (the item already near view) arrives before the dim has faded up: wait it out, no opacity pop
+    const wait = motion ? DIM_IN_MS - (performance.now() - born) : 0;
+    if (wait > 8) { clearTimeout(t); t = window.setTimeout(reveal, wait); return; }
+    phase = "shown";
+    const glow = !document.documentElement.classList.contains("no-glow");
+    if (!glow) fx.classList.add("flat");
+    const r0 = el.getBoundingClientRect(), D = 26;
+    fx.style.setProperty("--sx", String((r0.width + 2 * D) / Math.max(1, r0.width)));
+    fx.style.setProperty("--sy", String((r0.height + 2 * D) / Math.max(1, r0.height)));
+    fx.firstElementChild!.className = "lfx-dim";
+    fx.insertAdjacentHTML("beforeend", `${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
+      (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`));
+    el.classList.add("locate-flash");
+    t = window.setTimeout(done, motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
+  };
+  const cancel = () => {
+    if (phase !== "travel") return;
+    phase = "gone"; clearTimeout(t);
+    if (!motion) { done(); return; }
+    fx.firstElementChild!.className = "lfx-dim out";
+    t = window.setTimeout(done, LOCATE_OUT_MS);
+  };
   place();
   document.body.appendChild(fx);
-  el.classList.add("locate-flash");
   raf = requestAnimationFrame(tick);
-  const t = setTimeout(() => done(), motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
-  const done = () => { cancelAnimationFrame(raf); clearTimeout(t); fx.remove(); el.classList.remove("locate-flash"); if (fxCleanup === done) fxCleanup = null; };
   fxCleanup = done;
+  return { reveal, cancel };
 }

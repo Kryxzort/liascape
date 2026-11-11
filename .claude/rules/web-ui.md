@@ -145,7 +145,12 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   in the playlist or the bar is collapsed). Both call `glideTo(container, selector, axis, motion)` (`hooks/travelToPlaying.ts`):
   every frame it re-measures the element (content-visibility cards take their real size on the way) and closes a fraction of the
   distance (τ 110 ms) so it ends mid-view; the browser clamps at the ends (an end item can't be centred — no own max: scrollWidth −
-  clientWidth came out 3 px short); a wheel / pointer-down in the list stops it; motion off → a jump re-aimed over 3 frames. Then
+  clientWidth came out 3 px short); a wheel / pointer-down in the list stops it (and fades the dim out, `.lfx-dim.out` 160 ms); motion off → a jump
+  re-aimed over 3 frames. The spotlight's dim is up **from the click** (owner 2026-11-11: "make the spotlight dim be there from
+  the moment you click the button"): `locateFx` returns `{ reveal, cancel }` — at the click only `.lfx-dim.in` (fades up 180 ms,
+  its hole riding the target through the glide); `reveal()` on arrival (held until the 180 ms fade-in is done, so a short glide
+  never pops the opacity) swaps it to the hold-then-fade keyframes and adds the glow / edge / rings + `.locate-flash`, starting
+  the 1.5 s (still: 1.2 s) clock. Then
   the element is spotlit (owner 2026-11-11: "you didnt really add glow to the new stuff … do some cool design to make the
   go-to-playing more apparant of where's the wallpaper"): `locateFx(el, motion)` puts ONE fixed layer on `<body>` (`.locate-fx`,
   z 85, above the sidebar and the bar, never clipped by the grid / the bar's row) over the element's box, re-placed every frame
@@ -348,14 +353,15 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
     `--side-media-h` = `min(38vh, 320px)`), the hero (SCENE / crashed chips, duration — reserved —, resolution, age rating pills),
     tiles **Open in file manager · Open on Steam · Delete · Delete from source** (Workshop items, auto-import off), **Playback**
     (the crash whitelist, Volume, Speed, the loudness line + note), Scene properties, **Details** (tags, Workshop ID).
-    **The picture is the Play control** (owner 2026-11-11: the Play / In playlist row was "redundant clutter" — gone): on hover
-    a round accent Play button (`.side-play` `[data-side-play]`, a `<button>` over the whole picture, `aria-label` "Play
-    <title>", keyboard-reachable) over a picture scaled 1.025× with its glow up; a click applies the item. Already playing → no
+    **The picture is the Play control** (owner 2026-11-11: the Play / In playlist row was "redundant clutter" — gone): an
+    invisible `<button>` over the whole picture (`.side-play` `[data-side-play]`, `aria-label` "Play <title>",
+    keyboard-reachable, accent edge on focus) — **no Play icon** (owner 2026-11-11: clicking the picture to set it is
+    intuitive); the hover cue is the picture scaling 1.025× with its glow up; a click applies the item. Already playing → no
     overlay, the "Playing now · looping this one" badge on the picture (`[data-side-playing]`, `keepCurrent`) and a green frame.
     On the YouTube trailer the embed takes the clicks: Play moves to the head (`.side-tool.accent` `[data-side-play]`). Enter
     still plays. **In playlist** = the head's `PlaylistToggle` (`.side-tool.side-pl` `[data-side-playlist]`, `aria-pressed`,
     tooltip "Add to playlist" / "Remove from playlist"; a selection's targets like the card's toggle). Guard: probe-sidebar
-    `lib:play` (the button's name + tabIndex, hidden until a real hover then shown + the picture scaled, a real click plays k3,
+    `lib:play` (the button's name + tabIndex, no icon or tint before or on a real hover, the picture scaled, a real click plays k3,
     then the badge and no button; the head toggle out / back in; RED on the old UI). **The preview switch** (owner 2026-11-11: "a
     button to switch between gif preview, mp4 preview and youtube video preview"; `usePreview` in `components/sidePreview.ts`):
     translucent chips top-left on the picture (`.side-switch` / `.side-sw`, the active one accent + glow), only the options the

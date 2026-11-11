@@ -386,17 +386,17 @@ app.whenReady().then(async () => {
       const r0 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); const f = s.querySelector("[data-side-media]");
         return { btn: !!b, inMedia: !!b?.closest("[data-side-media]"), tag: b?.tagName, label: b?.getAttribute("aria-label"), tab: b ? b.tabIndex : null, media: f ? m.rect(f) : null,
           old: [...s.querySelectorAll("button")].filter((x) => /^(Play|Playing|In playlist|Add to playlist)$/.test(x.textContent.trim())).length,
-          op: b ? +getComputedStyle(b).opacity : null, pl: s.querySelector(".side-head [data-side-playlist]")?.getAttribute("aria-pressed") ?? null };`);
+          icon: b ? b.querySelectorAll("svg, img").length : null, bg: b ? getComputedStyle(b).backgroundImage : null, pl: s.querySelector(".side-head [data-side-playlist]")?.getAttribute("aria-pressed") ?? null };`);
       if (!r0.btn || !r0.inMedia) return [`no Play control on k3's picture (${JSON.stringify(r0)})`];
       if (r0.label !== "Play k3") v.push(`its accessible name is "${r0.label}", not "Play k3"`);
       if (r0.tag !== "BUTTON" || r0.tab < 0) v.push(`it isn't keyboard-reachable (${r0.tag}, tabIndex ${r0.tab})`);
       if (r0.old) v.push(`the old Play / In playlist buttons are still there (${r0.old})`);
       if (r0.pl !== "true") v.push(`the head's playlist toggle says aria-pressed=${r0.pl} for k3 (in the playlist)`);
-      if (r0.op > 0.1) v.push(`the Play overlay shows without a hover (opacity ${r0.op})`);
+      if (r0.icon || (r0.bg && r0.bg !== "none")) v.push(`the picture shows a Play icon / tint (owner: no icon; ${r0.icon} icons, bg ${r0.bg})`);
       const cx = r0.media.x + r0.media.w / 2, cy = r0.media.y + r0.media.h / 2;
       await mv(cx - 20, cy, 80); await mv(cx, cy, 500);
-      const r1 = await page(`const s = m.side(); return { op: +getComputedStyle(s.querySelector("[data-side-play]")).opacity, tr: getComputedStyle(s.querySelector(".side-frame")).transform };`);
-      if (r1.op < 0.9) v.push(`hovering the picture: the Play overlay at opacity ${r1.op}`);
+      const r1 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); return { icon: b.querySelectorAll("svg, img").length, tr: getComputedStyle(s.querySelector(".side-frame")).transform };`);
+      if (r1.icon) v.push(`hovering the picture: a Play icon appears (owner: no icon)`);
       if (r1.tr === "none") v.push("hovering the picture: it doesn't scale");
       await shot("lib-play-hover");
       send({ type: "mouseDown", x: Math.round(cx), y: Math.round(cy), button: "left", clickCount: 1 }); await sleep(40);
@@ -516,10 +516,12 @@ app.whenReady().then(async () => {
 
     // "go to playing": the spotlight (owner 2026-11-11: "make the go-to-playing more apparant of where's the wallpaper")
     const LOCATE = (btn) => `await m.closeAll(); await m.sleep(200); const b = document.querySelector('[data-go-playing="${btn}"]'); if (!b || b.disabled) return { btn: false };
-      b.click(); const t0 = performance.now(); const out = { btn: true, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null };
+      b.click(); const t0 = performance.now(); const fx0 = document.querySelector(".locate-fx");
+      const out = { btn: true, atClick: !!fx0 && !!fx0.querySelector(".lfx-dim") && !fx0.querySelector(".lfx-edge"), edge: null, preDim: 0, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null };
       await new Promise((res) => { const f = () => { const t = performance.now() - t0; const fx = document.querySelector(".locate-fx");
         if (fx) { if (out.seen == null) out.seen = Math.round(t); out.still = fx.classList.contains("still");
           const d = fx.querySelector(".lfx-dim"); if (d) out.dim = Math.max(out.dim, +getComputedStyle(d).opacity);
+          if (fx.querySelector(".lfx-edge")) { if (out.edge == null) out.edge = Math.round(t); } else if (d) out.preDim = Math.max(out.preDim, +getComputedStyle(d).opacity);
           const rs = [...fx.querySelectorAll(".lfx-ring")]; out.rings = Math.max(out.rings, rs.length);
           for (const r of rs) { const tf = getComputedStyle(r).transform; if (tf && tf !== "none") { const mm = new DOMMatrix(tf); out.scale = Math.max(out.scale, mm.a, mm.d); } }
           if (fx.querySelector(".lfx-glow")) out.glow = true;
@@ -537,8 +539,13 @@ app.whenReady().then(async () => {
         const r = await run(`${btn}`, btn);
         if (!r) continue;
         if (r.seen == null) { v.push(`${btn}: no spotlight after the button`); continue; }
+        // owner 2026-11-11: "make the spotlight dim be there from the moment you click the button" — the dim is up in the click's
+        // own task (no edge / rings yet: those wait for the glide's arrival) and fades up during the glide
+        if (!r.atClick) v.push(`${btn}: no dim (alone) right at the click`);
+        if (r.edge == null) v.push(`${btn}: the spotlight never revealed the item (no edge)`);
+        else if (r.preDim < 0.8) v.push(`${btn}: the dim didn't come up during the glide (${r.preDim} before arrival at ${r.edge} ms)`);
         if (r.gone == null || r.left) v.push(`${btn}: the spotlight never went away`);
-        else if (r.gone - r.seen > 2000 || r.gone - r.seen < 1000) v.push(`${btn}: the spotlight lasted ${r.gone - r.seen} ms (1–2 s)`);
+        else if (r.edge != null && (r.gone - r.edge > 2000 || r.gone - r.edge < 1000)) v.push(`${btn}: the spotlight lasted ${r.gone - r.edge} ms after arrival (1–2 s)`);
         if (r.dim < 0.8) v.push(`${btn}: the rest never dimmed (dim opacity ${r.dim})`);
         if (r.rings < 3 || r.scale < 1.05) v.push(`${btn}: no rippling rings (${r.rings} rings, scale ≤ ${r.scale.toFixed(2)})`);
         if (!r.glow) v.push(`${btn}: no glow layer`);
@@ -560,7 +567,8 @@ app.whenReady().then(async () => {
         if (st.seen == null) { v.push(`${btn}, animations off: no highlight`); continue; }
         if (!st.still || st.anims) v.push(`${btn}, animations off: it animates (${st.anims} animations, still ${st.still})`);
         if (st.dim < 0.9 || st.rings < 1) v.push(`${btn}, animations off: no dim / ring (${J(st)})`);
-        if (st.gone == null || st.gone - st.seen > 1600 || st.gone - st.seen < 900) v.push(`${btn}, animations off: shown ${st.gone == null ? "for ever" : st.gone - st.seen + " ms"} (~1.2 s)`);
+        if (!st.atClick) v.push(`${btn}, animations off: no dim right at the click`);
+        if (st.gone == null || st.edge == null || st.gone - st.edge > 1600 || st.gone - st.edge < 900) v.push(`${btn}, animations off: shown ${st.gone == null || st.edge == null ? "for ever / never" : st.gone - st.edge + " ms"} (~1.2 s)`);
       }
       await setMotion(true);
       return v;
