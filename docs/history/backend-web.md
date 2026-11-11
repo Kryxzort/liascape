@@ -1,8 +1,6 @@
----
-paths:
-  - "src/backend/Web/**"
-  - "src/backend/Program.cs"
----
+<!-- Archived verbatim from .claude/rules/web-backend.md (2026-11-11 docs rework): the old rule text with its history,
+     measurements and owner quotes. NOT loaded automatically and may be stale: the code, CLAUDE.md and
+     .claude/rules/** win. -->
 
 # Web backend (`serve`)
 

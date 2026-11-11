@@ -1,7 +1,6 @@
----
-paths:
-  - "src/backend/Player/**"
----
+<!-- Archived verbatim from .claude/rules/player-adapter.md (2026-11-11 docs rework): the old rule text with its history,
+     measurements and owner quotes. NOT loaded automatically and may be stale: the code, CLAUDE.md and
+     .claude/rules/** win. -->
 
 # liascape-player adapter (`PlayerEngine` setting, Task 17)
 

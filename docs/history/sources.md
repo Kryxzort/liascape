@@ -1,10 +1,6 @@
----
-paths:
-  - "src/backend/Scrapers/**"
-  - "src/backend/Services/**"
-  - "src/backend/Helpers/WorkshopDownloader.cs"
-  - "src/backend/Models/WorkshopFilter.cs"
----
+<!-- Archived verbatim from .claude/rules/sources.md (2026-11-11 docs rework): the old rule text with its history,
+     measurements and owner quotes. NOT loaded automatically and may be stale: the code, CLAUDE.md and
+     .claude/rules/** win. -->
 
 ## Wallpaper Sources
 

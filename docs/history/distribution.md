@@ -1,3 +1,7 @@
+<!-- Archived verbatim from .claude/rules/distribution.md (2026-11-11 docs rework): the old rule text with its history,
+     measurements and owner quotes. NOT loaded automatically and may be stale: the code, CLAUDE.md and
+     .claude/rules/** win. -->
+
 ## Distribution
 
 Users type **one command, `liascape`** (git/cargo style): bare = the app, `liascape <command>` = the CLI

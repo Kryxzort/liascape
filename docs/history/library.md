@@ -1,12 +1,6 @@
----
-paths:
-  - "src/backend/Helpers/LibraryService.cs"
-  - "src/backend/Helpers/LibraryStore.cs"
-  - "src/backend/Helpers/SceneProperties.cs"
-  - "src/backend/Helpers/DownloadHelper.cs"
-  - "src/backend/Helpers/ImportService.cs"
-  - "src/backend/Models/LibraryItem.cs"
----
+<!-- Archived verbatim from .claude/rules/library.md (2026-11-11 docs rework): the old rule text with its history,
+     measurements and owner quotes. NOT loaded automatically and may be stale: the code, CLAUDE.md and
+     .claude/rules/** win. -->
 
 ## Library layout (per-item folders + per-source `index.json`)
 
