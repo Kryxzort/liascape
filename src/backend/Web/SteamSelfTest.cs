@@ -15,8 +15,8 @@ namespace Liascape.Web;
 // hidden `liascape-backend steam-selftest` (PASS/FAIL, exit 1 on a failure): the password sign-in's plumbing — SteamOps'
 // endpoints' calls, the WS events, the code steps, errors, cancel, the rate-limit hold, what gets saved, and that the
 // password shows up NOWHERE (events, console) — with a scripted sign-in in place of SteamKit2 (never a real Steam account),
-// plus the no-sign-in unsubscribe (WorkshopDownloader.DrainUnsubQueueAsync → the Steam app) with a stub `xdg-open` that only
-// records the URL. Needs a private HOME under /tmp (it writes settings.json, workshop_unsub.json and fake Steam folders there).
+// plus the no-sign-in unsubscribe (WorkshopDownloader.DrainUnsubQueueAsync → the Steam to-do, one page at a time, Next / Open
+// again / Skip / Stop) with a stub `xdg-open` that only records the URL. Needs a private HOME under /tmp (it writes settings.json, workshop_unsub.json and fake Steam folders there).
 public static class SteamSelfTest
 {
     private const string Password = "pw-SELFTEST-c0rrect-h0rse";
@@ -215,7 +215,7 @@ public static class SteamSelfTest
         await DrainTests();
     }
 
-    // The no-sign-in unsubscribe: what Steam still has on disk opens in the Steam app (stub xdg-open records the URL).
+    // The no-sign-in unsubscribe: every id into the Steam to-do, one page at a time (stub xdg-open records the URL).
     private static async Task DrainTests()
     {
         string home = Environment.GetEnvironmentVariable("HOME")!;
@@ -225,12 +225,27 @@ public static class SteamSelfTest
         File.SetUnixFileMode(Path.Combine(bin, "xdg-open"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         Environment.SetEnvironmentVariable("PATH", bin + ":" + Environment.GetEnvironmentVariable("PATH"));
         string steamWs = Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960");
-        foreach (var id in new[] { "800000001", "800000002", "800000003" }) Directory.CreateDirectory(Path.Combine(steamWs, id));
+        foreach (var id in new[] { "800000001", "800000002", "800000003", "800000004" }) Directory.CreateDirectory(Path.Combine(steamWs, id));
         async Task<List<string>> Urls(int n)
         {
             for (int i = 0; i < 100 && (File.Exists(rec) ? File.ReadAllLines(rec).Length : 0) < n; i++) await Task.Delay(30);
             return File.Exists(rec) ? [.. File.ReadAllLines(rec)] : [];
         }
+
+        // the latest WS steam-todo payload (the Steam to-do — Web/SteamTodo.cs; other events are dropped here)
+        JsonElement? Todo()
+        {
+            JsonElement? last = null;
+            while (Events.TryDequeue(out var e))
+                if (e.Type == "steam-todo") { using var d = JsonDocument.Parse(e.Json); last = d.RootElement.GetProperty("payload").Clone(); }
+            return last;
+        }
+        string Show(JsonElement? p) => p?.GetRawText() ?? "none";
+        int I(JsonElement? p, string k) => p is { } v && v.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.Number ? x.GetInt32() : -1;
+        string CurId(JsonElement? p) => p is { } v && v.TryGetProperty("current", out var c) ? c.GetProperty("id").GetString() ?? "" : "";
+        bool Pending(string id) => WorkshopUnsubQueue.SnapshotPending().Contains(id);
+        bool Blocked(string id) => WorkshopUnsubQueue.SnapshotBlockedSet().Contains(id);
+        Todo();
 
         SteamOps.SignOut();
         WorkshopUnsubQueue.AddPending(["800000001"]);
@@ -238,21 +253,55 @@ public static class SteamSelfTest
         var urls = await Urls(1);
         Check(urls.LastOrDefault() == "steam://url/CommunityFilePage/800000001", $"unsub, signed out, 1 item: its page opens in Steam ({string.Join(" ", urls)})");
         Check(r.OpenedInSteam == 1 && (r.Message ?? "").Contains("Not signed in") && (r.Message ?? "").Contains("Unsubscribe"), $"…the message says why + what to click ({r.Message})");
-        Check(!WorkshopUnsubQueue.HasPending() && WorkshopUnsubQueue.SnapshotBlockedSet().Contains("800000001"), "…pending → blocked");
+        var tp = Todo();
+        Check(Str(tp ?? default, "action") == "unsubscribe" && I(tp, "index") == 1 && I(tp, "total") == 1 && CurId(tp) == "800000001",
+            $"…WS steam-todo: unsubscribe 1 of 1, the item ({Show(tp)})");
+        Check(Pending("800000001"), "…still pending while its page waits (blocked only on Next)");
+        SteamTodo.Next();
+        tp = Todo();
+        Check(!Pending("800000001") && Blocked("800000001") && tp is { } f1 && f1.TryGetProperty("finished", out _), $"Next: pending → blocked, the to-do finished ({Show(tp)})");
 
+        // three Steam has (+1 it hasn't — an owned steamcmd-style copy, never a subscription: no page, blocked at once): one page at
+        // a time, Next / Open again / Skip / Stop
         SettingsService.Update(x => { x.SteamRefreshToken = FakeJwt(76561190000000001); x.SteamId = 76561190000000001; x.SteamSignInRejected = true; });
-        WorkshopUnsubQueue.AddPending(["800000002", "800000003", "800000099"]);
+        WorkshopUnsubQueue.AddPending(["800000002", "800000099", "800000003", "800000004"]);
         r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         urls = await Urls(2);
-        Check(urls.LastOrDefault() == "steam://openurl/https://steamcommunity.com/my/myworkshopfiles/?appid=431960&browsefilter=mysubscriptions",
-            $"unsub, sign-in rejected, 2 items Steam has (+1 it hasn't): the subscriptions list opens ({urls.LastOrDefault()})");
-        Check(r.OpenedInSteam == 2 && (r.Message ?? "").Contains("signed this app out"), $"…2 of them, the message says Steam signed out ({r.Message})");
-        Check(!WorkshopUnsubQueue.HasPending(), "…all three leave pending");
+        await Task.Delay(200);
+        urls = await Urls(0);
+        Check(urls.Count == 2 && urls[^1] == "steam://url/CommunityFilePage/800000002",
+            $"unsub, sign-in rejected, 3 items Steam has: only the first page opens — never the subscriptions list ({string.Join(" ", urls)})");
+        Check(r.OpenedInSteam == 3 && (r.Message ?? "").Contains("signed this app out") && (r.Message ?? "").Contains("one at a time"), $"…3 in the to-do, the message says why ({r.Message})");
+        Check(!Pending("800000099") && Blocked("800000099"), "…the one Steam doesn't have (no Steam folder): no entry, no page, blocked at once");
+        tp = Todo();
+        Check(I(tp, "index") == 1 && I(tp, "total") == 3 && I(tp, "remaining") == 3, $"…WS steam-todo: 1 of 3 ({Show(tp)})");
+        await Task.Delay(300);
+        Check((await Urls(0)).Count == 2, "…nothing else opens by itself");
+        var again = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
+        Check(again.OpenedInSteam == 0 && (await Urls(0)).Count == 2, "…a second drain leaves the to-do's ids alone");
+        SteamTodo.Next();
+        urls = await Urls(3);
+        tp = Todo();
+        Check(urls.Count == 3 && urls[^1] == "steam://url/CommunityFilePage/800000003" && I(tp, "index") == 2 && CurId(tp) == "800000003",
+            $"Next: the second page opens, 2 of 3 ({urls.LastOrDefault()}, {Show(tp)})");
+        Check(Blocked("800000002") && !Pending("800000002"), "…the first is blocked");
+        SteamTodo.Reopen();
+        urls = await Urls(4);
+        Check(urls.Count == 4 && urls[^1] == "steam://url/CommunityFilePage/800000003", "Open again: the same page again");
+        SteamTodo.Skip();
+        urls = await Urls(5);
+        Check(urls.Count == 5 && urls[^1] == "steam://url/CommunityFilePage/800000004", $"Skip: the third page opens ({urls.LastOrDefault()})");
+        Check(!Pending("800000003") && !Blocked("800000003"), "…the skipped one stays subscribed: out of pending AND blocked");
+        SteamTodo.Stop();
+        tp = Todo();
+        await Task.Delay(200);
+        Check(!Pending("800000004") && !Blocked("800000004") && tp is { } f2 && f2.TryGetProperty("finished", out _) && (await Urls(0)).Count == 5,
+            $"Stop: the rest stays subscribed, the to-do finished, nothing more opens ({Show(tp)})");
 
-        WorkshopUnsubQueue.AddPending(["800000099"]);
+        WorkshopUnsubQueue.AddPending(["800000098"]);
         r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         await Task.Delay(300);
-        Check(r.OpenedInSteam == 0 && r.Message == null && (await Urls(0)).Count == 2, "unsub of an item Steam doesn't have: nothing opens, no message");
+        Check(r.OpenedInSteam == 0 && r.Message == null && (await Urls(0)).Count == 5 && Todo() == null, "unsub of an item Steam doesn't have: nothing opens, no to-do, no message");
         SteamOps.SignOut();
     }
 }

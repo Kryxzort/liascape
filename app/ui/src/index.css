@@ -588,6 +588,39 @@ input[type=range]:focus-visible { outline: none; }
   box-shadow: var(--glow-sm); animation: drain-ind 1.1s ease-in-out infinite; }
 @keyframes drain-ind { 0% { margin-left: -45%; } 100% { margin-left: 100%; } }
 
+/* ---- the Steam to-do (components/SteamTodoPanel.tsx): floating bottom-right, above the item sidebar (40) + the bar's hover
+   glow (45), under the modals (50); `bottom` inline (lifted over the playlist bar). Glow = var(--glow*) → none under no-glow ---- */
+.steam-todo { position: fixed; right: 16px; z-index: 46; width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column;
+  gap: 8px; padding: 12px 14px 12px; border-radius: 14px; font-size: 13px; color: var(--text);
+  background:
+    radial-gradient(260px 160px at 100% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--surface1));
+  box-shadow: 0 14px 34px rgba(0,0,0,.5), var(--glow-sm); }
+.steam-todo.folded { width: auto; padding: 8px 10px 8px 14px; }
+.st-head { display: flex; align-items: center; gap: 10px; }
+.st-name { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.st-head .st-step { color: var(--subtext); font-size: 12px; font-weight: 600; }
+.st-fold { margin-left: auto; }
+.steam-todo > .st-step { font-weight: 700; font-size: 14px; }
+.st-title { color: var(--subtext); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -4px; }
+.st-bar { height: 5px; border-radius: 999px; }
+.st-hint, .st-msg { margin: 0; line-height: 1.4; color: var(--muted); font-size: 12px; }
+.st-msg { color: var(--warn, #f9e2af); }
+.st-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-btns .btn { padding: 5px 10px; font-size: 12.5px; }
+.st-btns .st-next { flex: 1 0 100%; justify-content: center; }
+.st-btns .st-stop:hover:not(:disabled) { color: var(--danger); }
+.st-use { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; padding: 9px 2px 0;
+  border: 0; border-top: 1px solid var(--surface1); background: none; color: var(--accent); font: inherit; font-weight: 700;
+  cursor: pointer; text-align: left; transition: color .15s; }
+.st-use svg { transition: transform .18s; }
+.st-use:hover:not(:disabled) svg { transform: translateX(3px); }
+.st-use:hover:not(:disabled) { color: var(--accent-hover, var(--accent)); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent)); }
+.st-use:disabled { color: var(--muted); cursor: default; }
+:root.no-motion .st-use svg { transition: none; }
+:root.no-glow .st-use:hover:not(:disabled) { filter: none; }
+
 /* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
 .wfilter { position: relative; display: flex; gap: 8px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
 .wf-open { display: inline-flex; align-items: center; gap: 6px; }

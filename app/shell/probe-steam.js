@@ -29,7 +29,13 @@
 //   steam:modal:keys      Tab order account → password → Cancel → Sign in; nothing in the modal has a title (tooltip)
 //   steam:dlStatus        a Workshop download from the Browse sidebar while the backend waits on the Steam app: the sidebar and the
 //                         status bar show download-progress's status ("…click Subscribe in Steam…"); the card the step in short
-//                         words over a sweeping bar (each phase); Cancel aborts the request
+//                         words over a sweeping bar (each phase, + "In the Steam to-do" / "Waiting for the Steam app…"); Cancel
+//                         aborts the request
+//   steam:todo            the Steam to-do panel (components/SteamTodoPanel.tsx) for a fake WS steam-todo: "Subscribe in Steam · 2 of
+//                         5", the title, the hint, Done — next / Open again / Skip / Stop + "Let the Steam app do all 4" (remaining);
+//                         no tooltips, aria-label on the icon-only fold, fixed bottom-right on <body> above the item sidebar; each
+//                         button → one POST /steam-todo/<action>; folds to a pill; the last entry: "Done", no Steam-app line, the
+//                         message; gone after `finished`. Shot steam-todo.png
 // Screenshots: <LIASCAPE_OUT>/steam-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -80,6 +86,9 @@ const STUB = `(() => {
       const r = (window.__replies || {})[p];
       return r ? res(r.body, r.status) : res(null);
     }
+    // the Steam to-do: idle at load, every button's POST recorded (steam:todo)
+    if (p === "/steam-todo") return res({ finished: true });
+    if (p.startsWith("/steam-todo/") && m === "POST") { st.calls.push({ p, body: null }); return res(p.endsWith("use-steam-app") ? { error: null } : null); }
     if (p === "/browse" && m === "POST") { const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items); }
     if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "", needsReferrer: false });
     if (p === "/download" && m === "POST") {
@@ -471,7 +480,9 @@ app.whenReady().then(async () => {
       const card = (sel) => page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
         const l = c?.querySelector("[data-dl-label]"), bar = c?.querySelector(".dl-bar"), f = bar?.querySelector(".dl-fill");
         return { label: l?.textContent ?? null, indet: !!bar?.classList.contains("indet"), anim: f ? getComputedStyle(f).animationName : null };`);
-      for (const [status, want] of [[STATUS, "Click Subscribe in Steam"], ["Steam is downloading it…", "Steam is downloading…"], ["Steam is finishing…", "Steam is finishing…"]]) {
+      // + the Steam to-do: waiting its page's turn, then (steamapp) its turn with the Steam client
+      for (const [status, want] of [["In the Steam to-do — its page opens in Steam when it's its turn…", "In the Steam to-do"], ["Waiting for the Steam app…", "Waiting for the Steam app…"],
+        [STATUS, "Click Subscribe in Steam"], ["Steam is downloading it…", "Steam is downloading…"], ["Steam is finishing…", "Steam is finishing…"]]) {
         await ev("download-progress", { id: dl.result.pageUrl, value: 0, status }); await sleep(250);
         const c = await card();
         console.log(`        card: ${J(c)}`);
@@ -491,6 +502,63 @@ app.whenReady().then(async () => {
       // a late status for the cancelled download doesn't bring it back
       await ev("download-progress", { id: dl.result.pageUrl, value: 0, status: STATUS }); await sleep(300);
       if (await page(`return !!document.querySelector("[data-side-download]");`)) v.push("a late download-progress brought the progress row back");
+      return v;
+    });
+
+    // owner 2026-11-11 ("Guided, auto-advance" mockup → then "lets just have them click 'next'"): the Steam to-do panel, driven by
+    // fake WS steam-todo events; every button POSTs its /steam-todo/<action> (stubbed — nothing reaches the backend)
+    await cell("steam:todo", async () => {
+      const v = []; await load(SIGNED_OUT);
+      const TITLE = "Re:Zero Rem – Edit";
+      const panel = () => page(`const p = document.querySelector("[data-steam-todo]"); if (!p) return null;
+        const btn = (k) => p.querySelector('[data-st="' + k + '"]');
+        const cs = getComputedStyle(p), side = document.querySelector(".side-panel");
+        return { step: p.querySelector("[data-st-step]")?.textContent ?? null, title: p.querySelector("[data-st-title]")?.textContent ?? null,
+          hint: p.querySelector("[data-st-hint]")?.textContent ?? null, next: btn("next")?.textContent.trim() ?? null,
+          reopen: btn("reopen")?.textContent.trim() ?? null, skip: btn("skip")?.textContent.trim() ?? null, stop: btn("stop")?.textContent.trim() ?? null,
+          use: btn("use-steam-app")?.textContent.trim() ?? null, titles: p.querySelectorAll("[title]").length,
+          iconOnlyNoLabel: [...p.querySelectorAll("button")].filter((b) => !b.textContent.trim() && !b.getAttribute("aria-label")).length,
+          fixed: cs.position, z: +cs.zIndex, sideZ: side ? +getComputedStyle(side).zIndex : 40, inBody: p.parentElement === document.body,
+          rect: (() => { const r = p.getBoundingClientRect(); const bar = document.querySelector(".playlist-bar"); return { r: innerWidth - r.right, b: innerHeight - r.bottom, w: r.width, barLift: bar ? innerHeight - bar.getBoundingClientRect().top : 0 }; })(),
+          emoji: /\\p{Extended_Pictographic}/u.test(p.textContent), icons: p.querySelectorAll("svg.lucide").length };`);
+      if (await panel()) v.push("a panel showed before any steam-todo event");
+      const STEP = { action: "subscribe", index: 2, total: 5, remaining: 4, current: { id: "930001", title: TITLE }, delivered: false, message: null, busy: false };
+      await ev("steam-todo", STEP); await sleep(700);
+      const p = await panel();
+      console.log(`        ${J(p)}`);
+      if (!p) return ["no panel for a steam-todo event"];
+      if (p.step !== "Subscribe in Steam · 2 of 5") v.push(`the step reads "${p.step}"`);
+      if (p.title !== TITLE) v.push(`the title reads "${p.title}"`);
+      if (!/Click Subscribe on the page Steam opened, then Done — next/.test(p.hint ?? "")) v.push(`the hint reads "${p.hint}"`);
+      if (p.next !== "Done — next" || p.reopen !== "Open again" || p.skip !== "Skip" || p.stop !== "Stop") v.push(`the buttons read ${J([p.next, p.reopen, p.skip, p.stop])}`);
+      if (p.use !== "Let the Steam app do all 4") v.push(`the Steam-app line reads "${p.use}" (4 remaining)`);
+      if (p.titles) v.push(`${p.titles} element(s) with a title (tooltip) in the panel`);
+      if (p.iconOnlyNoLabel) v.push(`${p.iconOnlyNoLabel} icon-only button(s) without an aria-label`);
+      // bottom-right: 16 px from the edge, lifted over the playlist bar when it shows (Library)
+      if (p.fixed !== "fixed" || !p.inBody || !(p.z > p.sideZ) || p.rect.r > 40 || Math.abs(p.rect.b - (p.rect.barLift + 16)) > 4) v.push(`placement: ${J({ fixed: p.fixed, inBody: p.inBody, z: p.z, sideZ: p.sideZ, rect: p.rect })}`);
+      if (p.emoji || p.icons < 4) v.push(`icons: emoji ${p.emoji}, ${p.icons} lucide icons`);
+      await shot("todo");
+      // each button → its endpoint, once
+      for (const k of ["next", "reopen", "skip", "stop", "use-steam-app"]) {
+        const n0 = (await calls()).length;
+        await page(`document.querySelector('[data-steam-todo] [data-st="${k}"]').click();`); await sleep(250);
+        const got = (await calls()).slice(n0).map((c) => c.p);
+        if (J(got) !== J([`/steam-todo/${k}`])) v.push(`${k} → ${J(got)} (expected one POST /steam-todo/${k})`);
+      }
+      // the fold: a pill with the step, back again
+      await page(`document.querySelector("[data-steam-todo] .st-fold").click();`); await sleep(300);
+      const folded = await page(`const p = document.querySelector("[data-steam-todo]"); return { folded: p.classList.contains("folded"), step: p.querySelector("[data-st-step]")?.textContent, btns: p.querySelectorAll("[data-st]").length };`);
+      if (!folded.folded || folded.step !== "Subscribe in Steam · 2 of 5" || folded.btns) v.push(`folded: ${J(folded)}`);
+      await page(`document.querySelector("[data-steam-todo] .st-fold").click();`); await sleep(300);
+      // the last one: "Done", no Steam-app line; an unsubscribe entry says so; a message shows
+      await ev("steam-todo", { ...STEP, action: "unsubscribe", index: 5, total: 5, remaining: 1, message: "The Steam app couldn't be reached — Steam isn't running." }); await sleep(400);
+      const last = await page(`const p = document.querySelector("[data-steam-todo]"); return { step: p?.querySelector("[data-st-step]")?.textContent,
+        next: p?.querySelector('[data-st="next"]')?.textContent.trim(), use: !!p?.querySelector('[data-st="use-steam-app"]'), msg: p?.querySelector("[data-st-msg]")?.textContent ?? null };`);
+      console.log(`        last: ${J(last)}`);
+      if (last.step !== "Unsubscribe in Steam · 5 of 5" || last.next !== "Done" || last.use || !/couldn't be reached/.test(last.msg ?? "")) v.push(`at 1 remaining: ${J(last)}`);
+      // finished → gone (after its exit)
+      await ev("steam-todo", { finished: true }); await sleep(600);
+      if (await panel()) v.push("the panel stayed after a finished event");
       return v;
     });
   } catch (e) {

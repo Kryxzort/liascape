@@ -830,7 +830,24 @@ opens the item in the Steam app by itself (`sources.md` § Download — the deci
   sidebar's progress line (`[data-side-download-status]`, the whole sentence) and the status bar (untimed — it waits on
   the user; replaced by the next status / the end). A late `download-progress` for a download that already ended is dropped
   (`setDownload` — it used to re-add a stuck progress row). The no-sign-in unsubscribe's `unsub-progress.message` → the status
-  bar (untimed).
+  bar (untimed). The Steam to-do adds two card labels: "In the Steam to-do" (a download waiting for its page's turn) and
+  "Waiting for the Steam app…" (`steamapp`: another helper holds the Steam client's turn).
+- **The Steam to-do panel** (`components/SteamTodoPanel.tsx`, lazy in App's Suspense; owner 2026-11-11 picked the "Guided"
+  mockup, then "lets just have them click 'next'"; backend `web-backend.md` § The Steam to-do): the store's `steamTodo` (WS
+  `steam-todo` → `setSteamTodo`, `finished` → null; `resync` reads `GET /steam-todo`). Portal'd to `<body>`, `position: fixed`
+  bottom-right (16 px; lifted over the playlist bar when it shows — its top measured every 500 ms while the panel is up), z 46:
+  above the item sidebar (40) and the bar's hover glow (45), under the modals (50). Rows: "STEAM TO-DO" + a fold chevron
+  (`aria-label`, folds to a pill that keeps the step), the step **"Subscribe in Steam · 2 of 5"** / "Unsubscribe in Steam · …"
+  (`[data-st-step]`, the current entry's action), the title (`[data-st-title]`), a `.dl-bar` at index/total, the hint ("Click
+  Subscribe on the page Steam opened, then Done — next." / "Steam has it — click Done to go on." when `delivered`), the
+  backend's `message` (`role=alert`, warn colour), then the buttons `[data-st=next|reopen|skip|stop]` — **Done — next** (the
+  accent one, full width; "Done" on the last), Open again, Skip, Stop — and, while `remaining ≥ 2`, the footer line **"Let the
+  Steam app do all N →"** (`[data-st=use-steam-app]`, N = remaining incl. the current; "Asking the Steam app…" while `busy`).
+  Each button → `api.steamTodoAction(a)` (`POST /steam-todo/<a>`); nothing advances in the UI by itself. Look: the sidebar's
+  language — `--tr-strong` mantle fill + an accent corner pool, an accent-tinted border, `var(--glow-sm)` (→ none under
+  `no-glow`, the footer's hover drop-shadow too), lucide icons, no tooltips. Enter / exit: framer-motion y 24 px + opacity (a
+  spring in, 160 ms out); `useMotion()` off → none. `/download`'s `{skipped: true}` → "Skipped: <title>" in the status bar, the
+  card leaves its download state. Guard: probe-steam `steam:todo` (+ `steam:dlStatus`'s two new labels); shot `steam-todo.png`.
 - Guard: `scripts/test-ui-matrix.sh --probe probe-steam.js` (a script injected before the page's own via CDP stubs
   `/steam/*`, `/browse`, `/download` and wraps the page's WebSocket to push fake events — no Steam anywhere):
   `steam:row:signedOut|rejected|signedIn|steamcmd`, `steam:modal:email|device|confirm|error|cancel|keys` (real typing; the

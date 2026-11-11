@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { API, withToken, type LibraryItem } from "./client";
+import { API, withToken, type LibraryItem, type SteamTodo } from "./client";
 
 export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
@@ -14,6 +14,7 @@ export type LiascapeEvent =
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean; status?: string } }
   // finished without a usable sign-in: `openedInSteam` items were opened in the Steam app and `message` says what to click
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; openedInSteam?: number; message?: string | null; error?: string } }
+  | { type: "steam-todo"; payload: SteamTodo }
   | { type: "library-synced"; payload: { count: number } }
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)

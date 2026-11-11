@@ -233,7 +233,7 @@ public static class AppOps
         {
             var ap = new Progress<(double, string)>(t =>
                 EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
-            string dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct);
+            string dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
             string url = dir;
             if (!detail.IsScene)
             {
@@ -421,6 +421,7 @@ public static class AppOps
     public static string DeleteFromSource(List<LibraryItem> items)
     {
         var ids = items.Where(i => i.WorkshopId != null).Select(i => i.WorkshopId!).Distinct();
+        foreach (var i in items) if (i.WorkshopId != null) SteamTodo.RememberTitle(i.WorkshopId, i.Title); // its Steam to-do entry's name
         WorkshopUnsubQueue.AddPending(ids);
         return Trash(items);
     }
@@ -540,14 +541,20 @@ public static class AppOps
         // Steam already carried out is undone too: subscribed again (owner 2026-11-11: "what if i unsubscribe + undo / does it
         // resubscribe? it doesn't right?" — it didn't: the item came back while Steam deleted its folder)
         var resub = new List<string>();
+        var titles = new Dictionary<string, string>();
         foreach (var i in batch.Items)
-            if (i.WorkshopId is string wid && WorkshopUnsubQueue.Restore(wid)) resub.Add(wid);
+        {
+            if (i.WorkshopId is not string wid) continue;
+            titles[wid] = i.Title;
+            if (WorkshopUnsubQueue.Restore(wid)) resub.Add(wid);
+            SteamTodo.DropUnsubscribe(wid); // its unsubscribe still waited in the Steam to-do: nothing to click any more
+        }
         if (resub.Count > 0)
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var msg = await WorkshopDownloader.ResubscribeAsync(resub, SettingsService.Load(), CancellationToken.None);
+                    var msg = await WorkshopDownloader.ResubscribeAsync(resub, SettingsService.Load(), CancellationToken.None, titles);
                     if (msg != null) EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = resub.Count, message = msg });
                 }
                 catch (Exception e) { Console.WriteLine($"workshop: re-subscribing after undo failed: {e.Message}"); }

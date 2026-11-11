@@ -4,7 +4,9 @@
 #  1. `liascape-backend steam-selftest` — the password sign-in's plumbing with a scripted sign-in in place of SteamKit2
 #     (email / authenticator / approve-in-the-app steps, a wrong code, cancel, replace, timeout, wrong password, Steam's
 #     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json) and the
-#     no-sign-in unsubscribe (one item → its page, several → the subscriptions list, an item Steam doesn't have → nothing).
+#     no-sign-in unsubscribe through the Steam to-do (Web/SteamTodo.cs: one page at a time — never the subscriptions list —,
+#     pending until Next → blocked, Open again, Skip / Stop → kept subscribed, an item Steam doesn't have → no page, a second
+#     drain leaves the to-do's ids alone, WS steam-todo).
 #  2. A private backend whose PATH puts a stub `xdg-open` first (it only records the URL — the real Steam client is never
 #     started) and whose Workshop folder is a temp dir: POST /download of a Workshop item (no network: the result carries
 #     `trailerKnown`) with no sign-in, then with a sign-in Steam turned down → the item's page is "opened in Steam"
@@ -15,7 +17,12 @@
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
 #     released Steam + exited; Steam refusing → the old path (the item's page in the Steam app); a cancel → the helper
-#     releases Steam + exits, nothing imported.
+#     releases Steam + exits, nothing imported. Then the Steam to-do (h.): a bulk download of 3 under "Open in the Steam app"
+#     opens only the first page, a delivered item 1 doesn't advance it, Next opens page 2, Skip page 3 and ends item 2's
+#     /download as skipped at once, Stop the rest; a bulk Delete from source (one page at a time, no page for an item with no
+#     Steam folder, Next / Skip); "Let the Steam app do all 2" with Steam unreachable (unchanged + the message) and reachable
+#     (downloads and unsubscribes through the fake client, the saved mode unchanged); the page route never starts a
+#     `steam-ugc` child (the fake's helpers.log); 3 steamapp downloads at once never run two helpers at the same time.
 # Never signs in to Steam, never subscribes anything, never talks to steamcommunity.com, never touches ~/.config/liascape
 # (temp HOME + every XDG dir), never prints settings.json. Everything it started is stopped on exit.
 #
@@ -95,7 +102,9 @@ const out = (ok, name, extra = "") => console.log(`${ok ? "PASS" : "FAIL"}  ${na
 const urls = () => (fs.existsSync(`${T}/xdg-open.urls`) ? fs.readFileSync(`${T}/xdg-open.urls`, "utf8").trim().split("\n").filter(Boolean) : []);
 const status = {}; // workshop id → the statuses seen
 const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
-ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status); };
+const todo = []; // WS steam-todo payloads
+ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status);
+  if (e.type === "steam-todo") todo.push(e.payload); };
 await new Promise((r) => { ws.onopen = r; });
 const sources = await (await fetch(U + "/sources")).json();
 const src = sources.find((s) => s.supportsTagFilter)?.index ?? sources.findIndex((s) => s.supportsTagFilter);
@@ -129,6 +138,13 @@ async function viaSteam(id, why, label) {
   const body = r ? await r.json() : null;
   out(r?.status === 200 && body?.workshopId === id, `${label}: once Steam has it, the download finishes into the library`, r ? `${r.status} ${JSON.stringify(body).slice(0, 160)}` : "timed out");
   out(await inLib(id), `${label}: /library has it`);
+  // the Steam to-do (Web/SteamTodo.cs): a queue of 1 — Steam delivered it, the entry waits for the user's Next all the same
+  const td = todo.at(-1);
+  out(td && !td.finished && td.current?.id === id && td.delivered === true && td.index === 1 && td.total === 1,
+    `${label}: the Steam to-do holds it (1 of 1, delivered) until Next`, JSON.stringify(td ?? null));
+  await fetch(U + "/steam-todo/next", { method: "POST" });
+  for (let i = 0; i < 30 && !todo.at(-1)?.finished; i++) await sleep(50);
+  out(todo.at(-1)?.finished === true, `${label}: Next → the to-do finished`);
 }
 
 await viaSteam("700000001", "Not signed in", "no sign-in");

@@ -8,8 +8,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const out = (ok, name, extra = "") => console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? " — " + extra : ""}`);
 const urls = () => fs.readFileSync(`${T}/xdg-open.urls`, "utf8").trim().split("\n").filter(Boolean);
 const ev = {}; // page URL → its download-progress payloads
+const todo = []; // WS steam-todo payloads (the Steam to-do — Web/SteamTodo.cs)
 const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
-ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress") (ev[e.payload.id] ??= []).push(e.payload); };
+ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress") (ev[e.payload.id] ??= []).push(e.payload);
+  if (e.type === "steam-todo") todo.push(e.payload); };
+const post = (p, body) => fetch(U + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
 await new Promise((r) => { ws.onopen = r; });
 const sources = await (await fetch(U + "/sources")).json();
 const src = sources.find((s) => s.supportsTagFilter)?.index ?? sources.findIndex((s) => s.supportsTagFilter);
@@ -50,6 +53,7 @@ const d = `${T}/ws3/431960/710000002`; fs.mkdirSync(d, { recursive: true });
 fs.copyFileSync(`${T}/clip.mp4`, `${d}/v.mp4`); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000002" }));
 r = await Promise.race([p, sleep(20000).then(() => null)]);
 out(r?.status === 200, "…and still finishes once Steam has it", r ? String(r.status) : "timed out");
+await post("/steam-todo/next"); // its Steam to-do entry waits for the user's Next even after Steam delivered
 fs.rmSync(`${T}/steamlib/fail-init`);
 
 // c. cancel from the page mid-download: the child releases Steam and exits, nothing imported
@@ -76,6 +80,7 @@ const d4 = `${T}/ws3/431960/710000004`; fs.mkdirSync(d4, { recursive: true });
 fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000004" }));
 r = await Promise.race([pd, sleep(20000).then(() => null)]);
 out(r?.status === 200, "…and finishes once Steam has it", r ? String(r.status) : "timed out");
+await post("/steam-todo/next"); // the Steam to-do's entry waits for the user's Next even after Steam delivered
 // e. owner 2026-11-11 (a 369 MB duplicate): the WE folder setting names Steam's folder THROUGH A SYMLINK, the Steam client
 // reports the real folder → still linked into the library (local/<id>), never copied (workshop/<id>)
 fs.symlinkSync(`${T}/steamlib`, `${T}/wslink`);
@@ -117,9 +122,12 @@ fs.rmSync(`${T}/steamlib/fail-init`);
 // unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (its page route — Steam was
 // unreachable), 710000005 the one before (the Steam client unsubscribed it).
 const undo = async () => (await (await fetch(U + "/library/undo", { method: "POST" })).json());
-// 710000001: Steam is reachable again → the Steam client subscribes it again. Its unsubscribe went through the PAGE route, so
-// the fake never saw it: play the user's click on that page (drop the fake's subscription) — else the check proves nothing
+// 710000001: Steam is reachable again → the Steam client subscribes it again. Its unsubscribe went through the PAGE route (the
+// Steam to-do), so the fake never saw it: play the user's click on that page (drop the fake's subscription) + their Next in the
+// to-do (only Next marks it unsubscribed) — else the check proves nothing
 fs.rmSync(`${T}/steamlib/sub-710000001`, { force: true });
+await post("/steam-todo/next");
+await sleep(200);
 const relBefore = released().length;
 await undo();
 for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-710000001`); i++) await sleep(100);
@@ -137,5 +145,123 @@ await sleep(300);
 const msg = unsub.find((e) => e.message)?.message ?? "";
 out(urls().slice(n0).join() === "steam://url/CommunityFilePage/710000005" && /click Subscribe/.test(msg) && !!(await item("710000005")),
   "…Steam unreachable: the item's page opens to subscribe again, the status bar says so", `${urls().slice(n0).join(" ") || "nothing opened"} | ${msg}`);
+await post("/steam-todo/stop");
 fs.rmSync(`${T}/steamlib/fail-init`);
+
+// h. the Steam to-do (owner 2026-11-11, "Guided"): one page at a time, app-wide; the user's Next moves on — nothing is detected,
+// and the page route never connects to the Steam client (no steam-ugc child) unless "Let the Steam app do all N" is clicked
+const setMode = async (mode) => { const c = await (await fetch(U + "/settings")).json(); await post("/settings", { ...c, workshopDownloadMode: mode }); };
+const helpersLog = () => fs.existsSync(`${T}/steamlib/helpers.log`) ? fs.readFileSync(`${T}/steamlib/helpers.log`, "utf8").split("\n").filter(Boolean) : [];
+const lastTodo = () => todo.at(-1) ?? null;
+const waitTodo = async (pred, ms = 5000) => { for (let i = 0; i < ms / 50 && !pred(lastTodo()); i++) await sleep(50); return lastTodo(); };
+const waitUrl = async (id, from, ms = 5000) => { for (let i = 0; i < ms / 50; i++) { if (urls().slice(from).some((x) => x.includes(id))) return true; await sleep(50); } return false; };
+const dropItem = (id) => { const d = `${T}/steamlib/${id}`; /* the WE folder setting is $T/wslink → steamlib since e. */ fs.mkdirSync(d, { recursive: true });
+  fs.copyFileSync(`${T}/clip.mp4`, `${d}/v.mp4`); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: `ws-${id}` })); };
+const settle = (p, ms = 15000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), sleep(ms).then(() => null)]);
+const statuses = (id) => (ev[pageUrl(id)] ?? []).map((e) => e.status).filter(Boolean);
+
+await setMode("steampage");
+let h0 = helpersLog().length;
+n0 = urls().length; todo.length = 0;
+const ids3 = ["720000001", "720000002", "720000003"];
+const dl3 = ids3.map((id) => download(id));
+let t = await waitTodo((x) => x?.total === 3);
+await sleep(800);
+out(urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001",
+  "bulk download of 3 (Open in the Steam app): only the FIRST page opens", urls().slice(n0).join(" ") || "nothing opened");
+out(t?.action === "subscribe" && t.index === 1 && t.total === 3 && t.remaining === 3 && t.current?.id === "720000001" && t.current?.title === "ws-720000001",
+  "…WS steam-todo: subscribe, 1 of 3, the first item's id + title", JSON.stringify(t));
+out(statuses("720000002").at(-1)?.includes("Steam to-do") && statuses("720000003").at(-1)?.includes("Steam to-do") && /click Subscribe/i.test(statuses("720000001").at(-1) ?? ""),
+  "…the queued ones say \"In the Steam to-do\", the current one \"click Subscribe\"", ids3.map((id) => statuses(id).at(-1)).join(" | "));
+dropItem("720000001"); // Steam delivers item 1 (the user clicked Subscribe)
+const r1 = await settle(dl3[0]);
+await sleep(800);
+out(r1?.status === 200 && r1.body?.workshopId === "720000001", "…item 1 arrives in the Workshop folder → its download finishes", JSON.stringify(r1)?.slice(0, 120));
+out(urls().length === n0 + 1 && lastTodo()?.current?.id === "720000001" && lastTodo()?.delivered === true,
+  "…nothing advances by itself: page 2 waits for the user's Next", `${urls().length - n0} opened, ${JSON.stringify(lastTodo())}`);
+await post("/steam-todo/next");
+const opened2 = await waitUrl("720000002", n0);
+t = await waitTodo((x) => x?.current?.id === "720000002");
+out(opened2 && urls().length === n0 + 2 && t?.index === 2 && t?.total === 3 && t?.remaining === 2, "Next → the second page opens, 2 of 3", `${urls().slice(n0).join(" ")} | ${JSON.stringify(t)}`);
+const tSkip = Date.now();
+await post("/steam-todo/skip");
+const r2 = await settle(dl3[1], 5000);
+const opened3 = await waitUrl("720000003", n0);
+out(opened3 && urls().length === n0 + 3 && lastTodo()?.current?.id === "720000003" && lastTodo()?.index === 3, "Skip → the third page opens, 3 of 3", urls().slice(n0).join(" "));
+out(r2?.status === 200 && r2.body?.skipped === true && Date.now() - tSkip < 3000 && !(await item("720000002")),
+  "…the skipped item's /download ends at once as skipped (not after 10 min), nothing imported", `${JSON.stringify(r2)} in ${Date.now() - tSkip} ms`);
+await post("/steam-todo/stop");
+const r3 = await settle(dl3[2], 5000);
+t = await waitTodo((x) => x?.finished);
+await sleep(300);
+out(r3?.body?.skipped === true && t?.finished === true && urls().length === n0 + 3, "Stop → the rest ends as skipped, the to-do finished, nothing more opens", `${JSON.stringify(r3)} | ${JSON.stringify(t)}`);
+out(helpersLog().length === h0, "…the page route never started a Steam-client helper", `${helpersLog().length - h0} helper log lines`);
+
+// Delete from source of 3 (Open in the Steam app): the two Steam has in its Workshop folder (720000001 dropped there, 710000001
+// installed by the fake during g.) get their pages, one at a time; 710000004 has no folder in any Steam root now (it came from
+// $T/ws3, no longer the WE folder setting since e. — like an owned steamcmd copy, never a subscription: owner 2026-11-11) →
+// no page, blocked at once. Next = unsubscribed (blocked), Skip = kept subscribed (out of pending + blocked).
+const delItems = [await item("720000001"), await item("710000004"), await item("710000001")].filter(Boolean);
+h0 = helpersLog().length; n0 = urls().length; todo.length = 0; unsub.length = 0;
+await post("/workshop/delete-from-source", { items: delItems });
+await post("/workshop/drain");
+await waitTodo((x) => x?.total >= 2);
+await sleep(600);
+out(delItems.length === 3 && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001" && lastTodo()?.action === "unsubscribe" && lastTodo()?.total === 2,
+  "bulk Delete from source of 3 (Open in the Steam app): ONE page — the first item's, never the subscriptions list; Unsubscribe 1 of 2", `${urls().slice(n0).join(" ")} | ${JSON.stringify(lastTodo())}`);
+out(!(await queue()).includes("710000004") && !urls().slice(n0).some((x) => x.includes("710000004")),
+  "…the one with no Steam folder (a steamcmd-style copy): no page, no entry, off pending");
+out((await queue()).includes("720000001"), "…the current one's id stays pending until Next");
+await post("/steam-todo/next");
+out(await waitUrl("710000001", n0) && !(await queue()).includes("720000001") && lastTodo()?.index === 2,
+  "Next → unsubscribed (off pending) + the second page opens, 2 of 2", urls().slice(n0).join(" "));
+await post("/steam-todo/skip");
+t = await waitTodo((x) => x?.finished);
+out(t?.finished === true && !(await queue()).includes("710000001"), "Skip → kept subscribed: off pending (and blocked), the to-do finished");
+out(helpersLog().length === h0, "…no Steam-client helper for the page route's unsubscribes either");
+
+// "Let the Steam app do all N": the remaining entries go through the (fake) Steam client — the saved mode stays steampage.
+// First with Steam unreachable: the panel says so and the to-do stays as it was.
+n0 = urls().length; todo.length = 0;
+const idsU = ["730000001", "730000002"];
+const dlU = idsU.map((id) => download(id));
+await waitTodo((x) => x?.total === 2);
+fs.writeFileSync(`${T}/steamlib/fail-init`, "");
+let ru = await (await post("/steam-todo/use-steam-app")).json();
+t = await waitTodo((x) => !!x?.message && !x.busy);
+out(!!ru.error && t?.total === 2 && t?.remaining === 2 && /couldn't be reached/.test(t?.message ?? ""),
+  "Let the Steam app do all 2 — Steam unreachable: the panel says so, the to-do stays as it was", `${JSON.stringify(ru)} | ${JSON.stringify(t)}`);
+fs.rmSync(`${T}/steamlib/fail-init`);
+ru = await (await post("/steam-todo/use-steam-app")).json();
+const ra = await Promise.all(dlU.map((p) => settle(p, 20000)));
+out(!ru.error && ra.every((x, i) => x?.status === 200 && x.body?.workshopId === idsU[i]) && idsU.every((id) => fs.existsSync(`${T}/steamlib/sub-${id}`)),
+  "…Steam reachable: both downloads finish through the Steam client (subscribed there)", JSON.stringify(ra.map((x) => x?.status)));
+out(lastTodo()?.finished === true && urls().length === n0 + 1, "…the to-do finished, no further page opened", JSON.stringify(lastTodo()));
+out(idsU.some((id) => statuses(id).includes("Waiting for the Steam app…")), "…one waited its turn: \"Waiting for the Steam app…\"",
+  idsU.map((id) => statuses(id).join(" > ")).join(" || "));
+out((await (await fetch(U + "/settings")).json()).workshopDownloadMode === "steampage", "…the saved mode is unchanged (steampage)");
+// the same for unsubscribes: Delete from source → the to-do → "Let the Steam app do all 2" → the Steam client unsubscribes
+todo.length = 0;
+await post("/workshop/delete-from-source", { items: [await item("730000001"), await item("730000002")].filter(Boolean) });
+await post("/workshop/drain");
+await waitTodo((x) => x?.total === 2 && x.action === "unsubscribe");
+await post("/steam-todo/use-steam-app");
+for (let i = 0; i < 100 && idsU.some((id) => fs.existsSync(`${T}/steamlib/sub-${id}`) || false); i++) await sleep(100);
+await sleep(300);
+const qU = await queue();
+out(idsU.every((id) => !fs.existsSync(`${T}/steamlib/sub-${id}`) && !qU.includes(id)) && lastTodo()?.finished === true,
+  "…Delete from source of 2 → Let the Steam app do all 2: the Steam client unsubscribed both, the queue is empty", `pending [${qU}]`);
+
+// "Use the Steam app" (steamapp) bulk: ONE helper child at a time, app-wide — no two subscribe/unsubscribe helpers connected at once
+await setMode("steamapp");
+const idsC = ["740000001", "740000002", "740000003"];
+const rc = await Promise.all(idsC.map((id) => settle(download(id), 30000)));
+out(rc.every((x) => x?.status === 200), "steamapp: 3 downloads at once all finish", JSON.stringify(rc.map((x) => x?.status)));
+const spans = {}; const users = new Set();
+for (const l of helpersLog()) { const [k, pid, ts] = l.split(" "); if (k === "use") users.add(pid); else (spans[pid] ??= {})[k] = +ts; }
+const iv = [...users].map((p) => spans[p]).filter((x) => x?.open && x?.close).sort((a, b) => a.open - b.open);
+const overlaps = iv.filter((x, i) => i > 0 && x.open < iv[i - 1].close).length;
+out(iv.length >= 3 && overlaps === 0, "…no two Steam-client helpers ever ran at the same time (the fake's start/end log)", `${iv.length} helpers, ${overlaps} overlaps`);
+out(idsC.filter((id) => statuses(id).includes("Waiting for the Steam app…")).length >= 2, "…the queued ones said \"Waiting for the Steam app…\"",
+  idsC.map((id) => statuses(id).join(" > ")).join(" || "));
 ws.close();

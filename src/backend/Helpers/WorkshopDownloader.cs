@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Models;
+using Liascape.Web;
 
 namespace Liascape.Helpers;
 
@@ -21,7 +22,8 @@ public static class WorkshopDownloader
         string workshopId,
         AppSettings settings,
         IProgress<(double Progress, string Status)>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? title = null)
     {
         // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
         // Subscribe mode still subscribes below so the item is tracked online even if present.
@@ -39,8 +41,14 @@ public static class WorkshopDownloader
             return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
         }
 
-        return await AcquireViaSubscribeAsync(workshopId, settings, alreadyHave, progress, ct);
+        return await AcquireViaSubscribeAsync(workshopId, title, settings, alreadyHave, progress, ct);
     }
+
+    /// The user skipped (or stopped) this item in the Steam to-do: its /download ends as skipped, not failed.
+    public sealed class SkippedException(string workshopId) : Exception($"Skipped {workshopId} in the Steam to-do") { }
+
+    /// A download's status while it waits for its page in the Steam to-do (Web/SteamTodo.cs) — the card says "In the Steam to-do".
+    public const string InSteamTodo = "In the Steam to-do — its page opens in Steam when it's its turn…";
 
     // Real Steam subscription. Signed in here: the community AJAX endpoint (the same call the website's Subscribe button
     // makes). Not (no sign-in, or one Steam turned down — owner 2026-11-11: "is it a dead end for users without mobile
@@ -49,6 +57,7 @@ public static class WorkshopDownloader
     // and the running Steam client downloads it to a workshop/content/431960 dir which we poll for.
     private static async Task<string> AcquireViaSubscribeAsync(
         string workshopId,
+        string? title,
         AppSettings settings,
         bool alreadyHave,
         IProgress<(double, string)>? progress,
@@ -105,15 +114,18 @@ public static class WorkshopDownloader
                 if (IsWorkshopDirReady(dir)) return dir;
 
         string waitingFor = "Subscribed — waiting for Steam to download…";
+        // no usable sign-in: the user subscribes on the item's page in the Steam app — through the Steam to-do, one page at a
+        // time app-wide (owner 2026-11-11: a bulk download opened N pages at once, Steam showed one and the rest were lost)
+        SteamTodo.Entry? todo = null;
         if (why != null)
         {
-            if (!OpenInSteamApp($"steam://url/CommunityFilePage/{workshopId}"))
+            todo = SteamTodo.EnqueueSubscribe(workshopId, title, hasDownload: true, out bool openFailed);
+            if (openFailed)
                 throw new InvalidOperationException($"{why}, and the Steam app couldn't be opened (xdg-open steam://…). Sign in under Settings → Getting Workshop wallpapers, or open the item on Steam and subscribe there.");
             waitingFor = pageMode ? "Click Subscribe in Steam, then it downloads by itself…"
                                   : $"{why} — click Subscribe in Steam, then it downloads by itself…";
-            Console.WriteLine($"workshop: {workshopId}: {why} — opened its page in the Steam app, waiting for the download");
+            Console.WriteLine($"workshop: {workshopId}: {why} — in the Steam to-do, waiting for the download");
         }
-        progress?.Report((-1, waitingFor));
 
         const int maxWaitMs = 600_000;
         int pollMs = PollMs;
@@ -126,31 +138,53 @@ public static class WorkshopDownloader
         // the same look as a hang). Phases only, no percent: Steam may reserve a staged file's full size before writing it.
         string? shown = null;
         void Phase(string s) { if (s != shown) { shown = s; progress?.Report((-1, s)); } }
-        while (waited < maxWaitMs)
+        bool delivered = false;
+        var entry = todo;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            bool arrived = false;
-            foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
+            while (true)
             {
-                var media = TryGetMediaPath(dir);
-                if (media == null) continue;
-                arrived = true;
-                long size = SafeLen(media);
-                // only accept once the media file has stopped growing (size stable across two polls)
-                // AND is non-empty — guards against importing a still-downloading partial file.
-                if (size > 0 && lastSize.TryGetValue(media, out var prev) && prev == size) return dir;
-                lastSize[media] = size;
+                ct.ThrowIfCancellationRequested();
+                var wake = todo?.Wake;
+                switch (todo?.Outcome)
+                {
+                    case SteamTodo.Outcome.Skipped: throw new SkippedException(workshopId);
+                    case SteamTodo.Outcome.UseSteamApp:
+                        // "Let the Steam app do all N" — the Steam client subscribes it (one helper at a time, app-wide)
+                        todo = null; shown = null;
+                        var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
+                        if (viaClient.Folder == null)
+                            throw new InvalidOperationException($"The Steam app couldn't subscribe to it — {viaClient.Fallback}");
+                        if (TryGetMediaPath(viaClient.Folder) != null) { delivered = true; return viaClient.Folder; }
+                        continue; // Steam's folder without the media we expect: the usual folders' poll decides
+                }
+                // still waiting for its page's turn: no 10-minute clock yet (item 5 of a bulk download would time out queued)
+                bool queued = todo is { IsCurrent: false, Outcome: SteamTodo.Outcome.Waiting };
+                bool arrived = false;
+                foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
+                {
+                    var media = TryGetMediaPath(dir);
+                    if (media == null) continue;
+                    arrived = true;
+                    long size = SafeLen(media);
+                    // only accept once the media file has stopped growing (size stable across two polls)
+                    // AND is non-empty — guards against importing a still-downloading partial file.
+                    if (size > 0 && lastSize.TryGetValue(media, out var prev) && prev == size) { delivered = true; return dir; }
+                    lastSize[media] = size;
+                }
+                if (arrived) Phase(SteamFinishing);
+                else if (SteamStaging(settings.WorkshopFolder, workshopId)) Phase(SteamDownloading);
+                else Phase(queued ? InSteamTodo : waitingFor);
+                if (!queued && (waited += pollMs) > maxWaitMs)
+                    throw new TimeoutException(why == null
+                        ? $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. Make sure Steam is running and signed in."
+                        : $"Steam didn't download {workshopId} within 10 minutes. Click Subscribe on the page Steam opened (Steam has to be " +
+                          "running and signed in), then download it again — or sign in under Settings → Getting Workshop wallpapers.");
+                if (wake == null) await Task.Delay(pollMs, ct);
+                else await Task.WhenAny(Task.Delay(pollMs, ct), wake); // a Skip / its turn wakes it at once
             }
-            if (arrived) Phase(SteamFinishing);
-            else if (SteamStaging(settings.WorkshopFolder, workshopId)) Phase(SteamDownloading);
-            await Task.Delay(pollMs, ct);
-            waited += pollMs;
         }
-
-        throw new TimeoutException(why == null
-            ? $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. Make sure Steam is running and signed in."
-            : $"Steam didn't download {workshopId} within 10 minutes. Click Subscribe on the page Steam opened (Steam has to be " +
-              "running and signed in), then download it again — or sign in under Settings → Getting Workshop wallpapers.");
+        finally { if (entry != null) SteamTodo.Finish(entry, delivered); }
     }
 
     public const string SteamDownloading = "Steam is downloading it…";
@@ -318,7 +352,9 @@ public static class WorkshopDownloader
     /// <see cref="UnsubscribeInSteamApp"/> — the result's Message says what to click.
     public static async Task<DrainResult> DrainUnsubQueueAsync(AppSettings settings, IProgress<(int Done, int Total, string CurrentId)>? progress, CancellationToken ct)
     {
-        var pending = WorkshopUnsubQueue.SnapshotPending();
+        // ids whose unsubscribe already waits in the Steam to-do are the user's there (Next / Skip decide them)
+        var inTodo = SteamTodo.QueuedUnsubscribes();
+        var pending = WorkshopUnsubQueue.SnapshotPending().FindAll(id => !inTodo.Contains(id));
         if (pending.Count == 0) return new DrainResult();
         var undone = new System.Collections.Generic.List<string>(); // unsubscribed after an Undo restored them → re-subscribed at the end
         try { return await DrainCoreAsync(); }
@@ -389,7 +425,8 @@ public static class WorkshopDownloader
     /// unsubscribe + undo / does it resubscribe? it doesn't right?") — the way the download mode subscribes: the Steam client
     /// (steamapp), the sign-in (subscribe), else the item's page in the Steam app. Null = all done; else what the user still
     /// has to click (the status bar shows it). steamcmd: nothing (no subscription).
-    public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct)
+    public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? titles = null)
     {
         if (settings.WorkshopDownloadMode == "steamcmd" || ids.Count == 0) return null;
         var toPage = new System.Collections.Generic.List<string>();
@@ -414,41 +451,39 @@ public static class WorkshopDownloader
             toPage.Add(id);
         }
         if (toPage.Count == 0) return null;
-        foreach (var id in toPage.Take(5)) OpenInSteamApp($"steam://url/CommunityFilePage/{id}");
+        // the Steam to-do: one page at a time, Next moves on (it used to open up to 5 pages at once, the rest never)
+        foreach (var id in toPage)
+            SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
         // the page route can't know whether the user clicked Unsubscribe there — the words cover both
         return toPage.Count == 1
-            ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set)."
-            : $"Undone — to keep them subscribed, click Subscribe on the {toPage.Count} pages Steam opened (any that say Subscribed are set).";
+            ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
+            : $"Undone — to keep them subscribed, click Subscribe on each of the {toPage.Count} pages the Steam to-do opens (any that say Subscribed are set).";
     }
 
     private static string Why(AppSettings s) =>
         !string.IsNullOrWhiteSpace(s.SteamRefreshToken) && s.SteamSignInRejected ? "Steam signed this app out" : "Not signed in to Steam here";
 
-    /// The no-sign-in unsubscribe: the ids Steam still has on disk (its workshop folders — a subscribed item's live there;
-    /// our steamcmd cache isn't a subscription) are opened in the Steam app — one item → its page, several → the account's
-    /// Wallpaper Engine subscriptions — for the user to click Unsubscribe; every id leaves `pending` for `blocked`
-    /// (AutoImport keeps out the folder until Steam removes it, as after a real unsubscribe; re-downloading unblocks).
+    /// The no-sign-in unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
+    /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (the subscriptions list of
+    /// ~320 items is never opened any more). Only those: the unsubscribe queue holds items deleted from the LIBRARY, and a library
+    /// Workshop item is either a `local/<id>` link into Steam's folder (a subscription — its folder exists) or an owned
+    /// `workshop/<id>` copy (a steamcmd download, never a subscription; our steamcmd cache isn't a Steam root here) — owner
+    /// 2026-11-11. The rest are blocked at once, no page. A queued id stays `pending` until the user's Next marks it blocked
+    /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`).
     private static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
     {
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var roots = WorkshopContentRoots(settings.WorkshopFolder).FindAll(r => !r.StartsWith(Path.Combine(home, ".cache", "liascape"), StringComparison.Ordinal));
         var inSteam = ids.FindAll(id => WorkshopFolderExists(roots, id));
-        string? message = null;
-        if (inSteam.Count > 0)
-        {
-            string url = inSteam.Count == 1
-                ? $"steam://url/CommunityFilePage/{inSteam[0]}"
-                : "steam://openurl/https://steamcommunity.com/my/myworkshopfiles/?appid=431960&browsefilter=mysubscriptions";
-            if (OpenInSteamApp(url))
-                message = inSteam.Count == 1
-                    ? $"{why} — Steam opened the item: click Unsubscribe there."
-                    : $"{why} — Steam opened your Wallpaper Engine subscriptions: unsubscribe the {inSteam.Count} you deleted there.";
-            else
-                message = $"{why}, and the Steam app couldn't be opened — unsubscribe on Steam yourself, or sign in under Settings → Getting Workshop wallpapers.";
-            Console.WriteLine($"workshop: unsubscribe {string.Join(", ", inSteam)}: {why} — {(message.Contains("couldn't") ? "the Steam app couldn't be opened" : "opened in the Steam app")}");
-        }
-        foreach (var id in ids) WorkshopUnsubQueue.MarkBlocked(id);
-        return new DrainResult(inSteam.Count, message);
+        foreach (var id in ids) if (!inSteam.Contains(id)) WorkshopUnsubQueue.MarkBlocked(id); // not a subscription: nothing to click
+        if (inSteam.Count == 0) return new DrainResult();
+        var (queued, openFailed) = SteamTodo.EnqueueUnsubscribes(inSteam);
+        string message = openFailed
+            ? $"{why}, and the Steam app couldn't be opened — unsubscribe on Steam yourself, or sign in under Settings → Getting Workshop wallpapers."
+            : queued == 1 ? $"{why} — Steam opened the item: click Unsubscribe there, then Next."
+            : $"{why} — Steam opens the {queued} items one at a time: click Unsubscribe on each, then Next.";
+        Console.WriteLine($"workshop: unsubscribe {string.Join(", ", inSteam)}: {why} — in the Steam to-do{(openFailed ? " (the Steam app couldn't be opened)" : "")}");
+        return new DrainResult(queued, message);
     }
 
     /// Forget blocked ids whose workshop folder Steam has finished removing. One-time, cheap: parses

@@ -21,6 +21,7 @@ const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
+const SteamTodoPanel = lazy(() => import("./components/SteamTodoPanel").then((m) => ({ default: m.SteamTodoPanel })));
 const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ default: m.ErrorModal })));
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
 
@@ -71,6 +72,7 @@ export default function App() {
       if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
       else if (e.payload.finished && e.payload.error) s.setStatus("Removing from Steam failed: " + e.payload.error);
     }
+    else if (e.type === "steam-todo") s.setSteamTodo(e.payload);
     else if (e.type === "library-synced") s.loadLibrary();
     else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
     // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
@@ -235,6 +237,7 @@ export default function App() {
         <SteamModal />
         <SteamPasswordModal />
         <DrainToast />
+        <SteamTodoPanel />
         <ErrorModal />
         <DebugHud setTab={(t) => setTab(t as Tab)} getScroll={() => document.querySelector<HTMLElement>(".scroll")} />
       </Suspense>

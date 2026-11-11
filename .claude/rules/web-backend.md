@@ -161,15 +161,18 @@ the first middleware (before the error handler — a refusal never runs an endpo
   list (removing item 5 of 10 replayed 1–4). Only for an edit of the same list (nothing added): a
   different playlist loaded over it starts at its own top.
 - **`Web/SteamOps.cs`** — QR login (→ WS `steam-qr` PNG via QRCoder, `steam-signed-in`), the password sign-in (below),
-  status (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time; without a usable sign-in it
-  opens the items in the Steam app — `sources.md` § Unsubscribe).
+  status (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time; without a usable sign-in its
+  items go into the Steam to-do — `sources.md` § Unsubscribe).
+- **`Web/SteamTodo.cs`** — the Steam to-do (owner 2026-11-11, `sources.md` § Download): ONE app-wide queue of the Workshop
+  pages the user clicks in the Steam app, one at a time; only the user's Next moves on. Its endpoints are one-line wrappers.
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
 `GET /health /health/features /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
 /playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path= /library/scene-loudness/status`,
 `POST /browse /detail /settings /apply /stop /action /next /prev /random /pause /volume /mute /download /open
 /preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview,scene-loudness/estimate,scene-loudness/cancel} /playlist/{state,save,load,play,play-from}
-/steam/{qr/start,qr/cancel,signout,login,login/code,login/cancel} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
+/steam/{qr/start,qr/cancel,signout,login,login/code,login/cancel} /workshop/{delete-from-source,drain}
+/steam-todo/{next,reopen,skip,stop,use-steam-app}`, `GET /steam-todo`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
 **`POST /settings` merges (PATCH semantics)** — `SettingsService.Patch` → `Merge`: the body's keys overwrite
@@ -254,10 +257,30 @@ the base UI), the adapter IT's `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` section 
 every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume) `· scene-crashed {path}` (legacy: an LWE process died; liascape-player: the scene's `source.broken` — the item is then marked crashed in its index; the UI marks its card at once) `· scene-vram-stopped {path, usedMib, limitMib, message}` (liascape-player: the VRAM guard stopped a scene — not a crash; the UI's status bar shows the message) `· timed-stopped · download-progress {id,value,done?,status?} (`status`: a Workshop download's step in words — "Subscribing on
 Steam…", or without a usable sign-in "Not signed in to Steam here — click Subscribe in Steam, then it downloads by itself…")
 · unsub-progress {done,total,currentId,finished?, openedInSteam?, message?, error?} (the finishing one: `message` = what to click in the Steam app when it
-did the unsubscribing, or that Steam is rate-limiting) · library-synced {count} (the startup one fires before any open page has
+did the unsubscribing, or that Steam is rate-limiting) · steam-todo {action: subscribe|unsubscribe, index, total, remaining,
+current: {id, title}, delivered, message, busy} | {finished: true} (the Steam to-do, on every change — below) · library-synced {count} (the startup one fires before any open page has
 reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, …only the changed fields} (a volume keybind moved an item's own volume → `volumeOverride`; a scene's loudness estimate / report → `loudness*`) · scene-loudness-progress {done,total,currentId,finished?,cancelled?} · steam-qr {png}
 · steam-signed-in {…status} · steam-qr-error {message} · steam-login-code {kind: email|device|confirm, hint, retry} ·
 steam-login-error {message, rateLimited} · steam-login-cancelled` (the password sign-in, below).
+
+## The Steam to-do (`Web/SteamTodo.cs`; owner 2026-11-11 — `sources.md` § Download for the why)
+- **State**: an ordered list of entries `{id, title, action, hasDownload}`, `[0]` = the current one (its page was opened);
+  `index` = entries finished in this run + 1, `total` = finished + remaining (back to 0 when it empties). `delivered` = the
+  current entry's download already finished (Steam had it) — it still waits for Next; `message` = the Steam app couldn't be
+  opened / reached; `busy` = "Let the Steam app do all N" is probing Steam.
+- **`GET /steam-todo`** → that payload (or `{finished: true}`) — the UI's `resync` reads it (a page opened mid-to-do).
+- **`POST /steam-todo/next`** (the user did it: a subscribe entry's download keeps waiting; an unsubscribe → `MarkBlocked`, false
+  → re-subscribed), **`/skip`** (subscribe: its `/download` ends `{skipped: true}`; unsubscribe: `Unblock`), **`/stop`** (every
+  entry as skipped), **`/reopen`** (the current page again), **`/use-steam-app`** → `{error}` (null = handed to the Steam client;
+  else why not, and the to-do is unchanged). All 200, no-ops on an empty to-do. Behind the API token like every route.
+- **`POST /download`** answers **200 `{skipped: true, message}`** (not an error) when its to-do entry was skipped / stopped.
+- Fed by `WorkshopDownloader` (`EnqueueSubscribe` from the download's page route and `ResubscribeAsync`, `EnqueueUnsubscribes`
+  from `UnsubscribeInSteamApp`), `AppOps` (`RememberTitle` on Delete from source; `DropUnsubscribe` on Undo). Log lines:
+  `workshop: <id>: subscribe|unsubscribe in the Steam to-do — opened its page in the Steam app`, `… the Steam to-do — done |
+  skipped | left`, `the Steam to-do was stopped (N left: …)`, `the Steam to-do hands N to the Steam app (…)`, `… can't use the
+  Steam app — <why>`.
+- Guards: `scripts/test-steam-signin.sh` (§ 1 selftest: unsubscribes; § 2 + § 3 `h.`: downloads, Skip / Stop, Delete from
+  source, "use the Steam app", no `steam-ugc` child on the page route) and `probe-steam.js` `steam:todo` (the panel).
 
 ## Steam sign-in by password (`SteamOps.StartPasswordLogin` / `SubmitLoginCode` / `CancelPasswordLogin`)
 Owner 2026-11-11: "is it a dead end for users without mobile guard?" — the QR sign-in needs the Steam mobile app. He chose

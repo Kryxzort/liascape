@@ -31,6 +31,8 @@ namespace Liascape.Helpers;
 //   can't take the backend down. JSON lines on stdout; the parent closes its stdin to stop it (release → exit).
 // - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason, and the caller
 //   falls back to the existing paths (the signed-in web subscribe / the item's page in the Steam app).
+// - ONE subscribe/unsubscribe child at a time, app-wide (`Turn`; a bulk download waits with "Waiting for the Steam app…").
+//   `steam-ugc probe` (connect, release, exit) answers the Steam to-do's "Let the Steam app do all N" (Web/SteamTodo.cs).
 // Measured on the owner's machine (prototype, 2026-11-11): a 2.1 MB item subscribed 0.5 s, bytes 0.8 → 1.1 → 2.1 MB,
 // installed 4.5 s, the folder on the library Steam chose (/mnt/Games/… — no symlink guessing).
 public static class SteamClientUgc
@@ -61,6 +63,27 @@ public static class SteamClientUgc
     /// Subscribe + wait for Steam to install it. Folder = done; Fallback = why this route couldn't be used (the caller
     /// carries on the old way). Throws only for cancellation and for failures AFTER Steam took the subscribe.
     public static async Task<Result> SubscribeAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        await TakeTurnAsync(progress, ct);
+        try { return await SubscribeCoreAsync(workshopId, s, progress, ct); }
+        finally { Turn.Release(); }
+    }
+
+    /// The card's words while a download waits for its turn with the Steam client (another helper is running).
+    public const string WaitingForSteamApp = "Waiting for the Steam app…";
+
+    // ONE helper child at a time, app-wide (a bulk download under "Use the Steam app" spawned a child per item at once — N
+    // processes each presenting themselves as Wallpaper Engine to one Steam client). The queued ones say so on their card.
+    // The connect-only probe (ProbeAsync) is exempt: it holds no turn's worth of work and must answer while a long download runs.
+    static readonly SemaphoreSlim Turn = new(1, 1);
+    static async Task TakeTurnAsync(IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        if (Turn.Wait(0)) return;
+        progress?.Report((-1, WaitingForSteamApp));
+        await Turn.WaitAsync(ct);
+    }
+
+    static async Task<Result> SubscribeCoreAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
     {
         var libs = Candidates(s);
         if (libs.Count == 0) return new(null, "the Steam client's steamclient.so wasn't found — is Steam installed?");
@@ -115,6 +138,54 @@ public static class SteamClientUgc
     /// Steam client couldn't be used at all (the caller carries on the old way for every id); ids neither done nor failed-
     /// with-a-connection are the caller's to retry the old way too.
     public static async Task<(HashSet<string> Done, string? Fallback)> UnsubscribeAsync(IReadOnlyList<string> ids, AppSettings s,
+        Action<string>? onDone, CancellationToken ct)
+    {
+        await TakeTurnAsync(null, ct);
+        try { return await UnsubscribeCoreAsync(ids, s, onDone, ct); }
+        finally { Turn.Release(); }
+    }
+
+    /// Can the Steam client be used right now (running, signed in to an account that owns Wallpaper Engine)? A helper that only
+    /// connects and lets go (`steam-ugc probe`) — the Steam to-do's "Let the Steam app do all N" asks before it converts
+    /// anything, so a Steam that can't answer leaves the to-do as it was. Null = yes; else why not.
+    public static async Task<string?> ProbeAsync(AppSettings s, CancellationToken ct)
+    {
+        var libs = Candidates(s);
+        if (libs.Count == 0) return "the Steam client's steamclient.so wasn't found — is Steam installed?";
+        var self = PlayerHelper.GetSelfInvocationArgs();
+        if (self.Count == 0) return "can't start the helper";
+        var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
+        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add("probe");
+        foreach (var l in libs) psi.ArgumentList.Add(l);
+        psi.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
+        psi.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
+        psi.Environment.Remove("LD_LIBRARY_PATH");
+        using var proc = Process.Start(psi);
+        if (proc == null) return "can't start the helper";
+        _ = proc.StandardError.ReadToEndAsync();
+        try { proc.StandardInput.Close(); } catch { }
+        string? why = "Steam didn't answer";
+        try
+        {
+            using var to = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            to.CancelAfter(15000);
+            string? line;
+            while ((line = await proc.StandardOutput.ReadLineAsync(to.Token)) != null)
+            {
+                JsonElement e;
+                try { e = JsonDocument.Parse(line).RootElement; } catch { continue; }
+                var ev = e.GetProperty("event").GetString();
+                if (ev == "ready") why = null;
+                else if (ev == "error") why = e.GetProperty("message").GetString() ?? why;
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+        finally { if (!proc.WaitForExit(3000)) { try { proc.Kill(); } catch { } } }
+        return why;
+    }
+
+    static async Task<(HashSet<string> Done, string? Fallback)> UnsubscribeCoreAsync(IReadOnlyList<string> ids, AppSettings s,
         Action<string>? onDone, CancellationToken ct)
     {
         var done = new HashSet<string>();
@@ -221,8 +292,16 @@ public static class SteamClientUgc
 
     public static int RunChild(string[] args)
     {
+        if (args.Length >= 2 && args[0] == "probe")
+        {
+            var probe = Connect(args.Skip(1), out var whyNot);
+            if (probe == null) { Emit(new { @event = "error", message = whyNot }); return 3; }
+            Release(probe);
+            Emit(new { @event = "ready" });
+            return 0;
+        }
         if (args.Length < 3 || args[0] is not ("subscribe" or "unsubscribe"))
-        { Emit(new { @event = "error", message = "usage: steam-ugc subscribe <id> | unsubscribe <id,id,…>  <steamclient.so>…" }); return 2; }
+        { Emit(new { @event = "error", message = "usage: steam-ugc subscribe <id> | unsubscribe <id,id,…> | probe  <steamclient.so>…" }); return 2; }
         var ids = new List<ulong>();
         foreach (var part in args[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
             if (ulong.TryParse(part, out var v)) ids.Add(v);

@@ -170,12 +170,17 @@ Orchestrated in **`Web/AppOps.cs`**:
 **Undo of a Delete from Source** (owner 2026-11-11: "what if i unsubscribe + undo / does it resubscribe? it doesn't right?" — it
 didn't: the item came back while Steam deleted its folder): `AppOps.Undo` → `WorkshopUnsubQueue.Restore(id)` per item — true when
 Steam had ALREADY unsubscribed it (blocked, no longer pending) → `WorkshopDownloader.ResubscribeAsync` in the background, the way
-the download mode subscribes: `steamapp` the Steam client, `subscribe` the sign-in, else / on failure the item's page in the
-Steam app + WS `unsub-progress {finished, message}` for the status bar ("Undone — to keep it subscribed, click Subscribe on the
-page Steam opened (if it says Subscribed, you're set)" — the page route can't know whether the user clicked Unsubscribe);
-`steamcmd` nothing. An unsubscribe that completes AFTER an Undo restored the item (`MarkBlocked` returns false — it wasn't pending
-any more) blocks nothing and re-subscribes it at the end of the drain. Guard: `test-steam-signin.sh` § 3 (undo after the Steam
-client unsubscribed → subscribed again; Steam unreachable → the page + the message).
+the download mode subscribes: `steamapp` the Steam client, `subscribe` the sign-in, else / on failure the item's page through the
+**Steam to-do** (`Web/SteamTodo.cs`, one page at a time — sources.md § Download) + WS `unsub-progress {finished, message}` for the
+status bar ("Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then
+Next." — the page route can't know whether the user clicked Unsubscribe); `steamcmd` nothing. An unsubscribe that completes AFTER
+an Undo restored the item (`MarkBlocked` returns false — it wasn't pending any more) blocks nothing and re-subscribes it (the
+drain's end; the Steam to-do's Next / "Let the Steam app do all N" the same way). **The page route's unsubscribe is blocked on
+the user's Next, not when its page opens** (2026-11-11, the Steam to-do): until then the id stays `pending` — so an Undo meanwhile
+is a plain un-queue (`Restore` → false) and `SteamTodo.DropUnsubscribe` takes its entry out of the to-do (the next page opens if
+it was the current one); Skip / Stop = kept subscribed → `Unblock` (out of pending AND blocked). Guard: `test-steam-signin.sh`
+§ 3 (undo after the Steam client unsubscribed → subscribed again; after the to-do's Next → subscribed again through the Steam
+client; Steam unreachable → the page + the message) and § 1 (Next / Skip / Stop on unsubscribe entries).
 
 ### `WorkshopUnsubQueue` (`Helpers/WorkshopUnsubQueue.cs`)
 - Persisted JSON `~/.config/liascape/workshop_unsub.json`: `{ Pending[], Blocked[] }`. `pending` = awaiting the unsubscribe POST; `blocked` = unsubscribed, AutoImport skips while Steam's cleanup lags.
@@ -183,6 +188,6 @@ client unsubscribed → subscribed again; Steam unreachable → the page + the m
 - **AutoImport** (`SyncWallpaperEngine`) snapshots `pending ∪ blocked` once into a `HashSet` and skips matches (never `IsBlocked` per folder).
 
 ### Drain (`WorkshopDownloader.DrainUnsubQueueAsync`)
-- Per id: `SetSubscribedAsync(subscribe:false)` → `MarkBlocked(id)`. **No folder delete** — Steam does it. Throttled 300ms; failure leaves the id pending. Aborts the rest on a 429 rate-limit.
+- Per id: `SetSubscribedAsync(subscribe:false)` → `MarkBlocked(id)`. **No folder delete** — Steam does it. Throttled 300ms; failure leaves the id pending. Aborts the rest on a 429 rate-limit. Without a usable sign-in / under `steampage`: the Steam to-do (sources.md § Unsubscribe); ids already waiting in it are skipped by a later drain (`SteamTodo.QueuedUnsubscribes`).
 - **Prune** (`PruneBlocked`, launch, background): drops blocked ids whose folder is gone; parses `libraryfolders.vdf` once and reuses across ids.
 - **One drain at a time** (`SteamOps`, Interlocked guard). Progress → WS `unsub-progress`; the modal is a dismissable *view* (Dismiss hides it, the drain keeps running). Force-quit mid-drain → queue persists → resumes next launch.

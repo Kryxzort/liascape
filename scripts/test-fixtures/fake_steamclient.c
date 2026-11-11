@@ -9,6 +9,8 @@
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
 //   earlier download subscribed); UnsubscribeItem deletes it
+//   $FAKE_UGC_DIR/helpers.log ← "open <pid> <unix s>" (CreateInterface), "use <pid>" (Subscribe/UnsubscribeItem), "close <pid>
+//   <unix s>" (BReleaseSteamPipe) — the test checks that no two subscribe/unsubscribe helpers were connected at once
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,6 +24,12 @@ static double t_sub = -1; static uint64_t sub_id;
 static const uint64_t TOTAL = 4000000;
 static double now(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
 static const char *dir(void) { const char *d = getenv("FAKE_UGC_DIR"); return d ? d : "/nonexistent"; }
+static double wall(void) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
+static void helper_log(const char *what, int stamp) {
+  char line[96]; if (stamp) snprintf(line, sizeof line, "%s %d %.3f\n", what, getpid(), wall()); else snprintf(line, sizeof line, "%s %d\n", what, getpid());
+  char p[4096]; snprintf(p, sizeof p, "%s/helpers.log", getenv("FAKE_UGC_DIR") ? getenv("FAKE_UGC_DIR") : "/nonexistent");
+  FILE *f = fopen(p, "a"); if (f) { fputs(line, f); fclose(f); }
+}
 static void note(const char *file, const char *text) { char p[4096]; snprintf(p, sizeof p, "%s/%s", dir(), file); FILE *f = fopen(p, "a"); if (f) { fputs(text, f); fclose(f); } }
 
 typedef struct { void **vt; } Obj;
@@ -42,7 +50,7 @@ static void install(uint64_t id) {
 static double frac(uint64_t id) { if (t_sub < 0 || id != sub_id) return -1; double e = now() - t_sub - 0.3; return e < 0 ? 0 : e > 1.2 ? 1 : e / 1.2; }
 
 static int32_t create_pipe(Obj *s) { (void)s; return 7; }
-static bool release_pipe(Obj *s, int32_t pipe) { (void)s; (void)pipe; note("released", "pipe\n"); return true; }
+static bool release_pipe(Obj *s, int32_t pipe) { (void)s; (void)pipe; note("released", "pipe\n"); helper_log("close", 1); return true; }
 static int32_t connect_user(Obj *s, int32_t pipe) {
   (void)s; (void)pipe; char p[4096]; snprintf(p, sizeof p, "%s/fail-init", dir());
   if (access(p, F_OK) == 0) return 0;
@@ -55,10 +63,10 @@ static void *generic(Obj *s, int32_t user, int32_t pipe, const char *ver) {
 }
 static void subfile(uint64_t id, char *p, size_t n) { snprintf(p, n, "%s/sub-%llu", dir(), (unsigned long long)id); }
 static uint64_t subscribe(Obj *s, uint64_t id) {
-  (void)s; sub_id = id; t_sub = now(); char p[4096]; subfile(id, p, sizeof p); FILE *f = fopen(p, "w"); if (f) fclose(f); return 1;
+  (void)s; helper_log("use", 0); sub_id = id; t_sub = now(); char p[4096]; subfile(id, p, sizeof p); FILE *f = fopen(p, "w"); if (f) fclose(f); return 1;
 }
 static uint64_t unsubscribe(Obj *s, uint64_t id) {
-  (void)s; char p[4096]; subfile(id, p, sizeof p); unlink(p); if (id == sub_id) t_sub = -1; note("unsubscribed", "x\n"); return 2;
+  (void)s; helper_log("use", 0); char p[4096]; subfile(id, p, sizeof p); unlink(p); if (id == sub_id) t_sub = -1; note("unsubscribed", "x\n"); return 2;
 }
 static uint32_t item_state(Obj *s, uint64_t id) {
   (void)s; double f = frac(id);
@@ -81,6 +89,7 @@ void *CreateInterface(const char *ver, int *ret) {
   client_vt[0] = (void *)create_pipe; client_vt[1] = (void *)release_pipe; client_vt[2] = (void *)connect_user;
   client_vt[4] = (void *)release_user; client_vt[12] = (void *)generic;
   ugc_vt[68] = (void *)subscribe; ugc_vt[69] = (void *)unsubscribe; ugc_vt[72] = (void *)item_state; ugc_vt[73] = (void *)install_info; ugc_vt[74] = (void *)download_info;
+  helper_log("open", 1);
   char pid[32]; snprintf(pid, sizeof pid, "%d\n", getpid());
   char p[4096]; snprintf(p, sizeof p, "%s/child.pid", dir()); FILE *f = fopen(p, "w"); if (f) { fputs(pid, f); fclose(f); }
   return &client;

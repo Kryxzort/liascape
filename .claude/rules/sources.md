@@ -136,6 +136,40 @@ Workshop wallpapers"):
     downloads by itself…"; Delete from source unsubscribes in the Steam app too), `subscribe` (the sign-in; without one it
     still falls back to the page, so a download is never a dead end) and `steamcmd`. Settings shows the sign-in row under
     `subscribe` only.
+  - **The Steam to-do — every page the user clicks goes through ONE app-wide queue, one page at a time** (`Web/SteamTodo.cs`;
+    owner 2026-11-11: a bulk download opened N pages at once — Steam shows one, the rest were lost — and a bulk Delete from source
+    opened the whole subscriptions list, ~320 items; he picked the "Guided" panel mockup). Every place that opened a page for the
+    user enqueues instead: the download's page route (`steampage`, `subscribe` without a usable sign-in, `steamapp` when the
+    Steam client can't be reached), the unsubscribe drain's page route, `ResubscribeAsync`'s page route (undo). An entry =
+    `{id, title, action: subscribe|unsubscribe}`; the current one's page opens (`OpenInSteamApp`), a single item is a to-do of 1.
+    **Only the user's Next moves on** — nothing is detected (owner: "lets just have them click 'next' or smth themselves" — reading
+    Steam's own subscribed state would mean connecting to the Steam client, which someone who chose "Open in the Steam app" may
+    have chosen precisely to avoid, and "not on disk does not always mean unsubscribed"; a design that watched the folders /
+    Steam's state was dropped the same day). Next on a subscribe entry: the item's `/download` keeps waiting through the media
+    poll above (unchanged — it finishes when Steam delivers, its 10 minutes counted from when its page opened: a queued one's
+    clock doesn't run). A delivered download (Steam had it) leaves its entry current until Next all the same (`delivered: true`,
+    the panel says "Steam has it"); a cancelled / failed one leaves the to-do (the next page opens if it was current). Its status
+    while queued: "In the Steam to-do — its page opens in Steam when it's its turn…" (card "In the Steam to-do"); its turn:
+    "Click Subscribe in Steam, then it downloads by itself…". **Skip / Stop** on a subscribe entry end its waiting `/download` at
+    once as skipped (`WorkshopDownloader.SkippedException` → `/download` 200 `{skipped: true, message}`, the card leaves with
+    "Skipped: <title>" in the status bar) — not a 10-minute wait. **"Let the Steam app do all N"** (only while ≥ 2 remain): the
+    remaining entries (current included) through the Steam client — the user's explicit choice for that batch, the ONLY Steam-client
+    use on this route, the saved mode unchanged: first `SteamClientUgc.ProbeAsync` (`steam-ugc probe`: connect, release, exit);
+    Steam can't answer → the panel says "The Steam app couldn't be reached — <why>." and the to-do stays as it was; else every
+    download's own flow calls `SteamClientUgc.SubscribeAsync` (one helper at a time, below), unsubscribes go to
+    `UnsubscribeAsync` (each confirmed id → `MarkBlocked`, the rest stay pending for the next drain), undo re-subscribes too.
+    Open again re-opens the current page; xdg-open failing on a later entry → the panel's message ("Open again to retry, or
+    Skip"); on the first entry of a download → the download fails as before. WS `steam-todo`, `/steam-todo/*` — web-backend.md.
+    Guards: `test-steam-signin.sh` § 1 (unsubscribes: one page at a time, Next / Open again / Skip / Stop, a no-folder id gets no
+    page), § 2 (each single download a to-do of 1: delivered, held until Next), § 3 `h.` (bulk subscribe of 3: only page 1 opens,
+    item 1 delivered → page 2 still waits, Next → page 2, Skip → page 3 + item 2's `/download` skipped in < 3 s, Stop → the rest;
+    bulk Delete from source; "Let the Steam app do all 2" unreachable → unchanged, reachable → both through the fake client, the
+    mode unchanged; the page route never starts a `steam-ugc` child — the fake's `helpers.log` untouched).
+  - **`steamapp`: one Steam-client helper at a time, app-wide** (`SteamClientUgc.Turn`, a `SemaphoreSlim` around every
+    `steam-ugc subscribe|unsubscribe` child): a bulk download spawned a child per item at once (N processes each presenting
+    themselves as Wallpaper Engine to one Steam client). A queued one's card says "Waiting for the Steam app…". The probe is
+    exempt (it only connects and lets go, and must answer while a 30-minute download holds the turn). Guard: § 3 (3 downloads at
+    once: the fake's per-process open/close times never overlap; the queued ones said "Waiting for the Steam app…").
   - Either way it then polls every Workshop root (the WE folder, `~/.cache/liascape/steamcmd_workshop/…`, standard + Flatpak
     Steam, every `libraryfolders.vdf` library) every 3 s (`LIASCAPE_WORKSHOP_POLL_MS` shortens it for the test) until the
     media file exists, is non-empty and has the same size on two polls — tracked PER PATH (owner 2026-11-11: Steam's `~/.local/share/Steam/…/content/431960` a symlink to another library's folder → two paths to one folder; one shared "last size" slot alternated between them and the download said "Downloading…" for the full 10 min; guard: `test-steam-signin.sh` "Workshop folder reached through a symlink"); while it waits it reports the phase as the `download-progress` status — "Steam is downloading it…" once Steam's staging folder `<workshop>/downloads/431960/<id>` exists (each content root's `../../downloads`; Steam moves it to `content/` at the end), "Steam is finishing…" once the files are in but not yet steady — phases only, no percent (Steam may reserve a staged file's full size before writing it; owner 2026-11-11: a 458 MB item showed "Downloading…" over an empty bar for a minute); 10 min timeout (its message says to click Subscribe
@@ -148,12 +182,18 @@ each id confirmed by its state losing "subscribed" within 10 s → `MarkBlocked`
 button but for some reason it took me to the steam page instead of handling it itself") — what it can't confirm (Steam not
 running, not owned) goes on below; `steampage` → always the Steam app; else signed in → `POST
 …/sharedfiles/unsubscribe` per id (spaced, a rate limit stops the drain and says so); **not signed in** (or Steam ends the
-sign-in mid-drain) → `UnsubscribeInSteamApp`: the ids Steam still has in its own Workshop folders (our steamcmd cache isn't a
-subscription) open in the Steam app — one → `steam://url/CommunityFilePage/<id>`, several →
-`steam://openurl/https://steamcommunity.com/my/myworkshopfiles/?appid=431960&browsefilter=mysubscriptions` — for the user to
-click Unsubscribe; every id goes pending → blocked (AutoImport keeps the folder out until Steam removes it, as after a real
-unsubscribe; downloading it again unblocks). The finishing `unsub-progress` carries `openedInSteam` + `message` ("Not signed in
-to Steam here — Steam opened the item: click Unsubscribe there."), which the UI's status bar holds.
+sign-in mid-drain) → `UnsubscribeInSteamApp`: the ids Steam still has in its own Workshop folders go into the **Steam to-do**
+(above) — each one's page (`steam://url/CommunityFilePage/<id>`) in turn, for the user to click Unsubscribe, then Next; the
+subscriptions list (`…/myworkshopfiles/?…&browsefilter=mysubscriptions`, "unsubscribe the N you deleted there") is never opened
+any more. Only ids with a folder (owner 2026-11-11: the queue only holds items deleted from the LIBRARY, and a library Workshop
+item is either a `local/<id>` link into Steam's folder — a subscription — or an owned `workshop/<id>` copy — a steamcmd
+download, never a subscription; our steamcmd cache isn't a Steam root here): the rest are blocked at once, no page. A queued id
+stays `pending` until **Next** → `MarkBlocked` (AutoImport keeps the folder out until Steam removes it, as after a real
+unsubscribe; downloading it again unblocks); **Skip / Stop** = the user keeps it subscribed → `Unblock` (out of pending AND
+blocked); an Undo meanwhile drops its entry (library.md § Undo). A later drain leaves the to-do's ids alone. The finishing
+`unsub-progress` carries `openedInSteam` (= how many went into the to-do) + `message` ("Not signed in to Steam here — Steam opened
+the item: click Unsubscribe there, then Next." / "… — Steam opens the 3 items one at a time: click Unsubscribe on each, then
+Next."), which the UI's status bar holds.
 
 **Sign-in** (`SteamAuthService`; both store the same way — `SaveSignIn`: refresh token, Steam ID, account name, clears
 `SteamSignInRejected` + the cached cookie): **QR** (`LoginViaQrAsync`, the Steam mobile app) or **account name + password**

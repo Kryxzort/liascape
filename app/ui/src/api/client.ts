@@ -59,6 +59,14 @@ async function jget<T>(path: string): Promise<T> {
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
   return r.json();
 }
+// WS steam-todo / GET /steam-todo (Web/SteamTodo.cs): the current entry + the count, or `finished` (idle). `delivered` = Steam
+// already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
+// reached; `busy` = "Let the Steam app do all N" is asking Steam.
+export type SteamTodo =
+  | { finished: true }
+  | { finished?: false; action: "subscribe" | "unsubscribe"; index: number; total: number; remaining: number;
+      current: { id: string; title: string }; delivered?: boolean; message?: string | null; busy?: boolean };
+
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method: "POST",
@@ -204,7 +212,8 @@ export const api = {
   undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
   download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal) =>
-    jpost<LibraryItem & { error?: string }>("/download", { source, result, apply }, signal),
+    // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure
+    jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply }, signal),
   steamcmdSignin: () => jpost("/steam/steamcmd-signin"),
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache
@@ -233,6 +242,9 @@ export const api = {
   deleteFromSource: (items: LibraryItem[]) => jpost<{ batch: string }>("/workshop/delete-from-source", { items }),
   drain: () => jpost("/workshop/drain"),
   workshopQueue: () => jget<{ pending: string[]; hasPending: boolean }>("/workshop/queue"),
+  // API: the Steam to-do (the pages the user clicks in the Steam app, one at a time — web-ui.md § Steam to-do)
+  steamTodo: () => jget<SteamTodo>("/steam-todo"),
+  steamTodoAction: (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => jpost<{ error?: string | null } | void>(`/steam-todo/${a}`),
   open: (body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }) => jpost("/open", body),
   duration: (path: string) => jget<{ seconds: number }>(`/library/duration?path=${encodeURIComponent(path)}`),
   apply: (path: string) => jpost("/apply", { path }),

@@ -555,7 +555,10 @@ public static class ServerHost
         {
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
-            var item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl);
+            LibraryItem item;
+            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl); }
+            // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (web-ui.md § Steam to-do)
+            catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
             if (r.Apply) { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
                 SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } }); }
             return Results.Json(item);
@@ -637,6 +640,13 @@ public static class ServerHost
         });
         app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items) }));
         app.MapPost("/workshop/drain", () => { SteamOps.StartDrain(); return Results.Ok(); });
+        // the Steam to-do (Web/SteamTodo.cs; sources.md § Download): the pages the user clicks in the Steam app, one at a time
+        app.MapGet("/steam-todo", () => Results.Json(SteamTodo.Payload()));
+        app.MapPost("/steam-todo/next", () => { SteamTodo.Next(); return Results.Ok(); });
+        app.MapPost("/steam-todo/reopen", () => { SteamTodo.Reopen(); return Results.Ok(); });
+        app.MapPost("/steam-todo/skip", () => { SteamTodo.Skip(); return Results.Ok(); });
+        app.MapPost("/steam-todo/stop", () => { SteamTodo.Stop(); return Results.Ok(); });
+        app.MapPost("/steam-todo/use-steam-app", async () => Results.Json(new { error = await SteamTodo.UseSteamAppAsync() }));
         app.MapGet("/workshop/queue", () => Results.Json(new
         {
             pending = WorkshopUnsubQueue.SnapshotPending(), hasPending = WorkshopUnsubQueue.HasPending(),
