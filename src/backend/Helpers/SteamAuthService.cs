@@ -128,6 +128,21 @@ public static class SteamAuthService
     /// token is stored. Returns null if no auth is configured. Persists the refreshed cookie.
     public static async Task<string?> GetCookieAsync(AppSettings settings, CancellationToken ct = default)
     {
+        // A sign-in whose SteamId was zeroed (owner 2026-11-11: Settings said "Signed in as …" — it reads the refresh token — while a
+        // Workshop download failed "Not signed in to Steam"): an old settings save wrote the UI's stale `SteamId: 0` back before
+        // `SettingsService.Patch` kept it (d12ab993), and since then the guard has faithfully kept the 0. The id is the refresh
+        // token's own `sub` claim, so restore it from there instead of sending the user through the QR sign-in again.
+        if (!string.IsNullOrWhiteSpace(settings.SteamRefreshToken) && settings.SteamId == 0)
+        {
+            ulong id = 0;
+            try { id = SteamIdFromJwt(settings.SteamRefreshToken); } catch { /* not a readable token → the paths below */ }
+            if (id != 0)
+            {
+                settings.SteamId = id;
+                SettingsService.Update(s => { if (s.SteamId == 0) s.SteamId = id; });
+                Console.WriteLine("steam: the Steam ID was missing — restored from the sign-in token");
+            }
+        }
         // No QR sign-in → use manual cookie paste if present (back-compat / advanced).
         if (string.IsNullOrWhiteSpace(settings.SteamRefreshToken) || settings.SteamId == 0)
             return string.IsNullOrWhiteSpace(settings.SteamLoginSecure) ? null : settings.SteamLoginSecure.Trim();
