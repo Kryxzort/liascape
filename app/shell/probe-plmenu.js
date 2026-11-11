@@ -6,7 +6,7 @@
 // playback requests the UI tried to send. `/open` is stubbed as well (no real file manager).
 // Usage: electron app/shell/probe-plmenu.js "http://127.0.0.1:5173/?api=5174"   (exit 0 = pass)
 const { app, BrowserWindow } = require("electron");
-const url = process.argv[2] || "http://127.0.0.1:5173/?api=5174";
+const url = process.argv.slice(2).find((a) => /^https?:/.test(a)) || process.env.LIASCAPE_URL || "http://127.0.0.1:5173/?api=5174"; // LIASCAPE_URL: scripts/test-ui-matrix.sh --probe probe-plmenu.js
 app.commandLine.appendSwitch("ozone-platform-hint", "auto");
 
 const PLAYBACK = ["/playlist/play-from", "/playlist/play", "/apply", "/next", "/prev", "/random"];
@@ -14,6 +14,9 @@ const PLAYBACK = ["/playlist/play-from", "/playlist/play", "/apply", "/next", "/
 const SIDE_EFFECTS = ["/open"];
 
 app.whenReady().then(async () => {
+  // in the matrix's hermetic stack (LIASCAPE_CLIPS): a playlist of its clips first, so there are bar items to right-click
+  if (process.env.LIASCAPE_CLIPS) await fetch(new URL("/playlist/state", url), { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videoPaths: JSON.parse(process.env.LIASCAPE_CLIPS).slice(0, 3), settings: null, name: null }) }).catch(() => {});
   const win = new BrowserWindow({ show: false, width: 1400, height: 900,
     webPreferences: { backgroundThrottling: false } });
   await win.loadURL(url);

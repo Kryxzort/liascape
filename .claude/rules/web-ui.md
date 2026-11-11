@@ -100,7 +100,8 @@ local media via `media(path)` (`/media`). WS via `useEvents`.
   `playFrom`) receives its clicks too — the old bar menu's "Settings" restarted playback from that item. Wrap the portal content in
   a `display: contents` element that `stopPropagation`s click/contextmenu/pointerdown/keydown, or declare it outside the clickable
   element. Guard (now: a right-click on a bar item opens its sidebar, no menu; the sidebar's playlist toggle twice — no playback
-  request either way): `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback + `/open`).
+  request either way): `scripts/test-ui-matrix.sh --probe probe-plmenu.js` (the hermetic stack: it seeds a playlist from
+  the stack's clips) or `electron app/shell/probe-plmenu.js "http://localhost:5173/?api=<port>"` (stubs playback + `/open`).
 - **`useSmoothScroll(ref, axis)`** (`hooks/`) — smooth wheel scrolling (wheel→velocity, rAF ease,
   friction 0.85). Wire on every `.scroll` container + the horizontal `.playlist-bar-row` (`"x"`).
 - **Never set `scrollbar-width`/`scrollbar-color`** — Chromium ≥121 then ignores `::-webkit-scrollbar`
