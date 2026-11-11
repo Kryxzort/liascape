@@ -61,15 +61,16 @@ run over 500 ms.
   that's still there (`ReorderPlaylist(…, previousPaths)`; like Trash). It went on from the top of the new
   list (removing item 5 of 10 replayed 1–4). Only for an edit of the same list (nothing added): a
   different playlist loaded over it starts at its own top.
-- **`Web/SteamOps.cs`** — QR login (→ WS `steam-qr` PNG via QRCoder, `steam-signed-in`), status
-  (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time).
+- **`Web/SteamOps.cs`** — QR login (→ WS `steam-qr` PNG via QRCoder, `steam-signed-in`), the password sign-in (below),
+  status (daysLeft), signout, unsub drain (→ WS `unsub-progress`, Interlocked one-at-a-time; without a usable sign-in it
+  opens the items in the Steam app — `sources.md` § Unsubscribe).
 
 ## Endpoints (all under `http://127.0.0.1:<port>`)
 `GET /health /health/features /sources /settings /themes /mpv-preview /player-engine /library /current /workshop/queue /steam/status
 /playlist/state /playlist/names /library/undo-depth /library/duration /library/scene-props?path= /library/scene-loudness/status`,
 `POST /browse /detail /settings /apply /stop /action /next /prev /random /pause /volume /mute /download /open
 /preview /library/{delete,clear,volume,speed,whitelist,sync,import,trash,undo,scene-props,scene-props/preview,scene-loudness/estimate,scene-loudness/cancel} /playlist/{state,save,load,play,play-from}
-/steam/{qr/start,qr/cancel,signout} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
+/steam/{qr/start,qr/cancel,signout,login,login/code,login/cancel} /workshop/{delete-from-source,drain}`, `GET /img?u=&r=` (proxy,
 Firefox UA + Referer for moewalls), `GET /media?path=`, WS `/events`.
 
 **`POST /settings` merges (PATCH semantics)** — `SettingsService.Patch` → `Merge`: the body's keys overwrite
@@ -151,10 +152,45 @@ the base UI), the adapter IT's `LIASCAPE_SCENE_WORKER_BIN=/nonexistent` section 
 ## WS event types
 `wallpaper-changed {path}` (every switch — `SwitchToFile`; `null` on a keybind stop / trash stop) `· settings-changed
 {…changed fields}` (the backend changed settings itself — a keybind volume-up/down; the UI merges it:
-every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume) `· scene-crashed {path}` (legacy: an LWE process died; liascape-player: the scene's `source.broken` — the item is then marked crashed in its index; the UI marks its card at once) `· scene-vram-stopped {path, usedMib, limitMib, message}` (liascape-player: the VRAM guard stopped a scene — not a crash; the UI's status bar shows the message) `· timed-stopped · download-progress {id,value,done?,status?}
-· unsub-progress {done,total,currentId,finished?} · library-synced {count} (the startup one fires before any open page has
+every UI save posts its WHOLE copy, so a stale one reverted the keybind's volume) `· scene-crashed {path}` (legacy: an LWE process died; liascape-player: the scene's `source.broken` — the item is then marked crashed in its index; the UI marks its card at once) `· scene-vram-stopped {path, usedMib, limitMib, message}` (liascape-player: the VRAM guard stopped a scene — not a crash; the UI's status bar shows the message) `· timed-stopped · download-progress {id,value,done?,status?} (`status`: a Workshop download's step in words — "Subscribing on
+Steam…", or without a usable sign-in "Not signed in to Steam here — click Subscribe in Steam, then it downloads by itself…")
+· unsub-progress {done,total,currentId,finished?, openedInSteam?, message?, error?} (the finishing one: `message` = what to click in the Steam app when it
+did the unsubscribing, or that Steam is rate-limiting) · library-synced {count} (the startup one fires before any open page has
 reconnected — a page re-reads everything on a WS reopen instead: `web-ui.md` → "Backend restart under an open page") · library-item-changed {path, …only the changed fields} (a volume keybind moved an item's own volume → `volumeOverride`; a scene's loudness estimate / report → `loudness*`) · scene-loudness-progress {done,total,currentId,finished?,cancelled?} · steam-qr {png}
-· steam-signed-in {…status} · steam-qr-error {message}`.
+· steam-signed-in {…status} · steam-qr-error {message} · steam-login-code {kind: email|device|confirm, hint, retry} ·
+steam-login-error {message, rateLimited} · steam-login-cancelled` (the password sign-in, below).
+
+## Steam sign-in by password (`SteamOps.StartPasswordLogin` / `SubmitLoginCode` / `CancelPasswordLogin`)
+Owner 2026-11-11: "is it a dead end for users without mobile guard?" — the QR sign-in needs the Steam mobile app. He chose
+both: this, and Workshop downloads through the Steam app with no sign-in at all (`sources.md` § Download). Flow:
+- `POST /steam/login {username, password}` → 200 (started; a running one is replaced — quietly, no event for it) or **400
+  `{error}`** (empty fields, too long, or Steam's rate-limit hold: "…try again after HH:MM"). The body binds to a CLASS
+  (`LoginReq`, `ToString` prints no fields — a record's would print the password), `TakePassword()` empties it, and SteamOps
+  keeps it in a one-slot box that `SteamAuthService.LoginViaCredentialsAsync` empties when it hands it to SteamKit2's
+  `BeginAuthSessionViaCredentialsAsync` (RSA-encrypted there); nothing logs, broadcasts or stores it. Exception messages that
+  reach the throwing-endpoint middleware never carry it.
+- Steam's next step → WS **`steam-login-code {kind, hint, retry}`**: `email` (Steam Guard by email; `hint` = the address's
+  domain Steam sends as `associated_message`), `device` (the mobile authenticator's code), `confirm` (approve in the Steam
+  app — `AcceptDeviceConfirmationAsync` returns true so SteamKit2 polls; a code typed meanwhile goes to Steam as the
+  authenticator's code via the session's `SendSteamGuardCodeAsync`, a wrong one → `confirm` again with `retry`). A wrong
+  email / device code → the same kind with `retry: true` (SteamKit2's own loop asks again). No guard → straight to signed-in.
+- `POST /steam/login/code {code}` (spaces / dashes dropped, upper-cased) → 200, or **409 `{error}`** when nothing waits for a code.
+- Signed in → `SaveSignIn` (the same fields as the QR path: refresh token, `SteamId`, account name; clears `SteamSignInRejected`
+  and the cached cookie) → WS `steam-signed-in {…status}`. Failed → WS **`steam-login-error {message, rateLimited}`** in the
+  user's words (`SteamAuthService.LoginMessage`: "Wrong account name or password.", "Steam is limiting sign-in attempts from this
+  connection. Wait a while…", expired, refused, unreachable). **Never retried by the backend or the UI**; after a rate limit
+  (`RateLimitExceeded` / `AccountLoginDeniedThrottle` / `LimitExceeded` / `AccountActivityLimitExceeded`) new attempts are
+  refused for 15 min (`LoginHold`) without reaching Steam. A sign-in that waits > 10 min (`LoginTimeout`) ends with "timed out".
+- `POST /steam/login/cancel` → WS `steam-login-cancelled`, nothing saved.
+- Log lines (never the password, never the account name): `steam: password sign-in started`, `… Steam asks for the code it
+  emailed` / `the authenticator's code` / `waiting for the approval in the Steam app`, `steam: signed in with a password`,
+  `steam: password sign-in failed — <message>`.
+- Secrets stay behind `SteamAuthService` (`SaveSignIn`, `HasUsableSignIn`, `GetCookieAsync`) so moving them out of
+  settings.json later is one place. `GetCookieAsync` no longer asks finalizelogin again once Steam rejected the sign-in.
+- Hidden **`liascape-backend steam-selftest`** (needs HOME under /tmp): a scripted sign-in in place of SteamKit2 (the
+  `SteamOps.LoginDriver` seam) through every step above + the no-sign-in unsubscribe with a stub `xdg-open`; fails if the
+  password appears in any WS event, the console or settings.json. Wrapped with a private-backend download test in
+  `scripts/test-steam-signin.sh`.
 
 ## Steam Community rate limits (`Helpers/SteamGate.cs`)
 **Every** request to steamcommunity.com goes through `SteamGate.SendAsync(req, Kind)` (owner 2026-11-11: "make sure you obey

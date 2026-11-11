@@ -146,6 +146,7 @@ export const Settings = memo(function Settings() {
   const steam = useStore((s) => s.steam);
   const startQr = useStore((s) => s.startQr);
   const signoutSteam = useStore((s) => s.signoutSteam);
+  const openPwLogin = useStore((s) => s.openPwLogin);
   const resetAllSettings = useStore((s) => s.resetAllSettings);
   const steamcmdSignin = useStore((s) => s.steamcmdSignin);
   const themes = useStore((s) => s.themes);
@@ -454,16 +455,23 @@ export const Settings = memo(function Settings() {
         <Row label="Download via steamcmd" hint="a one-off copy, no syncing" wk="workshopDownloadMode">
           <input type="radio" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "subscribe"
+          /* Signing in is optional (owner 2026-11-11: "is it a dead end for users without mobile guard?"): without a usable
+             sign-in a Download opens the item in the Steam app, where the user clicks Subscribe (WorkshopDownloader) — so the
+             row says what happens either way. Sign in with QR (the Steam mobile app) or with a password (SteamPasswordModal). */
           ? <Row label="Steam">
-              {steam?.signedIn && steam.rejected
-                /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) — it
-                   used to keep saying "Signed in as …" while every download failed (owner 2026-11-11) */
-                ? <div className="hms" data-steam-rejected><span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again</span>
-                    <button className="btn accent" onClick={startQr}>Sign in with QR</button></div>
-                : steam?.signedIn
-                ? <div className="hms"><span className="shint">Signed in as <b>{steam.accountName}</b> · ~{steam.daysLeft}d left</span>
+              {steam?.signedIn && !steam.rejected
+                ? <div className="hms" data-steam-state="signed-in"><span className="shint">Signed in as <b>{steam.accountName}</b> · ~{steam.daysLeft}d left</span>
                     <button className="btn ghost" onClick={signoutSteam}>Sign out</button></div>
-                : <button className="btn accent" onClick={startQr}>Sign in with QR</button>}
+                : <div className="hms" data-steam-state={steam?.signedIn ? "rejected" : "signed-out"} data-steam-rejected={steam?.signedIn ? "" : undefined}>
+                    {steam?.signedIn
+                      /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) —
+                         it used to keep saying "Signed in as …" while every download failed (owner 2026-11-11) */
+                      ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again. Until then, downloads open in the Steam app.</span>
+                      : <span className="shint">Not signed in — downloads open in the Steam app, where you click Subscribe.</span>}
+                    <span className="steam-row-btns">
+                      <button className="btn accent" onClick={startQr} data-steam-signin="qr">Sign in with QR</button>
+                      <button className="btn ghost" onClick={openPwLogin} data-steam-signin="password">Sign in with password</button>
+                    </span></div>}
             </Row>
           : <>
               <Help>Downloads a one-off copy with steamcmd — no subscription. Needs steamcmd and a one-time sign-in.</Help>

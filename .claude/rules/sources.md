@@ -97,9 +97,49 @@ client-side.
 - Not exposed (niche / scene-element or asset/preset subtypes): `Background`/`Character`/`Clock`/`Fire`/`Interactive`/`Magic`/`Post Processing`/`Smoke`/`Space`/`Audio Visualizer` (Category), `Particle`/`Image`/`Sound`/`Model`/`Text`/`Sprite`/`Fullscreen`/`Composite`/`Script`/`Effect`/`Scripted Layer` (Asset), `Boolean`/`Number`/`Vec2..4`/`String` (Preset).
 
 **Download — `WorkshopDownloader.AcquireAsync`:**
-Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopDownloadMode`):
-- `"subscribe"` (default): `xdg-open steam://url/CommunityFilePage/<id>` → poll `workshop/content/431960/<id>/project.json` (3 s intervals, 10 min timeout). Checks both WE workshop dir and `~/.cache/liascape/steamcmd_workshop/…`.
+Steam blocks anonymous downloads for appid 431960. Two modes (`AppSettings.WorkshopDownloadMode`, Settings → "Getting
+Workshop wallpapers"):
+- `"subscribe"` (default, "Subscribe via Steam") — a real subscription, so Steam keeps the item synced and updated:
+  - **Signed in** (`SteamAuthService.HasUsableSignIn`: a refresh token Steam hasn't turned down, or a pasted cookie): the
+    community AJAX endpoint `POST steamcommunity.com/sharedfiles/subscribe` (the website's Subscribe button) with the
+    `steamLoginSecure` cookie minted from the refresh token (`GetCookieAsync` → finalizelogin → settokens), through `SteamGate`.
+    Status "Subscribing on Steam…" → "Subscribed — waiting for Steam to download…".
+  - **Not signed in — the Steam app does it** (owner 2026-11-11: "is it a dead end for users without mobile guard?" — the QR
+    sign-in needs the Steam mobile app; he chose both a password sign-in and this): no sign-in, a sign-in Steam turned down
+    (`SteamSignInRejected` — no finalizelogin is attempted again), a mint that failed, or Steam turning down the subscribe
+    request → `xdg-open steam://url/CommunityFilePage/<id>` (`OpenInSteamApp`: `setsid sh -c 'exec xdg-open …'`, detached
+    from the backend's process group; it starts Steam when it isn't running) and the download's `download-progress` status
+    says why + what to do: "Not signed in to Steam here — click Subscribe in Steam, then it downloads by itself…" (or "Steam
+    signed this app out — …", "Steam turned down the subscribe request — …"). Log `workshop: <id>: <why> — opened its page in
+    the Steam app, waiting for the download`. An item already on disk with no usable sign-in opens nothing (imported at once).
+    A rate limit (`SteamRateLimitException`) does NOT fall back — the app's page is steamcommunity.com from the same connection.
+  - **Decision: automatic, no third mode.** "Subscribe via Steam" is the one mode; signing in only makes it one click. A
+    third radio ("Subscribe in the Steam app") would split one behaviour in two and leave the user to work out which applies —
+    instead the Settings Steam row says what happens now ("Not signed in — downloads open in the Steam app, where you click
+    Subscribe"), WE-shaped (WE's own Workshop opens in Steam too).
+  - Either way it then polls every Workshop root (the WE folder, `~/.cache/liascape/steamcmd_workshop/…`, standard + Flatpak
+    Steam, every `libraryfolders.vdf` library) every 3 s (`LIASCAPE_WORKSHOP_POLL_MS` shortens it for the test) until the
+    media file exists, is non-empty and has the same size on two polls; 10 min timeout (its message says to click Subscribe
+    on the page Steam opened, or sign in); cancellable — the UI's Cancel aborts `/download` → `RequestAborted`.
 - `"steamcmd"`: runs `steamcmd +force_install_dir ~/.cache/liascape/steamcmd_workshop +login <SteamUsername> +workshop_download_item 431960 <id> +quit`. Password is **never stored** — one-time sign-in via `LaunchSteamCmdSignIn` opens an interactive terminal to cache Steam sentry file. Subsequent runs are non-interactive.
+
+**Unsubscribe** ("Delete from source" → `WorkshopUnsubQueue` pending → `DrainUnsubQueueAsync`): signed in → `POST
+…/sharedfiles/unsubscribe` per id (spaced, a rate limit stops the drain and says so); **not signed in** (or Steam ends the
+sign-in mid-drain) → `UnsubscribeInSteamApp`: the ids Steam still has in its own Workshop folders (our steamcmd cache isn't a
+subscription) open in the Steam app — one → `steam://url/CommunityFilePage/<id>`, several →
+`steam://openurl/https://steamcommunity.com/my/myworkshopfiles/?appid=431960&browsefilter=mysubscriptions` — for the user to
+click Unsubscribe; every id goes pending → blocked (AutoImport keeps the folder out until Steam removes it, as after a real
+unsubscribe; downloading it again unblocks). The finishing `unsub-progress` carries `openedInSteam` + `message` ("Not signed in
+to Steam here — Steam opened the item: click Unsubscribe there."), which the UI's status bar holds.
+
+**Sign-in** (`SteamAuthService`; both store the same way — `SaveSignIn`: refresh token, Steam ID, account name, clears
+`SteamSignInRejected` + the cached cookie): **QR** (`LoginViaQrAsync`, the Steam mobile app) or **account name + password**
+(`LoginViaCredentialsAsync`: SteamKit2 `BeginAuthSessionViaCredentialsAsync`, WebBrowser platform + website "Community" like
+the QR so finalizelogin works, `IsPersistentSession` for a long-lived token; an `IAuthenticator` asks the UI for an emailed
+Steam Guard code / the mobile authenticator's code / approval in the app — `web-backend.md` § Steam sign-in). The password is
+handed to Steam once and never stored, logged or broadcast.
+Hermetic test (no account, no Steam): `scripts/test-steam-signin.sh` — the hidden `steam-selftest` + a private backend with a
+stub `xdg-open` and a fake Workshop folder.
 
 After acquire: `DownloadHelper.DownloadAsync` with the workshop dir as `DownloadUrl` (local file path), identical to WE Local import. `WallpaperDetail.IsWorkshopAcquire = true` signals the acquire branch in `DownloadCardsAsync`.
 

@@ -9,8 +9,11 @@ export type LiascapeEvent =
   | { type: "timed-stopped"; payload: null }
   // `liascape loop-current` toggled "keep playing this one" (the rotation holds what plays)
   | { type: "loop-current"; payload: { keep: boolean; path: string | null; message: string } }
-  | { type: "download-progress"; payload: { id: string; value: number; done?: boolean } }
-  | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean } }
+  // `status`: a Workshop download's step in words ("Subscribing on Steam…", "Not signed in to Steam here — click Subscribe in
+  // Steam, then it downloads by itself…")
+  | { type: "download-progress"; payload: { id: string; value: number; done?: boolean; status?: string } }
+  // finished without a usable sign-in: `openedInSteam` items were opened in the Steam app and `message` says what to click
+  | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; openedInSteam?: number; message?: string | null; error?: string } }
   | { type: "library-synced"; payload: { count: number } }
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)
@@ -21,7 +24,12 @@ export type LiascapeEvent =
   | { type: "steam-qr"; payload: { png: string } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }
   | { type: "steam-qr-error"; payload: { message: string } }
-  | { type: "steam-qr-cancelled"; payload: null };
+  | { type: "steam-qr-cancelled"; payload: null }
+  // the password sign-in (SteamOps): what Steam wants next — `email` (hint = the address's domain), `device` (the mobile
+  // authenticator's code), `confirm` (approve in the Steam app, or type its code); `retry` = the last code was wrong
+  | { type: "steam-login-code"; payload: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean } }
+  | { type: "steam-login-error"; payload: { message: string; rateLimited: boolean } }
+  | { type: "steam-login-cancelled"; payload: null };
 
 // API: subscribe to backend push events over WS /events. Auto-reconnects. Same-origin (the installed
 // app: the backend serves the UI, API = "") connects to this page's own origin — it used to return

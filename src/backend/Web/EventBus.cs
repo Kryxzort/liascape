@@ -17,9 +17,14 @@ public static class EventBus
     public static void Add(Guid id, WebSocket ws) => _clients[id] = (ws, new SemaphoreSlim(1, 1));
     public static void Remove(Guid id) => _clients.TryRemove(id, out _);
 
+    // the hidden `steam-selftest` listens here (every event as sent: its type + the JSON)
+    internal static Action<string, string>? Tap;
+
     public static void Broadcast(string type, object? payload = null)
     {
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type, payload }));
+        var json = JsonSerializer.Serialize(new { type, payload });
+        Tap?.Invoke(type, json);
+        var bytes = Encoding.UTF8.GetBytes(json);
         foreach (var (id, c) in _clients)
         {
             if (c.Sock.State != WebSocketState.Open) { _clients.TryRemove(id, out _); continue; }

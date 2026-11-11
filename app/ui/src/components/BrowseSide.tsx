@@ -3,6 +3,7 @@ import { Monitor, Star, Heart, Eye, HardDrive, User, ExternalLink, Copy, Downloa
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
+import { useStore } from "../store";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -42,6 +43,9 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const online = useOnline();
   const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt && online });
   const downloading = progress !== undefined;
+  // a Workshop download's step in words (WS download-progress `status`) — e.g. "Not signed in to Steam here — click Subscribe in
+  // Steam, then it downloads by itself…" while it waits on the Steam app (WorkshopDownloader)
+  const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   // the About card only for a description; tags alone sit in a plain row (owner 2026-11-11: a card for one property felt strange)
   const tagRow = w.tags && w.tags.length > 0 ? <div className="tags side-tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -69,7 +73,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
         <div className="side-cta">
           {downloading ? (
             <div className="side-dl" data-side-download>
-              <span className="shint">{progress! > 0 ? `Downloading ${Math.round(progress! * 100)}%` : "Downloading…"}</span>
+              <span className="shint" data-side-download-status>{progress! > 0 ? `Downloading ${Math.round(progress! * 100)}%` : dlStatus || "Downloading…"}</span>
               <div className="dl-bar"><div className="dl-fill" style={{ width: `${Math.round((progress || 0) * 100)}%` }} /></div>
               <button className="btn ghost ico" onClick={onCancel}><X size={14} /> Cancel</button>
             </div>

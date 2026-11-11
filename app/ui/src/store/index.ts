@@ -65,6 +65,8 @@ interface State {
   // browse
   sources: Source[]; activeSource: number; wallpapers: Wallpaper[]; page: number;
   loading: boolean; query: string; hasMore: boolean; downloads: Record<string, number>;
+  // a Workshop download's step in words (WS download-progress `status`; e.g. "click Subscribe in Steam") — per page URL
+  downloadStatus: Record<string, string>;
   browseFilter: WorkshopFilter; browseSort: number;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
@@ -73,6 +75,9 @@ interface State {
   // steam / workshop
   steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string } | null;
   qrOpen: boolean; qrPng: string | null;
+  // the password sign-in modal (SteamPasswordModal): which step Steam is at (WS steam-login-code), busy while a request /
+  // Steam's answer is pending, the inline error. The password itself is never in the store — the modal's own field only.
+  pwLogin: { step: "credentials" | "email" | "device" | "confirm"; hint: string | null; retry: boolean; busy: boolean; error: string | null } | null;
   unsub: { done: number; total: number; currentId: string; active: boolean } | null;
   // the background scene-loudness queue's progress (WS scene-loudness-progress; null = idle)
   sceneLoudness: { done: number; total: number; currentId: string } | null;
@@ -106,7 +111,7 @@ interface State {
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
-  setDownload(id: string, v: number): void;
+  setDownload(id: string, v: number, status?: string): void;
   stop(): Promise<void>; resetAllSettings(): void;
   addManyToPlaylist(paths: string[]): void; removeManyFromPlaylist(paths: string[]): void;
   steamcmdSignin(): void; setError(e: string): void; dismissError(): void;
@@ -129,6 +134,9 @@ interface State {
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
   deleteFromSource(items: LibraryItem[]): Promise<void>; drain(): Promise<void>;
   setQrPng(png: string): void; onSignedIn(s: State["steam"]): void;
+  openPwLogin(): void; startPwLogin(username: string, password: string): Promise<void>; submitPwCode(code: string): Promise<void>;
+  cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
+  onPwError(message: string): void;
   setUnsub(u: State["unsub"]): void;
   setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
@@ -188,14 +196,14 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
-  sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {},
+  sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   // the docked filter column folded away (owner 2026-11-11: "the sidebar should be collapsable btw"); remembered
   filterColHidden: LS.get<boolean>("browseFilterHidden", false),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
-  steam: null, qrOpen: false, qrPng: null, unsub: null, sceneLoudness: null,
+  steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, sceneLoudness: null,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
@@ -293,10 +301,23 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       if (ctrl.signal.aborted) get().setStatus(`Cancelled: ${w.title}`);
       else get().setError(`Download failed: ${(e as Error).message}`); // error modal
-    } finally { delete dlCtrls[w.pageUrl]; const d = { ...get().downloads }; delete d[w.pageUrl]; set({ downloads: d }); }
+    } finally {
+      delete dlCtrls[w.pageUrl];
+      const d = { ...get().downloads }; delete d[w.pageUrl];
+      const st = { ...get().downloadStatus }; delete st[w.pageUrl];
+      set({ downloads: d, downloadStatus: st });
+    }
   },
   cancelDownload(id) { dlCtrls[id]?.abort(); }, // cancel an in-flight download
-  setDownload(id, v) { set({ downloads: { ...get().downloads, [id]: v } }); },
+  setDownload(id, v, status) {
+    if (!(id in get().downloads)) return; // a late event for a download that already ended (finished / cancelled)
+    if (status === undefined) { set({ downloads: { ...get().downloads, [id]: v } }); return; }
+    const changed = get().downloadStatus[id] !== status;
+    set({ downloads: { ...get().downloads, [id]: v }, downloadStatus: { ...get().downloadStatus, [id]: status } });
+    // the status bar says it too — a download started from a card has no sidebar showing it; untimed while it waits on
+    // the user (Steam's Subscribe button): the next status / the download's end replaces it
+    if (changed) get().setStatus(status, false);
+  },
   async stop() { await api.stop(); set({ playingPath: null }); get().setStatus("Stopped"); },
   resetAllSettings() {
     // spread defaults over current → preserves daemon-owned fields (lastSession, steam tokens) the
@@ -443,7 +464,28 @@ export const useStore = create<State>((set, get) => ({
   },
   async drain() { set({ unsub: { done: 0, total: 0, currentId: "", active: true } }); await api.drain(); },
   setQrPng(png) { set({ qrPng: png }); },
-  onSignedIn(s) { set({ steam: s, qrOpen: false, qrPng: null }); get().setStatus("Signed in to Steam"); },
+  onSignedIn(s) { set({ steam: s, qrOpen: false, qrPng: null, pwLogin: null }); get().setStatus("Signed in to Steam"); },
+  openPwLogin() { set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: false, error: null } }); },
+  async startPwLogin(username, password) {
+    set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: true, error: null } });
+    try { await api.steamLogin(username, password); } // Steam's next step / the result come over WS
+    catch (e) { const p = get().pwLogin; if (p) set({ pwLogin: { ...p, busy: false, error: (e as Error).message } }); }
+  },
+  async submitPwCode(code) {
+    const p0 = get().pwLogin; if (!p0) return;
+    set({ pwLogin: { ...p0, busy: true, error: null, retry: false } });
+    try { await api.steamLoginCode(code); }
+    catch (e) { const p = get().pwLogin; if (p) set({ pwLogin: { ...p, busy: false, error: (e as Error).message } }); }
+  },
+  async cancelPwLogin() {
+    const p = get().pwLogin;
+    set({ pwLogin: null });
+    if (p && (p.busy || p.step !== "credentials")) await api.steamLoginCancel().catch(() => {});
+  },
+  // the step Steam asks for (a "wrong code" retry of the same step says so)
+  onPwCode(c) { if (get().pwLogin) set({ pwLogin: { step: c.kind, hint: c.hint, retry: c.retry, busy: false, error: null } }); },
+  // back to the first step with the error (its password field starts empty: the password is never kept)
+  onPwError(message) { if (get().pwLogin) set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: false, error: message } }); },
   setUnsub(u) { set({ unsub: u }); },
   setSceneLoudness(p) { set({ sceneLoudness: p }); },
 

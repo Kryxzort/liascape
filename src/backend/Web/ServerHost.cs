@@ -610,6 +610,12 @@ public static class ServerHost
         app.MapPost("/steam/qr/start", () => { SteamOps.StartQr(); return Results.Ok(); });
         app.MapPost("/steam/qr/cancel", () => { SteamOps.CancelQr(); return Results.Ok(); });
         app.MapPost("/steam/signout", () => { SteamOps.SignOut(); return Results.Ok(); });
+        // password sign-in: the code steps come over WS (steam-login-code); never log / echo the body (SteamOps)
+        app.MapPost("/steam/login", (LoginReq r) =>
+            SteamOps.StartPasswordLogin(r.Username, r.TakePassword()) is { } why ? Results.Json(new { error = why }, statusCode: 400) : Results.Ok());
+        app.MapPost("/steam/login/code", async (CodeReq r) =>
+            await SteamOps.SubmitLoginCode(r.Code) is { } why ? Results.Json(new { error = why }, statusCode: 409) : Results.Ok());
+        app.MapPost("/steam/login/cancel", () => { SteamOps.CancelPasswordLogin(); return Results.Ok(); });
         // steamcmd one-time interactive sign-in (caches sentry; later runs non-interactive).
         app.MapPost("/steam/steamcmd-signin", () =>
         {
@@ -864,6 +870,15 @@ public static class ServerHost
     public record ValueReq(int? Delta, int? Value);
     public record MuteReq(bool User, bool Value);
     public record TrashReq(List<LibraryItem> Items);
+    // not a record: a record's ToString prints every property — the password must never be printable
+    public sealed class LoginReq
+    {
+        public string? Username { get; set; }
+        public string? Password { get; set; }
+        public string? TakePassword() { var p = Password; Password = null; return p; }
+        public override string ToString() => nameof(LoginReq);
+    }
+    public record CodeReq(string? Code);
     public record DownloadReq(int Source, WallpaperResult Result, bool Apply);
     public record SavePlaylistReq(string Name, CustomPlaylist Playlist);
     public record NameReq(string Name);

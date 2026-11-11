@@ -209,6 +209,11 @@ export const api = {
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),
+  // API: the password sign-in (SteamOps). The password goes in this one request body and nowhere else; the code steps
+  // come over WS (steam-login-code) and are answered by loginCode. A refused start / code → Error(backend's words).
+  steamLogin: (username: string, password: string) => jpost("/steam/login", { username, password }),
+  steamLoginCode: (code: string) => jpost("/steam/login/code", { code }),
+  steamLoginCancel: () => jpost("/steam/login/cancel"),
   deleteFromSource: (items: LibraryItem[]) => jpost<{ batch: string }>("/workshop/delete-from-source", { items }),
   drain: () => jpost("/workshop/drain"),
   workshopQueue: () => jget<{ pending: string[]; hasPending: boolean }>("/workshop/queue"),

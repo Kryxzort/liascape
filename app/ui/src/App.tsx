@@ -19,6 +19,7 @@ import { Select } from "./components/Select";
 // views import them).
 const Settings = lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings })));
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
+const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
 const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ default: m.ErrorModal })));
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
@@ -54,15 +55,22 @@ export default function App() {
 
   // backend push events → targeted store updates
   const onEvent = useCallback((e: LiascapeEvent) => {
-    if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value);
+    if (e.type === "download-progress") s.setDownload(e.payload.id, e.payload.value, e.payload.status);
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
     else if (e.type === "loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);
-    else if (e.type === "unsub-progress")
+    // the password sign-in's steps (SteamPasswordModal)
+    else if (e.type === "steam-login-code") s.onPwCode(e.payload);
+    else if (e.type === "steam-login-error") s.onPwError(e.payload.message);
+    else if (e.type === "unsub-progress") {
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
+      // no usable sign-in: the backend opened the item(s) in the Steam app — say what to click there (held, not a flash)
+      if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
+      else if (e.payload.finished && e.payload.error) s.setStatus("Removing from Steam failed: " + e.payload.error);
+    }
     else if (e.type === "library-synced") s.loadLibrary();
     else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
     // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
@@ -225,6 +233,7 @@ export default function App() {
       </LayoutGroup>
       <Suspense fallback={null}>
         <SteamModal />
+        <SteamPasswordModal />
         <DrainToast />
         <ErrorModal />
         <DebugHud setTab={(t) => setTab(t as Tab)} getScroll={() => document.querySelector<HTMLElement>(".scroll")} />

@@ -67,6 +67,122 @@ public static class SteamAuthService
         finally { try { steamClient.Disconnect(); } catch { } }
     }
 
+    /// What a password sign-in asks of the user while it runs (owner 2026-11-11: "is it a dead end for users without
+    /// mobile guard?" — the QR needs the Steam mobile app). Web/SteamOps turns each call into a WS event and
+    /// waits for the user's answer (POST /steam/login/code).
+    public interface ILoginPrompt
+    {
+        /// Steam wants a code: `email` (Steam Guard by email; `hint` = the address's domain Steam names) or `device` (the
+        /// mobile authenticator's code). `retry` = the previous one was wrong. Returns the code the user typed.
+        Task<string> AskCodeAsync(string kind, string? hint, bool retry, CancellationToken ct);
+        /// Steam wants the sign-in approved in the Steam mobile app; the user may type the app's code instead
+        /// (<paramref name="sendCode"/> hands it to Steam: false = it was wrong).
+        void AwaitConfirmation(Func<string, Task<bool>> sendCode);
+    }
+
+    /// Username + password sign-in (WebBrowser platform + the "Community" website, like the QR one, so finalizelogin can mint
+    /// the steamLoginSecure cookie from the refresh token). The password is handed to Steam once — SteamKit2 encrypts it with
+    /// Steam's RSA key in BeginAuthSessionViaCredentials — and this method drops its reference right after (<paramref
+    /// name="takePassword"/> is called once and the caller clears its copy then); it is never logged, stored or kept
+    /// for the rest of the sign-in. Throws <see cref="SteamLoginException"/> with a message for the user.
+    public static async Task<(string RefreshToken, ulong SteamId, string AccountName)> LoginViaCredentialsAsync(
+        string username, Func<string> takePassword, ILoginPrompt prompt, CancellationToken ct)
+    {
+        var steamClient = new SteamClient();
+        var manager = new CallbackManager(steamClient);
+        var tcs = new TaskCompletionSource<(string, ulong, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        bool connected = false;
+        manager.Subscribe<SteamClient.ConnectedCallback>(cb => { connected = true; _ = RunAsync(); });
+        manager.Subscribe<SteamClient.DisconnectedCallback>(_ =>
+            tcs.TrySetException(new SteamLoginException(connected
+                ? "Lost the connection to Steam before the sign-in finished — try again."
+                : "Couldn't reach Steam — check the connection and try again.")));
+
+        async Task RunAsync()
+        {
+            try
+            {
+                var details = new AuthSessionDetails
+                {
+                    Username = username,
+                    Password = takePassword(),
+                    PlatformType = SteamKit2.Internal.EAuthTokenPlatformType.k_EAuthTokenPlatformType_WebBrowser,
+                    WebsiteID = "Community",
+                    IsPersistentSession = true, // "remember me": a long-lived refresh token like the QR sign-in's
+                    DeviceFriendlyName = "Liascape",
+                    Authenticator = new PromptAuthenticator(prompt, ct),
+                };
+                CredentialsAuthSession session;
+                try { session = await steamClient.Authentication.BeginAuthSessionViaCredentialsAsync(details); }
+                finally { details.Password = null; } // Steam has it (encrypted); nothing here keeps it
+                ((PromptAuthenticator)details.Authenticator).Session = session;
+                var poll = await session.PollingWaitForResultAsync(ct);
+                ulong steamId = SteamIdFromJwt(poll.RefreshToken);
+                if (steamId == 0) steamId = session.SteamID.ConvertToUInt64();
+                tcs.TrySetResult((poll.RefreshToken, steamId, string.IsNullOrEmpty(poll.AccountName) ? username : poll.AccountName));
+            }
+            catch (OperationCanceledException) { tcs.TrySetCanceled(); }
+            catch (AuthenticationException e) { tcs.TrySetException(new SteamLoginException(LoginMessage(e.Result), e.Result)); }
+            catch (NotImplementedException) // a confirmation kind SteamKit2 can't drive (e.g. an emailed link)
+            { tcs.TrySetException(new SteamLoginException("Steam wants this sign-in confirmed in a way Liascape can't handle — use Sign in with QR.")); }
+            catch (SteamLoginException e) { tcs.TrySetException(e); }
+            catch (Exception e) { tcs.TrySetException(new SteamLoginException($"The sign-in failed: {e.Message}")); }
+        }
+
+        steamClient.Connect();
+        using var reg = ct.Register(() => tcs.TrySetCanceled());
+        _ = Task.Run(() =>
+        {
+            while (!tcs.Task.IsCompleted)
+                manager.RunWaitCallbacks(TimeSpan.FromMilliseconds(500));
+        });
+
+        try { return await tcs.Task; }
+        finally { try { steamClient.Disconnect(); } catch { } }
+    }
+
+    /// Steam's answer to a password sign-in, in the user's words. The rate limit is said as such — the UI never retries
+    /// on its own, and <see cref="IsRateLimit"/> makes SteamOps refuse new attempts for a while.
+    public static string LoginMessage(EResult r) => r switch
+    {
+        EResult.InvalidPassword or EResult.InvalidName => "Wrong account name or password.",
+        _ when IsRateLimit(r) => "Steam is limiting sign-in attempts from this connection. Wait a while (often half an hour or more) before trying again.",
+        EResult.InvalidLoginAuthCode or EResult.TwoFactorCodeMismatch => "That code wasn't accepted — start the sign-in again.",
+        EResult.Expired or EResult.FileNotFound => "The sign-in request expired — start again.",
+        EResult.AccessDenied or EResult.AccountDisabled or EResult.AccountLockedDown or EResult.Suspended
+            => $"Steam refused the sign-in ({r}).",
+        EResult.ServiceUnavailable or EResult.Timeout or EResult.TryAnotherCM or EResult.NoConnection
+            => "Couldn't reach Steam — try again in a moment.",
+        _ => $"Steam turned down the sign-in ({r}).",
+    };
+
+    public static bool IsRateLimit(EResult r) =>
+        r is EResult.RateLimitExceeded or EResult.AccountLoginDeniedThrottle or EResult.LimitExceeded
+            or EResult.AccountActivityLimitExceeded;
+
+    // SteamKit2's IAuthenticator over the UI prompt
+    private sealed class PromptAuthenticator(ILoginPrompt prompt, CancellationToken ct) : IAuthenticator
+    {
+        public CredentialsAuthSession? Session;
+        public Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect) =>
+            prompt.AskCodeAsync("email", string.IsNullOrWhiteSpace(email) ? null : email, previousCodeWasIncorrect, ct);
+        public Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect) =>
+            prompt.AskCodeAsync("device", null, previousCodeWasIncorrect, ct);
+        public Task<bool> AcceptDeviceConfirmationAsync()
+        {
+            // poll for the app's approval; a code typed meanwhile goes to Steam as the authenticator's code (the poll then
+            // finds the sign-in done)
+            prompt.AwaitConfirmation(async code =>
+            {
+                if (Session is not { } s) return false;
+                try { await s.SendSteamGuardCodeAsync(code, SteamKit2.Internal.EAuthSessionGuardType.k_EAuthSessionGuardType_DeviceCode); return true; }
+                catch (AuthenticationException e) when (e.Result is EResult.TwoFactorCodeMismatch or EResult.InvalidLoginAuthCode) { return false; }
+            });
+            return Task.FromResult(true);
+        }
+    }
+
     /// Derives a real web-session steamLoginSecure cookie from a WebBrowser refresh token, via
     /// Steam's finalizelogin → settokens flow (the same calls a browser login performs). The
     /// resulting cookie value (steamid||webtoken, URL-encoded) is what steamcommunity.com accepts.
@@ -152,6 +268,9 @@ public static class SteamAuthService
         if (string.IsNullOrWhiteSpace(settings.SteamRefreshToken) || settings.SteamId == 0)
             return string.IsNullOrWhiteSpace(settings.SteamLoginSecure) ? null : settings.SteamLoginSecure.Trim();
 
+        // Steam already turned this sign-in down: asking again only costs a request (it stays refused until a new sign-in)
+        if (settings.SteamSignInRejected) throw new SteamSignInRejectedException();
+
         await _mintGate.WaitAsync(ct);
         try
         {
@@ -180,6 +299,22 @@ public static class SteamAuthService
         }
         finally { _mintGate.Release(); }
     }
+
+    /// Is there a sign-in a subscribe / unsubscribe can use without asking the user — a refresh token Steam hasn't turned down,
+    /// or a pasted cookie? (Without one, Workshop downloads go through the Steam app: WorkshopDownloader.)
+    public static bool HasUsableSignIn(AppSettings s) =>
+        (!string.IsNullOrWhiteSpace(s.SteamRefreshToken) && !s.SteamSignInRejected)
+        || (string.IsNullOrWhiteSpace(s.SteamRefreshToken) && !string.IsNullOrWhiteSpace(s.SteamLoginSecure));
+
+    /// Stores a fresh sign-in (QR or password) — the one place a sign-in's tokens are written.
+    public static void SaveSignIn(string refreshToken, ulong steamId, string accountName) =>
+        SettingsService.Update(s =>
+        {
+            s.SteamRefreshToken = refreshToken;
+            s.SteamId = steamId;
+            s.SteamAccountName = accountName;
+            s.SteamSignInRejected = false; s.SteamAccessToken = "";
+        });
 
     /// Days until the stored refresh token expires (null if unknown / not signed in). When this hits
     /// 0 the user must re-sign-in; renewal below tries to keep it well above 0.
@@ -299,6 +434,13 @@ public static class SteamAuthService
     }
 }
 
+/// A password sign-in that didn't go through, in words for the user (never with the password in them).
+public sealed class SteamLoginException(string message, EResult? result = null) : Exception(message)
+{
+    public EResult? Result { get; } = result;
+    public bool RateLimited => Result is { } r && SteamAuthService.IsRateLimit(r);
+}
+
 public sealed class SteamSignInRejectedException() : Exception(
     "Steam has signed this app out (a password change or \"sign out of all devices\" on Steam does that). " +
-    "Sign in again: Settings → Getting Workshop wallpapers → Sign in with QR.");
+    "Sign in again: Settings → Getting Workshop wallpapers → Sign in with QR or with your password.");

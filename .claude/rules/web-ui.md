@@ -772,6 +772,39 @@ at once. Don't add a raw `<input type=number>` for a setting — use it (and its
 20 ms effect / 0 ms = a cut on the armed and the next switch); RED on the base UI: 12/12 (saved 0 / 999 at once; the
 duration clamped to 50).
 
+## Steam row + password sign-in (owner 2026-11-11: "is it a dead end for users without mobile guard?")
+Settings → **Getting Workshop wallpapers** → "Subscribe via Steam" → the **Steam** row (`[data-steam-state]`), three states
+from `/steam/status`: `signed-in` ("Signed in as X · ~Nd left" + Sign out); `signed-out` ("Not signed in — downloads open in
+the Steam app, where you click Subscribe."); `rejected` (the warning "Steam signed X out — sign in again. Until then, downloads
+open in the Steam app.", warn colour). The last two carry **Sign in with QR** (`[data-steam-signin=qr]`, the old QR modal) and
+**Sign in with password** (`[data-steam-signin=password]`). No third download mode: without a usable sign-in the backend
+opens the item in the Steam app by itself (`sources.md` § Download — the decision), and the row says so. No tooltips.
+- **`components/SteamPasswordModal.tsx`** (lazy, in App's Suspense; the store's `pwLogin {step, hint, retry, busy, error}`,
+  null = closed): a labelled `role=dialog aria-modal` (`[data-steam-pw-modal][data-step=credentials|email|device|confirm]`).
+  Step 1: ACCOUNT NAME (`autocomplete=username`, focused) + PASSWORD (`type=password autocomplete=current-password`,
+  `[data-steam-pw]`) in a `<form>` — Enter submits; **the password field is uncontrolled**: read once on submit, emptied at
+  once, never in React state or the store (`startPwLogin(user, password)` → `api.steamLogin` is the only place it travels).
+  "Signing in…" until Steam answers over WS. Code steps (`steam-login-code` → `onPwCode`): `email` "Steam sent a Steam Guard
+  code to your email at <hint>", `device` "…the Steam Guard authenticator in your Steam mobile app", `confirm` "Approve the
+  sign-in in your Steam mobile app — or enter the code the app shows" + "Waiting for your approval…"; one code field
+  (`[data-steam-pw-code]`, `autocomplete=one-time-code`, focused) → `api.steamLoginCode`; `retry` → "That code wasn't right —
+  check it and try again." (`role=alert`). `steam-login-error` → back to step 1 with the message inline (`[data-steam-pw-error]`,
+  `role=alert`), the account name kept, the password empty + focused; a refused start (400 — the rate-limit hold) shows its
+  words the same way; nothing retries on its own. `steam-signed-in` closes it (and the QR modal). Escape / Cancel →
+  `cancelPwLogin` (POST `/steam/login/cancel` once a request is out); a click outside does nothing (it'd lose what was typed).
+  Tab order: account → password → Cancel → Sign in. Look: `.pw-modal` (the playlist modals' `--tr-strong` panel), the key icon
+  with an accent drop-shadow (`no-glow` → none).
+- **A download waiting on the Steam app**: WS `download-progress.status` → the store's `downloadStatus[pageUrl]` → the Browse
+  sidebar's progress line (`[data-side-download-status]`, instead of "Downloading…") and the status bar (untimed — it waits on
+  the user; replaced by the next status / the end). A late `download-progress` for a download that already ended is dropped
+  (`setDownload` — it used to re-add a stuck progress row). The no-sign-in unsubscribe's `unsub-progress.message` → the status
+  bar (untimed).
+- Guard: `scripts/test-ui-matrix.sh --probe probe-steam.js` (a script injected before the page's own via CDP stubs
+  `/steam/*`, `/browse`, `/download` and wraps the page's WebSocket to push fake events — no Steam anywhere):
+  `steam:row:signedOut|rejected|signedIn|steamcmd`, `steam:modal:email|device|confirm|error|cancel|keys` (real typing; the
+  password checked absent from the DOM, input values, storage, console, every other request body, WS sends, the status bar),
+  `steam:dlStatus`; shots `steam-*.png`. Backend side: `scripts/test-steam-signin.sh`.
+
 ## Comment convention (grep these)
 - `// PERF:` — perf-critical; don't naïvely "simplify" (usually content-visibility / memo / selector).
 - `// COOL:` — motion/glow/UX intent.

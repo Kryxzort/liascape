@@ -46,6 +46,11 @@ sealed class Program
             case "player-selftest":
                 Environment.Exit(Liascape.Player.LiascapePlayerSelfTest.Run());
                 return;
+            // hidden: the Steam password sign-in's plumbing (scripted sign-in, no real account) + the no-sign-in unsubscribe
+            // through a stub xdg-open; needs a private HOME under /tmp
+            case "steam-selftest":
+                Environment.Exit(Liascape.Web.SteamSelfTest.Run());
+                return;
         }
 
         PlayerHelper.LoadUserMuteState();

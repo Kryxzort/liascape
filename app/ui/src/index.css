@@ -551,6 +551,23 @@ input[type=range]:focus-visible { outline: none; }
   display: grid; place-items: center; box-shadow: var(--glow); } /* COOL: glowing QR */
 .qr-box img { width: 216px; height: 216px; image-rendering: pixelated; }
 
+/* ---- steam password sign-in modal (SteamPasswordModal) ---- */
+.pw-modal { width: min(400px, 92vw); }
+.pw-modal h2.ico { justify-content: flex-start; gap: 8px; }
+.pw-modal h2 svg { color: var(--accent); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.pw-modal .help { margin: 0 0 4px; }
+.pw-step { margin: 2px 0 4px; color: var(--subtext); font-size: 13.5px; line-height: 1.45; }
+.pw-step b { color: var(--text); }
+.pw-wait { color: var(--accent); }
+.pw-code { font: 600 18px ui-monospace, monospace; letter-spacing: 4px; text-transform: uppercase; }
+.pw-err { margin: 10px 0 0; color: var(--danger); font-size: 13px; line-height: 1.4; }
+.pw-modal .text:disabled { opacity: .6; }
+/* the Settings Steam row: the line + its buttons wrap at a narrow width; the warning keeps its colour (`.hms span` is muted) */
+.hms[data-steam-state] { flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.hms[data-steam-state] > span.shint { max-width: 340px; line-height: 1.4; }
+.hms span.s-warn-text { color: var(--warn, #f9e2af); }
+.steam-row-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
 /* ---- unsub drain toast (dismissable; drain keeps running) ---- */
 .drain-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60;
   display: flex; align-items: center; gap: 12px; background: var(--surface0); border: 1px solid var(--surface1);
@@ -766,6 +783,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
+:root.no-glow .pw-modal h2 svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, web-ui.md § "Settings levels") */
