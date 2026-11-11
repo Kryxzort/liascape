@@ -142,7 +142,11 @@ Workshop wallpapers"):
     on the page Steam opened, or sign in); cancellable — the UI's Cancel aborts `/download` → `RequestAborted`.
 - `"steamcmd"`: runs `steamcmd +force_install_dir ~/.cache/liascape/steamcmd_workshop +login <SteamUsername> +workshop_download_item 431960 <id> +quit`. Password is **never stored** — one-time sign-in via `LaunchSteamCmdSignIn` opens an interactive terminal to cache Steam sentry file. Subsequent runs are non-interactive.
 
-**Unsubscribe** ("Delete from source" → `WorkshopUnsubQueue` pending → `DrainUnsubQueueAsync`): signed in → `POST
+**Unsubscribe** ("Delete from source" → `WorkshopUnsubQueue` pending → `DrainUnsubQueueAsync`): under **`steamapp`** first the
+Steam client (`SteamClientUgc.UnsubscribeAsync` → the helper `steam-ugc unsubscribe <id,id,…>`, ISteamUGC UnsubscribeItem slot 69,
+each id confirmed by its state losing "subscribed" within 10 s → `MarkBlocked`; owner 2026-11-11: "clicked the unsubscribe
+button but for some reason it took me to the steam page instead of handling it itself") — what it can't confirm (Steam not
+running, not owned) goes on below; `steampage` → always the Steam app; else signed in → `POST
 …/sharedfiles/unsubscribe` per id (spaced, a rate limit stops the drain and says so); **not signed in** (or Steam ends the
 sign-in mid-drain) → `UnsubscribeInSteamApp`: the ids Steam still has in its own Workshop folders (our steamcmd cache isn't a
 subscription) open in the Steam app — one → `steam://url/CommunityFilePage/<id>`, several →

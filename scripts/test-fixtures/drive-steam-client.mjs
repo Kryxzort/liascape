@@ -86,4 +86,30 @@ body = r ? await r.json() : null;
 const vp = body?.videoPath ?? "";
 const linked = /\/library\/local\/710000005(\/|$)/.test(vp) && fs.lstatSync(vp.replace(/\/[^/]*$/, "")).isSymbolicLink();
 out(r?.status === 200 && linked, "a Workshop folder setting through a symlink: the item is LINKED (local/), not copied", vp || (r ? String(r.status) : "timed out"));
+// f. owner 2026-11-11 ("clicked the unsubscribe button but for some reason it took me to the steam page instead of handling it
+// itself"): Delete from source under "Use the Steam app" → the Steam client unsubscribes; nothing opens in the Steam app
+const unsub = []; ws.addEventListener("message", (m) => { const e = JSON.parse(m.data); if (e.type === "unsub-progress") unsub.push(e.payload); });
+const item = async (id) => (await lib()).find((i) => i.workshopId === id);
+const queue = async () => (await (await fetch(U + "/workshop/queue")).json()).pending;
+const dropAndDrain = async (id) => {
+  const it = await item(id); if (!it) return false;
+  await fetch(U + "/workshop/delete-from-source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: [it] }) });
+  unsub.length = 0;
+  await fetch(U + "/workshop/drain", { method: "POST" });
+  for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100);
+  return true;
+};
+n0 = urls().length;
+const had = fs.existsSync(`${T}/steamlib/sub-710000005`);
+const ok5 = await dropAndDrain("710000005");
+out(ok5 && had && !fs.existsSync(`${T}/steamlib/sub-710000005`) && urls().length === n0 && !(await queue()).includes("710000005"),
+  "Delete from source under Use the Steam app: Steam unsubscribes it, nothing opens, the queue is empty",
+  `was subscribed ${had}, still ${fs.existsSync(`${T}/steamlib/sub-710000005`)}, opened ${urls().length - n0}, finished ${JSON.stringify(unsub.at(-1) ?? null)}`);
+// Steam unreachable → the old path for it: the item's page in the Steam app (no sign-in here)
+fs.writeFileSync(`${T}/steamlib/fail-init`, "");
+n0 = urls().length;
+const ok1 = await dropAndDrain("710000001");
+const opened = urls().slice(n0);
+out(ok1 && opened.some((x) => x.includes("710000001")), "…Steam unreachable: the unsubscribe falls back to the item's page in the Steam app", opened.join(" ") || "nothing opened");
+fs.rmSync(`${T}/steamlib/fail-init`);
 ws.close();

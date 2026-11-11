@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -319,6 +320,21 @@ public static class WorkshopDownloader
     {
         var pending = WorkshopUnsubQueue.SnapshotPending();
         if (pending.Count == 0) return new DrainResult();
+        // "Use the Steam app": the running Steam client unsubscribes (owner 2026-11-11: "clicked the unsubscribe button but for
+        // some reason it took me to the steam page instead of handling it itself"); whatever it can't confirm → the paths below
+        if (settings.WorkshopDownloadMode == "steamapp")
+        {
+            int total0 = pending.Count, n = 0;
+            progress?.Report((0, total0, pending[0]));
+            var (confirmed, fallback) = await SteamClientUgc.UnsubscribeAsync(pending, settings, id =>
+            {
+                WorkshopUnsubQueue.MarkBlocked(id); // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile
+                progress?.Report((++n, total0, id));
+            }, ct);
+            if (fallback != null) Console.WriteLine($"workshop: unsubscribe not through the Steam app's Workshop interface — {fallback}");
+            pending = pending.Where(id => !confirmed.Contains(id)).ToList();
+            if (pending.Count == 0 || ct.IsCancellationRequested) return new DrainResult();
+        }
         if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
         if (!SteamAuthService.HasUsableSignIn(settings)) return UnsubscribeInSteamApp(settings, pending, Why(settings));
         int total = pending.Count, done = 0;
