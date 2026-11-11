@@ -154,7 +154,11 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   display: grid; place-items: center; opacity: 0;
   background: color-mix(in srgb, var(--bg-crust) 78%, transparent);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent), 0 2px 8px rgba(0,0,0,.45);
-  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1), background .15s, box-shadow .2s; }
+  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1), background .15s, box-shadow .2s;
+  /* its own compositing layer at rest too (owner 2026-11-11: "off-center but gets correctly centered once you hover on it" —
+     at a fractional card position the resting arrow was rasterised pixel-snapped while the ring sat on the fraction; the
+     hover's transform made a layer drawn at the exact offset). Guard: probe-steam look:dlCentre (pixels, three sizes). */
+  will-change: transform; }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
 /* COOL: hovered (owner 2026-11-11: "add hover effects on the download button") — it lifts + grows, the chip fills with the accent,
    an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow nudges down,
@@ -168,7 +172,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .dl-btn:hover::before { opacity: 1; }
 .dl-btn:hover .dl-glyph { color: var(--accent-fg); animation: dl-nudge .8s cubic-bezier(.45, 0, .3, 1) infinite; }
 @keyframes dl-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
-.dl-glyph { color: var(--accent); width: 58%; height: 58%; fill: currentColor; stroke: none; transform-origin: center;
+/* WHOLE-pixel sizes with EVEN margins (owner 2026-11-11: off-centre at 1920×1080, fine on a small window): 58 % made a 17.4 px
+   glyph in the 30 px chip — 6.3 px margins, rounded to an off-centre arrow (measured (0.85, 0.44) px); 18 in 30 and 14 in 24 leave
+   6 / 5 px each side. The path itself is centred in its viewBox (Card.tsx). Guard: probe-steam look:dlCentre. */
+.dl-glyph { color: var(--accent); width: 18px; height: 18px; fill: currentColor; stroke: none; transform-origin: center;
   transition: color .15s; }
 .badge {
   position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
@@ -230,6 +237,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @container (max-width: 150px) {
   .del { width: 24px; height: 24px; bottom: 30px; right: 4px; }
   .dl-btn { width: 24px; height: 24px; bottom: 50px; right: 5px; }
+  .dl-btn .dl-glyph { width: 14px; height: 14px; }
   .del svg { width: 15px; height: 15px; }
   .pl-toggle { width: 16px; height: 16px; top: 4px; right: 4px; }
   .warn { bottom: 30px; left: 4px; }

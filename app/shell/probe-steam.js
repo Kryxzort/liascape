@@ -483,6 +483,67 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // owner 2026-11-11 ("its hilarious that the download button on browse cards is off-center but gets correctly centered once
+    // you hover on it"): the arrow's pixel bounding box vs the button's centre — at rest (the card hovered, the button not) and
+    // on the button (the bob frozen at its 0 % and 50 % keyframes). Pixels: the capture with the arrow minus without it.
+    await cell("look:dlCentre", async () => {
+      const v = []; await load(SIGNED_OUT);
+      const srcs = (await http("GET", "/sources")).json;
+      const wsName = srcs.find((x) => x.supportsTagFilter)?.name;
+      await tab("Browse");
+      await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      const tw = await page(`const t = document.querySelector(".scroll .card:not(.skel-card):not(:has([data-in-library])) .thumb-wrap") ?? document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap");
+        t.scrollIntoView({ block: "center" }); const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+      await sleep(300);
+      const mv = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
+      // the FIRST card's button (re-found each time — a resize moves it)
+      const btnSel = `document.querySelector(".scroll .card:not(.skel-card) .dl-btn")`;
+      const measure = async (label, css) => {
+        await page(`let st = document.getElementById("__dlc"); if (!st) { st = document.createElement("style"); st.id = "__dlc"; document.head.append(st); } st.textContent = ${J(css)};`);
+        await sleep(450);
+        const b = await page(`const b = ${btnSel}; if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        if (!b) return null;
+        const rect = { x: Math.floor(b.x) - 2, y: Math.floor(b.y) - 2, width: Math.ceil(b.w) + 5, height: Math.ceil(b.h) + 5 };
+        const withArrow = await win.webContents.capturePage(rect);
+        await page(`document.getElementById("__dlc").textContent += " .dl-glyph { visibility: hidden !important; }";`); await sleep(120);
+        const noArrow = await win.webContents.capturePage(rect);
+        const A = withArrow.toBitmap(), B = noArrow.toBitmap(), { width: W, height: H } = withArrow.getSize();
+        const sc = W / rect.width;
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, n = 0;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 4, d = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+          if (d > 90) { n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        }
+        const cx = (b.x - rect.x + b.w / 2) * sc, cy = (b.y - rect.y + b.h / 2) * sc;
+        const dx = ((x0 + x1 + 1) / 2 - cx) / sc, dy = ((y0 + y1 + 1) / 2 - cy) / sc;
+        fs.writeFileSync(path.join(OUT, `dlc-${label}.png`), withArrow.resize({ width: W * 8, quality: "good" }).toPNG());
+        console.log(`        ${label}: arrow box off the button centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px — ${n} px, button ${b.w.toFixed(1)}×${b.h.toFixed(1)} at y ${b.y.toFixed(2)}`);
+        return { dx, dy, n };
+      };
+      // owner: "weirdly, its not offcenter on a small window? try a 1920x1080 window" — every size (cards, and so the button's
+      // position, land on fractional pixels at some sizes)
+      const sizes = (E.LIASCAPE_DLC_SIZES || "1000x800,1920x1080,1600x900").split(",").map((x) => x.split("x").map(Number));
+      for (const [W0, H0] of sizes) {
+        win.setContentSize(W0, H0); await sleep(900);
+        const t2 = await page(`const t = document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap"); t.scrollIntoView({ block: "center" });
+          const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        Object.assign(tw, t2); await sleep(300);
+        mv(tw.x + 12, tw.y + 12); // on the card, off the button: the button shows (opacity 1), not hovered
+        const rest = await measure(`${W0}x${H0}-rest`, "");
+        const b0 = await page(`const e = ${btnSel}; if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+        if (!b0) { v.push(`${W0}x${H0}: no download button`); continue; }
+        mv(b0.x, b0.y);
+        await measure(`${W0}x${H0}-hover0`, ".dl-btn:hover .dl-glyph { animation: none !important; transform: translateY(-1px) !important; }");
+        await page(`document.getElementById("__dlc")?.remove();`);
+        mv(5, 5); await sleep(300);
+        if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow pixels at rest`); continue; }
+        if (Math.abs(rest.dx) > 0.5 || Math.abs(rest.dy) > 0.5) v.push(`${W0}x${H0}: at rest the arrow is off-centre by (${rest.dx.toFixed(2)}, ${rest.dy.toFixed(2)}) css px`);
+      }
+      win.setContentSize(1000, 800); await sleep(400);
+      return v;
+    });
+
     await cell("steam:dlStatus", async () => {
       const v = []; await load(SIGNED_OUT);
       const srcs = (await http("GET", "/sources")).json;
