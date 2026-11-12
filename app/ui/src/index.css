@@ -749,6 +749,12 @@ input[type=range]:focus-visible { outline: none; }
 
 /* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
 .wfilter { position: relative; display: flex; gap: 8px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
+/* a local scope's row (the Library, the WE folder) holds only the pill: it keeps the pill's height while the pill is up in the
+   docked column, so a fold / unfold never moves the grid (1lh at the pill's 13 px + its 6 px padding twice) */
+.wfilter.wf-local { font-size: 13px; min-height: calc(1lh + 12px); }
+/* nothing in the list passes the filter (Library.tsx, Browse.tsx) */
+.wf-none { display: grid; justify-items: center; gap: 12px; padding: 12vh 16px; color: var(--muted); animation: side-rise-sm .25s ease-out; }
+:root.bg-live .wf-none > span { filter: drop-shadow(0 0 3.5px #000); }
 .wf-open { display: inline-flex; align-items: center; gap: 6px; }
 /* ---- custom dropdown (Select.tsx) — app-controlled, translucent ---- */
 .sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -1042,7 +1048,7 @@ input[type=range]:focus-visible { outline: none; }
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill, :root.no-motion .seg-hl { transition: none; }
-:root.no-motion .wf-col, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
+:root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
 :root.no-motion .wf-open .wf-chev { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .app > .scroll { animation: none; }
@@ -1379,7 +1385,12 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
     radial-gradient(300px 240px at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
     color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
   border-right: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface0)); }
-.app:has(> .wf-col[data-mode="dock"]:not(.closing)) > .scroll { margin-left: var(--wf-w); }
+/* only the shown page's column docks: the Library's stays mounted while another tab shows (App.tsx `data-page`) */
+.app[data-page="browse"]:has(> .wf-col[data-wf-page="browse"][data-mode="dock"]:not(.closing)) > .scroll,
+.app[data-page="library"]:has(> .wf-col[data-wf-page="library"][data-mode="dock"]:not(.closing)) > .scroll { margin-left: var(--wf-w); }
+/* the Library's docked column ends where its grid does, above the playlist bar (index.css .lib-scroll); the bar keeps its
+   full width, so a fold never resizes it */
+.wf-col[data-wf-page="library"][data-mode="dock"] { bottom: var(--playlist-bar-h, 60px); }
 /* COOL: docked fold / unfold (Browse.tsx toggleCol): the column slides off its edge and back with a hint of overshoot; the grid
    (its margin already flipped) plays its old offset back to 0 — transform only, no fill (a transform left on these would trap
    their fixed-position descendants) */

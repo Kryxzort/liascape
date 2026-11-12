@@ -509,6 +509,8 @@ public static class LibraryService
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
         DateTime added; try { var fi = new FileInfo(media); added = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime; } catch { added = DateTime.Now; }
         var loud = isScene || m.IsScene ? SceneLoudnessInfoOf(m) : default;
+        // the index's (Steam's, saved at download) win; an auto-imported WE item has none, so its own project.json speaks
+        var proj = m.Tags == null || m.AgeRating == null ? ProjectFactsOf(folder) : default;
         return new LibraryItem
         {
             Title = m.Title ?? key,
@@ -526,10 +528,33 @@ public static class LibraryService
             AddedAt = added,
             LoudnessLufs = loud.Lufs, LoudnessEstimated = loud.Estimated, LoudnessSeconds = loud.Seconds,
             LoudnessConfidence = loud.Confidence, LoudnessNote = loud.Note,
-            Resolution = m.Resolution, AgeRating = m.AgeRating, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
+            Resolution = m.Resolution, AgeRating = m.AgeRating ?? proj.Age, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
-            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = m.Tags,
+            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = m.Tags ?? proj.Tags,
         };
+    }
+
+    // A WE item folder's age rating + tags from its project.json (WorkshopTags.FromProject), for the UI's filter column.
+    // Read, never written to the index: Steam may update the file under a local/<id> link, and an old index needs nothing
+    // new. PERF: cached per file by its write time — every library read (a sidebar close re-reads it) would otherwise
+    // parse ~300 files again.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, string? Age, string[]? Tags)> _projFacts = new();
+    private static (string? Age, string[]? Tags) ProjectFactsOf(string folder)
+    {
+        var pj = Path.Combine(folder, "project.json");
+        DateTime at;
+        try { if (!File.Exists(pj)) return default; at = File.GetLastWriteTimeUtc(pj); } catch { return default; }
+        if (_projFacts.TryGetValue(pj, out var hit) && hit.At == at) return (hit.Age, hit.Tags);
+        (string? Age, string[]? Tags) facts = default;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(pj));
+            var (age, tags) = WorkshopTags.FromProject(doc.RootElement);
+            facts = (age, tags.Length > 0 ? tags : null);
+        }
+        catch { }
+        _projFacts[pj] = (at, facts.Age, facts.Tags);
+        return facts;
     }
 
     // A scene item's preview image (its folder IS its play path) — liascape-player shows it while no frame exists.

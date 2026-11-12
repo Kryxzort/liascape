@@ -17,10 +17,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
-24. [ ] The Workshop filter column on the Library and on Browse's "Wallpaper Engine (Local)" too (the owner: "cuz why
-       not"): the same column, chips and tri-state tags, filtering locally (tags, type, age rating… from each item's
-       project.json / the library index) with no backend Workshop query; the features a source can't know stay hidden.
-
 25. [ ] Video preview clips that fit the card and loop like the wallpaper (owner): a "Video preview quality: Low / Mid /
        High" setting (Segmented) with no storage options (one shared, capped, LRU cache); each clip sized to the card it
        plays in (card px width × devicePixelRatio × quality, rounded up to a few width buckets so cards share clips) and

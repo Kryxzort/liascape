@@ -112,6 +112,8 @@ export interface WorkshopFilter {
 export interface Source {
   index: number; name: string; supportsSearch: boolean; supportsPagination: boolean;
   supportsSorting: boolean; supportsTagFilter: boolean; pageSizeHint: number; available: boolean;
+  // API: the UI filters this source's list itself from its items' tags / age rating (the local Wallpaper Engine folder)
+  supportsLocalFilter?: boolean;
 }
 export interface Wallpaper {
   title: string; thumbnailUrl: string; animatedThumbnailUrl: string | null; pageUrl: string;
@@ -120,6 +122,8 @@ export interface Wallpaper {
   subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
   // Workshop results: the item's YouTube trailer when known, and whether the backend looked it up (none ≠ not checked)
   youtubeUrl?: string | null; trailerKnown?: boolean;
+  // the local Wallpaper Engine folder's items: project.json's age rating (a Workshop result's is in its tags)
+  ageRating?: string | null;
 }
 export interface Detail {
   title: string; previewUrl: string; downloadUrl: string; needsReferrer: boolean;

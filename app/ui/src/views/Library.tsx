@@ -1,6 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
+import { NoMatch, WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
+import { facetsOf, knownTags, localMatcher, useFilterColumn } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { LibrarySide } from "../components/LibrarySide";
@@ -64,14 +66,37 @@ export const Library = memo(function Library() {
   useGridFit(scrollRef, "library");
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
-  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection, its grid stays where it was
-  useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
+  // the filter column: the Library's own filter (store libFilter — never Browse's), matched here against what each item
+  // knows (workshopFilter.ts localMatcher); the column offers only the tags some item has
+  const libFilter = useStore((s) => s.libFilter);
+  const clearTags = useStore((s) => s.clearTags);
+  const match = useMemo(() => localMatcher(libFilter), [libFilter]);
+  const known = useMemo(() => knownTags(items, (i) => i.videoPath), [items]);
+  const col = useFilterColumn("library", true);
+  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection (and a drawer), its grid stays
+  // where it was
+  useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; col.reset(); });
 
+  // PERF: one predicate per filter change and each item's facets computed once (workshopFilter.ts facetsOf) — no per-card work
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
-    const f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
+    let f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
+    if (match) f = f.filter((i) => match(facetsOf(i, i.videoPath)));
     return sortItems(f, libSort);
-  }, [items, libQuery, libSort]);
+  }, [items, libQuery, libSort, match]);
+  // a filter change starts the grid at its top, and the selection keeps only what still shows (Delete / a bulk action must
+  // never reach a card the user can't see). Keyed on the filter's value: <Activity> re-runs this on every return to the
+  // page, which keeps its view. Guard: probe-filters lib:interplay
+  const filterKey = JSON.stringify([libFilter.include, libFilter.exclude, libFilter.featureMatch, libFilter.genreMatch]);
+  const shownFilter = useRef(filterKey);
+  useLayoutEffect(() => {
+    if (shownFilter.current === filterKey) return;
+    shownFilter.current = filterKey;
+    if (scrollRef.current && scrollRef.current.scrollTop > 0) scrollRef.current.scrollTop = 0;
+    const vis = new Set(filtered.map((i) => i.videoPath));
+    setSel((x) => { const n = new Set([...x].filter((p) => vis.has(p))); return n.size === x.size ? x : n; });
+    if (anchor.current && !vis.has(anchor.current)) anchor.current = null;
+  }, [filterKey, filtered]);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
 
@@ -177,7 +202,10 @@ export const Library = memo(function Library() {
 
   return (
     <>
-    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+    {col.docked && col.dockCol.value && <WorkshopFilterColumn mode="dock" scope="library" known={known} closing={col.dockCol.closing} entering={col.shift?.dir === "in"} onFold={col.toggleCol} />}
+    <div className={`scroll lib-scroll${col.shiftClass}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+      <WorkshopSortRow scope="library" drawer={!col.docked} open={col.open} onOpenFilters={col.openFilters} />
+      {match && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}
@@ -190,6 +218,7 @@ export const Library = memo(function Library() {
         ))}
       </div>
     </div>
+    {!col.docked && col.drawer.value && <WorkshopFilterColumn mode="drawer" scope="library" known={known} closing={col.drawer.closing} onClose={col.closeDrawer} />}
     {sideItem && (() => {
       const targets = targetsFor(sideItem);
       return (

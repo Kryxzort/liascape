@@ -332,6 +332,8 @@ public static class ServerHost
                 index = i, name = p.Name,
                 supportsSearch = p.SupportsSearch, supportsPagination = p.SupportsPagination,
                 supportsSorting = p.SupportsSorting, supportsTagFilter = p.SupportsTagFilter,
+                // the UI filters this source's list itself, from each item's project.json tags (no Workshop query)
+                supportsLocalFilter = p is WallpaperEngineService,
                 pageSizeHint = p.PageSizeHint,
                 available = !(i == 3 && autoImport), // WE-local hidden when auto-import on
             }));

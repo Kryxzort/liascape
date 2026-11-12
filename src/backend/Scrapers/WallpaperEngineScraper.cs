@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Liascape.Helpers;
 using Liascape.Models;
 
 namespace Liascape.Scrapers;
@@ -47,7 +48,8 @@ public static class WallpaperEngineScraper
                     PageUrl = dir,
                     IsScene = true,
                     WorkshopId = workshopId,
-                    AddedAt = addedAt
+                    AddedAt = addedAt,
+                    Tags = info?.Tags, AgeRating = info?.Age
                 });
                 continue;
             }
@@ -71,7 +73,8 @@ public static class WallpaperEngineScraper
                 AnimatedThumbnailUrl = animatedGif,
                 PageUrl = videoPath,
                 WorkshopId = workshopId,
-                AddedAt = addedAt
+                AddedAt = addedAt,
+                Tags = info.Tags, AgeRating = info.Age
             });
         }
 
@@ -90,7 +93,8 @@ public static class WallpaperEngineScraper
         return results;
     }
 
-    private record ProjectInfo(string? Type, string? File, string? Title);
+    // Tags / Age: what the UI's filter column reads (WorkshopTags.FromProject)
+    private record ProjectInfo(string? Type, string? File, string? Title, string[]? Tags, string? Age);
 
     private static async Task<ProjectInfo?> ReadProjectAsync(string dir)
     {
@@ -102,10 +106,13 @@ public static class WallpaperEngineScraper
             using var stream = File.OpenRead(projectJson);
             var doc = await JsonDocument.ParseAsync(stream);
             var root = doc.RootElement;
+            var (age, tags) = WorkshopTags.FromProject(root);
             return new ProjectInfo(
                 Type: root.TryGetProperty("type", out var t) ? t.GetString() : null,
                 File: root.TryGetProperty("file", out var f) ? f.GetString() : null,
-                Title: root.TryGetProperty("title", out var ti) ? ti.GetString() : null
+                Title: root.TryGetProperty("title", out var ti) ? ti.GetString() : null,
+                Tags: tags.Length > 0 ? tags : null,
+                Age: age
             );
         }
         catch

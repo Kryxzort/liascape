@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using Liascape.Models;
 
 namespace Liascape.Helpers;
@@ -118,6 +119,28 @@ public static class WorkshopTags
         if (plan.Empty) return false;
         bool Has(string t) => tags.Contains(t, StringComparer.OrdinalIgnoreCase);
         return plan.TagGroups.All((g) => g.Any(Has)) && !plan.Excluded.Any(Has);
+    }
+
+    // What a Wallpaper Engine item's own project.json says, in the Workshop's tag names: its age rating (`contentrating`)
+    // and its tags — the genres WE's editor wrote (`tags`), plus the two features the file itself declares (`approved`, WE's
+    // curation mark; `general.supportsaudioprocessing` = "Audio responsive"). The UI filters local items (the library,
+    // Browse's WE folder) with these the way Steam filters the Workshop. Features only the Workshop listing knows (HDR, 3D,
+    // Customizable…) aren't guessed. Anything malformed is skipped.
+    public static (string? Age, string[] Tags) FromProject(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return (null, []);
+        string? age = null;
+        if (root.TryGetProperty("contentrating", out var cr) && cr.ValueKind == JsonValueKind.String)
+            age = Age.Tags.FirstOrDefault((t) => string.Equals(t, cr.GetString()?.Trim(), StringComparison.OrdinalIgnoreCase));
+        var tags = new List<string>();
+        if (root.TryGetProperty("tags", out var ts) && ts.ValueKind == JsonValueKind.Array)
+            foreach (var t in ts.EnumerateArray())
+                if (t.ValueKind == JsonValueKind.String && t.GetString()?.Trim() is { Length: > 0 } tag) tags.Add(Resolve(tag).Tag);
+        static bool True(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
+        if (True(root, "approved")) tags.Add("Approved");
+        if (root.TryGetProperty("general", out var g) && g.ValueKind == JsonValueKind.Object && True(g, "supportsaudioprocessing"))
+            tags.Add("Audio responsive");
+        return (age, tags.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     public static string Describe(Plan p) => p.Empty ? "(nothing can match)"

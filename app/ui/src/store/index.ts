@@ -22,9 +22,13 @@ const LS = {
 // ageRating / resolution, the genre / feature chips) all become includes, once (the
 // migrated filter is written back). Anything malformed -> the default.
 export type TagState = "inc" | "exc" | null;
+// The filter column's three homes, each with its own filter (saved under its own key): the Workshop's goes to the backend,
+// the local Wallpaper Engine folder's and the Library's filter what the page already holds (workshopFilter.ts localMatcher)
+export type FilterScope = "workshop" | "weLocal" | "library";
+export const FILTER_KEY: Record<FilterScope, string> = { workshop: "browseFilter", weLocal: "weLocalFilter", library: "libFilter" };
 type OldFilter = Partial<WorkshopFilter> & { type?: string; ageRating?: string; resolution?: string; genres?: string[]; features?: string[] };
-export function loadBrowseFilter(): WorkshopFilter {
-  const raw = LS.get<OldFilter | null>("browseFilter", null);
+export function loadBrowseFilter(key = FILTER_KEY.workshop): WorkshopFilter {
+  const raw = LS.get<OldFilter | null>(key, null);
   if (!raw || typeof raw !== "object") return { ...DEFAULT_FILTER };
   const strs = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string" && x !== "") : []);
   const sort = typeof raw.sort === "string" && raw.sort ? raw.sort : DEFAULT_FILTER.sort;
@@ -39,9 +43,10 @@ export function loadBrowseFilter(): WorkshopFilter {
   const include = [...new Set([raw.type, raw.ageRating, raw.resolution, ...strs(raw.genres), ...strs(raw.features)]
     .filter((x): x is string => typeof x === "string" && x !== ""))];
   const f: WorkshopFilter = { sort, trendDays, include, exclude: [], featureMatch, genreMatch };
-  LS.set("browseFilter", f);
+  LS.set(key, f);
   return f;
 }
+export const filterOf = (s: State, scope: FilterScope) => scope === "library" ? s.libFilter : scope === "weLocal" ? s.weFilter : s.browseFilter;
 
 // Applies a theme's 16 colors to :root as CSS vars (ThemeService color keys).
 // COOL: --accent also drives every glow in the app.
@@ -83,6 +88,8 @@ interface State {
   // a Workshop download's step in words (WS download-progress `status`; e.g. "click Subscribe in Steam") — per page URL
   downloadStatus: Record<string, string>;
   browseFilter: WorkshopFilter; browseSort: number;
+  // the local filters (FilterScope): the WE folder's on Browse, the Library's
+  weFilter: WorkshopFilter; libFilter: WorkshopFilter;
   // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
   // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
   browseFor: string;
@@ -133,10 +140,14 @@ interface State {
   // browse
   setSource(i: number): void; setQuery(q: string): void; reload(): Promise<void>; loadMore(): Promise<void>;
   setBrowseFilter(p: Partial<WorkshopFilter>): void; isWorkshop(): boolean; setBrowseSort(i: number): void;
-  // the Workshop filter column (components/WorkshopFilterColumn.tsx): one tag's state (include / exclude / off), all off;
-  // which groups are collapsed (remembered)
-  setTagState(tag: string, st: TagState): void; clearTags(): void;
-  filterColHidden: boolean; setFilterColHidden(v: boolean): void;
+  // the active Browse source's filter column, if it has one: the Workshop's or the local WE folder's
+  browseScope(): FilterScope | null;
+  // the filter column (components/WorkshopFilterColumn.tsx), per scope: one tag's state (include / exclude / off), the
+  // All / Any switches, all off; which groups are collapsed (remembered, shared)
+  setTagState(tag: string, st: TagState, scope?: FilterScope): void; clearTags(scope?: FilterScope): void;
+  setFilterIn(scope: FilterScope, p: Partial<WorkshopFilter>): void;
+  // the docked column folded away, per page (remembered)
+  filterColHidden: boolean; libFilterColHidden: boolean; setFilterColHidden(v: boolean, page?: "browse" | "library"): void;
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
@@ -227,9 +238,10 @@ let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
+  weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   // the docked filter column folded away; remembered
-  filterColHidden: LS.get<boolean>("browseFilterHidden", false),
+  filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false),
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null,
@@ -269,21 +281,31 @@ export const useStore = create<State>((set, get) => ({
   },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
+  browseScope() { const src = get().sources[get().activeSource]; return src?.supportsTagFilter ? "workshop" : src?.supportsLocalFilter ? "weLocal" : null; },
   // update the filter instantly (UI is snappy) but DEBOUNCE the network reload — rapid chip toggles
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
   // a tag is in include XOR exclude; the same debounced reload as every filter change
-  setTagState(tag, st) {
-    const { include, exclude } = get().browseFilter;
+  setTagState(tag, st, scope = "workshop") {
+    const { include, exclude } = filterOf(get(), scope);
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
     if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);
     // "In my library" filters the list already loaded (Browse's render) — no reload for it
-    if (tag.startsWith("@")) { const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf); return; }
-    get().setBrowseFilter({ include: inc, exclude: exc });
+    if (scope === "workshop" && tag.startsWith("@")) { const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf); return; }
+    get().setFilterIn(scope, { include: inc, exclude: exc });
   },
-  clearTags() { const f = get().browseFilter; if (f.include.length || f.exclude.length) get().setBrowseFilter({ include: [], exclude: [] }); },
-  setFilterColHidden(v) { set({ filterColHidden: v }); LS.set("browseFilterHidden", v); },
+  // the Workshop's filter reloads (debounced); a local one is the list's own render — no request, nothing to wait for
+  setFilterIn(scope, p) {
+    if (scope === "workshop") { get().setBrowseFilter(p); return; }
+    const f = { ...filterOf(get(), scope), ...p };
+    set(scope === "library" ? { libFilter: f } : { weFilter: f }); LS.set(FILTER_KEY[scope], f);
+  },
+  clearTags(scope = "workshop") { const f = filterOf(get(), scope); if (f.include.length || f.exclude.length) get().setFilterIn(scope, { include: [], exclude: [] }); },
+  setFilterColHidden(v, page = "browse") {
+    if (page === "library") { set({ libFilterColHidden: v }); LS.set("libFilterHidden", v); }
+    else { set({ filterColHidden: v }); LS.set("browseFilterHidden", v); }
+  },
   toggleFilterGroup(id) {
     const c = get().filterCollapsed, n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id];
     set({ filterCollapsed: n }); LS.set("browseFilterCollapsed", n);

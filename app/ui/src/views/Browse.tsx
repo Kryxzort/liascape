@@ -1,11 +1,10 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useStore } from "../store";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { filterOf, useStore } from "../store";
 import { Card } from "../components/Card";
-import { WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
-import { LIBRARY_TAG, WF_CLOSE_MS, WF_DOCK_MS, useFilterDocked } from "../components/workshopFilter";
+import { NoMatch, WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
+import { LIBRARY_TAG, facetsOf, knownTags, localMatcher, useFilterColumn } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
-import { type MorphSource, morph, snapshot } from "../hooks/filterMorph";
 import { BrowseSide } from "../components/BrowseSide";
 import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
@@ -45,25 +44,33 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const openExternal = useStore((s) => s.openExternal);
   const hasMore = useStore((s) => s.hasMore);
   const activeSource = useStore((s) => s.activeSource);
-  const isWorkshop = useStore((s) => s.isWorkshop());
   const browseSort = useStore((s) => s.browseSort);
   const browseFocus = useStore((s) => s.browseFocus);
   const focusBrowse = useStore((s) => s.focusBrowse);
   const applyItem = useStore((s) => s.applyItem);
+  const clearTags = useStore((s) => s.clearTags);
   const motion = useMotion();
   // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   // PERF: one Set per library change; each memo'd card gets a boolean, so only a card whose mark flips re-renders
   const libItems = useStore((s) => s.libraryItems);
   const libKeys = useMemo(() => libraryKeys(libItems), [libItems]);
+  // the source's filter column: the Workshop's (its tags go to Steam), the local WE folder's (matched here), or none
+  const scope = useStore((s) => s.browseScope());
   // the filter column's "In my library" row (UI-only, workshopFilter.ts LIBRARY_TAG): ✓ = only owned, ✕ = hide owned —
   // filtered here, over the pages already loaded (the infinite-scroll sentinel keeps loading while a page thins out)
-  const libMode = useStore((s) => !s.isWorkshop() ? null
-    : s.browseFilter.include.includes(LIBRARY_TAG) ? "only" : s.browseFilter.exclude.includes(LIBRARY_TAG) ? "hide" : null);
+  const libMode = useStore((s) => { const sc = s.browseScope(); if (!sc) return null; const f = filterOf(s, sc);
+    return f.include.includes(LIBRARY_TAG) ? "only" : f.exclude.includes(LIBRARY_TAG) ? "hide" : null; });
+  // the local WE folder holds its whole list: its tags filter it here, no request (workshopFilter.ts localMatcher)
+  const weFilter = useStore((s) => s.weFilter);
+  const local = scope === "weLocal";
+  const match = useMemo(() => (local ? localMatcher(weFilter) : null), [local, weFilter]);
+  const known = useMemo(() => (local ? knownTags(wallpapers, (w) => w.pageUrl) : null), [local, wallpapers]);
   const sorted = useMemo(() => {
-    const all = sortBrowse(wallpapers, browseSort);
-    return libMode ? all.filter((w) => inLibrary(libKeys, w) === (libMode === "only")) : all;
-  }, [wallpapers, browseSort, libMode, libKeys]);
+    let all = sortBrowse(wallpapers, browseSort);
+    if (libMode) all = all.filter((w) => inLibrary(libKeys, w) === (libMode === "only"));
+    return match ? all.filter((w) => match(facetsOf(w, w.pageUrl))) : all;
+  }, [wallpapers, browseSort, libMode, libKeys, match]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -73,7 +80,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   // the page is built on each visit (App.tsx): back on it, the list (kept in the store, no request) shows where it was
   // left; another source, search, filter or sort starts at the top. Guard: probe-layout tabs:browse
   const browseFor = useStore((s) => s.browseFor);
-  useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}`);
+  const localView = local ? JSON.stringify([weFilter.include, weFilter.exclude, weFilter.featureMatch, weFilter.genreMatch]) : "";
+  useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}`);
 
   useEffect(() => {
     const el = sentinel.current;
@@ -151,40 +159,17 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId }));
 
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
-  // the Workshop filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
-  const docked = useFilterDocked();
-  const colHidden = useStore((s) => s.filterColHidden);
-  const setColHidden = useStore((s) => s.setFilterColHidden);
-  // COOL: the docked column slides out / back in (WF_DOCK_MS) and the grid glides by its width instead of jumping — the margin
-  // flips at once (the grid re-fits once), `.wf-shift-*` plays the offset back to 0 on transform only (n % 2 alternates two
-  // identical keyframes so a quick re-toggle restarts it). Only on a toggle: a tab visit / a resize just shows the column.
-  const dockCol = useLinger(isWorkshop && docked && !colHidden ? true : null, WF_DOCK_MS, motion);
-  const [shift, setShift] = useState<{ dir: "in" | "out"; n: number } | null>(null);
-  useEffect(() => { if (!shift) return; const t = setTimeout(() => setShift(null), 420); return () => clearTimeout(t); }, [shift]);
-  // the pill ⇄ title morph: snapshot what's being left before the change, fly it onto its counterpart after the commit
-  const morphFrom = useRef<MorphSource | null>(null);
-  const toggleCol = () => {
-    if (motion) {
-      morphFrom.current = snapshot(document.querySelector(colHidden ? "[data-wf-open]" : "[data-wf-title]"));
-      setShift((s) => ({ dir: colHidden ? "in" : "out", n: (s?.n ?? 0) + 1 }));
-    }
-    setColHidden(!colHidden);
-  };
-  useLayoutEffect(() => {
-    const from = morphFrom.current; morphFrom.current = null;
-    if (from && shift) morph(from, document.querySelector(shift.dir === "in" ? "[data-wf-title]" : "[data-wf-open]"));
-  }, [shift]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
-  if (drawerOpen && (docked || !isWorkshop)) setDrawerOpen(false); // follow during render: a wider window / another source
-  const drawer = useLinger(isWorkshop && !docked && drawerOpen ? true : null, WF_CLOSE_MS, motion);
+  // the filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
+  const col = useFilterColumn("browse", !!scope);
   const sideW = shown.value && kept?.pageUrl === shown.value ? kept : null;
 
   return (
     <>
-    {isWorkshop && docked && dockCol.value && <WorkshopFilterColumn mode="dock" closing={dockCol.closing} entering={shift?.dir === "in"} onFold={toggleCol} />}
-    <div className={`scroll${shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : ""}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
-      {isWorkshop && <WorkshopSortRow drawer={!docked} open={docked && !colHidden} onOpenFilters={() => docked ? toggleCol() : setDrawerOpen(true)} />}
+    {/* keyed by scope: another source's column is another list's — its groups fade in fresh (index.css .wf-body) */}
+    {scope && col.docked && col.dockCol.value && <WorkshopFilterColumn key={scope} mode="dock" scope={scope} known={known} closing={col.dockCol.closing} entering={col.shift?.dir === "in"} onFold={col.toggleCol} />}
+    <div className={`scroll${col.shiftClass}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+      {scope && <WorkshopSortRow scope={scope} drawer={!col.docked} open={col.open} onOpenFilters={col.openFilters} />}
+      {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
@@ -212,7 +197,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
         </div>
       )}
     </div>
-    {!docked && drawer.value && <WorkshopFilterColumn mode="drawer" closing={drawer.closing} onClose={closeDrawer} />}
+    {scope && !col.docked && col.drawer.value && <WorkshopFilterColumn key={scope} mode="drawer" scope={scope} known={known} closing={col.drawer.closing} onClose={col.closeDrawer} />}
     {sideW && (
       <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}

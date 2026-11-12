@@ -38,3 +38,4 @@ and § Settings & state.
 
 ## Workshop filter
 - The filter contract is `{sort, trendDays, include[], exclude[], featureMatch, genreMatch}`; a tag is in include XOR exclude (`store.setTagState`). UI-only pseudo-tags start with `@` (`@library`) and are never sent. Changes go through `setBrowseFilter` (debounced reload).
+- The Library and the local WE folder (`supportsLocalFilter`) have their own filters (`FilterScope`: `libFilter`, `weFilter`, each saved under its own key), matched in the page by `localMatcher` with the Workshop's semantics, never sent; one scope's change never touches another's.
