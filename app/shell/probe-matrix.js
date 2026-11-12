@@ -2454,6 +2454,59 @@ C["clip:hoverHandoff"] = { states: ["single"], noSwitch: true,
     return v;
   } };
 
+// "Smooth window animations" off (:root.no-motion, useMotion() false): a hover swaps the card's clip for the real file at
+// once and an unhover swaps the clip back (components/PreviewPlayer.tsx, a plain swap). The swap removes the video under the
+// pointer; a leave before the browser re-aims the hover at the new one went to the removed node, which React can't map to
+// the card, so the card stayed "hovered" on its real file (a pointer brushing across cards left them all on their 1080p-4K
+// files). Rounds: brushed past (out 40 ms after in), out the moment the real file shows, out after a pause — each must end
+// on the clip with no real file left. Nothing has to be seamless here.
+C["clip:hoverHandoffNoMotion"] = { states: ["single"], noSwitch: true,
+  async pre(c) {
+    c.p = await clipFixture("clipHvOff", 30);
+    if (!c.p) return;
+    await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
+    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid", morphs: false });
+  },
+  async run(c) {
+    if (!c.p) return;
+    const send = (e) => win.webContents.sendInputEvent(e);
+    const kindNow = async () => (await js(CLIP_SAMPLE("clipHvOff", 1))).pop()?.k ?? null;
+    const reals = () => js(`[...document.querySelectorAll("video")].filter((x) => (x.getAttribute("src") || "").includes("/media?")).length`);
+    try {
+      c.noMotion = await js(`document.documentElement.classList.contains("no-motion")`);
+      // the full clip first: nothing is left asking for a better one when the fixture goes (a 404 then)
+      c.full = await waitFor(async () => isFull(await kindNow()), 30000, 300);
+      const pt = await ui(`const e = m.card("clipHvOff")?.querySelector(".thumb-wrap"); if (!e) return null; e.scrollIntoView({ block: "center" }); await m.sleep(300); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      if (!pt) return;
+      c.rounds = [];
+      for (const how of ["brushed past", "out at once", "out after a pause"]) {
+        await sleep(800);
+        send({ type: "mouseMove", x: pt.x - 3, y: pt.y }); send({ type: "mouseMove", x: pt.x, y: pt.y });
+        let real = null;
+        if (how === "brushed past") await sleep(40);
+        else { real = await waitFor(async () => (await kindNow()) === "real", 5000, 20); if (how === "out after a pause") await sleep(800); }
+        send({ type: "mouseMove", x: 700, y: 4 });
+        const back = await waitFor(async () => isClip(await kindNow()) && (await reals()) === 0, 4000, 100);
+        c.rounds.push({ how, real, back, after: await kindNow(), reals: await reals() });
+      }
+    } finally {
+      send({ type: "mouseMove", x: 700, y: 4 });
+      await post("/settings", { ...(await getSettings()), morphs: true });
+      await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300);
+    }
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.p) return ["couldn't import the 1280×720 fixture"];
+    if (!c.noMotion) return ["motion never went off (:root.no-motion) — proved nothing"];
+    if (!c.full) return ["the card never played its full clip before the hover — proved nothing"];
+    if (!c.rounds?.length) return ["no card to hover"];
+    for (const r of c.rounds) {
+      if (r.real === false) v.push(`${r.how}: the real file never took over`);
+      if (!r.back) v.push(`${r.how}: the card never went back to its clip (shows ${J(r.after)}, ${r.reals} videos on a real file)`);
+    }
+    return v;
+  } };
+
 // A gif preview that goes out of sight and comes back goes on from a later frame, never from frame 0 and never fetched
 // again, even after a garbage collection while it was away (components/MotionThumb.tsx keepHidden): k1's card on an
 // unhover + re-hover, and under "Animate GIF previews" scrolled away and back, the window inactive and active again, and

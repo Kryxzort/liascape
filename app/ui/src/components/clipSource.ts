@@ -1,5 +1,5 @@
-import { useEffect, useState, type RefObject } from "react";
-import { clipInfo, clipFile, clipShrink, type ClipQuality } from "../api/client";
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type RefObject } from "react";
+import { clipInfo, clipFile, clipShrink, type ClipInfo, type ClipQuality } from "../api/client";
 import { useStore } from "../store";
 
 // Which preview clip a card plays (the backend's Web/ClipStore.cs makes and keeps them; docs/decisions.md § "Play every
@@ -10,6 +10,9 @@ import { useStore } from "../store";
 // asks again every POLL_MS and hands over to it mid-play (components/PreviewPlayer.tsx). Off screen a card asks nothing,
 // so nothing is made for it. Guard: matrix clip:size, clip:shortToFull.
 export const QUALITY_FACTOR: Record<ClipQuality, number> = { low: 0.75, mid: 1, high: 1.5 };
+// the names Settings shows ("Video preview quality" and the card preview's caption)
+export const QUALITY_LABEL: Record<ClipQuality, string> = { low: "Low", mid: "Mid", high: "High" };
+const QUALITY_RANK: Record<ClipQuality, number> = { low: 0, mid: 1, high: 2 };
 const POLL_MS = 4000;
 
 export const useClipQuality = () => useStore((s) => {
@@ -59,9 +62,37 @@ useStore.subscribe((s, p) => {
   }
 });
 
+// Settings' card preview: its cards ask for exactly the chosen quality (the backend makes a short sample of it in seconds
+// when the stored clip is another quality), never the better clip the library keeps for the grid. Guard: probe-cardpreview
+// cardpv:quality.
+export const ClipExact = createContext(false);
+
+// ---- what each item's last answer said, and a quality being asked for: the preview's "making the High preview…" ----
+const answers = new Map<string, ClipInfo>();
+const asking = new Map<string, ClipQuality>();
+const answerSubs = new Set<() => void>();
+const changed = () => { for (const f of answerSubs) f(); };
+function remember(path: string, r: ClipInfo) {
+  const o = answers.get(path);
+  if (o && o.v === r.v && o.pending === r.pending && o.q === r.q) return;
+  answers.set(path, r);
+  changed();
+}
+const subscribeAnswers = (f: () => void) => { answerSubs.add(f); return () => { answerSubs.delete(f); }; };
+// true while one of these items waits for its first clip of quality `q`, or plays one below it while the backend makes it
+export function useClipMaking(paths: string[], q: ClipQuality): boolean {
+  const key = paths.join("\n");
+  return useSyncExternalStore(subscribeAnswers, () => key.split("\n").some((p) => {
+    if (asking.get(p) === q) return true;
+    const r = answers.get(p);
+    return !!r?.pending && (!r.q || QUALITY_RANK[r.q] < QUALITY_RANK[q]);
+  }));
+}
+
 // The clip URL a card plays now (null: none yet), and `retry` for a clip that failed to load (replaced and deleted since).
 export function useClipSrc(path: string | null, box: { w: number; h: number } | null): { src: string | null; retry: () => void } {
   const q = useClipQuality();
+  const exact = useContext(ClipExact);
   const [src, setSrc] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   // off screen: forget it, so a card coming back plays only what the backend names then (an older file may be gone)
@@ -72,11 +103,16 @@ export function useClipSrc(path: string | null, box: { w: number; h: number } | 
   useEffect(() => {
     if (!path || !w || !h) return;
     let dead = false, timer = 0;
-    needs.set(path, { w, h, q });
+    // the preview's box and quality aren't what the grid needs: they never steer the idle shrink
+    if (!exact) needs.set(path, { w, h, q });
     shown.set(path, (shown.get(path) ?? 0) + 1);
     const ask = async () => {
-      const r = await clipInfo(path, w, h, q).catch(() => null);
+      const first = answers.get(path)?.q !== q;
+      if (first) { asking.set(path, q); changed(); }
+      const r = await clipInfo(path, w, h, q, exact).catch(() => null);
+      if (first && asking.get(path) === q) { asking.delete(path); changed(); }
       if (dead) return;
+      if (r) remember(path, r);
       if (r?.v) setSrc(clipFile(path, r.v));
       // pending: a better clip is being made for this card; no answer: the backend is away, try again later
       if (!r || r.pending) timer = window.setTimeout(ask, r ? POLL_MS : POLL_MS * 4);
@@ -87,6 +123,6 @@ export function useClipSrc(path: string | null, box: { w: number; h: number } | 
       const n = (shown.get(path) ?? 1) - 1;
       if (n > 0) shown.set(path, n); else shown.delete(path);
     };
-  }, [path, w, h, q, attempt]);
+  }, [path, w, h, q, exact, attempt]);
   return { src: path && w && h ? src : null, retry: () => setAttempt((a) => a + 1) };
 }

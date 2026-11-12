@@ -8,6 +8,8 @@ import { api, type FeatureHealth, type ClipQuality } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Segmented } from "../components/Segmented";
+import { CardPreview } from "../components/CardPreview";
+import { QUALITY_LABEL } from "../components/clipSource";
 import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
 import { FolderFlap } from "../components/icons";
@@ -164,6 +166,8 @@ export const Settings = memo(function Settings() {
   const applyTheme = useStore((s) => s.applyTheme);
   const scrollRef = useRef<HTMLDivElement>(null);
   const smoothRef = useSmoothScroll(scrollRef);
+  // the Look & feel rows that change how a library card looks: the card preview shows beside them while they're on screen
+  const cardRowsRef = useRef<HTMLDivElement>(null);
   const [mpv, setMpv] = useState("");
   const [lwe, setLwe] = useState("");
   const [clearArm, setClearArm] = useState(-1); // -1 idle, >0 counting, 0 ready-to-confirm
@@ -395,11 +399,13 @@ export const Settings = memo(function Settings() {
         </Section>
       )}
 
+      <CardPreview scrollRef={scrollRef} rowsRef={cardRowsRef}>
       <Section title="Look & feel" icon={<Palette size={15} />}>
         <Row label="Theme" onReset={() => applyTheme(SETTINGS_DEFAULTS.theme as string)} deviated={themeName !== SETTINGS_DEFAULTS.theme}>
           <Select value={themeName} onChange={(v) => applyTheme(v)}
             options={themes.map((t) => ({ value: t.name, label: t.name }))} />
         </Row>
+        <div className="pv-rows" ref={cardRowsRef}>
         <Row label="Card size" rk="cardSize">
           <Select value={g("cardSize", "Medium")} onChange={(v) => set("cardSize", v)}
             options={["Small", "Medium", "Large"].map((x) => ({ value: x, label: x }))} />
@@ -409,15 +415,17 @@ export const Settings = memo(function Settings() {
             options={[{ value: "1:1", label: "Square (1:1)" }, { value: "16:9", label: "Widescreen (16:9)" }]} />
         </Row>
         <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things — off keeps everything readable, just without the glow" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
-        <Row label="Smooth window animations" hint="cards morph into their settings window — off simply fades it in" rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
+        <Row label="Smooth window animations" hint="the slides, fades and morphs all over the app — off, every change is instant" rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
         <Row label="Animate GIF previews" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
         <Row label="Animate wallpapers without a GIF" hint="wallpapers with no GIF preview play a silent clip of their own video, without hovering" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>
         <Row label="Use the video instead of the GIF" hint="a wallpaper that has a GIF preview shows a short clip of its own video instead — on hover, and without one while the setting above is on" rk="preferVideoThumbs"><input type="checkbox" checked={g("preferVideoThumbs", false)} onChange={(e) => set("preferVideoThumbs", e.target.checked)} /></Row>
         <Row label="Video preview quality" hint="sharper, smoother clips use more disk space and CPU" rk="videoPreviewQuality">
           <Segmented<ClipQuality> label="Video preview quality" value={g<ClipQuality>("videoPreviewQuality", "mid")} onChange={(v) => set("videoPreviewQuality", v)}
-            options={[{ value: "low", label: "Low" }, { value: "mid", label: "Mid" }, { value: "high", label: "High" }]} /></Row>
+            options={(["low", "mid", "high"] as const).map((v) => ({ value: v, label: QUALITY_LABEL[v] }))} /></Row>
+        </div>
         <Row label="Wallpaper behind every tab" hint="show the live wallpaper behind Browse and Library too (it peeks through between the cards)" rk="liveWallpaperBehindAllTabs"><input type="checkbox" checked={g("liveWallpaperBehindAllTabs", false)} onChange={(e) => set("liveWallpaperBehindAllTabs", e.target.checked)} /></Row>
       </Section>
+      </CardPreview>
 
       <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
         <Row label="Workshop folder" hint="where Steam keeps your Wallpaper Engine downloads">

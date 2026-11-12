@@ -193,6 +193,11 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* --thumb-aspect kept: respects the ThumbnailAspect setting (genuine, not design). */
 .thumb-wrap { position: relative; aspect-ratio: var(--thumb-aspect, 1 / 1); background: var(--bg-crust); cursor: pointer; }
 .thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* The preview layers over a thumbnail (gif, clip, real file, a frozen frame) come and go under the pointer: a swap removes
+   the hovered element, and a leave right after it targets that removed node, which React can't map to the card, so the
+   card would stay "hovered" on its real file (with motion off the swap is at once). The pointer only ever meets the static
+   thumbnail, which stays. Guard: matrix clip:hoverHandoffNoMotion, probe-cardpreview cardpv:motion. */
+.thumb.anim, .thumb-wrap video { pointer-events: none; }
 
 /* Hover slide-up Download & Apply. */
 .dl {
@@ -596,7 +601,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   border: 1px solid var(--surface1); border-radius: 14px; padding: 15px 18px 13px;
   box-shadow: 0 1px 3px rgba(0,0,0,.3);
   transition: border-color .2s, box-shadow .25s, transform .2s;
-  animation: ssection-in .55s cubic-bezier(.2,.7,.3,1) both;
+  animation: ssection-in .55s cubic-bezier(.2,.7,.3,1) both; animation-delay: var(--s-delay, 0s);
 }
 .ssection:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--surface1));
   box-shadow: 0 8px 26px rgba(0,0,0,.4), var(--glow-sm); }
@@ -606,12 +611,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   box-shadow: 0 0 12px -1px var(--accent); opacity: .55; transition: opacity .25s; }
 .ssection:hover::before { opacity: 1; }
 @keyframes ssection-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-/* stagger as the tab opens — wider gaps so it actually reads as a cascade */
-.ssection:nth-child(1) { animation-delay: .06s } .ssection:nth-child(2) { animation-delay: .15s }
-.ssection:nth-child(3) { animation-delay: .24s } .ssection:nth-child(4) { animation-delay: .33s }
-.ssection:nth-child(5) { animation-delay: .42s } .ssection:nth-child(6) { animation-delay: .51s }
-.ssection:nth-child(7) { animation-delay: .60s } .ssection:nth-child(8) { animation-delay: .69s }
-.ssection:nth-child(9) { animation-delay: .78s } .ssection:nth-child(n+10) { animation-delay: .87s }
+/* stagger as the tab opens — wider gaps so it actually reads as a cascade. Counted on the page's own children: a section
+   wrapped with the card preview (.pv-wrap) takes its wrapper's place */
+.settings > :nth-child(1) { --s-delay: .06s } .settings > :nth-child(2) { --s-delay: .15s }
+.settings > :nth-child(3) { --s-delay: .24s } .settings > :nth-child(4) { --s-delay: .33s }
+.settings > :nth-child(5) { --s-delay: .42s } .settings > :nth-child(6) { --s-delay: .51s }
+.settings > :nth-child(7) { --s-delay: .60s } .settings > :nth-child(8) { --s-delay: .69s }
+.settings > :nth-child(9) { --s-delay: .78s } .settings > :nth-child(n+10) { --s-delay: .87s }
 .ssection h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px;
   font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--accent); }
 .ssection-ico { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 8px;
@@ -1022,6 +1028,50 @@ input[type=range]:focus-visible { outline: none; }
 .tr-chip.on .tr-live { background: var(--accent-fg); box-shadow: none; }
 .tr-empty { text-align: center; color: var(--muted); padding: 30px; }
 
+/* ---- Settings → Look & feel: the live card preview (components/CardPreview.tsx) ----
+   Beside the section when the window leaves a side column for it (`data-side`, pinned while the rows scroll), else
+   centred above it (it comes first in the wrapper; the side layout places it by grid area). Looks like a Settings section
+   card (translucent crust over the live wallpaper, the accent edge and glow on hover). COOL: it rises and fades in while
+   the card rows are on screen and back out when they leave (no-motion: it just appears); its caption fades each new text in.
+   Above the rows it keeps its place while hidden, so showing it never moves them. */
+.pv-wrap { position: relative; z-index: 1; }
+/* the card rows sit in their own box (.pv-rows, what the preview watches): its first row and the row after it keep the line
+   above them (.srow:first-of-type drops it for the section's first row only) */
+.pv-rows > .srow:first-of-type, .pv-rows + .srow { border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent); }
+.pv-wrap[data-side] { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; }
+/* width 100vw, capped by the section's own max-width: its column takes that cap, as wide as every other section (an auto
+   column alone would take the section's max-content width, narrower) */
+.pv-wrap[data-side] > .ssection { grid-column: 2; grid-row: 1; margin-left: 0; margin-right: 0; width: 100vw; }
+/* no height of its own beside the rows: the row is the section's, and the frame hangs from the pinned point while the rows
+   scroll (it leaves with them) */
+.pv-wrap[data-side] > .card-pv { grid-column: 3; grid-row: 1; position: sticky; top: var(--gap); height: 0; padding-left: 18px; min-width: 0; }
+.pv-wrap:not([data-side]) > .card-pv { display: flex; justify-content: center; margin-bottom: 12px; }
+/* content-box: the width CardPreview sets is the cards' row (it sets the padding too) */
+.card-pv-frame { position: relative; box-sizing: content-box; border-radius: 14px; border: 1px solid var(--surface1);
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  opacity: 0; transform: translateY(10px);
+  transition: opacity .22s ease, transform .3s cubic-bezier(.2,.7,.3,1), border-color .2s, box-shadow .25s; }
+.card-pv[data-on] .card-pv-frame { opacity: 1; transform: none; }
+.card-pv-frame:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--surface1)); box-shadow: 0 8px 26px rgba(0,0,0,.4), var(--glow-sm); }
+.card-pv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 2px 10px;
+  font-size: 12px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--accent); }
+.card-pv-hint { font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--subtext); }
+.card-pv-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--gap); }
+.card-pv-slot { flex: none; aspect-ratio: var(--thumb-aspect, 1 / 1); }
+.card-pv-slot > .card { width: 100%; }
+/* a preview: nothing on it is a click target, and the hover-only actions it can't do (trash, add to playlist) stay hidden;
+   an item already in the playlist keeps its ring */
+.card-pv .thumb-wrap { cursor: default; }
+.card-pv :is(.del, .pl-toggle:not(.on)) { visibility: hidden; }
+.card-pv-cap { margin-top: 10px; min-height: 1.3em; font-size: 11.5px; color: var(--subtext); text-align: center; }
+.card-pv-cap > span { display: inline-block; animation: card-pv-cap-in .25s ease both; }
+/* a narrow frame wraps the caption between its parts, never inside one */
+.card-pv-cap i { font-style: normal; white-space: nowrap; }
+/* a clip being made: the caption in the accent, breathing (progress: the one kind of loop) */
+.card-pv-cap[data-making] > span { color: var(--accent); animation: card-pv-cap-in .25s ease both, card-pv-busy 1.4s ease-in-out .25s infinite; }
+@keyframes card-pv-cap-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes card-pv-busy { 50% { opacity: .55; } }
+
 /* ---- Settings → Appearance → "Glow effects" OFF (<html class="no-glow">, App.tsx) ----
    Every accent/state glow goes: the --glow vars (hover/active/selected/modal chrome) become an invisible shadow, and the
    hard-coded ones (pulses, drop-shadow hovers, the ambient corner pools, the portal'd playlist-bar hover layer) are
@@ -1075,6 +1125,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion :is(.ss-filter, .ss-n) { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .app > .scroll { animation: none; }
+:root.no-motion .card-pv-frame { transition: none; }
+:root.no-motion .card-pv-cap > span { animation: none; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
 :root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }

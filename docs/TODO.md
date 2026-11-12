@@ -17,11 +17,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
-27. [ ] A live card preview in Settings for every card-related setting (owner): 2–3 real library items drawn with the real
-       card component (one with a GIF, one video-only, one with both if any), pinned beside the card settings in Look &
-       feel and shown only while those rows are on screen; reflects thumbnail shape, card size, GIF / video previews,
-       video-over-GIF, video quality, glow and motion live; hover works on it; a caption with the quality's fps and disk
-       cost ("making the High preview…" while a clip is made).
 29. [ ] (next, ahead of 28) An agent-only app window (owner): agents drive their own Liascape window, never the owner's.
        `scripts/agent-window.sh up|down`: a Hyprland headless output (runtime `hyprctl output create headless …`, never
        a config change) so the window renders at a real refresh off the owner's screens; its own backend (private HOME /

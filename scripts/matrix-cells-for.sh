@@ -56,7 +56,7 @@ for f in $FILES; do
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
-    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f" ;;
+    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f (+ --probe probe-cardpreview.js — the card preview)" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f (+ --probe probe-expert.js — the stepper: − / +, hold, wheel, keys, roll, look)" ;;
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
@@ -74,7 +74,10 @@ for f in $FILES; do
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
     # the preview clips: the backend's store, the card's clip and its hand-overs
-    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f" ;;
+    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js)" ;;
+    # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
+    app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
+    app/shell/probe-cardpreview.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe
     app/ui/src/hooks/useMarquee.ts) add "$CARD|browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-select.js)" ;;

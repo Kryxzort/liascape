@@ -33,14 +33,20 @@ export const img = (u: string, referer?: string) =>
 export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}`);
 // API: the preview clips of a local video (/clip, the backend's Web/ClipStore.cs): what "Animate wallpapers without a GIF" plays
 // (components/clipSource.ts). clipInfo names the clip to play now for a box of w × h device pixels at a quality (`v`, an
-// immutable file) and whether a better one is being made (`pending`: ask again); clipFile is that clip's bytes.
+// immutable file), the quality it was made at (`q`) and whether a better one is being made (`pending`: ask again); clipFile is
+// that clip's bytes.
 export type ClipQuality = "low" | "mid" | "high";
-export type ClipInfo = { v: string | null; full: boolean; pending: boolean };
-export async function clipInfo(path: string, w: number, h: number, q: ClipQuality): Promise<ClipInfo> {
-  const r = await fetch(withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&w=${w}&h=${h}&q=${q}&info=1`));
+export type ClipInfo = { v: string | null; full: boolean; pending: boolean; q?: ClipQuality | null };
+// `exact`: a clip of exactly that quality, a short sample when the stored clip is another (Settings' card preview)
+export async function clipInfo(path: string, w: number, h: number, q: ClipQuality, exact = false): Promise<ClipInfo> {
+  const r = await fetch(withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&w=${w}&h=${h}&q=${q}&info=1${exact ? "&exact=1" : ""}`));
   if (!r.ok) throw new Error(`/clip → ${r.status}`);
   return r.json();
 }
+// API: each quality's fps cap and its disk cost per wallpaper (MB: the store's median full clip, else a typical one) — the
+// backend's own table (/clip/qualities), for Settings' card preview caption
+export type ClipQualityInfo = { name: ClipQuality; fps: number; mb: number; measured: boolean };
+export const clipQualities = () => jget<{ qualities: ClipQualityInfo[] }>("/clip/qualities").then((r) => r.qualities);
 export const clipFile = (path: string, v: string) => withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&v=${encodeURIComponent(v)}`);
 // API: the app went inactive with these clip boxes last seen off screen (the backend shrinks a clip 2x wider than needed),
 // or came back (idle false)

@@ -47,6 +47,14 @@ function colsNear(w: number, gap: number, target: number): number {
   return Math.abs(cardW(w, c + 1, gap) - target) < Math.abs(cardW(w, c, gap) - target) ? c + 1 : c;
 }
 
+// The card width the Library grid gets in a scroll area of w × h (its content box) at a "Card size" and "Thumbnail shape":
+// Settings' card preview draws its cards at it (components/CardPreview.tsx). A docked panel keeps the cards' size (above),
+// so the area without one is the whole answer.
+export function gridCardWidth(w: number, h: number, gap: number, size: string | undefined, shape: unknown): number {
+  const aspect = shape === "16:9" ? 16 / 9 : 1;
+  return cardW(w, fitCols(w, h, gap, aspect, COUNT[size ?? "Medium"] ?? 20), gap);
+}
+
 function bind(el: HTMLElement, key: string, aspect: number, n: number): () => void {
   const apply = () => {
     const cs = getComputedStyle(el);

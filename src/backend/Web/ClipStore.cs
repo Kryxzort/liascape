@@ -43,8 +43,11 @@ public static class ClipStore
     // 10 s - 3 min) at a bounded size; a longer video's clip is its first 5 min, a cut where the loop jumps back.
     public const int CAP_SECONDS = 300;
     private static readonly int[] WIDTHS = [240, 320, 480, 640, 960, 1280, 1920];
-    // name, fps cap, x264 CRF: a higher one never looks worse than a lower one (an upgrade only goes up)
-    private static readonly (string Name, int Fps, int Crf)[] QUALITY = [("low", 24, 31), ("mid", 30, 27), ("high", 60, 23)];
+    // name, fps cap, x264 CRF: a higher one never looks worse than a lower one (an upgrade only goes up). TypicalMb: a full
+    // clip's size on medium cards, measured over real wallpapers; Settings' card preview shows it until this store holds
+    // clips of that quality to take the median of (`GET /clip/qualities`)
+    private static readonly (string Name, int Fps, int Crf, double TypicalMb)[] QUALITY =
+        [("low", 24, 31, 0.8), ("mid", 30, 27, 1.8), ("high", 60, 23, 4.5)];
     private static readonly long OUTSIDE_CAP = 1024L * 1024 * 1024;
     private static readonly TimeSpan GRACE = TimeSpan.FromSeconds(90);
     // a card asks again every few seconds while it waits for a better clip (clipSource.ts POLL_MS); a job nobody asked for
@@ -125,8 +128,11 @@ public static class ClipStore
     }
 
     // ---- GET /clip ------------------------------------------------------------------------------------------------------
-    //   ?path=&w=&h=&q=&info=1  →  {v, full, pending}: the clip to play now for a box of w × h device pixels at quality q
+    //   ?path=&w=&h=&q=&info=1  →  {v, full, pending, q}: the clip to play now for a box of w × h device pixels at quality q
     //                              (low|mid|high); queues a better one when needed (pending: a newer clip is coming, ask again)
+    //        &exact=1           →  a clip of exactly quality q (Settings' card preview shows the chosen quality, not the
+    //                              better clip the library keeps): the stored full one when it is that quality, else a
+    //                              SHORT_SECONDS sample made on the request, in seconds; the full clip still queues as above
     //   ?path=&v=               →  that clip's bytes (one capped range per request)
     //   ?path=                  →  the bytes of the clip a mid-quality 320 px box would get (older pages, curl)
     // Every parameter is checked here; only numbers from these tables reach ffmpeg's arguments.
@@ -156,8 +162,9 @@ public static class ClipStore
             if (q < 0) return Results.Json(new { error = "q: low, mid or high" }, statusCode: 400);
             w = Math.Clamp(w, 16, 8192); h = Math.Clamp(h, 16, 8192);
         }
-        var r = await Info(path!, w, h, q);
-        if (info) return Results.Json(new { v = r.V, full = r.Full, pending = r.Pending });
+        var r = await Info(path!, w, h, q, qs["exact"].FirstOrDefault() == "1");
+        // q: the quality the named clip was made at (a higher one than asked can serve; a lower one while pending is being raised)
+        if (info) return Results.Json(new { v = r.V, full = r.Full, pending = r.Pending, q = r.V == null ? null : QUALITY[r.Q].Name });
         if (r.V == null) return Results.StatusCode(502);
         var f2 = Path.Combine(Dir, r.V + ".mp4");
         return File.Exists(f2) ? Bytes(ctx.Request, f2) : Results.StatusCode(502);
@@ -165,8 +172,8 @@ public static class ClipStore
 
     private static void Touch(string file) { try { File.SetLastAccessTimeUtc(file, DateTime.UtcNow); } catch { } }
 
-    private sealed record InfoResult(string? V, bool Full, bool Pending);
-    private static async Task<InfoResult> Info(string path, int boxW, int boxH, int q)
+    private sealed record InfoResult(string? V, bool Full, bool Pending, int Q = 0);
+    private static async Task<InfoResult> Info(string path, int boxW, int boxH, int q, bool exact)
     {
         Directory.CreateDirectory(Dir);
         var fi = new FileInfo(path);
@@ -177,22 +184,54 @@ public static class ClipStore
         int want = TargetWidth(src, boxW, boxH);
         var mine = ClipsOf(item).Where(c => c.Stamp == stamp).ToList();
         var full = Best(mine.Where(c => c.Full));
+        if (exact)
+        {
+            // the library's own clip is untouched: an upgrade queues the full one as for a card, and a lower quality than the
+            // stored clip is only ever a sample (a full one at it would replace the better clip the grid plays)
+            if (full == null || full.W < want || full.Q < q) Enqueue(path, item, Math.Max(want, full?.W ?? 0), Math.Max(q, full?.Q ?? 0));
+            if (full != null && full.Q == q && full.W >= want) return new(Stem(full), true, Queued(item), q);
+            var sample = Best(mine.Where(c => !c.Full && c.Q == q && c.W >= want)) ?? await MakeNow(path, item, stamp, want, q, full: false);
+            // pending: the queue is making a full clip of this quality (never for a quality below the stored one)
+            return new(sample == null ? null : Stem(sample), false, Queued(item) && (full == null || full.Q <= q), sample?.Q ?? q);
+        }
         if (full != null)
         {
             bool enough = full.W >= want && full.Q >= q;
             // an upgrade never loses what the stored clip has: the wider of the two widths, the higher quality
             if (!enough) Enqueue(path, item, Math.Max(want, full.W), Math.Max(q, full.Q));
-            return new(Stem(full), true, Queued(item));
+            return new(Stem(full), true, Queued(item), full.Q);
         }
         // a video no longer than the stand-in: its full clip is as quick to make as one
         if (src.Dur > 0 && src.Dur <= SHORT_SECONDS + 0.5)
         {
             var made = await MakeNow(path, item, stamp, want, q, full: true);
-            return new(made == null ? null : Stem(made), made != null, false);
+            return new(made == null ? null : Stem(made), made != null, false, made?.Q ?? 0);
         }
         Enqueue(path, item, want, q);
         var stand = Best(mine.Where(c => !c.Full)) ?? await MakeNow(path, item, stamp, want, q, full: false);
-        return new(stand == null ? null : Stem(stand), false, Queued(item));
+        return new(stand == null ? null : Stem(stand), false, Queued(item), stand?.Q ?? 0);
+    }
+
+    // ---- GET /clip/qualities: what each quality costs, for Settings' card preview caption -------------------------------
+    // fps: the encoder's cap; mb: the median full clip of that quality in this store (`measured`), else TypicalMb
+    public sealed record QualityInfo(string Name, int Fps, double Mb, bool Measured);
+    public static List<QualityInfo> Qualities()
+    {
+        var sizes = new List<long>[QUALITY.Length];
+        for (int i = 0; i < sizes.Length; i++) sizes[i] = [];
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(Dir, "*_full.mp4"))
+                if (Parse(f) is { } c && c.Q < sizes.Length) try { sizes[c.Q].Add(new FileInfo(f).Length); } catch { }
+        }
+        catch { }
+        return QUALITY.Select((x, i) =>
+        {
+            var s = sizes[i];
+            if (s.Count == 0) return new QualityInfo(x.Name, x.Fps, x.TypicalMb, false);
+            s.Sort();
+            return new QualityInfo(x.Name, x.Fps, Math.Round(s[s.Count / 2] / 1048576.0, 2), true);
+        }).ToList();
     }
     private static Clip? Best(IEnumerable<Clip> cs) => cs.OrderByDescending(c => c.Mtime).FirstOrDefault();
     private static string Stem(Clip c) => Path.GetFileNameWithoutExtension(c.Name);
@@ -201,7 +240,7 @@ public static class ClipStore
     // ---- encoding ---------------------------------------------------------------------------------------------------------
     private static List<string> Args(string src, string dst, int seconds, int w, int q)
     {
-        var (_, fps, crf) = QUALITY[q];
+        var (_, fps, crf, _) = QUALITY[q];
         var ci = CultureInfo.InvariantCulture;
         return ["-nostdin", "-hide_banner", "-loglevel", "error", "-t", seconds.ToString(ci), "-i", src,
             "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", $"scale={w.ToString(ci)}:-2",

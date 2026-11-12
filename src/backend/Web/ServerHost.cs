@@ -789,6 +789,8 @@ public static class ServerHost
 
         // A video preview clip (Web/ClipStore.cs): its info for a card's box, or a clip's bytes. ClipStore checks every parameter.
         app.MapGet("/clip", (HttpContext ctx, string? path) => ClipStore.Handle(ctx, path));
+        // What each preview quality costs (fps, MB per wallpaper): the caption under Settings' card preview.
+        app.MapGet("/clip/qualities", () => Results.Json(new { qualities = ClipStore.Qualities() }));
         // The app went inactive with these boxes last seen off screen (shrink clips now 2x wider than they need), or came back.
         app.MapPost("/clip/shrink", (ClipShrinkBody body) =>
         {
