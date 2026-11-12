@@ -8,10 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
-       (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
-       mid-pulse frames look slightly different (crossfade, not blur interpolation). It also restyles every other running animation each
-       frame (Browse's 72 skeleton shimmers: probe-layout `perf:skeleton` measures the cost).
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
@@ -81,8 +77,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 ## UI
 - [ ] Red on HEAD, cause not yet found (rerun alone, `--jobs 1`): matrix `single × playlistBarPlay` ("expected k1 on screen,
-      /current says k3 — no switch to k1 was requested") and `single × appear:glows` ("no glow on playing card pulse":
-      the cell reads the old box-shadow pulse; recheck it against the playing card's anchored glow layer).
+      /current says k3 — no switch to k1 was requested").
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

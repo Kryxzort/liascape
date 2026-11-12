@@ -587,6 +587,61 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: "mouseMove", x: 5, y: 5 });
       return v;
     };
+    // the playing card's pulse: one .playing-glow per grid, anchored behind the playing card (same box, also after the card
+    // scrolls in from off screen, where content-visibility skipped it), pulsing by opacity alone (no repaint of the card),
+    // gone under no-glow while the card's ring stays. Screenshot look-playingGlow.png.
+    await cell("look:playingGlow", async () => {
+      const v = [], J = JSON.stringify;
+      const lib = (await http("GET", "/library")).json ?? [];
+      const vid = lib.filter((i) => !i.isScene).map((i) => i.videoPath).pop();
+      if (!vid) return ["no library video to play — proved nothing"];
+      await post("/apply", { path: vid });
+      for (let i = 0; i < 60 && (await http("GET", "/current")).json?.path !== vid; i++) await sleep(250);
+      try {
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
+        const read = `(() => { const sc = document.querySelector(".lib-scroll"), c = sc?.querySelector(".card.playing"), g = sc?.querySelector(".playing-glow");
+          const R = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+          return c && g ? { card: R(c), glow: R(g), op: +getComputedStyle(g).opacity, shadow: getComputedStyle(g).boxShadow, ring: getComputedStyle(c, "::before").boxShadow,
+            anims: g.getAnimations().map((a) => a.animationName) } : { card: !!c, glow: !!g }; })()`;
+        // from off screen: scroll away, then bring the card into view (the live app keeps it skipped until then)
+        await js(`(() => { const sc = document.querySelector(".lib-scroll"); sc.scrollTo({ top: sc.scrollHeight, behavior: "instant" }); })()`); await sleep(300);
+        await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(400);
+        const a = await js(read);
+        if (!a.card || !a.glow || !Array.isArray(a.card)) return [`no playing card or no glow (${J(a)}) — proved nothing`];
+        const off = Math.max(...a.card.map((x, i) => Math.abs(x - a.glow[i])));
+        if (off > 1.5) v.push(`the glow isn't on the playing card: card ${J(a.card.map(Math.round))}, glow ${J(a.glow.map(Math.round))}`);
+        if (!a.anims.includes("pulse-glow-op")) v.push(`the glow doesn't pulse (animations ${J(a.anims)})`);
+        if (!/rgb/.test(a.ring)) v.push(`the card lost its ring (${a.ring})`);
+        const ops = [];
+        for (let i = 0; i < 12; i++) { ops.push((await js(read)).op); await sleep(150); }
+        if (Math.max(...ops) - Math.min(...ops) < 0.4) v.push(`the pulse is too faint to see: opacity ${Math.min(...ops).toFixed(2)}–${Math.max(...ops).toFixed(2)}`);
+        await shot("look-playingGlow");
+        // the corners at the pulse's brightness levels: the glow held at fixed phases (its own animation paused there), the
+        // card's top-left and bottom-right corners captured at 8x: look-playingGlow-corner-<phase>-<tl|br>.png
+        const d = dbg();
+        for (const [name, frac] of [["dim", 0], ["quarter", 0.15], ["half", 0.25], ["full", 0.5]]) {
+          const box = await js(`(() => { const sc = document.querySelector(".lib-scroll"), c = sc.querySelector(".card.playing"), g = sc.querySelector(".playing-glow");
+            const an = g.getAnimations()[0]; an.pause(); an.currentTime = ${frac} * 1800;
+            const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, op: +getComputedStyle(g).opacity }; })()`);
+          await sleep(250);
+          for (const [corner, x, y] of [["tl", box.x - 14, box.y - 14], ["br", box.x + box.w - 26, box.y + box.h - 26]]) {
+            const r = await d.sendCommand("Page.captureScreenshot", { format: "png", clip: { x, y, width: 40, height: 40, scale: 8 } });
+            fs.writeFileSync(path.join(OUT, `look-playingGlow-corner-${name}-${corner}.png`), Buffer.from(r.data, "base64"));
+          }
+          console.log(`        corner shots at ${name}: opacity ${box.op.toFixed(2)}`);
+        }
+        await js(`document.querySelector(".lib-scroll .playing-glow").getAnimations()[0].play()`);
+        // the open page doesn't see a /settings POST: reload, back to the playing card
+        await setSettings({ glows: false }); await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
+        await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(300);
+        const ng = await js(read.replace("+getComputedStyle(g).opacity", "getComputedStyle(g).display === 'none' ? -1 : 1"));
+        if (ng.op !== -1) v.push("no-glow: the pulse is still shown");
+        if (!/rgb/.test(ng.ring ?? "")) v.push(`no-glow: the card lost its ring (${ng.ring})`);
+        console.log(`        ${J({ off: +off.toFixed(2), ops: ops.map((x) => +x.toFixed(2)), ring: a.ring.slice(0, 40) })}`);
+      } finally { await setSettings({ glows: true }); }
+      return v;
+    });
+
     await cell("look:plFold", () => fold("on"));
     await cell("look:plFold:off", () => fold("off"));
     await cell("look:plFold:reduced", () => fold("reduced"));

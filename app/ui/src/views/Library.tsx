@@ -215,6 +215,8 @@ export const Library = memo(function Library() {
             autoPlayGifs={autoPlayGifs}
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
+        {/* COOL: the playing card's pulse, anchored behind it (index.css .playing-glow) */}
+        {filtered.some((x) => x.videoPath === playingPath) && <i className="playing-glow" aria-hidden />}
       </div>
     </div>
     {col.panel.value && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}

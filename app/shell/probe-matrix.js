@@ -1974,7 +1974,7 @@ true`;
 const GLOW_SPECS = [
   { name: "active tab", tab: "Library", el: `document.querySelector(".tabs .tab-pill")`, read: "boxShadow" }, // the sliding pill under the active tab carries its fill + glow
   { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
-  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".card.lib.playing")`, read: "animation" },
+  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".lib-scroll .playing-glow")`, read: "animation" }, // the anchored glow layer behind the playing card
   { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
   { name: "hovered card's playlist toggle", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing) .pl-toggle")`, read: "filter" },
   { name: "hovered playlist-bar item", tab: "Library", hover: true, el: `document.querySelector(".pl-item:not(.playing)")`, read: "layer" },

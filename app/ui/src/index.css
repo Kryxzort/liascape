@@ -257,15 +257,18 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 
 /* Playing card border = green; gentle green glow pulse. */
-/* TRIAL (#11): the grow/shrink pulse below repaints the card's shadow every frame (~240/s at 240 Hz, idle too); the trial
-   holds the outer glow still at its middle size and pulses a lit rim INSIDE the border by opacity alone (its own layer:
-   the compositor runs it, no main-thread frame). Inside, because .card's content-visibility paint-contains it: a layer
-   outside the card would be clipped. Restore the commented rules to compare.
-@keyframes pulse-glow {
-  0%,100% { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); }
-  50%     { box-shadow: 0 0 0 2px var(--success), 0 0 22px -1px var(--success); }
-}
-.card.playing { animation: pulse-glow 1.8s ease-in-out infinite; }
+/* the ring is drawn INSIDE the card's rounded clip (::before, over the picture): a ring outside it meets the clipped
+   picture's anti-aliased corner and shows a light seam on the curve. The pulsing glow is OUTSIDE, on one element per grid
+   (.playing-glow, anchored to the playing card, behind it): the card's content-visibility paint-contains everything inside
+   it, and pulsing the card's own shadow repaints it every frame; the glow's opacity alone runs on the compositor. */
+@keyframes pulse-glow-op { 0%,100% { opacity: .12; } 50% { opacity: 1; } }
+.grid { position: relative; isolation: isolate; anchor-scope: --playing-card; }
+.card.playing { anchor-name: --playing-card; box-shadow: 0 0 10px -3px var(--success); }
+.card.playing::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 5;
+  box-shadow: inset 0 0 0 2px var(--success); }
+.playing-glow { position: absolute; position-anchor: --playing-card; top: anchor(top); left: anchor(left); right: anchor(right);
+  bottom: anchor(bottom); z-index: -1; border-radius: 12px; pointer-events: none; box-shadow: 0 0 30px 4px var(--success);
+  opacity: .12; will-change: opacity; animation: pulse-glow-op 1.8s ease-in-out infinite; }
 
 /* PERF: the sweep moves a layer (transform), never background-position: a background-position animation runs on the main
    thread, so it forces a main frame every refresh, and each main frame restyles every running animation on the page —
@@ -1078,7 +1081,8 @@ input[type=range]:focus-visible { outline: none; }
    overridden here. State that is NOT glow stays: the playing item's green ring, the selected card's outline, accent
    borders/backgrounds on hover and active, the black depth shadows. */
 :root.no-glow { --glow-sm: 0 0 #0000; --glow: 0 0 #0000; }
-:root.no-glow .card.playing { animation: none; box-shadow: 0 0 0 2px var(--success); }
+:root.no-glow .card.playing { animation: none; box-shadow: none; } /* the ring (::before) stays */
+:root.no-glow .playing-glow { display: none; animation: none; }
 :root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
 :root.no-glow .pl-hover-glow { display: none; }
 :root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }
