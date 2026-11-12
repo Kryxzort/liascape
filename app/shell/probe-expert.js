@@ -9,6 +9,7 @@
 //   4. "When the playlist starts again": Settings (a Select + a hint per value) and the playlist modal (beside the global
 //      value it overrides; the playlist's own choice only matters under "Override global rotation settings")
 //   5. "Pause behind windows": the Playback row (liascape-player), default "A fullscreen or maximized window", saved + live
+//   3b. settings:noOverflow: no control sticks out of its row (every level, 1920 and 960 px windows)
 //   6. the number stepper (components/NumInput.tsx): no native spin arrows, − / + step and clamp, hold repeats and speeds up,
 //      ↑ / ↓ and the wheel on a focused field, typing as before, the digit roll (motion on / off), its look (glow, no-glow,
 //      bg-live, Latte); pictures stepper-*.png (1920×1080 when the screen fits: LIASCAPE_MATRIX_SCREEN=1920x1080)
@@ -131,6 +132,27 @@ app.whenReady().then(async () => {
       if (!(await waitFor(async () => (await field("settingsLevel")) === "expert", 4000))) v.push(`settingsLevel not saved (${await field("settingsLevel")})`);
       await loadSettings();
       if (!(await has(EXPERT_ROW))) v.push("after a reload the Expert row is gone — the level did not persist");
+      return v;
+    });
+
+    await cell("settings:noOverflow — no control sticks out of its row, at every level and at a wide and a narrow window", async () => {
+      // a long hint once squeezed a control column narrower than its segmented control, clipping an option off the row
+      const v = [];
+      await LEVEL("expert");
+      for (const [w, h] of [[1920, 1080], [960, 900]]) {
+        win.setContentSize(w, h); await sleep(600);
+        const bad = await js(`return [...document.querySelectorAll(".settings .srow")].filter((r) => r.offsetParent).flatMap((r) => {
+          const rr = r.getBoundingClientRect(), label = r.querySelector(".slabel")?.firstChild?.textContent?.trim() ?? r.textContent.slice(0, 40);
+          const out = [];
+          for (const c of r.querySelectorAll(".sctl, .sctl > *")) { const cr = c.getBoundingClientRect();
+            if (cr.width && (cr.right > rr.right + 0.5 || cr.left < rr.left - 0.5)) out.push(label + ": " + (c.className || c.tagName) + " " + Math.round(cr.left) + "-" + Math.round(cr.right) + " outside row " + Math.round(rr.left) + "-" + Math.round(rr.right)); }
+          const ctl = r.querySelector(".sctl"); if (ctl && ctl.scrollWidth > ctl.clientWidth + 1) out.push(label + ": its control column overflows (" + ctl.scrollWidth + " > " + ctl.clientWidth + " px)");
+          return out; })`);
+        const rows = await js(`return [...document.querySelectorAll(".settings .srow")].filter((r) => r.offsetParent).length`);
+        if (rows < 20) v.push(`${w}px: only ${rows} rows rendered — proved nothing`);
+        for (const b of bad.slice(0, 6)) v.push(`${w}px: ${b}`);
+      }
+      win.setContentSize(1400, 900); await sleep(400); await LEVEL("standard");
       return v;
     });
 

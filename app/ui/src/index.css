@@ -640,6 +640,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .s-reset:hover { color: var(--accent); filter: drop-shadow(0 0 5px var(--accent)); }
 .sctl { display: flex; align-items: center; gap: 8px; }
+/* a segmented control is as wide as its options: its column never shrinks under a long hint (the hint wraps instead) */
+.sctl:has(> .seg) { flex: none; }
 .settings input[type=range] { width: 200px; accent-color: var(--accent); transition: filter .2s; }
 /* checkboxes + radios: the themed `.ck` look below (the browser's own controls are white when off — foreign to the app) */
 /* COOL: glow the native slider on hover (drop-shadow works on the accent-colored control) */
