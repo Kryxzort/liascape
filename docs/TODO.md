@@ -22,6 +22,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
       test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
       recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
+      Headless run 2026-11-12 (`--headless 1920x1080@144,1920x1080@240`, release player, idle machine): 79/80 —
+      0 drops anywhere; one `frozen` micro-gap in `manual × frozen`, an S→V switch (`tr-1049`): 2 ms at 705 ms after the
+      switch, 70.8 dB under. The earlier `frozen` micro-gaps were settled as the F7 residual (async streams), so this
+      one is new or a rarer residual — find its cause (rerun `--cells manual --methods frozen` a few times; read the
+      sink recording around it) before blaming the meter.
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
 
