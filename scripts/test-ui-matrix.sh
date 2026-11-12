@@ -64,6 +64,7 @@
 # electron-42); pulseaudio (PULSEAUDIO=…) + pactl / paplay / parec for the auto-mute cells (they SKIP
 # without). Exit 0 = every cell passed. Results: $LIASCAPE_MATRIX_OUT (default: a dir printed at the end).
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 if [ "${LIASCAPE_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LIASCAPE_MATRIX_JOBS:-6}; SHARD=""; PROBE=""; CHANGED=""

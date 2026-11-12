@@ -49,6 +49,13 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   text (`tests/api.rs` hints, probe labels, `test-*.sh` output). Never trust "no test reads this" without the grep.
 - A refactor must keep what an effect did on mount (an initial value, a first fetch); a test that only covers updates misses it.
 
+## One heavy run at a time
+- Every `scripts/test-*.sh` and `scripts/bench-live-ui.mjs` take the machine's test lock (`scripts/test-lock.sh`): a second
+  run waits its turn and says who holds it. Run anything else heavy through it too: `bash scripts/test-lock.sh <command>`
+  (`cargo test`, the on-machine batteries). Never work around it: overlapping runs make every count and timing meaningless.
+- A perf or count failure seen while the machine was loaded (`uptime`'s load above the core count) proves nothing: rerun it
+  under the lock before reporting it.
+
 ## A red result
 - Re-run only the failed cells, alone, on this tree AND on the previous build before deciding anything: fails on both =
   older than your change; fails only on yours = yours; passes alone = load flake (the matrix runs 6 shards).

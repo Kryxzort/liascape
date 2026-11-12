@@ -11,6 +11,12 @@
 //   GPU processes' CPU time as % of one core) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
 // Compare runs only at the same refresh rate, build (Vite dev vs packaged) and tab. Rules: .claude/rules/testing.md.
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+// one heavy test run at a time on this machine (scripts/test-lock.sh): a matrix running beside a bench skews its frame times
+if (!process.env.LIASCAPE_TEST_LOCK_HELD) {
+  const r = spawnSync("bash", [new URL("./test-lock.sh", import.meta.url).pathname, process.execPath, ...process.argv.slice(1)], { stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
 // --profile high (default): this machine's CPU, judged at the display's measured refresh rate.
 // --profile typical: the CPU slowed 4× (Chromium's DevTools throttling) and judged at 60 Hz — most users' screens, on a
 // weaker PC. A change must hold up under both.
