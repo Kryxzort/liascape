@@ -2,11 +2,13 @@
 // LIASCAPE_DEBUG=1, CDP on :9222) with synthetic input, while recording a Chromium trace + CPU profile.
 // The repeatable half of the performance standard: the UI matrix gates refresh-independent COUNTS (layers, forced
 // layouts, renders); this measures real TIME on real hardware, judged in frames of the display's measured refresh rate.
-// Harmless input only: pointer moves, tab clicks, right-click (opens the item sidebar without applying) + Escape. Never a
-// left-click on a card (applies it), Enter (plays) or any button. Restores the tab it started on.
-// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|tabs|sidebar> [out-label] [--profile high|typical]
+// Harmless input only: pointer moves, wheel scrolls, tab clicks, right-click (opens the item sidebar without applying) +
+// Escape. Never a left-click on a card (applies it), Enter (plays) or any button. Restores the tab (and the Library's
+// scroll position) it started on.
+// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|libscroll|tabs|sidebar> [out-label] [--profile high|typical]
 //   prints one JSON line (hz, budgetMs, overBudget = main-thread tasks longer than one frame, over2Frames, main-thread ms by
-//   phase, worst tasks, layouts) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
+//   phase, worst tasks, layouts, the preview <video>s' decode: how many play, frames decoded / dropped, and the renderer +
+//   GPU processes' CPU time as % of one core) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
 // Compare runs only at the same refresh rate, build (Vite dev vs packaged) and tab. Rules: .claude/rules/testing.md.
 import fs from "node:fs";
 // --profile high (default): this machine's CPU, judged at the display's measured refresh rate.
@@ -39,6 +41,19 @@ const leftClickTab = async (name) => {
   await move(r.x, r.y); await call("Input.dispatchMouseEvent", { type: "mousePressed", x: r.x, y: r.y, button: "left", clickCount: 1 });
   await call("Input.dispatchMouseEvent", { type: "mouseReleased", x: r.x, y: r.y, button: "left", clickCount: 1 });
 };
+// CPU time per process (renderer = the page + its media decoders, GPU = compositing / hardware decode) from the browser target
+const procCpu = async () => {
+  const b = new WebSocket((await (await fetch("http://localhost:9222/json/version")).json()).webSocketDebuggerUrl);
+  await new Promise((r) => b.addEventListener("open", r));
+  const r = await new Promise((res) => { b.onmessage = (e) => res(JSON.parse(e.data)); b.send(JSON.stringify({ id: 1, method: "SystemInfo.getProcessInfo" })); });
+  b.close();
+  const out = {}; for (const p of r.result?.processInfo || []) if (p.type === "renderer" || p.type === "GPU") out[p.type] = (out[p.type] || 0) + p.cpuTime;
+  return out;
+};
+// preview videos: read on demand (no rAF); per element so a video that unmounts mid-run doesn't skew the deltas
+const vidSnap = `(() => { const m = window.__benchVq || (window.__benchVq = new WeakMap()); const vs = [...document.querySelectorAll("video")];
+  let dec = 0, drop = 0; for (const v of vs) { const q = v.getVideoPlaybackQuality(), o = m.get(v); if (o) { dec += q.totalVideoFrames - o[0]; drop += q.droppedVideoFrames - o[1]; } m.set(v, [q.totalVideoFrames, q.droppedVideoFrames]); }
+  return { n: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length, dec, drop }; })()`;
 const curTab = await ev(`document.querySelector("button.tab.active")?.textContent.trim()`);
 // the frame budget from the display's real refresh: sample rAF for half a second before the run (a 240 Hz monitor = 4.2 ms)
 const hz = await ev(`new Promise((r) => { let n = 0; const t0 = performance.now(); const f = (t) => { n++; if (t - t0 < 500) requestAnimationFrame(f); else r(Math.round(n * 1000 / (t - t0))); }; requestAnimationFrame(f); })`);
@@ -57,6 +72,18 @@ async function run() {
     await move(2, 2); await sleep(600);
     return;
   }
+  if (scen === "libscroll") {
+    // wheel down the Library grid and back up with the pointer over the cards (hover previews start and stop as cards
+    // pass under it); notched wheel steps like a mouse, so the app's smooth scroll glides between them
+    if (curTab !== "Library") { await leftClickTab("Library"); await sleep(900); }
+    const g = await ev(`(() => { const e = document.querySelector(".lib-scroll"); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: e.scrollTop }; })()`);
+    if (!g) throw new Error("no library grid");
+    for (const dir of [1, -1]) for (let i = 0; i < 24; i++) { await call("Input.dispatchMouseEvent", { type: "mouseWheel", x: Math.round(g.x), y: Math.round(g.y), deltaX: 0, deltaY: dir * 100 }); await sleep(90); }
+    await sleep(800); await move(2, 2);
+    await ev(`(() => { const e = document.querySelector(".lib-scroll"); if (e) e.scrollTop = ${g.top}; })()`);
+    await sleep(400);
+    return;
+  }
   if (scen === "tabs") { for (const t of ["Browse", "Settings", "Library", "Browse", "Library"]) { await leftClickTab(t); await sleep(900); } return; }
   if (scen === "sidebar") {
     if (curTab !== "Library") { await leftClickTab("Library"); await sleep(900); }
@@ -72,9 +99,12 @@ async function run() {
 await call("Profiler.enable"); await call("Profiler.setSamplingInterval", { interval: 200 });
 await call("Tracing.start", { categories: "devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,cc,benchmark", transferMode: "ReportEvents" });
 await call("Profiler.start"); await sleep(200);
+const cpu0 = await procCpu(); await ev(vidSnap);
 const t0 = Date.now(); let err = null;
 try { await run(); } catch (e) { err = e.message; }
 const wall = (Date.now() - t0) / 1000;
+const cpu1 = await procCpu(), vid = await ev(vidSnap);
+const cpuPct = Object.fromEntries(Object.keys(cpu1).map((k) => [k, Math.round(100 * (cpu1[k] - (cpu0[k] || 0)) / wall)]));
 const prof = (await call("Profiler.stop")).result.profile;
 if (profile === "typical") await call("Emulation.setCPUThrottlingRate", { rate: 1 }); // never leave the owner's window slowed
 await call("Tracing.end"); await finished;
@@ -97,6 +127,7 @@ for (const [nid, us] of cnt) { const f = byNode.get(nid).callFrame; if (["(idle)
   const k = `${f.functionName || "(anon)"} ${(f.url || "").split("/").slice(-2).join("/").split("?")[0]}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + us / 1000); }
 console.log(JSON.stringify({ scen, err, wallS: +wall.toFixed(1), frames: states, mainThreadMs: ms, tasks: tasks.length, profile, displayHz: hz, budgetHz, budgetMs: +budget.toFixed(2), overBudget: tasks.filter((d) => d > budget).length, over2Frames: tasks.filter((d) => d > 2 * budget).length, over16ms: tasks.filter((d) => d > 16).length,
   over50ms: tasks.filter((d) => d > 50).length, worstMs: tasks.slice(0, 5).map((d) => +d.toFixed(1)), layouts: lay.length,
-  layoutAvgMs: lay.length ? +(lay.reduce((a, e) => a + e.dur, 0) / lay.length / 1000).toFixed(2) : 0 }));
+  layoutAvgMs: lay.length ? +(lay.reduce((a, e) => a + e.dur, 0) / lay.length / 1000).toFixed(2) : 0,
+  videos: { ...vid, decPerS: Math.round(vid.dec / wall) }, cpuPct }));
 console.log("JS self (ms):"); for (const [k, v] of [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`  ${v.toFixed(1).padStart(7)}  ${k}`);
 process.exit(0);

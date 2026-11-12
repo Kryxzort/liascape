@@ -25,6 +25,8 @@ export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? 
 export const img = (u: string, referer?: string) =>
   withToken(`${API}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
 export const media = (path: string) => withToken(`${API}/media?path=${encodeURIComponent(path)}`);
+// API: a small preview clip of a local video (/clip): what "Play video previews" plays (components/autoplay.ts)
+export const clip = (path: string) => withToken(`${API}/clip?path=${encodeURIComponent(path)}`);
 // animated preview: serve remote gifs from a disk cache (/anim, range/length → loops cleanly, like
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops

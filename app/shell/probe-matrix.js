@@ -2046,51 +2046,126 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Play video previews": library cards and playlist-bar items whose only preview is their video (no gif/webp asset:
-// k2..k4 here; k1 has a gif) play it without a hover — only the ones on screen, at most 4 at a time across the page
-// (components/autoplay.ts). Off (the default): none does. Its own Settings row, separate from "Animate GIF previews".
-const VT_COUNT = String.raw`(() => { const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
+// "Play video previews": library cards and playlist-bar items whose preview is a video (k2..k4 here: no gif; k1 has a
+// gif) play it without a hover — EVERY one on screen, no cap (components/autoplay.ts): the cards and the playlist bar
+// (k1..k4) hold 6 of them, more than the old cap of 4. Gated: off screen (scrolled away, the Library behind another tab),
+// the window unfocused (`appActive`) — none. Off (the default): none plays by itself.
+const VT_COUNT = String.raw`(() => { const m = window.__mx;
+  const onScreen = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth; };
+  const els = [...m.cards().map((c) => [c.querySelector(".lib-title")?.dataset.title, c.querySelector(".thumb-wrap")]), ...m.barItems().map((e) => [e.dataset.title, e])];
+  const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
+  // one item's layers: its video (mounted / playing), its gif, and whether the video is the one on top
+  const one = (e) => { const v = e.querySelector("video.thumb.anim"), g = e.querySelector("img.thumb.anim");
+    return { video: !!v, playing: !!v && !v.paused && v.readyState >= 2, gif: !!g, videoOnTop: !!v && (!g || !!(g.compareDocumentPosition(v) & Node.DOCUMENT_POSITION_FOLLOWING)) }; };
   return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
     cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
-    gifCard: !!([...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.dataset.title === "k1")?.querySelector("video, img.thumb.anim")) }; })()`;
-C["appear:videoThumbs"] = { states: ["single"], noSwitch: true, async run(c) {
-    const count = () => js(VT_COUNT);
-    const settle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await count()), ms, 100); return r ?? (await count()); };
-    c.off = await settle((r) => r.total === 0, 1500);
-    await sleep(600); c.off = await count();                      // the default: nothing plays by itself
+    eligible: els.filter(([t, e]) => ["k2", "k3", "k4"].includes(t) && e && onScreen(e)).length,
+    k1: els.filter(([t, e]) => t === "k1" && e).map(([, e]) => one(e)) }; })()`;
+const vtAll = (r) => r.eligible > 0 && r.total === r.eligible && r.playing === r.total; // every on-screen preview plays
+const vtSettle = async (pred, ms = 3000) => { let r; await waitFor(async () => pred(r = await js(VT_COUNT)), ms, 100); return r ?? (await js(VT_COUNT)); };
+C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2], K[3]], settings: PS(), name: null }); },
+  async run(c) {
+    c.off = await vtSettle((r) => r.total === 0, 1500);
+    await sleep(600); c.off = await js(VT_COUNT);                 // the default: nothing plays by itself
     await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), true, "Play video previews"); await m.sleep(300);`);
     c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
-    c.on = await settle((r) => r.total >= 4 && r.playing >= 1, 6000);
-    await sleep(700); c.on2 = await count();                      // stays at the cap, nothing stacks up
-    // scrolled away: the cards leave the screen, the slots go to what is still on it (the playlist bar)
-    await ui(`const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(200);`);
-    c.away = await settle((r) => r.cards === 0, 4000);
+    c.on = await vtSettle(vtAll, 8000);
+    await sleep(700); c.on2 = await js(VT_COUNT);                 // and they stay playing
+    // scrolled away: the cards leave the screen and their videos go; the playlist bar's stay
+    await ui(`window.__mxVids = [...document.querySelectorAll(".card.lib video.thumb.anim")]; const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(200);`);
+    c.away = await vtSettle((r) => r.cards === 0 && vtAll(r), 4000);
+    // each one that left dropped its source: a detached <video> still loading keeps its connection (MotionThumb PreviewVideo)
+    c.left = await ui(`const vs = window.__mxVids || []; return { n: vs.length, holding: vs.filter((v) => !v.isConnected && (v.getAttribute("src") || v.networkState !== HTMLMediaElement.NETWORK_EMPTY)).length };`);
     await ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(200);`);
-    c.back = await settle((r) => r.total >= 4, 4000);
-    // the item sidebar open: the grid stays in view beside it, so its previews keep playing (the old modal covered them)
+    c.back = await vtSettle(vtAll, 6000);
+    // the item sidebar open: the grid stays in view beside it, so its previews keep playing
     await ui(`await m.openSide("k2"); await m.sleep(900);`);
-    c.modal = await settle((r) => r.total >= 4, 3000);
+    c.modal = await vtSettle(vtAll, 4000);
     await ui(`m.closeModal(); await m.sleep(900);`);
-    c.closed = await settle((r) => r.total >= 4, 4000);
+    c.closed = await vtSettle(vtAll, 4000);
+    // the window loses focus (App.tsx's blur listener reads document.hasFocus(); the probe's window has no preload for
+    // main.js's liascape:active): nothing plays; focused again: all of them
+    await js(`document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); true`);
+    c.inactive = await vtSettle((r) => r.total === 0, 3000);
+    await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`);
+    c.active = await vtSettle(vtAll, 6000);
+    // another tab: the Library page stays mounted but hidden — none of its videos plays behind it
+    await ui(`m.tab("Settings"); await m.sleep(300);`);
+    c.hidden = await vtSettle((r) => r.cards === 0, 3000);
+    await ui(`m.tab("Library"); await m.sleep(300);`);
+    c.shownAgain = await vtSettle(vtAll, 6000);
     await loadUi(); await sleep(600);
-    c.reloaded = await settle((r) => r.total >= 4, 6000);
+    c.reloaded = await vtSettle(vtAll, 8000);
     await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), false, "Play video previews"); await m.sleep(300);`);
     await ui(`m.tab("Library"); await m.sleep(300);`);
-    c.offAgain = await settle((r) => r.total === 0, 3000);
+    c.offAgain = await vtSettle((r) => r.total === 0, 3000);
   }, check(c) {
     const v = [], J = JSON.stringify;
+    const every = (n, r) => { if (!vtAll(r)) v.push(`${n}: expected all ${r.eligible} on-screen video previews playing, ${r.total} mounted, ${r.playing} playing ${J(r)}`); };
     if (c.off.total) v.push(`off (the default): ${c.off.total} preview videos mounted without a hover`);
-    if (!c.saved) v.push("turning Autoplay video thumbnails on wasn't saved");
-    if (c.on.total < 4 || !c.on.playing) v.push(`on: expected 4 videos, ≥ 1 playing — ${J(c.on)}`);
-    if (c.on.total > 4 || c.on2.total > 4) v.push(`on: more than the cap (4) play at once — ${J(c.on)} / ${J(c.on2)}`);
-    if (c.on.gifCard) v.push("on: the gif item (k1) got a video/animated layer — it follows the GIF setting");
+    if (!c.saved) v.push("turning Play video previews on wasn't saved");
+    if (c.on.eligible <= 4) v.push(`on: only ${c.on.eligible} video previews on screen — more than 4 are needed to show there is no cap: proved nothing`);
+    every("on", c.on); every("on, a moment later", c.on2);
+    if (c.on.k1.some((x) => x.video)) v.push("on: the gif item (k1) got a video — Prefer video previews is off, its gif is its preview");
     if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
-    if (c.back.total < 4) v.push(`on, cards back on screen: only ${c.back.total} videos ${J(c.back)}`);
-    if (c.modal.total < 4) v.push(`on, the item sidebar open: only ${c.modal.total} videos (the grid beside it stays live) ${J(c.modal)}`);
-    if (c.closed.total < 4) v.push(`on, sidebar closed: only ${c.closed.total} videos ${J(c.closed)}`);
-    if (c.reloaded.total < 4) v.push(`on, page reloaded: only ${c.reloaded.total} videos ${J(c.reloaded)}`);
+    every("on, cards scrolled off screen (the playlist bar's)", c.away);
+    if (!c.left.n) v.push("on: no card videos to scroll away — the release check proved nothing");
+    if (c.left.holding) v.push(`on, cards scrolled off screen: ${c.left.holding} of ${c.left.n} unmounted videos still hold their source (their connection stays open)`);
+    every("on, cards back on screen", c.back);
+    every("on, the item sidebar open (the grid beside it stays live)", c.modal);
+    every("on, sidebar closed", c.closed);
+    if (c.inactive.total) v.push(`on, window inactive: ${c.inactive.total} videos still mounted ${J(c.inactive)}`);
+    every("on, window active again", c.active);
+    if (c.hidden.cards) v.push(`on, the Library behind the Settings tab: ${c.hidden.cards} card videos still mounted`);
+    every("on, back on the Library tab", c.shownAgain);
+    every("on, page reloaded", c.reloaded);
     if (c.offAgain.total) v.push(`turned off again: ${c.offAgain.total} videos still mounted`);
+    return v;
+  } };
+
+// "Prefer video previews": k1 has a gif AND its own video. Off (the default): the gif is its preview — on hover and under
+// "Animate GIF previews" — never the video. On: the video wins — on hover (on top of the gif, which keeps running beneath
+// when GIFs animate in bulk, so it never restarts) and under "Play video previews" without a hover (then no gif: one
+// picture, one decode). Every combination of the three toggles, each turned through its Settings row (they apply live).
+const k1Want = (gifs, vids, prefer, hover) => prefer
+  ? { video: hover || vids, gif: gifs && !vids }
+  : { video: false, gif: hover || gifs };
+const k1Is = (x, w) => !!x && x.video === w.video && x.gif === w.gif && (!w.video || (x.playing && x.videoOnTop));
+C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
+    c.row = await ui(`m.tab("Settings"); await m.sleep(400); const i = m.input("Prefer video previews"); if (!i) return false; m.setCheck(i, true, "Prefer video previews"); return true;`);
+    c.savedRow = c.row && await waitFor(async () => (await getSettings()).preferVideoThumbs === true, 4000, 100);
+    await ui(`m.tab("Library"); await m.sleep(400);`);
+    const send = (e) => win.webContents.sendInputEvent(e);
+    c.combos = [];
+    for (const gifs of [false, true]) for (const vids of [false, true]) for (const prefer of [false, true]) {
+      await ui(`m.tab("Settings"); await m.sleep(300); m.setCheck(m.input("Animate GIF previews"), ${gifs}, "gifs"); m.setCheck(m.input("Play video previews"), ${vids}, "video previews");
+        const p = m.input("Prefer video previews"); if (p) m.setCheck(p, ${prefer}, "prefer"); m.tab("Library"); await m.sleep(300);`);
+      const idle = k1Want(gifs, vids, prefer, false), hov = k1Want(gifs, vids, prefer, true);
+      // both of k1's places (its card, its playlist-bar item) without a hover
+      const r = await vtSettle((x) => x.k1.length === 2 && x.k1.every((y) => k1Is(y, idle)), 6000);
+      // the pointer on k1's card
+      const pt = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      let h = null;
+      if (pt) {
+        send({ type: "mouseMove", x: pt.x - 3, y: pt.y }); await sleep(60); send({ type: "mouseMove", x: pt.x, y: pt.y });
+        h = (await vtSettle((x) => k1Is(x.k1[0], hov), 5000)).k1[0];
+        send({ type: "mouseMove", x: 700, y: 4 }); await sleep(250);
+      }
+      c.combos.push({ gifs, vids, prefer, idle, hov, got: r.k1, gotHover: h, k1Card: !!pt });
+    }
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.row) v.push("no \"Prefer video previews\" row in Settings");
+    else if (!c.savedRow) v.push("turning Prefer video previews on wasn't saved (preferVideoThumbs !== true)");
+    for (const x of c.combos) {
+      const n = `gifs ${x.gifs ? "on" : "off"}, video previews ${x.vids ? "on" : "off"}, prefer video ${x.prefer ? "on" : "off"}`;
+      if (!x.k1Card) { v.push(`${n}: no k1 card to hover`); continue; }
+      if (x.got.length !== 2) v.push(`${n}: k1 is in ${x.got.length} places on screen, expected its card and its playlist-bar item`);
+      x.got.forEach((y, i) => { if (!k1Is(y, x.idle)) v.push(`${n}, k1's ${i ? "bar item" : "card"}: expected ${J(x.idle)}, got ${J(y)}`); });
+      if (!k1Is(x.gotHover, x.hov)) v.push(`${n}, k1's card hovered: expected ${J(x.hov)}${x.hov.video ? " (playing, on top)" : ""}, got ${J(x.gotHover)}`);
+    }
     return v;
   } };
 

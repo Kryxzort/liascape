@@ -21,11 +21,11 @@ paths:
 - Write the token file 0600 (temp + rename) BEFORE `serve.port`; reuse a valid one across restarts so an open page keeps working. It stays beside `serve.port`, not in `$XDG_RUNTIME_DIR` (hermetic tests keep the session's runtime dir).
 - `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) → else 403.
 - A foreign `Origin` → 403. Allowed: the Vite dev origins only while this backend serves no UI (`LIASCAPE_UI_DIR` unset), plus `LIASCAPE_DEV_ORIGINS`. Never add `Access-Control-Allow-Origin: *` or `UseCors`.
-- Local files (`/media`, `/anim`, `/still`, `/library/duration`, `/open` reveal) only under the data dir, the caches and the `WorkshopFolder` (`ApiSecurity.MediaAllowed`); refuse `..`.
+- Local files (`/media`, `/clip`, `/anim`, `/still`, `/library/duration`, `/open` reveal) only under the data dir, the caches and the `WorkshopFolder` (`ApiSecurity.MediaAllowed`); refuse `..`.
 - Remote fetches (`/img`, remote `/anim` `/still`): http(s) only, every resolved address public, checked again at connect (`PublicOnlyHttp`). No proxy.
 - `POST /open`: http(s) URLs, or `{path, reveal: true}` under `MediaAllowed`. Never a bare path, `file:` or a custom scheme; `steam://` only via `POST /steam/open-page` with a digits-only id.
 - Spawn processes with an argument list (`ArgumentList`), never by pasting values into an `sh -c` string or one command string.
-- Serve `/media` `/img` `/anim` `/still` with `Content-Security-Policy: sandbox; default-src 'none'`.
+- Serve `/media` `/clip` `/img` `/anim` `/still` with `Content-Security-Policy: sandbox; default-src 'none'`.
 - Check after a security change: a private backend + curl — no token → 401, wrong `Host` → 403, foreign `Origin` → 403, `/media` outside → 403, `/img` to 127.0.0.1 / 192.168.x / 169.254.169.254 / `[::1]` → 403.
 
 ## Endpoint conventions

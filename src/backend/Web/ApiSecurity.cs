@@ -130,7 +130,7 @@ public static class ApiSecurity
         res.Headers["X-Frame-Options"] = "DENY";
         var path = req.Path.Value ?? "/";
         // served bytes from disk / the internet: never a document with this origin's rights, should one be opened
-        if (path is "/media" or "/img" or "/anim" or "/still") res.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+        if (path is "/media" or "/clip" or "/img" or "/anim" or "/still") res.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
 
         var origin = req.Headers.Origin.ToString();
         if (origin.Length > 0 && !HostOk(OriginHost(origin) ?? "", port))
@@ -180,7 +180,7 @@ public static class ApiSecurity
     }
 
     // ---- local files ---------------------------------------------------------------------------------------------------
-    // /media, /anim and /still (local), /library/duration and /open's reveal: only paths where the app keeps or finds
+    // /media, /clip, /anim and /still (local), /library/duration and /open's reveal: only paths where the app keeps or finds
     // wallpapers — its data dir (the library, incl. its links into Steam's folders), its caches, the Wallpaper Engine
     // Workshop folder from the settings. Never a `..` segment (a lexical check can't see where `..` lands after a symlink —
     // the library's workshop items ARE symlinks); symlinks inside the roots are followed (the app made them).

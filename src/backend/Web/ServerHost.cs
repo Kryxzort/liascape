@@ -223,6 +223,30 @@ public static class ServerHost
         try { File.Move(tmp, outPath, true); } catch { try { await File.WriteAllBytesAsync(outPath, data); File.Delete(tmp); } catch { } }
     }
 
+    // A preview clip for "Play video previews" (app/ui/src/components/autoplay.ts): the first CLIP_SECONDS of a video,
+    // CLIP_W px wide at most (the card stills' width), ≤ CLIP_FPS, no audio — 100-300 KB. Every preview on screen plays
+    // at once, and the wallpaper's own file can't: a full-size <video> keeps its HTTP/1.1 connection open while it plays
+    // (Chromium allows 6 per host, so past ~6 the rest never load and API calls queue behind them) and decodes 1080p-4K
+    // frames for a card a few hundred pixels wide. The clip downloads in one response and decodes ~10-40x fewer pixels.
+    private const int CLIP_SECONDS = 10, CLIP_W = 640, CLIP_FPS = 24;
+    private static readonly string ClipParams = $"{CLIP_SECONDS}s{CLIP_W}w{CLIP_FPS}fps"; // in the cache key: new values re-make the clips
+    private static void MakeClip(string video, string outMp4)
+    {
+        string tmp = outMp4 + ".tmp.mp4";
+        try
+        {
+            RunFfmpeg(["-nostdin", "-t", CLIP_SECONDS.ToString(), "-i", video, "-an", "-sn", "-dn",
+                // -fpsmax caps a faster source without padding a slower one with duplicate frames (each still a decode)
+                "-vf", $"scale='min({CLIP_W},iw)':-2", "-fpsmax", CLIP_FPS.ToString(), "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", tmp, "-y"],
+                // PERF: a scroll over new cards makes several at once; niced, they yield the CPU to the UI's frames
+                background: true);
+            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0) File.Move(tmp, outMp4, true);
+        }
+        catch { }
+        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+    }
+
     // A non-black/white STILL for the card thumbnail (so AutoPlayGifs-off doesn't show the gif's
     // black frame-0). First frame with YAVG 30–225, else frame 1, else frame 0.
     private static void ExtractStill(string gifPath, string outJpg, int width = 0)
@@ -247,7 +271,7 @@ public static class ServerHost
     // requests at once; ungated, each spawns up to 3 ffmpeg → CPU meltdown + slow thumbnails. Bound to
     // ~half the cores (min 2, max 6) so extractions run in parallel but never swamp the machine.
     private static readonly SemaphoreSlim _ffmpegGate = new(Math.Clamp(Environment.ProcessorCount / 2, 2, 6));
-    private static string RunFfmpeg(string[] args)
+    private static string RunFfmpeg(string[] args, bool background = false)
     {
         _ffmpegGate.Wait();
         try
@@ -255,6 +279,7 @@ public static class ServerHost
             var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi)!;
+            if (background) try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
             // drain both pipes concurrently — a full stderr buffer while we block reading stdout (or vice
             // versa) deadlocks the child; ReadToEndAsync on one + sync read on the other avoids it.
             var errTask = p.StandardError.ReadToEndAsync();
@@ -774,6 +799,29 @@ public static class ServerHost
             // Results.File(path,…) overload was 500ing on it, so the in-app wallpaper preview wouldn't load.
             var fs = File.OpenRead(path);
             return Results.Stream(fs, ct, enableRangeProcessing: true);
+        });
+
+        // A small preview clip of a local video (MakeClip): what "Play video previews" plays. Cached on path+mtime+size
+        // (+ the clip's parameters), like /still; a missing or failed clip answers 502 and the card keeps its still.
+        app.MapGet("/clip", async (string path) =>
+        {
+            if (!ApiSecurity.MediaAllowed(path)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
+            if (!File.Exists(path)) return Results.NotFound();
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "video_clips");
+            Directory.CreateDirectory(dir);
+            var fi = new FileInfo(path);
+            var key = $"{path}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|{ClipParams}";
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..24];
+            var mp4 = Path.Combine(dir, hash + "_clip.mp4");
+            if (!File.Exists(mp4))
+                await ExtractOnce(mp4, () =>
+                {
+                    if (!File.Exists(mp4)) { MakeClip(path, mp4); PruneAnimCache(dir, 512L * 1024 * 1024); }
+                    return Task.CompletedTask;
+                });
+            if (!File.Exists(mp4)) return Results.StatusCode(502);
+            try { File.SetLastAccessTimeUtc(mp4, DateTime.UtcNow); } catch { }
+            return Results.Stream(File.OpenRead(mp4), "video/mp4", enableRangeProcessing: true);
         });
 
         // Animated preview (workshop gifs): like library, serve from a LOCAL CACHED FILE with range/length

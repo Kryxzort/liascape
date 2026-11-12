@@ -72,7 +72,7 @@ const ROWS = {
   vram: ["Cap each scene's video memory", "When video memory runs low"],
   "auto-mute": ["Hush when other audio plays"],
   mpris: ["Only for media players"],
-  ffmpeg: ["Even out loudness"],
+  ffmpeg: ["Even out loudness", "Play video previews"],
 };
 // the playlist modal (Library tab → "Playlist settings"): the warning icon beside its TRANSITIONS label, or null; closes it again
 async function playlistModalWarn() {

@@ -16,11 +16,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
        `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
        media URL, the dev proxy and the Host checks.
-17. [ ] "Play video previews" without the cap of 4 (`AUTOPLAY_VIDEO_CAP`, `components/autoplay.ts`): every on-screen video
-       preview plays while the toggle is on. Keep the on-screen / window-active gating; measure decode cost and idle
-       frames with many cards (bench-live-ui at both profiles) and say what it costs in the setting's hint.
-18. [ ] A toggle to play an item's video preview even when it also has a GIF preview (today the GIF wins). Off by
-       default; composes with "Animate GIF previews" and "Play video previews".
 19. [ ] GIF previews resume where they stopped instead of restarting (on unhover, scroll-away, window backgrounded) — only
        if it costs no performance: measure (frames decoded, idle rAF, memory) before choosing a way (e.g. `ImageDecoder`
        to a canvas vs keeping the `<img>` mounted).

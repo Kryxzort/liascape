@@ -3,14 +3,15 @@ import { Trash2, AlertTriangle } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { PlaylistToggle } from "./PlaylistToggle";
 import { MotionThumb } from "./MotionThumb";
-import { hasGifAsset, hasVideoPreview } from "./mediaAssets";
+import { hasGifAsset, hasVideoPreview, useVideoOverGif } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
 // PERF: memo'd; content-visibility (CSS) + per-card props; lift+glow hover (design choice).
 // Its settings and actions live in the item sidebar (a click or a right-click focuses the card) — components/LibrarySide.tsx.
-// COOL: animated preview on hover (MotionThumb); gif/webp assets also auto-play when AutoPlayGifs on.
+// COOL: animated preview on hover (MotionThumb); gif/webp assets also auto-play when AutoPlayGifs on, video previews under
+// "Play video previews".
 export const LibraryCard = memo(function LibraryCard({
   item, playing, selected, focused, inPlaylist, autoPlayGifs, onClick, onTrash, onToggle, onContextFocus,
 }: {
@@ -21,10 +22,11 @@ export const LibraryCard = memo(function LibraryCard({
   onContextFocus: (item: LibraryItem) => void;
 }) {
   const [hover, setHover] = useState(false);
-  const active = hover || (autoPlayGifs && hasGifAsset(item));
-  // "Autoplay video thumbnails": a video-only item on screen plays its video without a hover (a slot, components/autoplay.ts)
+  const autoGif = autoPlayGifs && hasGifAsset(item);
+  const videoOverGif = useVideoOverGif();
+  // "Play video previews": an item on screen whose preview is a video plays it without a hover (components/autoplay.ts)
   const wrapRef = useRef<HTMLDivElement>(null);
-  const autoVideo = useAutoplayVideo(wrapRef, hasVideoPreview(item));
+  const autoVideo = useAutoplayVideo(wrapRef, hasVideoPreview(item, videoOverGif));
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
@@ -35,7 +37,7 @@ export const LibraryCard = memo(function LibraryCard({
         onContextMenu={(e) => { e.preventDefault(); onContextFocus(item); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
        >
-        <MotionThumb item={item} active={active} autoVideo={autoVideo} />
+        <MotionThumb item={item} hover={hover} autoGif={autoGif} autoVideo={autoVideo} videoOverGif={videoOverGif} />
         {item.isScene && <span className="badge">SCENE</span>}
         {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}

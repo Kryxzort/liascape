@@ -155,6 +155,12 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Play every on-screen video preview, each as a small clip — 2026-11-12
+"Play video previews" has no cap (it was 4): every video preview on screen plays, each a clip of at most 10 s, 640 px and
+24 fps that the backend makes once (`/clip`), never the wallpaper's own file. A full-size `<video>` keeps one of
+Chromium's 6 connections to the backend while it plays: uncapped, 12 of 24 previews never loaded and other loads queued
+behind them. Guard: matrix `appear:videoThumbs`; `.claude/rules/ui/design.md` § Performance.
+
 ### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
 The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and
 Settings rebuild on each visit. Not a virtualised grid: `content-visibility` already skips off-screen cards, the cost

@@ -17,7 +17,7 @@ import { SavePlaylistModal } from "./SavePlaylistModal";
 import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
 import { MotionThumb } from "./MotionThumb";
-import { hasGifAsset, hasVideoPreview } from "./mediaAssets";
+import { hasGifAsset, hasVideoPreview, useVideoOverGif } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -91,9 +91,10 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
     return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
   const onEnter = () => hv.set(path);
-  const active = !!item && (hover || (autoPlayGifs && hasGifAsset(item)));
-  // "Autoplay video thumbnails": a video-only item in view plays its video without a hover (a slot, components/autoplay.ts)
-  const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item));
+  const autoGif = !!item && autoPlayGifs && hasGifAsset(item);
+  const videoOverGif = useVideoOverGif();
+  // "Play video previews": an item in view whose preview is a video plays it without a hover (components/autoplay.ts)
+  const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item, videoOverGif));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
@@ -104,7 +105,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
       // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (docs/decisions.md §
       // "Open the item sidebar on right-click; no context menus" — the sidebar has the playlist toggle, Open in file manager, Delete)
       onContextMenu={(e) => { e.preventDefault(); focusLib(path); revealCard(`lib-${path}`); }}>
-      {item && <MotionThumb item={item} active={active} autoVideo={autoVideo} />}
+      {item && <MotionThumb item={item} hover={hover} autoGif={autoGif} autoVideo={autoVideo} videoOverGif={videoOverGif} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" aria-label="Remove from playlist"
@@ -119,7 +120,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
 function PlItemOverlay({ item }: { item?: LibraryItem }) {
   return (
     <div className="pl-item dragging" style={{ cursor: "grabbing", boxShadow: "0 12px 28px rgba(0,0,0,.5)", transform: "scale(1.05)" }}>
-      {item && <MotionThumb item={item} active={false} />}
+      {item && <MotionThumb item={item} hover={false} autoGif={false} />}
       <div className="pl-title">{item?.title ?? ""}</div>
     </div>
   );
