@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { useStore } from "../store";
-import { motionOn } from "../components/motion";
+import { motionOn, FADE_EXIT_MS } from "../components/motion";
 import { useStableFn } from "./useStableFn";
 
 // Box (marquee) selection in a card grid (Library, Browse): a drag that starts on the grid's empty space draws a rectangle
@@ -144,7 +144,8 @@ export function useMarquee(scrollRef: RefObject<HTMLElement | null>, o: Opts): (
       const c = clip;
       if (c) {
         const motion = motionOn(useStore.getState().settings);
-        if (motion) { c.firstElementChild?.classList.add("out"); setTimeout(() => c.remove(), OUT_MS); } else c.remove();
+        // motion off: the same fade out, shorter (index.css :root.no-motion .marquee)
+        c.firstElementChild?.classList.add("out"); setTimeout(() => c.remove(), motion ? OUT_MS : FADE_EXIT_MS);
       }
       clip = box = null;
     };

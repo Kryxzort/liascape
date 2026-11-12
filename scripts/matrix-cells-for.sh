@@ -82,6 +82,8 @@ for f in $FILES; do
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     app/shell/probe-cardpreview.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
+    # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
+    app/shell/motion-off.js) add "appear:morphs" "$f (+ --probe probe-sidebar.js motion:, probe-filters.js, probe-layout.js, probe-select.js, probe-steam.js, probe-expert.js, probe-cardpreview.js — their motion-off cells)" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe
     app/ui/src/hooks/useMarquee.ts) add "$CARD|browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-select.js)" ;;

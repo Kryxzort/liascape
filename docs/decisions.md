@@ -171,6 +171,14 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Fade, never move, with motion off — 2026-11-12
+"Smooth window animations" off and `prefers-reduced-motion` mean nothing moves and what appears, leaves or swaps
+cross-fades in place on opacity alone, in 120 ms — not "every change is instant": the setting serves people sensitive to
+motion and people saving its cost; an opacity fade moves nothing and runs on the compositor, while an instant change
+makes panels and menus pop. Hover holds and pointer feedback just stay still; highlights and carets change at once; loops
+stand still but the spinner. Enforced: `.claude/rules/ui/design.md` § Motion off; the motion-off probe cells
+(`app/shell/motion-off.js`).
+
 ### Let a hidden gif preview keep its own clock; don't resume it on a canvas — 2026-11-12
 A gif preview that goes out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and
 undecoded, and shows again at the frame Chromium's clock for it is on, as if it had played meanwhile; never from frame 0.

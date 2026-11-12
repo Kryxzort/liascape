@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes, type PointerEvent as RPointerEvent } from "react";
 import { Minus, Plus } from "lucide-react";
 import { clampNum } from "./clampNum";
-import { useMotion } from "./motion";
+import { useMotion, FADE_MS } from "./motion";
 import { useStableFn } from "../hooks/useStableFn";
 
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "min" | "max" | "type"> & {
@@ -57,16 +57,22 @@ export function NumInput({ value, onChange, min, max, emptyValue, integer, step,
   const atMax = max != null && shownN != null && shownN >= max;
 
   // COOL: the digits roll — the old value slides out and the new one in from the side it came from (up = bigger),
-  // transform + opacity only, inside the field's clip; a fast hold shortens the roll to its own pace. Off under no-motion.
+  // transform + opacity only, inside the field's clip; a fast hold shortens the roll to its own pace. Motion off: the old
+  // value cross-fades into the new in place (opacity only, at most FADE_MS). Guard: probe-expert "stepper: …roll…"
   const lastStep = useRef(0);
   const roll = (old: string, dir: 1 | -1) => {
     const el = input.current, g = ghost.current;
-    if (!motion || !el || !g) return;
-    const now = performance.now(), ms = Math.max(70, Math.min(200, now - lastStep.current));
+    if (!el || !g) return;
+    const now = performance.now(), ms = Math.max(70, Math.min(motion ? 200 : FADE_MS, now - lastStep.current));
     lastStep.current = now;
     g.textContent = old;
-    const out = dir > 0 ? "-0.9em" : "0.9em", inn = dir > 0 ? "0.9em" : "-0.9em";
     for (const a of [...el.getAnimations(), ...g.getAnimations()]) a.cancel();
+    if (!motion) {
+      g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: "linear", fill: "forwards" });
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: "linear" });
+      return;
+    }
+    const out = dir > 0 ? "-0.9em" : "0.9em", inn = dir > 0 ? "0.9em" : "-0.9em";
     g.animate([{ transform: "translateY(0)", opacity: 1 }, { transform: `translateY(${out})`, opacity: 0 }], { duration: ms, easing: "cubic-bezier(.4, 0, .6, 1)", fill: "forwards" });
     el.animate([{ transform: `translateY(${inn})`, opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], { duration: ms * 1.25, easing: "cubic-bezier(.34, 1.4, .64, 1)" });
   };

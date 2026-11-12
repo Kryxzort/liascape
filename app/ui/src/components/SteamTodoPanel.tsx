@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, ChevronDown, ExternalLink, SkipForward, Square } from "lucide-react";
 import { api, type SteamTodo } from "../api/client";
 import { useStore } from "../store";
-import { useMotion } from "./motion";
+import { useMotion, FADE } from "./motion";
 import { magnetRef } from "./magnet";
 
 type Active = Exclude<SteamTodo, { finished: true }>;
@@ -21,11 +21,18 @@ type Active = Exclude<SteamTodo, { finished: true }>;
 // fold ⇄ unfold MORPHS the panel's box (framer `layout`: size + corners; the head rides with `layout="position"`, the body fades
 // out first / in after) with the chevron ROTATING 0 ↔ 180° on a springy curve; a new current entry (Next / Skip / auto) SLIDES
 // like the item sidebar's carousel — the old step + title + hint out to the left, the new in from the right. Transform +
-// opacity only; `useMotion()` off → all of it instant; no glow under `no-glow`.
+// opacity only. `useMotion()` off → nothing moves: the panel, the body and a new entry cross-fade in place
+// (components/motion.ts FADE), the dock and the fold change size and place at once, the chevron turns at once (it shows
+// the state). Guard: probe-steam "steam-todo …motion" cells. No glow under `no-glow`.
 export function SteamTodoPanel() {
   const todo = useStore((s) => s.steamTodo) as Active | null;
   const motionOn = useMotion();
   const [folded, setFolded] = useState(false);
+  // the folded look (the pill's size, the step in the head): with motion off it waits for the body's fade out, so the body
+  // fades where it is instead of being carried along by the shrinking box. Guard: probe-steam steam:todoMotion:off
+  const [shut, setShut] = useState(false);
+  if (!folded && shut) setShut(false);
+  const look = folded && (motionOn || shut);
   const [busy, setBusy] = useState<string | null>(null);
   // sits above the playlist bar when one is showing (Library) — its height changes with the window and its dock state
   const [lift, setLift] = useState(0);
@@ -58,15 +65,14 @@ export function SteamTodoPanel() {
   const step = todo ? `${verb} in Steam · ${todo.index} of ${todo.total}` : "";
   const entryKey = todo ? `${todo.action}:${todo.current.id}:${todo.index}` : "";
   const spring = { type: "spring" as const, stiffness: 320, damping: 28 };
-  const t = motionOn ? spring : { duration: 0 };
   const layoutT = motionOn ? { type: "spring" as const, stiffness: 380, damping: 32 } : { duration: 0 };
   // the carousel: out to the left, in from the right
   const slide = motionOn
     ? { initial: { x: 48, opacity: 0 }, animate: { x: 0, opacity: 1 }, exit: { x: -48, opacity: 0 }, transition: { duration: 0.28, ease: [0.2, 0.9, 0.3, 1] as const } }
-    : { initial: false as const, animate: { x: 0, opacity: 1 }, exit: { opacity: 0, transition: { duration: 0 } }, transition: { duration: 0 } };
+    : FADE;
   const fade = motionOn
     ? { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.2, delay: 0.08 } }, exit: { opacity: 0, transition: { duration: 0.1 } } }
-    : { initial: false as const, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, transition: { duration: 0 } } };
+    : FADE;
   const hint = !todo ? "" : todo.delivered ? "Steam has it — click Done to go on."
     : todo.autoNext ? `Click ${verb} on the page Steam opened — this moves on by itself once Steam downloads it.`
     : `Click ${verb} on the page Steam opened, then ${todo.remaining > 1 ? "Done — next" : "Done"}.`;
@@ -74,20 +80,19 @@ export function SteamTodoPanel() {
     <div className={`steam-todo-dock${motionOn ? "" : " still"}`} data-steam-todo-dock style={{ transform: `translateY(${-lift}px)` }}>
       <AnimatePresence>
         {show && todo && (
-          <motion.section key="steam-todo" className={`steam-todo${folded ? " folded" : ""}`} role="region" aria-label="Steam to-do"
-            data-steam-todo data-folded={folded || undefined} layout={motionOn} style={{ borderRadius: folded ? 20 : 14 }}
-            initial={motionOn ? { y: 24, opacity: 0 } : false} animate={{ y: 0, opacity: 1 }}
-            exit={motionOn ? { y: 24, opacity: 0, transition: { duration: 0.16 } } : { opacity: 0, transition: { duration: 0 } }}
-            transition={{ ...t, layout: layoutT }}>
+          <motion.section key="steam-todo" className={`steam-todo${look ? " folded" : ""}`} role="region" aria-label="Steam to-do"
+            data-steam-todo data-folded={folded || undefined} layout={motionOn} style={{ borderRadius: look ? 20 : 14 }}
+            {...(motionOn ? { initial: { y: 24, opacity: 0 }, animate: { y: 0, opacity: 1 }, exit: { y: 24, opacity: 0, transition: { duration: 0.16 } },
+              transition: { ...spring, layout: layoutT } } : FADE)}>
             <motion.div className="st-head" layout={motionOn ? "position" : false} transition={{ layout: layoutT }}>
               <span className="st-name">Steam to-do</span>
               <AnimatePresence mode="popLayout" initial={false}>
-                {folded && <motion.span key={`f-${entryKey}`} className="st-step" data-st-step {...slide}>{step}</motion.span>}
+                {look && <motion.span key={`f-${entryKey}`} className="st-step" data-st-step {...slide}>{step}</motion.span>}
               </AnimatePresence>
               <button className="mini st-fold" aria-label={folded ? "Show the Steam to-do" : "Fold the Steam to-do"} aria-expanded={!folded}
                 onClick={() => setFolded(!folded)}><ChevronDown size={15} className="st-chev" /></button>
             </motion.div>
-            <AnimatePresence initial={false} mode="popLayout">
+            <AnimatePresence initial={false} mode={motionOn ? "popLayout" : "sync"} onExitComplete={() => setShut(true)}>
               {!folded && (
                 <motion.div key="body" className="st-body" {...fade}>
                   <div className="st-track">

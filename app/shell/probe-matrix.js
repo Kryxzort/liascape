@@ -19,6 +19,7 @@ const cp = require("child_process");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
 const K = JSON.parse(E.LIASCAPE_CLIPS); // library videoPaths of k1..k4 (k4 is the short one)
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -2038,7 +2039,8 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
 // "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx),
 // opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
 // in (transform + opacity animations only, nothing else animated), and closes (its close button, or Escape) by sliding out.
-// Off: nothing animates — it's there at once and gone at once (≤ 100 ms) — also after a page reload; back on: it slides.
+// Off: nothing moves — it fades in and out in place (opacity only; per frame: in-between frames, its box still; gone after
+// the ~120 ms fade, not at once) — also after a page reload; back on: it slides.
 const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-panel"); if (!p) return null;
   const run = p.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && !a.effect?.target?.matches?.("img, video"));
   const props = [...new Set(run.flatMap((a) => (a.effect.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((x) => !["offset", "easing", "composite", "computedOffset"].includes(x)))))];
@@ -2049,11 +2051,15 @@ async function sideOpen(c, via, { full = false, esc = false } = {}) {
   const open = via === "bar" ? `m.ctx(m.playlistBar(${JSON.stringify(t)}), "playlistBar");`
     : `m.ctx(m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"), "card");`;
   const r = {};
-  await ui(`m.tab("Library"); await m.sleep(300); ${open} await m.sleep(60);`);
+  await ui(`m.tab("Library"); await m.sleep(300);`);
+  const smp = full ? js(MO.SAMPLE({ panel: ".side-panel" }, 500)) : null;
+  if (smp) await sleep(40);
+  await ui(`${open} await m.sleep(60);`);
   r.early = await js(SIDE_SAMPLE);
   if (full) {
     await sleep(400); r.mid = await js(SIDE_SAMPLE);
     await sleep(750); r.late = await js(SIDE_SAMPLE);
+    r.fr = (await smp)?.panel;
   }
   const close = esc ? `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));` : `m.closeModal();`;
   r.closeMs = await ui(`${close} const t0 = performance.now(); while (performance.now() - t0 < 2000) { if (!document.querySelector(".side-panel")) return Math.round(performance.now() - t0); await m.sleep(15); } return -1;`);
@@ -2087,10 +2093,13 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     if (c.onCard.mid?.anims) v.push(`animations on: still animating at +460 ms ${J(c.onCard.mid)}`);
     if (!c.savedOff) v.push("turning Smooth window animations off wasn't saved (morphs !== false)");
     const off = (n, r) => {
-      for (const k of ["early", "mid", "late"]) { const x = r[k]; if (x?.anims) v.push(`animations off, ${n}: it animates at ${k} ${J(x)}`); }
+      for (const k of ["early", "mid", "late"]) { const x = r[k]; if (x?.props?.some((p) => p !== "opacity")) v.push(`animations off, ${n}: it moves at ${k} ${J(x)}`); }
+      for (const k of ["mid", "late"]) { const x = r[k]; if (x?.anims) v.push(`animations off, ${n}: still animating at ${k} ${J(x)} (a fade is ~120 ms)`); }
       if (!r.early) v.push(`animations off, ${n}: not there at +60 ms`);
       if (r.mid && r.late && J(r.mid.rect) !== J(r.late.rect)) v.push(`animations off, ${n}: the panel moved after it appeared ${J(r.mid.rect)} → ${J(r.late.rect)}`);
-      if (r.closeMs < 0 || r.closeMs > 100) v.push(`animations off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      if (r.fr) v.push(...MO.judge(`animations off, ${n}: the panel`, r.fr, { appear: true }));
+      if (r.closeMs < 0 || r.closeMs > 400) v.push(`animations off, ${n}: closing took ${r.closeMs} ms (-1 = never)`);
+      else if (r.closeMs < 60) v.push(`animations off, ${n}: it popped out (gone after ${r.closeMs} ms, want the ~120 ms fade)`);
       if (r.after.panels) v.push(`animations off, ${n}: left behind after closing ${J(r.after)}`);
     };
     off("card", c.offCard); off("playlist-bar item", c.offBar); off("card, Escape", c.offEsc); off("card, page reloaded", c.reloaded);

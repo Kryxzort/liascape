@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useFadeOff } from "./motion";
 import { KeyRound, LogIn } from "lucide-react";
 import { useStore } from "../store";
 import { magnetRef } from "./magnet";
@@ -12,6 +13,7 @@ import { magnetRef } from "./magnet";
 // on its own). The password is an UNCONTROLLED field: read once on submit, emptied at once, never in React state or the
 // store, never echoed. Escape / Cancel stop the sign-in; a click outside does nothing (it would throw away what was typed).
 export function SteamPasswordModal() {
+  const fadeOff = useFadeOff(); // motion off: the zoom / rise below becomes a fade in place
   const pw = useStore((s) => s.pwLogin);
   const start = useStore((s) => s.startPwLogin);
   const submitCode = useStore((s) => s.submitPwCode);
@@ -67,11 +69,11 @@ export function SteamPasswordModal() {
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="modal-backdrop" {...fadeOff({ initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } })}>
           <motion.div className="modal pl-modal pw-modal" role="dialog" aria-modal="true" aria-labelledby={`${id}-h`}
             data-steam-pw-modal data-step={step}
-            initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 320, damping: 28 }}
+            {...fadeOff({ initial: { scale: 0.96, opacity: 0 }, animate: { scale: 1, opacity: 1 },
+            exit: { scale: 0.96, opacity: 0 }, transition: { type: "spring", stiffness: 320, damping: 28 } })}
             onKeyDown={onKey}>
             <div className="modal-body">
               <h2 id={`${id}-h`} className="ico"><KeyRound size={17} /> Sign in to Steam</h2>

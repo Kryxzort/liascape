@@ -413,7 +413,7 @@ app.whenReady().then(async () => {
       await press(s.inc, 20); await sleep(450);
       return js(`return window.__rs`);
     };
-    await cell("stepper: a step rolls the digits (motion on: in-between frames); motion off: no roll", async () => {
+    await cell("stepper: a step rolls the digits (motion on: in-between frames); motion off: a cross-fade in place", async () => {
       await stepperStart(); await setField(10);
       const v = [];
       const on = await rollRun();
@@ -428,8 +428,14 @@ app.whenReady().then(async () => {
       if (!(await waitFor(async () => (await field("morphs")) === false, 3000))) v.push("couldn't turn motion off");
       await show();
       const off = await rollRun();
-      const moved = off.filter((f) => Math.abs(f.iy) > 0.5 || f.io < 0.99 || f.go > 0.01);
+      // nothing moves; the old value fades out as the new fades in (never a pop), and it settles
+      // (a shown layer: the hidden ghost may still hold the last motion-on roll's end, out of sight)
+      const moved = off.filter((f) => (Math.abs(f.iy) > 0.5 && f.io > 0.02) || (Math.abs(f.gy) > 0.5 && f.go > 0.02));
       if (moved.length) v.push(`motion off: ${moved.length} frames still roll (${JSON.stringify(moved.slice(0, 3))})`);
+      const fIn = off.filter((f) => f.io > 0.02 && f.io < 0.98).length, fOut = off.filter((f) => f.go > 0.02 && f.go < 0.98).length;
+      if (!fIn || !fOut) v.push(`motion off: the digits popped (${fIn} frames of the new fading in, ${fOut} of the old fading out) — ${JSON.stringify(off.slice(0, 6))}`);
+      const end = off.at(-1);
+      if (end && (end.io < 0.99 || end.go > 0.01)) v.push(`motion off: the cross-fade didn't settle: ${JSON.stringify(end)}`);
       if ((await st()).field !== "12") v.push(`the motion-off step shows ${(await st()).field}, want 12`);
       await js(`window.__x.row("Smooth window animations").querySelector("input[type=checkbox]").click(); await window.__x.sleep(300); return true`);
       return v;

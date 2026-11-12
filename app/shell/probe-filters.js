@@ -43,8 +43,8 @@
 //                     (right edge, inside the window, above the item sidebar); a switch works in it; Escape / the scrim close it
 //   wf:size:<w>x<h>   the nine layout sizes: docked iff ≥ 900 px, the grid keeps ≥ 240 px (also with the item sidebar open,
 //                     which closes the panel), cards inside it, no sideways scroll; narrow: the drawer fits the window
-//   wf:noMotion       "Smooth window animations" off → the drawer and the docked panel open and close with no animation; on →
-//                     they slide (transform + opacity only)
+//   wf:noMotion       "Smooth window animations" off → the drawer, its scrim and the docked panel fade in and out in place
+//                     (opacity only, per frame: in-between frames, the boxes still); on → they slide (transform + opacity only)
 //   wf:noGlow         Glow effects off → an included segment and the lit toggle have no glow
 //   wf:liveBg         live wallpaper behind the tabs → the docked column has no fill, its groups carry the darkness; the drawer
 //                     keeps a fill
@@ -63,7 +63,7 @@
 //                     starts the grid at its top; a tab visit keeps the view; the playlist bar is untouched; over 300+ cards a
 //                     filter change re-renders the Library and its column, never the cards that stay (React's commit hook)
 //   lib:fold          the Library's toggle closes its own panel (Browse's stays), the grid doesn't move down; remembered;
-//                     motion off → no slide
+//                     motion off → it fades in place (opacity only)
 //   lib:drawer        below 900 px the Library's toggle opens its drawer; a switch works in it; Escape closes; a tab visit closes it
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
 //                     (no filter POSTed), "In my library" too, its own saved filter; its client sort in the split, no Workshop sort
@@ -78,6 +78,8 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
+const NF = "await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));"; // in-page: two frames pass
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -653,7 +655,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the panel's open / close is the item sidebar's, exactly: its duration, curve and keyframes, both ways; motion off → none
+    // the panel's open / close is the item sidebar's, exactly: its duration, curve and keyframes, both ways; motion off → the
+    // same fade for both (opacity only, ~120 ms), never a pop
     await cell("motion:match", async () => {
       const v = [];
       const SIG = `const sig = (el) => { const a = el?.getAnimations().find((x) => x.effect?.target === el); if (!a) return null;
@@ -664,7 +667,7 @@ app.whenReady().then(async () => {
         const c = await page(`const t = m.q(".scroll:not(.lib-scroll) .card .thumb-wrap"); return t ? m.rect(t) : null;`);
         if (!c) return null;
         await rightAt(c.x + c.w / 2, c.y + c.h / 2); // the sidebar opens, the panel closes
-        // `lingers`: ms until the closed one is gone (polled to 150; the exit slide is 170 — motion off it goes on the next tick)
+        // `lingers`: ms until the closed one is gone (polled to 150; the exit slide is 170 — motion off its fade, ~170 with the frame it starts on)
         const gone = (sel) => `await (async () => { const t0 = performance.now(); while (m.q(${J(sel)}) && performance.now() - t0 < 150) await m.sleep(5); return Math.round(performance.now() - t0); })()`;
         const a = await page(`${SIG} await m.sleep(30); return { sideIn: sig(m.q(".side-panel:not(.closing)")), panelOut: sig(m.q(".wf-col.closing")),
           lingers: ${gone(".wf-col")} };`);
@@ -684,9 +687,12 @@ app.whenReady().then(async () => {
       await setMotion(false);
       const off = await run();
       console.log(`        motion off: ${J(off)}`);
-      if (off.sideIn || off.panelOut || off.panelIn || off.sideOut) v.push(`motion off: something animates ${J(off)}`);
-      // gone within a tick or two (the matrix's loaded 60 Hz Xvfb), never the 170 ms slide
-      if (off.lingerA > 60 || off.lingerB > 60) v.push(`motion off: the closed one lingers (panel ${off.lingerA} ms, sidebar ${off.lingerB} ms)`);
+      same("motion off, opening", off.panelIn, off.sideIn);
+      same("motion off, closing", off.panelOut, off.sideOut);
+      for (const [k, s] of Object.entries({ panelIn: off.panelIn, sideIn: off.sideIn, panelOut: off.panelOut, sideOut: off.sideOut }))
+        if (s && (s.from[0] || s.to[0] || s.dur > MO.FADE_MS + 30)) v.push(`motion off: ${k} isn't a short fade in place (${J(s)})`);
+      // the closed one fades out (gone ~170 ms after, polled from ~30 ms in), never popped
+      if (off.lingerA < 60 || off.lingerB < 60) v.push(`motion off: the closed one popped out (panel ${off.lingerA} ms, sidebar ${off.lingerB} ms)`);
       await setMotion(true);
       return v;
     });
@@ -921,17 +927,24 @@ app.whenReady().then(async () => {
       if (!r.n) v.push("motion on: the drawer doesn't animate in");
       const bad = r.props.filter((p) => !["transform", "opacity", "translate"].includes(p));
       if (bad.length) v.push(`motion on: animates ${bad.join(", ")}`);
+      // motion off: the drawer and its scrim fade in and out in place, opacity only
       await setMotion(false);
-      r = await probe();
-      console.log(`        motion off: ${J(r)}`);
-      if (r.n) v.push(`motion off: ${r.n} animations on the drawer / scrim`);
-      if (r.gone > 100) v.push(`motion off: the drawer took ${r.gone} ms to go`);
-      // docked: opened / closed in place, no slide
+      const sides = { col: ".wf-col", scrim: ".wf-scrim" };
+      r = await page(`let s = ${MO.SAMPLE(sides, 500)}; ${NF} m.tog().click(); await m.sleep(40); const none = document.createElement("i");
+        const props = [...${MO.OPACITY_ONLY}(m.col() ?? none), ...${MO.OPACITY_ONLY}(m.q(".wf-scrim") ?? none)];
+        const open = await s; s = ${MO.SAMPLE(sides, 500)}; ${NF} m.col().querySelector(".wf-close").click(); const close = await s; return { open, close, props };`);
+      console.log(`        motion off, drawer: open ${MO.brief(r.open.col)} / ${MO.brief(r.open.scrim)}, close ${MO.brief(r.close.col)} / ${MO.brief(r.close.scrim)}`);
+      if (r.props.length) v.push(`motion off: the drawer animates ${r.props.join(", ")} (opacity only)`);
+      v.push(...MO.judge("motion off, drawer open: the panel", r.open.col, { appear: true }), ...MO.judge("motion off, drawer open: the scrim", r.open.scrim, { appear: true }),
+        ...MO.judge("motion off, drawer close: the panel", r.close.col, { leave: true }), ...MO.judge("motion off, drawer close: the scrim", r.close.scrim, { leave: true }));
+      // docked: closed and opened in place, fading
       await resize(1400, 900); await page(`await m.ensure();`);
-      const dk = await page(`m.tog().click(); await m.sleep(30); const gone = !m.q(".wf-col"); m.tog().click(); await m.sleep(30);
-        const c = m.col(); return { gone, anims: c ? c.getAnimations().length : -1 };`);
-      if (!dk.gone) v.push("motion off: the docked panel lingers after closing");
-      if (dk.anims !== 0) v.push(`motion off: the docked panel ${dk.anims < 0 ? "didn't open" : `opens with ${dk.anims} animation(s)`}`);
+      const dk = await page(`let s = ${MO.SAMPLE({ col: ".wf-col" }, 500)}; ${NF} m.tog().click(); const close = await s;
+        s = ${MO.SAMPLE({ col: ".wf-col" }, 500)}; ${NF} m.tog().click(); await m.sleep(40); const props = m.col() ? ${MO.OPACITY_ONLY}(m.col()) : null; const open = await s; return { close, open, props };`);
+      console.log(`        motion off, docked: close ${MO.brief(dk.close.col)}, open ${MO.brief(dk.open.col)}`);
+      if (!dk.props) v.push("motion off: the docked panel didn't open");
+      else if (dk.props.length) v.push(`motion off: the docked panel animates ${dk.props.join(", ")} (opacity only)`);
+      v.push(...MO.judge("motion off, docked close", dk.close.col, { leave: true }), ...MO.judge("motion off, docked open", dk.open.col, { appear: true }));
       await setMotion(true);
       return v;
     });
@@ -1157,12 +1170,13 @@ app.whenReady().then(async () => {
       await loadUi(); await tab("Library");
       if ((await st()).col) v.push("the Library's closed panel isn't remembered over a reload");
       await shot("lib-folded");
-      // motion off: opens in place, no slide
+      // motion off: opens in place, fading (opacity only)
       await setMotion(false); await tab("Library");
-      const off = await page(`m.tog().click(); await m.sleep(40);
-        const c = m.q('.wf-col[data-wf-page="library"]'); return { anims: c ? c.getAnimations().length : -1 };`);
-      if (off.anims < 0) v.push("motion off: the toggle didn't open the panel");
-      if (off.anims > 0) v.push(`motion off: ${off.anims} panel animation(s)`);
+      const off = await page(`const s = ${MO.SAMPLE({ col: '.wf-col[data-wf-page="library"]' }, 500)}; ${NF} m.tog().click(); await m.sleep(40);
+        const c = m.q('.wf-col[data-wf-page="library"]'); return { props: c ? ${MO.OPACITY_ONLY}(c) : null, fr: await s };`);
+      if (!off.props) v.push("motion off: the toggle didn't open the panel");
+      else if (off.props.length) v.push(`motion off: the panel animates ${off.props.join(", ")} (opacity only)`);
+      v.push(...MO.judge("motion off, open", off.fr.col, { appear: true }));
       await setMotion(true); await tab("Library");
       if (!(await st()).col) v.push("the Library's panel isn't back after opening it");
       return v;

@@ -7,15 +7,18 @@
 //   resize:side:<w>x<h>   the item sidebar fits the window (inside it, close + actions reachable); ≥ 900 px it docks (the grid
 //                         ends at its left edge, no card under it), narrower it floats over the page with a scrim
 //   dock:hover[:off]      hovering a playlist bar item lifts it most (4 px) and its two neighbours a little (transform
-//                         only); "Smooth window animations" off → only the hovered one (2 px, as before), no neighbours,
-//                         no easing
+//                         only); "Smooth window animations" off → nothing lifts (the hovered one's glow shows it)
 //   look:plFold[:off|:reduced] the playlist bar's fold chevron, clicked: collapsing, the chevron turns, the bar's edge slides
 //                         down and the row fades out through in-between frames, the items stay in the document (hidden);
 //                         expanding plays it back to where it started. The grid's columns and cards never move, --playlist-bar-h
 //                         ends at the bar's height, aria-expanded / the saved setting / locate-playing follow; motion off or
-//                         reduced: no in-between frame. Screenshots plfold-<collapse|expand>-<mid|mode>.png
+//                         reduced: nothing moves (the chevron turns at once, the edge jumps, the row stays put) and the row
+//                         fades out / in through in-between opacity frames. Screenshots plfold-<collapse|expand>-<mid|mode>.png
 //   tabs:slide[:off|:reduced] switching tabs slides the active pill (transform) and slides/fades the page in
-//                         (transform + opacity); off / prefers-reduced-motion → it jumps, nothing animates
+//                         (transform + opacity); off / prefers-reduced-motion → the pill jumps, the page fades in in place
+//                         (opacity only, in-between frames, its box still)
+//   motion:switch         flipping "Smooth window animations" off and on, on the Settings page: the page and its sections
+//                         neither fade nor move (the switch restarts no appear animation)
 //   tabs:keep             the Library page is kept while Browse shows (hidden, its sidebar too, taking no room from Browse's
 //                         grid); back on it: the same grid, at the offset it was left at (the same card at the same place),
 //                         its selection cleared, its sidebar docked again
@@ -69,6 +72,7 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -254,7 +258,7 @@ const FOLD_REC = `(() => {
     const fold = (a) => { const t = a.effect?.target; return !!t && (!t.closest(".playlist-bar-head") || !!t.closest(".pl-chev")); };
     const props = bar ? bar.getAnimations({ subtree: true }).filter(fold).flatMap((a) => a.transitionProperty ? [a.transitionProperty]
       : (a.effect?.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((p) => !["offset", "easing", "composite", "computedOffset"].includes(p)))) : [];
-    r.f.push({ chev: ang(bar?.querySelector(".pl-chev")), top: bar?.getBoundingClientRect().top, o, cols: sc?.style.getPropertyValue("--cols") ?? null,
+    r.f.push({ chev: ang(bar?.querySelector(".pl-chev")), top: bar?.getBoundingClientRect().top, rowY: row?.offsetParent ? row.getBoundingClientRect().top : null, o, cols: sc?.style.getPropertyValue("--cols") ?? null,
       cardY: sc?.querySelector(".card.lib")?.getBoundingClientRect().top ?? null, props: [...new Set(props)] }); };
   grab();
   const f = () => { if (!r.on) return; grab(); requestAnimationFrame(f); }; requestAnimationFrame(f);
@@ -498,14 +502,16 @@ app.whenReady().then(async () => {
       const ty = await page(`return [...document.querySelectorAll(".pl-item")].map((e) => m.ty(e));`);
       const v = [];
       console.log(`        lift ${ty.map((x) => x.toFixed(1)).join(" ")} (40 ms in: ${mid.map((x) => x.toFixed(1)).join(" ")})`);
-      if (!(ty[1] < (morphs ? -2.5 : -1.5))) v.push(`the hovered item lifts ${(-ty[1]).toFixed(1)} px`);
+      if (morphs && !(ty[1] < -2.5)) v.push(`the hovered item lifts ${(-ty[1]).toFixed(1)} px`);
       if (morphs) {
         if (!(ty[0] < -0.4 && ty[2] < -0.4)) v.push(`its neighbours don't lift (${ty[0].toFixed(1)}, ${ty[2].toFixed(1)})`);
         if (!(ty[0] > ty[1] && ty[2] > ty[1])) v.push(`a neighbour lifts as much as the hovered one`);
         if (Math.abs(ty[3]) > 0.4 && ty.length > 3 && Math.abs(ty[3]) >= Math.abs(ty[2])) v.push(`the item two away lifts as much as the neighbour (${ty[3].toFixed(1)})`);
       } else {
-        if (Math.abs(ty[0]) > 0.1 || Math.abs(ty[2]) > 0.1) v.push(`animations off but the neighbours lift (${ty[0].toFixed(1)}, ${ty[2].toFixed(1)})`);
-        if (Math.abs(mid[1] - ty[1]) > 0.1) v.push(`animations off but the lift eases in (${mid[1].toFixed(1)} → ${ty[1].toFixed(1)})`);
+        // nothing moves: no item lifts, at 40 ms or after; the hovered one's glow says which one
+        const moved = [...mid, ...ty].filter((y) => Math.abs(y) > 0.1);
+        if (moved.length) v.push(`animations off but items move (hovered ${mid[1].toFixed(1)} → ${ty[1].toFixed(1)} px, neighbours ${ty[0].toFixed(1)}, ${ty[2].toFixed(1)})`);
+        if (!(await js(`!!document.querySelector(".pl-hover-glow")`))) v.push("animations off: the hovered item has no glow (nothing shows which one)");
       }
       const props = await js(`getComputedStyle(document.querySelector(".pl-item")).transitionProperty`);
       if (/\b(top|margin|height|width|left)\b/.test(props)) v.push(`the lift transitions a layout property (${props})`);
@@ -537,8 +543,9 @@ app.whenReady().then(async () => {
         win.webContents.sendInputEvent({ type: "mouseMove", x: chev.x, y: chev.y }); await sleep(400);
         await js(FOLD_REC);
         await clickAt(chev);
-        await sleep(dir === "collapse" ? 120 : 200);
-        if (mode === "on") await shot(`plfold-${dir}-mid`);
+        // mid-animation: the slide, or with motion off mid-fade
+        await sleep(mode === "on" ? (dir === "collapse" ? 120 : 200) : 50);
+        await shot(`plfold-${dir}-mid${mode === "on" ? "" : `-${mode}`}`);
         await sleep(FOLD_MS);
         const f = await js(`window.__pf.stop()`);
         const end = await page(`const bar = document.querySelector(".playlist-bar"), row = bar.querySelector(".playlist-bar-row"), b = document.querySelector(".pl-fold");
@@ -580,7 +587,11 @@ app.whenReady().then(async () => {
           if (fading < 2) v.push(`${dir}: the row didn't fade (${fading} frames between)`);
           if (!props.length) v.push(`${dir}: nothing in the bar animated`);
         } else {
-          if (moving("chev") || moving("top") || fading) v.push(`${mode}: ${dir} still animates (chevron ${moving("chev")}, edge ${moving("top")}, fade ${fading} frames)`);
+          // nothing moves (the chevron and the edge change at once, the row stays where it is while shown); the row fades
+          const rowMoves = fr.filter((x, i) => i && x.rowY != null && fr[i - 1].rowY != null && x.o > 0.02 && fr[i - 1].o > 0.02 && Math.abs(x.rowY - fr[i - 1].rowY) > 0.75).length;
+          const moves = props.filter((p) => ["transform", "translate", "rotate", "scale"].includes(p));
+          if (moving("chev") || moving("top") || rowMoves || moves.length) v.push(`${mode}: ${dir} moves (chevron ${moving("chev")}, edge ${moving("top")}, row ${rowMoves} frames; animates [${moves.join(", ")}])`);
+          if (!fading) v.push(`${mode}: ${dir}: the row popped ${want ? "out" : "in"} (no in-between opacity frame)`);
         }
       }
       await reducedMotion(false);
@@ -637,8 +648,13 @@ app.whenReady().then(async () => {
         const ng = await js(read.replace("+getComputedStyle(g).opacity", "getComputedStyle(g).display === 'none' ? -1 : 1"));
         if (ng.op !== -1) v.push("no-glow: the pulse is still shown");
         if (!/rgb/.test(ng.ring ?? "")) v.push(`no-glow: the card lost its ring (${ng.ring})`);
+        // motion off: no loop but the spinner, so the glow holds still (shown, no animation)
+        await setSettings({ glows: true, morphs: false }); await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
+        await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(300);
+        const nm = await js(read);
+        if (!nm.glow || nm.anims?.length || !(nm.op > 0.3)) v.push(`motion off: the glow should hold still and stay shown (${J({ anims: nm.anims, op: nm.op })})`);
         console.log(`        ${J({ off: +off.toFixed(2), ops: ops.map((x) => +x.toFixed(2)), ring: a.ring.slice(0, 40) })}`);
-      } finally { await setSettings({ glows: true }); }
+      } finally { await setSettings({ glows: true, morphs: true }); }
       return v;
     });
 
@@ -653,6 +669,7 @@ app.whenReady().then(async () => {
       await tab("Browse"); await sleep(300);
       const r = await page(`const pill = document.querySelector(".tabs .tab-pill");
         const x0 = pill ? new DOMMatrixReadOnly(getComputedStyle(pill).transform === "none" ? undefined : getComputedStyle(pill).transform).m41 : null;
+        const s = ${MO.SAMPLE({ page: ".lib-scroll" }, 500)};
         m.byText(".tab", "Library").click();
         const xs = []; const anims = []; const t0 = performance.now();
         await new Promise((res) => { const f = () => {
@@ -661,7 +678,7 @@ app.whenReady().then(async () => {
           const sc = document.querySelector(".scroll");
           if (sc) for (const a of sc.getAnimations()) { const k = a.effect?.getKeyframes?.() ?? []; anims.push(...k.flatMap((x) => Object.keys(x).filter((p) => !["offset", "easing", "composite", "computedOffset"].includes(p)))); }
           if (performance.now() - t0 < 500) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
-        return { pill: !!pill, x0, xs, props: [...new Set(anims)] };`);
+        return { pill: !!pill, x0, xs, props: [...new Set(anims)], fr: await s };`);
       const v = [];
       if (!r.pill) return ["no sliding pill (.tabs .tab-pill)"];
       const x1 = r.xs[r.xs.length - 1];
@@ -675,7 +692,12 @@ app.whenReady().then(async () => {
         if (bad.length) v.push(`the page animates ${bad.join(", ")} (transform / opacity only)`);
       } else {
         if (between > 0) v.push(`${mode}: the pill still slides (${between} frames between)`);
-        if (r.props.length) v.push(`${mode}: the page still animates (${r.props.join(", ")})`);
+        const moves = r.props.filter((p) => p !== "opacity");
+        if (moves.length) v.push(`${mode}: the page moves (${moves.join(", ")})`);
+        console.log(`        ${mode}: page opacity ${MO.brief(r.fr.page)}`);
+        // its box isn't judged: the top bar's own height changes between the tabs' controls, which moves the page's top (not
+        // an animation — the page animates opacity alone, checked above)
+        v.push(...MO.judge(`${mode}: the page`, r.fr.page, { appear: true, still: false }));
       }
       await shot(`tabs-slide-${mode}`);
       return v;
@@ -683,6 +705,28 @@ app.whenReady().then(async () => {
     await cell("tabs:slide", () => slide("on"));
     await cell("tabs:slide:off", () => slide("off"));
     await cell("tabs:slide:reduced", () => slide("reduced"));
+    // the switch itself shows nothing: flipping "Smooth window animations" on the Settings page renames the page's and the
+    // sections' appear animations, which CSS restarts — App.tsx finishes what the switch started, so nothing fades or moves
+    await cell("motion:switch", async () => {
+      const v = [];
+      await reducedMotion(false); await setMotion(true); await sleep(600);
+      for (const to of [false, true]) {
+        const r = await page(`const row = [...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel")?.textContent.includes("Smooth window animations"));
+          const cb = row?.querySelector("input[type=checkbox]"); if (!cb) return null;
+          const s = ${MO.SAMPLE({ page: ".scroll.settings", section: ".scroll.settings .ssection" }, 500)};
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); cb.click(); return await s;`);
+        if (!r) return ["no Smooth window animations row on Settings"];
+        for (const k of ["page", "section"]) {
+          const dip = r[k].filter((f) => f[1] != null && f[1] < 0.95).length;
+          console.log(`        motion ${to ? "on" : "off"}: ${k} opacity ${MO.brief(r[k])}`);
+          if (dip) v.push(`turning motion ${to ? "on" : "off"}: the ${k} faded in again (${dip} frames)`);
+          v.push(...MO.judge(`turning motion ${to ? "on" : "off"}: the ${k}`, r[k], { size: false }));
+        }
+        await sleep(400);
+      }
+      await setMotion(true);
+      return v;
+    });
     // ---- the segmented control (components/Segmented.tsx), on the Settings level picker in the top bar ----
     // seg:glide: Basic → Expert, the highlight moves on transform through in-between frames (a spring: it passes the end a
     // little and settles), lands centred on Expert at its width; :off / :reduced it jumps. Both window sizes.

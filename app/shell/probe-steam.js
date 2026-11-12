@@ -39,7 +39,9 @@
 //                         steam-todo.png
 //   steam:todoMotion:on|off  per frame: a playlist bar appearing → the dock's translateY passes through in-between values; fold /
 //                         unfold → the panel's height too; the chevron is one icon turned 180°; a new current entry → its x off
-//                         its place for ≥ 3 frames. off (Smooth window animations off): all instant. Mid-animation shots
+//                         its place for ≥ 3 frames. off (Smooth window animations off): nothing moves — the lift, the fold's
+//                         height and the chevron change at once; the panel, the body and the entries fade in / out (per
+//                         frame: in-between opacity frames, the boxes still). Mid-animation shots
 //                         steam-todo-glide.png / -fold.png / -slide.png
 //   steam:subToggle:workshop  the Browse sidebar's subscription toggle per a stubbed /workshop/state: Not subscribed → Subscribe
 //                         (POST /workshop/subscribe {workshopId, title}) → Subscribing… + the bar (WS subscribe-progress) →
@@ -55,6 +57,7 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -687,14 +690,20 @@ app.whenReady().then(async () => {
 
     // the to-do panel moves smoothly — the lift
     // GLIDES (a playlist bar appearing), fold ⇄ unfold MORPHS (widths in between), a new current entry SLIDES (the carousel);
-    // under no-motion all three are instant. Mid-animation shots: steam-todo-glide.png, steam-todo-fold.png, steam-todo-slide.png
+    // under no-motion nothing moves (the lift and the fold change at once) and what appears or leaves fades (components/motion.ts
+    // FADE). Mid-animation shots: steam-todo-glide.png, steam-todo-fold.png, steam-todo-slide.png
     for (const motion of [true, false]) {
       await cell(`steam:todoMotion:${motion ? "on" : "off"}`, async () => {
         const v = [];
         await setSettings({ morphs: motion });
         await load(SIGNED_OUT); await tab("Browse");
         await page(`document.getElementById("__fakebar")?.remove(); [...document.querySelectorAll(".playlist-bar")].some((e) => e.getClientRects().length) && (window.__realBar = true);`);
+        // motion off: what appears / leaves is sampled per frame (MO.judge)
+        // (wrapped: an async function returning the bare promise would wait for the whole sample)
+        const smp = async (sels, ms) => { if (motion) return { p: null }; const p = js(MO.SAMPLE(sels, ms)); await sleep(50); return { p }; };
+        const pIn = await smp({ panel: "[data-steam-todo]" }, 500);
         await ev("steam-todo", { ...STEP2, current: { id: "930001", title: "Rem – Edit" } }); await sleep(900);
+        const panelIn = await pIn.p;
         if (await js(`!!window.__realBar`)) console.log("        (a playlist bar already shows on Browse — the glide is measured against the fake one anyway)");
         // (a) the lift: a bar appears → the dock glides up to it (re-measured every 150 ms)
         const lift = await (motion ? shotDuring("todo-glide", () => frames(fakeBar, DOCK_Y, 900), 260) : frames(fakeBar, DOCK_Y, 900));
@@ -707,9 +716,12 @@ app.whenReady().then(async () => {
         await page(`document.getElementById("__fakebar")?.remove();`); await sleep(700);
         // (b) fold ⇄ unfold: the box's width passes through sizes in between
         // heights: the folded pill keeps about the open width (its head), the height is what folds
+        const bFold = await smp({ body: "[data-steam-todo] .st-body" }, 600);
         const fold = await (motion ? shotDuring("todo-fold", () => frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700), 90)
           : frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700));
+        const bodyOut = await bFold.p, bUnfold = await smp({ body: "[data-steam-todo] .st-body" }, 600);
         const unfold = await frames(`document.querySelector("[data-steam-todo] .st-fold").click();`, PANEL_W, 700);
+        const bodyIn = await bUnfold.p;
         const nF = between(fold), nU = between(unfold);
         console.log(`        fold: ${fold[0]?.toFixed(0)} → ${fold.at(-1)?.toFixed(0)} (${nF} between); unfold → ${unfold.at(-1)?.toFixed(0)} (${nU} between)`);
         if (!(fold.at(-1) < fold[0] - 40) || Math.abs(unfold.at(-1) - fold[0]) > 2) v.push(`fold heights ${fold[0]} → ${fold.at(-1)} → ${unfold.at(-1)}`);
@@ -722,15 +734,25 @@ app.whenReady().then(async () => {
         if (motion && chev.tr === "0s") v.push("the chevron has no transition");
         await page(`document.querySelector("[data-steam-todo] .st-fold").click();`); await sleep(700);
         // (c) a new current entry: the content slides in (transform)
+        const sEntry = await smp({ old: '[data-st-entry="930001"]', now: '[data-st-entry="930002"]' }, 600);
         const slide = await (motion
           ? shotDuring("todo-slide", () => frames(`window.__fakeWs("steam-todo", ${J({ ...STEP2, index: 3, remaining: 3, current: { id: "930002", title: "Emilia – Loop" } })});`, ENTRY_X("930002"), 600), 90)
-          : frames(`window.__fakeWs("steam-todo", ${J({ ...STEP2, index: 3, remaining: 3, current: { id: "930002", title: "Emilia – Loop" } })});`, ENTRY_X("930002"), 600));
+          : shotDuring("todo-slide-off", () => frames(`window.__fakeWs("steam-todo", ${J({ ...STEP2, index: 3, remaining: 3, current: { id: "930002", title: "Emilia – Loop" } })});`, ENTRY_X("930002"), 600), 55));
         const moved = slide.filter((x) => x != null && Math.abs(x) > 1.5).length;
         console.log(`        slide x: [${slide.slice(0, 10).map((x) => x == null ? "–" : x.toFixed(1))}…] ${moved} offset frame(s)`);
         if (motion && moved < 3) v.push(`the new entry didn't slide in (${moved} frames off its place)`);
         if (!motion && moved > 0) v.push(`no-motion: the new entry slid (${moved} frames)`);
         if (slide.at(-1) == null || Math.abs(slide.at(-1)) > 0.5) v.push(`the new entry didn't land (x ${slide.at(-1)})`);
+        const entries = await sEntry.p, pOut = await smp({ panel: "[data-steam-todo]" }, 500);
         await ev("steam-todo", { finished: true }); await sleep(500);
+        if (!motion) {
+          const panelOut = await pOut.p;
+          console.log(`        no-motion: panel in ${MO.brief(panelIn.panel)}, body out ${MO.brief(bodyOut.body)} / in ${MO.brief(bodyIn.body)}, entry old ${MO.brief(entries.old)} / new ${MO.brief(entries.now)}, panel out ${MO.brief(panelOut.panel)}`);
+          v.push(...MO.judge("no-motion: the panel coming in", panelIn.panel, { appear: true, size: false }),
+            ...MO.judge("no-motion: the body folding away", bodyOut.body, { leave: true }), ...MO.judge("no-motion: the body unfolding", bodyIn.body, { appear: true }),
+            ...MO.judge("no-motion: the old entry", entries.old, { leave: true }), ...MO.judge("no-motion: the new entry", entries.now, { appear: true, size: false }),
+            ...MO.judge("no-motion: the panel leaving", panelOut.panel, { leave: true, size: false }));
+        }
         return v;
       });
     }

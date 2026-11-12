@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import { FADE_EXIT_MS } from "../components/motion";
 
 // "Travel to running wallpaper on app open" (docs/decisions.md § "Travel to the playing wallpaper once per session, spotlit
 // in the playing green"): the first time a list shows the playing item in this
@@ -126,7 +127,8 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
 // transform + opacity animate, on its own composited layers: nothing in the grid repaints. The layer follows the element every
 // frame (the bar's dock magnification moves it; a scroll). The element itself carries `.locate-flash` meanwhile: a static
 // accent outline (shows with "Glow effects" off; the matrix's travel:button reads it). Glow effects off → no glow layer, the
-// spotlight + rings stay; motion off → no animation: the dim, the outline and one still ring for 1.2 s, then gone at once.
+// spotlight + rings stay; motion off → nothing moves: the dim, the outline and one still ring fade in, hold for 1.2 s and
+// fade out (opacity only, FADE_MS; index.css `.locate-fx.still`). Guard: probe-sidebar look:locator
 // Two phases (the dim is there from the moment of the click): `locateFx` puts up
 // the dim at once (a quick fade in, `.lfx-dim.in`) — its hole follows the element while `glideTo` scrolls it into place — and
 // `reveal()` on arrival adds the glow, edge and rings and starts the 1.5 s clock, the dim holding then fading with them.
@@ -185,12 +187,17 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
     clip.insertAdjacentHTML("beforeend", `${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
       (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`));
     el.classList.add("locate-flash");
-    t = window.setTimeout(done, motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
+    t = window.setTimeout(motion ? done : fadeOut, motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
+  };
+  // motion off: the whole layer fades, the outline (drawn over by the layer's edge) goes with it
+  const fadeOut = () => {
+    clearTimeout(t); el.classList.remove("locate-flash"); fx.classList.add("out");
+    t = window.setTimeout(done, FADE_EXIT_MS);
   };
   const cancel = () => {
     if (phase !== "travel") return;
     phase = "gone"; clearTimeout(t);
-    if (!motion) { done(); return; }
+    if (!motion) { fadeOut(); return; }
     dim.className = "lfx-dim out";
     t = window.setTimeout(done, LOCATE_OUT_MS);
   };

@@ -167,7 +167,8 @@ export function setFiltersFromClick(page: FilterPage, open: boolean) {
 // button (components/SortFilterButton.tsx) and the panel's own ×; one right-hand panel at a time (store setFiltersOpen).
 // `on` = the page offers filters now. `panel` lingers through the exit slide (WF_CLOSE_MS). `entering`: the docked panel
 // slides in only when it's opened — a page that starts with it open (Browse is built on each visit, the kept Library shows
-// again) just shows it; a drawer always slides (it opens only on a click).
+// again) just shows it; a drawer always slides (it opens only on a click). Motion off: the same, as a fade in place
+// (index.css :root.no-motion .wf-col).
 export function useFilterOpen(page: FilterPage, on: boolean) {
   const docked = useFilterDocked();
   return useStore((s) => on && (docked ? !(page === "library" ? s.libFilterColHidden : s.filterColHidden) : s.filterDrawer === page));
@@ -180,7 +181,7 @@ export function useFilterPanel(page: FilterPage, on: boolean) {
   const close = useCallback(() => setFiltersFromClick(page, false), [page]);
   const [wasOpen, setWasOpen] = useState(open);
   const [entering, setEntering] = useState(false);
-  if (wasOpen !== open) { setWasOpen(open); setEntering(open && motion); } // follow during render
+  if (wasOpen !== open) { setWasOpen(open); setEntering(open); } // follow during render
   useEffect(() => { if (!entering) return; const t = setTimeout(() => setEntering(false), 400); return () => clearTimeout(t); }, [entering]);
   // a drawer left open goes when the window docks the panel (the docked state is its own) or the page stops offering
   // filters, and when the page goes (Browse unmounts; the kept Library hides: a layout effect's cleanup runs then too)

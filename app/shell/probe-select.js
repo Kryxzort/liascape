@@ -17,7 +17,7 @@
 //   look:glow         the box: rounded corners, a translucent accent fill, the small glow; none under no-glow; still
 //                     translucent under bg-live; the fill strengthens as it catches more cards
 //   look:motion[:off] motion on: the box fades in and out (per-frame samples pass through in-between opacities); "Smooth window
-//                     animations" off: it appears and goes at once
+//                     animations" off: the same short fade in and out (opacity only), never a pop
 //   look:shot         1920×1080 screenshots of a box mid-drag: <LIASCAPE_OUT>/select-{lib,br}-middrag.png
 //   perf:drag         a sweep over ~170 cards: no layout forced from script, the selection set at most once a frame, and only the
 //                     cards whose selection flipped re-render (React's commit hook counts components that ran)
@@ -457,8 +457,12 @@ app.whenReady().then(async () => {
         const { s } = await motionRun();
         const shown = s.filter((x) => x[1] != null);
         if (!shown.length) return ["no box in any frame — proved nothing"];
-        const mid = shown.filter((x) => x[1] < 0.98);
-        if (mid.length) v.push(`motion off: the box faded (${J(mid.slice(0, 4))})`);
+        // the same fade in and out as with motion on (opacity only; the box itself follows the pointer), never a pop
+        const iIn = s.findIndex((x) => x[1] != null), iOut = s.findLastIndex((x) => x[1] != null);
+        const fadeIn = s.slice(iIn, iIn + 8).filter((x) => x[1] > 0.02 && x[1] < 0.98);
+        const fadeOut = s.slice(Math.max(0, iOut - 12), iOut + 1).filter((x) => x[1] > 0.02 && x[1] < 0.98);
+        if (!fadeIn.length) v.push(`motion off: the box popped in (first frames ${J(s.slice(iIn, iIn + 4))})`);
+        if (!fadeOut.length) v.push(`motion off: the box popped out (last frames ${J(s.slice(Math.max(0, iOut - 4), iOut + 2))})`);
       } finally { await setMotion(true, () => LIB.enter()); }
       return v;
     });

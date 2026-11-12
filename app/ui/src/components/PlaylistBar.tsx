@@ -169,7 +169,7 @@ export function PlaylistBar() {
   const [hv] = useState(hoverStore);
   const motion = useMotion();
   // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
-  // the remove button, the preview — and the lift's fallback with motion off
+  // the remove button and the preview (with motion off, the glow alone: nothing lifts)
   useDockLift(rowRef, motion, !!dragId, [rowShown, playlist.length]);
   // the pointer on the row itself (not on an item): inside the run of items = a gap (keep), past either end = off them
   // …and above the items' strip (the row reaches up into the head for the magnified items' headroom) = off them too

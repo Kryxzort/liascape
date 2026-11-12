@@ -23,7 +23,7 @@
 //   preview:hiddenTab    an unmuted, playing Video preview / YouTube trailer (stub player) in the Library sidebar pauses
 //                        when Browse / Settings shows (the Library stays mounted, hidden) and plays on, unmuted, back on
 //                        Library; a trailer the user paused stays paused
-//   look:previewVolume   the slider's pill slides + fades out from under the chip on hover (per frame), instant with motion off,
+//   look:previewVolume   the slider's pill slides + fades out from under the chip on hover (per frame); motion off: it fades in place,
 //                        no pointer while hidden, inside the picture, theme text + accent fill; no chip glow under no-glow; a dark
 //                        fill under bg-live. Screenshots side-pvol-*.png
 //   look:strip:<w>x<h>   the preview switch is the segmented control's strip fused to the picture: 0 px gap, the same left /
@@ -33,7 +33,7 @@
 //                        option → no strip, the picture rounded all round; the strip keeps its dark fill under bg-live
 //                        (sizes 1920x1080 and 1100x700: run with LIASCAPE_MATRIX_SCREEN=2560x1440). Screenshots side-strip-*.png
 //   lib:slide            an item switch slides like a carousel by where the new card sits: the same row, right → in from the
-//                        right (the old out left), left mirrored; a row below → rises from below, above → mirrored; the outgoing copy inert + after the live one, gone after ~0.3 s; motion off → no slide
+//                        right (the old out left), left mirrored; a row below → rises from below, above → mirrored; the outgoing copy inert + after the live one, gone after ~0.3 s; motion off → a cross-fade in place
 //   look:plCheck         a card's CHECKED playlist box, hovered: still accent, with a dark visible tick (pixels)
 //   look:focusRing       a click + a letter: no focus ring on the clicked button; Tab: the accent ring; a click ends it
 //   look:liveBg          live wallpaper behind the tabs → the panel fully see-through (like Settings), its section cards dark, a see-through head,
@@ -49,11 +49,14 @@
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
-//   motion:on|off|reduced the open slides/fades (transform + opacity only); animations off / reduced motion → nothing animates
+//   motion:on|off|reduced the open slides/fades (transform + opacity only); animations off / reduced motion → only opacity
+//                        animates and nothing moves: the panel fades in, a switch cross-fades the old content into the new, the
+//                        close fades out (per frame: in-between opacity frames, the boxes still)
 //   look:focus           the focused card's ring is the accent (outline colour), off the card, with the accent glow; Glow effects
 //                        off → the ring without the glow
 //   look:locator         "go to playing" (grid + bar): the spotlight (dim + rings + glow) appears, the rings ripple, all gone in
-//                        ≤ 2 s; Glow effects off → no glow layer, still dim + rings; animations off → a still highlight, no animation
+//                        ≤ 2 s; Glow effects off → no glow layer, still dim + rings; animations off → a still highlight that fades
+//                        in and out (opacity only, nothing scales)
 //   look:dlHover         a Browse card's download button under a real pointer: it lifts, its glow layer shows, the arrow nudges;
 //                        the Browse sidebar's Download & Apply the same (computed styles differ from the un-hovered ones)
 // Screenshots: <LIASCAPE_OUT>/side-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -65,6 +68,7 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
 const OUT = E.LIASCAPE_OUT;
@@ -465,7 +469,8 @@ app.whenReady().then(async () => {
       await setMotion(false);
       await page(`await m.closeAll(); await m.openSide("k1"); await m.sleep(300);`);
       const c = await page(SLIDE("k3")); console.log(`        motion off, k1 → k3: ${J(c)}`);
-      if (c.exit != null) v.push(`motion off: an outgoing copy slid (${J(c)})`);
+      if (c.exit !== "fade" || Math.abs(c.x0 ?? 99) > 0.5 || Math.abs(c.y0 ?? 99) > 0.5) v.push(`motion off: the switch didn't cross-fade in place (${J(c)})`);
+      if (c.goneAt == null || c.goneAt > 400) v.push(`motion off: the outgoing copy stayed (${c.goneAt} ms)`);
       await setMotion(true);
       await page(`await m.closeAll();`);
       return v;
@@ -846,14 +851,16 @@ app.whenReady().then(async () => {
         await mv(5, 5, 600); const bb = on.b; await mv(bb.x + bb.w / 2, bb.y + bb.h / 2); await sleep(70); await shot("pvol-midreveal"); await sleep(600);
         await page(`${VS} b.click(); await m.sleep(250);`); await shot("pvol-muted");
         await mv(5, 5, 400); await shot("pvol-rest");
-        // motion off: it shows at once
+        // motion off: it fades in place (opacity only)
         await setMotion(false); await mv(5, 5);
         const off = await reveal();
         if (!off || off.none) v.push("motion off: no control");
         else {
           const mid0 = off.frames.filter((f) => f.op > 0.02 && f.op < 0.98).length, tx0 = off.frames.filter((f) => Math.abs(f.tx) > 0.5 && f.op > 0.02).length;
           console.log(`        motion off: ${mid0} frames between (opacity), ${tx0} (moving)`);
-          if (mid0 || tx0) v.push(`motion off: the slider still animates (${mid0} fading, ${tx0} moving frames)`);
+          if (tx0) v.push(`motion off: the slider moves (${tx0} frames off its place)`);
+          if (!mid0) v.push("motion off: the slider popped in (no in-between opacity frame)");
+          if (Math.abs(off.hid.op) > 0.01) v.push(`motion off: hidden, the slider still shows (${J(off.hid)})`);
         }
       } finally {
         await mv(5, 5); await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await setMotion(true);
@@ -1133,7 +1140,24 @@ app.whenReady().then(async () => {
           if (!r.n) v.push("the sidebar didn't animate in");
           const bad = r.props.filter((p) => !["transform", "opacity", "translate"].includes(p));
           if (bad.length) v.push(`it animates ${bad.join(", ")} (transform / opacity only)`);
-        } else if (r.n) v.push(`${mode}: it still animates (${r.props.join(", ")})`);
+        } else {
+          // only opacity, nothing moves: the open fades in, a switch cross-fades, the close fades out (MO.judge)
+          const nf = "await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));";
+          const o = await page(`await m.closeAll(); await m.sleep(400);
+            let s = ${MO.SAMPLE({ panel: ".side-panel" }, 600)}; ${nf} m.ctx(m.thumb("k2")); await m.sleep(50);
+            const props = new Set(${MO.OPACITY_ONLY}(m.side() ?? document.body)); const open = await s; await m.sleep(300);
+            s = ${MO.SAMPLE({ live: ".side-panel .side-content:not(.opening):not(.side-exit)", exit: ".side-panel .side-content.side-exit" }, 600)}; ${nf}
+            m.ctx(m.thumb("k3")); await m.sleep(50); for (const p of ${MO.OPACITY_ONLY}(m.side() ?? document.body)) props.add(p); const sw = await s; await m.sleep(300);
+            s = ${MO.SAMPLE({ panel: ".side-panel" }, 600)}; ${nf} m.key("Escape"); const close = await s;
+            return { open, sw, close, props: [...props] };`);
+          console.log(`        ${mode}: open ${MO.brief(o.open.panel)} | new ${MO.brief(o.sw.live)} | old ${MO.brief(o.sw.exit)} | close ${MO.brief(o.close.panel)}`);
+          if (o.props.length) v.push(`${mode}: it animates ${o.props.join(", ")} (opacity only)`);
+          v.push(...MO.judge(`${mode}, open: the panel`, o.open.panel, { appear: true }),
+            ...MO.judge(`${mode}, switch: the new content`, o.sw.live, { appear: true, size: false }),
+            ...MO.judge(`${mode}, switch: the old content`, o.sw.exit, { leave: true, size: false }),
+            ...MO.judge(`${mode}, close: the panel`, o.close.panel, { leave: true }));
+          if (mode === "off") { await page(`await m.closeAll(); await m.sleep(300); m.ctx(m.thumb("k2")); await m.sleep(60);`); await shot("motion-off-midfade"); }
+        }
         return v;
       });
     }
@@ -1163,7 +1187,7 @@ app.whenReady().then(async () => {
     // "go to playing": the spotlight that shows where the playing wallpaper is
     const LOCATE = (btn) => `await m.closeAll(); await m.sleep(200); const b = document.querySelector('[data-go-playing="${btn}"]'); if (!b || b.disabled) return { btn: false };
       b.click(); const t0 = performance.now(); const fx0 = document.querySelector(".locate-fx");
-      const out = { btn: true, atClick: !!fx0 && !!fx0.querySelector(".lfx-dim") && !fx0.querySelector(".lfx-edge"), edge: null, preDim: 0, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null };
+      const out = { btn: true, atClick: !!fx0 && !!fx0.querySelector(".lfx-dim") && !fx0.querySelector(".lfx-edge"), edge: null, preDim: 0, seen: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, anims: 0, still: false, outline: null, fo: [], np: [] };
       await new Promise((res) => { const f = () => { const t = performance.now() - t0; const fx = document.querySelector(".locate-fx");
         if (fx) { if (out.seen == null) out.seen = Math.round(t); out.still = fx.classList.contains("still");
           const d = fx.querySelector(".lfx-dim"); if (d) out.dim = Math.max(out.dim, +getComputedStyle(d).opacity);
@@ -1172,6 +1196,7 @@ app.whenReady().then(async () => {
           for (const r of rs) { const tf = getComputedStyle(r).transform; if (tf && tf !== "none") { const mm = new DOMMatrix(tf); out.scale = Math.max(out.scale, mm.a, mm.d); } }
           if (fx.querySelector(".lfx-glow")) out.glow = true;
           out.anims = Math.max(out.anims, fx.getAnimations({ subtree: true }).length);
+          out.fo.push(+(+getComputedStyle(fx).opacity).toFixed(3)); for (const p of ${MO.OPACITY_ONLY}(fx)) if (!out.np.includes(p)) out.np.push(p);
           const el = document.querySelector(".locate-flash"); if (el) { out.outline = getComputedStyle(el).outlineColor; out.olOff = parseFloat(getComputedStyle(el).outlineOffset);
             const a = d?.getBoundingClientRect(), b = el.getBoundingClientRect();
             if (a) out.holeOff = Math.max(out.holeOff ?? 0, Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.right - b.right), Math.abs(a.bottom - b.bottom)); }
@@ -1316,7 +1341,11 @@ app.whenReady().then(async () => {
         const st = await run(`${btn}, animations off`, btn);
         if (!st) continue;
         if (st.seen == null) { v.push(`${btn}, animations off: no highlight`); continue; }
-        if (!st.still || st.anims) v.push(`${btn}, animations off: it animates (${st.anims} animations, still ${st.still})`);
+        // nothing moves (opacity only, the ring unscaled); it fades in at the click and out at the end — never pops
+        if (!st.still || st.np.length || st.scale > 1.001) v.push(`${btn}, animations off: it moves (still ${st.still}, animates ${J(st.np)}, ring scale ${st.scale})`);
+        const fi = st.fo.findIndex((x) => x >= 0.95), fl = st.fo.findLastIndex((x) => x >= 0.95);
+        if (!st.fo.slice(0, Math.max(0, fi)).some((x) => x > 0.02 && x < 0.95)) v.push(`${btn}, animations off: it popped in (${J(st.fo.slice(0, 4))})`);
+        if (!st.fo.slice(fl + 1).some((x) => x > 0.02 && x < 0.95)) v.push(`${btn}, animations off: it popped out (${J(st.fo.slice(-4))})`);
         if (st.dim < 0.9 || st.rings < 1) v.push(`${btn}, animations off: no dim / ring (${J(st)})`);
         if (!st.atClick) v.push(`${btn}, animations off: no dim right at the click`);
         if (st.gone == null || st.edge == null || st.gone - st.edge > 1600 || st.gone - st.edge < 900) v.push(`${btn}, animations off: shown ${st.gone == null || st.edge == null ? "for ever / never" : st.gone - st.edge + " ms"} (~1.2 s)`);

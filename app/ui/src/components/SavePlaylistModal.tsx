@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useFadeOff } from "./motion";
 import { Save } from "lucide-react";
 import { magnetRef } from "./magnet";
 
@@ -7,6 +8,7 @@ import { magnetRef } from "./magnet";
 export function SavePlaylistModal({
   open, names, onSave, onClose,
 }: { open: boolean; names: string[]; onSave: (name: string) => void; onClose: () => void }) {
+  const fadeOff = useFadeOff(); // motion off: the zoom / rise below becomes a fade in place
   const [name, setName] = useState("");
   // each opening starts with an empty name (reset during render on the change — no frame shows the old text)
   const [wasOpen, setWasOpen] = useState(open);
@@ -15,9 +17,9 @@ export function SavePlaylistModal({
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-          <motion.div className="modal pl-modal" initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        <motion.div className="modal-backdrop" {...fadeOff({ initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } })} onClick={onClose}>
+          <motion.div className="modal pl-modal" {...fadeOff({ initial: { scale: 0.96, opacity: 0 }, animate: { scale: 1, opacity: 1 },
+            exit: { scale: 0.96, opacity: 0 }, transition: { type: "spring", stiffness: 320, damping: 28 } })}
             onClick={(e) => e.stopPropagation()}>
             <div className="modal-body">
               <h2>Save Playlist</h2>

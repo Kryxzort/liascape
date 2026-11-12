@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useFadeOff } from "./motion";
 import { Sparkles } from "lucide-react";
 import type { PlaylistSettings } from "../api/client";
 import { useStore } from "../store";
@@ -22,6 +23,7 @@ export function PlaylistSettingsModal({
   open: boolean; ps: PlaylistSettings; setPS: (p: Partial<PlaylistSettings>) => void;
   autoAdd: boolean; setAutoAdd: (v: boolean) => void; onClose: () => void;
 }) {
+  const fadeOff = useFadeOff(); // motion off: the zoom / rise below becomes a fade in place
   const ovr = ps.overrideGlobalSettings;
   const aoe = ps.switchWhenVideoEnds;
   const sep = ps.separateSceneTiming ?? true;
@@ -38,9 +40,9 @@ export function PlaylistSettingsModal({
     <HealthCtx.Provider value={warnings}>
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-          <motion.div className="modal pl-modal" initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        <motion.div className="modal-backdrop" {...fadeOff({ initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } })} onClick={onClose}>
+          <motion.div className="modal pl-modal" {...fadeOff({ initial: { scale: 0.96, opacity: 0 }, animate: { scale: 1, opacity: 1 },
+            exit: { scale: 0.96, opacity: 0 }, transition: { type: "spring", stiffness: 320, damping: 28 } })}
             onClick={(e) => e.stopPropagation()}>
             <div className="modal-body">
               <h2>Playlist Settings</h2>

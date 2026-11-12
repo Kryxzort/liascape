@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useFadeOff } from "./motion";
 import { Search, CheckCheck, Star, RefreshCw } from "lucide-react";
 import { api, media, type TransitionEffect, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
@@ -27,6 +28,7 @@ export function TransitionPicker({
   open: boolean; value: TransitionValue;
   onChange: (p: Partial<TransitionValue>) => void; onClose: () => void; title?: string;
 }) {
+  const fadeOff = useFadeOff(); // motion off: the zoom / rise below becomes a fade in place
   const [effects, setEffects] = useState<TransitionEffect[]>(_catalog ?? []);
   const [q, setQ] = useState("");
   const [hovered, setHovered] = useState<string | null>(null);
@@ -111,9 +113,9 @@ export function TransitionPicker({
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-          <motion.div className="modal tr-modal" initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.96, opacity: 0 }} transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        <motion.div className="modal-backdrop" {...fadeOff({ initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } })} onClick={onClose}>
+          <motion.div className="modal tr-modal" {...fadeOff({ initial: { scale: 0.96, opacity: 0 }, animate: { scale: 1, opacity: 1 },
+            exit: { scale: 0.96, opacity: 0 }, transition: { type: "spring", stiffness: 320, damping: 28 } })}
             onClick={(e) => e.stopPropagation()}>
             <div className="modal-body tr-body">
               <div className="tr-head">

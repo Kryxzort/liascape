@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
-import { captureSource, sourceEl, useMotion } from "./motion";
+import { captureSource, sourceEl, useMotion, FADE_EXIT_MS } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
 import { type PreviewKind } from "../store";
@@ -13,9 +13,9 @@ import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPr
 // the Browse sidebar: an <aside> beside the page (a sibling of `.scroll` inside `.app`), docked at ≥ 900 px — the grid
 // and the playlist bar end at its left edge (index.css `.app:has(> .side-panel…)`) — and floating over the page with a
 // scrim below that. It slides in on a slightly springy curve and its content follows in a quick stagger (picture → hero →
-// actions → rows), a switch re-staggers the new item's content faster, it slides out on close (transform + opacity only,
-// `:root.no-motion` → none of it). `id` is the item's IDENTITY (its path / page URL): a new copy of the same item
-// (`library-item-changed`) is no new open — nothing replays.
+// actions → rows), a switch re-staggers the new item's content faster, it slides out on close (transform + opacity only;
+// `:root.no-motion` → it fades in and out, and a switch cross-fades). `id` is the item's IDENTITY (its path / page URL): a
+// new copy of the same item (`library-item-changed`) is no new open — nothing replays.
 // Look: the Settings page's language — accent-tinted
 // section cards with glowing icon chips (`.side-sec`), the picture in a framed stage with a soft accent glow, action tiles.
 
@@ -37,10 +37,12 @@ export function SideHeadTools({ children }: { children: ReactNode }) {
 // measure (filtered out / scrolled away from a content-visibility grid) → `order`, the item's index in the list: later =
 // from the right. The outgoing content stays mounted (same key, so nothing reloads — its video keeps playing) in a layer
 // laid over the new one (after it in the DOM: a lookup finds the live content first), `inert`, its head tools withheld, for
-// SIDE_SLIDE_MS. Neither known → the old quick re-stagger. Motion off → an instant swap.
+// SIDE_SLIDE_MS. Neither known → the old quick re-stagger. Motion off → the same exit layer, cross-fading (FADE_EXIT_MS)
+// whatever the direction (index.css :root.no-motion .side-exit). Guard: probe-sidebar lib:slide, motion:off
 export const SIDE_SLIDE_MS = 300;
 type Dir = "right" | "left" | "down" | "up";
 type Shown = { id: string; order: number; card?: string; node: ReactNode };
+type Exit = Shown & { dir: Dir | null };
 function slideDir(a: Shown, b: { order: number; card?: string }): Dir | null {
   const ra = sourceEl(a.card ?? null)?.getBoundingClientRect(), rb = sourceEl(b.card ?? null)?.getBoundingClientRect();
   if (ra && rb && ra.width && rb.width) {
@@ -64,18 +66,18 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
   // follow the shown item during render (no effect round-trip, like useLinger): the last children per item, so a switch
   // still has the outgoing item's content to slide out
   const [cur, setCur] = useState<Shown>({ id, order, card, node: children });
-  const [exit, setExit] = useState<(Shown & { dir: Dir }) | null>(null);
+  const [exit, setExit] = useState<Exit | null>(null);
   const [dir, setDir] = useState<Dir | null>(null);
   if (cur.id !== id) {
     const d = slideDir(cur, { order, card });
     setFirst(null);
     setDir(d);
-    setExit(d && motion ? { ...cur, dir: d } : null);
+    setExit(!motion ? { ...cur, dir: null } : d ? { ...cur, dir: d } : null);
     setCur({ id, order, card, node: children });
   } else if (cur.node !== children || cur.order !== order || cur.card !== card) setCur({ id, order, card, node: children });
   useEffect(() => {
     if (!exit) return;
-    const t = setTimeout(() => setExit(null), SIDE_SLIDE_MS);
+    const t = setTimeout(() => setExit(null), exit.dir ? SIDE_SLIDE_MS : FADE_EXIT_MS);
     return () => clearTimeout(t);
   }, [exit]);
   // a new item scrolls the panel back to its top (the old one's scroll position means nothing for it)
@@ -108,7 +110,7 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
             <HeadSlot.Provider value={slot}>{children}</HeadSlot.Provider>
           </div>
           {exit && (
-            <div className={`side-content side-exit ${OUT[exit.dir]}`} key={exit.id} inert aria-hidden>
+            <div className={`side-content side-exit ${exit.dir ? OUT[exit.dir] : "fade"}`} key={exit.id} inert aria-hidden>
               <HeadSlot.Provider value={null}>{exit.node}</HeadSlot.Provider>
             </div>
           )}

@@ -18,7 +18,7 @@ import { useEffect, type RefObject } from "react";
 // dnd-kit owns the inline transform while sorting and React never touches --dock. Distances use the items' LAYOUT boxes
 // (offsetLeft, unaffected by transforms), so the motion never feeds back into itself.
 // While dragging, everything settles flat. `enabled` false ("Smooth window animations" off / reduced motion) → --dock is
-// cleared and the CSS fallback applies (the hovered item alone, 2 px).
+// cleared: nothing moves, the hovered item's glow alone says which one (index.css :root.no-motion .pl-item).
 // RISE: how far the top of the item under the pointer rises, fully magnified; its bounce peaks ~13 % higher. The bar's
 // head leaves that + ≥ 3 px of clearance (index.css .playlist-bar-head). Guard: probe-plbar bar:headroom, bar:shape.
 const RISE = 12;       // px

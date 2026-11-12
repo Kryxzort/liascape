@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { CloudCheck, CloudOff, CloudDownload, LoaderCircle } from "lucide-react";
 import { api, type WorkshopSubState } from "../api/client";
 import { useStore } from "../store";
-import { useMotion } from "./motion";
+import { useMotion, FADE } from "./motion";
 import { magnetRef } from "./magnet";
 
 // The Browse sidebar's Subscribe / Unsubscribe toggle for a Workshop item ("Wallpaper Engine (Local)" and "Wallpaper Engine
@@ -13,7 +13,8 @@ import { magnetRef } from "./magnet";
 // source for an item the library has (trash + unsubscribe, undoable — the sub-line says so), else the unsubscribe alone; Subscribe
 // (accent) subscribes without importing (a Download stays the way to get it into the library). A WE-local item whose folder
 // Steam deleted → the Browse list reloads (it leaves). Motion: the line + button swap slide in (transform + opacity), the
-// progress row eases in / out, the box glides to its new height (framer `layout`); none under `no-motion`, no glow under `no-glow`.
+// progress row eases in / out, the box glides to its new height (framer `layout`); under `no-motion` the swaps and the row
+// cross-fade in place (components/motion.ts FADE) and the height changes at once; no glow under `no-glow`.
 export function SubToggle({ id, title, weLocal }: { id: string; title: string; weLocal: boolean }) {
   const tick = useStore((s) => s.wsStateTick);
   const prog = useStore((s) => s.subProgress[id]);
@@ -59,7 +60,7 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
     finally { setBusy(false); setReadTick((n) => n + 1); }
   };
   const slide = motionOn ? { initial: { opacity: 0, x: 14 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -14 },
-    transition: { duration: 0.22, ease: [0.2, 0.9, 0.3, 1] as const } } : { initial: false as const, transition: { duration: 0 } };
+    transition: { duration: 0.22, ease: [0.2, 0.9, 0.3, 1] as const } } : FADE;
   const pct = prog && prog.value > 0 ? Math.round(prog.value * 100) : null;
   return (
     <motion.div className="side-sub" data-side-sub data-state={state} layout={motionOn} transition={{ duration: motionOn ? 0.24 : 0 }}>
@@ -86,8 +87,8 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
       <AnimatePresence initial={false}>
         {state === "subscribing" && prog && (
           <motion.div key="bar" className={`dl-bar side-sub-bar${pct == null ? " indet" : ""}`} data-side-sub-progress
-            initial={motionOn ? { opacity: 0, scaleX: 0.6 } : false} animate={{ opacity: 1, scaleX: 1 }}
-            exit={motionOn ? { opacity: 0, scaleX: 0.6 } : { opacity: 0, transition: { duration: 0 } }} transition={{ duration: motionOn ? 0.2 : 0 }}>
+            {...(motionOn ? { initial: { opacity: 0, scaleX: 0.6 }, animate: { opacity: 1, scaleX: 1 }, exit: { opacity: 0, scaleX: 0.6 },
+              transition: { duration: 0.2 } } : FADE)}>
             <div className="dl-fill" style={pct == null ? undefined : { width: `${pct}%` }} />
           </motion.div>
         )}

@@ -28,6 +28,8 @@
   --spring-soft-dur: .5s;
   --ease-icon-out: cubic-bezier(.2, .9, .3, 1);
   --press-dur: 70ms;
+  /* motion off: the one fade every appear / leave / content swap gets (= components/motion.ts FADE_MS) */
+  --fade-dur: .12s;
 }
 /* live wallpaper behind every tab → let the chrome go translucent so it shows through */
 :root.bg-live { --tr: 65%; --tr-strong: 85%; --tr-side: 0%; }
@@ -428,9 +430,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    bar's whole travel in and out of flow (hooks/useBarFold.ts), and it sits exactly where the row sat on its own.
    Folded and at rest it is hidden, not unmounted; while the fold plays (`data-fold`, set by useBarFold) it is out of flow
    where it sits in flow — the bar's layout is the folded one, its WAAPI slide puts it back on screen — and takes no
-   pointer on the way out. Motion off: no data-fold, it swaps at once. Guard: probe-layout look:plFold */
+   pointer on the way out. Motion off: no data-fold; the body fades out in place before the bar folds (`data-fade`) and
+   fades in once it has unfolded (hooks/useBarFold.ts). Guard: probe-layout look:plFold */
 .pl-body { display: flow-root; }
-.playlist-bar.folded:not([data-fold]) > .pl-body { display: none; }
+.playlist-bar.folded:not([data-fold], [data-fade]) > .pl-body { display: none; }
 .playlist-bar[data-fold] > .pl-body { position: absolute; left: 12px; right: 12px; } /* = .playlist-bar's side padding */
 .playlist-bar[data-fold="out"] > .pl-body { pointer-events: none; }
 .playlist-bar[data-fold="in"] > .pl-body { opacity: 0; } /* until its fade starts (hooks/useBarFold.ts: the frame it is sized in) */
@@ -530,8 +533,12 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes lfx-dim-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes lfx-glow { 0% { opacity: 0; } 16% { opacity: 1; } 38% { opacity: .65; } 58% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes lfx-ring { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(var(--sx, 1.2), var(--sy, 1.2)); } }
-/* motion off / reduced: the same picture standing still for 1.2 s — the dim, the edge, one ring a little further out */
+/* motion off / reduced: the same picture standing still for 1.2 s — the dim, the edge, one ring a little further out —
+   fading in at the click, its edge and ring fading in on arrival, all of it fading out (opacity only, --fade-dur) */
+.locate-fx.still { animation: nm-in var(--fade-dur) linear; }
+.locate-fx.still.out { animation: nm-out var(--fade-dur) linear forwards; }
 .locate-fx.still div { animation: none; }
+.locate-fx.still .lfx-clip > * { animation: nm-in var(--fade-dur) linear; }
 .locate-fx.still .lfx-ring { inset: -13px; border-radius: calc(var(--r, 10px) + 13px); opacity: .65; }
 .pl-remove { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border-radius: 999px;
   background: none; color: #fff; opacity: 0; transition: opacity .12s, color .15s, filter .2s;
@@ -734,7 +741,7 @@ input[type=range]:focus-visible { outline: none; }
 .st-fold { margin-left: auto; }
 /* the chevron turns (folded = up) with a springy overshoot — one icon, never swapped */
 .st-chev { display: block; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
-.steam-todo.folded .st-chev { transform: rotate(180deg); }
+.st-fold[aria-expanded="false"] .st-chev { transform: rotate(180deg); }
 :root.no-motion .st-chev { transition: none; }
 .st-body { display: flex; flex-direction: column; gap: 8px; }
 /* the current entry's words: the carousel's track (old out left, new in from the right — framer, transform + opacity) */
@@ -807,7 +814,7 @@ input[type=range]:focus-visible { outline: none; }
   transition: border-color .15s, box-shadow .2s, opacity .15s; }
 .combo-caret:hover { border-color: var(--accent); box-shadow: var(--glow-sm); opacity: 1; }
 /* ---- number stepper (components/NumInput.tsx): − field + in one themed pill; the browser's spin arrows hidden. The field
-   clips its digits so a step rolls them (WAAPI in NumInput, off under no-motion). COOL: a button's hover is a tinted disc
+   clips its digits so a step rolls them (WAAPI in NumInput; a cross-fade in place under no-motion). COOL: a button's hover is a tinted disc
    carrying the static --glow-sm (none under no-glow), shown by opacity; its press squeezes the icon with the springy
    overshoot. Guard: probe-expert "stepper: …" ---- */
 .num-step { display: inline-flex; align-items: stretch; vertical-align: middle; font: inherit;
@@ -1035,7 +1042,7 @@ input[type=range]:focus-visible { outline: none; }
    Beside the section when the window leaves a side column for it (`data-side`, pinned while the rows scroll), else
    centred above it (it comes first in the wrapper; the side layout places it by grid area). Looks like a Settings section
    card (translucent crust over the live wallpaper, the accent edge and glow on hover). COOL: it rises and fades in while
-   the card rows are on screen and back out when they leave (no-motion: it just appears); its caption fades each new text in.
+   the card rows are on screen and back out when they leave (no-motion: it fades in place); its caption fades each new text in.
    Above the rows it keeps its place while hidden, so showing it never moves them. */
 .pv-wrap { position: relative; z-index: 1; }
 /* the card rows sit in their own box (.pv-rows, what the preview watches): its first row and the row after it keep the line
@@ -1083,6 +1090,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow { --glow-sm: 0 0 #0000; --glow: 0 0 #0000; }
 :root.no-glow .card.playing { animation: none; box-shadow: none; } /* the ring (::before) stays */
 :root.no-glow .playing-glow { display: none; animation: none; }
+/* motion off: no loop but the spinner, so the playing card's glow holds at its middle brightness */
+:root.no-motion .playing-glow { animation: none; opacity: .55; }
 :root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
 :root.no-glow .pl-hover-glow { display: none; }
 :root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }
@@ -1122,15 +1131,51 @@ input[type=range]:focus-visible { outline: none; }
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* ---- "Smooth window animations" OFF or prefers-reduced-motion (<html class="no-motion">, App.tsx) ----
-   The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
-   neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
+   Nothing moves, short fades (docs/decisions.md § "Fade, never move, with motion off"): what appears, leaves or swaps its
+   content cross-fades in --fade-dur on opacity alone (the compositor runs it); every slide, zoom, morph, tilt, spring or
+   glide becomes that fade, or nothing where a fade means nothing — a hover hold, pointer feedback, a highlight that shows
+   the choice (it jumps, like the carets). Loops stand still but the spinner (progress). An exit stays mounted a
+   little longer than its fade (components/motion.ts FADE_EXIT_MS). Rules that mix `transform` with `rotate` / `scale` / `translate` stay apart (the icon block
+   below says why). Guard: the motion-off cells (probe-sidebar lib:slide, probe-filters motion:match, probe-layout
+   tabs:slide:off, probe-select look:motion:off, …) */
+@keyframes nm-in { from { opacity: 0; } }
+@keyframes nm-out { to { opacity: 0; } }
 :root.no-motion .tab-pill, :root.no-motion .seg-hl { transition: none; }
+/* the page of the tab switched to fades in where it is */
+:root.no-motion .app[data-tab-dir] > .scroll { animation: nm-in var(--fade-dur) linear; }
+/* the filter panel and its scrim fade in and out, a group's rows fade in, the count fades in on a change and out at 0 */
 :root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim,
 :root.no-motion :is(.ss-filter, .ss-n) { animation: none !important; transition: none !important; }
+:root.no-motion .wf-col.entering, :root.no-motion .wf-col[data-mode="drawer"], :root.no-motion .wf-scrim, :root.no-motion .wf-none,
+:root.no-motion .wf-col .wf-body, :root.no-motion .ss-filter .ss-n.pop { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .wf-col.closing, :root.no-motion .ss-filter .ss-n.out { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .wf-scrim.closing { transition: opacity var(--fade-dur) linear !important; }
+/* the item sidebar and its scrim fade in and out; a switch cross-fades the old content (the exit layer) into the new; the
+   body's rows fade in when they arrive; the picture's layers cross-fade; the volume pill fades in place; nothing in it
+   lifts, grows or squeezes; the subscribe spinner spins (progress) */
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
-:root.no-motion .app > .scroll { animation: none; }
-:root.no-motion .card-pv-frame { transition: none; }
-:root.no-motion .card-pv-cap > span { animation: none; }
+:root.no-motion .side-panel, :root.no-motion .side-scrim, :root.no-motion .side-panel .side-content:not(.opening),
+:root.no-motion .side-panel .side-content > .side-body:not(.wait) > *, :root.no-motion .side-panel .yt-stage { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel.closing, :root.no-motion .side-panel .side-content.side-exit { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .side-scrim.closing, :root.no-motion .side-panel .sm-full, :root.no-motion .side-panel .sm-anim,
+:root.no-motion .side-panel .side-vol-slide { transition: opacity var(--fade-dur) linear !important; }
+:root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
+:root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
+:root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
+/* the Settings card preview fades in and out in place, its caption fades each new text in (the busy breathing stands still) */
+:root.no-motion .card-pv-frame { transform: none; transition: opacity var(--fade-dur) linear, border-color .2s, box-shadow .25s; }
+:root.no-motion .card-pv-cap > span { animation: nm-in var(--fade-dur) linear both; }
+/* Settings sections fade in in place (no rise, no stagger) and don't lift on hover; a row's accent bar shows without growing */
+:root.no-motion .ssection { animation: nm-in var(--fade-dur) linear both; animation-delay: 0s; }
+:root.no-motion .ssection:hover, :root.no-motion .srow::before { transform: none; }
+/* pointer feedback: hover lifts and press squeezes don't move (the glow and colour still answer); the card's Download bar
+   fades in place. The focused card keeps its lift: a state, shown at once like a caret */
+:root.no-motion :is(.card:hover:not(.focused), .dl, .dl-btn, .btn:active, .st-use) { transform: none; }
+:root.no-motion .card { transition: box-shadow .2s ease; }
+:root.no-motion .ns-btn::before { transform: none; }
+/* loops stand still: the undo / confirm buttons glow without pulsing, the drain toast's bar holds full width, dimmed */
+:root.no-motion .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent), var(--glow-sm); }
+:root.no-motion .drain-fill { animation: none; width: 100%; margin-left: 0; opacity: .45; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
 :root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }
@@ -1145,9 +1190,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion svg.lucide:not(.lucide-chevron-down, .lucide-chevron-up, .lucide-chevron-right, .lucide-chevron-left, .lucide-loader-circle, .sel-caret) {
   rotate: none !important; scale: none !important; }
 :root.no-motion [data-magnet] { translate: none !important; }
+/* the playlist bar: no magnification and no lift; the hovered item's glow (.pl-hover-glow) says which one */
 :root.no-motion .pl-item { transition: box-shadow .2s; }
-:root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
-:root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; }
+:root.no-motion .playlist-bar-row .pl-item:not(.dragging) { transform: none; }
 
 /* ---- the item sidebar (WE-style — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
    An <aside> beside the page under the top bar (anchored to its bottom edge, `.topbar`), docked from 900 px (the grid and the playlist
@@ -1237,7 +1282,7 @@ input[type=range]:focus-visible { outline: none; }
 /* the Video preview's sound (SidePanel.tsx PreviewVolume): the mute chip in the picture's corner, above the click-to-play
    layer; on = sound. Beside it the volume slider, in a dark pill in the preview strip's language (its fill, its 11 px bold
    numerals), that the chip sits at the end of. The pill slides out from under the chip and fades in (transform + opacity)
-   while the chip or the pill is hovered, its slider held, or the keyboard is in it; motion off → it just shows. Hidden it
+   while the chip or the pill is hovered, its slider held, or the keyboard is in it; motion off → it fades in place. Hidden it
    takes no pointer (only the chip opens it). */
 .side-vol { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; }
 .side-mute { position: relative; z-index: 1; width: 32px; height: 32px; padding: 0; border-radius: 50%;
@@ -1267,7 +1312,6 @@ input[type=range]:focus-visible { outline: none; }
 .side-vol-val.follow { color: var(--accent); }
 :root.no-glow .side-vol-notch.on { box-shadow: none; }
 :root.no-motion .side-vol-notch { transition: none; }
-:root.no-motion .side-vol-slide { transition: none; }
 /* the preview switch (GIF / Video / YouTube / Picture): the segmented control's flat strip, fused to the picture's top edge
    (not an overlay, not tabs) — a little shorter than a pill row; its highlight is clipped to the strip's rounded top, and
    the unit's glow stands in for its own */
@@ -1340,7 +1384,6 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-sub-btn:active:not(:disabled) { transform: scale(.97); transition-duration: .08s; }
 .side-sub-btn:disabled { opacity: .6; cursor: default; }
 .side-sub-bar { transform-origin: 0 50%; height: 3px; }
-:root.no-motion .side-sub-spin { animation: none; }
 :root.no-glow .side-sub-ico.subscribed { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent); }
 :root.no-glow .side-sub-ico.subscribing, :root.no-glow .side-sub-ico.unsubscribing { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 :root.bg-live .side-sub-text b, :root.bg-live .side-sub-hint { filter: drop-shadow(0 0 3px #000); }
@@ -1626,6 +1669,8 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: var(--mq, 0); transition: opacity .18s ease-out; }
 .marquee.out { opacity: 0; }
 @keyframes mq-in { from { opacity: 0; } }
-:root.no-motion .marquee, :root.no-motion .marquee::before { animation: none; transition: none; }
+/* motion off: the box still fades in and out (opacity only, --fade-dur); its wash follows the catch at once */
+:root.no-motion .marquee { animation-duration: var(--fade-dur); transition-duration: var(--fade-dur); }
+:root.no-motion .marquee::before { transition: none; }
 /* while a box is drawn the cards take no pointer: no hover lift or preview under the sweep */
 .marquee-on > .grid { pointer-events: none; }

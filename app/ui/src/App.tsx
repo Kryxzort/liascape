@@ -44,7 +44,8 @@ export default function App() {
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
-  // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → none). No direction until
+  // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → the pill jumps, the page
+  // fades in place). No direction until
   // the first switch, so the app's first page doesn't slide in.
   // PERF: `picked` is the tab the user chose — the pill and the tab's label follow it in the click's own frame; `tab` (the
   // page, its top-bar controls and the slide direction) follows it in a background render (useDeferredValue), which
@@ -166,9 +167,18 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
   }, [s.settings?.glows]);
-  // COOL: "Smooth window animations" off, or the OS asks for reduced motion → :root.no-motion: the tab slide and the
-  // playlist bar's dock lift don't animate (index.css); the morphs read useMotion() themselves
-  useEffect(() => { document.documentElement.classList.toggle("no-motion", !motion); }, [motion]);
+  // COOL: "Smooth window animations" off, or the OS asks for reduced motion → :root.no-motion: nothing moves, what appears,
+  // leaves or swaps fades (index.css; docs/decisions.md § "Fade, never move, with motion off"); the morphs read useMotion()
+  // The switch itself shows nothing: it swaps the name of every appear animation that already ran (the page's, an open
+  // panel's, the Settings sections'), and CSS restarts a renamed animation — the page would fade or slide in again. So
+  // what the switch just started is finished at once (loops excepted). Guard: probe-layout motion:switch
+  useEffect(() => {
+    const root = document.documentElement;
+    if (root.classList.contains("no-motion") === !motion) return;
+    root.classList.toggle("no-motion", !motion);
+    for (const a of document.getAnimations())
+      if (a.pending && a instanceof CSSAnimation && a.effect?.getTiming().iterations !== Infinity) a.finish();
+  }, [motion]);
 
   // Library-tab Import (parity: library action lives here, not buried in Settings).
   const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {

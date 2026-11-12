@@ -14,7 +14,8 @@
 //   cardpv:hover       a hover hands the clip over to the real file and back
 //   cardpv:noApply     clicks, double-clicks, right-clicks and keys apply, play, add or open nothing; the aria says so
 //   cardpv:offscreen   scrolled away: no card, no media, no clip request; window inactive: nothing plays
-//   cardpv:motion      motion on: it fades in and a size change morphs; "Smooth window animations" off: both instant, and
+//   cardpv:motion      motion on: it fades in and a size change morphs; "Smooth window animations" off: it fades in in
+//                      place (opacity only, in-between frames, no transform), the size changes at once, and
 //                      the cards stay whole, on screen, playing and handing over on hover — also after a toggle in the middle
 //                      of a morph and after a reload
 //   cardpv:noGlow      "Glow effects" off: the frame's hover glow goes; bg-live: still a translucent card
@@ -361,12 +362,12 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("cardpv:motion — it fades in and a size change morphs; motion off: instant, and the cards stay whole, play and hover", async () => {
+    await cell("cardpv:motion — it fades in and a size change morphs; motion off: it fades in place, the size changes at once, and the cards stay whole, play and hover", async () => {
       const v = [], J = JSON.stringify;
       // per-frame samples of the frame's opacity while it comes in, and of the video slot's transform while the size changes
-      const appear = () => pv(`await p.toTop(); const s = []; let run = true;
-        const tick = () => { if (!run) return; const f = p.frame(); if (f) s.push(+getComputedStyle(f).opacity); requestAnimationFrame(tick); }; requestAnimationFrame(tick);
-        document.querySelector(".pv-rows").scrollIntoView({ block: "center" }); await p.sleep(700); run = false; return s`);
+      const appear = () => pv(`await p.toTop(); const s = [], tf = []; let run = true;
+        const tick = () => { if (!run) return; const f = p.frame(); if (f) { const c = getComputedStyle(f); s.push(+c.opacity); tf.push(c.transform); } requestAnimationFrame(tick); }; requestAnimationFrame(tick);
+        document.querySelector(".pv-rows").scrollIntoView({ block: "center" }); await p.sleep(700); run = false; return { s, tf }`);
       const morph = (size) => pv(`const s = []; let run = true;
         const tick = () => { if (!run) return; const el = p.slot("video"); if (el) s.push(getComputedStyle(el).transform); requestAnimationFrame(tick); }; requestAnimationFrame(tick);
         await p.select("Card size", ${J(size)}); await p.sleep(600); run = false; return s`);
@@ -406,10 +407,10 @@ app.whenReady().then(async () => {
       if (!(await needCards(v, "motion"))) return v;
       const mid = (s) => s.filter((o) => o > 0.05 && o < 0.95).length;
       const moved = (s) => s.filter((t) => t !== "none" && t !== "matrix(1, 0, 0, 1, 0, 0)").length;
-      const onA = await appear(), onM = await morph("Large"); await morph("Medium");
+      const { s: onA } = await appear(), onM = await morph("Large"); await morph("Medium");
       await pv(`await p.toRows(); await p.check("Smooth window animations", false); return true`);
-      const offA = await appear(), offM = await morph("Large"); await morph("Medium");
-      const tr = await pv(`return getComputedStyle(p.frame()).transitionDuration`);
+      const { s: offA, tf: offT } = await appear(), offM = await morph("Large"); await morph("Medium");
+      const tr = await pv(`const c = getComputedStyle(p.frame()); return { p: c.transitionProperty, d: c.transitionDuration }`);
       v.push(...(await whole("motion off")));
       await shot("motionoff");
       // turned off in the middle of a morph: motion on, a size change, motion off 80 ms into it
@@ -427,9 +428,12 @@ app.whenReady().then(async () => {
       if (!onA.length || !mid(onA)) v.push(`motion on: no in-between opacity while it came in (${onA.length} frames, ${J(onA.slice(0, 12))})`);
       if (!moved(onM)) v.push(`motion on: the card didn't morph to its new size (${onM.length} frames, all at rest)`);
       if (!offA.length) v.push("motion off: no frames sampled — proved nothing");
-      else if (mid(offA)) v.push(`motion off: ${mid(offA)} in-between frames while it came in (want none) ${J(offA.slice(0, 12))}`);
+      else if (!mid(offA)) v.push(`motion off: it popped in — no in-between opacity frame (want a fade) ${J(offA.slice(0, 12))}`);
+      if (moved(offT)) v.push(`motion off: the frame moved while it came in (${moved(offT)} frames transformed: ${J(offT.find((t) => t !== "none"))})`);
       if (moved(offM)) v.push(`motion off: ${moved(offM)} frames of a size morph (want an instant change)`);
-      if (!/^0s(, 0s)*$/.test(tr)) v.push(`motion off: the frame still has a transition (${tr})`);
+      // its transition: opacity (the fade) and the hover's colours only, the fade short
+      const tp = tr.p.split(", "), td = tr.d.split(", ").map(parseFloat);
+      if (tp.some((x) => /transform|translate|scale|rotate|all/.test(x)) || !tp.includes("opacity") || td[tp.indexOf("opacity") % td.length] > 0.15) v.push(`motion off: the frame's transition isn't a short fade (${J(tr)})`);
       if (cut.some((s) => (s.t !== "none" && s.t !== "matrix(1, 0, 0, 1, 0, 0)") || Math.abs(s.w - s.lw) > 1)) v.push(`motion turned off mid-morph: a card is left scaled ${J(cut)}`);
       return v;
     });
