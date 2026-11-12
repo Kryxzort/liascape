@@ -64,8 +64,6 @@ export const Library = memo(function Library() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const smoothRef = useSmoothScroll(scrollRef);
   useGridFit(scrollRef, "library");
-  // app open / the first Library visit with something playing: the playing card in view (once per session)
-  useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
   // the filter column: the Library's own filter (store libFilter — never Browse's), matched here against what each item
   // knows (workshopFilter.ts localMatcher); the column offers only the tags some item has
   const libFilter = useStore((s) => s.libFilter);
@@ -85,6 +83,9 @@ export const Library = memo(function Library() {
     if (match) f = f.filter((i) => match(facetsOf(i, i.videoPath)));
     return sortItems(f, libSort);
   }, [items, libQuery, libSort, match]);
+  // app open / the first Library visit with something playing: the playing card in view (once per session)
+  const showsPlaying = useMemo(() => !!playingPath && filtered.some((i) => i.videoPath === playingPath), [filtered, playingPath]);
+  useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, showsPlaying);
   // a filter change starts the grid at its top, and the selection keeps only what still shows (Delete / a bulk action must
   // never reach a card the user can't see). Keyed on the filter's value: <Activity> re-runs this on every return to the
   // page, which keeps its view. Guard: probe-filters lib:interplay

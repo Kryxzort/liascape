@@ -26,7 +26,8 @@
 //                         /browse request) at the offset it was left at, exact from the first frame it paints and in every
 //                         frame after, with motion on, off and the item sidebar docked; a notch then glides on from there, →
 //                         steps the focus on in view; a search, a filter or another source starts the list at its top, and
-//                         a switch away and back keeps it there
+//                         a switch away and back keeps it there; a jump to the list's end loads the next pages and stops
+//                         once real cards fill the view
 //   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
 //                         scroll's wheel listener
 //   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
@@ -48,7 +49,8 @@
 //   perf:tabs             on a PERF_N-item library: each real tab click forces no layout from script (an effect / handler
 //                         measuring the new page before its frame does); a switch to Library restyles under PERF_STYLED_MAX
 //                         elements per element of the document (no whole-page restyle) and runs no requestAnimationFrame
-//                         callback; prints the longest task, what mounted and what was restyled
+//                         callback, with a Library card playing that the playlist bar doesn't hold; prints the longest task,
+//                         what mounted and what was restyled
 //   perf:sidebar          right-click open / switch / Escape close re-render the sidebar, not the grid's cards or the
 //                         playlist bar (React's commit hook counts the components that ran), and force no layout
 //                         (LIASCAPE_PERF_DUMP=1: every step's trace → <LIASCAPE_OUT>/perf-trace-<n>.json)
@@ -179,6 +181,7 @@ const BR_PAGES = 6;           // pages the stub serves before an empty one (the 
 const BR_LOADED = 160;        // cards loaded (4 pages) before the offset is taken: rows the user scrolled through
 const BR_FRAMES = 30;         // frames sampled after the return: none may move the grid
 const BR_TOL = 0.5;           // px: the offset and the anchor card's place come back exact (the layout's own resolution)
+const BR_MARGIN = 400;        // px: how near the view a placeholder asks for the next page (views/Browse.tsx rootMargin)
 const BR_THUMBS = [];
 function makeBrowseThumbs() {
   if (BR_THUMBS.length) return;
@@ -312,6 +315,11 @@ async function perfSetup() {
   }
   if (paths.filter(Boolean).length < PERF_N) throw new Error(`perf setup: imported ${paths.filter(Boolean).length} of ${PERF_N}`);
   await post("/playlist/state", { videoPaths: paths.slice(0, PERF_PLAYLIST), settings: null, name: null });
+  // a wallpaper applied from the grid plays: the Library shows it, the playlist bar doesn't hold it (perf:tabs)
+  const playing = paths[PERF_N - 1];
+  await post("/apply", { path: playing });
+  for (let i = 0; i < 60 && (await http("GET", "/current")).json?.path !== playing; i++) await sleep(250);
+  if ((await http("GET", "/current")).json?.path !== playing) throw new Error("perf setup: the applied library item isn't playing");
   const d = dbg(); await d.sendCommand("Page.enable");
   await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: RC_HOOK });
   await win.loadURL(withToken(U + "/"));
@@ -972,9 +980,22 @@ app.whenReady().then(async () => {
         await page(`m.byText(".pill", ${JSON.stringify(ws.name)}).click();`);
         for (let i = 0; i < 60 && !((await at())?.n >= BR_PER_PAGE); i++) await sleep(100);
         win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
+        // a jump to the end of the list (End, the scrollbar dragged down) lands among the placeholders, past the first one:
+        // the next pages come, and the loading stops once real cards fill the view (the placeholders stay below: more remain)
+        const settle = async () => { let n = await posts();
+          for (let i = 0; i < 40; i++) { await sleep(300); const k = await posts(); if (k === n && !(await js(`!!document.querySelector(".loadbar")`))) return; n = k; } };
+        await settle();
+        const j0 = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"), sk = sc.querySelector(".skel-card"); if (!sk) return null;
+          sc.scrollTop = sc.scrollHeight; return { n: sc.querySelectorAll(".card:not(.skel-card)").length, past: sc.getBoundingClientRect().top - sk.getBoundingClientRect().bottom };`);
+        const jp = await posts(); await settle();
+        const j1 = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); return { n: sc.querySelectorAll(".card:not(.skel-card)").length, skel: sc.querySelectorAll(".skel-card").length };`);
+        console.log(`        jump to the end: ${j0 ? `${j0.n} cards, the first placeholder ${j0.past.toFixed(0)} px above the view` : "no placeholders"} → ${j1.n} cards (${(await posts()) - jp} /browse requests), ${j1.skel} placeholders left`);
+        if (!j0 || j0.past <= BR_MARGIN + 100) v.push(`jump to the end: ${j0 ? `the first placeholder was only ${j0.past.toFixed(0)} px above the view` : "no placeholders"} (want > ${BR_MARGIN + 100}) — proved nothing`);
+        else if (j1.n <= j0.n) v.push(`jump to the end: still ${j1.n} cards — the placeholders in view never asked for the next page`);
+        else if (!j1.skel) v.push(`jump to the end: it loaded to the list's end (${j1.n} cards) — the view followed the placeholders down as each page landed`);
         // kept: a deep offset comes back exact, nothing requested
         const s0 = await deep(0.55);
-        if (!s0 || s0.n < BR_LOADED || s0.top < 1500) return [`couldn't scroll the stubbed list deep (${show(s0)}; want ≥ ${BR_LOADED} cards, ≥ 1500 px) — proved nothing`];
+        if (!s0 || s0.n < BR_LOADED || s0.top < 1500) return [...v, `couldn't scroll the stubbed list deep (${show(s0)}; want ≥ ${BR_LOADED} cards, ≥ 1500 px) — proved nothing`];
         await roundTrip("motion on", s0);
         // a notch after the return glides on from the kept offset (the smooth scroll bound to the rebuilt grid)
         const g = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); const b = sc.getBoundingClientRect();
@@ -1153,13 +1174,17 @@ app.whenReady().then(async () => {
         const r = await perfStep(async () => { await clickAt(at); await sleep(900); });
         // the page the click asked for is the one showing (a kept page is in the document while hidden too)
         const showing = await js(`(() => { const sc = [...document.querySelectorAll(".app > .scroll")].filter((e) => e.offsetParent);
-          return { n: sc.length, lib: sc.length === 1 && sc[0].classList.contains("lib-scroll") ? sc[0].querySelectorAll(".card.lib").length : -1 }; })()`);
+          return { n: sc.length, lib: sc.length === 1 && sc[0].classList.contains("lib-scroll") ? sc[0].querySelectorAll(".card.lib").length : -1,
+            playing: document.querySelectorAll(".lib-scroll .card.playing").length, barPlaying: document.querySelectorAll(".pl-item.playing").length }; })()`);
         rows.push({ t, ...r, showing });
         console.log(`        → ${t.padEnd(8)} longest task ${r.longest.toFixed(0)} ms, busy ${r.busy.toFixed(0)} ms, script ${r.script.toFixed(0)} ms (one task ${r.maxScript.toFixed(0)} ms = ${(r.share * 100).toFixed(0)} %), ${r.forced} forced layouts (${r.forcedMs.toFixed(1)} ms), rendered ${r.rendered}, mounted ${r.mounted}, styled ${r.styled} of ${r.dom} elements, ${r.rafs} rAF callbacks`);
       }
       const lib = rows.filter((r) => r.t === "Library");
       for (const r of rows) if (r.showing.n !== 1) v.push(`→ ${r.t}: ${r.showing.n} pages showing after the switch (one)`);
       for (const r of lib) if (r.showing.lib < PERF_N) v.push(`→ Library: the Library page isn't showing its ${PERF_N} cards (${r.showing.lib}) — nothing measured (proved nothing)`);
+      // perfSetup's playing item is a Library card the playlist bar doesn't hold: the bar's travel to the playing item has
+      // nothing to find (it must not look for it on every return)
+      for (const r of lib) if (r.showing.playing !== 1 || r.showing.barPlaying) v.push(`→ Library: ${r.showing.playing} playing cards, ${r.showing.barPlaying} playing bar items (want 1, 0) — the rAF count proved nothing`);
       // the Library page stays mounted while another tab shows (App.tsx): coming back reveals it, nothing is built again
       for (const r of lib) if (r.mounted > PERF_KEPT_MOUNTS_MAX) v.push(`→ Library: ${r.mounted} components mounted (≤ ${PERF_KEPT_MOUNTS_MAX}): the page was built again, not kept`);
       // a page that is built (Settings, a first visit) builds in short slices: no one task runs most of the switch's script

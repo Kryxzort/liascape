@@ -58,7 +58,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   // the source's filter column: the Workshop's (its tags go to Steam), the local WE folder's (matched here), or none
   const scope = useStore((s) => s.browseScope());
   // the filter column's "In my library" row (UI-only, workshopFilter.ts LIBRARY_TAG): ✓ = only owned, ✕ = hide owned —
-  // filtered here, over the pages already loaded (the infinite-scroll sentinel keeps loading while a page thins out)
+  // filtered here, over the pages already loaded (the placeholders keep loading while a page thins out)
   const libMode = useStore((s) => { const sc = s.browseScope(); if (!sc) return null; const f = filterOf(s, sc);
     return f.include.includes(LIBRARY_TAG) ? "only" : f.exclude.includes(LIBRARY_TAG) ? "hide" : null; });
   // the local WE folder holds its whole list: its tags filter it here, no request (workshopFilter.ts localMatcher)
@@ -72,7 +72,6 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     return match ? all.filter((w) => match(facetsOf(w, w.pageUrl))) : all;
   }, [wallpapers, browseSort, libMode, libKeys, match]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinel = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
   const smoothRef = useSmoothScroll(scrollRef);
@@ -83,13 +82,15 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const localView = local ? JSON.stringify([weFilter.include, weFilter.exclude, weFilter.featureMatch, weFilter.genreMatch]) : "";
   useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}`);
 
+  // any placeholder near the view asks for the next page, not only the first: a jump past it (End, the scrollbar dragged
+  // to the bottom) lands among the later ones, and the first would never come into range. Observing fires an initial
+  // callback, so the re-run after a page lands keeps loading while placeholders are STILL in range. Guard: probe-layout tabs:browse
   useEffect(() => {
-    const el = sentinel.current;
-    if (!el) return;
-    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) loadMore(); },
-      { root: scrollRef.current, rootMargin: "400px" });
-    io.observe(el); // fires an initial callback for the current state → keeps loading if the trigger
-                    // is STILL in view after a page lands (re-run on wallpapers.length below)
+    const sc = scrollRef.current;
+    const els = sc ? sc.querySelectorAll(":scope > .grid > .skel-card") : [];
+    if (!sc || !els.length) return;
+    const io = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) loadMore(); }, { root: sc, rootMargin: "400px" });
+    for (const el of els) io.observe(el);
     return () => io.disconnect();
   }, [loadMore, hasMore, wallpapers.length]);
 
@@ -176,11 +177,11 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
               onCancel={cardCancel} onClick={cardClick} onDownload={cardDownload} onContext={cardContext} onMiddle={cardMiddle} />
           ))}
           {/* INFINITE FEEL: while more pages exist, always render a block of placeholder cards right
-              after the real ones (they flow inline, filling the last partial row — no gap). The first
-              placeholder is the load trigger: scrolling it toward view fires loadMore, which inserts the
-              next page before the block and pushes a fresh batch down. */}
+              after the real ones (they flow inline, filling the last partial row — no gap). They are the
+              load trigger: one coming toward view fires loadMore, which inserts the next page before the
+              block and pushes a fresh batch down. */}
           {hasMore && Array.from({ length: 72 }).map((_, i) => (
-            <div className="card lib skel-card" key={`ph${i}`} ref={i === 0 ? sentinel : undefined}>
+            <div className="card lib skel-card" key={`ph${i}`}>
               <div className="thumb-wrap skel" />
             </div>
           ))}

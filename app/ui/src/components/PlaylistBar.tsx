@@ -181,7 +181,7 @@ export function PlaylistBar() {
     if (!first || !last || e.clientX < first.left || e.clientX > last.right || e.clientY < top) hv.set(null);
   };
   // …and the playlist bar's playing item (horizontal; once per session)
-  useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, playlist.length);
+  useTravelToPlaying(rowRef, "playlistBar", "x", ".pl-item.playing", playingPath, !!playingPath && playlist.includes(playingPath));
   // expose the playlist bar's live height as --playlist-bar-h so the library scroll can pad its bottom enough to
   // reveal the last row above the bar — whether it's collapsed or expanded.
   // PERF: from the observer's own size (its first callback lands after the frame's layout, before its paint), written only

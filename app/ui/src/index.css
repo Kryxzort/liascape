@@ -435,7 +435,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes shimmer { to { transform: translateX(100%); } }
 /* motion off: a still placeholder (the highlight waits off the card's left edge). Guard: probe-layout perf:skeleton */
 :root.no-motion .skel::after { animation: none; }
-.skel-card { pointer-events: none; }
+/* never the scroll anchor: a view of placeholders alone (a jump to the list's end) would follow them down as each page
+   lands above them, stay among them and load page after page to the list's end. Unanchored, the page lands in view and
+   the loading stops once real cards fill it. Guard: probe-layout tabs:browse */
+.skel-card { pointer-events: none; overflow-anchor: none; }
 .skel-card .thumb-wrap.skel { aspect-ratio: var(--thumb-aspect, 1 / 1); border-radius: 10px 10px 0 0; }
 .skel-line { height: 11px; border-radius: 5px; } .skel-line.w1 { width: 70%; }
 .err-modal { width: min(460px, 90vw); padding: 22px 24px; }

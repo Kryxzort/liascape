@@ -50,11 +50,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
-- [ ] probe-layout `perf:tabs`: each switch to the Library runs ~50 rAF callbacks in a full `--probe probe-layout.js` run
-      (with a card playing), 0 when the cell runs alone (`--only perf:tabs`): a loop an earlier cell starts keeps running.
-      Find it (a `requestAnimationFrame` wrapper recording stacks) and stop it while its page is hidden.
-- [ ] probe-layout `tabs:browse` can't set itself up in a full run ("couldn't scroll the stubbed list deep … 120 cards"),
-      passes alone (tree and HEAD alike): an earlier cell leaves Browse's list or scroll in another state.
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

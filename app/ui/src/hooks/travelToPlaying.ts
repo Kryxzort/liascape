@@ -7,15 +7,18 @@ import { FADE_EXIT_MS } from "../components/motion";
 // container jumps (no smooth glide: it's where the page opens) so the playing item sits in the middle of the view. Once
 // per session per list (`key`): coming back to the tab later, or a switch while the app is open, never moves the user's
 // scroll. Nothing playing / the item not in the list (a search hides it) → nothing happens, and the next chance tries again.
+// `shown` says whether the list renders the playing item: the search for its element runs only then, since the page's
+// effects run again on every return to it (App.tsx <Activity>) and a search for an item that isn't there would run a
+// frame loop each time. Guard: probe-layout perf:tabs
 // `selector` finds the playing element inside `ref` (`.card.playing`, `.pl-item.playing`). The grid's cards are
 // `content-visibility: auto` (their offscreen size is the intrinsic estimate), so the jump is re-aimed over a few frames
 // while the cards around the target render at their real size.
 const traveled = new Set<string>();
 
 export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: string, axis: "x" | "y", selector: string,
-  playingPath: string | null, count: number) {
+  playingPath: string | null, shown: boolean) {
   useEffect(() => {
-    if (traveled.has(key) || !playingPath || count === 0) return;
+    if (traveled.has(key) || !playingPath || !shown) return;
     let raf = 0, tries = 0, cancelled = false;
     const aim = () => {
       const sc = ref.current, el = sc?.querySelector<HTMLElement>(selector);
@@ -41,7 +44,7 @@ export function useTravelToPlaying(ref: RefObject<HTMLElement | null>, key: stri
     sc?.addEventListener("wheel", stop, { passive: true });
     sc?.addEventListener("pointerdown", stop);
     return () => { stop(); sc?.removeEventListener("wheel", stop); sc?.removeEventListener("pointerdown", stop); };
-  }, [playingPath, count]); // eslint-disable-line
+  }, [playingPath, shown]); // eslint-disable-line
 }
 
 // "Go to the playing wallpaper" buttons — the Library top bar's and the playlist bar head's. `glideTo` eases the scroll container so `selector`'s
