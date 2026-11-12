@@ -166,6 +166,9 @@ public static class ServerHost
             TrailerOps.Kick("startup"); // the library's Workshop items without a cached YouTube trailer answer
         });
 
+        // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
+        _ = Task.Run(() => { try { ClipStore.Sweep(); } catch (Exception e) { Console.WriteLine($"clips: sweep failed: {e.Message}"); } });
+
         // While the app is open, measure any un-measured library audio in the background so loudness
         // normalization is ready before clips play (only when the feature is on).
         if (startup.NormalizeAudio)
@@ -224,30 +227,6 @@ public static class ServerHost
         try { File.Move(tmp, outPath, true); } catch { try { await File.WriteAllBytesAsync(outPath, data); File.Delete(tmp); } catch { } }
     }
 
-    // A preview clip for "Animate wallpapers without a GIF" (app/ui/src/components/autoplay.ts): the first CLIP_SECONDS of a video,
-    // CLIP_W px wide at most (the card stills' width), ≤ CLIP_FPS, no audio — 100-300 KB. Every preview on screen plays
-    // at once, and the wallpaper's own file can't: a full-size <video> keeps its HTTP/1.1 connection open while it plays
-    // (Chromium allows 6 per host, so past ~6 the rest never load and API calls queue behind them) and decodes 1080p-4K
-    // frames for a card a few hundred pixels wide. The clip downloads in one response and decodes ~10-40x fewer pixels.
-    private const int CLIP_SECONDS = 10, CLIP_W = 640, CLIP_FPS = 24;
-    private static readonly string ClipParams = $"{CLIP_SECONDS}s{CLIP_W}w{CLIP_FPS}fps"; // in the cache key: new values re-make the clips
-    private static void MakeClip(string video, string outMp4)
-    {
-        string tmp = outMp4 + ".tmp.mp4";
-        try
-        {
-            RunFfmpeg(["-nostdin", "-t", CLIP_SECONDS.ToString(), "-i", video, "-an", "-sn", "-dn",
-                // -fpsmax caps a faster source without padding a slower one with duplicate frames (each still a decode)
-                "-vf", $"scale='min({CLIP_W},iw)':-2", "-fpsmax", CLIP_FPS.ToString(), "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart", tmp, "-y"],
-                // PERF: a scroll over new cards makes several at once; niced, they yield the CPU to the UI's frames
-                background: true);
-            if (File.Exists(tmp) && new FileInfo(tmp).Length > 0) File.Move(tmp, outMp4, true);
-        }
-        catch { }
-        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-    }
-
     // A non-black/white STILL for the card thumbnail (so AutoPlayGifs-off doesn't show the gif's
     // black frame-0). First frame with YAVG 30–225, else frame 1, else frame 0.
     private static void ExtractStill(string gifPath, string outJpg, int width = 0)
@@ -272,7 +251,7 @@ public static class ServerHost
     // requests at once; ungated, each spawns up to 3 ffmpeg → CPU meltdown + slow thumbnails. Bound to
     // ~half the cores (min 2, max 6) so extractions run in parallel but never swamp the machine.
     private static readonly SemaphoreSlim _ffmpegGate = new(Math.Clamp(Environment.ProcessorCount / 2, 2, 6));
-    private static string RunFfmpeg(string[] args, bool background = false)
+    private static string RunFfmpeg(string[] args)
     {
         _ffmpegGate.Wait();
         try
@@ -280,7 +259,6 @@ public static class ServerHost
             var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi)!;
-            if (background) try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
             // drain both pipes concurrently — a full stderr buffer while we block reading stdout (or vice
             // versa) deadlocks the child; ReadToEndAsync on one + sync read on the other avoids it.
             var errTask = p.StandardError.ReadToEndAsync();
@@ -524,8 +502,13 @@ public static class ServerHost
 
         // ---- library ----------------------------------------------------------------------
         app.MapGet("/library", () => Results.Json(LibraryService.LoadAll()));
-        app.MapPost("/library/delete", (LibraryItem item) => { LibraryService.Delete(item); return Results.Ok(); });
-        app.MapPost("/library/clear", () => { LibraryService.DeleteAll(); return Results.Ok(); });
+        app.MapPost("/library/delete", (LibraryItem item) =>
+        {
+            LibraryService.Delete(item);
+            ClipStore.ForgetUnder(item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath) ?? item.VideoPath);
+            return Results.Ok();
+        });
+        app.MapPost("/library/clear", () => { LibraryService.DeleteAll(); ClipStore.ForgetUnder(DownloadHelper.LibraryPath); return Results.Ok(); });
         // save the override (drops to global when == global) THEN apply it live to the playing wallpaper
         app.MapPost("/library/volume", (OverrideReq r) => { LibraryService.SaveVolumeOverride(r.Path, r.IntValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
         app.MapPost("/library/speed", (OverrideReq r) => { LibraryService.SaveSpeedOverride(r.Path, r.DoubleValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
@@ -804,27 +787,13 @@ public static class ServerHost
             return Results.Stream(fs, ct, enableRangeProcessing: true);
         });
 
-        // A small preview clip of a local video (MakeClip): what "Animate wallpapers without a GIF" plays. Cached on path+mtime+size
-        // (+ the clip's parameters), like /still; a missing or failed clip answers 502 and the card keeps its still.
-        app.MapGet("/clip", async (string path) =>
+        // A video preview clip (Web/ClipStore.cs): its info for a card's box, or a clip's bytes. ClipStore checks every parameter.
+        app.MapGet("/clip", (HttpContext ctx, string? path) => ClipStore.Handle(ctx, path));
+        // The app went inactive with these boxes last seen off screen (shrink clips now 2x wider than they need), or came back.
+        app.MapPost("/clip/shrink", (ClipShrinkBody body) =>
         {
-            if (!ApiSecurity.MediaAllowed(path)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
-            if (!File.Exists(path)) return Results.NotFound();
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "video_clips");
-            Directory.CreateDirectory(dir);
-            var fi = new FileInfo(path);
-            var key = $"{path}|{fi.LastWriteTimeUtc.Ticks}|{fi.Length}|{ClipParams}";
-            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..24];
-            var mp4 = Path.Combine(dir, hash + "_clip.mp4");
-            if (!File.Exists(mp4))
-                await ExtractOnce(mp4, () =>
-                {
-                    if (!File.Exists(mp4)) { MakeClip(path, mp4); PruneAnimCache(dir, 512L * 1024 * 1024); }
-                    return Task.CompletedTask;
-                });
-            if (!File.Exists(mp4)) return Results.StatusCode(502);
-            try { File.SetLastAccessTimeUtc(mp4, DateTime.UtcNow); } catch { }
-            return Results.Stream(File.OpenRead(mp4), "video/mp4", enableRangeProcessing: true);
+            _ = Task.Run(() => ClipStore.SetIdle(body.Idle, body.Items ?? []));
+            return Results.Ok();
         });
 
         // Animated preview (workshop gifs): like library, serve from a LOCAL CACHED FILE with range/length
@@ -994,5 +963,6 @@ public static class ServerHost
     public record PlayFromReq(List<string> Paths, int StartIndex, PlaylistSettings? Settings);
     public record ImportReq(string Path, string Title);
     public record SceneLoudnessReq(List<string>? Paths = null, bool? Force = null);
+    public record ClipShrinkBody(bool Idle, List<ClipStore.ShrinkItem>? Items);
     public record OpenReq(string? Path, string? Url, bool Reveal, bool IsScene = false, string? WorkshopId = null, string? CopiedSceneDir = null);
 }

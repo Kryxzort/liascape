@@ -220,6 +220,24 @@ done
 post /settings '{"PauseWhenCovered":"maximized","GlobalPlaylistStart":"start_over","RotateWhileParked":true,"SettingsLevel":"standard","Theme":"Nord"}' >/dev/null; snap t4
 same t0 t4 '["theme"]' "the Task 10 keys back to their defaults"
 
+echo "== Video preview quality: a file without it loads mid; partial bodies set / keep it; unknown values read as mid"
+[ "$(f .videoPreviewQuality s0)" = '"mid"' ] && ok "a file without videoPreviewQuality: mid (the default)" || bad "videoPreviewQuality after loading a file without it: $(f .videoPreviewQuality s0)"
+snap v0
+post /settings '{"VideoPreviewQuality":"high"}' >/dev/null; snap v1
+[ "$(f .videoPreviewQuality v1)" = '"high"' ] && ok "{VideoPreviewQuality:high} → high" || bad "{VideoPreviewQuality:high} → $(f .videoPreviewQuality v1)"
+same v0 v1 '["videoPreviewQuality"]' "{VideoPreviewQuality:high}"
+[ "$(disk .VideoPreviewQuality)" = high ] && ok "VideoPreviewQuality high written to settings.json" || bad "settings.json VideoPreviewQuality → $(disk .VideoPreviewQuality)"
+post /settings '{"theme":"Nord"}' >/dev/null; snap v2
+[ "$(f .videoPreviewQuality v2)" = '"high"' ] && ok "an unrelated partial body keeps videoPreviewQuality high" || bad "an unrelated partial body changed videoPreviewQuality to $(f .videoPreviewQuality v2)"
+for pair in 'videoPreviewQuality:LOW:low' 'VideoPreviewQuality:ultra:mid' 'videoPreviewQuality:high:high' 'videoPreviewQuality::mid'; do
+  IFS=: read -r k v want <<< "$pair"
+  post /settings "{\"$k\":\"$v\"}" >/dev/null; snap v3
+  [ "$(f .videoPreviewQuality v3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .videoPreviewQuality v3), want $want"
+done
+code_=$(code /settings '{"VideoPreviewQuality":5}'); [ "$code_" = 400 ] && ok "{VideoPreviewQuality:5} → 400" || bad "{VideoPreviewQuality:5} → $code_"
+snap v4; [ "$(f .videoPreviewQuality v4)" = '"mid"' ] && ok "…and videoPreviewQuality stays mid" || bad "videoPreviewQuality after the rejected body: $(f .videoPreviewQuality v4)"
+same v0 v4 '["theme"]' "videoPreviewQuality back to mid"
+
 echo "== UI toggles: defaults on a file without the keys, partial bodies set / keep them, in either key spelling"
 for spec in "${UI_TOGGLES[@]}"; do
   k=${spec%%:*}; def=${spec##*:}; K=$(python3 -c "print('$k'[0].upper()+'$k'[1:])"); inv=$([ "$def" = true ] && echo false || echo true)

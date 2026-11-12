@@ -57,6 +57,14 @@ public class AppSettings
     public bool AutoPlayGifs { get; set; } = false;
     public bool AutoPlayVideoThumbs { get; set; } = false;   // UI: library/playlist video previews play without a hover (every one on screen — components/autoplay.ts)
     public bool PreferVideoThumbs { get; set; } = false;     // UI: an item with a gif AND its own video previews with the video (components/mediaAssets.ts previewVideo)
+    // UI: "Video preview quality" — low | mid (default) | high: the clips' size factor, fps and CRF (components/clipSource.ts,
+    // Web/ClipStore.cs). An unknown value reads as the default.
+    private string _videoPreviewQuality = "mid";
+    public string VideoPreviewQuality
+    {
+        get => _videoPreviewQuality;
+        set => _videoPreviewQuality = value?.ToLowerInvariant() is "low" or "mid" or "high" ? value.ToLowerInvariant() : "mid";
+    }
     public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
     // UI: how much of Settings shows — basic | standard (default) | advanced | expert (.claude/rules/ui/state-and-api.md § Settings page). Hidden

@@ -2,13 +2,13 @@ import { useEffect, useState, type RefObject } from "react";
 import { useStore } from "../store";
 
 // Settings → Look & feel → "Animate wallpapers without a GIF": a library card / playlist-bar item whose preview is a VIDEO
-// (components/mediaAssets.ts previewVideo) plays it without a hover. The same <video> layer the hover uses. Every such
-// item ON SCREEN plays, no cap; what keeps it bounded is that nothing else does:
+// (components/mediaAssets.ts previewVideo) plays it without a hover (components/MotionThumb.tsx; a hover hands it over to
+// the real file). Every such item ON SCREEN plays, no cap; what keeps it bounded is that nothing else does:
 //   - only an item on screen plays (one shared IntersectionObserver; scrolled away, or its page hidden behind another
 //     tab, = the <video> unmounts and its decoder goes),
 //   - none while the window is backgrounded or unfocused (`appActive`).
-// Each plays a small clip, not the wallpaper's file (MotionThumb, the backend's /clip), but still has a decoder of its
-// own: the cost grows with how many are on screen, and the Settings hint says so. Guard: matrix appear:videoThumbs.
+// Each plays a clip sized to its card (components/clipSource.ts), not the wallpaper's file, but still has a decoder of its
+// own: the cost grows with how many are on screen and with "Video preview quality". Guard: matrix appear:videoThumbs.
 type Seen = (on: boolean) => void;
 const watchers = new Map<Element, Seen>();
 let io: IntersectionObserver | null = null;

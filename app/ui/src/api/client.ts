@@ -31,8 +31,22 @@ export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? 
 export const img = (u: string, referer?: string) =>
   withToken(`${MEDIA}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
 export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}`);
-// API: a small preview clip of a local video (/clip): what "Animate wallpapers without a GIF" plays (components/autoplay.ts)
-export const clip = (path: string) => withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}`);
+// API: the preview clips of a local video (/clip, the backend's Web/ClipStore.cs): what "Animate wallpapers without a GIF" plays
+// (components/clipSource.ts). clipInfo names the clip to play now for a box of w × h device pixels at a quality (`v`, an
+// immutable file) and whether a better one is being made (`pending`: ask again); clipFile is that clip's bytes.
+export type ClipQuality = "low" | "mid" | "high";
+export type ClipInfo = { v: string | null; full: boolean; pending: boolean };
+export async function clipInfo(path: string, w: number, h: number, q: ClipQuality): Promise<ClipInfo> {
+  const r = await fetch(withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&w=${w}&h=${h}&q=${q}&info=1`));
+  if (!r.ok) throw new Error(`/clip → ${r.status}`);
+  return r.json();
+}
+export const clipFile = (path: string, v: string) => withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&v=${encodeURIComponent(v)}`);
+// API: the app went inactive with these clip boxes last seen off screen (the backend shrinks a clip 2x wider than needed),
+// or came back (idle false)
+export const clipShrink = (idle: boolean, items: { path: string; w: number; h: number; q: ClipQuality }[]) =>
+  fetch(`${API}/clip/shrink`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
+    body: JSON.stringify({ idle, items }) }).catch(() => undefined);
 // animated preview: serve remote gifs from a disk cache (/anim, range/length → loops cleanly, like
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops

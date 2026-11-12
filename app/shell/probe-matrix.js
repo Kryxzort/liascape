@@ -2222,6 +2222,238 @@ C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// The preview clips (Web/ClipStore.cs, components/clipSource.ts, components/PreviewPlayer.tsx). k1..k4 are 320×180, as
+// narrow as any clip, so these cells import a 1280×720 video of their own (deleted again at the end, which deletes its
+// clips too) and play it under "Animate wallpapers without a GIF" in its card and its playlist-bar item.
+const CLIP_DIR = path.join(E.HOME || "", ".cache", "liascape", "video_clips");
+const clipFiles = () => { try { return fs.readdirSync(CLIP_DIR).filter((f) => f.endsWith(".mp4")); } catch { return []; } };
+async function clipFixture(title, secs = 30) {
+  const f = path.join(OUT, `${title}.mp4`);
+  if (!fs.existsSync(f)) cp.execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30",
+    "-t", String(secs), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", f], { timeout: 60000 });
+  return (await post("/library/import", { path: f, title })).json?.videoPath ?? null;
+}
+async function dropFixture(p) {
+  const it = ((await http("GET", "/library")).json || []).find((i) => i.videoPath === p);
+  if (it) await post("/library/delete", it);
+}
+// what a card's preview shows on every frame for `ms`: the shown video's kind (real = the wallpaper's own file via /media,
+// short / full = the clip's file name parts), its time and readiness, the incoming one under it, and how many videos in the
+// page play a real file
+const CLIP_SAMPLE = (title, ms) => `(() => new Promise((res) => { const m = window.__mx, out = [], t0 = performance.now();
+  const kind = (u) => !u ? null : u.includes("/media?") ? "real" : (/[?&]v=([^&]+)/.exec(u) || [])[1] ? decodeURIComponent(/[?&]v=([^&]+)/.exec(u)[1]).split("_").slice(2).join("_") : "clip?";
+  const step = () => { const w = m.card(${JSON.stringify(title)})?.querySelector(".thumb-wrap"), v = w?.querySelector("video.thumb.anim"), inc = w?.querySelector("video.thumb:not(.anim)");
+    out.push({ t: +(performance.now() - t0).toFixed(1), k: v ? kind(v.src) : null, ct: v ? +v.currentTime.toFixed(3) : null, rs: v ? v.readyState : 0, p: v ? v.paused : null,
+      inc: inc ? kind(inc.src) : null, real: [...document.querySelectorAll("video")].filter((x) => (x.getAttribute("src") || "").includes("/media?")).length });
+    if (performance.now() - t0 < ${ms}) requestAnimationFrame(step); else res(out); };
+  requestAnimationFrame(step); }))()`;
+// the frame where the shown video changed from one kind to the other, and whether its time ran on across it: the new one's
+// time = the old one's + the wall time between the two frames (within ~3 frames: a frame or two plus the sampling's jitter),
+// no frame without a playing video around it, and its time advancing like the clock over the next half second
+function clipSwap(sm, from, to) {
+  const i = sm.findIndex((x, k) => k > 0 && from(sm[k - 1].k) && to(x.k));
+  if (i < 0) return { swapped: false, kinds: [...new Set(sm.map((x) => x.k))] };
+  const a = sm[i - 1], b = sm[i], jump = +(b.ct - (a.ct + (b.t - a.t) / 1000)).toFixed(3);
+  const after = sm.filter((x) => x.t > b.t && x.t <= b.t + 500 && x.k === b.k), last = after[after.length - 1];
+  const ran = last ? +((last.ct - b.ct) - (last.t - b.t) / 1000).toFixed(3) : null;
+  const around = sm.filter((x) => x.t >= a.t - 300 && x.t <= b.t + 300);
+  return { swapped: true, at: b.t, from: a.k, to: b.k, old: a.ct, now: b.ct, jump, ran, blank: around.filter((x) => !x.k || x.rs < 2 || x.p).length };
+}
+const swapOk = (r) => r.swapped && Math.abs(r.jump) <= 0.1 && r.ran != null && Math.abs(r.ran) <= 0.15 && r.blank === 0;
+// the Settings page is built on each visit: wait for a row before using it
+const ROW = (label) => `for (let i = 0; i < 50 && !m.row(${JSON.stringify(label)}); i++) await m.sleep(100); const row = m.row(${JSON.stringify(label)});`;
+const isClip = (k) => !!k && k !== "real", isShort = (k) => !!k && k.endsWith("_short"), isFull = (k) => !!k && k.endsWith("_full");
+
+// /clip checks every parameter (Web/ClipStore.cs Handle): a path outside the library 403, a box or quality that isn't one
+// 400, a clip id that isn't this item's 400; the cache keeps items apart and re-makes a clip only for more (a wider box, a
+// higher quality), never for less.
+C["clip:params"] = { states: ["idle"], noSwitch: true, async run(c) {
+    c.p1 = await clipFixture("clipP1", 12); c.p2 = await clipFixture("clipP2", 12);
+    const port = Number(new URL(U).port) + 1, base = `http://127.0.0.1:${port}/clip`;
+    const get = async (q) => { const r = await fetch(withToken(`${base}?${q}`)); let j = null; try { j = await r.json(); } catch { /* bytes */ } return { s: r.status, j }; };
+    const P = (p) => `path=${encodeURIComponent(p)}`;
+    try {
+      c.codes = {};
+      for (const [n, q] of [["outside", `path=${encodeURIComponent("/etc/passwd")}&info=1&w=200&h=200&q=mid`],
+        ["dotdot", `path=${encodeURIComponent(path.dirname(c.p1) + "/../" + path.basename(path.dirname(c.p1)) + "/" + path.basename(c.p1))}&info=1&w=200&h=200&q=mid`],
+        ["q", `${P(c.p1)}&info=1&w=200&h=200&q=ultra`], ["w", `${P(c.p1)}&info=1&w=-3&h=200&q=mid`], ["h", `${P(c.p1)}&info=1&w=200&h=2e3&q=mid`],
+        ["noBox", `${P(c.p1)}&info=1&q=mid`], ["v", `${P(c.p1)}&v=..%2F..%2Fetc%2Fpasswd`], ["vArgs", `${P(c.p1)}&v=-y%20-i%20x`]])
+        c.codes[n] = (await get(q)).s;
+      const a = await get(`${P(c.p1)}&info=1&w=200&h=200&q=low`), b = await get(`${P(c.p2)}&info=1&w=200&h=200&q=low`);
+      c.a = a.j; c.b = b.j;
+      c.foreign = (await get(`${P(c.p1)}&v=${encodeURIComponent(b.j?.v ?? "")}`)).s;
+      c.mine = (await get(`${P(c.p1)}&v=${encodeURIComponent(a.j?.v ?? "")}`)).s;
+      c.big = (await get(`${P(c.p1)}&info=1&w=9999&h=99999&q=mid`)).j;                    // clamped, then a wider + better clip queued
+      c.up = null; await waitFor(async () => { const r = (await get(`${P(c.p1)}&info=1&w=900&h=900&q=mid`)).j; c.up = r; return r && !r.pending; }, 20000, 400);
+      c.less = (await get(`${P(c.p1)}&info=1&w=100&h=100&q=low`)).j;                     // a smaller box, a lower quality: the same clip
+      c.files = clipFiles();
+    } finally { await dropFixture(c.p1); await dropFixture(c.p2); }
+    c.left = clipFiles().filter((f) => [c.a?.v, c.b?.v, c.up?.v].some((v) => v && f.startsWith(v.split("_")[0])));
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.p1 || !c.p2) return ["couldn't import the 1280×720 fixtures"];
+    const want = { outside: 403, dotdot: 403, q: 400, w: 400, h: 400, noBox: 400, v: 400, vArgs: 400 };
+    for (const [n, code] of Object.entries(want)) if (c.codes[n] !== code) v.push(`/clip ${n}: ${c.codes[n]}, expected ${code}`);
+    if (!c.a?.v || !c.b?.v) v.push(`no clip named for a fixture ${J([c.a, c.b])}`);
+    else if (c.a.v.split("_")[0] === c.b.v.split("_")[0]) v.push(`two videos got the same item key: ${c.a.v} / ${c.b.v}`);
+    if (c.foreign !== 400) v.push(`another item's clip id → ${c.foreign}, expected 400`);
+    if (c.mine !== 200 && c.mine !== 206) v.push(`its own clip id → ${c.mine}, expected the bytes`);
+    if (!c.big?.v) v.push(`a huge box wasn't clamped into a clip: ${J(c.big)}`);
+    const parts = (x) => (x?.v || "").split("_");
+    if (!c.up?.v || c.up.pending || !c.up.full || Number(parts(c.up)[2]) < 960 || parts(c.up)[3] !== "1") v.push(`a 900 px mid box didn't get a full clip ≥ 960 px at mid: ${J(c.up)}`);
+    if (c.less?.v !== c.up?.v || c.less?.pending) v.push(`a smaller box at a lower quality re-made the clip: ${J(c.up)} → ${J(c.less)}`);
+    if (c.left.length) v.push(`the deleted items' clips are still on disk: ${J(c.left)}`);
+    return v;
+  } };
+
+// A card asks for a clip sized to its own box (its CSS px × devicePixelRatio × the quality's factor: Low 0.75, Mid 1, High
+// 1.5) and its playlist-bar item for its own; the item keeps one clip, as wide as the widest of them needs, re-made only
+// for more. Settings → "Video preview quality" applies live: up re-makes, down keeps; the card's shape changes the box,
+// never the clip (the card crops it).
+C["clip:size"] = { states: ["single"], noSwitch: true,
+  // imported before the page loads (it reads the library at start)
+  async pre(c) {
+    c.p = await clipFixture("clipSz", 20);
+    if (!c.p) return;
+    await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
+    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "low" });
+  },
+  async run(c) {
+    if (!c.p) return;
+    try {
+      const setQ = (q) => ui(`m.tab("Settings"); ${ROW("Video preview quality")}
+        row?.querySelectorAll("[role=radio]")[${["low", "mid", "high"].indexOf(q)}]?.click(); await m.sleep(300); m.tab("Library"); await m.sleep(300);`);
+      c.row = await ui(`m.tab("Settings"); ${ROW("Video preview quality")} if (!row?.querySelector("[role=radiogroup]")) return false;
+        row.scrollIntoView({ block: "center" }); await m.sleep(600); return true;`);
+      // how the row looks, kept beside the results (a new control is looked at, not only counted)
+      if (c.row) fs.writeFileSync(path.join(OUT, "clip-quality-settings.png"), (await win.webContents.capturePage()).toPNG());
+      // the info requests the page made and what its card and bar item play: [w, h, q] per place, and the clip's name
+      const look = () => ui(`const P = ${JSON.stringify(c.p)}; const dpr = devicePixelRatio;
+        const reqs = performance.getEntriesByType("resource").map((e) => e.name).filter((u) => u.includes("/clip?") && u.includes("info=1"))
+          .map((u) => new URL(u)).filter((u) => u.searchParams.get("path") === P).map((u) => [+u.searchParams.get("w"), +u.searchParams.get("h"), u.searchParams.get("q")]);
+        const box = (e) => { const b = e?.getBoundingClientRect(); return b ? [Math.ceil(b.width / 8) * 8, Math.ceil(b.height / 8) * 8] : null; };
+        const card = m.card("clipSz")?.querySelector(".thumb-wrap"), bar = m.playlistBar("clipSz");
+        const v = (e) => { const s = e?.querySelector("video.thumb.anim")?.src || ""; const x = /[?&]v=([^&]+)/.exec(s); return x ? decodeURIComponent(x[1]) : null; };
+        return { dpr, reqs, card: box(card), bar: box(bar), cardV: v(card), barV: v(bar) };`);
+      const settle = async (q) => { let r; await waitFor(async () => { r = await look(); const n = r.cardV?.split("_");
+        return n && n[4] === "full" && r.barV === r.cardV && Number(n[3]) >= ["low", "mid", "high"].indexOf(q) && r.reqs.filter((x) => x[2] === q).length >= 2; }, 25000, 500); return r; };
+      await js(`performance.setResourceTimingBufferSize(5000); performance.clearResourceTimings(); true`);
+      c.steps = [];
+      for (const q of ["low", "mid", "high", "low"]) {
+        await js(`performance.clearResourceTimings(); true`);
+        await setQ(q);
+        const r = await settle(q);
+        c.steps.push({ q, ...r, saved: (await getSettings()).videoPreviewQuality });
+      }
+      await js(`performance.clearResourceTimings(); true`);
+      await ui(`m.tab("Settings"); ${ROW("Thumbnail shape")} await m.select("Thumbnail shape", "Widescreen (16:9)"); await m.sleep(300); m.tab("Library"); await m.sleep(800);`);
+      c.wide = { ...(await settle("low")) };
+    } finally { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300); }
+  }, check(c) {
+    const v = [], J = JSON.stringify, F = { low: 0.75, mid: 1, high: 1.5 }, W = [240, 320, 480, 640, 960, 1280, 1920];
+    if (!c.p) return ["couldn't import the 1280×720 fixture"];
+    if (!c.row) v.push("no \"Video preview quality\" switch in Settings");
+    // the clip width a box needs: cover of a 16:9 video, snapped up to the widths, never wider than the source (1280)
+    const need = ([w, h]) => Math.min(1280, W.find((x) => x >= Math.max(w, h * 16 / 9)) ?? 1920);
+    const exp = (b, q, dpr) => b && [Math.round(b[0] * dpr * F[q]), Math.round(b[1] * dpr * F[q])];
+    let prev = null;
+    for (const s of [...c.steps, { ...c.wide, q: "low", wide: true }]) {
+      const n = `${s.wide ? "16:9 cards, " : ""}quality ${s.q}`;
+      if (!s.wide && s.saved !== s.q) v.push(`${n}: the switch didn't save it (videoPreviewQuality ${s.saved})`);
+      for (const [place, b] of [["card", s.card], ["bar item", s.bar]]) {
+        const e = exp(b, s.q, s.dpr);
+        if (!e || !s.reqs.some((r) => r[0] === e[0] && r[1] === e[1] && r[2] === s.q)) v.push(`${n}: the ${place} (box ${J(b)} css px, dpr ${s.dpr}) never asked for ${J(e)} at ${s.q} — asked ${J(s.reqs)}`);
+      }
+      const parts = (s.cardV || "").split("_"), w = Number(parts[2]), qi = Number(parts[3]);
+      if (s.cardV !== s.barV) v.push(`${n}: the card and the bar item play different clips of one item: ${s.cardV} / ${s.barV}`);
+      const widest = Math.max(...[s.card, s.bar].map((b) => b ? need(exp(b, s.q, s.dpr)) : 0));
+      if (!(w >= widest)) v.push(`${n}: the clip is ${w} px, narrower than the ${widest} px its widest place needs (${s.cardV})`);
+      // after the first step: down (and the shape change) keeps the clip, up re-makes it
+      if (prev && s.q === "low" && s.cardV !== prev) v.push(`${n}: going down re-made the clip ${prev} → ${s.cardV} (the bigger one should play on)`);
+      if (prev && s.q !== "low" && s.cardV === prev) v.push(`${n}: going up kept ${prev}`);
+      if (s.cardV && !s.wide && ["low", "mid", "high"].indexOf(s.q) > qi) v.push(`${n}: the clip's quality ${qi} is below what is set`);
+      prev = s.cardV;
+    }
+    return v;
+  } };
+
+// The 10 s stand-in plays first and the full clip takes over mid-play the moment it's ready: from the moment the stand-in
+// is at, never from frame 0, no frame without a playing video.
+C["clip:shortToFull"] = { states: ["single"], noSwitch: true,
+  // imported before the page loads (it reads the library at start)
+  async pre(c) {
+    c.p = await clipFixture("clipSF", 30);
+    if (!c.p) return;
+    await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
+    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid" });
+  },
+  async run(c) {
+    if (!c.p) return;
+    try {
+      c.sm = await js(CLIP_SAMPLE("clipSF", 14000));
+      fs.writeFileSync(path.join(OUT, "clip-shortToFull.json"), JSON.stringify(clipSwap(c.sm, isShort, isFull)));
+    } finally { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300); }
+  }, check(c) {
+    if (!c.p) return ["couldn't import the 1280×720 fixture"];
+    const r = clipSwap(c.sm, isShort, isFull), J = JSON.stringify;
+    if (!c.sm.some((x) => isShort(x.k))) return [`the stand-in never played (kinds ${J([...new Set(c.sm.map((x) => x.k))])})`];
+    if (!r.swapped) return [`the full clip never took over within 14 s ${J(r)}`];
+    return swapOk(r) ? [] : [`the hand-over from the stand-in to the full clip wasn't seamless ${J(r)}`];
+  } };
+
+// A hover hands the playing clip over to the wallpaper's own file at the same moment (only the hovered card loads one), and
+// the clip takes back over on the way out, the real file released; without "Animate wallpapers without a GIF" a hover
+// plays the real file straight away.
+C["clip:hoverHandoff"] = { states: ["single"], noSwitch: true,
+  // imported before the page loads (it reads the library at start)
+  async pre(c) {
+    c.p = await clipFixture("clipHv", 30);
+    if (!c.p) return;
+    await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
+    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid" });
+  },
+  async run(c) {
+    if (!c.p) return;
+    const send = (e) => win.webContents.sendInputEvent(e);
+    try {
+      // the full clip first (the hand-over from the stand-in has its own cell)
+      c.full = await waitFor(async () => isFull((await js(CLIP_SAMPLE("clipHv", 1))).pop()?.k), 20000, 300);
+      const pt = await ui(`const e = m.card("clipHv")?.querySelector(".thumb-wrap"); if (!e) return null; e.scrollIntoView({ block: "center" }); await m.sleep(300); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      if (!pt) return;
+      await sleep(1200); // into the clip's playback, away from its start
+      const hov = js(CLIP_SAMPLE("clipHv", 5000));
+      await sleep(400); send({ type: "mouseMove", x: pt.x - 3, y: pt.y }); await sleep(50); send({ type: "mouseMove", x: pt.x, y: pt.y });
+      c.hover = await hov;
+      const out = js(CLIP_SAMPLE("clipHv", 5000));
+      await sleep(400); send({ type: "mouseMove", x: 700, y: 4 });
+      c.unhover = await out;
+      c.left = await js(`[...document.querySelectorAll("video")].filter((x) => (x.getAttribute("src") || "").includes("/media?")).length`);
+      fs.writeFileSync(path.join(OUT, "clip-hoverHandoff.json"), JSON.stringify({ hover: clipSwap(c.hover, isClip, (k) => k === "real"), unhover: clipSwap(c.unhover, (k) => k === "real", isClip) }));
+      // the setting off: a hover plays the real file at once
+      await ui(`m.tab("Settings"); ${ROW("Animate wallpapers without a GIF")} m.setCheck(row?.querySelector("input"), false, "Animate wallpapers without a GIF"); m.tab("Library"); await m.sleep(400);`);
+      const pt2 = await ui(`const e = m.card("clipHv")?.querySelector(".thumb-wrap"); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      send({ type: "mouseMove", x: pt2.x - 3, y: pt2.y }); await sleep(50); send({ type: "mouseMove", x: pt2.x, y: pt2.y });
+      c.plain = (await js(CLIP_SAMPLE("clipHv", 2500))).filter((x) => x.k);
+      send({ type: "mouseMove", x: 700, y: 4 }); await sleep(300);
+    } finally { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300); }
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.p) return ["couldn't import the 1280×720 fixture"];
+    if (!c.full) v.push("the full clip never played before the hover (see clip:shortToFull)");
+    if (!c.hover) return [...v, "no card to hover"];
+    const h = clipSwap(c.hover, isClip, (k) => k === "real");
+    if (!h.swapped) v.push(`hovered: the real file never took over from the clip ${J(h)}`);
+    else if (!swapOk(h)) v.push(`hovered: the hand-over to the real file wasn't seamless ${J(h)}`);
+    const most = Math.max(...c.hover.map((x) => x.real));
+    if (most !== 1) v.push(`hovered: ${most} videos played a real file at once (only the hovered card loads one)`);
+    const u = clipSwap(c.unhover, (k) => k === "real", isClip);
+    if (!u.swapped) v.push(`unhovered: the clip never took back over ${J(u)}`);
+    else if (!swapOk(u)) v.push(`unhovered: the hand-back to the clip wasn't seamless ${J(u)}`);
+    if (c.left) v.push(`unhovered: ${c.left} videos still hold the real file (src not dropped)`);
+    if (!c.plain.length || c.plain.some((x) => x.k !== "real")) v.push(`setting off, hovered: expected the real file straight away, got ${J([...new Set(c.plain.map((x) => x.k))])}`);
+    return v;
+  } };
+
 // A gif preview that goes out of sight and comes back goes on from a later frame, never from frame 0 and never fetched
 // again, even after a garbage collection while it was away (components/MotionThumb.tsx keepHidden): k1's card on an
 // unhover + re-hover, and under "Animate GIF previews" scrolled away and back, the window inactive and active again, and

@@ -445,6 +445,8 @@ public static class AppOps
             try { LibraryService.Trash(item, batchDir); done.Add(item); } catch { }
         }
         if (done.Count == 0) return batchDir;
+        // their preview clips live as long as they are in the library (an undo makes them again)
+        foreach (var i in done) ClipStore.ForgetUnder(i.IsScene ? i.VideoPath : Path.GetDirectoryName(i.VideoPath) ?? i.VideoPath);
         var del = new HashSet<string>(done.Select(i => i.VideoPath));
         var removed = pl?.VideoPaths.Select((p, i) => (p, i)).Where(x => del.Contains(x.p)).ToList() ?? [];
         lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done, removed));

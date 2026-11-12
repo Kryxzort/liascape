@@ -73,6 +73,8 @@ for f in $FILES; do
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
+    # the preview clips: the backend's store, the card's clip and its hand-overs
+    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe
     app/ui/src/hooks/useMarquee.ts) add "$CARD|browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-select.js)" ;;

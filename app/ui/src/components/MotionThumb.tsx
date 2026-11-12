@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { media, clip, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
+import { media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { previewVideo } from "./mediaAssets";
+import { PreviewPlayer } from "./PreviewPlayer";
+import { useBoxSize, useClipSrc } from "./clipSource";
 
 // PERF: a gif <img> that leaves the document makes its gif restart: once no <img> of it is left, the next garbage
 // collection drops the image, and the next <img> fetches it again and plays it from frame 0. So a gif stays mounted once
@@ -30,19 +32,6 @@ function keepHidden(drop: () => void): () => void {
   return () => { const i = kept.indexOf(drop); if (i >= 0) kept.splice(i, 1); };
 }
 
-// PERF: an unmounted <video> doesn't stop loading: Chromium keeps a detached element that still has network activity
-// alive, with its decoder and its HTTP connection (one of the 6 to the backend) — a few hovers and scrolls later no
-// other video loads at all. Drop the source on the way out, which aborts the load at once. Guard: matrix
-// appear:videoThumbs (the scrolled-away videos).
-function PreviewVideo({ src, preload }: { src: string; preload: "auto" | "metadata" | "none" }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const v = ref.current;
-    return () => { if (v) { v.removeAttribute("src"); v.load(); } };
-  }, []);
-  return <video ref={ref} className="thumb anim" src={src} muted loop autoPlay playsInline preload={preload} />;
-}
-
 // COOL: animated library/playlist preview. Reuses the source's preview gif/webp when present;
 // otherwise plays the local wallpaper video on hover (moewalls-type sources ship no gif).
 // Browsers autoplay gif/webp <img> and decode off-thread → no special gif decode machinery is
@@ -57,10 +46,15 @@ export function MotionThumb({ item, hover, autoGif, autoVideo = false, videoOver
   const anim = item.animatedThumbnailPath;
   const vid = previewVideo(item, videoOverGif);
   const gif = !!anim && anim !== vid;
-  const playVideo = !!vid && (hover || autoVideo);
-  // with "Animate wallpapers without a GIF" on, a hover plays the same clip as the bulk preview: a card hovered before it is seen
-  // on screen doesn't start the full file only to swap it for the clip a moment later
-  const clips = useStore((s) => !!s.settings?.autoPlayVideoThumbs);
+  // PERF: "Animate wallpapers without a GIF" plays every one on screen, so each plays a small clip sized to this box (the
+  // static image fills it), never the full file: a full-size video holds one of Chromium's 6 connections to the backend
+  // while it plays and decodes 1080p-4K frames (components/clipSource.ts). A hover plays the wallpaper's own file, the
+  // hovered card's alone, handed over from the clip at the same moment and back again (components/PreviewPlayer.tsx).
+  const boxRef = useRef<HTMLImageElement>(null);
+  const box = useBoxSize(boxRef, autoVideo && !!vid);
+  const { src: clipSrc, retry: retryClip } = useClipSrc(autoVideo ? vid : null, box);
+  const realSrc = vid && hover ? media(vid) : null;
+  const videoSrc = realSrc ?? (vid && autoVideo ? clipSrc : null);
   const showGif = gif && (vid ? autoGif && !autoVideo : hover || autoGif);
   // the gif this card has shown (kept mounted, hidden, while it shouldn't play — keepHidden above)
   const [heldGif, setHeldGif] = useState<string | null>(null);
@@ -75,21 +69,14 @@ export function MotionThumb({ item, hover, autoGif, autoVideo = false, videoOver
   const staticSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   return (
     <>
-      <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
+      <img ref={boxRef} className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
       {(showGif || held) && (
         // gif → /anim (leading-black trimmed); backgroundImage = the /still frame so the loop-gap
         // shows a real frame, not black (parity with the Browse Card).
         <img className="thumb anim" src={animUrl(anim!)} decoding="async" alt=""
           style={{ backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center", visibility: showGif ? undefined : "hidden" }} />
       )}
-      {playVideo && (clips || autoVideo
-        // PERF: "Animate wallpapers without a GIF" plays every one on screen, so each plays a small clip (/clip, the backend's
-        // MakeClip), never the full file: a full-size video holds one of Chromium's 6 connections to the backend while
-        // it plays and decodes 1080p-4K frames. Without it, a lone hover plays the real video.
-        ? <PreviewVideo key="clip" src={clip(vid!)} preload="auto" />
-        // a preview asset is small (its metadata is cheap); the wallpaper's own video loads nothing until it plays
-        : <PreviewVideo key="full" src={media(vid!)} preload={vid === anim ? "metadata" : "none"} />
-      )}
+      {videoSrc && <PreviewPlayer src={videoSrc} real={videoSrc === realSrc} onError={realSrc ? undefined : retryClip} />}
     </>
   );
 }
