@@ -275,6 +275,7 @@ const EFFECT_MS = 2500;
 // the rotation (player-adapter.md § Rotation): advance-on-end off → intervalSeconds is the timer; on → it is the minimum
 // play time and maxPlaySeconds the maximum (0 = off)
 const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, switchWhenVideoEnds: false, maxPlaySeconds: 0,
+  separateSceneTiming: true, switchScenesAfterSeconds: 1800, playlistStart: "start_over",
   transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
 // Getting INTO a state isn't what a cell tests: its entry switches run as ENTRY_MS fades BEFORE the UI loads (the
 // app opened onto a playing wallpaper, as in real use), then the configured durations go back — so the UI reads
@@ -597,7 +598,9 @@ C["playlistBarClick"] = { switch: true, async run(c) {
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}), "playlistBar item");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: !!c.before.cur?.path }), ...psKept(c)] };
 C["playlistBarPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
-  exp: { paused: false }, check: (c) => [...expectShown(c, c.after.ps?.videoPaths?.[0], { effect: !!c.before.cur?.path }), ...psKept(c)] };
+  exp: { paused: false }, check: (c) => [...(c.before.ps?.settings?.playlistStart === "start_over" ? []
+    : [`the playlist starts with "${c.before.ps?.settings?.playlistStart}", not the baseline's start_over: item 1 proves nothing`]),
+  ...expectShown(c, c.after.ps?.videoPaths?.[0], { effect: !!c.before.cur?.path }), ...psKept(c)] };
 // a wallpaper starting from nothing just appears: a card, the Play button, a stop in between. No effect (no transition
 // when no wallpaper played before); the switch after it, over a real A, has its effect
 C["fromNothing:noEffect"] = { states: ["idle"], switch: true, exp: { paused: false }, async run(c) {
