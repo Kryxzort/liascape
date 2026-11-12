@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useStore } from "../store";
 
-// Settings → Look & feel → "Play video previews": a library card / playlist-bar item whose preview is a VIDEO
+// Settings → Look & feel → "Animate wallpapers without a GIF": a library card / playlist-bar item whose preview is a VIDEO
 // (components/mediaAssets.ts previewVideo) plays it without a hover. The same <video> layer the hover uses. Every such
 // item ON SCREEN plays, no cap; what keeps it bounded is that nothing else does:
 //   - only an item on screen plays (one shared IntersectionObserver; scrolled away, or its page hidden behind another

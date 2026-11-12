@@ -49,7 +49,7 @@ function PreviewVideo({ src, preload }: { src: string; preload: "auto" | "metada
 // needed. PERF: the parent card has content-visibility:auto, so offscreen cards never paint the
 // animated layer (and Chromium decodes none of its frames).
 // `hover`: the pointer is on it. `autoGif`: AutoPlayGifs is on for this item (it has a gif). `autoVideo`: "Play video
-// previews" plays it now (useAutoplayVideo). `videoOverGif`: "Prefer video previews" — an item with a gif AND its own
+// previews" plays it now (useAutoplayVideo). `videoOverGif`: "Use the video instead of the GIF" — an item with a gif AND its own
 // video previews with the video; its gif then only animates in bulk (under the hovered video, so it never restarts) and
 // goes once the video plays by itself (two decodes of one picture).
 export function MotionThumb({ item, hover, autoGif, autoVideo = false, videoOverGif = false }:
@@ -58,7 +58,7 @@ export function MotionThumb({ item, hover, autoGif, autoVideo = false, videoOver
   const vid = previewVideo(item, videoOverGif);
   const gif = !!anim && anim !== vid;
   const playVideo = !!vid && (hover || autoVideo);
-  // with "Play video previews" on, a hover plays the same clip as the bulk preview: a card hovered before it is seen
+  // with "Animate wallpapers without a GIF" on, a hover plays the same clip as the bulk preview: a card hovered before it is seen
   // on screen doesn't start the full file only to swap it for the clip a moment later
   const clips = useStore((s) => !!s.settings?.autoPlayVideoThumbs);
   const showGif = gif && (vid ? autoGif && !autoVideo : hover || autoGif);
@@ -83,7 +83,7 @@ export function MotionThumb({ item, hover, autoGif, autoVideo = false, videoOver
           style={{ backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center", visibility: showGif ? undefined : "hidden" }} />
       )}
       {playVideo && (clips || autoVideo
-        // PERF: "Play video previews" plays every one on screen, so each plays a small clip (/clip, the backend's
+        // PERF: "Animate wallpapers without a GIF" plays every one on screen, so each plays a small clip (/clip, the backend's
         // MakeClip), never the full file: a full-size video holds one of Chromium's 6 connections to the backend while
         // it plays and decodes 1080p-4K frames. Without it, a lone hover plays the real video.
         ? <PreviewVideo key="clip" src={clip(vid!)} preload="auto" />

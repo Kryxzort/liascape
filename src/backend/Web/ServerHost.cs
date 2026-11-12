@@ -223,7 +223,7 @@ public static class ServerHost
         try { File.Move(tmp, outPath, true); } catch { try { await File.WriteAllBytesAsync(outPath, data); File.Delete(tmp); } catch { } }
     }
 
-    // A preview clip for "Play video previews" (app/ui/src/components/autoplay.ts): the first CLIP_SECONDS of a video,
+    // A preview clip for "Animate wallpapers without a GIF" (app/ui/src/components/autoplay.ts): the first CLIP_SECONDS of a video,
     // CLIP_W px wide at most (the card stills' width), ≤ CLIP_FPS, no audio — 100-300 KB. Every preview on screen plays
     // at once, and the wallpaper's own file can't: a full-size <video> keeps its HTTP/1.1 connection open while it plays
     // (Chromium allows 6 per host, so past ~6 the rest never load and API calls queue behind them) and decodes 1080p-4K
@@ -801,7 +801,7 @@ public static class ServerHost
             return Results.Stream(fs, ct, enableRangeProcessing: true);
         });
 
-        // A small preview clip of a local video (MakeClip): what "Play video previews" plays. Cached on path+mtime+size
+        // A small preview clip of a local video (MakeClip): what "Animate wallpapers without a GIF" plays. Cached on path+mtime+size
         // (+ the clip's parameters), like /still; a missing or failed clip answers 502 and the card keeps its still.
         app.MapGet("/clip", async (string path) =>
         {

@@ -1896,7 +1896,7 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
-// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Play video previews": UI-only toggles. Each cell
+// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Animate wallpapers without a GIF": UI-only toggles. Each cell
 // turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
 // there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
 const GLOW_JS = String.raw`window.__glow = {
@@ -2046,7 +2046,7 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Play video previews": library cards and playlist-bar items whose preview is a video (k2..k4 here: no gif; k1 has a
+// "Animate wallpapers without a GIF": library cards and playlist-bar items with no GIF (their own video stands in) (k2..k4 here: no gif; k1 has a
 // gif) play it without a hover — EVERY one on screen, no cap (components/autoplay.ts): the cards and the playlist bar
 // (k1..k4) hold 6 of them, more than the old cap of 4. Gated: off screen (scrolled away, the Library behind another tab),
 // the window unfocused (`appActive`) — none. Off (the default): none plays by itself.
@@ -2069,7 +2069,7 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
   async run(c) {
     c.off = await vtSettle((r) => r.total === 0, 1500);
     await sleep(600); c.off = await js(VT_COUNT);                 // the default: nothing plays by itself
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), true, "Play video previews"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Animate wallpapers without a GIF"), true, "Animate wallpapers without a GIF"); await m.sleep(300);`);
     c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
     c.on = await vtSettle(vtAll, 8000);
@@ -2099,17 +2099,17 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
     c.shownAgain = await vtSettle(vtAll, 6000);
     await loadUi(); await sleep(600);
     c.reloaded = await vtSettle(vtAll, 8000);
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Play video previews"), false, "Play video previews"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Animate wallpapers without a GIF"), false, "Animate wallpapers without a GIF"); await m.sleep(300);`);
     await ui(`m.tab("Library"); await m.sleep(300);`);
     c.offAgain = await vtSettle((r) => r.total === 0, 3000);
   }, check(c) {
     const v = [], J = JSON.stringify;
     const every = (n, r) => { if (!vtAll(r)) v.push(`${n}: expected all ${r.eligible} on-screen video previews playing, ${r.total} mounted, ${r.playing} playing ${J(r)}`); };
     if (c.off.total) v.push(`off (the default): ${c.off.total} preview videos mounted without a hover`);
-    if (!c.saved) v.push("turning Play video previews on wasn't saved");
+    if (!c.saved) v.push("turning Animate wallpapers without a GIF on wasn't saved");
     if (c.on.eligible <= 4) v.push(`on: only ${c.on.eligible} video previews on screen — more than 4 are needed to show there is no cap: proved nothing`);
     every("on", c.on); every("on, a moment later", c.on2);
-    if (c.on.k1.some((x) => x.video)) v.push("on: the gif item (k1) got a video — Prefer video previews is off, its gif is its preview");
+    if (c.on.k1.some((x) => x.video)) v.push("on: the gif item (k1) got a video — Use the video instead of the GIF is off, its gif is its preview");
     if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
     every("on, cards scrolled off screen (the playlist bar's)", c.away);
     if (!c.left.n) v.push("on: no card videos to scroll away — the release check proved nothing");
@@ -2126,23 +2126,23 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
     return v;
   } };
 
-// "Prefer video previews": k1 has a gif AND its own video. Off (the default): the gif is its preview — on hover and under
+// "Use the video instead of the GIF": k1 has a gif AND its own video. Off (the default): the gif is its preview — on hover and under
 // "Animate GIF previews" — never the video. On: the video wins — on hover (on top of the gif, which keeps running beneath
-// when GIFs animate in bulk, so it never restarts) and under "Play video previews" without a hover (then no gif: one
+// when GIFs animate in bulk, so it never restarts) and under "Animate wallpapers without a GIF" without a hover (then no gif: one
 // picture, one decode). Every combination of the three toggles, each turned through its Settings row (they apply live).
 const k1Want = (gifs, vids, prefer, hover) => prefer
   ? { video: hover || vids, gif: gifs && !vids }
   : { video: false, gif: hover || gifs };
 const k1Is = (x, w) => !!x && x.video === w.video && x.gif === w.gif && (!w.video || (x.playing && x.videoOnTop));
 C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
-    c.row = await ui(`m.tab("Settings"); await m.sleep(400); const i = m.input("Prefer video previews"); if (!i) return false; m.setCheck(i, true, "Prefer video previews"); return true;`);
+    c.row = await ui(`m.tab("Settings"); await m.sleep(400); const i = m.input("Use the video instead of the GIF"); if (!i) return false; m.setCheck(i, true, "Use the video instead of the GIF"); return true;`);
     c.savedRow = c.row && await waitFor(async () => (await getSettings()).preferVideoThumbs === true, 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
     const send = (e) => win.webContents.sendInputEvent(e);
     c.combos = [];
     for (const gifs of [false, true]) for (const vids of [false, true]) for (const prefer of [false, true]) {
-      await ui(`m.tab("Settings"); await m.sleep(300); m.setCheck(m.input("Animate GIF previews"), ${gifs}, "gifs"); m.setCheck(m.input("Play video previews"), ${vids}, "video previews");
-        const p = m.input("Prefer video previews"); if (p) m.setCheck(p, ${prefer}, "prefer"); m.tab("Library"); await m.sleep(300);`);
+      await ui(`m.tab("Settings"); await m.sleep(300); m.setCheck(m.input("Animate GIF previews"), ${gifs}, "gifs"); m.setCheck(m.input("Animate wallpapers without a GIF"), ${vids}, "video previews");
+        const p = m.input("Use the video instead of the GIF"); if (p) m.setCheck(p, ${prefer}, "prefer"); m.tab("Library"); await m.sleep(300);`);
       const idle = k1Want(gifs, vids, prefer, false), hov = k1Want(gifs, vids, prefer, true);
       // both of k1's places (its card, its playlist-bar item) without a hover
       const r = await vtSettle((x) => x.k1.length === 2 && x.k1.every((y) => k1Is(y, idle)), 6000);
@@ -2158,8 +2158,8 @@ C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
     }
   }, check(c) {
     const v = [], J = JSON.stringify;
-    if (!c.row) v.push("no \"Prefer video previews\" row in Settings");
-    else if (!c.savedRow) v.push("turning Prefer video previews on wasn't saved (preferVideoThumbs !== true)");
+    if (!c.row) v.push("no \"Use the video instead of the GIF\" row in Settings");
+    else if (!c.savedRow) v.push("turning Use the video instead of the GIF on wasn't saved (preferVideoThumbs !== true)");
     for (const x of c.combos) {
       const n = `gifs ${x.gifs ? "on" : "off"}, video previews ${x.vids ? "on" : "off"}, prefer video ${x.prefer ? "on" : "off"}`;
       if (!x.k1Card) { v.push(`${n}: no k1 card to hover`); continue; }

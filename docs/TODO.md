@@ -12,10 +12,19 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
        mid-pulse frames look slightly different (crossfade, not blur interpolation). It also restyles every other running animation each
        frame (Browse's 72 skeleton shimmers: probe-layout `perf:skeleton` measures the cost).
-15. [ ] Owner's call: a reload / search / filter within one Browse source can still queue behind slow `/img` thumbnail
-       loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
-       `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
-       media URL, the dev proxy and the Host checks.
+15. [ ] Serve media from a second host so slow thumbnail loads never block browsing: a reload / search / filter within
+       one Browse source can queue behind slow `/img` loads (Chromium's 6 connections per host). Media on its own host
+       (e.g. `localhost:<port>`, the API on `127.0.0.1:<port>`) so they never share connections — touches every media
+       URL, the dev proxy, the Host / Origin checks and the CSP.
+21. [ ] Sidebar preview audio: (a) bug — a playing, unmuted sidebar video (or YouTube trailer) in the Library keeps
+       sounding after switching to Browse / Settings (the Library stays mounted under `<Activity>`); pause on hide,
+       resume on show. (b) Remember the preview's mute: it starts muted the first time, then keeps whatever the user
+       left it at. (c) Until the user moves the preview's own slider, its level follows the item's effective wallpaper
+       volume (`override ?? global`); once moved, the preview keeps its own level.
+22. [ ] Keep the scroll position on Library and Browse across tab switches (today both open at the top): Library's
+       `useResetOnLeave` drops it on purpose; Browse is rebuilt each visit, so its list and offset must survive too.
+23. [ ] GIF previews idle on their middle frame (owner's ask; details to confirm): the resting picture of a GIF preview
+       is a frame from the middle, not the first, and hovering plays on from there.
 
 
 ## On a real desktop session (not hermetic)

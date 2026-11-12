@@ -163,7 +163,7 @@ renderer CPU of Chromium's gif animation (67–74 % vs 35 % of a core), ~400 MB 
 there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-12
-"Play video previews" has no cap (it was 4): every video preview on screen plays, each a clip of at most 10 s, 640 px and
+"Animate wallpapers without a GIF" has no cap (it was 4): every video preview on screen plays, each a clip of at most 10 s, 640 px and
 24 fps that the backend makes once (`/clip`), never the wallpaper's own file. A full-size `<video>` keeps one of
 Chromium's 6 connections to the backend while it plays: uncapped, 12 of 24 previews never loaded and other loads queued
 behind them. Guard: matrix `appear:videoThumbs`; `.claude/rules/ui/design.md` § Performance.

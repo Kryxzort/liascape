@@ -7,8 +7,8 @@ export function hasGifAsset(item: LibraryItem): boolean {
   return !!item.animatedThumbnailPath && !VIDEO_RE.test(item.animatedThumbnailPath);
 }
 
-// The video an item's preview plays (on hover, or under "Play video previews"), or null: a video preview asset; else
-// the wallpaper's own video when there is no gif/webp, or when `overGif` ("Prefer video previews") lets the video win
+// The video an item's preview plays (on hover, or under "Animate wallpapers without a GIF"), or null: a video preview asset; else
+// the wallpaper's own video when there is no gif/webp, or when `overGif` ("Use the video instead of the GIF") lets the video win
 // over the gif. Guard: matrix appear:videoOverGif (every combination with the gif and video-preview toggles).
 export function previewVideo(item: LibraryItem, overGif: boolean): string | null {
   const a = item.animatedThumbnailPath;
@@ -17,11 +17,11 @@ export function previewVideo(item: LibraryItem, overGif: boolean): string | null
   return !a || overGif ? item.videoPath : null;
 }
 
-// True when the item's preview is a video (a scene has none) — what "Play video previews" plays without a hover
+// True when the item's preview is a video (a scene has none) — what "Animate wallpapers without a GIF" plays without a hover
 // (components/autoplay.ts).
 export function hasVideoPreview(item: LibraryItem, overGif: boolean): boolean {
   return !item.isScene && previewVideo(item, overGif) !== null;
 }
 
-// Settings → "Prefer video previews": an item with both a gif/webp and its own video previews with the video.
+// Settings → "Use the video instead of the GIF": an item with both a gif/webp and its own video previews with the video.
 export const useVideoOverGif = () => useStore((s) => !!s.settings?.preferVideoThumbs);

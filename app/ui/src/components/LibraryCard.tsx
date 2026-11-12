@@ -11,7 +11,7 @@ import { useAutoplayVideo } from "./autoplay";
 // PERF: memo'd; content-visibility (CSS) + per-card props; lift+glow hover (design choice).
 // Its settings and actions live in the item sidebar (a click or a right-click focuses the card) — components/LibrarySide.tsx.
 // COOL: animated preview on hover (MotionThumb); gif/webp assets also auto-play when AutoPlayGifs on, video previews under
-// "Play video previews".
+// "Animate wallpapers without a GIF".
 export const LibraryCard = memo(function LibraryCard({
   item, playing, selected, focused, inPlaylist, autoPlayGifs, onClick, onTrash, onToggle, onContextFocus,
 }: {
@@ -24,7 +24,7 @@ export const LibraryCard = memo(function LibraryCard({
   const [hover, setHover] = useState(false);
   const autoGif = autoPlayGifs && hasGifAsset(item);
   const videoOverGif = useVideoOverGif();
-  // "Play video previews": an item on screen whose preview is a video plays it without a hover (components/autoplay.ts)
+  // "Animate wallpapers without a GIF": an item on screen with no GIF plays a clip of its own video without a hover (components/autoplay.ts)
   const wrapRef = useRef<HTMLDivElement>(null);
   const autoVideo = useAutoplayVideo(wrapRef, hasVideoPreview(item, videoOverGif));
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;

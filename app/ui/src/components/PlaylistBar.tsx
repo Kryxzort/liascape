@@ -93,7 +93,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
   const onEnter = () => hv.set(path);
   const autoGif = !!item && autoPlayGifs && hasGifAsset(item);
   const videoOverGif = useVideoOverGif();
-  // "Play video previews": an item in view whose preview is a video plays it without a hover (components/autoplay.ts)
+  // "Animate wallpapers without a GIF": an item in view with no GIF plays a clip of its own video without a hover (components/autoplay.ts)
   const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item, videoOverGif));
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
