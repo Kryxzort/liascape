@@ -78,6 +78,11 @@ const RECIPES: Record<string, Part[]> = {
   "lucide-locate-fixed": [dip(":scope > circle:nth-child(6)", 0.25, "scale(1.7)", 700)],
   // direction: one nudge along it
   "lucide-arrow-right": [nudge("translateX(3px)")],
+  // sort (the top bar's, components/SortFilterButton.tsx): the arrow dips once down its shaft; as it lands the bars, pulled
+  // in from their left ends, settle back out one after another, the widest first
+  "lucide-arrow-down-wide-narrow": [{ sel: ":scope > :nth-child(1), :scope > :nth-child(2)", ms: 700, k: [{ t: "none", e: "O" }, { t: "translateY(3px)", at: 0.28, e: "S" }, { t: "none" }] },
+    ...[3, 4, 5].map((n, i): Part => ({ sel: `:scope > :nth-child(${n})`, ms: 650, delay: 140 + 50 * i,
+      k: [{ t: "none", e: "O", origin: "11px 12px" }, { t: "scaleX(.7)", at: 0.25, e: "S", origin: "11px 12px" }, { t: "none", origin: "11px 12px" }] }))],
   // go: the triangle stretches and shoots off to the right, a fresh one springs in from the left (the button's ring: index.css)
   "lucide-play": [{ sel: null, ms: 820, k: throughAndBack("translateX(7px) scale(1.25, .8)", "translateX(-8px) scale(.85)") }],
   "lucide-skip-forward": [{ sel: ":scope > :nth-child(2)", ms: 700, k: [{ t: "none", e: "O" }, { t: "translateX(4px)", at: 0.28, e: "S" }, { t: "none" }] }],
@@ -87,6 +92,9 @@ const RECIPES: Record<string, Part[]> = {
 // hosts whose icons are state glyphs, not actions: the segmented control (its highlight moves), the number stepper (its own
 // squeeze), the filter column's tri-state switch
 const SKIP = ".seg-opt, .ns-btn, .wf-seg";
+// an emblem chip's glyph (a filter group's, index.css .wf-gico) is an object even inside a button: its chip tilts with its
+// group, the glyph never acts on its own
+const EMBLEM = ".wf-gico";
 
 function play(svg: SVGSVGElement, parts: Part[]) {
   const T = tokens();
@@ -109,7 +117,7 @@ const running = new WeakSet<SVGSVGElement>();
 function act(host: Element, motion: boolean) {
   for (const svg of host.querySelectorAll<SVGSVGElement>("svg.lucide, svg.dl-glyph")) {
     const parts = RECIPES[[...svg.classList].find((c) => c in RECIPES) ?? ""];
-    if (!parts) continue;
+    if (!parts || svg.parentElement?.matches(EMBLEM)) continue;
     // an acting icon isn't an object: index.css's hover tilt skips [data-act] (set before the hover's first frame)
     if (!svg.hasAttribute("data-act")) svg.setAttribute("data-act", "");
     if (!motion || running.has(svg)) continue; // never restart a one-shot half-way

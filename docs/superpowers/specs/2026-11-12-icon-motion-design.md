@@ -29,11 +29,11 @@ Small moves only: a gesture travels 2–5 viewBox units (a 16 px icon: 1.5–3.5
 
 | role | icons | on hover | held state |
 |---|---|---|---|
-| **act** — a verb, the icon plays its meaning once | download, cloud-download, upload, external-link, copy, refresh, reset (rotate-ccw), undo, save, stop (square), sparkles, check-check, star, sliders, volume, cloud-off, locate | one-shot (WAAPI, `iconMotion.ts`), plays to the end even if the pointer leaves | — |
+| **act** — a verb, the icon plays its meaning once | download, cloud-download, upload, external-link, copy, refresh, reset (rotate-ccw), undo, save, stop (square), sparkles, check-check, star, sliders, volume, cloud-off, locate, sort (arrow-down-wide-narrow) | one-shot (WAAPI, `iconMotion.ts`), plays to the end even if the pointer leaves | — |
 | **hold** — an object that opens while pointed at | trash (lid lifts, hinged left), folder (the front flap falls open), close / remove (X turns 90°) | — | CSS transition on `--spring`; leaving closes it on the same spring |
 | **direction** — it says where you go | arrow-right, skip-forward, play, log-in | one nudge along its direction, springs back | — |
 | **disclosure** — chevrons | chevron-down / -left / -right | none | ROTATES to its state on `--spring-soft` (one icon, never a swap) |
-| **object** — a section's emblem, an icon button with no verb of its own | section chips (`.ssection-ico`, `.side-sec-ico`), library, wand, anything without a recipe | tilts −8° and grows 1.08× | while hovered, on `--spring` |
+| **object** — a section's emblem, an icon button with no verb of its own | section chips (`.ssection-ico`, `.side-sec-ico`, the filter groups' `.wf-gico` — its glyph never acts, even one with a recipe), library, wand, anything without a recipe | tilts −8° and grows 1.08× | while hovered, on `--spring` |
 | **status** — a fact | warning triangle, cloud-check, a chip's check / repeat, the pills' info glyphs | never moves | glows (a static `drop-shadow` / the chip's shadow) under glows; nothing under `no-glow` |
 | **progress** — the only loops | `LoaderCircle` (`.side-sub-spin`), the indeterminate download sweep | loops while the work runs | — |
 | **toggle** — on/off | the playlist toggle, the mute button, the copied-ID check | none on hover (a checkbox that grows feels wrong) | the new state POPS once (scale 0.6 → 1 on `--spring`) when the user changes it — never on mount of an already-on card |
@@ -55,6 +55,8 @@ gets a two-part lucide icon of our own via `createLucideIcon` in `app/ui/src/com
 - **volume-2**: the two waves ripple out, staggered; **volume-x**: the X turns 90°.
 - **cloud-off**: the slash draws across (scale 0 → 1 from its top-left end).
 - **locate**: the crosshair holds a 90° turn while hovered (hold, `--spring-soft`) and its centre dot pops once.
+- **sort** (arrow-down-wide-narrow): the arrow dips once down its shaft (y +3); as it lands the three bars, pulled in from
+  their left ends (scaleX .7), spring back out one after another, the widest first.
 
 ## The magnet (primary actions only)
 A primary action leans toward a pointer that comes near: inside its box plus 28 px around it, it translates toward the

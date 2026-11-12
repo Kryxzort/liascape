@@ -8,11 +8,13 @@
 //                       (Browse sidebar), card-download (a Browse card's own button: the arrow into its tray), external-link
 //                       + copy (the sidebar's tiles), cloud-download (Subscribe), refresh (Browse top bar),
 //                       upload (Import), save + sliders + play (the playlist bar), sparkles (Settings → Transitions…), arrow-right
-//                       + skip-forward + stop (the Steam to-do). Frames: <OUT>/icons-<name>-f<i>.png
+//                       + skip-forward + stop (the Steam to-do), sort (the Library top bar's split: the arrow dips, the bars
+//                       settle; its <svg> no longer tilts as an object). Frames: <OUT>/icons-<name>-f<i>.png
 //   icon:hold:<name>    trash (a Library card's delete: the lid), folder (the playlist bar's Load: the flap), x (the sidebar's
 //                       close), chevron (the playlist bar's fold, clicked): hover → it moves through in-between frames, overshoots,
 //                       HOLDS a moved state; leaving → back to rest through in-between frames
-//   icon:object         a Settings section's chip: tilts on the spring (overshoots its held tilt) while its card is hovered
+//   icon:object         tilts on the spring (overshoots its held tilt) while hovered: a Settings section's chip (its card
+//                       hovered) and an icon button's glyph with no verb of its own (a Library sidebar's Workshop-ID pill, #)
 //   icon:press          mouseDown on an icon button → the icon's `scale` drops under .9 within a few frames; mouseUp → it springs
 //                       back past 1 and settles at 1
 //   icon:toggle         a Library card's playlist toggle clicked → the new state pops (scale through in-between frames); a fresh
@@ -24,7 +26,7 @@
 //                       off → never leans
 //   icon:playRing       Play's accent ring ripples out once per hover (motion on), none with motion off
 //   icon:act:off / icon:act:reduced   motion off / prefers-reduced-motion: hover / press start no animation and no transition
-//                       frames (download, the close X, the press)
+//                       frames (download, the close X, sort, the press)
 //   icon:still:off                    motion off: the hover holds, an emblem's tilt and the press squeeze end where they started
 //   icon:perf           while one-shots, holds and the magnet run: no layout forced from script and none bigger than an icon's
 //                       own SVG (dirty objects per Layout, from a trace; an idle stretch alongside for comparison), and an idle
@@ -224,6 +226,10 @@ app.whenReady().then(async () => {
       if (offRest.length) v.push(`hover: starts off its rest state (${offRest.join("; ")}) — it jumps when the hover lands`);
       const bad = props.filter((p) => !["transform", "opacity", "transformOrigin"].includes(p));
       if (bad.length) v.push(`animates ${bad.join(", ")} (transform / opacity only)`);
+      if (opts.svgStill) { // an acting icon isn't an object too: its <svg> mustn't also tilt while hovered
+        const t = await page(`const e = ${partExpr(host, "svg.lucide")}; return e ? m.look(e) : null;`);
+        if (!t || Math.abs(t.ang) > 0.5 || Math.abs(t.sx - 1) > 0.01) v.push(`hovered, its <svg> still tilts as an object (${J(t)})`);
+      }
       await frames(name, host, opts.stay);
       return v;
     });
@@ -297,6 +303,7 @@ app.whenReady().then(async () => {
     await act("arrow-right", async () => { await lib(); await steamTodo(); }, `document.querySelector("[data-st=next]")`, null);
     await act("skip-forward", steamTodo, `document.querySelector("[data-st=skip]")`, ":scope svg.lucide-skip-forward > :nth-child(2)");
     await act("stop", steamTodo, `document.querySelector("[data-st=stop]")`, null);
+    await act("sort", lib, `document.querySelector("[data-sortsplit] .ss-sort")`, ":scope svg.lucide-arrow-down-wide-narrow > :nth-child(2)", { svgStill: true });
     await js(`window.__fakeWs("steam-todo", { finished: true })`);
     // the Browse card's own (hand-drawn) download button: the arrow drops into its tray
     await act("card-download", async () => { await closeSide(); await browse();
@@ -325,8 +332,33 @@ app.whenReady().then(async () => {
       const s = await js(`window.__smp`), mo = motionOf(s, rest), held = mo.vals[mo.vals.length - 1], j = judge(mo.vals, mo.key, held);
       console.log(`        section chip: ${mo.key} → ${held?.toFixed(2)}, ${j.between} in-between, ${j.cross} past it`);
       const v = [];
-      if (Math.abs(held) < 1) return ["the section chip doesn't tilt — proved nothing"];
-      if (j.cross < 1) v.push(`no spring: the tilt never passes its held ${mo.key} (${held.toFixed(2)})`);
+      if (Math.abs(held) < 1) v.push("the section chip doesn't tilt — proved nothing");
+      else if (j.cross < 1) v.push(`section chip: no spring — the tilt never passes its held ${mo.key} (${held.toFixed(2)})`);
+      // an icon button's glyph with no recipe (#, the Workshop-ID pill of a Library item with an id: the stack's scenes)
+      await lib();
+      const opened = await page(`for (const t of ["s1", "s2", "s3"]) {
+          const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="' + t + '"]'));
+          if (!c) continue;
+          c.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+          for (let i = 0; i < 30 && !document.querySelector(".side-panel:not(.closing) [data-side-row=workshop-id]"); i++) await m.sleep(100);
+          if (document.querySelector(".side-panel:not(.closing) [data-side-row=workshop-id]")) return t;
+        } return null;`);
+      if (!opened) return [...v, "no Library item with a Workshop-ID pill — proved nothing"];
+      await sleep(700);
+      const pill = `document.querySelector(".side-panel:not(.closing) [data-side-row=workshop-id]")`, glyph = partExpr(pill, "svg.lucide-hash");
+      const pc = await centre(pill); await mv(3, 3, 500);
+      const prest = await page(`const e = ${glyph}; return e ? m.look(e) : null;`);
+      if (!prest) return [...v, "the Workshop-ID pill shows no # glyph — proved nothing"];
+      await page(`window.__smp = m.sample(() => ${glyph}, 60); true`);
+      await mv(pc.x, pc.y);
+      const ps = await js(`window.__smp`), pmo = motionOf(ps, prest), pheld = pmo.vals[pmo.vals.length - 1], pj = judge(pmo.vals, pmo.key, pheld);
+      const acts = await page(`return ${glyph}?.hasAttribute("data-act") ?? null;`);
+      console.log(`        # pill (${opened}): ${pmo.key} → ${pheld?.toFixed(2)}, ${pj.between} in-between, ${pj.cross} past it; data-act ${acts}`);
+      if (acts) v.push("the # glyph has a recipe now (data-act) — pick another object icon");
+      if (pmo.key !== "ang" || Math.abs(pheld) < 4) v.push(`the # glyph doesn't tilt while hovered (${pmo.key} → ${pheld?.toFixed(2)}) — proved nothing`);
+      else if (pj.cross < 1) v.push(`# glyph: no spring — the tilt never passes its held ${pmo.key} (${pheld.toFixed(2)})`);
+      await frames("object-hash", pill);
+      await closeSide();
       return v;
     });
 
@@ -510,6 +542,13 @@ app.whenReady().then(async () => {
         if (mo.key && j.between > 1) v.push(`${name}: ${j.between} in-between frames of ${mo.key} with motion ${how}`);
       }
       await lib();
+      const sort = `document.querySelector("[data-sortsplit] .ss-sort")`, sc = await centre(sort); await mv(3, 3, 300);
+      await page(`window.__smp = m.sample(() => ${partExpr(sort, "svg.lucide-arrow-down-wide-narrow > :nth-child(2)")}, 40); true`);
+      await mv(sc.x, sc.y);
+      const ss = (await js(`window.__smp`)).filter(Boolean), sAnims = await page(`return ${partExpr(sort, "svg.lucide-arrow-down-wide-narrow")}.getAnimations({ subtree: true }).length;`);
+      if (sAnims) v.push(`sort: ${sAnims} animations started with motion ${how}`);
+      if (ss.some((x) => Math.abs(x.ty) > 0.05 || Math.abs(x.sx - 1) > 0.005)) v.push(`sort: the arrow moves with motion ${how}`);
+      await mv(3, 3, 200);
       const host = bar("Save playlist"), c = await centre(host);
       await mv(c.x, c.y, 800);
       await page(`window.__smp = m.sample(() => ${partExpr(host, null)}, 20); true`);

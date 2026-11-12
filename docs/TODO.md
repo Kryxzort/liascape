@@ -8,10 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 32. [ ] (owner, in progress) The library operations' text moves into the top bar's status slot (an app message beats it,
        it beats the Library's muted hint; at narrow widths the count alone), leaving only the progress line on the bar's
        edge (no tab over the cards); and at narrow widths the search field folds to an icon that expands in place.
-35. [ ] (owner) The filter column's groups get an icon each (Type, Resolution, Age rating, Genre, Features …), in the
-       header like Settings' section emblems; never an icon per tag (not even the features: it would be inconsistent).
-37. [ ] (owner) The sort button's icon acts instead of the generic tilt: the arrow dips once along its direction and
-       the bars settle (iconMotion.ts RECIPES, the :root springs; motion off: still).
 38. [ ] (owner) Every round / square icon chip's glyph is pixel-centred: a sweep with the shared pixel-centre check
        (app/shell/pixel-centre.js, from #34) over all icon chips and icon-only buttons, at rest and hovered, two window
        sizes; fix each with whole-pixel icon sizes and even margins. Off-centre icons keep coming back: make it a guard.

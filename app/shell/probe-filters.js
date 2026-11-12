@@ -85,6 +85,18 @@
 //   lib:steamTags     an item auto-imported from a Wallpaper Engine folder (its project.json: a genre, no resolution, no age)
 //                     gets Steam's tags from the backend's one look-up (the stack's fake Steam servers, LIASCAPE_STEAM_CM_FIXTURE —
 //                     asked for its id alone): the Library's column grows its rows (3840 x 2160, Questionable) and they filter it
+//   wf:emblem         each group's head carries one emblem chip (.wf-gico) with its own glyph (Library / Shield / Layers / Monitor
+//                     / Palette / Sparkles), no tag row any icon but its switch's; Fit: the head's height, the column's width and
+//                     the button's rhythm unchanged by it (same with the chips hidden; chevron → chip → name gaps equal, all on
+//                     one centre line); its glow on; hovering the group tilts the chip on the spring (per frame: in-between
+//                     frames, past its held tilt), its glyph neither tilts nor acts on its own (Features' sparkles too).
+//                     Screenshots wf-emblem.png, wf-emblem-tilt-<i>.png
+//   wf:emblem:look    Glow effects off: no glow round a chip at rest or hovered; bg-live: the chips drawn over the groups'
+//                     darkness; motion off: hovering a group leaves its chip still (motion-off.js). Screenshots
+//                     wf-emblem-noglow.png, wf-emblem-bglive.png
+//   wf:emblem:centre  at 1400×900 and 1920×1080: every chip and glyph whole pixels with even margins, and the glyph on its chip's
+//                     centre as drawn (pixel-centre.js: ±0.5 css px at a whole device pixel ratio, one device pixel at a
+//                     fractional one — the matrix's). Close-ups wf-emblem-px-<group>-<w>.png
 // Screenshots: <LIASCAPE_OUT>/wf-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -94,6 +106,7 @@ const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
+const PXC = require("./pixel-centre"); // a chip's glyph centred as drawn, in pixels
 const NF = "await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));"; // in-page: two frames pass
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
@@ -1263,6 +1276,159 @@ app.whenReady().then(async () => {
       await resize(1400, 900);
       await setSettings({ liveWallpaperBehindAllTabs: false });
       await page(`m.q("[data-wf-clear]")?.click();`);
+      return v;
+    });
+
+    // ---- the groups' emblems: one per group, in its head (never one per tag) ----
+    const GICO = { library: "lucide-library", age: "lucide-shield", type: "lucide-layers", resolution: "lucide-monitor", genre: "lucide-palette", features: "lucide-sparkles" };
+    const chipSel = (id) => `#wf-panel-browse [data-wf-gico="${id}"]`;
+    const expandAll = () => page(`const ids = []; for (const g of m.col().querySelectorAll("[data-wf-group]")) if (g.dataset.wfCollapsed) { ids.push(g.dataset.wfGroup); m.head(g.dataset.wfGroup).click(); }
+      await m.sleep(350); return ids;`);
+    const recollapse = (ids) => page(`for (const id of ${J(ids)}) if (!m.grp(id)?.dataset.wfCollapsed) m.head(id)?.click(); await m.sleep(300);`);
+    // the chip's look per frame (its own transform: rotation, scale) for n frames
+    const chipLook = `(el) => { const t = getComputedStyle(el).transform; const mx = new DOMMatrixReadOnly(t === "none" ? undefined : t);
+      return { ang: Math.atan2(mx.m12, mx.m11) * 180 / Math.PI, sc: Math.hypot(mx.m11, mx.m12) }; }`;
+    const sampleChip = (sel, n) => `new Promise((res) => { const L = ${chipLook}, out = []; const f = () => { const e = document.querySelector(${J(sel)}); out.push(e ? L(e) : null);
+      if (out.length >= ${n}) res(out); else requestAnimationFrame(f); }; requestAnimationFrame(f); })`;
+    const at = async (sel) => { const r = await page(`const e = document.querySelector(${J(sel)}); if (!e) return null; e.scrollIntoView({ block: "nearest" }); await m.sleep(80);
+      const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 };`); if (!r) throw new Error(`no ${sel}`); return r; };
+    const mvTo = async (x, y, ms = 0) => { send({ type: "mouseMove", x: Math.round(x), y: Math.round(y) }); if (ms) await sleep(ms); };
+    const outerGlow = (bs) => bs.split(/,(?![^(]*\))/).map((x) => x.trim()).filter((x) => x && x !== "none" && !/inset/.test(x) && !/rgba\(0, 0, 0, 0\)/.test(x) && !/^0px 0px 0px 0px/.test(x.replace(/^rgba?\([^)]*\)\s*/, "")));
+
+    await cell("wf:emblem", async () => {
+      const v = [];
+      await resize(1400, 900); await toWorkshop(); await page(`m.q("[data-wf-clear]")?.click();`); await mvTo(3, 3, 200);
+      const opened = await expandAll();
+      try {
+        const r = await page(`const c = m.col(), gs = [...c.querySelectorAll("[data-wf-group]")];
+          return { groups: gs.map((g) => ({ id: g.dataset.wfGroup, chips: g.querySelectorAll(".wf-gico").length, inHead: !!g.querySelector(".wf-head > .wf-head-btn > .wf-gico"),
+              cls: [...(g.querySelector(".wf-gico svg.lucide")?.classList ?? [])] })),
+            rows: c.querySelectorAll(".wf-row").length,
+            rowIcons: [...c.querySelectorAll(".wf-body svg")].filter((x) => !x.closest(".wf-sw")).length };`);
+        console.log(`        ${r.groups.length} groups, ${r.rows} tag rows, ${r.rowIcons} icons in the bodies outside the switches; ${J(r.groups.map((g) => [g.id, g.chips, g.cls.filter((k) => k !== "lucide").join(" ")]))}`);
+        if (r.rows < 40) v.push(`only ${r.rows} tag rows shown — proved little`);
+        if (r.rowIcons) v.push(`${r.rowIcons} icons on the tag rows besides their switches (an emblem is per group, never per tag)`);
+        for (const g of r.groups) {
+          if (g.chips !== 1 || !g.inHead) v.push(`${g.id}: ${g.chips} emblem chips${g.inHead ? "" : ", none in its head button"} (want one, in the head)`);
+          else if (!GICO[g.id]) v.push(`${g.id}: a group the probe doesn't know — give it a glyph here (${g.cls.join(" ")})`);
+          else if (!g.cls.includes(GICO[g.id])) v.push(`${g.id}: the emblem is ${g.cls.join(" ")}, want ${GICO[g.id]}`);
+        }
+        if (r.groups.length < 6) v.push(`only ${r.groups.length} groups on the Workshop's column (want Library, Age, Type, Resolution, Genre, Features)`);
+        // Fit: the chip takes the head's rhythm — the head as tall as a head without one (its name's line, 6 px above and
+        // below), the same column width, the button's own gap on both sides, one centre line
+        const fit = await page(`const c = m.col(), g = m.grp("genre"), head = g.querySelector(".wf-head"), btn = g.querySelector(".wf-head-btn"), chip = btn.querySelector(".wf-gico"), chev = btn.querySelector(".wf-chev");
+          if (!chip) return null; const tn = [...btn.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+          const nr = document.createRange(); nr.selectNodeContents(tn); const N = nr.getBoundingClientRect(), C = chip.getBoundingClientRect(), V = chev.getBoundingClientRect();
+          const out = { head: head.getBoundingClientRect().height, col: c.getBoundingClientRect().width, gapA: C.left - V.right, gapB: N.left - C.right,
+            cy: C.top + C.height / 2, ny: N.top + N.height / 2, vy: V.top + V.height / 2, chip: [C.width, C.height], btnGap: parseFloat(getComputedStyle(btn).columnGap) };
+          const st = document.createElement("style"); st.textContent = ".wf-gico { display: none !important; } .wf-head-btn { padding-block: 6px !important; }"; document.head.append(st); ${NF}
+          out.headBare = head.getBoundingClientRect().height; out.colBare = c.getBoundingClientRect().width; st.remove(); ${NF} return out;`);
+        console.log(`        fit: ${J(fit)}`);
+        if (!fit) return [...v, "no emblem in Genre's head to fit"];
+        if (Math.abs(fit.head - fit.headBare) > 0.5) v.push(`the emblem changes the head's height (${fit.headBare} → ${fit.head} px)`);
+        if (Math.abs(fit.col - fit.colBare) > 0.5) v.push(`the emblem changes the column's width (${fit.colBare} → ${fit.col} px)`);
+        if (Math.abs(fit.gapA - fit.btnGap) > 0.5 || Math.abs(fit.gapB - fit.btnGap) > 0.5) v.push(`chevron → chip → name gaps ${fit.gapA.toFixed(1)} / ${fit.gapB.toFixed(1)} px, not the head's ${fit.btnGap} px`);
+        if (Math.abs(fit.cy - fit.ny) > 0.5 || Math.abs(fit.cy - fit.vy) > 0.5) v.push(`the chip's centre line (${fit.cy.toFixed(1)}) isn't the name's (${fit.ny.toFixed(1)}) / the chevron's (${fit.vy.toFixed(1)})`);
+        if (fit.chip.some((x) => x !== Math.round(x))) v.push(`a fractional chip size ${J(fit.chip)} (whole pixels centre the glyph)`);
+        const glow = await page(`return getComputedStyle(document.querySelector(${J(chipSel("genre"))})).boxShadow;`);
+        if (!outerGlow(glow).length) v.push(`glow on: the chip has no glow (${glow})`);
+        const col = await page(`const b = m.col().getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);
+        const clip = { x: Math.floor(col.x), y: Math.floor(col.y), width: Math.ceil(col.w), height: Math.min(Math.ceil(col.h), 520) };
+        fs.writeFileSync(path.join(OUT, "wf-emblem.png"), (await win.webContents.capturePage(clip)).toPNG());
+        // hovering the group (a tag row, not the head): the chip tilts on the spring and holds it; its glyph stays put in it
+        const row = await at(`#wf-panel-browse [data-wf-group="genre"] .wf-row .wf-name`);
+        await mvTo(3, 3, 400);
+        await page(`window.__smp = ${sampleChip(chipSel("genre"), 60)}; true`);
+        await mvTo(row.x, row.y);
+        const ch = await page(`const a = []; for (let i = 0; i < 4; i++) { await m.sleep(55); const b = document.querySelector(${J(chipSel("genre"))}).getBoundingClientRect();
+          a.push({ x: Math.floor(b.x) - 8, y: Math.floor(b.y) - 8, width: Math.ceil(b.width) + 16, height: Math.ceil(b.height) + 16 }); } return a[0];`);
+        for (let i = 0; i < 4; i++) { const img = await win.webContents.capturePage(ch); fs.writeFileSync(path.join(OUT, `wf-emblem-tilt-${i}.png`), img.resize({ width: img.getSize().width * 6 }).toPNG()); await sleep(60); }
+        const smp = (await js(`window.__smp`)).filter(Boolean), angs = smp.map((x) => x.ang), held = angs[angs.length - 1];
+        const peak = angs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0), between = angs.filter((x) => Math.abs(x) > 0.3 && Math.abs(x - held) > 0.3).length;
+        console.log(`        hover tilt: held ${held.toFixed(2)}°, peak ${peak.toFixed(2)}°, ${between} in-between frames`);
+        if (Math.abs(held) < 4) v.push(`hovering the group doesn't tilt its emblem (held ${held.toFixed(2)}°)`);
+        else { if (between < 3) v.push(`the tilt jumps (${between} in-between frames)`); if (!(Math.abs(peak) > Math.abs(held) + 0.3)) v.push(`no spring: the tilt never passes its held ${held.toFixed(2)}°`); }
+        // the head button hovered: the glyph neither acts (Features' sparkles have a one-shot elsewhere) nor tilts on its own
+        for (const id of ["genre", "features"]) {
+          const h = await at(`#wf-panel-browse [data-wf-head="${id}"]`); await mvTo(3, 3, 300); await mvTo(h.x, h.y, 120);
+          const g = await page(`const s = document.querySelector(${J(chipSel(id) + " > svg")}); await m.sleep(500); const t = getComputedStyle(s).transform;
+            return { anims: s.getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSTransition)).length, t, act: s.hasAttribute("data-act") };`);
+          if (g.anims || g.act) v.push(`${id}: the emblem's glyph acts on hover (${g.anims} one-shots${g.act ? ", data-act" : ""}) — it's an object`);
+          if (g.t !== "none" && !new DOMMatrixReadOnly(g.t).isIdentity) v.push(`${id}: the emblem's glyph tilts inside its tilting chip (${g.t})`);
+        }
+        await mvTo(3, 3, 300);
+      } finally { await recollapse(opened); }
+      return v;
+    });
+
+    await cell("wf:emblem:look", async () => {
+      const v = [];
+      const chip = chipSel("genre");
+      const hoverBs = async () => { const r = await at(`#wf-panel-browse [data-wf-group="genre"] .wf-row .wf-name`); await mvTo(3, 3, 300);
+        const rest = await page(`return getComputedStyle(document.querySelector(${J(chip)})).boxShadow;`); await mvTo(r.x, r.y, 800);
+        const hov = await page(`return getComputedStyle(document.querySelector(${J(chip)})).boxShadow;`); await mvTo(3, 3, 300); return { rest, hov }; };
+      const shotCol = async (name) => { const c = await page(`m.col().querySelector(".wf-scroll").scrollTop = 0; await m.sleep(150); const b = m.col().getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);
+        fs.writeFileSync(path.join(OUT, `wf-emblem-${name}.png`), (await win.webContents.capturePage({ x: Math.floor(c.x), y: Math.floor(c.y), width: Math.ceil(c.w), height: Math.min(Math.ceil(c.h), 520) })).toPNG()); };
+      try {
+        await setSettings({ glows: false }); await loadUi(); await resize(1400, 900); await toWorkshop();
+        const ng = await hoverBs();
+        console.log(`        no-glow: rest ${ng.rest} / hovered ${ng.hov}`);
+        if (outerGlow(ng.rest).length || outerGlow(ng.hov).length) v.push(`Glow effects off: the chip still glows (${ng.rest} / hovered ${ng.hov})`);
+        if (!/inset/.test(ng.rest)) v.push(`Glow effects off: the chip lost its ring (${ng.rest})`);
+        await shotCol("noglow");
+        await setSettings({ glows: true, liveWallpaperBehindAllTabs: true }); await loadUi(); await toWorkshop(); await sleep(1000);
+        const bl = await page(`const e = document.querySelector(${J(chip)}); return { live: document.documentElement.classList.contains("bg-live"), bg: getComputedStyle(e).backgroundColor,
+          grp: getComputedStyle(m.grp("genre")).backgroundColor, vis: e.checkVisibility() };`);
+        console.log(`        bg-live: ${J(bl)}`);
+        if (!bl.live) v.push("bg-live: no :root.bg-live with the setting on");
+        if (!bl.vis || /rgba\(0, 0, 0, 0\)|transparent/.test(bl.bg)) v.push(`bg-live: the chip isn't drawn (${bl.bg})`);
+        await shotCol("bglive");
+        await setSettings({ liveWallpaperBehindAllTabs: false }); await loadUi(); await toWorkshop();
+        // motion off: a hovered group's chip stays where it is (no tilt, no transition frames)
+        await setMotion(false);
+        const r = await at(`#wf-panel-browse [data-wf-group="genre"] .wf-row .wf-name`); await mvTo(3, 3, 300);
+        await page(`window.__mo = ${MO.SAMPLE({ chip }, 700)}; true`); await mvTo(r.x, r.y);
+        const off = await js(`window.__mo`), held = await page(`return getComputedStyle(document.querySelector(${J(chip)})).transform;`);
+        console.log(`        motion off: ${MO.brief(off.chip)}; transform hovered ${held}`);
+        v.push(...MO.judge("motion off: the hovered group's emblem", off.chip));
+        if (held !== "none" && !new DOMMatrixReadOnly(held).isIdentity) v.push(`motion off: the hovered group's emblem tilts (${held})`);
+        await mvTo(3, 3, 200);
+      } finally { await setSettings({ glows: true, liveWallpaperBehindAllTabs: false }); await setMotion(true); await loadUi(); await resize(1400, 900); await toWorkshop(); }
+      return v;
+    });
+
+    // Whole-pixel sizes and even margins (the layout), then the glyph's drawn pixels on the chip's (pixel-centre.js) at the
+    // window's own device pixel ratio: ±0.5 css px at a whole ratio; at a fractional one (the matrix's Xvfb draws at ~1.05) the
+    // glyph's and the chip's edges round to device pixels each on their own, so one device pixel is the resolution there
+    await cell("wf:emblem:centre", async () => {
+      const v = [];
+      try {
+        for (const [w, h] of [[1400, 900], [1920, 1080]]) {
+          await resize(w, h); await toWorkshop(); await mvTo(3, 3, 300);
+          const dpr = await js("devicePixelRatio"), tag = `${w}x${h}@${+dpr.toFixed(3)}`, tol = Number.isInteger(dpr) ? 0.5 : Math.max(0.5, 1.01 / dpr);
+          const lay = await page(`return [...m.col().querySelectorAll("[data-wf-gico]")].map((e) => { const c = e.getBoundingClientRect(), g = e.querySelector("svg").getBoundingClientRect();
+            return { id: e.dataset.wfGico, cw: c.width, ch: c.height, gw: g.width, gh: g.height, dx: g.x + g.width / 2 - (c.x + c.width / 2), dy: g.y + g.height / 2 - (c.y + c.height / 2) }; });`);
+          if (lay.length < 6) v.push(`${tag}: only ${lay.length} emblems — proved little`);
+          for (const l of lay) {
+            if (![l.cw, l.ch, l.gw, l.gh].every(Number.isInteger) || (l.cw - l.gw) % 2 || (l.ch - l.gh) % 2 || Math.abs(l.dx) > 0.01 || Math.abs(l.dy) > 0.01)
+              v.push(`${tag} ${l.id}: chip ${l.cw}×${l.ch}, glyph ${l.gw}×${l.gh} at (${l.dx.toFixed(2)}, ${l.dy.toFixed(2)}) — want whole pixels, even margins, centred`);
+          }
+          for (const { id } of lay) {
+            await page(`document.querySelector(${J(chipSel(id))}).scrollIntoView({ block: "center" }); await m.sleep(250); true`);
+            // against the ring and fill: the outer glow is symmetric but soft (and off at once: its box-shadow transition would
+            // still be running between the captures); the hover tilt isn't on (the pointer is away)
+            const r = await PXC.measure(win, { chip: chipSel(id), glyph: `${chipSel(id)} > svg`, css: `${chipSel(id)} { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent) !important; transition: none !important; }`,
+              png: path.join(OUT, `wf-emblem-px-${id}-${w}.png`) });
+            console.log(`        ${tag} ${id}: ${r.error ?? `(${r.dx.toFixed(2)}, ${r.dy.toFixed(2)}) css px, glyph ${r.glyphPx} px, chip ${r.chipPx} px`} (±${tol.toFixed(2)})`);
+            // At a fractional ratio a square chip can draw one row or column short (22 css px = 23.03 device px rounds to 23 or
+            // 24 by its position): its measured centre then moves half a device pixel, which isn't the glyph's doing. At ratio 1
+            // (the agent window) every emblem measures exactly centred.
+            const lost = !Number.isInteger(dpr) && r.box ? Math.abs((r.box[2] - r.box[0]) - (r.box[3] - r.box[1])) : 0;
+            v.push(...PXC.judge(`${tag} ${id}`, r, tol + (lost * 0.5) / dpr));
+          }
+          await page(`m.col().querySelector(".wf-scroll").scrollTop = 0; true`);
+        }
+      } finally { await resize(1400, 900); }
       return v;
     });
 

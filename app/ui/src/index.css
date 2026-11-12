@@ -970,7 +970,7 @@ input[type=range]:focus-visible { outline: none; }
 :where(svg.lucide) > * { transform-box: view-box; transform-origin: 12px 12px; transition: transform var(--spring-dur) var(--spring); }
 /* object: an icon with no verb of its own tilts while its button is hovered (iconMotion.ts marks the acting ones data-act) */
 :where(button, a):hover:not(:disabled, .seg-opt, .ns-btn, .wf-seg) svg.lucide:not(.lucide-x, .lucide-trash-2, .lucide-folder-flap,
-  .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act]) {
+  .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act], .wf-gico > *) {
   transform: rotate(-8deg) scale(1.08); }
 /* hold: the trash lid lifts, hinged at its left end; the folder's flap falls open from its bottom edge; X turns a quarter;
    the crosshair turns a quarter. Leaving closes them on the same spring. */
@@ -1205,7 +1205,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover { filter: none; }
 :root.no-glow .settings { background-image: none; }
 :root.no-glow .ssection::before, :root.no-glow .srow::before { box-shadow: none; }
-:root.no-glow .ssection-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+:root.no-glow :is(.ssection-ico, .wf-gico) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 :root.no-glow .settings input[type=range]:hover, :root.no-glow:not(.range-dragging) input[type=range]:focus-visible { filter: none; }
 /* a keyboard-focused slider still shows where focus is: an outline instead of the glow (never while it's held) */
 :root.kbd-nav.no-glow:not(.range-dragging) input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -1286,14 +1286,14 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent), var(--glow-sm); }
 :root.no-motion .drain-fill { animation: none; width: 100%; margin-left: 0; opacity: .45; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
-:root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico) { transition: none !important; }
+:root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico, .wf-gico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }
 /* motion off = icons stay still, not snap: a hover tilt, a turned X, a lifted lid or a press squeeze with no transition is
    still a jump. Kept: the disclosure carets and chevrons (their turn says open / closed, instant here) and the spinner
    (progress). !important beats the hover rules and any one-shot left over. Guard: probe-icons icon:still:off */
 :root.no-motion svg.lucide:not(.lucide-chevron-down, .lucide-chevron-up, .lucide-chevron-right, .lucide-chevron-left, .lucide-loader-circle, .sel-caret),
 :root.no-motion svg.lucide:not(.lucide-loader-circle) > *,
-:root.no-motion :is(.ssection-ico, .side-sec-ico, .side-tile-ico) { transform: none !important; }
+:root.no-motion :is(.ssection-ico, .side-sec-ico, .side-tile-ico, .wf-gico) { transform: none !important; }
 /* rotate / scale in a rule of their own: next to `transform` in one block, the build's CSS minifier folds all three into
    `transform: rotate(0) scale(1)` and drops the individual properties the X's turn (rotate) and the press (scale) use */
 :root.no-motion svg.lucide:not(.lucide-chevron-down, .lucide-chevron-up, .lucide-chevron-right, .lucide-chevron-left, .lucide-loader-circle, .sel-caret) {
@@ -1710,12 +1710,22 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   background: var(--accent); box-shadow: 0 0 8px var(--accent); opacity: 0; transition: opacity .2s; }
 .wf-grp.has-active::before { opacity: .8; }
 .wf-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 0; }
-.wf-head-btn { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 6px 6px; border-radius: 7px;
+/* 3 px above and below the 22 px emblem: the head keeps the height the name's line gave it before (Guard: probe-filters wf:emblem) */
+.wf-head-btn { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 7px;
   font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); text-align: left;
   transition: color .12s; }
 .wf-head-btn:hover { color: var(--text); }
 .wf-chev { flex: none; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .wf-head-btn[aria-expanded="false"] .wf-chev { transform: rotate(-90deg); }
+/* a group's emblem: a Settings section chip (.ssection-ico) in the head's size; whole-pixel chip and glyph (22 / 14: 4 px
+   each side) so the glyph's pixels sit on the chip's centre. Object role: the chip tilts on the spring while its group is
+   hovered (its glyph neither acts nor tilts on its own: iconMotion.ts EMBLEM, the object rule above). Guard: probe-filters
+   wf:emblem, wf:emblem:centre */
+.wf-gico { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
+  transition: box-shadow .25s, transform var(--spring-dur) var(--spring); }
+.wf-grp:hover .wf-gico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: rotate(-8deg) scale(1.1); }
 .wf-n { flex: none; min-width: 18px; padding: 0 6px; border-radius: 999px; line-height: 17px; text-align: center;
   font-size: 10.5px; font-weight: 800; color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
 .wf-sub { margin: 6px 8px 1px; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; color: var(--muted); }

@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
-import { Check, ChevronDown, Dot, X } from "lucide-react";
+import { Check, ChevronDown, Dot, Layers, Library, Monitor, Palette, Shield, Sparkles, Tags, X, type LucideIcon } from "lucide-react";
 import { filterOf, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { groupsFor, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
@@ -80,6 +80,16 @@ function MatchSwitch({ m, on, scope }: { m: GroupMatch; on: boolean; scope: Filt
   );
 }
 
+// each group's emblem, in the head like a Settings section's (index.css .wf-gico): one per group, never one per tag — a
+// glyph on some rows and not others reads as a difference between the tags. Resolution and Age take the sidebar's pills'
+// glyphs (LibrarySide.tsx), so a fact wears one icon everywhere.
+const GROUP_ICON: Record<string, LucideIcon> = { library: Library, age: Shield, type: Layers, resolution: Monitor, genre: Palette, features: Sparkles };
+// PERF: memo'd — a group re-renders on every tag change, its emblem never needs to. Guard: probe-filters lib:interplay
+const GroupEmblem = memo(function GroupEmblem({ id }: { id: string }) {
+  const Icon = GROUP_ICON[id] ?? Tags;
+  return <span className="wf-gico" data-wf-gico={id} aria-hidden="true"><Icon size={14} /></span>;
+});
+
 function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState>; scope: FilterScope }) {
   const collapsed = useStore((s) => s.filterCollapsed.includes(g.id));
   const toggle = useStore((s) => s.toggleFilterGroup);
@@ -93,7 +103,8 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
       role="group" aria-label={`${g.name} (${match === "all" ? "all of" : "any of"})`}>
       <div className="wf-head">
         <button type="button" className="wf-head-btn" data-wf-head={g.id} aria-expanded={!collapsed} aria-controls={bodyId} onClick={() => toggle(g.id)}>
-          <ChevronDown size={14} className="wf-chev" /> {g.name}
+          <ChevronDown size={14} className="wf-chev" />
+          <GroupEmblem id={g.id} />{g.name}
         </button>
         {n > 0 && <span className="wf-n" data-wf-count={n}>{n}</span>}
         {g.match && <MatchSwitch m={g.match} on={included >= 2} scope={scope} />}
