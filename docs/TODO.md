@@ -20,7 +20,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        AND down: a user who picks Low wants the disk and decode savings, so a downgrade replaces the bigger clip and frees
        its space (after the hand-over grace). On-screen cards go first, then the rest of the library, one encode at a time
        at idle priority (`nice` / `ionice -c3`, ClipStore's background queue), never starving a card that's waiting. A
-       thin progress line on the playlist bar's bottom edge shows running library operations (this sweep; also the
+       thin progress line on the top bar's bottom edge (where Browse's load bar runs: share its place and look, one line
+       at a time) shows running library operations (this sweep; also the
        Steam-tag / frame-size pass, LibraryFactsOps) with their count (`Making Low previews 42 / 318`); theme, glow,
        motion-off (fade) and bg-live per design.md. Guards: matrix cells for the sweep's order, debounce, downgrade freeing
        space, and the progress line.
