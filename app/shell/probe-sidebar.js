@@ -754,6 +754,44 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // the notch sits at the item's wallpaper volume; a level moved to within a few points of it snaps on and the preview
+    // follows the wallpaper again (nothing saved); a small step that starts on or inside the band leaves it (arrow keys
+    // aren't swallowed by the snap). SidePanel.tsx snapsToWallpaper.
+    await cell("preview:notch", async () => {
+      const v = [], J = JSON.stringify;
+      await post("/library/volume", { path: K[0], intValue: 35 });
+      try {
+        await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await loadUi();
+        if (!await openVideo("k1")) return ["k1: the Video preview has no mute chip (proved nothing)"];
+        const NS = `${VS} const now = () => { const n = m.side().querySelector(".side-vol-notch");
+          return { ...st(), on: !!n?.classList.contains("on"), at: n ? +getComputedStyle(n).getPropertyValue("--at") : null }; };`;
+        const r = await page(`${NS} if (!rg) return { none: true };
+          const o = {}; b.click(); await m.sleep(150); o.start = now();
+          for (const [k, x] of [["at60", 60], ["near", 37], ["at10", 10], ["below", 33], ["out", 39], ["back", 36]]) {
+            m.setValue(m.side().querySelector("[data-side-vol-range]"), x); await m.sleep(150); o[k] = now(); }
+          return o;`);
+        console.log(`        ${J(r)}`);
+        if (r.none) return ["no volume slider (proved nothing)"];
+        if (!r.start.on || r.start.slider !== 35) return [`unmuted, k1 doesn't start on its notch at 35 (${J(r.start)}) — proved nothing`];
+        if (Math.abs(r.start.at - 0.35) > 0.005) v.push(`the notch sits at ${r.start.at}, not k1's 35`);
+        const on = (x, n) => x.on && x.slider === 35 && x.vol === 35 && x.saved === null || v.push(`${n}: want snapped onto the notch (35, following, nothing saved): ${J(x)}`);
+        const off = (x, n, want) => (!x.on && x.slider === want && x.saved === String(want)) || v.push(`${n}: want its own level ${want}, off the notch: ${J(x)}`);
+        off(r.at60, "60", 60); on(r.near, "60 → 37"); off(r.at10, "10", 10); on(r.below, "10 → 33");
+        off(r.out, "35 → 39 (outside the band)", 39); on(r.back, "39 → 36");
+        // keys: one step off the notch leaves it, the next step inside the band stays where it is, back down to 35 lands on it
+        const key = async (k) => { send({ type: "keyDown", keyCode: k }); await sleep(30); send({ type: "keyUp", keyCode: k }); await sleep(150); };
+        await page(`m.side().querySelector("[data-side-vol-range]").focus();`);
+        const ks = [];
+        for (const k of ["Right", "Right", "Left", "Left"]) { await key(k); ks.push(await page(`${NS} return now();`)); }
+        console.log(`        keys: ${J(ks)}`);
+        off(ks[0], "notch + Right", 36); off(ks[1], "36 + Right", 37); off(ks[2], "37 + Left", 36); on(ks[3], "36 + Left");
+      } finally {
+        await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
+        await post("/library/volume", { path: K[0], intValue: null });
+      }
+      return v;
+    });
+
     // its look: the pill slides + fades out from under the chip on hover (per frame, transform + opacity), instant with motion
     // off; hidden it takes no pointer; it stays inside the picture; the chip's glow goes under no-glow; the pill keeps its own
     // dark fill under bg-live. Screenshots side-pvol-*.png.

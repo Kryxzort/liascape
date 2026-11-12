@@ -72,6 +72,12 @@ export function setPreviewVolume(v: number) {
   save(PV_KEY, own); if (last != null) save(PV_LAST_KEY, last);
   emit({ ...ps, own, last });
 }
+// back to following the wallpaper's volume (the slider's notch): forget the preview's own level
+export function followWallpaper() {
+  if (ps.own == null) return;
+  try { localStorage.removeItem(PV_KEY); } catch { /* storage unavailable: the in-memory state still follows */ }
+  emit({ ...ps, own: null });
+}
 export function setPreviewMuted(muted: boolean) {
   if (muted === ps.muted) return;
   save(PV_MUTED_KEY, muted ? 1 : 0);

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { captureSource, sourceEl, useMotion } from "./motion";
@@ -6,7 +6,7 @@ import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
 import { type PreviewKind } from "../store";
 import { useStableFn } from "../hooks/useStableFn";
-import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, unmutePreview, rangeFill } from "./sidePreview";
+import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, followWallpaper, unmutePreview, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
 // item sidebar"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
@@ -221,16 +221,34 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
 // layer (z 3) and stopping its clicks: a press here never applies the wallpaper.
 // Guard: probe-sidebar preview:volume, preview:volumeLook.
 const WHEEL_PX_PER_STEP = 24;
+// The slider's notch sits at the wallpaper's own volume. A new level that lands close enough to it snaps onto it and the
+// preview follows the wallpaper again (the way back after moving the preview's own slider); anywhere else is the
+// preview's own level. Guard: probe-sidebar preview:notch
+// "Close enough" is a few points either side, and only on the way IN: a level already on the notch (or inside the band)
+// that moves away by one arrow key or wheel step must leave it, or the notch would hold the level and swallow every
+// small step.
+const NOTCH_SNAP = 3;
+function snapsToWallpaper(v: number, from: number, wall: number): boolean {
+  if (v === wall) return true;
+  return Math.abs(v - wall) <= NOTCH_SNAP && Math.abs(from - wall) > NOTCH_SNAP;
+}
+
 function PreviewVolume({ wall }: { wall: number }) {
   const sound = usePreviewSound();
   const level = previewLevel(sound, wall);
+  const clampWall = Math.max(0, Math.min(100, Math.round(wall)));
   const silent = sound.muted || level === 0;
   const shown = silent ? 0 : level;
   // several wheel events can land before React renders the last one's level: step from the level the last one asked for
   const wheelAt = useRef({ v: 0, t: -Infinity });
   // the glyph pops on a change the user made, never when the chip first shows
   const [touched, setTouched] = useState(false);
-  const change = (v: number) => { setTouched(true); setPreviewVolume(v); if (v > 0) setPreviewMuted(false); };
+  const following = sound.own == null;
+  const change = (v: number) => {
+    setTouched(true);
+    if (snapsToWallpaper(v, shown, clampWall)) followWallpaper(); else setPreviewVolume(v);
+    if (v > 0) setPreviewMuted(false);
+  };
   const toggle = () => {
     setTouched(true); wheelAt.current.t = -Infinity;
     if (silent) unmutePreview(wall); else setPreviewMuted(true);
@@ -265,9 +283,12 @@ function PreviewVolume({ wall }: { wall: number }) {
         {/* keyed by the state: the new glyph pops once on a change (icon motion: toggle) */}
         <span className={`side-mute-ico${touched ? " ico-pop" : ""}`} key={silent ? "off" : "on"}>{silent ? <VolumeX size={16} /> : <Volume2 size={16} />}</span></button>
       <div className="side-vol-slide">
-        <span className="side-vol-val" aria-hidden>{shown}</span>
-        <input type="range" min={0} max={100} step={1} value={shown} style={rangeFill(shown, 0, 100)} data-side-vol-range
-          aria-label="Preview volume" aria-valuetext={silent ? "muted" : `${shown}%`} onChange={(e) => change(+e.target.value)} />
+        <span className={`side-vol-val${following ? " follow" : ""}`} aria-hidden>{shown}</span>
+        <span className="side-vol-track">
+          <i className={`side-vol-notch${following ? " on" : ""}`} style={{ "--at": clampWall / 100 } as CSSProperties} aria-hidden />
+          <input type="range" min={0} max={100} step={1} value={shown} style={rangeFill(shown, 0, 100)} data-side-vol-range
+          aria-label="Preview volume" aria-valuetext={silent ? "muted" : `${shown}%${following ? ", following the wallpaper" : ""}`} onChange={(e) => change(+e.target.value)} />
+        </span>
       </div>
     </div>
   );

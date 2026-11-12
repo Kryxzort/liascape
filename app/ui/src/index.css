@@ -1170,6 +1170,16 @@ input[type=range]:focus-visible { outline: none; }
 .side-panel .side-vol input[type=range] { flex: none; width: 84px; min-width: 0; max-width: none; height: 18px; }
 .side-panel .side-vol input[type=range]::-webkit-slider-runnable-track { height: 4px; }
 .side-panel .side-vol input[type=range]::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; }
+/* the notch: the wallpaper's own volume on the preview's slider (SidePanel.tsx snapsToWallpaper). It sits on the thumb's
+   travel (6 px in from each end: the 12 px thumb's half), lit in the accent while the preview follows the wallpaper. */
+.side-vol-track { position: relative; display: flex; align-items: center; }
+.side-vol-notch { position: absolute; top: 50%; left: calc(6px + (100% - 12px) * var(--at, 0)); width: 2px; height: 10px;
+  border-radius: 1px; background: var(--subtext); opacity: .6; transform: translate(-50%, -50%); pointer-events: none;
+  transition: background-color .2s, opacity .2s, box-shadow .2s; }
+.side-vol-notch.on { background: var(--accent); opacity: 1; box-shadow: var(--glow-sm); }
+.side-vol-val.follow { color: var(--accent); }
+:root.no-glow .side-vol-notch.on { box-shadow: none; }
+:root.no-motion .side-vol-notch { transition: none; }
 :root.no-motion .side-vol-slide { transition: none; }
 /* the preview switch (GIF / Video / YouTube / Picture): the segmented control's flat strip, fused to the picture's top edge
    (not an overlay, not tabs) — a little shorter than a pill row; its highlight is clipped to the strip's rounded top, and
