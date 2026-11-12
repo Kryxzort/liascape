@@ -393,9 +393,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .err-text { color: var(--subtext); font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
 
 /* ---- playlist bar ---- */
-/* overlaid at the bottom (cards scroll BEHIND it) so collapse/expand never resizes .scroll →
-   useGridFit doesn't recompute → no card reflow. Opaque bg (no backdrop blur: it'd repaint over the
-   animating gif grid every frame — the documented lag trap). */
+/* overlaid at the bottom; the library scroll ends above it (.lib-scroll margin) and the column fit counts that margin as
+   grid (hooks/useGridFit.ts), so collapse/expand never changes the columns → no card reflow. No backdrop blur: it'd repaint
+   over the animating gif grid every frame — the documented lag trap. */
 .playlist-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
   border-top: 1px solid var(--surface1);
   /* fully transparent bg → the live wallpaper video shows at 100% behind the playlist bar (the scroll ends
@@ -412,6 +412,16 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .pl-chev { display: block; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .pl-fold.folded .pl-chev { transform: rotate(-90deg); }
 :root.no-motion .pl-chev { transition: none; }
+/* the bar's body: the row, or the empty hint. flow-root keeps the row's negative top margin inside it, so its height is the
+   bar's whole travel in and out of flow (hooks/useBarFold.ts), and it sits exactly where the row sat on its own.
+   Folded and at rest it is hidden, not unmounted; while the fold plays (`data-fold`, set by useBarFold) it is out of flow
+   where it sits in flow — the bar's layout is the folded one, its WAAPI slide puts it back on screen — and takes no
+   pointer on the way out. Motion off: no data-fold, it swaps at once. Guard: probe-layout look:plFold */
+.pl-body { display: flow-root; }
+.playlist-bar.folded:not([data-fold]) > .pl-body { display: none; }
+.playlist-bar[data-fold] > .pl-body { position: absolute; left: 12px; right: 12px; } /* = .playlist-bar's side padding */
+.playlist-bar[data-fold="out"] > .pl-body { pointer-events: none; }
+.playlist-bar[data-fold="in"] > .pl-body { opacity: 0; } /* until its fade starts (hooks/useBarFold.ts: the frame it is sized in) */
 .playlist-bar-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
 .playlist-bar-count { font-size: 11px; color: var(--subtext); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); padding: 1px 7px; border-radius: 999px; }
 .mini { padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); color: var(--subtext);

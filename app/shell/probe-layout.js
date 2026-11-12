@@ -9,6 +9,11 @@
 //   dock:hover[:off]      hovering a playlist bar item lifts it most (4 px) and its two neighbours a little (transform
 //                         only); "Smooth window animations" off → only the hovered one (2 px, as before), no neighbours,
 //                         no easing
+//   look:plFold[:off|:reduced] the playlist bar's fold chevron, clicked: collapsing, the chevron turns, the bar's edge slides
+//                         down and the row fades out through in-between frames, the items stay in the document (hidden);
+//                         expanding plays it back to where it started. The grid's columns and cards never move, --playlist-bar-h
+//                         ends at the bar's height, aria-expanded / the saved setting / locate-playing follow; motion off or
+//                         reduced: no in-between frame. Screenshots plfold-<collapse|expand>-<mid|mode>.png
 //   tabs:slide[:off|:reduced] switching tabs slides the active pill (transform) and slides/fades the page in
 //                         (transform + opacity); off / prefers-reduced-motion → it jumps, nothing animates
 //   tabs:keep             the Library page is kept while Browse shows (hidden, its sidebar too, taking no room from Browse's
@@ -44,6 +49,9 @@
 //   perf:sidebar          right-click open / switch / Escape close re-render the sidebar, not the grid's cards or the
 //                         playlist bar (React's commit hook counts the components that ran), and force no layout
 //                         (LIASCAPE_PERF_DUMP=1: every step's trace → <LIASCAPE_OUT>/perf-trace-<n>.json)
+//   perf:plFold           a PERF_N-item playlist: folding and unfolding the playlist bar (real clicks) mount, unmount and
+//                         re-render under PERF_FOLD_MAX components (the items stay mounted, hidden) and force no layout;
+//                         the row comes back at its scroll offset; prints each click's longest task
 //   perf:dockRepaint      on a heavy Library (long playlist, autoplaying video thumbnails, live wallpaper, a playing card) a
 //                         dock sweep doesn't repaint the whole playlist bar every frame, and its items stack exactly as they
 //                         magnify; prints the layer tree (element + Chromium's compositing reasons) and what repainted most
@@ -137,6 +145,9 @@ const PERF_KEPT_MOUNTS_MAX = 50;   // components mounted by a switch back to the
 // (a measured height on .app or :root, a grid re-fit through a wrong height) restyles the page again each time
 const PERF_STYLED_MAX = 0.6;
 const PERF_RAFS_MAX = 0;      // requestAnimationFrame callbacks on a switch to Library: its motion is CSS, nothing to settle
+// components mounted, unmounted or re-rendered by a click on the playlist bar's fold: the bar, its head and what reads the
+// settings object the click saves (~70); a component per playlist item (perf:plFold's PERF_N, each item ~4) is far over it
+const PERF_FOLD_MAX = 150;
 const PERF_SIDE_RENDERS_MAX = 200; // components re-rendered per sidebar step: the sidebar's own few dozen pass, the grid's
                                    // cards (~6 components each, PERF_N of them) don't
 const DOCK_PLAYLIST = 45;          // perf:dockRepaint: playlist bar items (most of them scrolled out of the bar's view)
@@ -204,12 +215,13 @@ const BR_WATCH = `(() => { window.__brf = null; window.__brs = []; const read = 
 // A fiber object that is still the current one from the last commit was never visited (its subtree neither); a new current
 // one with no alternate mounted; with PerformedWork (flag 1) its component ran.
 const RC_HOOK = `(() => {
-  const C = new Set([0, 1, 11, 14, 15]); const cur = new WeakSet(); window.__rc = { rendered: 0, mounted: 0 }; window.__rcWho = {};
+  const C = new Set([0, 1, 11, 14, 15]); const cur = new WeakSet(); window.__rc = { rendered: 0, mounted: 0, unmounted: 0 }; window.__rcWho = {};
   // what re-rendered, named by the class of its first DOM node (production names are minified)
   const who = (f) => { let h = f.child; while (h && typeof h.type !== "string") h = h.child;
     const k = h ? h.type + "." + String(h.memoizedProps?.className ?? "").split(" ")[0] : "?"; window.__rcWho[k] = (window.__rcWho[k] ?? 0) + 1; };
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { supportsFiber: true, renderers: new Map(), inject() { return 1; },
-    onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, checkDCE() {}, onScheduleFiberRoot() {},
+    // called for every fiber of a deleted subtree (react-dom walks it)
+    onCommitFiberUnmount(_id, f) { if (C.has(f.tag)) window.__rc.unmounted++; }, onPostCommitFiberRoot() {}, checkDCE() {}, onScheduleFiberRoot() {},
     onCommitFiberRoot(_id, root) {
       const st = [root.current];
       while (st.length) {
@@ -222,6 +234,24 @@ const RC_HOOK = `(() => {
       }
     } };
 })();`;
+// look:plFold — from a fold click on, each frame: the chevron's turn (deg), the bar's top edge, the row's effective opacity (it and
+// its ancestors up to the bar; null = not in the document), the Library grid's --cols and first card's top, the properties
+// the bar's subtree animates (CSS transitions and WAAPI)
+const FOLD_MS = 1000;
+const FOLD_REC = `(() => {
+  const ang = (e) => { const t = e ? getComputedStyle(e).transform : "none"; if (!e) return null; if (t === "none") return 0; const m = new DOMMatrixReadOnly(t); return Math.atan2(m.b, m.a) * 180 / Math.PI; };
+  const r = window.__pf = { f: [], on: true, stop() { this.on = false; return this.f; } };
+  const grab = () => { const bar = document.querySelector(".playlist-bar"), row = bar?.querySelector(".playlist-bar-row"), sc = document.querySelector(".lib-scroll");
+    let o = null; if (row) { o = 1; for (let e = row; e && e !== bar.parentElement; e = e.parentElement) o *= +getComputedStyle(e).opacity; if (!row.offsetParent) o = 0; }
+    // the fold's own: the bar, its body and the chevron (the head's buttons have hover transitions of their own)
+    const fold = (a) => { const t = a.effect?.target; return !!t && (!t.closest(".playlist-bar-head") || !!t.closest(".pl-chev")); };
+    const props = bar ? bar.getAnimations({ subtree: true }).filter(fold).flatMap((a) => a.transitionProperty ? [a.transitionProperty]
+      : (a.effect?.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((p) => !["offset", "easing", "composite", "computedOffset"].includes(p)))) : [];
+    r.f.push({ chev: ang(bar?.querySelector(".pl-chev")), top: bar?.getBoundingClientRect().top, o, cols: sc?.style.getPropertyValue("--cols") ?? null,
+      cardY: sc?.querySelector(".card.lib")?.getBoundingClientRect().top ?? null, props: [...new Set(props)] }); };
+  grab();
+  const f = () => { if (!r.on) return; grab(); requestAnimationFrame(f); }; requestAnimationFrame(f);
+  return true; })()`;
 const dbg = () => { const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3"); return d; };
 // grid:boot — from the document's start, each frame's first look at the Library grid: its element, its card count, the
 // --cols the fit wrote on it ("" = none, the stylesheet's default)
@@ -331,7 +361,7 @@ async function perfStep(fn) {
     forced: forced.length, forcedMs: forced.reduce((s, e) => s + e.dur, 0) / 1000,
     // who forced it: the JS frame that asked (file:line:col of the bundle)
     forcedBy: forced.map((e) => { const f = e.args?.beginData?.stackTrace?.[0]; return f ? `${f.functionName || "?"}@${String(f.url).split("/").pop()}:${f.lineNumber}:${f.columnNumber}` : "?"; }).join(", "),
-    rendered: rc1.rendered - rc0.rendered, mounted: rc1.mounted - rc0.mounted, who: rc1.who };
+    rendered: rc1.rendered - rc0.rendered, mounted: rc1.mounted - rc0.mounted, unmounted: rc1.unmounted - rc0.unmounted, who: rc1.who };
 }
 
 // Wheel events through Chromium's input pipeline (webContents.sendInputEvent → a real WebMouseWheelEvent) at the scroller's
@@ -478,6 +508,81 @@ app.whenReady().then(async () => {
     };
     await cell("dock:hover", () => dock(true));
     await cell("dock:hover:off", () => dock(false));
+    await setMotion(true);
+
+    // ---- the playlist bar's fold ----
+    // A real click on the fold chevron, then every frame for FOLD_MS: the chevron's turn, the bar's top edge on screen, the
+    // row's effective opacity, place and whether it shows, the Library grid's --cols and its first card's top, and what the
+    // bar animates. Collapse, then expand.
+    const fold = async (mode) => {
+      const v = [];
+      await setMotion(mode !== "off"); await reducedMotion(mode === "reduced"); await sleep(300);
+      await tab("Library");
+      win.webContents.sendInputEvent({ type: "mouseMove", x: 5, y: 5 });
+      await page(`document.querySelector(".lib-scroll").scrollTop = 0;
+        if (document.querySelector(".pl-fold")?.getAttribute("aria-expanded") === "false") { document.querySelector(".pl-fold").click(); await m.sleep(900); }`);
+      const n0 = await js(`document.querySelectorAll(".pl-item").length`);
+      if (n0 < 2) return [`only ${n0} playlist bar items — proved nothing`];
+      const runs = {};
+      for (const dir of ["collapse", "expand"]) {
+        // the pointer gets to the chevron first (the fold moves the bar's head, so it is found again each time)
+        const chev = await page(`const b = document.querySelector(".pl-fold").getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: chev.x, y: chev.y }); await sleep(400);
+        await js(FOLD_REC);
+        await clickAt(chev);
+        await sleep(dir === "collapse" ? 120 : 200);
+        if (mode === "on") await shot(`plfold-${dir}-mid`);
+        await sleep(FOLD_MS);
+        const f = await js(`window.__pf.stop()`);
+        const end = await page(`const bar = document.querySelector(".playlist-bar"), row = bar.querySelector(".playlist-bar-row"), b = document.querySelector(".pl-fold");
+          return { items: document.querySelectorAll(".pl-item").length, rowKept: !!row, rowShown: !!row?.offsetParent, exp: b.getAttribute("aria-expanded"),
+            locate: !!bar.querySelector('[data-go-playing="bar"]')?.disabled, barH: bar.offsetHeight,
+            varH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--playlist-bar-h")) };`);
+        const saved = (await http("GET", "/settings")).json?.isPlaylistBarCollapsed;
+        runs[dir] = { f, end, saved };
+        await shot(`plfold-${dir}-${mode}`);
+      }
+      for (const [dir, { f, end, saved }] of Object.entries(runs)) {
+        const want = dir === "collapse";
+        if (f.length < 3) { v.push(`${dir}: only ${f.length} frames sampled — proved nothing`); continue; }
+        const a = f[0], z = f[f.length - 1], fr = f.slice(1);
+        const moving = (k) => fr.filter((x) => x[k] != null && a[k] != null && z[k] != null && Math.abs(x[k] - a[k]) > 1 && Math.abs(x[k] - z[k]) > 1).length;
+        const fading = fr.filter((x) => x.o != null && x.o > 0.05 && x.o < 0.95).length;
+        const cols = [...new Set(f.map((x) => x.cols))], dy = Math.max(...f.map((x) => Math.abs((x.cardY ?? 0) - (a.cardY ?? 0))));
+        const props = [...new Set(f.flatMap((x) => x.props))];
+        console.log(`        ${mode} ${dir}: chevron ${a.chev?.toFixed(0)}° → ${z.chev?.toFixed(0)}° (${moving("chev")} frames turning), bar top ${a.top?.toFixed(1)} → ${z.top?.toFixed(1)} px (${moving("top")} moving),`
+          + ` row opacity ${fr.map((x) => x.o == null ? "-" : x.o.toFixed(2)).slice(0, 14).join(" ")}… (${fading} fading); ${f.length} frames; --cols ${cols.join("→")}, first card moved ${dy.toFixed(1)} px;`
+          + ` animates [${props.join(", ")}]; end: ${end.items} items, row ${end.rowKept ? (end.rowShown ? "shown" : "hidden") : "gone"}, aria-expanded ${end.exp}, saved ${saved}, bar ${end.barH} px / --playlist-bar-h ${end.varH}`);
+        // what must hold with motion on, off and reduced
+        if (Math.abs(Math.abs(z.chev) - (want ? 90 : 0)) > 2) v.push(`${dir}: the chevron ends at ${z.chev?.toFixed(1)}° (${want ? "−90" : "0"})`);
+        if (end.exp !== String(!want)) v.push(`${dir}: aria-expanded is ${end.exp}`);
+        if (saved !== want) v.push(`${dir}: the setting saved isPlaylistBarCollapsed = ${saved}`);
+        if (want && !end.locate) v.push("collapsed: locate-playing isn't disabled");
+        if (end.items !== n0) v.push(`${dir}: ${end.items} playlist items in the document after it (${n0}): ${want ? "the collapse unmounted them" : "they were built again"}`);
+        if (want ? end.rowShown || !end.rowKept : !end.rowShown) v.push(`${dir}: the row is ${end.rowKept ? (end.rowShown ? "shown" : "hidden") : "gone"} at the end`);
+        if (!want && (Math.abs(z.o - 1) > 0.01 || Math.abs(z.top - runs.collapse.f[0].top) > 0.5)) v.push(`expand: it ends at opacity ${z.o}, top ${z.top} px (not where it started the collapse: ${runs.collapse.f[0].top} px)`);
+        if (Math.abs(end.barH - end.varH) > 0.5) v.push(`${dir}: --playlist-bar-h is ${end.varH} px, the bar ${end.barH} px`);
+        // the grid isn't re-fit by the bar: no column jump, its cards don't move
+        if (cols.length > 1) v.push(`${dir}: the grid's columns changed ${cols.join(" → ")}`);
+        if (dy > 0.5) v.push(`${dir}: the grid's first card moved ${dy.toFixed(1)} px`);
+        const bad = props.filter((p) => !["transform", "opacity", "translate", "rotate", "scale"].includes(p));
+        if (bad.length) v.push(`${dir}: the bar animates ${bad.join(", ")} (transform / opacity only)`);
+        if (mode === "on") {
+          if (moving("chev") < 3) v.push(`${dir}: the chevron jumped (${moving("chev")} frames turning)`);
+          if (moving("top") < 3) v.push(`${dir}: the bar's edge jumped (${moving("top")} frames moving)`);
+          if (fading < 2) v.push(`${dir}: the row didn't fade (${fading} frames between)`);
+          if (!props.length) v.push(`${dir}: nothing in the bar animated`);
+        } else {
+          if (moving("chev") || moving("top") || fading) v.push(`${mode}: ${dir} still animates (chevron ${moving("chev")}, edge ${moving("top")}, fade ${fading} frames)`);
+        }
+      }
+      await reducedMotion(false);
+      win.webContents.sendInputEvent({ type: "mouseMove", x: 5, y: 5 });
+      return v;
+    };
+    await cell("look:plFold", () => fold("on"));
+    await cell("look:plFold:off", () => fold("off"));
+    await cell("look:plFold:reduced", () => fold("reduced"));
     await setMotion(true);
 
     // ---- tab slide ----
@@ -914,7 +1019,7 @@ app.whenReady().then(async () => {
     await reducedMotion(false);
 
     // ---- perf: tab switches and the item sidebar on a full library ----
-    if (!ONLY || ["perf:tabs", "tabs:keep", "perf:sidebar", "perf:dockRepaint"].some((c) => ONLY.test(c))) await perfSetup();
+    if (!ONLY || ["perf:tabs", "tabs:keep", "perf:sidebar", "perf:plFold", "perf:dockRepaint"].some((c) => ONLY.test(c))) await perfSetup();
     // A tab switch: Browse → Library → Settings → Library → Browse, each one a real click (sendInputEvent) under a trace.
     // Per switch: the longest main-thread task, the layouts forced from script (a Layout inside a JS call: the effect that
     // reads a size before the frame would lay out anyway), and the React components that rendered / mounted.
@@ -1010,6 +1115,47 @@ app.whenReady().then(async () => {
         if (r.rendered > PERF_SIDE_RENDERS_MAX) v.push(`${what}: ${r.rendered} components re-rendered (≤ ${PERF_SIDE_RENDERS_MAX}: the grid's cards and the playlist bar must not) — most: ${r.who}`);
         if (r.forced > PERF_FORCED_MAX) v.push(`${what}: ${r.forced} layouts forced from script (≤ ${PERF_FORCED_MAX}): ${r.forcedBy}`);
       }
+      win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
+      return v;
+    });
+    // The playlist bar's fold on a long playlist (every library item, PERF_N): each click a real one under a trace. The items
+    // stay mounted while the bar is folded (hidden, not unmounted), so neither click builds or tears down a component per
+    // item; prints the click's longest task.
+    await cell("perf:plFold", async () => {
+      const v = [];
+      const lib = (await http("GET", "/library")).json ?? [];
+      const all = lib.map((i) => i.videoPath);
+      if (all.length < PERF_N) return [`only ${all.length} library items — proved nothing`];
+      await post("/playlist/state", { videoPaths: all, settings: null, name: null });
+      await setSettings({ isPlaylistBarCollapsed: false });
+      await win.loadURL(withToken(U + "/")); // the open page doesn't see a /settings POST
+      for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.pl-item').length`) >= all.length) break; await sleep(100); }
+      await js(PAGE); await tab("Library"); await sleep(1200);
+      const n0 = await js(`document.querySelectorAll(".pl-item").length`);
+      if (n0 < all.length) return [`${n0} of ${all.length} playlist items rendered — proved nothing`];
+      // the row's scroll offset comes back with it (kept, not built again)
+      const left0 = await page(`const r = document.querySelector(".playlist-bar-row"); r.scrollLeft = 1000; await m.sleep(300); return r.scrollLeft;`);
+      if (!(left0 > 500)) return [`the row scrolled to ${left0} px, not 1000 — proved nothing`];
+      for (const dir of ["collapse", "expand"]) {
+        // the chevron, pointed at before the trace: the fold moves the bar's head
+        const at = await page(`const b = document.querySelector(".pl-fold").getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y }); await sleep(400);
+        // the hand leaves once it has clicked: an expanding row rising under a still pointer would hover an item, and the
+        // hover's own first glow placement (PlItem, probe-plbar bar:sweepCost) isn't the fold's cost
+        const r = await perfStep(async () => { await clickAt(at); win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 }); await sleep(1000); });
+        const s1 = await js(`({ exp: document.querySelector(".pl-fold").getAttribute("aria-expanded"), items: document.querySelectorAll(".pl-item").length })`);
+        console.log(`        ${dir.padEnd(8)} longest task ${r.longest.toFixed(0)} ms, busy ${r.busy.toFixed(0)} ms, script ${r.script.toFixed(0)} ms, ${r.forced} forced layouts (${r.forcedMs.toFixed(1)} ms),`
+          + ` rendered ${r.rendered}, mounted ${r.mounted}, unmounted ${r.unmounted}; ${s1.items} items in the document — most: ${r.who}`);
+        if (s1.exp !== String(dir === "expand")) { v.push(`${dir}: aria-expanded is ${s1.exp} after the click — nothing measured (proved nothing)`); break; }
+        if (r.mounted > PERF_FOLD_MAX) v.push(`${dir}: ${r.mounted} components mounted (≤ ${PERF_FOLD_MAX}): the items were built again`);
+        if (r.unmounted > PERF_FOLD_MAX) v.push(`${dir}: ${r.unmounted} components unmounted (≤ ${PERF_FOLD_MAX}): the items were torn down`);
+        if (r.rendered > PERF_FOLD_MAX) v.push(`${dir}: ${r.rendered} components re-rendered (≤ ${PERF_FOLD_MAX}) — most: ${r.who}`);
+        if (r.forced > PERF_FORCED_MAX) v.push(`${dir}: ${r.forced} layouts forced from script (≤ ${PERF_FORCED_MAX}): ${r.forcedBy}`);
+      }
+      const left1 = await js(`document.querySelector(".playlist-bar-row")?.scrollLeft ?? null`);
+      console.log(`        the row's scroll offset: ${left0} px before the fold, ${left1} after it`);
+      if (!v.length && Math.abs(left1 - left0) > 1) v.push(`the row came back at scroll offset ${left1} px, not the ${left0} px it was left at`);
+      await post("/playlist/state", { videoPaths: all.slice(0, PERF_PLAYLIST), settings: null, name: null });
       win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
       return v;
     });
@@ -1132,12 +1278,14 @@ app.whenReady().then(async () => {
       if (!fin) v.push("the Library's grid has no fitted --cols after boot — the fit never bound");
       if (painted.includes("")) v.push("the grid painted with the stylesheet's default column count before any fit");
       if (painted.length > 1) v.push(`the first painted column count isn't the final one: ${painted.map((c) => c || "default").join(" → ")}`);
-      // bound: a resize refits it (two sizes whose fits differ: one of them may equal the boot size's)
+      // bound: a resize refits it (sizes whose fits differ: one of them may equal the boot size's, and two shapes of window
+      // can fit the same count — 1920×1080 and 800×600 both take 6 widescreen columns — so a wide, short one too)
       const cols = () => js(`document.querySelector(".lib-scroll")?.style.getPropertyValue("--cols") ?? null`);
       await resize(1920, 1080); const wide = await cols();
       await resize(800, 600); const narrow = await cols();
-      console.log(`        after a resize: 1920×1080 → --cols ${JSON.stringify(wide)}, 800×600 → ${JSON.stringify(narrow)}`);
-      if (!wide || !narrow || wide === narrow) v.push(`resizing to 1920×1080 and 800×600 left --cols at ${JSON.stringify(wide)} / ${JSON.stringify(narrow)} (the fit isn't observing the grid)`);
+      await resize(2400, 520); const band = await cols();
+      console.log(`        after a resize: 1920×1080 → --cols ${JSON.stringify(wide)}, 800×600 → ${JSON.stringify(narrow)}, 2400×520 → ${JSON.stringify(band)}`);
+      if (!wide || !narrow || !band || new Set([wide, narrow, band]).size < 2) v.push(`resizing to 1920×1080, 800×600 and 2400×520 left --cols at ${JSON.stringify(wide)} / ${JSON.stringify(narrow)} / ${JSON.stringify(band)} (the fit isn't observing the grid)`);
       await resize(1400, 900);
       await setSettings({ thumbnailAspect: "1:1" });
       return v;

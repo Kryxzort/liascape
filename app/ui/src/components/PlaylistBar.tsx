@@ -22,6 +22,7 @@ import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useDockLift, dockOwnsFrame } from "../hooks/useDockLift";
+import { useBarFold } from "../hooks/useBarFold";
 import { useMotion } from "./motion";
 import { revealCard } from "../hooks/gridKeys";
 
@@ -134,6 +135,11 @@ function setBarH(h: number) {
   document.documentElement.style.setProperty("--playlist-bar-h", `${h}px`);
 }
 
+// PERF: one options object for the bar's life: useSensor memoizes on it, and a fresh literal per render changed DndContext's
+// activators, re-rendering every item (each useSortable reads that context) on any render of the bar — a fold, a setting,
+// a modal opening. Guard: probe-layout perf:plFold
+const SENSOR_OPTS = { activationConstraint: { distance: 6 } };
+
 export function PlaylistBar() {
   const playlist = useStore((s) => s.playlist);
   const items = useStore((s) => s.libraryItems);
@@ -154,11 +160,11 @@ export function PlaylistBar() {
   const [showLoad, setShowLoad] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null); // the item currently picked up (→ DragOverlay)
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(useSensor(PointerSensor, SENSOR_OPTS));
   const rowRef = useRef<HTMLDivElement>(null);
-  // the row only exists while the bar is expanded and the playlist has items (it loads after the first render): re-attach the
+  // the row exists while the playlist has items (it loads after the first render; folding only hides it): re-attach the
   // wheel listener whenever it (re)mounts — attached once at mount, the bar never scrolls
-  const rowShown = !collapsed && playlist.length > 0;
+  const rowShown = playlist.length > 0;
   const rowSmooth = useSmoothScroll(rowRef, "x");
   const [hv] = useState(hoverStore);
   const motion = useMotion();
@@ -185,6 +191,10 @@ export function PlaylistBar() {
   // that frame's observations): it is never written — written, the next Library visit writes the real height back: two
   // whole-page restyles and a grid re-fit (--cols) through the wrong height. Guard: probe-layout perf:tabs.
   const playlistBarRef = useRef<HTMLDivElement>(null);
+  // the fold's slide keeps the bar's layout height folded while it plays, so this writes the folded height at a collapse's
+  // click and the unfolded one when an expand lands (hooks/useBarFold.ts)
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useBarFold(playlistBarRef, bodyRef, collapsed, motion);
   useEffect(() => {
     const el = playlistBarRef.current;
     if (!el) return;
@@ -208,7 +218,7 @@ export function PlaylistBar() {
   const onDragCancel = () => { setDragId(null); (document.activeElement as HTMLElement | null)?.blur?.(); };
 
   return (
-    <div className="playlist-bar" ref={playlistBarRef}>
+    <div className={`playlist-bar${collapsed ? " folded" : ""}`} ref={playlistBarRef}>
       <div className="playlist-bar-head">
         {/* one chevron, turned −90° while folded (a disclosure rotates, never swaps) */}
         <button className={`mini pl-fold${collapsed ? " folded" : ""}`} aria-label={collapsed ? "Expand" : "Collapse"} aria-expanded={!collapsed}
@@ -226,7 +236,9 @@ export function PlaylistBar() {
         <button className="play-btn ico" ref={magnetRef} onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>
 
-      {!collapsed && (playlist.length === 0 ? (
+      {/* PERF: kept mounted while folded (index.css hides it once the fold has played, hooks/useBarFold.ts): a click
+          neither tears down nor builds the items. Guard: probe-layout perf:plFold */}
+      <div className="pl-body" ref={bodyRef}>{playlist.length === 0 ? (
         <div className="playlist-bar-empty">Add wallpapers with the toggle on library cards</div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter}
@@ -240,7 +252,7 @@ export function PlaylistBar() {
               overflow + backdrop-filter would otherwise clip an in-place transform) */}
           {createPortal(<DragOverlay>{dragId ? <PlItemOverlay item={byPath[dragId]} /> : null}</DragOverlay>, document.body)}
         </DndContext>
-      ))}
+      )}</div>
 
       {/* portal'd to body so the playlist bar's backdrop-filter containing block doesn't pin them off-screen */}
       {createPortal(<>

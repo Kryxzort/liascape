@@ -1,7 +1,7 @@
 // Playlist bar probe — `scripts/test-ui-matrix.sh --probe probe-plbar.js` (the matrix's hermetic stack): the bar's row
 // scrolls on the wheel, and the hover survives the gaps between playlist items.
 //   bar:wheel        a real wheel over the bar's row scrolls it (the row overflows: a narrow window)
-//   bar:wheelReopen  collapse + expand the bar (the row unmounts / mounts again): the wheel still scrolls it
+//   bar:wheelReopen  collapse + expand the bar (the row is hidden, kept, then shown again): the wheel still scrolls it
 //   bar:gap          pointer on item 1 → the gap → item 2: item 1 stays lifted (and glowing) in the gap, then item 2 takes over
 //   bar:leave        pointer off the row: nothing stays lifted, no glow left behind
 //   bar:bounce       the bounce on entering + on the item the pointer stops on, none on the items a sweep (fast or slow) passes
@@ -72,11 +72,12 @@ async function measure() {
 }
 
 async function wheelScrolls(v, what) {
+  // from the row's start, so its first item is on screen (a folded row comes back at the offset it was left at)
+  await page(`if (${row}) ${row}.scrollLeft = 0;`); await sleep(100);
   const s0 = await state();
   if (s0.max === null) { v.push(`${what}: no playlist bar row`); return; }
   if (s0.max <= 0) { v.push(`${what}: the row doesn't overflow (max ${s0.max}) — the cell proves nothing`); return; }
   const it = s0.items[0];
-  await page(`${row}.scrollLeft = 0;`); await sleep(100);
   for (let i = 0; i < 4; i++) { wheel(it.x + it.w / 2, it.y + it.h / 2, -120); await sleep(40); }
   await sleep(900);
   const s1 = await state();
@@ -110,9 +111,13 @@ app.whenReady().then(async () => {
     await cell("bar:wheelReopen", async () => {
       const v = [];
       const toggle = `document.querySelector(".playlist-bar-head .mini").click();`;
-      await page(toggle); await sleep(400);
-      if (await js(`!!${row}`)) v.push("the collapse button didn't collapse the bar");
-      await page(toggle); await sleep(600);
+      await page(toggle); await sleep(900); // the fold plays (hooks/useBarFold.ts), then the row hides
+      if (await js(`!!${row}?.offsetParent`)) v.push("the collapse button didn't collapse the bar");
+      await page(toggle); await sleep(900);
+      const at = await page(`const b = document.querySelector(".playlist-bar"), r = ${row}?.getBoundingClientRect();
+        return { fold: b.dataset.fold ?? null, top: r?.top, bottom: r?.bottom, o: ${row} ? getComputedStyle(${row}.parentElement).opacity : null, h: innerHeight };`);
+      console.log(`        after collapse + expand: data-fold ${at.fold}, row ${at.top?.toFixed(1)}–${at.bottom?.toFixed(1)} px of ${at.h}, its body's opacity ${at.o}`);
+      if (at.fold) v.push(`after collapse + expand: the fold never settled (data-fold="${at.fold}")`);
       await wheelScrolls(v, "after collapse + expand");
       return v;
     });

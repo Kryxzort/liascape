@@ -10,7 +10,9 @@ import { useStore } from "../store";
 // A docked panel (the item sidebar's margin-right, the Workshop filter column's margin-left) is not a smaller window: the
 // count is fitted to the grid as if no panel were open, and with one open the grid takes the column count whose card
 // width is closest to that size — the panel drops columns, the cards keep their size. Guard: probe-layout grid:panel,
-// probe-filters wf:cardSize.
+// probe-filters wf:cardSize. The playlist bar isn't one either: the Library grid ends above it (`.lib-scroll`'s margin-bottom,
+// --playlist-bar-h), and that margin counts as the grid's height, so folding the bar never changes the columns.
+// Guard: probe-layout look:plFold.
 const COUNT: Record<string, number> = { Small: 54, Medium: 35, Large: 20 };
 const MIN_CARD_W = 100; // px — hard floor that only rescues genuinely tiny windows; lets Small stay small
 
@@ -49,14 +51,14 @@ function bind(el: HTMLElement, key: string, aspect: number, n: number): () => vo
   const apply = () => {
     const cs = getComputedStyle(el);
     const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-    // use the TOP padding for both sides — the bottom padding is dynamic (reserves space for the
-    // overlaid playlist bar via --playlist-bar-h); counting it would resize cards when the bar expands.
+    // the TOP padding for both sides, and the bottom margin (the playlist bar's room, which changes as it folds) counted as
+    // grid: neither the bar's height nor the Library's own bottom padding changes the column count
     const padTop = parseFloat(cs.paddingTop) || 0;
     const gap = parseFloat(cs.getPropertyValue("--gap")) || 14;
     // the docked panels' room (the grid has no side margins of its own); computed style is clean in this callback
     const panels = (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
     const w = el.clientWidth - padX;
-    const h = el.clientHeight - padTop * 2;
+    const h = el.clientHeight + (parseFloat(cs.marginBottom) || 0) - padTop * 2;
     if (w <= 0 || h <= 0) return;
     let best = fitCols(w + panels, h, gap, aspect, n);
     if (panels > 0) best = colsNear(w, gap, cardW(w + panels, best, gap));
