@@ -123,9 +123,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   padding: 6px 12px; border-radius: 999px; color: var(--subtext); font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: all .15s, box-shadow .2s;
 }
-.pill:hover { color: var(--text); box-shadow: var(--glow-sm); }
+.pill:hover, .pill.hover-hold { color: var(--text); box-shadow: var(--glow-sm); }
 .pill.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
-.pill.active:hover { box-shadow: var(--glow); }
+.pill.active:hover, .pill.active.hover-hold { box-shadow: var(--glow); }
 
 /* ---- the segmented control (components/Segmented.tsx): every "pick one of a few" switch ----
    COOL: equal-width options in a grid, so the one accent highlight (`.seg-hl`) moves on transform alone — 1/n of the track

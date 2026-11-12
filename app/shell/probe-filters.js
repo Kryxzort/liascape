@@ -440,6 +440,22 @@ app.whenReady().then(async () => {
       if (k.dist < 30 && k.midScale > 1.015) v.push(`a ${k.dist.toFixed(1)} px flight lifts the ghost ${k.midScale.toFixed(3)}× mid-way (it flashes in place)`);
       if (k.dist < 30 && k.midGlow) v.push(`a ${k.dist.toFixed(1)} px flight glows mid-way (it flashes in place)`);
       if (k.dist >= 120 && k.midScale < 1.05) v.push(`a ${k.dist.toFixed(0)} px flight lost its lift (${k.midScale.toFixed(3)}×)`);
+      // a real hovered click (the user's): the glow of whatever shows (pill, ghost, landed title) never dims mid-way — the
+      // landed button gets :hover only a beat after it appears under a still pointer, and must not ease back up to it
+      for (const dir of ["fold", "unfold"]) {
+        const c = await page(`const b = document.querySelector("[data-wf-title]") || document.querySelector("[data-wf-open]"); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+        send({ type: "mouseMove", x: Math.round(c.x), y: Math.round(c.y) }); await sleep(500);
+        await page(`window.__gl = []; const t0 = performance.now(); const f = () => {
+          const el = document.querySelector(".wf-morph") || [document.querySelector("[data-wf-open]"), document.querySelector("[data-wf-title]")].find((e) => e && getComputedStyle(e).visibility === "visible");
+          const mm = el && /(-?[0-9.]+)px (-?[0-9.]+)px ([0-9.]+)px/.exec(getComputedStyle(el).boxShadow); if (mm) window.__gl.push(+mm[3]);
+          if (performance.now() - t0 < 900) requestAnimationFrame(f); }; requestAnimationFrame(f); return true;`);
+        send({ type: "mouseDown", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1 }); await sleep(40);
+        send({ type: "mouseUp", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1 }); await sleep(1100);
+        const gl = await page(`return window.__gl;`);
+        if (gl.length < 10) v.push(`${dir}: only ${gl.length} glow samples — proved nothing`);
+        else if (Math.min(...gl) < gl[0] * 0.95) v.push(`${dir} under a hovering pointer: the glow dims ${gl[0]} → ${Math.min(...gl)} px and comes back (a blink)`);
+      }
+      send({ type: "mouseMove", x: 2, y: 2 }); await sleep(300);
       return v;
     });
 

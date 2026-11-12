@@ -4,7 +4,7 @@
 // curve, so all three land together). The target stays hidden until the ghost arrives; the source is already gone (the pill
 // isn't rendered while the column is out, the title leaves with the column).
 
-export type MorphSource = { rect: DOMRect; node: HTMLElement; style: { bg: string; color: string; shadow: string; radius: string } };
+export type MorphSource = { rect: DOMRect; node: HTMLElement; hover: boolean; style: { bg: string; color: string; shadow: string; radius: string } };
 
 export const MORPH_MS = 340;
 const EASE = "cubic-bezier(.2, 1, .36, 1)";
@@ -13,7 +13,7 @@ const EASE = "cubic-bezier(.2, 1, .36, 1)";
 export function snapshot(el: Element | null): MorphSource | null {
   if (!(el instanceof HTMLElement)) return null;
   const cs = getComputedStyle(el);
-  return { rect: el.getBoundingClientRect(), node: el.cloneNode(true) as HTMLElement,
+  return { rect: el.getBoundingClientRect(), node: el.cloneNode(true) as HTMLElement, hover: el.matches(":hover"),
     style: { bg: cs.backgroundColor, color: cs.color, shadow: cs.boxShadow, radius: cs.borderRadius } };
 }
 
@@ -55,11 +55,16 @@ export function morph(from: MorphSource, to: Element | null) {
   const lift = Math.min(1, Math.hypot(dx, dy) / 120);
   const mid: Keyframe = { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2}px) scale(${(1 + sx) / 2 * (1 + 0.06 * lift)}, ${(1 + sy) / 2 * (1 + 0.06 * lift)})` };
   if (lift > 0.25) mid.boxShadow = "0 0 22px -3px var(--accent), 0 6px 18px rgba(0,0,0,.35)";
+  const keepHoverEnd = from.hover && lift < 0.25;
   const a = g.animate([
     { offset: 0, transform: "none", backgroundColor: from.style.bg, color: from.style.color, boxShadow: from.style.shadow, borderRadius: from.style.radius },
     mid,
+    // a short hop lands under the pointer that clicked it: the target (hidden while the ghost flies, so not :hover) would
+    // end on its resting glow and then ease straight back up to its hover glow — a dim-and-brighten blink. Keep the
+    // hovered look the whole way instead. Guard: probe-filters wf:morphLift
     { offset: 1, transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
-      backgroundColor: cs.backgroundColor, color: cs.color, boxShadow: cs.boxShadow, borderRadius: cs.borderRadius },
+      ...(keepHoverEnd ? { backgroundColor: from.style.bg, color: from.style.color, boxShadow: from.style.shadow }
+        : { backgroundColor: cs.backgroundColor, color: cs.color, boxShadow: cs.boxShadow }), borderRadius: cs.borderRadius },
   ], { duration: MORPH_MS, easing: EASE, fill: "forwards" });
   // the chevron TURNS on the way, never snaps: the copy
   // starts with the source's direction and the landing swaps it for the target's at once. Rotate the ghost's chevron between
@@ -74,6 +79,14 @@ export function morph(from: MorphSource, to: Element | null) {
   const done = () => {
     g.remove();
     if (!to.isConnected) return;
+    // the landed button sits under a pointer that hasn't moved, and Chromium applies :hover to a newly shown element only
+    // a beat later — it would show its resting glow, then ease back up. Hold the hover look (.hover-hold, index.css) until
+    // the pointer is really off it.
+    if (keepHoverEnd) {
+      to.classList.add("hover-hold");
+      const off = () => { if (!to.matches(":hover")) { to.classList.remove("hover-hold"); removeEventListener("pointermove", off); } };
+      addEventListener("pointermove", off, { passive: true });
+    }
     to.style.visibility = "";
     requestAnimationFrame(() => { to.style.transition = ""; }); // after the visible frame, so nothing fades in
   };
