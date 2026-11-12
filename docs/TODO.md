@@ -24,11 +24,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        clock") — not unless the owner asks.
 
 ## On a real desktop session (not hermetic)
-- [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
-      test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
-      recording still gets the full signal (check that before trusting the run). Hold new agents while it runs.
-      Headless run 2026-11-12: 79/80, 0 drops; its one `frozen` micro-gap was a real click (a frozen transition
-      committed by a mid-effect `next` started B at full level), fixed — the real-session rerun is still to do.
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
 
@@ -626,8 +621,8 @@ Two bug classes kept recurring; fix the class, not the instance:
     **Closed 2026-11-04 with the F7 residual:** it is that lost cycle landing on B's first ramp samples — in frozen
     S→V, A's worker quits at the handoff and its stream's deactivation (1.5–6 ms later) raced the graph exactly as B
     (mpv, already flowing) ramped in; one quantum of zeros at the ramp's start reads as a 2–5 ms late onset. Async
-    producers lose no cycle (0 of 60, two profiler runs); the owner's battery re-run (`programs.sh dropout` with
-    `P3_RECORD`, real session) is the remaining confirmation on the real outputs.
+    producers lose no cycle (0 of 60, two profiler runs); confirmed on the real outputs 2026-11-13: `programs.sh dropout`
+    with `P3_RECORD`, real session, 80/80, 0 drops / micro-gaps / seams in every cell.
   - F2: pause when covered takes 374–401 ms against the plan's 350 ms (300 ms debounce + 30 ms batch + the rest).
     Closed 2026-11-02: the bound is now 450 ms; the debounce stays.
   - F3: the plan's "handoff vs A's end ≤ 1 frame": measured 33 ms against the nominal end, 19.7 ms against
