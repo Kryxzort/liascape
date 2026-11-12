@@ -167,6 +167,9 @@ export interface LibraryItem {
   loudnessLufs?: number | null; loudnessEstimated?: boolean | null; loudnessSeconds?: number | null;
   loudnessConfidence?: string | null; loudnessNote?: string | null;
 }
+// a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips following "Video preview
+// quality" (phase low | mid | high), `facts` = Steam's tags (steam), trailer pages (trailers), frame sizes (sizes)
+export interface LibraryOp { id: string; phase: string; done: number; total: number }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
@@ -248,6 +251,7 @@ export const api = {
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),
   undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
+  libraryOps: () => jget<{ ops: LibraryOp[] }>("/library/ops").then((r) => r.ops),
   download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal) =>
     // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure
     jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply }, signal),

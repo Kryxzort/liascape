@@ -9,7 +9,7 @@
 //   cardpv:overGif     "Use the video instead of the GIF" → the gif + video card plays its video
 //   cardpv:quality     "Video preview quality" → the preview plays exactly the chosen quality: a High sample within 3 s of
 //                      choosing it (not the full-length re-encode), a Low clip after High (other fps and size than High's,
-//                      where the library keeps its better clip); the caption says "making the High preview…", then the
+//                      before the library's clip follows the choice); the caption says "making the High preview…", then the
 //                      backend's fps and size for it
 //   cardpv:hover       a hover hands the clip over to the real file and back
 //   cardpv:noApply     clicks, double-clicks, right-clicks and keys apply, play, add or open nothing; the aria says so
@@ -265,7 +265,7 @@ app.whenReady().then(async () => {
       const hiFacts = clipFacts(await clipStem("video"));
       const asks = await pv(`return p.clipAsks()`);
       const hiAsk = asks.some((n) => /[?&]q=high(&|$)/.test(n)), midAsk = asks.some((n) => /[?&]q=mid(&|$)/.test(n));
-      // Low after High: the library keeps its High clip (only ever re-made for more), the preview must still show Low
+      // Low after High: the library's clip follows only once the choice settles (Web/ClipStore.cs), the preview shows Low at once
       await pv(`await p.seg("Video preview quality", "Low"); return true`);
       const lowOk = await waitFor(async () => qOf(await clipStem("video")) === "0" && (await pv(`return p.layers("video")?.playing`)), 10000, 100);
       const loFacts = clipFacts(await clipStem("video"));

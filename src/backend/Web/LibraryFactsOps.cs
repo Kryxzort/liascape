@@ -39,6 +39,7 @@ namespace Liascape.Web;
 // Single-flight: a kick while a pass runs makes it run once more after (a new arrival during a pass isn't missed). Kicked
 // after the startup WE sync, /library/sync, an import and a download. Trailer finds → WS `library-item-changed
 // {path, youtubeUrl}`; saved tags / sizes → `library-synced` (the Library re-reads). Adapter log: `library-facts: …`.
+// While a pass works, its phase and count → LibraryOps "facts" (the top bar's progress line).
 // Guard: scripts/test-library-facts.sh; matrix probe-filters lib:steamTags
 public static class LibraryFactsOps
 {
@@ -65,7 +66,7 @@ public static class LibraryFactsOps
         {
             if (Interlocked.Exchange(ref _running, 1) == 1) return; // the running pass sees _again and goes once more
             try { while (Interlocked.Exchange(ref _again, 0) == 1) await PassAsync(why).ConfigureAwait(false); }
-            finally { Interlocked.Exchange(ref _running, 0); }
+            finally { LibraryOps.End("facts"); Interlocked.Exchange(ref _running, 0); }
             if (Volatile.Read(ref _again) == 0) return; // else a kick landed between the last check and the release
         }
     }
@@ -131,6 +132,7 @@ public static class LibraryFactsOps
             .ToList();
         if (todo.Count == 0) return;
         Console.WriteLine($"library-facts: asking Steam about {todo.Count} Workshop item(s) ({why}) — {todo.Count(NeedsTags)} for tags, {todo.Count(NeedsTrailer)} for a trailer");
+        LibraryOps.Set("facts", "steam", 0, todo.Count); // the top bar's line (one request: its count jumps at the answer)
         int tagged = 0, gone = 0, found = 0, none = 0, fails = 0, inARow = 0;
         var t0 = DateTime.UtcNow;
         // FIRST: Steam's own servers, anonymously — no page reads. What they answer for is recorded; the rest (unreachable
@@ -169,8 +171,10 @@ public static class LibraryFactsOps
         if (pages.Count == 0) return;
         // the fallback reads steamcommunity.com: during its cooldown (maybe from before a restart) come back after it
         if (SteamGate.CooldownRemaining is { } cool && cool > TimeSpan.Zero) { ScheduleAfter(cool, why); return; }
+        int asked = 0;
         foreach (var e in pages)
         {
+            LibraryOps.Set("facts", "trailers", asked++, pages.Count);
             var (r, url) = await SteamWorkshopScraper.CheckYoutubeAsync(e.SteamId!.Value.ToString(), SteamGate.Kind.Background).ConfigureAwait(false);
             if (r == SteamWorkshopScraper.PageCheck.RateLimited)
             {
@@ -209,6 +213,7 @@ public static class LibraryFactsOps
         }
         if (todo.Count == 0) return;
         var sw = Stopwatch.StartNew();
+        int at = 0;
         int read = 0, unknown = 0;
         var changes = new List<(Entry, Action<LibMeta>)>();
         void Flush()
@@ -220,6 +225,7 @@ public static class LibraryFactsOps
         }
         foreach (var (e, file, stamp) in todo)
         {
+            LibraryOps.Set("facts", "sizes", at++, todo.Count);
             var size = e.Item.IsScene ? SceneSizeOf(file) : await VideoSizeOfAsync(file).ConfigureAwait(false);
             if (size == null) { unknown++; continue; } // couldn't read it (no ffprobe, a timeout): nothing stored
             read++;

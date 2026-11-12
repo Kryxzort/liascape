@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { API, withToken, type LibraryItem, type SteamTodo } from "./client";
+import { API, withToken, type LibraryItem, type LibraryOp, type SteamTodo } from "./client";
 
 export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
@@ -24,6 +24,8 @@ export type LiascapeEvent =
   | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote">> }
   // the background scene-loudness queue (Settings → Sound → "Pre-measure scenes", imports): shaped like unsub-progress
   | { type: "scene-loudness-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; cancelled?: boolean } }
+  // the library's background operations running now, the whole list on each change (the top bar's progress line)
+  | { type: "library-ops"; payload: { ops: LibraryOp[] } }
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }

@@ -2280,9 +2280,10 @@ const ROW = (label) => `for (let i = 0; i < 50 && !m.row(${JSON.stringify(label)
 const isClip = (k) => !!k && k !== "real", isShort = (k) => !!k && k.endsWith("_short"), isFull = (k) => !!k && k.endsWith("_full");
 
 // /clip checks every parameter (Web/ClipStore.cs Handle): a path outside the library 403, a box or quality that isn't one
-// 400, a clip id that isn't this item's 400; the cache keeps items apart and re-makes a clip only for more (a wider box, a
-// higher quality), never for less.
+// 400, a clip id that isn't this item's 400; the cache keeps items apart and re-makes a clip for a wider box, never for a
+// smaller one, nor for a quality nobody set (an old page's: the library follows the setting, clip:size).
 C["clip:params"] = { states: ["idle"], noSwitch: true, async run(c) {
+    await post("/settings", { ...(await getSettings()), videoPreviewQuality: "mid" });
     c.p1 = await clipFixture("clipP1", 12); c.p2 = await clipFixture("clipP2", 12);
     const port = Number(new URL(U).port) + 1, base = `http://127.0.0.1:${port}/clip`;
     const get = async (q) => { const r = await fetch(withToken(`${base}?${q}`)); let j = null; try { j = await r.json(); } catch { /* bytes */ } return { s: r.status, j }; };
@@ -2300,7 +2301,7 @@ C["clip:params"] = { states: ["idle"], noSwitch: true, async run(c) {
       c.mine = (await get(`${P(c.p1)}&v=${encodeURIComponent(a.j?.v ?? "")}`)).s;
       c.big = (await get(`${P(c.p1)}&info=1&w=9999&h=99999&q=mid`)).j;                    // clamped, then a wider + better clip queued
       c.up = null; await waitFor(async () => { const r = (await get(`${P(c.p1)}&info=1&w=900&h=900&q=mid`)).j; c.up = r; return r && !r.pending; }, 20000, 400);
-      c.less = (await get(`${P(c.p1)}&info=1&w=100&h=100&q=low`)).j;                     // a smaller box, a lower quality: the same clip
+      c.less = (await get(`${P(c.p1)}&info=1&w=100&h=100&q=low`)).j;                     // a smaller box, a quality not set: the same clip
       c.files = clipFiles();
     } finally { await dropFixture(c.p1); await dropFixture(c.p2); }
     c.left = clipFiles().filter((f) => [c.a?.v, c.b?.v, c.up?.v].some((v) => v && f.startsWith(v.split("_")[0])));
@@ -2316,15 +2317,15 @@ C["clip:params"] = { states: ["idle"], noSwitch: true, async run(c) {
     if (!c.big?.v) v.push(`a huge box wasn't clamped into a clip: ${J(c.big)}`);
     const parts = (x) => (x?.v || "").split("_");
     if (!c.up?.v || c.up.pending || !c.up.full || Number(parts(c.up)[2]) < 960 || parts(c.up)[3] !== "1") v.push(`a 900 px mid box didn't get a full clip ≥ 960 px at mid: ${J(c.up)}`);
-    if (c.less?.v !== c.up?.v || c.less?.pending) v.push(`a smaller box at a lower quality re-made the clip: ${J(c.up)} → ${J(c.less)}`);
+    if (c.less?.v !== c.up?.v || c.less?.pending) v.push(`a smaller box at a quality nobody set re-made the clip: ${J(c.up)} → ${J(c.less)}`);
     if (c.left.length) v.push(`the deleted items' clips are still on disk: ${J(c.left)}`);
     return v;
   } };
 
 // A card asks for a clip sized to its own box (its CSS px × devicePixelRatio × the quality's factor: Low 0.75, Mid 1, High
-// 1.5) and its playlist-bar item for its own; the item keeps one clip, as wide as the widest of them needs, re-made only
-// for more. Settings → "Video preview quality" applies live: up re-makes, down keeps; the card's shape changes the box,
-// never the clip (the card crops it).
+// 1.5) and its playlist-bar item for its own; the item keeps one clip, as wide as the widest of them needs. Settings →
+// "Video preview quality" applies live: once the choice settles, the clip is re-made at exactly it, up and down (the
+// library follows the setting: Web/ClipStore.cs); the card's shape changes the box, never the clip (the card crops it).
 C["clip:size"] = { states: ["single"], noSwitch: true,
   // imported before the page loads (it reads the library at start)
   async pre(c) {
@@ -2351,7 +2352,7 @@ C["clip:size"] = { states: ["single"], noSwitch: true,
         const v = (e) => { const s = e?.querySelector("video.thumb.anim")?.src || ""; const x = /[?&]v=([^&]+)/.exec(s); return x ? decodeURIComponent(x[1]) : null; };
         return { dpr, reqs, card: box(card), bar: box(bar), cardV: v(card), barV: v(bar) };`);
       const settle = async (q) => { let r; await waitFor(async () => { r = await look(); const n = r.cardV?.split("_");
-        return n && n[4] === "full" && r.barV === r.cardV && Number(n[3]) >= ["low", "mid", "high"].indexOf(q) && r.reqs.filter((x) => x[2] === q).length >= 2; }, 25000, 500); return r; };
+        return n && n[4] === "full" && r.barV === r.cardV && Number(n[3]) === ["low", "mid", "high"].indexOf(q) && r.reqs.filter((x) => x[2] === q).length >= 2; }, 40000, 500); return r; };
       await js(`performance.setResourceTimingBufferSize(5000); performance.clearResourceTimings(); true`);
       c.steps = [];
       for (const q of ["low", "mid", "high", "low"]) {
@@ -2383,10 +2384,10 @@ C["clip:size"] = { states: ["single"], noSwitch: true,
       if (s.cardV !== s.barV) v.push(`${n}: the card and the bar item play different clips of one item: ${s.cardV} / ${s.barV}`);
       const widest = Math.max(...[s.card, s.bar].map((b) => b ? need(exp(b, s.q, s.dpr)) : 0));
       if (!(w >= widest)) v.push(`${n}: the clip is ${w} px, narrower than the ${widest} px its widest place needs (${s.cardV})`);
-      // after the first step: down (and the shape change) keeps the clip, up re-makes it
-      if (prev && s.q === "low" && s.cardV !== prev) v.push(`${n}: going down re-made the clip ${prev} → ${s.cardV} (the bigger one should play on)`);
-      if (prev && s.q !== "low" && s.cardV === prev) v.push(`${n}: going up kept ${prev}`);
-      if (s.cardV && !s.wide && ["low", "mid", "high"].indexOf(s.q) > qi) v.push(`${n}: the clip's quality ${qi} is below what is set`);
+      // after the first step: a quality change re-makes the clip, down too (its space goes); the shape change keeps it
+      if (prev && s.wide && s.cardV !== prev) v.push(`${n}: the shape change re-made the clip ${prev} → ${s.cardV} (the card crops it)`);
+      if (prev && !s.wide && s.cardV === prev) v.push(`${n}: the quality change kept ${prev}`);
+      if (s.cardV && ["low", "mid", "high"].indexOf(s.q) !== qi) v.push(`${n}: the clip's quality ${qi} isn't the ${s.q} set`);
       prev = s.cardV;
     }
     return v;

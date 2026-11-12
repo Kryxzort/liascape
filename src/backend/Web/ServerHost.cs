@@ -167,7 +167,8 @@ public static class ServerHost
         });
 
         // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
-        _ = Task.Run(() => { try { ClipStore.Sweep(); } catch (Exception e) { Console.WriteLine($"clips: sweep failed: {e.Message}"); } });
+        // then the library's clips follow "Video preview quality" where a sweep was cut short by the last exit
+        _ = Task.Run(() => { try { ClipStore.Sweep(); } catch (Exception e) { Console.WriteLine($"clips: sweep failed: {e.Message}"); } ClipStore.ResumeSweep(); });
 
         // While the app is open, measure any un-measured library audio in the background so loudness
         // normalization is ready before clips play (only when the feature is on).
@@ -434,6 +435,8 @@ public static class ServerHost
             // while open — off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
             if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
             Mark("backfill");
+            // the library's preview clips follow the quality, up and down, once the choice settles (off this thread)
+            if (prev.VideoPreviewQuality != s.VideoPreviewQuality) ClipStore.QualityChanged(s.VideoPreviewQuality);
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
@@ -793,6 +796,8 @@ public static class ServerHost
         app.MapGet("/clip", (HttpContext ctx, string? path) => ClipStore.Handle(ctx, path));
         // What each preview quality costs (fps, MB per wallpaper): the caption under Settings' card preview.
         app.MapGet("/clip/qualities", () => Results.Json(new { qualities = ClipStore.Qualities() }));
+        // the library's background operations running now, with their counts (the top bar's progress line; WS library-ops)
+        app.MapGet("/library/ops", () => Results.Json(LibraryOps.Snapshot()));
         // The app went inactive with these boxes last seen off screen (shrink clips now 2x wider than they need), or came back.
         app.MapPost("/clip/shrink", (ClipShrinkBody body) =>
         {

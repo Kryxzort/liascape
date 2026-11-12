@@ -290,6 +290,36 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* motion off: still, the accent's peak at the bar's middle */
 :root.no-motion .loadbar::before { animation: none; transform: translateX(-12.5%); }
 
+/* ---- the library's background operations (components/LibraryOpsLine.tsx): Browse's load bar's place and look, a line
+   that fills with the count, and a tab hanging under it that says what ("Making Low previews 42 / 318"). Over the page
+   (anchored, no layout shift) and over the docked sidebar (40), under the scrims and modals. COOL: it fades in as the tab
+   drops out from under the top bar; the fill eases to each new count while a highlight sweeps along it (the progress
+   role's loop); at the end the fill runs out to the edge and it all fades. Guard: --probe probe-libops.js */
+.libops { position: absolute; top: anchor(--topbar bottom, 56px); left: 0; right: 0; height: 3px; z-index: 41; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); animation: nm-in .24s ease-out; }
+.libops.closing { animation: nm-out .45s ease-in forwards; }
+.libops-fill { position: absolute; inset: 0; overflow: hidden; transform-origin: left; background: var(--accent); box-shadow: var(--glow-sm);
+  transition: transform .6s cubic-bezier(.25, .8, .25, 1); }
+.libops.closing .libops-fill { transition-duration: .3s; }
+.libops-fill::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 400%;
+  background: linear-gradient(90deg, transparent, var(--accent-hover), transparent) 0 0 / 50% 100%;
+  animation: slide 1.6s linear infinite; }
+.libops.idle .libops-fill::after { animation-play-state: paused; }
+.libops-tab { position: absolute; top: 100%; left: 50%; translate: -50% 0; max-width: calc(100vw - 32px); display: flex; gap: 8px;
+  padding: 3px 12px 4px; border: 1px solid var(--surface0); border-top: 0; border-radius: 0 0 9px 9px;
+  background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent); color: var(--subtext); font-size: 11px;
+  font-weight: 600; line-height: 1.3; white-space: nowrap; animation: libops-drop .4s var(--spring-soft); }
+.libops-label { overflow: hidden; text-overflow: ellipsis; }
+.libops-n { color: var(--text); font-variant-numeric: tabular-nums; }
+@keyframes libops-drop { from { transform: translateY(-100%); opacity: 0; } }
+/* the live wallpaper behind: a dark track the accent reads on, whatever the picture */
+:root.bg-live .libops { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
+/* motion off: it fades in and out in place; the count steps (no ease, no sweep) */
+:root.no-motion .libops { animation: nm-in var(--fade-dur) linear; }
+:root.no-motion .libops.closing { animation: nm-out var(--fade-dur) linear forwards; }
+:root.no-motion .libops-fill { transition: none; }
+:root.no-motion .libops-fill::after, :root.no-motion .libops-tab { animation: none; }
+
 .theme-pick { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
   border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color .15s, box-shadow .2s; }
 .theme-pick:hover, .theme-pick:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }

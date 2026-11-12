@@ -28,9 +28,11 @@ namespace Liascape.Web;
 //     never re-encodes.
 //   - full length up to CAP_SECONDS, made in the background one at a time (`nice -n 19 ionice -c3`), behind every short
 //     clip. Until it exists, a SHORT_SECONDS stand-in plays (made at once on the request); the full clip replaces it.
-//   - re-made only for more: a box wider than the stored clip, or a higher quality. A smaller box or a lower quality keeps
-//     the bigger clip (the browser downscales it). Shrunk only when the stored one is 2x wider than needed (3-4x the bytes),
-//     only while the app is inactive (`POST /clip/shrink`), never for a card on screen.
+//   - re-made for a box wider than the stored clip; a smaller box keeps the bigger clip (the browser downscales it). Shrunk
+//     only when the stored one is 2x wider than needed (3-4x the bytes), only while the app is inactive (`POST
+//     /clip/shrink`), never for a card on screen.
+//   - always at exactly the quality Settings names, up AND down (a lower one frees its space): a change settles first, then
+//     the sweep re-makes the whole library (§ the library follows "Video preview quality").
 //   - a replaced file goes after GRACE, so a card still playing it can hand over to the new one first.
 //   - deleted with its library item (trash, delete, clear) and at start-up when its source is gone; clips of items outside
 //     the library (Browse's Wallpaper Engine folder) share a size-capped LRU (OUTSIDE_CAP).
@@ -49,7 +51,10 @@ public static class ClipStore
     private static readonly (string Name, int Fps, int Crf, double TypicalMb)[] QUALITY =
         [("low", 24, 31, 0.8), ("mid", 30, 27, 1.8), ("high", 60, 23, 4.5)];
     private static readonly long OUTSIDE_CAP = 1024L * 1024 * 1024;
-    private static readonly TimeSpan GRACE = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan GRACE = EnvMs("LIASCAPE_CLIP_GRACE_MS", 90_000);
+    // the hermetic sweep test shortens the waits (scripts/test-clip-sweep.sh)
+    private static TimeSpan EnvMs(string name, int ms) =>
+        TimeSpan.FromMilliseconds(int.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.None, CultureInfo.InvariantCulture, out var v) && v > 0 ? v : ms);
     // a card asks again every few seconds while it waits for a better clip (clipSource.ts POLL_MS); a job nobody asked for
     // within this window belongs to cards that left the screen and is dropped
     private static readonly TimeSpan ASK_WINDOW = TimeSpan.FromSeconds(15);
@@ -120,8 +125,14 @@ public static class ClipStore
     // the clip width a box of boxW × boxH device pixels needs (object-fit: cover of the source's shape), snapped up to WIDTHS,
     // never wider than the source
     private static int TargetWidth(Src s, int boxW, int boxH)
+        => SnapUp(s, Math.Max(boxW, boxH * (double)s.W / s.H));
+    private static int SnapNear(Src s, double need)
     {
-        double need = Math.Max(boxW, boxH * (double)s.W / s.H);
+        int b = WIDTHS.OrderBy(x => Math.Abs(Math.Log(x / need))).First();
+        return Math.Max(2, Math.Min(b, s.W & ~1));
+    }
+    private static int SnapUp(Src s, double need)
+    {
         int b = WIDTHS.FirstOrDefault(x => x >= need);
         if (b == 0) b = WIDTHS[^1];
         return Math.Max(2, Math.Min(b, s.W & ~1));
@@ -186,20 +197,29 @@ public static class ClipStore
         var full = Best(mine.Where(c => c.Full));
         if (exact)
         {
-            // the library's own clip is untouched: an upgrade queues the full one as for a card, and a lower quality than the
-            // stored clip is only ever a sample (a full one at it would replace the better clip the grid plays)
-            if (full == null || full.W < want || full.Q < q) Enqueue(path, item, Math.Max(want, full?.W ?? 0), Math.Max(q, full?.Q ?? 0));
+            // the library's own clip follows the setting through the sweep, never through this preview: until it is re-made
+            // the preview plays a sample of exactly q. Its box (the preview's) never sizes the library's clip: want 0 =
+            // carry the stored width over. A first full clip queues as for a card.
+            if (full == null || (full.Q == q && full.W < want)) Enqueue(path, item, Math.Max(want, full?.W ?? 0), q);
+            bool coming = full != null && full.Q != q && SweepAsk(path, item, 0, q);
             if (full != null && full.Q == q && full.W >= want) return new(Stem(full), true, Queued(item), q);
             var sample = Best(mine.Where(c => !c.Full && c.Q == q && c.W >= want)) ?? await MakeNow(path, item, stamp, want, q, full: false);
-            // pending: the queue is making a full clip of this quality (never for a quality below the stored one)
-            return new(sample == null ? null : Stem(sample), false, Queued(item) && (full == null || full.Q <= q), sample?.Q ?? q);
+            // pending: a full clip of this quality is on its way (the queue or the sweep)
+            return new(sample == null ? null : Stem(sample), false, Queued(item) || coming, sample?.Q ?? q);
         }
         if (full != null)
         {
-            bool enough = full.W >= want && full.Q >= q;
-            // an upgrade never loses what the stored clip has: the wider of the two widths, the higher quality
-            if (!enough) Enqueue(path, item, Math.Max(want, full.W), Math.Max(q, full.Q));
-            return new(Stem(full), true, Queued(item), full.Q);
+            if (full.Q == q)
+            {
+                if (full.W < want) Enqueue(path, item, want, q);
+                return new(Stem(full), true, Queued(item), q);
+            }
+            // another quality than the stored clip's: the sweep re-makes it (after the change settles; this card first while
+            // it keeps asking). Meanwhile the stored clip plays on.
+            bool coming = SweepAsk(path, item, want, q);
+            // a page asking for a quality nobody set (an old tab): a wider box still gets more, at the stored clip's quality
+            if (!coming && full.W < want) Enqueue(path, item, want, full.Q);
+            return new(Stem(full), true, coming || Queued(item), full.Q);
         }
         // a video no longer than the stand-in: its full clip is as quick to make as one
         if (src.Dur > 0 && src.Dur <= SHORT_SECONDS + 0.5)
@@ -316,6 +336,9 @@ public static class ClipStore
         public int W, Q;
         public DateTime Asked;
         public bool Shrink;
+        // the sweep's (W 0 = the stored clip's width carried over to Q's factor), of sweep generation Gen
+        public bool Sweep;
+        public int Gen;
     }
     private static readonly object _lock = new();
     private static readonly Dictionary<string, Job> _jobs = new();
@@ -379,11 +402,12 @@ public static class ClipStore
         {
             var now = DateTime.UtcNow;
             foreach (var k in _jobs.Where(kv => !kv.Value.Shrink && now - kv.Value.Asked > ASK_WINDOW).Select(kv => kv.Key).ToList()) _jobs.Remove(k);
-            // the card asked for most recently first: the one the user is looking at now
+            // the card asked for most recently first: the one the user is looking at now; then the sweep; shrinks last
             var j = _jobs.Values.Where(x => !x.Shrink).OrderByDescending(x => x.Asked).FirstOrDefault()
+                    ?? NextSweep(now)
                     ?? (_idle ? _jobs.Values.FirstOrDefault(x => x.Shrink) : null);
             if (j == null) return null;
-            _jobs.Remove(j.Item);
+            if (!j.Sweep) _jobs.Remove(j.Item);
             _running = j;
             _runningCts = new CancellationTokenSource();
             return j;
@@ -403,7 +427,15 @@ public static class ClipStore
                 if (j == null) break;
                 try { Run(j, _runningCts!.Token); }
                 catch (Exception e) { Console.WriteLine($"clips: {e.GetType().Name}: {e.Message}"); }
-                finally { lock (_lock) { _running = null; _runningCts?.Dispose(); _runningCts = null; } }
+                finally
+                {
+                    lock (_lock)
+                    {
+                        _running = null; _runningCts?.Dispose(); _runningCts = null;
+                        // one more done of this sweep (made, already right, gone or failed); a re-targeted one's doesn't count
+                        if (j.Sweep) { if (j.Gen == _gen) _swDone++; ReportLocked(); }
+                    }
+                }
             }
         }
     }
@@ -415,9 +447,22 @@ public static class ClipStore
         var stamp = StampOf(fi);
         var src = Probe(j.Path, stamp);
         if (src == null) return;
-        int w = Math.Min(j.W, src.W & ~1);
         var stored = Best(ClipsOf(j.Item).Where(c => c.Full && c.Stamp == stamp));
-        if (j.Shrink ? stored == null || stored.W < 2 * w : stored != null && stored.W >= w && stored.Q >= j.Q) return;
+        int w;
+        if (j.Sweep)
+        {
+            // nothing to follow: gone, or made at this quality meanwhile (a card's own job)
+            if (stored == null || stored.Q == j.Q) return;
+            // as wide as the cards that asked need, else the stored width carried over to the new quality's factor, to the
+            // nearest of WIDTHS: snapping up would ratchet (Low 320 → Mid 480 → High 960 → Low 480); a card that needs more
+            // asks for it (Info)
+            w = j.W > 0 ? Math.Min(j.W, src.W & ~1) : SnapNear(src, stored.W * FACTOR[j.Q] / FACTOR[stored.Q]);
+        }
+        else
+        {
+            w = Math.Min(j.W, src.W & ~1);
+            if (j.Shrink ? stored == null || stored.W < 2 * w : stored != null && stored.W >= w && stored.Q >= j.Q) return;
+        }
         var name = NameFor(j.Item, stamp, w, j.Q, true);
         var dst = Path.Combine(Dir, name);
         var tmp = dst + ".tmp";
@@ -427,14 +472,15 @@ public static class ClipStore
         {
             File.Move(tmp, dst, true);
             WriteSrc(j.Item, j.Path);
-            Console.WriteLine($"clips: {(j.Shrink ? "shrank" : "made")} {w} px {QUALITY[j.Q].Name} ({new FileInfo(dst).Length / 1024} KB, {t0.Elapsed.TotalSeconds:0.0} s) for {Path.GetFileName(j.Path)}");
+            Console.WriteLine($"clips: {(j.Shrink ? "shrank" : j.Sweep ? "re-made" : "made")} {w} px {QUALITY[j.Q].Name} ({new FileInfo(dst).Length / 1024} KB, {t0.Elapsed.TotalSeconds:0.0} s) for {Path.GetFileName(j.Path)}");
             Superseded(j.Item, name);
             PruneOutside();
         }
         else
         {
             try { File.Delete(tmp); } catch { }
-            if (!ct.IsCancellationRequested) lock (_lock) _failed[$"{j.Item}|{j.W}|{j.Q}"] = DateTime.UtcNow;
+            if (!ct.IsCancellationRequested) lock (_lock) _failed[j.Sweep ? $"{j.Item}|sweep|{j.Q}" : $"{j.Item}|{j.W}|{j.Q}"] = DateTime.UtcNow;
+            else if (j.Sweep) Console.WriteLine($"clips: stopped re-making {Path.GetFileName(j.Path)} at {QUALITY[j.Q].Name}");
         }
     }
 
@@ -445,6 +491,157 @@ public static class ClipStore
         var old = ClipsOf(item).Select(c => c.Name).Where(n => n != keep).ToList();
         if (old.Count == 0) return;
         _ = Task.Delay(GRACE).ContinueWith(_ => { foreach (var n in old) Delete(n); });
+    }
+
+    // ---- the library follows "Video preview quality" ---------------------------------------------------------------------
+    // A user who picks Low wants the disk and decode savings, one who picks High the better picture, so a change reaches every
+    // clip of the library, up and down (docs/decisions.md § "Play every on-screen video preview, each as a small clip"):
+    //   - it settles for SETTLE first: flipping through Low / Mid / High starts nothing; each change restarts the wait.
+    //   - then the sweep re-makes, on the background queue above (one at a time, nice 19 / idle I/O, behind every stand-in
+    //     and every card's own job), each library item whose full clip is another quality: first the items a card asked
+    //     about within ASK_WINDOW (a card on screen keeps asking while `pending`, clipSource.ts: that is the UI saying what
+    //     is visible), the latest first; then the rest, the most recently played first.
+    //   - the old clip goes GRACE after the new one exists (Superseded); the wallpaper's own file is only ever read.
+    //   - a newer change re-targets it: a running encode of another quality is killed, the list is taken again.
+    //   - a restart resumes it: the clips on disk are its state (ResumeSweep reads the setting and settles).
+    // Progress: LibraryOps "clips" (the top bar's line). Guard: scripts/test-clip-sweep.sh; matrix clip:size.
+    private static readonly double[] FACTOR = [0.75, 1, 1.5]; // the box factor of each quality: clipSource.ts QUALITY_FACTOR
+    private static readonly TimeSpan SETTLE = EnvMs("LIASCAPE_CLIP_SETTLE_MS", 4000);
+    private static int _target = -1, _pendingQ = -1, _gen, _swDone, _swTotal, _armSeq;
+    private static bool _settling;
+    private static DateTime _checkedAt;
+    private static readonly List<(string Item, string Path)> _todo = new();
+    private static readonly Dictionary<string, (string Path, int W, DateTime Asked)> _seen = new();
+    private static Timer? _settleTimer;
+    private static readonly object _settleRun = new();
+
+    // POST /settings changed it (cheap: the work runs once it settles)
+    public static void QualityChanged(string quality)
+    {
+        int q = ParseQuality(quality);
+        if (q < 0) return;
+        lock (_lock) { _pendingQ = q; ArmSettle(); }
+    }
+    // at start-up: whatever a sweep left undone before the restart
+    public static void ResumeSweep()
+    {
+        try { QualityChanged(SettingsService.Load().VideoPreviewQuality); } catch (Exception e) { Console.WriteLine($"clips: can't read the quality: {e.Message}"); }
+    }
+    private static void ArmSettle()
+    {
+        _settling = true;
+        _armSeq++;
+        _settleTimer ??= new Timer(_ => { try { Settle(); } catch (Exception e) { Console.WriteLine($"clips: sweep failed: {e.Message}"); } });
+        _settleTimer.Change(SETTLE, Timeout.InfiniteTimeSpan);
+    }
+
+    // a card asks for quality q while its item's full clip is another one: true when the sweep is heading for q (the item
+    // is in its list, and first while the card keeps asking). `want` 0: the asker's box doesn't size the clip.
+    private static bool SweepAsk(string path, string item, int want, int q)
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            if (_settling ? q != _pendingQ : q != _target)
+            {
+                // the setting may have changed without POST /settings (another process wrote it): look, at most twice a minute
+                if (!_settling && now - _checkedAt > TimeSpan.FromSeconds(30))
+                {
+                    _checkedAt = now;
+                    _ = Task.Run(() => { try { var s = ParseQuality(SettingsService.Load().VideoPreviewQuality); if (s >= 0 && s != Volatile.Read(ref _target)) QualityChanged(QUALITY[s].Name); } catch { } });
+                }
+                return false;
+            }
+            _seen[item] = _seen.TryGetValue(item, out var s0) && now - s0.Asked < ASK_WINDOW ? (path, Math.Max(s0.W, want), now) : (path, want, now);
+            // an item the list doesn't hold (its clip made at another quality since, an item outside the library on screen)
+            if (!_settling && !_todo.Any(t => t.Item == item) && !(_running is { Sweep: true } r && r.Item == item))
+            {
+                if (_failed.TryGetValue($"{item}|sweep|{q}", out var at) && now - at < TimeSpan.FromHours(1)) return false;
+                _todo.Add((item, path)); _swTotal++;
+                ReportLocked();
+                _worker ??= Task.Run(Work);
+                _wake.Release();
+            }
+            return true;
+        }
+    }
+
+    private static Job? NextSweep(DateTime now)
+    {
+        if (_settling || _todo.Count == 0 || _target < 0) return null;
+        foreach (var k in _seen.Where(kv => now - kv.Value.Asked > ASK_WINDOW).Select(kv => kv.Key).ToList()) _seen.Remove(k);
+        // what a card asked about lately, the latest first: it's on screen
+        int at = 0; DateTime latest = default;
+        for (int i = 0; i < _todo.Count; i++)
+            if (_seen.TryGetValue(_todo[i].Item, out var s) && s.Asked > latest) { latest = s.Asked; at = i; }
+        var (item, path) = _todo[at];
+        _todo.RemoveAt(at);
+        int w = _seen.TryGetValue(item, out var seen) ? seen.W : 0;
+        return new Job { Path = path, Item = item, W = w, Q = _target, Asked = now, Sweep = true, Gen = _gen };
+    }
+
+    private static void Settle()
+    {
+        lock (_settleRun)
+        {
+            int seq, q;
+            lock (_lock) seq = _armSeq;
+            try { q = ParseQuality(SettingsService.Load().VideoPreviewQuality); } catch { q = -1; }
+            if (q < 0) lock (_lock) q = _pendingQ >= 0 ? _pendingQ : 1;
+            bool same;
+            lock (_lock) same = q == _target;
+            var todo = same ? null : Mismatched(q);
+            lock (_lock)
+            {
+                // a change that landed meanwhile settles again (its timer is armed)
+                if (seq == _armSeq) { _settling = false; _pendingQ = -1; }
+                if (todo != null)
+                {
+                    bool first = _target < 0;
+                    _target = q; _gen++;
+                    _todo.Clear(); _todo.AddRange(todo);
+                    _swDone = 0; _swTotal = todo.Count;
+                    // what the queue would make at another quality: nobody asks for it any more
+                    foreach (var k in _jobs.Where(kv => !kv.Value.Shrink && kv.Value.Q != q).Select(kv => kv.Key).ToList()) _jobs.Remove(k);
+                    if (_running is { Shrink: false } r && r.Q != q)
+                    {
+                        Console.WriteLine($"clips: stopping a {QUALITY[r.Q].Name} encode of {System.IO.Path.GetFileName(r.Path)}");
+                        _runningCts?.Cancel();
+                    }
+                    if (!first || todo.Count > 0) Console.WriteLine($"clips: the library follows {QUALITY[q].Name}: {todo.Count} clip(s) to re-make");
+                    ReportLocked();
+                }
+                _worker ??= Task.Run(Work);
+            }
+            _wake.Release();
+        }
+    }
+
+    // the library items whose full clip is another quality than q, the most recently played first
+    private static List<(string Item, string Path)> Mismatched(int q)
+    {
+        var lib = DownloadHelper.LibraryPath.TrimEnd('/') + "/";
+        var byItem = SafeFiles("*_full.mp4").Select(Parse).OfType<Clip>().GroupBy(c => c.Item).ToDictionary(g => g.Key, g => g.ToList());
+        var list = new List<(string Item, string Path, DateTime Used)>();
+        foreach (var (item, clips) in byItem)
+        {
+            if (ReadSrc(item) is not { } path || !path.StartsWith(lib, StringComparison.Ordinal)) continue;
+            var fi = new FileInfo(path);
+            if (!fi.Exists) continue;
+            var stamp = StampOf(fi);
+            var full = Best(clips.Where(c => c.Stamp == stamp));
+            if (full == null || full.Q == q) continue;
+            DateTime used; try { used = File.GetLastAccessTimeUtc(Path.Combine(Dir, full.Name)); } catch { used = default; }
+            list.Add((item, path, used));
+        }
+        return list.OrderByDescending(x => x.Used).Select(x => (x.Item, x.Path)).ToList();
+    }
+
+    // the top bar's line: this sweep's count while it runs; gone once its list is empty and nothing of it is running
+    private static void ReportLocked()
+    {
+        if (_todo.Count == 0 && _running is not { Sweep: true }) LibraryOps.End("clips");
+        else if (_target >= 0) LibraryOps.Set("clips", QUALITY[_target].Name, _swDone, Math.Max(_swTotal, _swDone));
     }
 
     // ---- removal: with the library item, and the start-up sweep ----------------------------------------------------------

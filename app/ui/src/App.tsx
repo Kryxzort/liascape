@@ -18,6 +18,7 @@ import { SourcePills } from "./components/SourcePills";
 import { BUTTONS_NARROW, useNarrow } from "./hooks/useTopbarCompact";
 import { WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
 import { Segmented } from "./components/Segmented";
+import LibraryOpsLine from "./components/LibraryOpsLine";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -101,6 +102,8 @@ export default function App() {
     else if (e.type === "steam-todo") { s.setSteamTodo(e.payload); s.bumpWsState(); }
     else if (e.type === "library-synced") { s.loadLibrary(); s.bumpWsState(); }
     else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
+    // the library's background operations (the clip sweep, Steam's tags, frame sizes): the top bar's progress line
+    else if (e.type === "library-ops") s.setLibraryOps(e.payload.ops);
     // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
     else if (e.type === "scene-loudness-progress") {
       const p = e.payload;
@@ -250,6 +253,7 @@ export default function App() {
       </div>
 
       {s.loading && <div className="loadbar" />}
+      <LibraryOpsLine />
 
       {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>

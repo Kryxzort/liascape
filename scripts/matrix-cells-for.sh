@@ -44,9 +44,12 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-library-facts.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    # the library's background operations and the top bar's line that shows them: their own script + probe
+    src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx)
+      echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
     # the library's Steam tags / trailers / frame sizes: the filter column's data
-    src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:')" >&2 ;;
+    src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; its progress: --probe probe-libops.js)" >&2 ;;
     scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
@@ -78,10 +81,10 @@ for f in $FILES; do
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
     # the preview clips: the backend's store, the card's clip and its hand-overs
-    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js)" ;;
+    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js; ClipStore: bash scripts/test-clip-sweep.sh, --probe probe-libops.js)" ;;
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
-    app/shell/probe-cardpreview.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
+    app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
     app/shell/motion-off.js) add "appear:morphs" "$f (+ --probe probe-sidebar.js motion:, probe-filters.js, probe-layout.js, probe-select.js, probe-steam.js, probe-expert.js, probe-cardpreview.js — their motion-off cells)" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;

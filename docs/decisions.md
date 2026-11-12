@@ -190,10 +190,12 @@ there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Perform
 "Animate wallpapers without a GIF" has no cap (it was 4): every video preview on screen plays a clip the backend makes
 (`/clip`, `Web/ClipStore.cs`), never the wallpaper's own file — a full-size `<video>` keeps one of Chromium's 6
 connections while it plays (uncapped, 12 of 24 never loaded). Owner's terms: no storage options; one clip per item, as
-wide as its widest card needs (box × dpr × "Video preview quality", source shape, the card crops it), full length up to
-5 min (a 10 s stand-in until then), kept while the item is in the library; re-made only for more, shrunk only when 2×
-too wide, in idle time. A hover hands over to the real file and back at the same moment, as every clip swap does
-(`components/PreviewPlayer.tsx`), never at a loop boundary. Guard: matrix `appear:videoThumbs`, `clip:*`.
+wide as its widest card needs (box × dpr × "Video preview quality", source shape, the card crops it), up to 5 min (a 10 s
+stand-in first), kept while the item is in the library; re-made for a wider box, shrunk when 2× too wide in idle time.
+The whole library follows the quality, down too (Low = the disk and decode savings), once the choice settles (4 s), not
+only cards as they show. A hover hands over to the real file and back at the same moment, as every clip swap does
+(`components/PreviewPlayer.tsx`), never at a loop boundary. Guard: matrix `appear:videoThumbs`, `clip:*`;
+`scripts/test-clip-sweep.sh`.
 
 ### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
 The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and
