@@ -116,7 +116,8 @@ export default function App() {
     else if (e.type === "library-item-changed") { const { path, ...changed } = e.payload; s.itemChangedByBackend(path, changed); }
     // the library's background operations (the clip sweep, Steam's tags, frame sizes): the top bar's progress line
     else if (e.type === "library-ops") s.setLibraryOps(e.payload.ops);
-    // the scene-loudness queue: "Estimating scene loudness 12 / 96…" in the topbar while it runs, a timed line at its end
+    // the scene-loudness queue: its count runs on the top bar's progress line (library-ops "scene-loudness"; a held status
+    // message here would sit over it), Settings → Sound keeps its own; a timed line at its end
     else if (e.type === "scene-loudness-progress") {
       const p = e.payload;
       if (p.finished) {
@@ -124,7 +125,6 @@ export default function App() {
         s.setStatus(p.cancelled ? "Scene loudness: cancelled" : `Scene loudness: estimated ${p.done} scene${p.done === 1 ? "" : "s"}`);
       } else {
         s.setSceneLoudness({ done: p.done, total: p.total, currentId: p.currentId });
-        s.setStatus(`Estimating scene loudness ${p.done} / ${p.total}…`, false);
       }
     }
     // liascape-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
