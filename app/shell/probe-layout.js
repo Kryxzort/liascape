@@ -27,6 +27,10 @@
 //   seg:keys              arrows / Home / End move the choice and the focus, the key is taken, only the checked option is a Tab stop
 //   seg:glow              the highlight glows, none under no-glow; the track goes translucent under bg-live
 //   perf:idle             an idle page asks for no frames
+//   perf:skeleton         Browse's placeholder cards + the load bar (a /browse that never answers): nothing asks for a main frame
+//                         every refresh (≤ SKEL_RECALCS_PER_FRAME main-thread style recalcs per frame the compositor drew);
+//                         the shimmer and the load bar sweep with motion on (transform + pixels), stand still with motion off /
+//                         reduced motion
 //   perf:tabs             on a PERF_N-item library: each real tab click forces no layout from script (an effect / handler
 //                         measuring the new page before its frame does); a switch to Library restyles under PERF_STYLED_MAX
 //                         elements per element of the document (no whole-page restyle) and runs no requestAnimationFrame
@@ -129,6 +133,14 @@ const DOCK_PLAYLIST = 45;          // perf:dockRepaint: playlist bar items (most
 const DOCK_GROW = 8;               // hooks/useDockLift.ts RISE − LIFT: px an item grows at amount 1 (its scale: 1 + DOCK_GROW / height)
 const DOCK_BAR_REPAINTS_MAX = 0.75; // perf:dockRepaint: repaints of the whole playlist bar per dock frame: ~1 when every frame
                                     // writes a z-index, ~0.5 when only a change of the items' order does (a sweep reorders them often)
+const SKEL_N = 72;            // perf:skeleton: Browse's placeholder cards while more pages are coming (views/Browse.tsx)
+const SKEL_WINDOW = 1200;     // perf:skeleton: ms traced
+// perf:skeleton: main-thread style recalcs per frame drawn. A main-thread animation anywhere on the page: 1 (each restyling
+// every running animation, the 72 shimmers too); composited only: Chromium's own few syncs a second (~0.15 at 60 Hz, less faster)
+const SKEL_RECALCS_PER_FRAME = 0.4;
+const SKEL_DRAW_EVENT = "ProxyImpl::ScheduledActionDraw"; // perf:skeleton: a frame the renderer's compositor thread drew
+const SKEL_GAP = 250;         // perf:skeleton: ms between the two looks at the sweep (≈ a fifth of its 1.2 s period)
+const SKEL_PX_MIN = 200;      // perf:skeleton: pixel bytes that must change between them with motion on
 // React's DevTools hook, installed before the page's scripts: production react-dom calls onCommitFiberRoot on every commit.
 // A fiber object that is still the current one from the last commit was never visited (its subtree neither); a new current
 // one with no alternate mounted; with PerformedWork (flag 1) its component ran.
@@ -545,6 +557,85 @@ app.whenReady().then(async () => {
       const recalc = Math.round((b.RecalcStyleCount - a.RecalcStyleCount) / 3), taskMs = Math.round(((b.TaskDuration - a.TaskDuration) / 3) * 1000);
       console.log(`        idle 3 s on Library: ${raf} rAF callbacks, ${recalc} style recalcs/s, main thread ${taskMs} ms/s`);
       if (raf > 12) v.push(`a requestAnimationFrame loop keeps running while idle (${raf} callbacks in 3 s)`);
+      return v;
+    });
+    // Browse's placeholder cards while more pages are coming (a /browse that never answers keeps all of them up, and the
+    // top bar's load bar with them). A compositor animation still costs main-thread style work in every main frame that
+    // runs for another reason (Blink re-resolves each running animation then): so while the cards shimmer, nothing on the
+    // page may ask for a main frame every refresh — the load bar's sweep included. Main-thread style recalcs per frame the
+    // compositor drew ≤ SKEL_RECALCS_PER_FRAME; the shimmer and the load bar still sweep with motion on (transform moves,
+    // pixels change) and stand still with motion off / reduced motion.
+    await cell("perf:skeleton", async () => {
+      const v = [];
+      await setSettings({ morphs: true, autoPlayVideoThumbs: false, liveWallpaperBehindAllTabs: false });
+      const d = dbg(); await d.sendCommand("Page.enable");
+      const hang = `(() => { const f = window.fetch; window.fetch = (u, o) => {
+        const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
+        return p === "/browse" && (o?.method || "GET") === "POST" ? new Promise(() => {}) : f(u, o); }; })();`;
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: hang });
+      try {
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); await reducedMotion(false); await tab("Browse");
+        for (let i = 0; i < 50; i++) { if (await js(`document.querySelectorAll('.skel-card').length`) >= SKEL_N) break; await sleep(100); }
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 }); await sleep(1000);
+        const st = await js(`({ n: document.querySelectorAll('.skel-card').length, bar: !!document.querySelector('.loadbar') })`);
+        if (st.n < SKEL_N || !st.bar) return [`${st.n} placeholder cards on Browse (want ${SKEL_N}), load bar ${st.bar} — proved nothing`];
+        // over SKEL_WINDOW ms, from Chromium's own trace (a rAF meter would force the main frames it counts): the renderer main
+        // thread's style recalcs, the frames its compositor thread drew
+        const evs = []; let done;
+        const onMsg = (_e, m, p) => { if (m === "Tracing.dataCollected") evs.push(...p.value); else if (m === "Tracing.tracingComplete") done(); };
+        d.on("message", onMsg);
+        await d.sendCommand("Tracing.start", { traceConfig: { includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "cc"] }, transferMode: "ReportEvents" });
+        await sleep(SKEL_WINDOW);
+        const complete = new Promise((res) => { done = res; });
+        await d.sendCommand("Tracing.end"); await complete; d.removeListener("message", onMsg);
+        const names = {}; for (const e of evs) if (e.name === "thread_name") names[`${e.pid}:${e.tid}`] = e.args.name;
+        const runs = {}; for (const e of evs) { const k = `${e.pid}:${e.tid}`; if (names[k] === "CrRendererMain" && e.name === "RunTask" && e.dur) runs[k] = (runs[k] ?? 0) + e.dur; }
+        const main = Object.entries(runs).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const pid = main?.split(":")[0];
+        const recalcs = evs.filter((e) => `${e.pid}:${e.tid}` === main && e.name === "UpdateLayoutTree" && e.ph === "X");
+        const styled = recalcs.reduce((s, e) => s + (e.args?.elementCount ?? 0), 0);
+        const comp = evs.filter((e) => String(e.pid) === pid && names[`${e.pid}:${e.tid}`] === "Compositor");
+        const draws = comp.filter((e) => e.name === SKEL_DRAW_EVENT && e.ph === "X").length;
+        console.log(`        ${st.n} placeholder cards + the load bar, ${SKEL_WINDOW} ms: the compositor drew ${draws} frames; the main thread ran ${recalcs.length} style recalcs (${draws ? (recalcs.length / draws).toFixed(2) : "-"} per frame), restyling ${styled} elements (${draws ? (styled / draws).toFixed(1) : "-"} per frame)`);
+        if (draws < SKEL_WINDOW / 1000 * 20) {
+          const top = {}; for (const e of comp) top[e.name] = (top[e.name] ?? 0) + 1;
+          return [`the compositor drew ${draws} frames in ${SKEL_WINDOW} ms — proved nothing (its events: ${Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, c]) => `${k}×${c}`).join(", ")})`];
+        }
+        if (recalcs.length / draws > SKEL_RECALCS_PER_FRAME) v.push(`the main thread restyles while the placeholders shimmer: ${recalcs.length} style recalcs (${styled} elements) over ${draws} frames (≤ ${SKEL_RECALCS_PER_FRAME} per frame: something animates on the main thread)`);
+        // the look: the first placeholder's shimmer (its transform + pixels) and the load bar's sweep, sampled SKEL_GAP ms apart
+        const look = async () => {
+          const r = await js(`(() => { const e = document.querySelector(".skel-card .skel"); const b = e.getBoundingClientRect(); const bar = document.querySelector(".loadbar");
+            return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), t: getComputedStyle(e, "::after").transform,
+              bar: bar ? getComputedStyle(bar, "::before").transform : null }; })()`);
+          const img = await win.webContents.capturePage({ x: r.x + 2, y: r.y + 2, width: r.w - 4, height: r.h - 4 });
+          return { t: r.t, bar: r.bar, px: img.toBitmap() };
+        };
+        const sweep = async () => {
+          const a = await look(); await sleep(SKEL_GAP); const b = await look();
+          let diff = 0; for (let i = 0; i < Math.min(a.px.length, b.px.length); i++) if (Math.abs(a.px[i] - b.px[i]) > 2) diff++;
+          return { moved: a.t !== b.t, diff, a: a.t, b: b.t, barMoved: a.bar !== b.bar, bar: `${a.bar} → ${b.bar}` };
+        };
+        const s1 = await sweep(); await shot("perf-skeleton-on");
+        console.log(`        motion on: shimmer ${s1.a} → ${s1.b}, ${s1.diff} pixel bytes changed; load bar ${s1.bar}`);
+        if (!s1.moved || s1.diff < SKEL_PX_MIN) v.push(`motion on: the shimmer doesn't sweep (transform ${s1.a} → ${s1.b}, ${s1.diff} pixel bytes changed)`);
+        if (!s1.barMoved) v.push(`motion on: the load bar's layer doesn't sweep (transform ${s1.bar})`);
+        for (const mode of ["off", "reduced"]) {
+          if (mode === "off") await setMotion(false); else { await setMotion(true); await reducedMotion(true); }
+          await tab("Browse"); await sleep(500);
+          const s = await sweep(); await shot(`perf-skeleton-${mode}`);
+          console.log(`        motion ${mode}: shimmer ${s.a} → ${s.b}, ${s.diff} pixel bytes changed; load bar ${s.bar}`);
+          if (s.moved || s.diff) v.push(`motion ${mode}: the shimmer still moves (transform ${s.a} → ${s.b}, ${s.diff} pixel bytes changed)`);
+          if (s.barMoved) v.push(`motion ${mode}: the load bar still sweeps (transform ${s.bar})`);
+        }
+      } finally {
+        await reducedMotion(false); await setMotion(true);
+        await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); await sleep(800);
+      }
       return v;
     });
     // An app, not a page: Ctrl+A (or a drag) highlights none of the chrome; what you type and the text worth copying stays

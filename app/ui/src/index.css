@@ -253,9 +253,17 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 }
 .card.playing { animation: pulse-glow 1.8s ease-in-out infinite; }
 
-.loadbar { height: 3px; background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  background-size: 200% 100%; animation: slide 1s linear infinite; }
-@keyframes slide { to { background-position: -200% 0; } }
+/* PERF: the sweep moves a layer (transform), never background-position: a background-position animation runs on the main
+   thread, so it forces a main frame every refresh, and each main frame restyles every running animation on the page —
+   Browse's 72 placeholder shimmers among them — though they run on the compositor. The layer is two 200 % tiles wide and
+   travels one tile a second: the same sweep the tiled background made. Guard: probe-layout perf:skeleton */
+.loadbar { height: 3px; position: relative; overflow: hidden; }
+.loadbar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 400%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 50% 100%;
+  animation: slide 1s linear infinite; }
+@keyframes slide { from { transform: translateX(-50%); } to { transform: none; } }
+/* motion off: still, the accent's peak at the bar's middle */
+:root.no-motion .loadbar::before { animation: none; transform: translateX(-12.5%); }
 
 .theme-pick { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
   border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color .15s, box-shadow .2s; }
@@ -370,6 +378,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,.10) 42%, rgba(255,255,255,.27) 50%, rgba(255,255,255,.10) 58%, transparent 75%);
   animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { to { transform: translateX(100%); } }
+/* motion off: a still placeholder (the highlight waits off the card's left edge). Guard: probe-layout perf:skeleton */
+:root.no-motion .skel::after { animation: none; }
 .skel-card { pointer-events: none; }
 .skel-card .thumb-wrap.skel { aspect-ratio: var(--thumb-aspect, 1 / 1); border-radius: 10px 10px 0 0; }
 .skel-line { height: 11px; border-radius: 5px; } .skel-line.w1 { width: 70%; }

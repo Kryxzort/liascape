@@ -10,7 +10,7 @@ Every command below is hermetic unless marked; run anything over ~30 s in the ba
 - Backend build: `dotnet build src/backend`
 - UI build + lint (both clean; keep them clean before every commit): `cd app/ui && npm run build && npm run lint`
 - Player tests: `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q` (this machine's shell carries a stray `LD_LIBRARY_PATH` that breaks native links)
-- UI matrix: `bash scripts/test-ui-matrix.sh --changed` before a commit, the full run before a merge; one area: `--probe <app/shell/probe-*.js>` (skill `ui-verify`)
+- UI matrix: `bash scripts/test-ui-matrix.sh --changed` before a commit, the full run before a merge; one area: `--probe probe-<area>.js` (the bare file name, from `app/shell/`) (skill `ui-verify`)
 - Adapter integration test: `bash scripts/test-liascape-player-adapter.sh [--no-build]`
 - Adapter self-test: `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`
 - Settings merge / cross-process writes / settings latency: `bash scripts/test-settings-merge.sh`, `bash scripts/test-cross-process.sh`, `bash scripts/test-settings-latency.sh`

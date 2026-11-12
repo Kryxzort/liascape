@@ -79,7 +79,7 @@ for f in $FILES; do
     # the grids' column fit and the cards' stable handlers (a tab switch, a sidebar focus)
     app/ui/src/hooks/useGridFit.ts|app/ui/src/hooks/useStableFn.ts)
       add "$CARD|$KEYS|browse:" "$f (+ --probe probe-layout.js — perf:tabs, perf:sidebar, resize:)" ;;
-    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover; --probe probe-icons.js — icon motion)" ;;
+    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover, perf:skeleton; --probe probe-icons.js — icon motion)" ;;
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;

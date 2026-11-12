@@ -10,7 +10,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
 11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
-       mid-pulse frames look slightly different (crossfade, not blur interpolation).
+       mid-pulse frames look slightly different (crossfade, not blur interpolation). It also restyles every other running animation each
+       frame (Browse's 72 skeleton shimmers: probe-layout `perf:skeleton` measures the cost).
 15. [ ] Owner's call: a reload / search / filter within one Browse source can still queue behind slow `/img` thumbnail
        loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
        `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
@@ -23,8 +24,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 19. [ ] GIF previews resume where they stopped instead of restarting (on unhover, scroll-away, window backgrounded) — only
        if it costs no performance: measure (frames decoded, idle rAF, memory) before choosing a way (e.g. `ImageDecoder`
        to a canvas vs keeping the `<img>` mounted).
-20. [ ] Browse's loading skeletons (`.skel::after` shimmer, 72 cards) restyle on the main thread every frame (~600
-       style recalcs a frame in a trace): move the shimmer to a composited transform/opacity animation, same look.
 
 
 ## On a real desktop session (not hermetic)
