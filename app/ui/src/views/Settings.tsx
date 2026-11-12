@@ -415,6 +415,7 @@ export const Settings = memo(function Settings() {
             options={[{ value: "1:1", label: "Square (1:1)" }, { value: "16:9", label: "Widescreen (16:9)" }]} />
         </Row>
         <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things — off keeps everything readable, just without the glow" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
+        <Row label="Text shadow" hint="a soft black shadow around every letter, like film subtitles — text stays readable over a bright wallpaper" rk="textShadow"><input type="checkbox" checked={g("textShadow", false)} onChange={(e) => set("textShadow", e.target.checked)} /></Row>
         <Row label="Smooth window animations" hint="the slides, zooms and morphs all over the app — off, nothing moves: things fade quickly in and out instead" rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
         <Row label="Animate GIF previews" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
         <Row label="Animate wallpapers without a GIF" hint="wallpapers with no GIF preview play a silent clip of their own video, without hovering" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>

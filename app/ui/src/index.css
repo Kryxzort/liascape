@@ -1233,6 +1233,30 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow :is(.ss-filter, .ss-filter.on, .ss-filter:hover, .ss-n) { box-shadow: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
 
+/* ---- Settings → Look & feel → "Text shadow" ON (<html class="text-shadow">, App.tsx) ----
+   Netflix's subtitle look on every letter: a soft black shadow hugging the glyphs, no offset (`#000 0 0 7px`, a fan
+   recreation's value; Netflix doesn't publish it). Set on body and inherited; Chromium's own sheet resets text-shadow on
+   buttons and fields, so they inherit it back. Not a glow: no-glow leaves it on. Guard: probe-layout look:textShadow */
+:root.text-shadow body { text-shadow: #000 0 0 7px; }
+:root.text-shadow :is(button, input, textarea, select) { text-shadow: inherit; }
+/* text on a fill of its own (the accent, danger, a badge) is legible on it already; a black halo around --accent-fg's dark
+   letters only smudges them */
+:root.text-shadow :is(.tab.active, .pill.active, .seg-ghost, .dl, .badge, .check, .btn.accent, .btn.danger.solid, .mini.on, .play-btn,
+  .ss-filter.on, .ss-n, .sel-opt.on, .pl-name.sel, .tr-toggle.on, .tr-refresh:hover, .tr-chip.on, .side-tool.accent, .side-mute.on,
+  .wf-n, .wf-seg[aria-checked="true"], .wf-fm-seg[aria-checked="true"]) { text-shadow: none; }
+/* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
+   the same shadow as a filter instead (drop-shadow's blur is σ, text-shadow's 2σ: 3.5px = 7px), as bg-live does */
+:root.text-shadow .side-head-text { filter: drop-shadow(0 0 3.5px #000); text-shadow: none; }
+/* the same for text that clips itself (an ellipsis, a card title's clamp, a pill) and has no fill of its own: a filter on the
+   element isn't cut by its own overflow, so the shadow keeps its soft edge instead of a dark box at the clip. (A bar that
+   clips its own text, like .pl-title, cuts the shadow at its fill's edge, which shows anyway.) The chosen pill sits under the
+   accent highlight: no shadow, or it would leak out round the highlight. */
+:root.text-shadow :is(.st-layer, .lib-title span, .st-title, .sel-val, .sh-text, .side-sub-text b, .wf-name, .seg-opt:not(.on)) {
+  filter: drop-shadow(0 0 3.5px #000); text-shadow: none; }
+:root.text-shadow .seg-opt.on { text-shadow: none; }
+/* under bg-live the loose text over the wallpaper already carries this shadow as a filter: never twice */
+:root.text-shadow.bg-live :is(.wf-none > span, .side-sub-text b, .side-sub-hint, .wf-title, .wf-clear) { text-shadow: none; }
+
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 

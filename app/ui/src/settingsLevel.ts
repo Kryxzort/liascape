@@ -21,7 +21,7 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   globalMaxPlaySeconds: "standard", globalSeparateSceneTiming: "standard", globalSwitchScenesAfterSeconds: "standard",
   globalPlaylistStart: "standard", autoAddLibraryToPlaylist: "standard",
   videoScale: "standard", videoFpsCap: "standard", autoThrottleScenes: "standard", vramLowMode: "standard",
-  thumbnailAspect: "standard", glows: "standard", morphs: "standard", autoPlayGifs: "standard", autoPlayVideoThumbs: "standard", preferVideoThumbs: "standard", videoPreviewQuality: "standard",
+  thumbnailAspect: "standard", glows: "standard", textShadow: "standard", morphs: "standard", autoPlayGifs: "standard", autoPlayVideoThumbs: "standard", preferVideoThumbs: "standard", videoPreviewQuality: "standard",
   autoAddWeWallpapersToLibrary: "standard",
   // advanced
   disableCache: "advanced", stayPausedWhenSwitching: "advanced", restartMpvpaperEverySeconds: "advanced",

@@ -126,8 +126,8 @@ same() {   # $1 before, $2 after, $3 = JSON array of the fields that should chan
 }
 
 # UI toggles (key:default, camelCase as GET /settings spells them): a file without the key loads the default, a
-# partial body sets/keeps it. Glow effects / Morph animations / Play video previews / Prefer video previews (Settings → Look & feel).
-UI_TOGGLES=("glows:true" "morphs:true" "autoPlayVideoThumbs:false" "preferVideoThumbs:false")
+# partial body sets/keeps it. Glow effects / Text shadow / Morph animations / Play video previews / Prefer video previews (Settings → Look & feel).
+UI_TOGGLES=("glows:true" "textShadow:false" "morphs:true" "autoPlayVideoThumbs:false" "preferVideoThumbs:false")
 echo "== a settings.json that still carries the removed LweSilent loads"
 snap s0
 [ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.sceneMonitors|length' s0)" = 2 ] \

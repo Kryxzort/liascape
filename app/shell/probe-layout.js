@@ -41,6 +41,10 @@
 //                         seg:jump:<w>x<h> / seg:jump:reduced — motion off / reduced motion: it jumps. Screenshots seg-*-midglide.png
 //   seg:keys              arrows / Home / End move the choice and the focus, the key is taken, only the checked option is a Tab stop
 //   seg:glow              the highlight glows, none under no-glow; the track goes translucent under bg-live
+//   look:textShadow       Settings → "Text shadow": applies live and saves; body text, labels and buttons carry the subtitle
+//                         shadow, text on an accent fill none, no-glow keeps it; under bg-live no doubled shadow (no text-shadow
+//                         inside bg-live's drop-shadow filters, the sidebar title's pixels the same on and off); the clamped
+//                         sidebar title's shadow reaches out of its box; off: gone. Screenshots look-textShadow-*.png
 //   perf:idle             an idle page asks for no frames
 //   perf:skeleton         Browse's placeholder cards + the load bar (a /browse that never answers): nothing asks for a main frame
 //                         every refresh (≤ SKEL_RECALCS_PER_FRAME main-thread style recalcs per frame the compositor drew);
@@ -829,6 +833,147 @@ app.whenReady().then(async () => {
       if (!r.on || r.on === "none") v.push(`glows on: the highlight has no glow (${r.on})`);
       if (r.off !== "none") v.push(`no-glow: the highlight still glows (${r.off})`);
       if (r.solid === r.live) v.push(`bg-live: the track's fill doesn't go translucent (${r.live})`);
+      return v;
+    });
+    // look:textShadow — Settings → "Text shadow" (:root.text-shadow, index.css): Netflix's subtitle shadow on all text. Clicked
+    // on, it applies at once (no reload) and saves; body text, a Settings label and a tab button carry `#000 0 0 7px`; text on
+    // an accent fill (its colour is --accent-fg) carries none; no-glow keeps it. Under bg-live (a static backdrop, bright on the
+    // right, dark on the left, stands in for the wallpaper: LIASCAPE_TS_BACKDROP=<image> puts a real one on the bright side)
+    // no text inside an element that already draws bg-live's black drop-shadow filter carries a text-shadow too, and the
+    // sidebar title's pixels are the same with the option on or off (no doubled shadow). With bg-live off, on a white panel,
+    // the sidebar title's shadow reaches left of its clamped box (the clamp's overflow: hidden doesn't cut it off). Clicked
+    // off, it's gone. Screenshots look-textShadow-*.png
+    await cell("look:textShadow", async () => {
+      const v = [], J = JSON.stringify, SHADOW = /^rgb\(0, 0, 0\) 0px 0px 7px$/;
+      const ROW = `[...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel-row")?.textContent.trim() === "Text shadow")`;
+      // the computed text-shadow of: body, a Settings label, a top-bar tab (a button: Chromium resets its text-shadow), every
+      // element showing its own text in --accent-fg (on an accent fill), the root class
+      const READ = `const root = document.documentElement, ts = (e) => e ? getComputedStyle(e).textShadow : null;
+        const probe = document.createElement("span"); probe.style.color = "var(--accent-fg)"; document.body.append(probe);
+        const fg = getComputedStyle(probe).color; probe.remove();
+        const own = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+        const filled = [...document.querySelectorAll("body *")].filter((e) => own(e) && e.getClientRects().length && getComputedStyle(e).color === fg);
+        return { cls: root.classList.contains("text-shadow"), body: ts(document.body), label: ts(document.querySelector(".srow .slabel")),
+          tab: ts(document.querySelector(".tab:not(.active)")), nFilled: filled.length,
+          filledShadowed: filled.filter((e) => ts(e) !== "none").map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) };`;
+      // (Settings is a lazy chunk: a first visit can take seconds to mount)
+      // text whose own overflow clip cuts its text-shadow off (a hard-edged dark box on a bright backdrop): an element showing its
+      // own text with a shadow, overflow not visible, no fill of its own (a fill's edge shows anyway: the clip adds none) and
+      // less padding than the shadow's reach on some side
+      const CLIPS = `const own = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+        return [...document.querySelectorAll("body *")].filter((e) => { if (!own(e) || !e.getClientRects().length) return false; const cs = getComputedStyle(e);
+          if (cs.textShadow === "none" || (cs.overflowX === "visible" && cs.overflowY === "visible") || cs.backgroundColor !== "rgba(0, 0, 0, 0)") return false;
+          return Math.min(...["Top", "Right", "Bottom", "Left"].map((k) => parseFloat(cs["padding" + k]))) < 7; })
+          .map((e) => e.className + ":" + e.textContent.trim().slice(0, 16));`;
+      const click = (on) => page(`for (let w = 0; w < 8000 && !(${ROW}); w += 100) await m.sleep(100);
+        const r = ${ROW}; const cb = r?.querySelector("input[type=checkbox]"); if (!cb) return false;
+        if (cb.checked !== ${on}) cb.click(); return true;`);
+      const saved = async (want) => { for (let i = 0; i < 40; i++) { if ((await http("GET", "/settings")).json?.textShadow === want) return true; await sleep(100); } return false; };
+      // a static backdrop over the wallpaper's video (a moving picture would make the pixel comparisons meaningless)
+      const img = E.LIASCAPE_TS_BACKDROP ? `url(data:image/jpeg;base64,${fs.readFileSync(E.LIASCAPE_TS_BACKDROP).toString("base64")}) center / cover` : "none";
+      const BACKDROP = `(() => { document.querySelector(".ts-probe-bg")?.remove(); document.querySelectorAll(".settings-bg").forEach((e) => e.style.visibility = "hidden");
+        const d = document.createElement("div"); d.className = "ts-probe-bg";
+        d.style.cssText = "position:fixed;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,#15151f 0 40%,transparent 40%)," + ${J(img)} + ",#fff";
+        document.querySelector(".app").prepend(d); return true; })()`;
+      const openSide = async () => {
+        await tab("Library");
+        await page(`const c = document.querySelector(".card.lib .thumb-wrap"); const r = c.getBoundingClientRect();
+          c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 }));`);
+        await sleep(900);
+        return page(`const h = document.querySelector(".side-panel:not(.closing) .side-head h2"); if (!h) return null; const b = h.getBoundingClientRect();
+          const w = h.closest(".side-head-text"), cs = getComputedStyle(w);
+          return { x: b.x, y: b.y, w: b.width, h: b.height, title: getComputedStyle(h).textShadow, filter: cs.filter, wrapClips: cs.overflow !== "visible" };`);
+      };
+      // mean brightness (0–255) of a window rect
+      const lum = async (x, y, w, h) => { const bm = (await win.webContents.capturePage({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) })).toBitmap();
+        let s = 0; for (let i = 0; i < bm.length; i += 4) s += (bm[i] + bm[i + 1] + bm[i + 2]) / 3; return s / (bm.length / 4); };
+      const pixels = async (r) => (await win.webContents.capturePage({ x: Math.round(r.x - 10), y: Math.round(r.y - 6), width: Math.round(r.w + 20), height: Math.round(r.h + 12) })).toBitmap();
+      try {
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true });
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Settings"); await sleep(600);
+        // off (the default)
+        const off = await page(READ);
+        if (off.cls || off.body !== "none" || off.label !== "none") v.push(`off: text still shadowed (${J({ cls: off.cls, body: off.body, label: off.label })})`);
+        // on: live, through the row's checkbox
+        if (!(await click(true))) return ["no Text shadow row on Settings — proved nothing"];
+        await sleep(300);
+        const on = await page(READ);
+        if (!on.cls) v.push("on: <html> lacks text-shadow (not applied live)");
+        for (const k of ["body", "label", "tab"]) if (!SHADOW.test(on[k] ?? "")) v.push(`on: the ${k} text has no subtitle shadow (${on[k]})`);
+        if (!on.nFilled) v.push("on: no text on an accent fill on Settings to check — proved nothing");
+        if (on.filledShadowed.length) v.push(`on: text on an accent fill is shadowed: ${on.filledShadowed.join(", ")}`);
+        if (!(await saved(true))) v.push("turning Text shadow on wasn't saved (textShadow !== true)");
+        const cut = new Set(await page(CLIPS));
+        // no-glow: not a glow, so it stays
+        const ng = await page(`document.documentElement.classList.add("no-glow"); await m.sleep(50); const r = (() => { ${READ} })();
+          document.documentElement.classList.remove("no-glow"); return r;`);
+        if (!SHADOW.test(ng.label ?? "")) v.push(`no-glow: the subtitle shadow went with the glows (${ng.label})`);
+        console.log(`        on: body ${on.body}, ${on.nFilled} accent-fill texts unshadowed`);
+
+        // bg-live, set through the saved settings (a reload: the class comes back from them)
+        await setSettings({ liveWallpaperBehindAllTabs: true });
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Settings"); await sleep(800); await js(BACKDROP); await sleep(300);
+        const live = await page(READ);
+        if (!live.cls) v.push("bg-live, reloaded: <html> lacks text-shadow (not restored from the saved setting)");
+        if (!SHADOW.test(live.label ?? "")) v.push(`bg-live: the Settings label lost its shadow (${live.label})`);
+        await shot("look-textShadow-settings-bglive");
+        await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
+        await shot("look-textShadow-settings-bglive-off");
+        await page(`document.documentElement.classList.add("text-shadow");`);
+        const sl = await openSide();
+        if (!sl) return [...v, "bg-live: the item sidebar didn't open — proved nothing"];
+        await js(BACKDROP); await sleep(300);
+        // inside every element drawing a black drop-shadow filter, no text carries a text-shadow as well
+        const dbl = await page(`const own = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+          const f = [...document.querySelectorAll("body *")].filter((e) => /drop-shadow\\(rgba?\\(0, 0, 0/.test(getComputedStyle(e).filter) && e.getClientRects().length);
+          const withText = f.filter((e) => [e, ...e.querySelectorAll("*")].some(own));
+          const name = (x) => x.className + ":" + x.textContent.trim().slice(0, 16);
+          return { n: withText.length, twice: withText.flatMap((e) => [e, ...e.querySelectorAll("*")].filter((x) => own(x) && getComputedStyle(x).textShadow !== "none").map(name)),
+            nested: withText.filter((e) => f.some((o) => o !== e && o.contains(e))).map(name) };`);
+        if (!dbl.n) v.push("bg-live: no text under a black drop-shadow filter on screen — proved nothing");
+        if (dbl.twice.length) v.push(`bg-live: doubled shadow (text-shadow inside a drop-shadow filter): ${dbl.twice.join(", ")}`);
+        if (dbl.nested.length) v.push(`bg-live: doubled shadow (a drop-shadow filter inside another): ${dbl.nested.join(", ")}`);
+        for (const x of await page(CLIPS)) cut.add(x);
+        const a = await pixels(sl);
+        await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
+        const b = await pixels(sl);
+        await page(`document.documentElement.classList.add("text-shadow");`); await sleep(150);
+        let diff = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) diff = Math.max(diff, Math.abs(a[i] - b[i]));
+        if (a.length !== b.length || diff > 6) v.push(`bg-live: the sidebar title looks different with the option on (max channel diff ${diff}): its shadow is doubled`);
+        await shot("look-textShadow-side-bglive");
+        console.log(`        bg-live: ${dbl.n} filtered text blocks, title on vs off max diff ${diff}`);
+
+        // bg-live off: the sidebar title (a two-line clamp, overflow: hidden) on a white panel — its shadow reaches out of its box
+        await setSettings({ liveWallpaperBehindAllTabs: false });
+        await win.loadURL(withToken(U + "/")); await js(PAGE);
+        const so = await openSide();
+        if (!so) return [...v, "the item sidebar didn't open — proved nothing"];
+        await shot("look-textShadow-side-solid");
+        for (const x of await page(CLIPS)) cut.add(x);
+        if (cut.size) v.push(`the shadow is cut off at the box of text that clips itself: ${[...cut].join(", ")}`);
+        if (so.title !== "none" && !/drop-shadow/.test(so.filter)) v.push(`the sidebar title's shadow is a text-shadow inside its clamp (${so.title}): clipped`);
+        if (so.wrapClips) v.push("the sidebar title's wrapper clips its overflow: the filter's shadow is cut off");
+        await page(`const s = document.createElement("style"); s.id = "ts-white"; s.textContent = ".side-panel { background: #fff !important; }"; document.head.append(s);`);
+        await sleep(200);
+        const edge = () => lum(so.x - 5, so.y + 4, 4, Math.min(14, so.h - 6));
+        const lOn = await edge();
+        await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
+        const lOff = await edge();
+        await page(`document.documentElement.classList.add("text-shadow"); document.getElementById("ts-white")?.remove();`);
+        console.log(`        solid: brightness left of the title's box: on ${lOn.toFixed(1)}, off ${lOff.toFixed(1)}`);
+        if (lOff < 240) v.push(`left of the sidebar title isn't the white test panel (brightness ${lOff.toFixed(0)}) — proved nothing`);
+        else if (!(lOff - lOn > 12)) v.push(`the sidebar title's shadow stops at its box (brightness left of it: on ${lOn.toFixed(0)}, off ${lOff.toFixed(0)}): the clamp clips it`);
+
+        // off again, through the row
+        await tab("Settings"); await sleep(400);
+        await click(false); await sleep(300);
+        const back = await page(READ);
+        if (back.cls || back.body !== "none" || back.label !== "none") v.push(`turned off: text still shadowed (${J({ cls: back.cls, body: back.body, label: back.label })})`);
+        if (!(await saved(false))) v.push("turning Text shadow off wasn't saved");
+      } finally {
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true });
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await sleep(400);
+      }
       return v;
     });
     // An idle page asks for no frames: a requestAnimationFrame loop that never stops (a frame counter, a "watch the box"

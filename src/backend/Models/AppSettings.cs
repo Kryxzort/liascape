@@ -67,6 +67,7 @@ public class AppSettings
     }
     public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
+    public bool TextShadow { get; set; } = false;            // UI: a subtitle shadow on all text (on = <html class="text-shadow">, index.css)
     // UI: how much of Settings shows — basic | standard (default) | advanced | expert (.claude/rules/ui/state-and-api.md § Settings page). Hidden
     // rows keep their values and stay live; nothing here reads it (docs/decisions.md § "Use four settings levels,
     // Standard by default, and never reset a hidden value").

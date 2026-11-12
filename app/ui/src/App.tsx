@@ -182,6 +182,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("no-glow", s.settings?.glows === false);
   }, [s.settings?.glows]);
+  // Settings → Look & feel → "Text shadow": on = :root.text-shadow, a subtitle shadow on every letter (index.css)
+  useEffect(() => {
+    document.documentElement.classList.toggle("text-shadow", s.settings?.textShadow === true);
+  }, [s.settings?.textShadow]);
   // COOL: "Smooth window animations" off, or the OS asks for reduced motion → :root.no-motion: nothing moves, what appears,
   // leaves or swaps fades (index.css; docs/decisions.md § "Fade, never move, with motion off"); the morphs read useMotion()
   // The switch itself shows nothing: it swaps the name of every appear animation that already ran (the page's, an open
