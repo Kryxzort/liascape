@@ -44,7 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
@@ -75,8 +75,8 @@ for f in $FILES; do
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
-    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts)
-      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; probe-layout.js perf:sidebar)" ;;
+    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
+      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts|app/ui/src/hooks/useBarFold.ts)
       add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
     # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)
@@ -92,6 +92,8 @@ for f in $FILES; do
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
+    # the pixel-centre judge for round icon buttons: the probes that call it
+    app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-sidebar.js --only look:iconCentre)" >&2 ;;
     app/shell/motion-off.js) add "appear:morphs" "$f (+ --probe probe-sidebar.js motion:, probe-filters.js, probe-layout.js, probe-select.js, probe-steam.js, probe-expert.js, probe-cardpreview.js — their motion-off cells)" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe

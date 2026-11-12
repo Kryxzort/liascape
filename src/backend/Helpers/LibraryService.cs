@@ -93,6 +93,22 @@ public static class LibraryService
     public static void MarkCrashed(string mediaPath) =>
         LibraryStore.SetMeta(mediaPath, m => m.Crashed = true);
 
+    // The sidebar's "Clear" on a crashed scene: playable again (every gate reads the index fresh — Apply, the pickers,
+    // the program's skip flag); a new crash marks it again (OnSceneBroken). Field-level, and only an entry that carries the
+    // mark is written: a stale request never creates an entry or rewrites the file. Returns whether it cleared one.
+    public static bool ClearCrashed(string mediaPath)
+    {
+        if (LibraryStore.Locate(mediaPath) is not { } loc) return false;
+        bool cleared = false;
+        LibraryStore.UpdateIndex(loc.Source, idx =>
+        {
+            if (!idx.TryGetValue(loc.Key, out var m) || !m.Crashed) return false;
+            m.Crashed = false;
+            return cleared = true;
+        });
+        return cleared;
+    }
+
     // ---------- loudness (EBU R128) measurement, cached in the index ----------
     public readonly record struct Loudness(double I, double TP, double LRA, double Thresh);
 

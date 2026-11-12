@@ -44,6 +44,12 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const previewVid = detail?.full && VIDEO_RE.test(detail.full.split("?")[0]) ? thumb(detail.full, w.pageUrl) : null;
   const fullSrc = detail?.full && !previewVid ? thumb(detail.full, w.pageUrl) : null;
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
+  // "open in your own player" only for a file on this machine (a local Wallpaper Engine folder's item); a Workshop preview is
+  // a remote URL, never sent as a path, and its media-cache copy isn't offered: the user asked for the item's media, not
+  // whatever part of it the cache holds
+  const localFile = (u: string | null | undefined) => (u && u.startsWith("/") ? u : null);
+  const files = { video: previewVid ? localFile(detail?.full) : null, gif: localFile(w.animatedThumbnailUrl),
+    image: localFile(detail?.full && !previewVid ? detail.full : w.thumbnailUrl) };
   const online = useOnline();
   const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt && online });
   // the previews' default level: the volume this wallpaper would play at — its library copy's own, else the global one
@@ -61,7 +67,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
 
   return (
     <>
-      <SideMedia id={w.pageUrl} cardId={`br-${w.pageUrl}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={previewVid} youtube={yt} preview={preview} wall={wall} />
+      <SideMedia id={w.pageUrl} cardId={`br-${w.pageUrl}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={previewVid} youtube={yt} preview={preview} wall={wall} files={files} />
       <div className="side-body">
         <div className="side-hero">
           {libItem && (

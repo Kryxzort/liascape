@@ -26,6 +26,15 @@
 //   look:previewVolume   the slider's pill slides + fades out from under the chip on hover (per frame); motion off: it fades in place,
 //                        no pointer while hidden, inside the picture, theme text + accent fill; no chip glow under no-glow; a dark
 //                        fill under bg-live. Screenshots side-pvol-*.png
+//   preview:open         the picture's "open in your default app" button (AppWindow): on k1's Video / GIF / Picture a real click
+//                        posts /open/media with that layer's file (stubbed) and applies nothing; a scene's Picture its preview
+//   look:previewOpen     Fit: the mute chip's twin (size, inset from its corner, fill, edge, colour); glow on hover, none under
+//                        no-glow, the chip's fill under bg-live; fades out on the trailer and back in, motion off too. Shots side-pvopen-*.png
+//   look:iconCentre      the open button's and the mute chip's glyphs centred in pixels (pixel-centre.js, ≤ 0.5 css px), at rest and
+//                        hovered, at two window sizes. Close-ups side-pxc-*.png
+//   lib:clearCrash:on|off  s2 marked crashed: a notice block (the section cards' material, a danger stripe, a .mini Clear) in the
+//                        body's 12 px rhythm; Clear → the notice and the whitelist row fade out, what follows glides into their room
+//                        (off: fade only, at once), the index mark and the card's go, s2 plays. Screenshots side-crash-*.png
 //   look:strip:<w>x<h>   the preview switch is the segmented control's strip fused to the picture: 0 px gap, the same left /
 //                        right edges, the unit as wide as the content (full width at 16:9), rounded strip top + picture bottom,
 //                        shorter than the old pills; the highlight glides (per frame) and lands centred, jumps with motion off;
@@ -78,6 +87,7 @@ const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.setPath("userData", path.join(OUT, "electron-user-data"));
+if (E.LIASCAPE_SIDE_DPR) app.commandLine.appendSwitch("force-device-scale-factor", E.LIASCAPE_SIDE_DPR); // look:iconCentre at a set ratio
 
 async function http(method, p, body) {
   const r = await fetch(U + p, { method, headers: authHeaders({ "Content-Type": "application/json" }), body: body === undefined ? undefined : JSON.stringify(body) });
@@ -123,9 +133,9 @@ const PAGE = `window.__sb = {
 const page = (code) => js(`(async () => { const m = window.__sb; ${code} })()`);
 async function loadUi() {
   await win.loadURL(withToken(U + "/"));
-  // /open would start a real file manager, the unsubscribe a Steam call: recorded, never sent
+  // /open would start a real file manager (/open/media a real player), the unsubscribe a Steam call: recorded, never sent
   await js(`(() => { window.__opened = []; const f = window.fetch; window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
-    if ((o?.method || "GET") === "POST" && (p === "/open" || p.startsWith("/workshop/unsubscribe") || p === "/library/delete-from-source")) { window.__opened.push({ p, body: o?.body ?? null });
+    if ((o?.method || "GET") === "POST" && (p === "/open" || p === "/open/media" || p.startsWith("/workshop/unsubscribe") || p === "/library/delete-from-source")) { window.__opened.push({ p, body: o?.body ?? null });
       return Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })); }
     return f(u, o); }; })(); true`);
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
@@ -904,6 +914,269 @@ app.whenReady().then(async () => {
       for (let i = 0; i < 80 && !window.__yt.some((d) => d.event === "listening"); i++) await m.sleep(50);
       await m.sleep(400); return window.__yt.some((d) => d.event === "listening");`);
     const ytCmds = (since = 0) => js(`window.__yt.slice(${since}).filter((d) => d.event === "command").map((d) => d.func + (d.args?.length ? "(" + d.args.join(",") + ")" : ""))`);
+
+    // preview:open — the picture's "open in your default app" button (SidePanel.tsx SideOpen, lucide AppWindow): on k1's
+    // Video and GIF (k1) and Picture (k2: no switch, the picture only) a real click at its centre posts /open/media with that
+    // layer's file — and applies nothing (it sits above the click-to-play layer); a scene's Picture opens its preview file. /open/media is stubbed in the page
+    // (loadUi): nothing really opens.
+    const clickAt = async (x, y) => { send({ type: "mouseDown", x: Math.round(x), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+      send({ type: "mouseUp", x: Math.round(x), y: Math.round(y), button: "left", clickCount: 1 }); };
+    const pickOpen = (k) => page(`const s = m.side(); const o = s.querySelector('[data-preview-src="${k}"]');
+      if (o && o.getAttribute("aria-checked") !== "true") o.click(); await m.sleep(650);
+      const b = s.querySelector("[data-side-open]"); if (!b) return null; const c = getComputedStyle(b);
+      return { mode: s.querySelector("[data-side-media]")?.dataset.previewMode, on: b.classList.contains("on"), inert: b.inert, file: b.dataset.sideOpen,
+        op: +c.opacity, pe: c.pointerEvents, label: b.getAttribute("aria-label"), icon: !!b.querySelector("svg.lucide-app-window"), r: m.rect(b),
+        play: !!s.querySelector("[data-side-play]") };`);
+    const clickOpen = async (b) => {
+      await js(`window.__opened.length = 0; true`);
+      await clickAt(b.r.x + b.r.w / 2, b.r.y + b.r.h / 2); await sleep(400);
+      return js(`window.__opened.map((o) => ({ p: o.p, body: JSON.parse(o.body || "null") }))`);
+    };
+    await cell("preview:open", async () => {
+      const v = [], J = JSON.stringify;
+      const k1 = await libItemByTitle("k1"), k2 = await libItemByTitle("k2"), s2 = await libItemByTitle("s2");
+      const gif = k1?.animatedThumbnailPath, pic = k2?.thumbnailPath || k2?.animatedThumbnailPath, scPic = s2?.thumbnailPath || s2?.animatedThumbnailPath;
+      if (!gif || !/\.gif$/i.test(gif) || !pic || !scPic) return [`k1 / k2 / s2 lack a local GIF or picture (${J({ gif, pic, scPic })}) — proved nothing`];
+      // k1 and k2 not playing: their picture is then the Play control, which a click on the button must not reach
+      if ([K[0], K[1]].includes(await current())) { await post("/apply", { path: K[2] }); await sleep(1500); }
+      const cur0 = await current();
+      for (const [k, want, t] of [["video", K[0], "k1"], ["gif", gif, "k1"], ["image", pic, "k2"]]) {
+        await page(`if (m.sideTitle() !== "${t}") { await m.closeAll(); await m.openSide("${t}"); await m.sleep(400); }`);
+        const b = await pickOpen(k);
+        if (!b) { v.push(`${k}: no open button`); continue; }
+        if (b.mode !== k) { v.push(`${k}: the picture shows ${b.mode}`); continue; }
+        if (!b.on || b.inert || b.op < 0.95 || b.pe === "none") v.push(`${k}: the button isn't shown / usable (${J(b)})`);
+        if (!b.icon) v.push(`${k}: not the AppWindow icon`);
+        if (b.label !== "Open in your default app") v.push(`${k}: aria-label ${J(b.label)}`);
+        if (!b.play) v.push(`${k}: no click-to-play layer under the button — the "applies nothing" check proved nothing`);
+        const sent = await clickOpen(b);
+        if (J(sent) !== J([{ p: "/open/media", body: { path: want } }])) v.push(`${k}: a click posted ${J(sent)}, want /open/media {path: ${want}}`);
+        await shot(`pvopen-${k}`);
+      }
+      await sleep(500);
+      const cur1 = await current();
+      if (cur1 !== cur0) v.push(`a click on the button applied the item (/current ${T(cur1)}, was ${T(cur0)})`);
+      await page(`await m.closeAll(); await m.openSide("s2"); await m.sleep(500);`);
+      const sb = await pickOpen("image");
+      if (!sb || !sb.on) v.push(`s2 (a scene): no open button on its Picture (${J(sb)})`);
+      else { const sent = await clickOpen(sb); if (J(sent) !== J([{ p: "/open/media", body: { path: scPic } }])) v.push(`s2: a click posted ${J(sent)}, want its picture ${scPic}`); }
+      await mv(5, 5); await page(`await m.closeAll();`);
+      return v;
+    });
+
+    // look:previewOpen — Fit: the button is the mute chip's twin: its size, its inset from the picture's other bottom corner,
+    // its fill, edge, text colour and roundness; it glows on hover like the chip (none under no-glow) and keeps the chip's fill
+    // under bg-live; on a layer with no file (the YouTube trailer, stubbed) it fades out, and back in on the Picture (in-between
+    // opacity frames, nothing moves), motion off too. Screenshots side-pvopen-*.png.
+    await cell("look:previewOpen", async () => {
+      const v = [], J = JSON.stringify, near = (a, b, t = 0.75) => Math.abs(a - b) <= t;
+      // the chip's resting material, from a stand-in chip where the real one sits (the real one may be lit: unmuted)
+      const geo = (cls = "") => page(`const s = m.side(), b = s.querySelector("[data-side-open]"), u = s.querySelector("[data-side-mute]"), md = s.querySelector("[data-side-media]");
+        if (!b || !u) return null; const t = document.createElement("button"); t.className = "side-mute"; u.parentElement.appendChild(t);
+        const root = document.documentElement, add = "${cls}".split(" ").filter(Boolean); for (const c of add) root.classList.add(c); await m.sleep(60);
+        const cs = (e) => { const c = getComputedStyle(e); return { bg: c.backgroundColor, edge: c.borderTopColor, bw: c.borderTopWidth, color: c.color, radius: c.borderTopLeftRadius }; };
+        const out = { b: m.rect(b), u: m.rect(u), md: m.rect(md), bs: cs(b), us: cs(t), strip: s.querySelector(".seg.strip") ? m.rect(s.querySelector(".seg.strip")) : null };
+        t.remove(); for (const c of add) root.classList.remove(c); return out;`);
+      try {
+        await loadUi(); await setMotion(true);
+        if (!await openVideo("k1")) return ["k1: no Video preview (proved nothing)"];
+        await mv(5, 5, 300);
+        const g = await geo();
+        if (!g) return ["no open button beside the mute chip"];
+        console.log(`        ${J(g)}`);
+        if (!near(g.b.w, g.u.w, 0.5) || !near(g.b.h, g.u.h, 0.5)) v.push(`size ${g.b.w}×${g.b.h}, the mute chip's ${g.u.w}×${g.u.h}`);
+        const bIn = g.md.y + g.md.h - (g.b.y + g.b.h), uIn = g.md.y + g.md.h - (g.u.y + g.u.h);
+        const bSide = g.b.x - g.md.x, uSide = g.md.x + g.md.w - (g.u.x + g.u.w);
+        if (!near(bIn, uIn) || !near(bSide, uSide)) v.push(`inset from its corner ${bSide.toFixed(1)} / ${bIn.toFixed(1)} px, the chip's ${uSide.toFixed(1)} / ${uIn.toFixed(1)}`);
+        if (J(g.bs) !== J(g.us)) v.push(`material ${J(g.bs)}, the chip's ${J(g.us)}`);
+        if (g.b.x < g.md.x || g.b.y + g.b.h > g.md.y + g.md.h + 0.5 || (g.strip && g.b.y < g.strip.y + g.strip.h)) v.push(`not inside the picture (${J(g.b)} vs ${J(g.md)})`);
+        // hover: the chip's glow + accent edge; no-glow: none; bg-live: still the chip's fill
+        await mv(g.b.x + g.b.w / 2, g.b.y + g.b.h / 2, 400);
+        const hov = await page(`const b = m.side().querySelector("[data-side-open]"), root = document.documentElement; const c = getComputedStyle(b);
+          const out = { glow: c.boxShadow, edge: c.borderTopColor, accent: m.accent() }; root.classList.add("no-glow"); await m.sleep(250);
+          out.noGlow = getComputedStyle(b).boxShadow; root.classList.remove("no-glow"); return out;`);
+        if (!hov.glow || hov.glow === "none") v.push("glows on: the hovered button doesn't glow");
+        if (hov.edge !== hov.accent) v.push(`hovered: edge ${hov.edge}, want the accent ${hov.accent}`);
+        if (hov.noGlow !== "none") v.push(`no-glow: the hovered button still glows (${hov.noGlow})`);
+        await shot("pvopen-hover");
+        await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("pvopen-noglow"); await page(`document.documentElement.classList.remove("no-glow");`);
+        await mv(5, 5, 300);
+        const live = await geo("bg-live");
+        if (live && J(live.bs) !== J(live.us)) v.push(`bg-live: material ${J(live.bs)}, the chip's ${J(live.us)}`);
+      } finally {
+        await mv(5, 5); await page(`await m.closeAll();`);
+      }
+      // a layer with no file to open (the trailer): out on it, back in on the Picture — opacity only
+      await withYtStub(async () => {
+        for (const on of [true, false]) {
+          if (!on) await setMotion(false);
+          await page(`await m.closeAll(); await m.openSide("s1"); await m.sleep(400); const o = m.side().querySelector('[data-preview-src="image"]');
+            if (o && o.getAttribute("aria-checked") !== "true") o.click(); await m.sleep(600);`);
+          const flip = async (to) => { const samp = js(MO.SAMPLE({ open: ".side-panel:not(.closing) [data-side-open]" }, 700));
+            await sleep(40); await page(`m.side().querySelector('[data-preview-src="${to}"]')?.click();`); return (await samp).open; };
+          const out = await flip("youtube");
+          const back = await flip("image");
+          if (on) { await flip("youtube"); await page(`m.side().querySelector('[data-preview-src="image"]').click();`); await sleep(80); await shot("pvopen-midfade"); await sleep(600); }
+          const mode = on ? "on" : "off";
+          console.log(`        motion ${mode}: out ${MO.brief(out)} / in ${MO.brief(back)}`);
+          v.push(...MO.judge(`motion ${mode}: leaving`, out, { leave: true, maxMs: 400 }), ...MO.judge(`motion ${mode}: coming back`, back, { appear: true, maxMs: 400 }));
+        }
+      }).finally(() => setMotion(true));
+      // the real live-wallpaper mode, for the eye
+      await setBgLive(true);
+      try { if (await openVideo("k1")) { await mv(5, 5, 300); await shot("pvopen-live"); } } finally { await page(`await m.closeAll();`); await setBgLive(false); }
+      return v;
+    });
+
+    // look:iconCentre — the round chips' glyphs are centred in pixels (app/shell/pixel-centre.js: the glyph's drawn box against
+    // the chip's drawn box, within 0.5 css px): the open button (on k2's Picture: nothing moves under it) and the mute chip (on
+    // k1's Video, paused and hidden while measured), at rest and hovered (the ring without its glow; the volume pill hidden), at two window sizes and
+    // four sub-pixel offsets of the picture (its aspect-ratio height lands the chips on any fraction; the offset is a
+    // margin on the stage, so every fraction is met, not only the ones a layout happens to give). Within 0.5 css px at a whole
+    // device pixel ratio; at a fractional one (the matrix's Xvfb gives 67/64) a device pixel can't be split, so within one.
+    // LIASCAPE_SIDE_DPR=1 / 2 runs the probe at that ratio (Chromium's --force-device-scale-factor: an emulated ratio isn't
+    // what capturePage reads). Close-ups side-pxc-*.png.
+    await cell("look:iconCentre", async () => {
+      const v = [];
+      const PXC = require("./pixel-centre");
+      const sizes = [[1400, 900], [1180, 780]];
+      const settle = (sel) => page(`const e = m.side()?.querySelector(${JSON.stringify(sel)}); for (const a of e?.getAnimations({ subtree: true }) ?? []) a.finish(); await m.sleep(60);`);
+      let tol = 0.5;
+      const one = async (label, chip, glyph, css) => {
+        for (const hov of [false, true]) for (const off of [0, 0.25, 0.5, 0.75]) {
+          await page(`let st = document.getElementById("__pxoff"); if (!st) { st = document.createElement("style"); st.id = "__pxoff"; document.head.append(st); }
+            st.textContent = ".side-panel .side-stage { margin-top: ${6 + off}px !important; transition: none !important; }"; await m.sleep(80);`);
+          const r0 = await page(`const e = m.side()?.querySelector(${JSON.stringify(chip)}); return e ? m.rect(e) : null;`);
+          if (!r0) { v.push(`${label}: no chip`); return; }
+          if (hov) await mv(r0.x + r0.w / 2, r0.y + r0.h / 2, 450); else await mv(5, 5, 350);
+          await settle(chip);
+          const name = `${label}-${hov ? "hover" : "rest"}+${off}`;
+          const r = await PXC.measure(win, { chip: `.side-panel:not(.closing) ${chip}`, glyph: `.side-panel:not(.closing) ${chip} svg`,
+            css: `${hov ? `.side-panel ${chip} { box-shadow: none !important; } ` : ""}${css}`, png: off ? null : path.join(OUT, `side-pxc-${name.replace(/\+0$/, "")}.png`) });
+          console.log(`        ${name}: ${r.error ?? `off by (${r.dx.toFixed(2)}, ${r.dy.toFixed(2)}) css px, glyph ${JSON.stringify(r.glyph)} in ${JSON.stringify(r.box)}`}`);
+          v.push(...PXC.judge(name, r, tol));
+        }
+        await page(`document.getElementById("__pxoff")?.remove();`);
+      };
+      try {
+        for (const [W0, H0] of sizes) {
+          win.setContentSize(W0, H0); await sleep(700);
+          const real = await js("devicePixelRatio");
+          tol = Math.abs(real - Math.round(real)) < 1e-3 ? 0.5 : 1 / real + 0.02;
+          const W = `${W0}@${real.toFixed(3).replace(/\.?0+$/, "")}`, H = `${H0}`;
+          console.log(`        ${W0}x${H0} at devicePixelRatio ${real} (tolerance ${tol.toFixed(2)} css px)`);
+          await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(400); const o = m.side().querySelector('[data-preview-src="image"]');
+            if (o && o.getAttribute("aria-checked") !== "true") o.click(); await m.sleep(700);`);
+          await one(`${W}x${H}-open`, "[data-side-open]", "svg", "");
+          if (!await openVideo("k1")) { v.push(`${W}x${H}: k1 has no Video preview`); continue; }
+          // paused, and past the layers' cross-fade (.28 s): nothing may change under the chip while it's measured
+          await page(`m.side().querySelector('video[data-preview-layer="video"]')?.pause(); await m.sleep(700);`);
+          // the video hidden under it while measured: a paused frame can still be redrawn between captures (seen at 2x)
+          await one(`${W}x${H}-mute`, "[data-side-mute]", "svg", ".side-vol-slide, .side-panel .side-media > video { visibility: hidden !important; }");
+        }
+      } finally {
+        win.setContentSize(1400, 900); await sleep(400); await mv(5, 5); await page(`await m.closeAll();`);
+      }
+      return v;
+    });
+
+    // lib:clearCrash:<on|off> — a crashed scene's notice and its Clear (LibrarySide.tsx clearCrash). s2 marked crashed in its
+    // index entry shows the notice — a block of the body in the section cards' material with a danger stripe, the warning
+    // glyph in --danger, its words and a .mini Clear, 12 px from its neighbours — and the whitelist row, and /apply refuses
+    // it. A real click on Clear: the notice and the row fade out (in-between opacity frames; motion off: opacity only, nothing
+    // moves); what sat after them takes their room (motion on: the action tiles and the Volume row glide through in-between
+    // positions; off: at once); the mark is gone from the index, the card isn't marked, and (on) s2 plays: /apply → /current.
+    // The hovered Clear glows (none under no-glow); under bg-live the notice keeps its own fill. Screenshots side-crash-*.png.
+    const visibleGlow = (bs) => !!bs && bs !== "none" && !/^(rgba\(0, 0, 0, 0\)[^,]*)(, rgba\(0, 0, 0, 0\)[^,]*)*$/.test(bs);
+    for (const mode of ["on", "off"]) await cell(`lib:clearCrash:${mode}`, async () => {
+      const v = [], J = JSON.stringify;
+      const scIdx = path.join(path.dirname(SC[1]), "index.json"), key = path.basename(SC[1]), idx0 = fs.readFileSync(scIdx, "utf8");
+      const writeIdx = (j) => { fs.writeFileSync(scIdx + ".pb", typeof j === "string" ? j : JSON.stringify(j)); fs.renameSync(scIdx + ".pb", scIdx); };
+      const cur0 = await current();
+      try {
+        const j = JSON.parse(idx0); j[key] = { ...(j[key] || {}), crashed: true }; writeIdx(j);
+        await setSettings({ allowScenes: true });
+        await loadUi(); if (mode === "off") await setMotion(false);
+        await page(`await m.closeAll(); await m.openSide("s2"); await m.sleep(700);`);
+        const pre = await page(`const s = m.side(), c = s.querySelector("[data-side-crash]"), b = s.querySelector("[data-side-crash-clear]");
+          if (!c || !b) return { none: true, text: c?.textContent ?? null };
+          const sec = s.querySelector(".side-sec"), cs = (e) => { const x = getComputedStyle(e); return { bg: x.backgroundColor, edge: x.borderTopColor, bw: x.borderTopWidth, radius: x.borderTopLeftRadius }; };
+          const st = getComputedStyle(c, "::before"), d = document.createElement("div"); d.style.color = "var(--danger)"; document.body.appendChild(d); const danger = getComputedStyle(d).color; d.remove();
+          const prev = c.previousElementSibling, next = c.nextElementSibling, r = c.getBoundingClientRect();
+          return { text: c.textContent.trim(), btn: m.rect(b), mini: b.classList.contains("mini"), parent: c.parentElement.classList.contains("side-body"),
+            mat: cs(c), secMat: cs(sec), stripe: { w: st.width, img: st.backgroundImage, left: st.left }, danger, ico: getComputedStyle(c.querySelector("svg")).color,
+            gaps: [prev ? Math.round(r.top - prev.getBoundingClientRect().bottom) : null, next ? Math.round(next.getBoundingClientRect().top - r.bottom) : null],
+            wl: !!s.querySelector(".side-wl"), card: !!m.card("s2")?.classList.contains("crashed") };`);
+        if (pre.none) return [`s2 marked crashed: no crash notice with a Clear (${J(pre)}) — proved nothing`];
+        console.log(`        ${J(pre)}`);
+        if (!pre.parent) v.push("the notice isn't a block of the side body");
+        if (!/crashed/i.test(pre.text) || !/won't be played/.test(pre.text)) v.push(`the notice says ${J(pre.text)}`);
+        if (!pre.mini) v.push("Clear isn't the sidebar's small button (.mini)");
+        if (J(pre.mat) !== J(pre.secMat)) v.push(`material ${J(pre.mat)}, the section cards' ${J(pre.secMat)}`);
+        const dRgb = pre.danger.replace(/^rgba?\(|\)$/g, "").split(",").slice(0, 3).map((x) => x.trim()).join(", ");
+        if (pre.stripe.w !== "3px" || pre.stripe.left !== "0px" || !pre.stripe.img.includes(dRgb)) v.push(`the left stripe isn't a 3 px --danger one (${J(pre.stripe)}, danger ${pre.danger})`);
+        if (pre.ico !== pre.danger) v.push(`the glyph is ${pre.ico}, want --danger ${pre.danger}`);
+        for (const g of pre.gaps) if (g != null && Math.abs(g - 12) > 1) v.push(`${g} px from a neighbour, want the body's 12 (${J(pre.gaps)})`);
+        if (!pre.wl) v.push("s2 marked crashed: no whitelist row");
+        if (!pre.card) v.push("s2's card isn't marked crashed");
+        if (mode === "on") {
+          const r = await post("/apply", { path: SC[1] });
+          if (r.status < 400 || !/crash/i.test(r.json?.error ?? "")) v.push(`while marked, /apply s2 answered ${r.status} ${J(r.json)} — expected the crash refusal`);
+        }
+        await mv(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2, 400);
+        const hov = await page(`const b = m.side().querySelector("[data-side-crash-clear]"), root = document.documentElement;
+          const out = { glow: getComputedStyle(b).boxShadow }; root.classList.add("no-glow"); await m.sleep(250); out.noGlow = getComputedStyle(b).boxShadow; root.classList.remove("no-glow");
+          const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(60);
+          out.liveBg = getComputedStyle(m.side().querySelector("[data-side-crash]")).backgroundColor; if (!had) root.classList.remove("bg-live"); return out;`);
+        if (!visibleGlow(hov.glow)) v.push(`glows on: the hovered Clear doesn't glow (${hov.glow})`);
+        if (visibleGlow(hov.noGlow)) v.push(`no-glow: the hovered Clear still glows (${hov.noGlow})`);
+        const a = /\/\s*([\d.]+)\s*\)/.exec(hov.liveBg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(hov.liveBg)?.[1] ?? "1";
+        if (+a < 0.3) v.push(`bg-live: the notice has no fill of its own (${hov.liveBg})`);
+        if (mode === "on") {
+          await shot("crash-hover");
+          await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("crash-noglow"); await page(`document.documentElement.classList.remove("no-glow");`);
+        }
+        const S = (sel) => `.side-panel:not(.closing) ${sel}`;
+        const samp = js(MO.SAMPLE({ notice: S("[data-side-crash]"), wl: S(".side-wl"), tiles: S(".side-tiles"), vol: S('[data-side-row="volume"]') }, 1100));
+        await sleep(40); await clickAt(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2);
+        await sleep(mode === "on" ? 120 : 60); await shot(`crash-clear-mid-${mode}`);
+        const fr = await samp;
+        await mv(5, 5); await sleep(300); await shot(`crash-cleared-${mode}`);
+        console.log(`        motion ${mode}: notice ${MO.brief(fr.notice)} / row ${MO.brief(fr.wl)}`);
+        v.push(...MO.judge("the notice", fr.notice, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        v.push(...MO.judge("the whitelist row", fr.wl, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        // what took their room: frames between its start and end position
+        for (const [name, i] of [["the action tiles", "tiles"], ["the Volume row", "vol"]]) {
+          const p = fr[i].filter((f) => f[1] != null).map((f) => f[3]);
+          if (p.length < 2) { v.push(`${name}: not on screen — proved nothing`); continue; }
+          const p0 = p[0], p1 = p[p.length - 1], d = p1 - p0;
+          if (Math.abs(d) < 2) { v.push(`${name}: didn't move (${p0} → ${p1}) — proved nothing`); continue; }
+          const mid = p.filter((x) => Math.min(Math.abs(x - p0), Math.abs(x - p1)) > 1 && (x - p0) * (p1 - x) > 0).length;
+          console.log(`        ${name}: ${p0} → ${p1}, ${mid} frames between`);
+          if (mode === "on" && mid < 2) v.push(`${name}: jumped ${d.toFixed(1)} px — no glide (${mid} frames between)`);
+          if (mode === "off" && mid > 0) v.push(`motion off: ${name} glided (${mid} frames between) — it should take its place at once`);
+        }
+        const post1 = await page(`const s = m.side(); return { notice: !!s.querySelector("[data-side-crash]"), wl: !!s.querySelector(".side-wl"), card: !!m.card("s2")?.classList.contains("crashed") };`);
+        if (post1.notice || post1.wl) v.push(`after Clear: still showing ${J(post1)}`);
+        if (post1.card) v.push("after Clear: s2's card is still marked crashed");
+        const m1 = JSON.parse(fs.readFileSync(scIdx, "utf8"))[key];
+        if (m1?.crashed) v.push(`after Clear: s2's index entry still crashed (${J(m1)})`);
+        if (mode === "on") {
+          const r = await post("/apply", { path: SC[1] });
+          if (r.status !== 200) v.push(`after Clear, /apply s2 answered ${r.status} ${J(r.json)}`);
+          let cur = null; for (let i = 0; i < 40 && (cur = await current()) !== SC[1]; i++) await sleep(200);
+          if (cur !== SC[1]) v.push(`after Clear, s2 doesn't play (/current ${T(cur)})`);
+        }
+      } finally {
+        writeIdx(idx0);
+        await setSettings({ allowScenes: false });
+        if (cur0) await post("/apply", { path: cur0 }); else await post("/stop");
+        await sleep(800);
+        await mv(5, 5); if (mode === "off") await setMotion(true);
+        await loadUi();
+      }
+      return v;
+    });
 
     // the previews' level until the user sets one is the item's effective wallpaper volume (sidePreview.ts previewLevel):
     // k1's own, k2's the global; live while the sidebar's Volume row moves; the trailer is told the same level. Once the

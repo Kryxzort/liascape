@@ -240,6 +240,8 @@ export const api = {
   // global sliders (every live wallpaper without its own override for that field — override ?? global)
   preview: (body: { volume?: number; speed?: number; paths?: string[]; global?: boolean }) => jpost("/preview", body),
   libraryWhitelist: (path: string, value: boolean) => jpost("/library/whitelist", { path, value }),
+  // API: a crashed scene playable again (the backend broadcasts library-item-changed {hasCrashed: false})
+  libraryClearCrash: (path: string) => jpost<{ cleared: boolean }>("/library/clear-crash", { path }),
   // API: a scene's user properties (project.json general.properties) — list, set (saved per item + live),
   // reset (name: one, none: all), and the drag twin (live, nothing saved)
   sceneProps: (path: string) => jget<ScenePropsResp>(`/library/scene-props?path=${encodeURIComponent(path)}`),
@@ -300,6 +302,8 @@ export const api = {
   steamTodo: () => jget<SteamTodo>("/steam-todo"),
   steamTodoAction: (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => jpost<{ error?: string | null } | void>(`/steam-todo/${a}`),
   open: (body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }) => jpost("/open", body),
+  // API: a library video / GIF in the desktop's default app for its type — 403 for anything else (.claude/rules/backend/api.md § Security)
+  openMedia: (path: string) => jpost("/open/media", { path }),
   duration: (path: string) => jget<{ seconds: number }>(`/library/duration?path=${encodeURIComponent(path)}`),
   apply: (path: string) => jpost("/apply", { path }),
   stop: () => jpost("/stop"),

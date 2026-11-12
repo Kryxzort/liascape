@@ -112,6 +112,24 @@ public static class AppOps
 
     // Reveal the real media in the file manager. Scene → CopiedSceneDir or <WE>/<workshopId>;
     // video → resolve the symlink → reveal the file.
+    // A crashed scene made playable again: the index mark cleared (LibraryService.ClearCrashed), a running rotation's skip
+    // flag lifted (the player drops its own broken mark with it: docs/player/modules/programs.md), every page told.
+    public static bool ClearCrash(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !LibraryService.ClearCrashed(path)) return false;
+        LiascapePlayerProgram.PushItem(path);
+        EventBus.Broadcast("library-item-changed", new { path, hasCrashed = false });
+        return true;
+    }
+
+    // The resolved file (ApiSecurity.OpenableMedia) handed to xdg-open — the desktop's default app for its type. False = refused.
+    public static bool OpenMedia(string? path)
+    {
+        if (ApiSecurity.OpenableMedia(path) is not { } real) return false;
+        try { Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { real }, UseShellExecute = false })?.Dispose(); } catch { }
+        return true;
+    }
+
     public static void RevealLibraryItem(string path, bool isScene, string? workshopId, string? copiedSceneDir)
     {
         string? dir = null, filePath = null;

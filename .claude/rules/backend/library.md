@@ -32,6 +32,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 ## Per-item overrides
 - Every playback path reads overrides through `LibraryService` (`PlayerHelper`'s private readers delegate to it); effective = `override ?? global` everywhere.
 - After saving an override, apply it live (`PlayerHelper.ApplyOverrideLive`).
+- A scene's crash mark (`Crashed`) is set by `PlayerHelper.OnSceneBroken` and lifted only by the user (`POST /library/clear-crash` → `LibraryService.ClearCrashed`: field-level, writes only an entry that carries it; then `LiascapePlayerProgram.PushItem` so a rotation's skip flag follows, and `library-item-changed {hasCrashed: false}`). Every gate (Apply, the pickers, the program's `skip`) reads the index fresh. Guard: `scripts/test-item-actions.sh`, probe-sidebar `lib:clearCrash:*`.
 
 ## Loudness
 - Videos: measure once with ffmpeg `loudnorm` pass 1 (`EnsureLoudnessAsync`, all four values or `loudnessSkip`); play with ONE fixed gain (`LoudnormAf` → `volume=<g>dB`), `g = min(target − I, −1 − TP)`. Never use `loudnorm` at playback — it falls back to dynamic mode and pumps.

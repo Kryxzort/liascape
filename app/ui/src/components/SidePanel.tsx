@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
+import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX, AppWindow } from "lucide-react";
 import { captureSource, sourceEl, useMotion, FADE_EXIT_MS } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
-import { type PreviewKind } from "../store";
+import { type PreviewKind, useStore } from "../store";
 import { useStableFn } from "../hooks/useStableFn";
+import { api } from "../api/client";
 import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, followWallpaper, unmutePreview, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
@@ -145,10 +146,13 @@ const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, vide
 // glow; already playing → the green frame (no badge: the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
 // `wall`: the item's effective wallpaper volume (`override ?? global`), the previews' level until the user sets their own.
-export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, wall, play }: {
+// `files`: the local files behind the Video / GIF / Picture layers (a library item's, a local folder's Browse item's); the
+// picture gets an "open in your default app" button while a layer with one shows (SideOpen). A Workshop preview is remote: none.
+export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, wall, play, files }: {
   id: string; cardId: string | null; base: string; full: string | null; gif: string | null; video: string | null; youtube: string | null;
   preview: ReturnType<typeof usePreview>; wall: number;
   play?: { label: string; playing: boolean; looping: boolean; onPlay: () => void };
+  files?: { video: string | null; gif: string | null; image: string | null };
 }) {
   const [src] = useState(() => captureSource(cardId)); // read once, at the focus (the card is on screen then)
   const [aspect, setAspect] = useState<number | null>(() => src.aspect ?? aspects.get(id) ?? null);
@@ -206,12 +210,36 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
           {yt && <YouTubeEmbed url={youtube} level={level} />}
           {/* above the click-to-play layer (z 3): a press here never applies the wallpaper */}
           {mode === "video" && video && vidOn === video && <PreviewVolume wall={wall} />}
+          {(files?.video && video || files?.gif && gif || files?.image) && (
+            <SideOpen file={mode === "video" ? (video && files?.video) || null : mode === "gif" ? (gif && files?.gif) || null
+              : mode === "image" ? files?.image ?? null : null} />
+          )}
           {playable && (
             <button className="side-play" data-side-play aria-label={play.label} onClick={play.onPlay} />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// The shown Video / GIF / Picture in the desktop's default app for its type (POST /open/media: a library video or picture
+// only, checked by name and content). AppWindow — an app's window, not ExternalLink's "a web page". The mute chip's twin in
+// the opposite corner — its size, inset and fill (index.css `.side-open`). Mounted while the item has a file behind any layer,
+// shown only while such a layer is picked (not the YouTube trailer): it fades in and out with the switch (opacity; motion
+// off the same fade), inert while hidden. Above the click-to-play layer and stopping its clicks: a press here never applies
+// the wallpaper. Guard: probe-sidebar preview:open, look:previewOpen.
+function SideOpen({ file }: { file: string | null }) {
+  const [last, setLast] = useState(file);
+  if (file && file !== last) setLast(file); // the label stays while it fades out
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return (
+    <button className={`side-open${file ? " on" : ""}`} data-side-open={last ?? ""} inert={!file} aria-hidden={!file || undefined}
+      aria-label="Open in your default app" title="Open in your default app"
+      onPointerDown={stop} onDoubleClick={stop}
+      onClick={(e) => { e.stopPropagation(); if (file) api.openMedia(file).catch((err) => useStore.getState().setError(`Couldn't open it: ${(err as Error).message}`)); }}>
+      <AppWindow size={16} />
+    </button>
   );
 }
 

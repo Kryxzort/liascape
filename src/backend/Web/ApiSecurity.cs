@@ -278,6 +278,94 @@ public static class ApiSecurity
         }
     }
 
+    // ---- a library file opened in the user's own app (POST /open/media) ----------------------------------------------
+    // xdg-open dispatches by MIME type, and a file it takes for a .desktop entry, a script or an executable can run code —
+    // so only a video or a picture (a GIF included), decided by name AND by content, under the media roots once every
+    // symlink is resolved:
+    //  • MediaAllowed (the lexical check), then realpath() of the whole path re-checked against the roots' own realpaths
+    //    (a link inside the library may point anywhere; a root that is itself a link — ~/.steam/steam — still matches);
+    //  • a regular file (opened O_NONBLOCK: a FIFO can't hang the request), its extension — and its resolved name's — in one
+    //    family below;
+    //  • its first bytes that family's: a video container's for a video name, a PNG / JPEG / WebP / GIF header for a picture
+    //    name (a preview saved under another picture's extension is common, and opens in the same viewer), and no
+    //    desktop-entry group in its head (shared-mime-info finds "[Desktop Entry]" in the first 32 bytes, whatever the name).
+    // Returns the resolved path to hand to xdg-open (an argument list, never a shell), else null.
+    // Guard: scripts/test-item-actions.sh § open.
+    private static readonly HashSet<string> OpenVideoExts = new(StringComparer.Ordinal) { ".mp4", ".webm", ".mkv", ".mov", ".m4v", ".avi" };
+    private static readonly HashSet<string> OpenImageExts = new(StringComparer.Ordinal) { ".png", ".jpg", ".jpeg", ".webp", ".gif" };
+    public static string? OpenableMedia(string? path)
+    {
+        if (!MediaAllowed(path)) return null;
+        string ext = Path.GetExtension(path!).ToLowerInvariant();
+        bool image = OpenImageExts.Contains(ext);
+        if (!image && !OpenVideoExts.Contains(ext)) return null;
+        if (RealPath(path!) is not { } real) return null;
+        // the real file's own name must pass too: a link named .mp4 to a .desktop is still a .desktop to xdg-open's MIME lookup
+        if (!(image ? OpenImageExts : OpenVideoExts).Contains(Path.GetExtension(real).ToLowerInvariant())) return null;
+        bool under = MediaRoots(fresh: true).Select(RealPath).Any(r => r != null && r.Length > 1 && real.StartsWith(r + "/", StringComparison.Ordinal));
+        if (!under) return null;
+        var head = ReadHead(real, 4096);
+        if (head == null) return null;
+        if (image ? !IsImage(head) : !IsVideoContainer(head)) return null;
+        if (Contains(head, "[Desktop") || Contains(head, "[KDE Desktop")) return null;
+        return real;
+    }
+
+    private static bool IsImage(byte[] b)
+    {
+        if (b.Length < 12) return false;
+        if (b[0] == 'G' && b[1] == 'I' && b[2] == 'F' && b[3] == '8' && (b[4] == '7' || b[4] == '9') && b[5] == 'a') return true;
+        if (b.AsSpan(0, 8).SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })) return true; // PNG
+        if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true; // JPEG (SOI + a marker)
+        return Encoding.ASCII.GetString(b, 0, 4) == "RIFF" && Encoding.ASCII.GetString(b, 8, 4) == "WEBP";
+    }
+    private static readonly string[] IsoBoxes = ["ftyp", "moov", "mdat", "wide", "free", "skip"];
+    private static bool IsVideoContainer(byte[] b)
+    {
+        if (b.Length < 12) return false;
+        // Matroska / WebM: the EBML magic
+        if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return true;
+        // AVI: RIFF....AVI
+        if (Encoding.ASCII.GetString(b, 0, 4) == "RIFF" && Encoding.ASCII.GetString(b, 8, 4) == "AVI ") return true;
+        // MP4 / MOV / M4V (ISO base media): a first box with a real size and a known type
+        uint size = (uint)(b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]);
+        return (size >= 8 || size == 1) && IsoBoxes.Contains(Encoding.ASCII.GetString(b, 4, 4));
+    }
+    private static bool Contains(byte[] hay, string needle)
+    {
+        var n = Encoding.ASCII.GetBytes(needle);
+        return hay.AsSpan().IndexOf(n) >= 0;
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)] private static extern IntPtr realpath(string path, IntPtr resolved);
+    [System.Runtime.InteropServices.DllImport("libc")] private static extern void free(IntPtr p);
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)] private static extern int open(string path, int flags);
+    private const int O_RDONLY = 0, O_NONBLOCK = 0x800, O_CLOEXEC = 0x80000; // the same on x86-64 and arm64
+
+    private static string? RealPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Contains('\0')) return null;
+        IntPtr p = realpath(path, IntPtr.Zero);
+        if (p == IntPtr.Zero) return null;
+        try { return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(p); } finally { free(p); }
+    }
+
+    // The first `max` bytes of a regular file, else null (a directory, a FIFO, a socket or a device reads as an error or empty).
+    private static byte[]? ReadHead(string path, int max)
+    {
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) return null;
+        using var h = new Microsoft.Win32.SafeHandles.SafeFileHandle((IntPtr)fd, ownsHandle: true);
+        try
+        {
+            if (!File.Exists(path)) return null; // false for a directory
+            var buf = new byte[max];
+            int n = RandomAccess.Read(h, buf, 0);
+            return n <= 0 ? null : buf[..n];
+        }
+        catch { return null; }
+    }
+
     // ---- remote fetches --------------------------------------------------------------------------------------------------
     // The image proxy (/img) and the remote /anim + /still fetch what the page names: http(s) only, and only to public
     // addresses — never this machine or the LAN (a page could otherwise make the backend fetch the router's admin page, a

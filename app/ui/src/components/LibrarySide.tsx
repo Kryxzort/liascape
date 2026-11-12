@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check, Repeat } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
@@ -9,6 +9,9 @@ import { usePreview, rangeFill, useOnline } from "./sidePreview";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
 import { sideTags } from "./sideTags";
+import { useMotion } from "./motion";
+import { useLinger } from "../hooks/useLinger";
+import { snapFlip, glideFlip } from "./flipGlide";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -36,6 +39,10 @@ function sceneLoudnessText(i: LibraryItem): string | null {
 
 // the body waits at most this long for its asynchronous sections (a scene's properties) before it shows what it has
 const READY_CAP_MS = 450;
+// the crash notice's (and the whitelist row's) exit: index.css `side-crash-out`
+const CRASH_OUT_MS = 220;
+// what glides into the room they leave: the body's blocks and the Playback section's rows
+const CRASH_FLIP = ":scope > *, .side-sec[data-sec=\"playback\"] > *";
 
 // The Library sidebar's content (components/SidePanel.tsx is the shell): everything the per-card settings modal had —
 // volume / speed (drag-preview live, persist on release), the scene's properties, its loudness line, the crash
@@ -151,6 +158,24 @@ export function LibrarySide({
   };
   const toggleWl = (b: boolean) => { setWl(b); api.libraryWhitelist(p, b); };
 
+  // "Clear" on the crash notice: playable again (POST /library/clear-crash; its library-item-changed tells every other page,
+  // a new crash marks it again). The notice and the whitelist row fade out (motion off too — never a pop), then what sat
+  // after them glides into their room (a FLIP: measured as the fade starts, played back once they unmount).
+  // Guard: probe-sidebar lib:clearCrash
+  const motion = useMotion();
+  const crash = useLinger(item.hasCrashed || null, CRASH_OUT_MS, motion);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const flipFrom = useRef<ReturnType<typeof snapFlip>>(null);
+  useLayoutEffect(() => { if (crash.closing && motion) flipFrom.current = snapFlip(bodyRef.current, CRASH_FLIP); }, [crash.closing, motion]);
+  useLayoutEffect(() => {
+    if (crash.value != null || !flipFrom.current) return;
+    glideFlip(flipFrom.current, bodyRef.current, CRASH_FLIP); flipFrom.current = null;
+  }, [crash.value]);
+  const clearCrash = () => {
+    patchItem(p, { hasCrashed: false });
+    api.libraryClearCrash(p).catch((e) => { patchItem(p, { hasCrashed: true }); useStore.getState().setError(`Couldn't clear the crash mark: ${(e as Error).message}`); });
+  };
+
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
   const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : null;
@@ -158,6 +183,11 @@ export function LibrarySide({
   const gifSrc = anim && !VIDEO_RE.test(anim) ? animUrl(anim) : null;
   // the preview switch's "Video": the item's own video file (a scene has none); else a video preview the source shipped
   const vidSrc = item.isScene ? null : VIDEO_RE.test(p) ? media(p) : anim && VIDEO_RE.test(anim) ? media(anim) : null;
+  // the files behind those layers, for "open in your default app": the backend opens a video or a picture, checked by name
+  // and content (.claude/rules/backend/api.md § Security); the Picture is the item's still (else its animated preview)
+  const local = (f: string | null | undefined) => (f && f.startsWith("/") ? f : null);
+  const vidFile = item.isScene ? null : VIDEO_RE.test(p) ? local(p) : anim && VIDEO_RE.test(anim) ? local(anim) : null;
+  const files = { video: vidFile, gif: gifSrc ? local(anim) : null, image: local(stillSrc) };
   const online = useOnline();
   const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl && online });
   const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
@@ -177,14 +207,13 @@ export function LibrarySide({
       {/* nothing in the head but close (no playlist toggle there, and no Play either — not even while the
           YouTube trailer covers the picture: play it from the card / Enter, or switch the picture back) */}
       <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc} youtube={item.youtubeUrl}
-        preview={preview} wall={vol} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
-      <div className={`side-body${ready ? "" : " wait"}`}>
+        preview={preview} wall={vol} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} files={files} />
+      <div ref={bodyRef} className={`side-body${ready ? "" : " wait"}`}>
         {/* the hero line: what it is (chips) and its numbers (pills) */}
         <div className="side-hero">
           {item.isScene && <span className="side-chip accent">SCENE</span>}
           {/* "keep playing this one" is on — the only thing the old "Playing now" pill said that nothing else does */}
           {playing && keepCurrent && <span className="side-chip accent" data-side-looping><Repeat size={12} /> Looping this one</span>}
-          {item.hasCrashed && <span className="side-chip danger"><AlertTriangle size={12} /> Crashed — won't be played</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}
           {!item.isScene && <span className="side-pill" style={{ visibility: dur ? "visible" : "hidden" }}><Clock size={13} /> {dur || "0 seconds"}</span>}
           {item.resolution && <span className="side-pill"><Monitor size={13} /> {item.resolution}</span>}
@@ -198,6 +227,15 @@ export function LibrarySide({
           )}
         </div>
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
+        {/* the crash mark, as a notice block of the body (the tiles' material, a danger stripe) with its own Clear */}
+        {crash.value && (
+          <div className={`side-crash${crash.closing ? " leaving" : ""}`} data-side-crash role="status">
+            <span className="side-crash-ico"><AlertTriangle size={16} /></span>
+            <span className="side-crash-text">This scene crashed the player — it won't be played</span>
+            <button className="mini side-crash-clear" data-side-crash-clear aria-label="Clear the crash mark" disabled={crash.closing}
+              onClick={clearCrash}>Clear</button>
+          </div>
+        )}
         {/* the right-click menu's actions (all four of them), as tiles */}
         <div className="side-tiles">
           <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</button>
@@ -212,8 +250,8 @@ export function LibrarySide({
           )}
         </div>
         <SideSection icon={<SlidersHorizontal size={15} />} title="Playback" data-sec="playback">
-          {item.hasCrashed && (
-            <label className="inline side-wl">
+          {crash.value && (
+            <label className={`inline side-wl${crash.closing ? " leaving" : ""}`}>
               <input type="checkbox" checked={wl} onChange={(e) => toggleWl(e.target.checked)} /> Keep in playlist despite crash (whitelist)
             </label>
           )}

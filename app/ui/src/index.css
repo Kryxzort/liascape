@@ -1222,6 +1222,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-tile.danger .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+:root.no-glow .side-open:hover { box-shadow: none; }
+:root.no-glow .side-crash::before { box-shadow: none; }
+:root.no-glow .side-crash-ico > svg { filter: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
@@ -1261,7 +1264,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > *, :root.no-motion .side-panel .yt-stage { animation: nm-in var(--fade-dur) linear !important; }
 :root.no-motion .side-panel.closing, :root.no-motion .side-panel .side-content.side-exit { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .side-scrim.closing, :root.no-motion .side-panel .sm-full, :root.no-motion .side-panel .sm-anim,
-:root.no-motion .side-panel .side-vol-slide { transition: opacity var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-vol-slide, :root.no-motion .side-panel .side-open { transition: opacity var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
+:root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
 :root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
 :root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
@@ -1398,6 +1403,16 @@ input[type=range]:focus-visible { outline: none; }
 .side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .side-mute.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 :root.no-glow .side-mute:hover { box-shadow: none; }
+/* "open in your own player" (SidePanel.tsx SideOpen): the mute chip's twin in the opposite corner — its size, inset,
+   material and hover (keep the two in step: the probe compares them). It shows only while the Video / GIF layer is
+   picked, fading with the switch; hidden it takes no pointer. Its glyph is 16 px in the 30 px content box, 7 px each side
+   (whole pixels: an odd glyph or a fractional box is off-centre in pixels). Guard: probe-sidebar look:previewOpen, look:iconCentre */
+.side-open { position: absolute; left: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; color: var(--text); background: color-mix(in srgb, var(--bg-crust) 50%, transparent);
+  border: 1px solid var(--surface1); cursor: pointer; opacity: 0; pointer-events: none;
+  transition: opacity .2s ease-out, background .15s, color .15s, box-shadow .2s, border-color .15s; }
+.side-open.on { opacity: 1; pointer-events: auto; }
+.side-open:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .side-vol-slide { position: absolute; right: 0; top: 0; height: 32px; display: flex; align-items: center; gap: 6px;
   padding: 0 40px 0 11px; border-radius: 16px; color: var(--text);
   background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1); box-shadow: 0 2px 10px rgba(0,0,0,.35);
@@ -1442,6 +1457,24 @@ input[type=range]:focus-visible { outline: none; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 10px -4px var(--accent); }
 .side-chip.inlib { background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
 .side-chip.danger { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
+/* a crashed scene's notice (LibrarySide.tsx): a block of the body in the section cards' material (.side-sec: fill, edge,
+   radius) with a danger stripe where they have the accent one, the warning glyph, the words and the sidebar's small button
+   (.mini) to Clear the mark. Cleared, it (and the Playback section's whitelist row) fade out, shrinking a little (motion off:
+   the fade alone); what sat after them glides into the room (flipGlide.ts). Guard: probe-sidebar lib:clearCrash:* */
+.side-crash { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 14px;
+  border-radius: 13px; background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
+  box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.side-crash::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; pointer-events: none;
+  background: linear-gradient(var(--danger), color-mix(in srgb, var(--danger) 30%, transparent)); box-shadow: 0 0 12px -1px var(--danger); }
+.side-crash-ico { flex: none; display: grid; place-items: center; color: var(--danger); }
+.side-crash-ico > svg { display: block; filter: drop-shadow(0 0 3px currentColor); }
+.side-crash-text { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; line-height: 1.3; color: var(--text); }
+.side-crash-clear { flex: none; }
+/* (as specific as the body's own entrance rules — .side-content.opening > .side-body > * — which would replace the exit) */
+.side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving, .side-wl.leaving {
+  pointer-events: none; animation: side-crash-out .22s ease-in forwards; animation-delay: 0s; }
+.side-wl.leaving { transform-origin: left center; }
+@keyframes side-crash-out { to { opacity: 0; transform: scale(.96); } }
 .side-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--subtext);
   padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--surface0) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }

@@ -538,6 +538,8 @@ public static class ServerHost
             Liascape.Player.LiascapePlayerProgram.PushItem(r.Path); // a rotation's skip flag follows
             return Results.Ok();
         });
+        // the sidebar's "Clear" on a crashed scene's chip → playable again (AppOps.ClearCrash). Guard: scripts/test-item-actions.sh § crash
+        app.MapPost("/library/clear-crash", (PathReq r) => Results.Json(new { cleared = AppOps.ClearCrash(r.Path) }));
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
         // item in its index, then live on its source(s) under liascape-player), and the drag twin (live, nothing saved)
         app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));
@@ -635,6 +637,10 @@ public static class ServerHost
             try { AppOps.RevealLibraryItem(r.Path, r.IsScene, r.WorkshopId, r.CopiedSceneDir); } catch { }
             return Results.Ok();
         });
+        // the sidebar preview's video / GIF / picture in the user's own app: a library video or picture only, by name AND
+        // content, its symlinks resolved (ApiSecurity.OpenableMedia) — anything else 403. Guard: scripts/test-item-actions.sh § open
+        app.MapPost("/open/media", (PathReq r) => AppOps.OpenMedia(r.Path)
+            ? Results.Ok() : Results.Json(new { error = "only a library video or picture opens" }, statusCode: 403));
 
         // ---- steam / workshop -------------------------------------------------------------
         app.MapGet("/steam/status", () => Results.Json(SteamOps.Status()));

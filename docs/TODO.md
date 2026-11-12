@@ -8,6 +8,19 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 32. [ ] (owner, in progress) The library operations' text moves into the top bar's status slot (an app message beats it,
        it beats the Library's muted hint; at narrow widths the count alone), leaving only the progress line on the bar's
        edge (no tab over the cards); and at narrow widths the search field folds to an icon that expands in place.
+35. [ ] (owner) The filter column's groups get an icon each (Type, Resolution, Age rating, Genre, Features …), in the
+       header like Settings' section emblems; never an icon per tag (not even the features: it would be inconsistent).
+37. [ ] (owner) The sort button's icon acts instead of the generic tilt: the arrow dips once along its direction and
+       the bars settle (iconMotion.ts RECIPES, the :root springs; motion off: still).
+38. [ ] (owner) Every round / square icon chip's glyph is pixel-centred: a sweep with the shared pixel-centre check
+       (app/shell/pixel-centre.js, from #34) over all icon chips and icon-only buttons, at rest and hovered, two window
+       sizes; fix each with whole-pixel icon sizes and even margins. Off-centre icons keep coming back: make it a guard.
+39. [ ] (owner) A Look & feel option that gives all UI text Netflix's subtitle shadow: soft black hugging the letters, no
+       offset — `text-shadow: #000 0 0 7px` (a fan recreation; Netflix doesn't publish it), the look bg-live already gives text
+       over the wallpaper as `filter: drop-shadow(0 0 3.5px #000)` (drop-shadow's blur is σ, text-shadow's 2σ: measured
+       identical). One `:root` class, inherited from body; where a line clamp's `overflow: hidden` would clip the blur (the
+       sidebar title) use the filter on an unclipped wrapper, as `.side-head-text` does. Applies live; no double shadow
+       with bg-live's; accent / filled controls stay legible. A probe cell: on/off, bg-live, no-glow, screenshots looked at.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
