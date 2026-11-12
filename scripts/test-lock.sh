@@ -9,25 +9,30 @@
 #
 # LIASCAPE_TEST_LOCK_HELD=1 in the environment = an outer run holds it already (a suite that calls another one).
 # LIASCAPE_TEST_LOCK=<path> overrides the lock file (default: $XDG_RUNTIME_DIR/liascape-tests.lock).
+#
+# The lock is held by a small helper beside the run, never by the run's own shell: an open lock fd is inherited by every
+# child, and a child that outlives the run (dotnet's VBCSCompiler build server, a backend) would hold the lock for
+# minutes with nothing behind it. The helper watches the run's pid and lets go within half a second of it exiting.
 
 __lt_lock() {
   [ -n "${LIASCAPE_TEST_LOCK_HELD:-}" ] && return 0
-  local f=${LIASCAPE_TEST_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/liascape-tests.lock}
-  exec 9>>"$f"
-  if ! flock -n 9; then
-    local who; who=$(cat "$f.who" 2>/dev/null || echo unknown)
-    echo "test-lock: waiting for another test run — $who" >&2
-    # the children a run starts inherit the lock: a run that has exited but left one behind (a backend, an Electron) still
-    # holds it — name them rather than wait forever on nothing
-    local pid=${who#pid }; pid=${pid%% *}
-    if [[ $pid =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
-      echo "test-lock: that run has exited; still holding the lock: $(fuser "$f" 2>/dev/null | xargs -r ps -o pid=,comm= -p | tr '\n' ' ')" >&2
+  local f=${LIASCAPE_TEST_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/liascape-tests.lock} run=$$ ready
+  ready=$(mktemp -u "${TMPDIR:-/tmp}/liascape-lock.XXXXXX")
+  ( exec 9>>"$f"; flock 9 || exit 1; : >"$ready"
+    while kill -0 "$run" 2>/dev/null; do sleep 0.5; done ) </dev/null >/dev/null 2>&1 &
+  local helper=$!
+  disown 2>/dev/null || true
+  local t0=$SECONDS said=""
+  while [ ! -e "$ready" ]; do
+    if [ -z "$said" ] && [ $((SECONDS - t0)) -ge 1 ]; then
+      echo "test-lock: waiting for another test run — $(cat "$f.who" 2>/dev/null || echo unknown)" >&2; said=1
     fi
-    local t0=$SECONDS
-    flock 9
-    echo "test-lock: got it after $((SECONDS - t0)) s" >&2
-  fi
-  echo "pid $$ since $(date +%T): ${__lt_what:-$0}" >"$f.who"
+    kill -0 "$helper" 2>/dev/null || [ -e "$ready" ] || { echo "test-lock: couldn't take $f" >&2; return 1; }
+    sleep 0.2
+  done
+  rm -f "$ready"
+  [ -n "$said" ] && echo "test-lock: got it after $((SECONDS - t0)) s" >&2
+  echo "pid $run since $(date +%T): ${__lt_what:-$0}" >"$f.who"
   export LIASCAPE_TEST_LOCK_HELD=1 LIASCAPE_TEST_LOCK="$f"
 }
 
