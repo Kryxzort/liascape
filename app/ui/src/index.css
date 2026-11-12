@@ -182,6 +182,11 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   user-select: none; -webkit-user-select: none; /* no text/drag-selection highlight on cards */
   contain: content;
   content-visibility: auto;           /* PERF: skip offscreen render+decode (the bench win) */
+  /* PERF: a skipped card keeps its real size: all it holds is its thumbnail, so its height is its column's width over the
+     thumbnail aspect. min-height 0: its intrinsic height (220 px, or a size remembered at another window width) never props
+     it taller, or the rows the user hasn't seen would sit at another height and a kept scroll offset would land on another
+     row. Guard: probe-layout tabs:keep, tabs:browse */
+  aspect-ratio: var(--thumb-aspect, 1 / 1); min-height: 0;
   contain-intrinsic-size: auto 220px;
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.5), var(--glow); } /* DESIGN CHOICE: lift+glow */

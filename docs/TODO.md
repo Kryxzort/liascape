@@ -16,8 +16,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        one Browse source can queue behind slow `/img` loads (Chromium's 6 connections per host). Media on its own host
        (e.g. `localhost:<port>`, the API on `127.0.0.1:<port>`) so they never share connections — touches every media
        URL, the dev proxy, the Host / Origin checks and the CSP.
-22. [ ] Keep the scroll position on Library and Browse across tab switches (today both open at the top): Library's
-       `useResetOnLeave` drops it on purpose; Browse is rebuilt each visit, so its list and offset must survive too.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

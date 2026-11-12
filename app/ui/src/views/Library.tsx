@@ -64,8 +64,8 @@ export const Library = memo(function Library() {
   useGridFit(scrollRef, "library");
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
-  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection, its grid goes back to the top
-  useResetOnLeave(scrollRef, () => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
+  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection, its grid stays where it was
+  useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
 
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();

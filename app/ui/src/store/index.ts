@@ -83,6 +83,9 @@ interface State {
   // a Workshop download's step in words (WS download-progress `status`; e.g. "click Subscribe in Steam") — per page URL
   downloadStatus: Record<string, string>;
   browseFilter: WorkshopFilter; browseSort: number;
+  // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
+  // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
+  browseFor: string;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
   // playlist
@@ -223,7 +226,7 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
-  browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
+  browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   // the docked filter column folded away; remembered
   filterColHidden: LS.get<boolean>("browseFilterHidden", false),
@@ -261,7 +264,7 @@ export const useStore = create<State>((set, get) => ({
   // browser's 6 connections to the backend, and the new source's /browse queues behind them for seconds — the old list
   // under the new pill all that time. Guard: matrix browse:switchSource.
   setSource(i) {
-    set(i === get().activeSource ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true });
+    set(i === get().activeSource ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
     LS.set("activeSource", i); get().reload();
   },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
@@ -297,7 +300,8 @@ export const useStore = create<State>((set, get) => ({
     try {
       const list = await api.browse(activeSource, 1, query || undefined, filter);
       if (gen !== browseGen) return;
-      set({ wallpapers: list, hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
+      set({ wallpapers: list, browseFor: JSON.stringify([activeSource, query, filter ?? null]),
+        hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
     } catch (e) {
       // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
       if (gen === browseGen) {

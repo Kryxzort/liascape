@@ -11,6 +11,7 @@ import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
+import { useKeptScroll } from "../hooks/useKeptScroll";
 import { useStableFn } from "../hooks/useStableFn";
 import { useMarquee } from "../hooks/useMarquee";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
@@ -69,6 +70,10 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const anchor = useRef<string | null>(null);
   const smoothRef = useSmoothScroll(scrollRef);
   useGridFit(scrollRef, "browse");
+  // the page is built on each visit (App.tsx): back on it, the list (kept in the store, no request) shows where it was
+  // left; another source, search, filter or sort starts at the top. Guard: probe-layout tabs:browse
+  const browseFor = useStore((s) => s.browseFor);
+  useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}`);
 
   useEffect(() => {
     const el = sentinel.current;

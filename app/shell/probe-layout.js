@@ -12,7 +12,13 @@
 //   tabs:slide[:off|:reduced] switching tabs slides the active pill (transform) and slides/fades the page in
 //                         (transform + opacity); off / prefers-reduced-motion → it jumps, nothing animates
 //   tabs:keep             the Library page is kept while Browse shows (hidden, its sidebar too, taking no room from Browse's
-//                         grid); back on it: the same grid, at its top, its selection cleared, its sidebar docked again
+//                         grid); back on it: the same grid, at the offset it was left at (the same card at the same place),
+//                         its selection cleared, its sidebar docked again
+//   tabs:browse           Browse (built on each visit) on a stubbed paged Workshop source: back on it, the list it had (no
+//                         /browse request) at the offset it was left at, exact from the first frame it paints and in every
+//                         frame after, with motion on, off and the item sidebar docked; a notch then glides on from there, →
+//                         steps the focus on in view; a search, a filter or another source starts the list at its top, and
+//                         a switch away and back keeps it there
 //   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
 //                         scroll's wheel listener
 //   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
@@ -84,6 +90,10 @@ const js = (code) => win.webContents.executeJavaScript(code);
 const PAGE = `window.__ly = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
+  // the Library grid's row the eye is on: the first card whose bottom is below the grid's top edge, and its place
+  libAt() { const sc = document.querySelector(".lib-scroll"), top = sc.getBoundingClientRect().y;
+    const a = [...sc.querySelectorAll(".card.lib")].find((c) => c.getBoundingClientRect().bottom > top + 1);
+    return { id: a?.querySelector("[data-title]")?.dataset.title ?? null, y: a ? a.getBoundingClientRect().y - top : null }; },
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom }; },
   ty(el) { const m = new DOMMatrixReadOnly(getComputedStyle(el).transform === "none" ? undefined : getComputedStyle(el).transform); return m.m42; },
   // the top bar's visible controls (what a user sees and clicks), leaves of its flex rows
@@ -141,6 +151,55 @@ const SKEL_RECALCS_PER_FRAME = 0.4;
 const SKEL_DRAW_EVENT = "ProxyImpl::ScheduledActionDraw"; // perf:skeleton: a frame the renderer's compositor thread drew
 const SKEL_GAP = 250;         // perf:skeleton: ms between the two looks at the sweep (≈ a fifth of its 1.2 s period)
 const SKEL_PX_MIN = 200;      // perf:skeleton: pixel bytes that must change between them with motion on
+// ---- tabs:browse: Browse's list and offset across tab switches, on a stubbed Workshop source ----
+const BR_PER_PAGE = 40;       // items per stubbed /browse page
+const BR_PAGES = 6;           // pages the stub serves before an empty one (the end of the list)
+const BR_LOADED = 160;        // cards loaded (4 pages) before the offset is taken: rows the user scrolled through
+const BR_FRAMES = 30;         // frames sampled after the return: none may move the grid
+const BR_TOL = 0.5;           // px: the offset and the anchor card's place come back exact (the layout's own resolution)
+const BR_THUMBS = [];
+function makeBrowseThumbs() {
+  if (BR_THUMBS.length) return;
+  const d = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "br-thumbs"); fs.mkdirSync(d, { recursive: true });
+  ["0x4c4f9a", "0x1f6f8b", "0x8b3a62", "0x2e7d4f", "0x9a6b2f", "0x5a2e8b"].forEach((c, i) => {
+    const f = path.join(d, `t${i}.jpg`);
+    require("child_process").execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `gradients=size=480x270:c0=${c}:c1=0x101018:seed=${i + 1}`,
+      "-frames:v", "1", f], { timeout: 30000 });
+    BR_THUMBS.push(f);
+  });
+}
+// The page's POST /browse for a Workshop source (it carries `filter`) answered here: BR_PER_PAGE items per page, distinct per
+// search + filter (their titles carry both); every /browse request (any source) recorded in window.__br; /detail answered for the item sidebar.
+const BR_STUB = () => `(() => { window.__br = []; const thumbs = ${JSON.stringify(BR_THUMBS)};
+  const f = window.fetch; window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
+    const ok = (b) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } }));
+    if (p === "/browse" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body);
+      window.__br.push({ source: b.source, page: b.page, query: b.query ?? "", inc: b.filter?.include.join(",") ?? null }); if (b.filter) {
+      const salt = (b.query ?? "") + "~" + b.filter.include.join(",");
+      if (b.page > ${BR_PAGES}) return ok([]);
+      return ok(Array.from({ length: ${BR_PER_PAGE} }, (_, i) => { const n = (b.page - 1) * ${BR_PER_PAGE} + i, id = String(7000000 + salt.length * 1000 + n);
+        return { title: salt + " " + n, thumbnailUrl: thumbs[n % thumbs.length], animatedThumbnailUrl: null,
+          pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + salt.length + "0" + n + "&s=" + encodeURIComponent(salt),
+          resolution: "1920 x 1080", isScene: false, workshopId: id, addedAt: null, description: "probe", authorName: "probe",
+          fileSizeBytes: 1000, subscriptions: n, favorites: n, views: n, tags: [] }; })); } }
+    if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
+    return f(u, o); }; })();`;
+// where the shown Browse grid is: its offset, the first card whose bottom is below the grid's top edge (the row the eye
+// is on) and that card's place in the grid, the cards loaded, the focused card
+const BR_AT = `const sc = [...document.querySelectorAll(".app > .scroll:not(.lib-scroll)")].find((e) => e.offsetParent); if (!sc) return null;
+  const top = sc.getBoundingClientRect().y, cards = [...sc.querySelectorAll(".card:not(.skel-card)")];
+  const a = cards.find((c) => c.getBoundingClientRect().bottom > top + 1);
+  return { top: sc.scrollTop, room: sc.scrollHeight - sc.clientHeight, n: cards.length, id: a?.querySelector("[data-title]")?.dataset.title ?? null,
+    y: a ? a.getBoundingClientRect().y - top : null, focused: sc.querySelector(".card.focused [data-title]")?.dataset.title ?? null,
+    cols: sc.style.getPropertyValue("--cols") };`;
+// armed before a click on the Browse tab: the grid's place in the first frame the new page paints (read in a ResizeObserver
+// made after the page's own, so after its first-layout work and before that frame's paint), then in each of BR_FRAMES frames
+const BR_WATCH = `(() => { window.__brf = null; window.__brs = []; const read = () => { ${BR_AT} };
+  const mo = new MutationObserver(() => { const sc = document.querySelector(".app > .scroll:not(.lib-scroll):not(.settings)"); if (!sc) return; mo.disconnect();
+    const ro = new ResizeObserver(() => { ro.disconnect(); window.__brf = read(); let k = 0;
+      const f = () => { window.__brs.push(read()); if (++k < ${BR_FRAMES}) requestAnimationFrame(f); }; requestAnimationFrame(f); });
+    ro.observe(sc); });
+  mo.observe(document.querySelector(".app"), { childList: true }); return true; })()`;
 // React's DevTools hook, installed before the page's scripts: production react-dom calls onCommitFiberRoot on every commit.
 // A fiber object that is still the current one from the last commit was never visited (its subtree neither); a new current
 // one with no alternate mounted; with PerformedWork (flag 1) its component ran.
@@ -638,6 +697,136 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+    // tabs:browse — Browse is built on each visit, its list kept in the store: back on it, the list (no request) shows at the
+    // offset it was left at, exact from the first frame it paints and still in every frame after (the rows scrolled past
+    // and the ones skipped hold their size), with motion on and off; a wheel notch then glides on from there and the arrows
+    // move the focus from the focused card (in view, no jump). Another search, filter or source starts its list at the top,
+    // and a switch away and back keeps it there. A stubbed Workshop source (BR_STUB) with BR_PAGES pages of BR_PER_PAGE.
+    await cell("tabs:browse", async () => {
+      const v = [];
+      makeBrowseThumbs();
+      await resize(1400, 900);
+      const srcs = (await http("GET", "/sources")).json;
+      const ws = srcs.find((s) => s.supportsTagFilter && s.available);
+      if (!ws) return ["no available Workshop source (supportsTagFilter) in /sources — proved nothing"];
+      const ls0 = await js(`({ src: localStorage.getItem("liascape.activeSource"), bf: localStorage.getItem("liascape.browseFilter") })`);
+      const d = dbg(); await d.sendCommand("Page.enable");
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: BR_STUB() });
+      const at = () => page(BR_AT);
+      const posts = () => js(`window.__br.length`);
+      const same = (a, b) => a && b && a.id === b.id && Math.abs(a.top - b.top) <= BR_TOL && Math.abs(a.y - b.y) <= BR_TOL;
+      const show = (a) => a ? `${a.top.toFixed(1)} px, "${a.id}" at ${a.y?.toFixed(1)} px, ${a.n} cards` : "no grid";
+      // scroll through the list until BR_LOADED cards came in (the infinite scroll's sentinel asks for each page), then to an
+      // offset deep in it that isn't a row boundary
+      const deep = async (frac) => {
+        for (let i = 0; i < 60 && (await at())?.n < BR_LOADED; i++) { await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); sc.scrollTop = sc.scrollHeight;`); await sleep(250); }
+        await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); sc.scrollTop = Math.round(${frac} * (sc.scrollHeight - sc.clientHeight)) + 37;`);
+        for (let i = 0; i < 40 && (await js(`!!document.querySelector(".loadbar")`)); i++) await sleep(100);
+        await sleep(700);
+        return at();
+      };
+      // leave for the Library and come back by the Browse tab, the grid watched from the first frame the page paints
+      const roundTrip = async (what, s0) => {
+        const n0 = await posts();
+        await tab("Library");
+        await js(BR_WATCH); await page(`m.byText(".tab", "Browse").click();`); await sleep(1500);
+        const { f, s } = await js(`({ f: window.__brf, s: window.__brs })`);
+        const n1 = await posts(), s1 = await at();
+        console.log(`        ${what}: left at ${show(s0)}; first frame back ${show(f)}; settled ${show(s1)}; ${n1 - n0} /browse requests`);
+        if (n1 !== n0) v.push(`${what}: ${n1 - n0} /browse request(s) on the way back (the kept list loads again)`);
+        if (!f) { v.push(`${what}: the watcher saw no Browse grid paint — proved nothing`); return s1; }
+        if (!same(f, s0)) v.push(`${what}: the first frame back shows ${show(f)}, not where it was left (${show(s0)})`);
+        const moved = s.findIndex((x) => !same(x, f));
+        if (moved >= 0) v.push(`${what}: the grid moved ${moved + 1} frames after it showed: ${show(s[moved])} (first frame ${show(f)})`);
+        if (s1?.n !== s0.n) v.push(`${what}: ${s1?.n} cards back, ${s0.n} were loaded`);
+        return s1;
+      };
+      try {
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); await reducedMotion(false);
+        await tab("Browse");
+        await page(`m.byText(".pill", ${JSON.stringify(ws.name)}).click();`);
+        for (let i = 0; i < 60 && !((await at())?.n >= BR_PER_PAGE); i++) await sleep(100);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
+        // kept: a deep offset comes back exact, nothing requested
+        const s0 = await deep(0.55);
+        if (!s0 || s0.n < BR_LOADED || s0.top < 1500) return [`couldn't scroll the stubbed list deep (${show(s0)}; want ≥ ${BR_LOADED} cards, ≥ 1500 px) — proved nothing`];
+        await roundTrip("motion on", s0);
+        // a notch after the return glides on from the kept offset (the smooth scroll bound to the rebuilt grid)
+        const g = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); const b = sc.getBoundingClientRect();
+          window.__wdp = null; sc.addEventListener("wheel", (e) => { window.__wdp = e.defaultPrevented; }, { once: true });
+          return { x: Math.round(b.x + 12), y: Math.round(b.y + b.height / 2), top: sc.scrollTop };`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: g.x, y: g.y }); await sleep(200);
+        win.webContents.sendInputEvent({ type: "mouseWheel", x: g.x, y: g.y, canScroll: true, deltaX: 0, deltaY: -120, wheelTicksX: 0, wheelTicksY: -1, hasPreciseScrollingDeltas: false });
+        await sleep(250); const g1 = await at(); await sleep(1200); const g2 = await at();
+        console.log(`        notch after the return: ${g.top.toFixed(1)} → ${g1.top.toFixed(1)} (250 ms) → ${g2.top.toFixed(1)} px, cancelled ${await js("window.__wdp")}`);
+        if (!(await js("window.__wdp"))) v.push("after the return a wheel notch wasn't taken by the smooth scroll (not cancelled)");
+        if (!(g1.top > g.top + 20 && g2.top > g1.top + 5)) v.push(`after the return a notch doesn't glide on from ${g.top.toFixed(1)} px: ${g1.top.toFixed(1)} → ${g2.top.toFixed(1)} px`);
+        // the arrows from a focused card: a right-click on a card in the middle of the view (the item sidebar opens), → steps on
+        await sleep(400);
+        const c = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); const r = sc.getBoundingClientRect();
+          const cs = [...sc.querySelectorAll(".card:not(.skel-card)")]; const k = cs.findIndex((e) => { const b = e.getBoundingClientRect(); return b.y > r.y + r.height * 0.3; });
+          const b = cs[k].querySelector(".thumb-wrap").getBoundingClientRect();
+          return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), id: cs[k].querySelector("[data-title]").dataset.title, next: cs[k + 1]?.querySelector("[data-title]").dataset.title };`);
+        await clickAt(c, "right"); await sleep(900);
+        const k0 = await at();
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Right" }); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Right" }); await sleep(600);
+        const k1 = await at();
+        const inView = await page(`const sc = document.querySelector(".app > .scroll:not(.lib-scroll)"); const r = sc.getBoundingClientRect(); const e = sc.querySelector(".card.focused");
+          if (!e) return false; const b = e.getBoundingClientRect(); return b.y >= r.y - 1 && b.bottom <= r.bottom + 1;`);
+        console.log(`        arrows: right-click "${c.id}" → focused "${k0.focused}" at ${k0.top.toFixed(1)} px; → "${k1.focused}" at ${k1.top.toFixed(1)} px, in view ${inView}`);
+        if (k0.focused !== c.id) v.push(`a right-click on "${c.id}" after the return focused "${k0.focused}" — the arrows proved nothing`);
+        else if (k1.focused !== c.next) v.push(`→ after the return focused "${k1.focused}", not the next card "${c.next}"`);
+        if (!inView || Math.abs(k1.top - k0.top) > 400) v.push(`→ after the return: the focused card ${inView ? "is in view" : "is out of view"}, the grid went ${k0.top.toFixed(1)} → ${k1.top.toFixed(1)} px`);
+        // with the item sidebar docked (the grid one column narrower): kept too
+        await roundTrip("sidebar open", k1);
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" }); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" }); await sleep(700);
+        // another list starts at its top, and stays there across a switch: a search, a filter, another source
+        const fresh = async (what, act, undo) => {
+          const s1 = await deep(0.5);
+          if (!(s1?.top > 500)) { v.push(`${what}: couldn't scroll deep first (${show(s1)}) — proved nothing`); return; }
+          const n0 = await posts();
+          await page(act);
+          for (let i = 0; i < 40 && (await posts()) === n0; i++) await sleep(100);
+          await sleep(900);
+          const s2 = await at();
+          console.log(`        ${what}: ${show(s1)} → ${show(s2)}`);
+          if ((await posts()) === n0) v.push(`${what}: no /browse request — proved nothing`);
+          else if (!s2 || s2.top !== 0) v.push(`${what}: the new list shows at ${s2?.top} px, not at its top`);
+          await tab("Library"); await tab("Browse"); await sleep(300);
+          const s3 = await at();
+          if (!s3 || s3.top !== 0) v.push(`${what}: after a switch away and back the new list shows at ${s3?.top} px (the old list's offset came back)`);
+          if (undo) { await page(undo); await sleep(1200); }
+        };
+        const setQ = (q) => `const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(q)}); i.dispatchEvent(new Event("input", { bubbles: true }));`;
+        await fresh("search", setQ("probe"), setQ(""));
+        const tagged = await page(`const r = [...document.querySelectorAll(".wf-col:not(.closing) .wf-row[data-wf-tag]")].find((x) => !x.dataset.wfTag.startsWith("@") && x.querySelector(".wf-name")?.offsetParent); return r ? r.dataset.wfTag : null;`);
+        if (!tagged) v.push("no filter row in the docked filter column — the filter case proved nothing");
+        else {
+          const name = `[...document.querySelectorAll(".wf-col:not(.closing) .wf-row")].find((r) => r.dataset.wfTag === ${JSON.stringify(tagged)}).querySelector(".wf-name").click();`;
+          await fresh(`filter (${tagged})`, name, name);
+        }
+        const other = srcs.find((s) => s.available && s.index !== ws.index);
+        if (!other) v.push("no second available source — the source case proved nothing");
+        else await fresh(`source (${other.name})`, `m.byText(".pill", ${JSON.stringify(other.name)}).click();`, `m.byText(".pill", ${JSON.stringify(ws.name)}).click();`);
+        // motion off: kept the same way, and the notch scrolls natively from there
+        await setMotion(false); await tab("Browse");
+        for (let i = 0; i < 60 && !((await at())?.n >= BR_PER_PAGE); i++) await sleep(100);
+        const m0 = await deep(0.6);
+        if (!m0 || m0.top < 1500) v.push(`motion off: couldn't scroll deep (${show(m0)}) — proved nothing`);
+        else await roundTrip("motion off", m0);
+      } finally {
+        await setMotion(true);
+        await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+        await js(`(() => { const r = (k, x) => x == null ? localStorage.removeItem(k) : localStorage.setItem(k, x);
+          r("liascape.activeSource", ${JSON.stringify(ls0.src)}); r("liascape.browseFilter", ${JSON.stringify(ls0.bf)}); })()`);
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); await sleep(800);
+      }
+      return v;
+    });
     // An app, not a page: Ctrl+A (or a drag) highlights none of the chrome; what you type and the text worth copying stays
     // selectable. Reads what the user would see: the live selection's text after selectAll, and computed user-select.
     await cell("select:chrome", async () => {
@@ -756,19 +945,20 @@ app.whenReady().then(async () => {
       for (const r of lib) if (r.rafs > PERF_RAFS_MAX) v.push(`→ Library: ${r.rafs} requestAnimationFrame callbacks (≤ ${PERF_RAFS_MAX})`);
       return v;
     });
-    // tabs:keep (on the PERF_N-card library) — the Library page is kept across tab switches (App.tsx <Activity>). Scrolled down with a card selected (a
-    // Ctrl+click: selects and focuses it, the sidebar opens, nothing is applied), then Browse: the Library's grid and sidebar
-    // are hidden, not gone, and take no room from Browse's grid; back on the Library: the same grid element, at its top with
-    // nothing selected (as a page built anew), its sidebar showing and docked again.
+    // tabs:keep (on the PERF_N-card library) — the Library page is kept across tab switches (App.tsx <Activity>). Scrolled deep
+    // with a card selected (a Ctrl+click: selects and focuses it, the sidebar opens, nothing is applied), then Browse: the
+    // Library's grid and sidebar are hidden, not gone, and take no room from Browse's grid; back on the Library: the same grid
+    // element at the offset it was left at (the same card at the same place: the rows it skipped hold their size), nothing
+    // selected, its sidebar showing and docked again.
     await cell("tabs:keep", async () => {
       const v = [];
       await tab("Library"); await sleep(500);
       const s0 = await page(`const sc = document.querySelector(".lib-scroll"); if (!sc) return null; sc.__kept = 1;
         sc.querySelector(".card.lib .thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
-        await m.sleep(500); sc.scrollTop = Math.min(400, sc.scrollHeight - sc.clientHeight); await m.sleep(300);
-        return { top: sc.scrollTop, sel: sc.querySelectorAll(".card.selected").length, side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)') };`);
+        await m.sleep(500); sc.scrollTop = Math.round(0.6 * (sc.scrollHeight - sc.clientHeight)) + 37; await m.sleep(400);
+        return { top: sc.scrollTop, sel: sc.querySelectorAll(".card.selected").length, side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)'), ...m.libAt() };`);
       if (!s0) return ["no Library grid"];
-      if (!(s0.top > 0) || !s0.sel || !s0.side) return [`couldn't set the Library up (scrolled ${s0.top} px, ${s0.sel} selected, sidebar ${s0.side}) — proved nothing`];
+      if (!(s0.top > 1000) || !s0.sel || !s0.side) return [`couldn't set the Library up (scrolled ${s0.top} px, ${s0.sel} selected, sidebar ${s0.side}) — proved nothing`];
       await tab("Browse"); await sleep(300);
       const b = await page(`const lib = document.querySelector(".lib-scroll"), sc = document.querySelector(".scroll");
         return { lib: !!lib, libShown: !!lib?.offsetParent, first: !!sc && !sc.classList.contains("lib-scroll") && !!sc.offsetParent,
@@ -780,9 +970,11 @@ app.whenReady().then(async () => {
       if (b.side) v.push("on Browse: the Library's sidebar still shows");
       await tab("Library"); await sleep(300);
       const l = await page(`const sc = document.querySelector(".lib-scroll"); return { same: sc?.__kept === 1, top: sc?.scrollTop, sel: sc?.querySelectorAll(".card.selected").length,
-        side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)')?.offsetParent, mr: sc ? parseFloat(getComputedStyle(sc).marginRight) : 0 };`);
+        side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)')?.offsetParent, mr: sc ? parseFloat(getComputedStyle(sc).marginRight) : 0, ...m.libAt() };`);
+      console.log(`        left at ${s0.top.toFixed(1)} px ("${s0.id}" at ${s0.y?.toFixed(1)} px); back at ${l.top?.toFixed(1)} px ("${l.id}" at ${l.y?.toFixed(1)} px)`);
       if (!l.same) v.push("back on the Library: its grid is a new element (built again, not kept)");
-      if (l.top !== 0) v.push(`back on the Library: the grid is at ${l.top} px, not at its top`);
+      if (Math.abs(l.top - s0.top) > BR_TOL || l.id !== s0.id || Math.abs(l.y - s0.y) > BR_TOL)
+        v.push(`back on the Library: the grid is at ${l.top} px ("${l.id}" at ${l.y?.toFixed(1)} px), not where it was left (${s0.top} px, "${s0.id}" at ${s0.y?.toFixed(1)} px)`);
       if (l.sel) v.push(`back on the Library: ${l.sel} cards still selected`);
       if (!l.side) v.push("back on the Library: the focused card's sidebar isn't showing");
       else if (!(l.mr > 0)) v.push("back on the Library: its sidebar shows but the grid doesn't make room for it (not docked)");

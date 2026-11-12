@@ -83,8 +83,8 @@ for f in $FILES; do
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
-    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection)" ;;
+    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts)
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the Workshop filter column: not in the matrix (Browse needs the network) — its own probe stubs /browse
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts)
       echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js)" >&2 ;;
