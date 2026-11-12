@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { captureSource, sourceEl, useMotion } from "./motion";
@@ -6,7 +6,7 @@ import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
 import { type PreviewKind } from "../store";
 import { useStableFn } from "../hooks/useStableFn";
-import { type usePreview, usePreviewVolume, setPreviewVolume, rangeFill } from "./sidePreview";
+import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, unmutePreview, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
 // item sidebar"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
@@ -135,16 +135,17 @@ const LABEL: Record<PreviewKind, string> = { gif: "GIF", video: "Video", youtube
 const ICON: Record<PreviewKind, ReactNode> = { gif: <Sparkles size={12} />, video: <Film size={12} />, youtube: <TvMinimalPlay size={13} />, image: <ImageIcon size={12} /> };
 // the picture, bottom → top: the card's own still (cached — the first frame IS the card) → a sharp image (fades in once IT
 // loaded) → the animated preview the switch picked: the gif / webp (the card's own /anim URL: the same image, the same
-// animation), the video (from where the card's hover video was) or the YouTube trailer (muted — the desktop owns the sound;
-// unmounted on a switch / close, which stops it). Layers cross-fade on opacity. At the picture's own aspect: read from the
+// animation), the video (from where the card's hover video was) or the YouTube trailer (both at the previews' remembered mute and
+// level, sidePreview.ts; the trailer is unmounted on a switch / close, which stops it). Layers cross-fade on opacity. At the picture's own aspect: read from the
 // card's loaded image when the item is focused, else from an earlier visit, else 16:9 until the still loads — capped in
 // height (index.css `.side-stage`). `play`: the Library sidebar's picture is its Play control (docs/decisions.md § "Make
 // the sidebar's picture the Play control") — no icon, the hover cue is the picture with its strip lifting 1.025× with their
 // glow; already playing → the green frame (no badge: the card and the frame already say it — "looping" is the hero's chip); on the trailer the embed takes the clicks (Play moves to the head).
 const aspects = new Map<string, number>();
-export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, play }: {
+// `wall`: the item's effective wallpaper volume (`override ?? global`), the previews' level until the user sets their own.
+export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview, wall, play }: {
   id: string; cardId: string | null; base: string; full: string | null; gif: string | null; video: string | null; youtube: string | null;
-  preview: ReturnType<typeof usePreview>;
+  preview: ReturnType<typeof usePreview>; wall: number;
   play?: { label: string; playing: boolean; looping: boolean; onPlay: () => void };
 }) {
   const [src] = useState(() => captureSource(cardId)); // read once, at the focus (the card is on screen then)
@@ -156,14 +157,20 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const [vidMounted, setVidMounted] = useState(false);
   if (mode === "video" && video && !vidMounted) setVidMounted(true);
   const vidRef = useRef<HTMLVideoElement>(null);
-  // the Video preview's sound: muted by default — the desktop's wallpaper owns the sound — and a new item (a remount) starts
-  // muted again; unmuted it plays at the previews' own remembered level (PreviewVolume), never the wallpaper's or the global
-  // volume. A level of 0 is silent too.
-  const [vidMuted, setVidMuted] = useState(true);
-  const { level } = usePreviewVolume();
-  const silent = vidMuted || level === 0;
+  // the Video preview's sound: the previews' remembered mute and level (sidePreview.ts previewSound); a level of 0 is silent too
+  const sound = usePreviewSound();
+  const level = previewLevel(sound, wall);
+  const silent = sound.muted || level === 0;
   useEffect(() => { const v = vidRef.current; if (v) v.volume = level / 100; }, [level, vidMounted]);
-  useEffect(() => { const v = vidRef.current; if (!v) return; if (mode === "video") v.play().catch(() => {}); else v.pause(); }, [mode, vidMounted]);
+  // The cleanup pauses: the Library stays mounted behind another tab (App.tsx <Activity>), and a hidden <video> keeps
+  // playing its sound; hiding runs this cleanup and showing again re-runs the effect. A layout effect: Activity runs its
+  // cleanup in the commit that hides the page (a passive one can land frames later, still sounding).
+  // Guard: probe-sidebar preview:hiddenTab
+  useLayoutEffect(() => {
+    const v = vidRef.current; if (!v) return;
+    if (mode === "video") v.play().catch(() => {}); else v.pause();
+    return () => v.pause();
+  }, [mode, vidMounted]);
   const a = aspect ?? 16 / 9;
   // the frame takes the SHOWN preview's own shape (a 16:9 video cover-cropped into a square picture's frame loses its
   // sides): the picture / gif → the picture's aspect, Video
@@ -194,9 +201,9 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
             onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth && v.videoHeight) setVidAspect(v.videoWidth / v.videoHeight);
               if (src.videoTime != null && v.duration) v.currentTime = src.videoTime % v.duration; }}
             onPlaying={() => setVidOn(video)} />}
-          {yt && <YouTubeEmbed url={youtube} />}
+          {yt && <YouTubeEmbed url={youtube} level={level} />}
           {/* above the click-to-play layer (z 3): a press here never applies the wallpaper */}
-          {mode === "video" && video && vidOn === video && <PreviewVolume muted={vidMuted} setMuted={setVidMuted} />}
+          {mode === "video" && video && vidOn === video && <PreviewVolume wall={wall} />}
           {playable && (
             <button className="side-play" data-side-play aria-label={play.label} onClick={play.onPlay} />
           )}
@@ -214,20 +221,19 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
 // layer (z 3) and stopping its clicks: a press here never applies the wallpaper.
 // Guard: probe-sidebar preview:volume, preview:volumeLook.
 const WHEEL_PX_PER_STEP = 24;
-function PreviewVolume({ muted, setMuted }: { muted: boolean; setMuted: (m: boolean) => void }) {
-  const { level, last } = usePreviewVolume();
-  const silent = muted || level === 0;
+function PreviewVolume({ wall }: { wall: number }) {
+  const sound = usePreviewSound();
+  const level = previewLevel(sound, wall);
+  const silent = sound.muted || level === 0;
   const shown = silent ? 0 : level;
   // several wheel events can land before React renders the last one's level: step from the level the last one asked for
   const wheelAt = useRef({ v: 0, t: -Infinity });
   // the glyph pops on a change the user made, never when the chip first shows
   const [touched, setTouched] = useState(false);
-  const change = (v: number) => { setTouched(true); setPreviewVolume(v); if (v > 0) setMuted(false); };
+  const change = (v: number) => { setTouched(true); setPreviewVolume(v); if (v > 0) setPreviewMuted(false); };
   const toggle = () => {
     setTouched(true); wheelAt.current.t = -Infinity;
-    if (!silent) { setMuted(true); return; }
-    setMuted(false);
-    if (level === 0) setPreviewVolume(last);
+    if (silent) unmutePreview(wall); else setPreviewMuted(true);
   };
   const step = useStableFn((n: number) => {
     const now = performance.now(), base = now - wheelAt.current.t < 150 ? wheelAt.current.v : shown;

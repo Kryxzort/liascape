@@ -16,11 +16,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        one Browse source can queue behind slow `/img` loads (Chromium's 6 connections per host). Media on its own host
        (e.g. `localhost:<port>`, the API on `127.0.0.1:<port>`) so they never share connections — touches every media
        URL, the dev proxy, the Host / Origin checks and the CSP.
-21. [ ] Sidebar preview audio: (a) bug — a playing, unmuted sidebar video (or YouTube trailer) in the Library keeps
-       sounding after switching to Browse / Settings (the Library stays mounted under `<Activity>`); pause on hide,
-       resume on show. (b) Remember the preview's mute: it starts muted the first time, then keeps whatever the user
-       left it at. (c) Until the user moves the preview's own slider, its level follows the item's effective wallpaper
-       volume (`override ?? global`); once moved, the preview keeps its own level.
 22. [ ] Keep the scroll position on Library and Browse across tab switches (today both open at the top): Library's
        `useResetOnLeave` drops it on purpose; Browse is rebuilt each visit, so its list and offset must survive too.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the

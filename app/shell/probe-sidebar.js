@@ -10,12 +10,19 @@
 //   lib:play             the picture is the Play control (no icon): a click applies the item, then the green frame — no
 //                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
-//                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
+//                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; the first preview
+//                        ever opens muted; the trailer (stubbed) remembers the shared mute + level
 //   preview:volume       the Video preview's own volume slider beside the mute chip: opens muted (slider 0); unmute plays at the
-//                        remembered level (default 50); the slider sets the <video>'s volume and the saved level; 0 shows the
+//                        item's wallpaper volume; the slider sets the <video>'s volume and the saved level; 0 shows the
 //                        muted glyph and unmuting brings the last level back; the wheel steps it (the sidebar doesn't scroll);
-//                        Tab from the chip reaches it, arrows / Home step it (the grid stays); kept across items and a reload;
-//                        never the global / the item's volume, nothing applied
+//                        Tab from the chip reaches it, arrows / Home step it (the grid stays); the mute and the level kept
+//                        across items and a reload; never the global / the item's volume, nothing applied
+//   preview:follow       until the preview's own slider moves, its level is the item's effective wallpaper volume (k1's own,
+//                        k2's the global), following the sidebar's Volume row live, and the YouTube trailer (a stub player)
+//                        is told the same; once moved, every item keeps the preview's own level
+//   preview:hiddenTab    an unmuted, playing Video preview / YouTube trailer (stub player) in the Library sidebar pauses
+//                        when Browse / Settings shows (the Library stays mounted, hidden) and plays on, unmuted, back on
+//                        Library; a trailer the user paused stays paused
 //   look:previewVolume   the slider's pill slides + fades out from under the chip on hover (per frame), instant with motion off,
 //                        no pointer while hidden, inside the picture, theme text + accent fill; no chip glow under no-glow; a dark
 //                        fill under bg-live. Screenshots side-pvol-*.png
@@ -75,6 +82,7 @@ const getSettings = async () => (await http("GET", "/settings")).json;
 async function setSettings(patch) { await post("/settings", { ...(await getSettings()), ...patch }); }
 const current = async () => (await http("GET", "/current")).json?.path ?? null;
 const libItem = async (p) => ((await http("GET", "/library")).json || []).find((i) => i.videoPath === p);
+const libItemByTitle = async (t) => ((await http("GET", "/library")).json || []).find((i) => i.title === t);
 
 let win;
 const js = (code) => win.webContents.executeJavaScript(code);
@@ -142,6 +150,14 @@ async function setBgLive(on) {
   await loadUi(); await tab("Library"); await sleep(600);
 }
 const T = (p) => (p ? path.basename(p).replace(/\.[^.]+$/, "") : String(p));
+// the sidebar previews' saved sound (app/ui/src/components/sidePreview.ts)
+const PV_KEYS = `["liascape.previewVolume", "liascape.previewVolumeLast", "liascape.previewMuted"]`;
+// an item's effective wallpaper volume (`override ?? global`), by its card title
+async function wallOf(title) {
+  const it = await libItemByTitle(title);
+  if (!it) throw new Error("no library item " + title);
+  return it.volumeOverride ?? (await getSettings()).volume ?? 100;
+}
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, useContentSize: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
@@ -521,6 +537,8 @@ app.whenReady().then(async () => {
       const j = JSON.parse(idx0); j["900000001"].youtubeUrl = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"; fs.writeFileSync(idx, JSON.stringify(j));
       win.webContents.session.webRequest.onBeforeRequest({ urls: ["*://*.youtube.com/*", "*://*.ytimg.com/*", "*://*.googlevideo.com/*", "*://*.youtube-nocookie.com/*"] }, (d, cb) => cb({ cancel: true }));
       try {
+        // the first preview ever: nothing saved
+        await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
         await loadUi();
         const look = (t) => page(`await m.closeAll(); await m.openSide(${JSON.stringify(t)}); await m.sleep(700); const s = m.side();
           const lay = {}; for (const e of s.querySelectorAll("[data-preview-layer]")) lay[e.dataset.previewLayer] = +m.op(e).toFixed(2);
@@ -596,13 +614,14 @@ app.whenReady().then(async () => {
           const ym = await page(`const s = m.side(), f = s.querySelector("iframe"); if (!f) return null;
             const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
             const out = { src: f.src };
-            // its volume is the previews' shared level (sidePreview.ts): the player first answers at that level, then moves
-            const P = JSON.parse(localStorage.getItem("liascape.previewVolume") ?? "50");
+            // its volume is the previews' shared level (sidePreview.ts): nothing set yet → s1's wallpaper volume; the player
+            // first answers at that level, then moves
+            const P = ${await wallOf("s1")};
             say({ muted: false, volume: P }); await m.sleep(50); say({ muted: false, volume: 40 }); await m.sleep(50);
-            out.saved = { muted: localStorage.getItem("liascape_yt_muted"), volume: localStorage.getItem("liascape.previewVolume") };
+            out.saved = { muted: localStorage.getItem("liascape.previewMuted"), volume: localStorage.getItem("liascape.previewVolume") };
             // a message from anywhere else never counts
             window.dispatchEvent(new MessageEvent("message", { origin: "https://evil.example", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info: { muted: true } }) }));
-            await m.sleep(50); out.foreign = localStorage.getItem("liascape_yt_muted");
+            await m.sleep(50); out.foreign = localStorage.getItem("liascape.previewMuted");
             window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "onStateChange", info: 0 }) }));
             await m.sleep(50); out.loops = f.parentElement.dataset.ytLoops ?? null;
             return out;`);
@@ -623,7 +642,7 @@ app.whenReady().then(async () => {
             const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
             const out = { src: f.src }; say({ muted: false, volume: 100 }); await m.sleep(50); out.afterDefault = localStorage.getItem("liascape.previewVolume");
             say({ muted: false, volume: 40 }); await m.sleep(50); say({ muted: false, volume: 55 }); await m.sleep(50); out.afterMove = localStorage.getItem("liascape.previewVolume");
-            for (const k of ["liascape_yt_muted", "liascape_yt_volume", "liascape.previewVolume", "liascape.previewVolumeLast"]) localStorage.removeItem(k); return out;`);
+            for (const k of ${PV_KEYS}) localStorage.removeItem(k); return out;`);
           console.log(`        next trailer: ${JSON.stringify(y2)}`);
           if (y2) {
             if (!/[?&]mute=0/.test(y2.src)) v.push(`the next trailer didn't open unmuted (${y2.src})`);
@@ -642,10 +661,10 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the Video preview's own volume (components/SidePanel.tsx PreviewVolume, sidePreview.ts previewVolume): a slider beside
+    // the Video preview's own volume (components/SidePanel.tsx PreviewVolume, sidePreview.ts previewSound): a slider beside
     // the mute chip; it sets the <video>'s volume and nothing else (not the global volume, not the item's, not the wallpaper);
-    // remembered across items and a reload; mute and level compose; wheel and keys drive it. (The stack's audio is private.)
-    const PV_KEYS = `["liascape.previewVolume", "liascape.previewVolumeLast", "liascape_yt_volume"]`;
+    // until moved it plays at the item's wallpaper volume; the mute and the level are remembered across items and a reload;
+    // mute and level compose; wheel and keys drive it. (The stack's audio is private.)
     const openVideo = async (t) => page(`await m.closeAll(); await m.openSide(${JSON.stringify(t)}); await m.sleep(300);
       const b = m.side().querySelector('[data-preview-src="video"]'); if (b && b.getAttribute("aria-checked") !== "true") b.click();
       for (let i = 0; i < 60 && !m.side().querySelector("[data-side-mute]"); i++) await m.sleep(50); await m.sleep(200); return !!m.side().querySelector("[data-side-mute]");`);
@@ -654,75 +673,84 @@ app.whenReady().then(async () => {
         x: !!s.querySelector("[data-side-mute] svg.lucide-volume-x"), slider: rg ? +rg.value : null, saved: localStorage.getItem("liascape.previewVolume") });`;
     await cell("preview:volume", async () => {
       const v = [], J = JSON.stringify;
-      await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await loadUi();
-      const set0 = await getSettings(), item0 = await libItem(K[0]), cur0 = await current();
-      if (!await openVideo("k1")) return ["k1: the Video preview has no mute chip (proved nothing)"];
-      const r = await page(`${VS} if (!rg) return { none: true, first: st() };
-        const out = { first: st() };
-        b.click(); await m.sleep(150); out.unmuted = st();
-        m.setValue(rg, 30); await m.sleep(150); out.at30 = st();
-        m.setValue(rg, 0); await m.sleep(150); out.at0 = st();
-        s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.restored = st();
-        s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.muted = st();
-        s.querySelector("[data-side-mute]").click(); await m.sleep(150);
-        const wheel = (el, dy) => { const e = new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }); el.dispatchEvent(e); return e.defaultPrevented; };
-        const sc = s.querySelector(".side-scroll"), top0 = sc.scrollTop;
-        out.wheelPrevented = wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelUp = st();
-        wheel(s.querySelector("[data-side-vol-range]"), 120); wheel(s.querySelector("[data-side-vol-range]"), 120); await m.sleep(120); out.wheelDown = st();
-        out.scrolled = sc.scrollTop !== top0;
-        // muted, a wheel up starts from the 0 it shows and unmutes
-        s.querySelector("[data-side-mute]").click(); await m.sleep(120); wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelFromMuted = st();
-        m.setValue(rg, 40); await m.sleep(150); out.at40 = st();
-        return out;`);
-      console.log(`        ${J(r)}`);
-      if (r.none) return [`no volume slider beside the mute chip (${J(r.first)})`];
-      if (!r.first.muted || r.first.pressed !== "false" || !r.first.x || r.first.slider !== 0) v.push(`opens muted, the slider at 0, the muted glyph: ${J(r.first)}`);
-      if (r.unmuted.muted || r.unmuted.vol !== 50 || r.unmuted.slider !== 50 || r.unmuted.x) v.push(`unmute: plays at the default 50 with the sound glyph (${J(r.unmuted)})`);
-      if (r.at30.vol !== 30 || r.at30.muted || r.at30.saved !== "30") v.push(`slider → 30: the video's volume / the saved level (${J(r.at30)})`);
-      if (!r.at0.x || r.at0.pressed !== "false" || !r.at0.muted) v.push(`slider → 0: not shown / played as muted (${J(r.at0)})`);
-      if (r.restored.vol !== 30 || r.restored.muted || r.restored.slider !== 30 || r.restored.x) v.push(`unmute after dragging to 0: the last level 30 isn't back (${J(r.restored)})`);
-      if (!r.muted.muted || r.muted.slider !== 0 || r.muted.saved !== "30" || !r.muted.x) v.push(`mute: silent, slider 0, the level kept at 30 (${J(r.muted)})`);
-      if (!r.wheelPrevented || r.scrolled) v.push(`the wheel over the control scrolls the sidebar (prevented ${r.wheelPrevented}, scrolled ${r.scrolled})`);
-      if (r.wheelUp.slider !== 35 || r.wheelUp.vol !== 35) v.push(`a wheel notch up: 30 → ${r.wheelUp.slider} (want 35)`);
-      if (r.wheelDown.slider !== 25) v.push(`two notches down: 35 → ${r.wheelDown.slider} (want 25)`);
-      if (r.wheelFromMuted.muted || r.wheelFromMuted.slider !== 5) v.push(`muted + a notch up: ${J(r.wheelFromMuted)} (want unmuted at 5)`);
-      if (r.at40.vol !== 40) v.push(`slider → 40: video at ${r.at40.vol}`);
-      // keyboard: Tab from the chip lands on the slider (shown), arrows step it, the grid's arrows don't fire
-      const box = await page(`const b = m.side().querySelector("[data-side-mute]"); b.focus(); return m.rect(b);`);
-      const key = async (k) => { send({ type: "keyDown", keyCode: k }); await sleep(30); send({ type: "keyUp", keyCode: k }); await sleep(120); };
-      await key("Tab"); await sleep(400);
-      const kb0 = await page(`const a = document.activeElement, sl = m.side().querySelector(".side-vol-slide");
-        return { onRange: a?.matches?.("[data-side-vol-range]"), op: +getComputedStyle(sl).opacity, title: m.sideTitle() };`);
-      await key("Right"); await key("Right"); await key("Left"); await key("Right");
-      const kb = await page(`${VS} return { ...st(), title: m.sideTitle(), focused: document.querySelector(".card.focused .lib-title")?.dataset.title ?? null };`);
-      await key("Home");
-      const kbH = await page(`${VS} return st();`);
-      await key("End"); await sleep(50);
-      await page(`${VS} m.setValue(rg, 40);`); await sleep(150);
-      console.log(`        keys: ${J({ box, kb0, kb, kbH })}`);
-      if (!kb0.onRange) v.push("Tab from the mute chip doesn't reach the volume slider");
-      if (!(kb0.op > 0.95)) v.push(`the slider has keyboard focus but isn't shown (opacity ${kb0.op})`);
-      if (kb.slider !== 42 || kb.vol !== 42) v.push(`arrows on the slider: 40 → ${kb.slider} (want 42)`);
-      if (kb.title !== "k1" || kb.focused !== "k1") v.push(`the arrows moved the grid's focus (sidebar ${kb.title}, focused card ${kb.focused})`);
-      if (kbH.slider !== 0 || !kbH.x) v.push(`Home: ${J(kbH)} (want 0, the muted glyph)`);
-      // remembered across items and a reload; never the global / the item's volume; nothing applied
-      if (!await openVideo("k2")) v.push("k2: no Video preview");
-      else {
-        const k2 = await page(`${VS} const out = { first: st() }; b.click(); await m.sleep(150); out.unmuted = st(); b.click(); return out;`);
-        if (k2.first.slider !== 0 || !k2.first.muted) v.push(`k2 doesn't open muted (${J(k2.first)})`);
-        if (k2.unmuted.vol !== 40 || k2.unmuted.slider !== 40) v.push(`k2 unmuted: ${J(k2.unmuted)} (want the remembered 40)`);
+      const g0 = (await getSettings()).volume;
+      // k1 has its own wallpaper volume (35), k2 plays at the global (70): the preview's untouched level is the item's
+      await setSettings({ volume: 70 }); await post("/library/volume", { path: K[0], intValue: 35 });
+      try {
+        await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await loadUi();
+        const set0 = await getSettings(), item0 = await libItem(K[0]), cur0 = await current();
+        if (!await openVideo("k1")) return ["k1: the Video preview has no mute chip (proved nothing)"];
+        const r = await page(`${VS} if (!rg) return { none: true, first: st() };
+          const out = { first: st() };
+          b.click(); await m.sleep(150); out.unmuted = st();
+          m.setValue(rg, 30); await m.sleep(150); out.at30 = st();
+          m.setValue(rg, 0); await m.sleep(150); out.at0 = st();
+          s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.restored = st();
+          s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.muted = st();
+          s.querySelector("[data-side-mute]").click(); await m.sleep(150);
+          const wheel = (el, dy) => { const e = new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }); el.dispatchEvent(e); return e.defaultPrevented; };
+          const sc = s.querySelector(".side-scroll"), top0 = sc.scrollTop;
+          out.wheelPrevented = wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelUp = st();
+          wheel(s.querySelector("[data-side-vol-range]"), 120); wheel(s.querySelector("[data-side-vol-range]"), 120); await m.sleep(120); out.wheelDown = st();
+          out.scrolled = sc.scrollTop !== top0;
+          // muted, a wheel up starts from the 0 it shows and unmutes
+          s.querySelector("[data-side-mute]").click(); await m.sleep(120); wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelFromMuted = st();
+          m.setValue(rg, 40); await m.sleep(150); out.at40 = st();
+          return out;`);
+        console.log(`        ${J(r)}`);
+        if (r.none) return [`no volume slider beside the mute chip (${J(r.first)})`];
+        if (!r.first.muted || r.first.pressed !== "false" || !r.first.x || r.first.slider !== 0) v.push(`opens muted, the slider at 0, the muted glyph: ${J(r.first)}`);
+        if (r.unmuted.muted || r.unmuted.vol !== 35 || r.unmuted.slider !== 35 || r.unmuted.x || r.unmuted.saved !== null) v.push(`unmute: plays at k1's own wallpaper volume 35 (nothing saved) with the sound glyph (${J(r.unmuted)})`);
+        if (r.at30.vol !== 30 || r.at30.muted || r.at30.saved !== "30") v.push(`slider → 30: the video's volume / the saved level (${J(r.at30)})`);
+        if (!r.at0.x || r.at0.pressed !== "false" || !r.at0.muted) v.push(`slider → 0: not shown / played as muted (${J(r.at0)})`);
+        if (r.restored.vol !== 30 || r.restored.muted || r.restored.slider !== 30 || r.restored.x) v.push(`unmute after dragging to 0: the last level 30 isn't back (${J(r.restored)})`);
+        if (!r.muted.muted || r.muted.slider !== 0 || r.muted.saved !== "30" || !r.muted.x) v.push(`mute: silent, slider 0, the level kept at 30 (${J(r.muted)})`);
+        if (!r.wheelPrevented || r.scrolled) v.push(`the wheel over the control scrolls the sidebar (prevented ${r.wheelPrevented}, scrolled ${r.scrolled})`);
+        if (r.wheelUp.slider !== 35 || r.wheelUp.vol !== 35) v.push(`a wheel notch up: 30 → ${r.wheelUp.slider} (want 35)`);
+        if (r.wheelDown.slider !== 25) v.push(`two notches down: 35 → ${r.wheelDown.slider} (want 25)`);
+        if (r.wheelFromMuted.muted || r.wheelFromMuted.slider !== 5) v.push(`muted + a notch up: ${J(r.wheelFromMuted)} (want unmuted at 5)`);
+        if (r.at40.vol !== 40) v.push(`slider → 40: video at ${r.at40.vol}`);
+        // keyboard: Tab from the chip lands on the slider (shown), arrows step it, the grid's arrows don't fire
+        const box = await page(`const b = m.side().querySelector("[data-side-mute]"); b.focus(); return m.rect(b);`);
+        const key = async (k) => { send({ type: "keyDown", keyCode: k }); await sleep(30); send({ type: "keyUp", keyCode: k }); await sleep(120); };
+        await key("Tab"); await sleep(400);
+        const kb0 = await page(`const a = document.activeElement, sl = m.side().querySelector(".side-vol-slide");
+          return { onRange: a?.matches?.("[data-side-vol-range]"), op: +getComputedStyle(sl).opacity, title: m.sideTitle() };`);
+        await key("Right"); await key("Right"); await key("Left"); await key("Right");
+        const kb = await page(`${VS} return { ...st(), title: m.sideTitle(), focused: document.querySelector(".card.focused .lib-title")?.dataset.title ?? null };`);
+        await key("Home");
+        const kbH = await page(`${VS} return st();`);
+        await key("End"); await sleep(50);
+        await page(`${VS} m.setValue(rg, 40);`); await sleep(150);
+        console.log(`        keys: ${J({ box, kb0, kb, kbH })}`);
+        if (!kb0.onRange) v.push("Tab from the mute chip doesn't reach the volume slider");
+        if (!(kb0.op > 0.95)) v.push(`the slider has keyboard focus but isn't shown (opacity ${kb0.op})`);
+        if (kb.slider !== 42 || kb.vol !== 42) v.push(`arrows on the slider: 40 → ${kb.slider} (want 42)`);
+        if (kb.title !== "k1" || kb.focused !== "k1") v.push(`the arrows moved the grid's focus (sidebar ${kb.title}, focused card ${kb.focused})`);
+        if (kbH.slider !== 0 || !kbH.x) v.push(`Home: ${J(kbH)} (want 0, the muted glyph)`);
+        // the mute and the level are remembered across items and a reload (k2's own wallpaper volume is the global 70, so 40
+        // is the preview's); never the global / the item's volume; nothing applied
+        if (!await openVideo("k2")) v.push("k2: no Video preview");
+        else {
+          const k2 = await page(`${VS} const out = { first: st() }; b.click(); await m.sleep(150); out.muted = st(); return out;`);
+          if (k2.first.muted || k2.first.pressed !== "true" || k2.first.vol !== 40 || k2.first.slider !== 40) v.push(`k2 (left unmuted at 40 on k1): opens ${J(k2.first)}, want unmuted at the remembered 40`);
+          if (!k2.muted.muted || k2.muted.slider !== 0) v.push(`k2: the chip didn't mute it (${J(k2.muted)})`);
+        }
+        await page(`await m.closeAll();`); await loadUi();
+        if (!await openVideo("k1")) v.push("after a reload: no Video preview");
+        else {
+          const rl = await page(`${VS} const o = { first: st() }; b.click(); await m.sleep(150); o.unmuted = st(); s.querySelector("[data-side-mute]").click(); return o;`);
+          if (!rl.first.muted || rl.first.slider !== 0) v.push(`after a reload: k1 doesn't open muted as it was left (${J(rl.first)})`);
+          if (rl.unmuted.vol !== 40 || rl.unmuted.slider !== 40) v.push(`after a reload, unmuted: ${J(rl.unmuted)} (want the remembered 40)`);
+        }
+        const set1 = await getSettings(), item1 = await libItem(K[0]);
+        if (set1.volume !== set0.volume || set1.noAudio !== set0.noAudio) v.push(`the global volume changed (${set0.volume}/${set0.noAudio} → ${set1.volume}/${set1.noAudio})`);
+        if (item1?.volumeOverride !== item0?.volumeOverride) v.push(`k1's own volume changed (${item0?.volumeOverride} → ${item1?.volumeOverride})`);
+        if ((await current()) !== cur0) v.push("the volume control applied a wallpaper");
+      } finally {
+        await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
+        await setSettings({ volume: g0 }); await post("/library/volume", { path: K[0], intValue: null });
       }
-      await page(`await m.closeAll();`); await loadUi();
-      if (!await openVideo("k1")) v.push("after a reload: no Video preview");
-      else {
-        const rl = await page(`${VS} b.click(); await m.sleep(150); const o = st(); s.querySelector("[data-side-mute]").click(); return o;`);
-        if (rl.vol !== 40 || rl.slider !== 40) v.push(`after a reload: ${J(rl)} (want the remembered 40)`);
-      }
-      const set1 = await getSettings(), item1 = await libItem(K[0]);
-      if (set1.volume !== set0.volume || set1.noAudio !== set0.noAudio) v.push(`the global volume changed (${set0.volume}/${set0.noAudio} → ${set1.volume}/${set1.noAudio})`);
-      if (J(item1?.volume ?? null) !== J(item0?.volume ?? null)) v.push(`k1's own volume changed (${item0?.volume} → ${item1?.volume})`);
-      if ((await current()) !== cur0) v.push("the volume control applied a wallpaper");
-      await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
       return v;
     });
 
@@ -791,6 +819,148 @@ app.whenReady().then(async () => {
         }
       } finally {
         await mv(5, 5); await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await setMotion(true);
+      }
+      return v;
+    });
+
+    // a stub YouTube player (no network in the stack): s1 gets a trailer, https://www.youtube.com/embed/* serves a page that
+    // echoes every message the app posts to it back as {event: "stub", data} (collected in window.__yt) and answers like the
+    // real player's embed messaging: `listening` / a command → infoDelivery {volume, muted, playerState}
+    const YT_STUB = `<!doctype html><body style="background:#123"><script>
+      let vol = 100, state = 1; const muted = /[?&]mute=1/.test(location.search);
+      const say = (o) => parent.postMessage(JSON.stringify(o), "*");
+      addEventListener("message", (e) => { let d; try { d = JSON.parse(e.data); } catch { return; }
+        say({ event: "stub", data: d });
+        if (d.event === "command") { if (d.func === "setVolume") vol = d.args[0]; if (d.func === "pauseVideo") state = 2; if (d.func === "playVideo") state = 1; }
+        if (d.event === "listening" || d.event === "command") say({ event: "infoDelivery", info: { volume: vol, muted, playerState: state } }); });
+    </script></body>`;
+    async function withYtStub(fn) {
+      const idx = path.join(path.dirname(SC[0]), "index.json"), idx0 = fs.readFileSync(idx, "utf8");
+      const j = JSON.parse(idx0); j["900000001"].youtubeUrl = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"; fs.writeFileSync(idx, JSON.stringify(j));
+      const proto = win.webContents.session.protocol;
+      proto.handle("https", (req) => new URL(req.url).hostname === "www.youtube.com"
+        ? new Response(YT_STUB, { headers: { "Content-Type": "text/html" } }) : new Response("", { status: 404 }));
+      try {
+        await loadUi();
+        await js(`window.__yt = []; window.addEventListener("message", (e) => { if (e.origin !== "https://www.youtube.com") return;
+          try { const d = JSON.parse(e.data); if (d.event === "stub") window.__yt.push(d.data); } catch { /* not ours */ } }); true`);
+        return await fn();
+      } finally {
+        fs.writeFileSync(idx, idx0); proto.unhandle("https");
+        await page(`await m.closeAll();`); await loadUi();
+      }
+    }
+    // s1's sidebar on its trailer, once the stub player answered (its `listening` arrived and a setVolume was confirmed)
+    const openTrailer = () => page(`await m.closeAll(); await m.openSide("s1"); await m.sleep(300);
+      const b = m.side().querySelector('[data-preview-src="youtube"]'); if (!b) return false; if (b.getAttribute("aria-checked") !== "true") b.click();
+      for (let i = 0; i < 80 && !window.__yt.some((d) => d.event === "listening"); i++) await m.sleep(50);
+      await m.sleep(400); return window.__yt.some((d) => d.event === "listening");`);
+    const ytCmds = (since = 0) => js(`window.__yt.slice(${since}).filter((d) => d.event === "command").map((d) => d.func + (d.args?.length ? "(" + d.args.join(",") + ")" : ""))`);
+
+    // the previews' level until the user sets one is the item's effective wallpaper volume (sidePreview.ts previewLevel):
+    // k1's own, k2's the global; live while the sidebar's Volume row moves; the trailer is told the same level. Once the
+    // preview's own slider moves, every item keeps it. (The stack's audio is private.)
+    await cell("preview:follow", async () => {
+      const v = [], J = JSON.stringify;
+      const g0 = (await getSettings()).volume;
+      await setSettings({ volume: 70 }); await post("/library/volume", { path: K[0], intValue: 35 });
+      try {
+        await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
+        // the trailer first: nothing set → s1's wallpaper volume (the global 70), then live with s1's Volume row
+        await withYtStub(async () => {
+          if (!await openTrailer()) { v.push("s1: the stub trailer never answered (proved nothing)"); return; }
+          const first = await ytCmds();
+          const n = (await js(`window.__yt.length`));
+          const row = await page(`const r = m.sideRow("volume")?.querySelector("input[type=range]"); if (!r) return false; m.setValue(r, 55); await m.sleep(300); return true;`);
+          const moved = await ytCmds(n);
+          console.log(`        trailer: ${J({ first, row, moved })}`);
+          const vols = (l) => l.filter((c) => c.startsWith("setVolume(")).map((c) => +c.slice(10, -1));
+          if (vols(first).at(-1) !== 70) v.push(`the trailer wasn't told s1's wallpaper volume 70 (${J(first)})`);
+          if (!row) v.push("s1: no Volume row");
+          else if (vols(moved).at(-1) !== 55) v.push(`s1's Volume row → 55: the trailer wasn't told 55 (${J(moved)})`);
+          await post("/library/volume", { path: (await libItemByTitle("s1")).videoPath, intValue: null });
+        });
+        if (!await openVideo("k1")) return [...v, "k1: no Video preview (proved nothing)"];
+        const a = await page(`${VS} const out = {}; b.click(); await m.sleep(150); out.k1 = st();
+          const row = m.sideRow("volume")?.querySelector("input[type=range]"); if (!row) return { ...out, noRow: true };
+          m.setValue(row, 60); await m.sleep(200); out.row60 = st(); return out;`);
+        console.log(`        k1: ${J(a)}`);
+        if (a.k1.muted || a.k1.vol !== 35 || a.k1.slider !== 35 || a.k1.saved !== null) v.push(`k1 unmuted: ${J(a.k1)}, want its own wallpaper volume 35, nothing saved`);
+        if (a.noRow) v.push("k1: no Volume row");
+        else if (a.row60.vol !== 60 || a.row60.slider !== 60 || a.row60.saved !== null) v.push(`k1's Volume row → 60: the preview ${J(a.row60)}, want 60 (following, nothing saved)`);
+        await sleep(400); // the row's debounced save
+        if (!await openVideo("k2")) v.push("k2: no Video preview");
+        else {
+          const b = await page(`${VS} const out = { first: st() }; m.setValue(rg, 20); await m.sleep(150); out.own = st(); return out;`);
+          console.log(`        k2: ${J(b)}`);
+          if (b.first.muted || b.first.vol !== 70 || b.first.slider !== 70) v.push(`k2 (no own volume): ${J(b.first)}, want unmuted at the global 70`);
+          if (b.own.vol !== 20 || b.own.saved !== "20") v.push(`k2's preview slider → 20: ${J(b.own)}`);
+        }
+        if (!await openVideo("k1")) v.push("k1 again: no Video preview");
+        else {
+          const c = await page(`${VS} const out = { first: st() }; const row = m.sideRow("volume")?.querySelector("input[type=range]");
+            if (row) { m.setValue(row, 50); await m.sleep(200); } out.row50 = st(); return out;`);
+          console.log(`        k1 after the preview's own level: ${J(c)}`);
+          if (c.first.vol !== 20 || c.first.slider !== 20) v.push(`k1 after the preview slider moved: ${J(c.first)}, want the preview's own 20 (not k1's 60)`);
+          if (c.row50.vol !== 20) v.push(`k1's Volume row → 50 moved the preview's own level (${J(c.row50)})`);
+        }
+      } finally {
+        await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
+        await setSettings({ volume: g0 }); await post("/library/volume", { path: K[0], intValue: null });
+      }
+      return v;
+    });
+
+    // the Library stays mounted behind another tab (App.tsx <Activity>, hidden): its sidebar's unmuted Video preview and
+    // YouTube trailer must not keep sounding there — paused when Browse / Settings shows, playing on (unmuted) back on
+    // Library; a trailer the user paused stays paused. (The stack's audio is private; we read paused / muted.)
+    await cell("preview:hiddenTab", async () => {
+      const v = [], J = JSON.stringify;
+      await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await loadUi();
+      try {
+        if (!await openVideo("k1")) return ["k1: no Video preview (proved nothing)"];
+        const on = await page(`${VS} b.click(); await m.sleep(500); const t0 = vd.currentTime; await m.sleep(400);
+          return { ...st(), paused: vd.paused, adv: +(vd.currentTime - t0).toFixed(2) };`);
+        if (on.paused || on.muted || !(on.adv > 0.1)) return [`k1's Video preview isn't playing unmuted before the switch (${J(on)}) — proved nothing`];
+        const HID = `const vd = document.querySelector('.side-panel[data-side="library"] video[data-preview-layer="video"]');`;
+        // pausedAtHide: read as the commit that hides the Library lands (a MutationObserver runs right after it, before any
+        // paint) — paused there, nothing more is heard than before the click
+        const away = async (name) => page(`${HID} if (!vd) return null; const side = document.querySelector('.side-panel[data-side="library"]');
+          const out = { name: ${J(name)}, pausedAtHide: null };
+          const mo = new MutationObserver(() => { if (out.pausedAtHide == null && !side.checkVisibility()) out.pausedAtHide = vd.paused; });
+          mo.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class", "hidden"] });
+          m.byText(".tab", ${J(name)}).click();
+          await m.sleep(600); mo.disconnect(); const t0 = vd.currentTime; await m.sleep(500);
+          return { ...out, paused: vd.paused, muted: vd.muted, adv: +(vd.currentTime - t0).toFixed(2), libHidden: !document.querySelector('.side-panel[data-side="library"]')?.checkVisibility() };`);
+        const r1 = await away("Browse"), r2 = await away("Settings");
+        await tab("Library"); await sleep(300);
+        const back = await page(`${VS} const t0 = vd.currentTime; await m.sleep(500); return { ...st(), paused: vd.paused, adv: +(vd.currentTime - t0).toFixed(2) };`);
+        console.log(`        video: ${J({ on, r1, r2, back })}`);
+        for (const r of [r1, r2]) {
+          if (!r) { v.push("the hidden Library's Video preview is gone (nothing to check)"); continue; }
+          if (!r.libHidden) v.push(`${r.name}: the Library sidebar still shows — the switch proved nothing`);
+          if (!r.paused || r.adv > 0) v.push(`${r.name} shown: the hidden Library's Video preview keeps playing (${J(r)})`);
+          else if (r.pausedAtHide !== true) v.push(`${r.name} shown: the preview was still playing as the Library was hidden (${J(r)})`);
+        }
+        if (back.paused || !(back.adv > 0.1) || back.muted || back.pressed !== "true") v.push(`back on Library: the Video preview doesn't play on unmuted (${J(back)})`);
+        // the trailer: pauseVideo as the page hides, playVideo as it shows; one the user paused stays paused
+        await withYtStub(async () => {
+          if (!await openTrailer()) { v.push("s1: the stub trailer never answered (proved nothing)"); return; }
+          let n = await js(`window.__yt.length`);
+          await tab("Settings"); const hid = await ytCmds(n);
+          n = await js(`window.__yt.length`); await tab("Library"); await sleep(300); const shown = await ytCmds(n);
+          await page(`const f = m.side().querySelector("iframe"); window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow,
+            data: JSON.stringify({ event: "onStateChange", info: 2 }) })); await m.sleep(100);`);
+          n = await js(`window.__yt.length`); await tab("Browse"); const hid2 = await ytCmds(n);
+          n = await js(`window.__yt.length`); await tab("Library"); await sleep(300); const shown2 = await ytCmds(n);
+          console.log(`        trailer: ${J({ hid, shown, hid2, shown2 })}`);
+          if (!hid.includes("pauseVideo") || hid.includes("playVideo")) v.push(`Settings shown: the hidden trailer wasn't paused (${J(hid)})`);
+          if (!shown.includes("playVideo")) v.push(`back on Library: the trailer wasn't resumed (${J(shown)})`);
+          if (!hid2.includes("pauseVideo")) v.push(`Browse shown: the hidden trailer wasn't paused (${J(hid2)})`);
+          if (shown2.includes("playVideo")) v.push(`back on Library: a trailer the user paused was resumed (${J(shown2)})`);
+        });
+      } finally {
+        await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
       }
       return v;
     });

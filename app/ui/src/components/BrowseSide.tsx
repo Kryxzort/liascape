@@ -45,6 +45,9 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const gifSrc = w.animatedThumbnailUrl ? anim(w.animatedThumbnailUrl) : null;
   const online = useOnline();
   const preview = usePreview("browse", { gif: !!gifSrc, video: !!previewVid, youtube: !!yt && online });
+  // the previews' default level: the volume this wallpaper would play at — its library copy's own, else the global one
+  const globalVolume = useStore((s) => (s.settings?.volume as number) ?? 100);
+  const wall = libItem?.volumeOverride ?? globalVolume;
   const downloading = progress !== undefined;
   // a Workshop download's step in words (WS download-progress `status`) — e.g. "Not signed in to Steam here — click Subscribe in
   // Steam, then it downloads by itself…" while it waits on the Steam app (WorkshopDownloader)
@@ -56,7 +59,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
 
   return (
     <>
-      <SideMedia id={w.pageUrl} cardId={`br-${w.pageUrl}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={previewVid} youtube={yt} preview={preview} />
+      <SideMedia id={w.pageUrl} cardId={`br-${w.pageUrl}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={previewVid} youtube={yt} preview={preview} wall={wall} />
       <div className="side-body">
         <div className="side-hero">
           {libItem && (

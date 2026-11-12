@@ -174,7 +174,7 @@ export function LibrarySide({
       {/* nothing in the head but close (no playlist toggle there, and no Play either — not even while the
           YouTube trailer covers the picture: play it from the card / Enter, or switch the picture back) */}
       <SideMedia id={p} cardId={`lib-${p}`} base={baseSrc} full={fullSrc} gif={gifSrc} video={vidSrc} youtube={item.youtubeUrl}
-        preview={preview} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
+        preview={preview} wall={vol} play={{ label: `Play ${item.title}`, playing, looping: keepCurrent, onPlay }} />
       <div className={`side-body${ready ? "" : " wait"}`}>
         {/* the hero line: what it is (chips) and its numbers (pills) */}
         <div className="side-hero">
