@@ -32,7 +32,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        anonymous client-protocol session (`Helpers/SteamAnonymous.cs`, PublishedFile.GetDetails, many IDs per call,
        through `SteamGate`), save them with the item, and only look up new arrivals after. Non-Workshop items get their
        resolution from the file (video frame size via ffprobe, cached; a scene's project size), bucketed into the
-       Workshop's resolution groups.
+       Workshop's resolution groups. Batch sizes are measured, not guessed (owner: "we should know exact number for all
+       batch related stuff"): the web GetPublishedFileDetails caps at ~213–220 IDs by URL length (third-party reports),
+       but our path is the client protocol, where that doesn't apply — measure GetDetails at 100/200/500/1000 IDs (every ID
+       back?) and QueryFiles numperpage at 100/200/500, a few gated requests; then audit every batch / concurrency
+       constant (SteamGate spacing, the ffmpeg gate, the clip worker, download concurrency) and back each with a
+       measurement or source in its comment, or fix it.
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
