@@ -5,9 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
-       re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
-       `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
@@ -50,11 +47,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
-- [ ] Red on HEAD (`perf:tabs`): the switch to Settings forces layout in framer's `measureScroll` — the card preview's
-      `layout` slots (components/CardPreview.tsx) measure their scroll parents as Settings mounts. Measure from a
-      ResizeObserver, or give the slots `layout` only once the preview is on screen.
-- [ ] While a card is playing, the switch to the Library runs ~30–50 rAF callbacks (HEAD 28–36, so it predates the
-      card-local ring): find which loop runs and whether it should wait for the page to show.
+- [ ] probe-layout `perf:tabs`: each switch to the Library runs ~50 rAF callbacks in a full `--probe probe-layout.js` run
+      (with a card playing), 0 when the cell runs alone (`--only perf:tabs`): a loop an earlier cell starts keeps running.
+      Find it (a `requestAnimationFrame` wrapper recording stacks) and stop it while its page is hidden.
+- [ ] probe-layout `tabs:browse` can't set itself up in a full run ("couldn't scroll the stubbed list deep … 120 cards"),
+      passes alone (tree and HEAD alike): an earlier cell leaves Browse's list or scroll in another state.
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in

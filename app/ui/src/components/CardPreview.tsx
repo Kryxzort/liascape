@@ -136,6 +136,7 @@ export function CardPreview({ scrollRef, rowsRef, children }: {
     cw = Math.max(40, Math.floor(cw));
   }
   const rowW = perRow * cw + (perRow - 1) * g;
+  const layoutOn = motion && mounted && !!geo;
   const quality = QUALITY_LABEL[q];
   const info = qinfo?.find((x) => x.name === q);
   const parts = making ? [`making the ${quality} preview…`] : info ? [quality, `${info.fps} fps`, `~${fmtMb(info.mb)} MB per wallpaper`] : [quality];
@@ -155,8 +156,11 @@ export function CardPreview({ scrollRef, rowsRef, children }: {
             {picks.map((it) => (
               // COOL: a size or shape change morphs each card to its new box (framer layout, transform only); motion off: no
               // layout node, so the change is instant (a 0 s layout transition still draws one frame at the old size).
-              // Guard: probe-cardpreview cardpv:motion.
-              <fm.div key={it.videoPath} className="card-pv-slot" layout={motion} transition={{ duration: 0.34, ease: [0.2, 0.8, 0.3, 1] }}
+              // PERF: layout only once the cards are mounted and sized (geo comes from the ResizeObserver): a layout node
+              // mounting with Settings measures its scroll parents inside the tab click (forced layouts). Framer reads
+              // `layout` only when the node is made, so the key remounts the slot when it flips (with the cards' own
+              // first mount, so they aren't built twice). Guard: probe-cardpreview cardpv:motion, probe-layout perf:tabs.
+              <fm.div key={`${it.videoPath}|${layoutOn}`} className="card-pv-slot" layout={layoutOn} transition={{ duration: 0.34, ease: [0.2, 0.8, 0.3, 1] }}
                 style={{ width: cw }} data-pv-kind={hasGifAsset(it) ? (previewVideo(it, true) ? "both" : "gif") : "video"}>
                 {mounted && <LibraryCard item={it} playing={it.videoPath === playingPath} selected={false} focused={false}
                   inPlaylist={playlist.includes(it.videoPath)} autoPlayGifs={autoPlayGifs}
