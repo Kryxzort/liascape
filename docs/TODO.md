@@ -14,6 +14,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
 
+31. [ ] The whole library follows the video preview quality (owner): today a quality change only reaches cards as they come
+       on screen, and a lower quality never re-encodes (the bigger clip keeps playing). Instead, after the setting settles
+       (debounced: users flip through Low / Mid / High), every library clip is re-made at exactly the chosen quality, up
+       AND down: a user who picks Low wants the disk and decode savings, so a downgrade replaces the bigger clip and frees
+       its space (after the hand-over grace). On-screen cards go first, then the rest of the library, one encode at a time
+       at idle priority (`nice` / `ionice -c3`, ClipStore's background queue), never starving a card that's waiting. A
+       thin progress line on the playlist bar's bottom edge shows running library operations (this sweep; also the
+       Steam-tag / frame-size pass, LibraryFactsOps) with their count (`Making Low previews 42 / 318`); theme, glow,
+       motion-off (fade) and bg-live per design.md. Guards: matrix cells for the sweep's order, debounce, downgrade freeing
+       space, and the progress line.
+
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
       test tones on the real output, so mute the sink first: PipeWire's monitor taps before the sink volume, so the
