@@ -27,6 +27,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        feel and shown only while those rows are on screen; reflects thumbnail shape, card size, GIF / video previews,
        video-over-GIF, video quality, glow and motion live; hover works on it; a caption with the quality's fps and disk
        cost ("making the High preview…" while a clip is made).
+28. [ ] Complete the Library's filter data (owner): auto-imported Workshop items (subscribed through Steam, so never
+       downloaded by Liascape) have no Steam tags — no resolution, partial genres. Fetch their real tags once over the
+       anonymous client-protocol session (`Helpers/SteamAnonymous.cs`, PublishedFile.GetDetails, many IDs per call,
+       through `SteamGate`), save them with the item, and only look up new arrivals after. Non-Workshop items get their
+       resolution from the file (video frame size via ffprobe, cached; a scene's project size), bucketed into the
+       Workshop's resolution groups.
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
