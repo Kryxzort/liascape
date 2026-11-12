@@ -64,12 +64,12 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface1); border-radius: 10px;
+  background: color-mix(in srgb, var(--surface1) var(--tr), transparent); border-radius: 10px; /* --tr: like .mini */
   border: 2px solid transparent; background-clip: padding-box; min-height: 20px;
   transition: background .1s, border-width .1s;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--surface2); border-width: 1px; }
-::-webkit-scrollbar-thumb:active { background: var(--muted); }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--surface2) var(--tr), transparent); border-width: 1px; }
+::-webkit-scrollbar-thumb:active { background: color-mix(in srgb, var(--muted) var(--tr), transparent); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---- app shell ---- */
@@ -165,7 +165,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .seg.row :is(.seg-opt, .seg-ghost) { padding: 5px 13px; font-size: 13px; }
 
 /* ---- grid ---- */
-.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--gap); }
+/* position: relative so the scroll box (its scrollbar included) paints in the positioned layer, after the fixed live
+   wallpaper (video.settings-bg, z-index 0, under bg-live): a non-positioned scroller paints before it, so its scrollbar sat
+   behind the wallpaper while the (positioned) cards showed */
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--gap); position: relative; }
 /* library scroll sits BEHIND the overlaid playlist bar — pad the bottom so the collapsed bar
    never permanently hides the last row (expanding the bar covers cards by design: cards sit behind). */
 /* pad by the playlist bar's live height (--playlist-bar-h, set by PlaylistBar) + a gap so the last row clears the
@@ -259,18 +262,21 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 
 /* Playing card border = green; gentle green glow pulse. */
-/* the ring is drawn INSIDE the card's rounded clip (::before, over the picture): a ring outside it meets the clipped
-   picture's anti-aliased corner and shows a light seam on the curve. The pulsing glow is OUTSIDE, on one element per grid
-   (.playing-glow, anchored to the playing card, behind it): the card's content-visibility paint-contains everything inside
-   it, and pulsing the card's own shadow repaints it every frame; the glow's opacity alone runs on the compositor. */
-@keyframes pulse-glow-op { 0%,100% { opacity: .12; } 50% { opacity: 1; } }
-.grid { position: relative; isolation: isolate; anchor-scope: --playing-card; }
-.card.playing { anchor-name: --playing-card; box-shadow: 0 0 10px -3px var(--success); }
-.card.playing::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 5;
-  box-shadow: inset 0 0 0 2px var(--success); }
-.playing-glow { position: absolute; position-anchor: --playing-card; top: anchor(top); left: anchor(left); right: anchor(right);
-  bottom: anchor(bottom); z-index: -1; border-radius: 12px; pointer-events: none; box-shadow: 0 0 30px 4px var(--success);
-  opacity: .12; will-change: opacity; animation: pulse-glow-op 1.8s ease-in-out infinite; }
+/* The playing card carries its own ring and pulse, so both move with it in its own layer (a lift is a compositor
+   transform: anything positioned separately lags it by a frame). Only this one card drops paint containment and
+   content-visibility skipping (they clip whatever is outside its box); its thumbnail clips its own rounded corners.
+   The ring (::before) and the pulse (::after, opacity only: the compositor runs it, the card never repaints) sit behind
+   the thumbnail, so the thumbnail's anti-aliased corner blends into the ring's green, not the dark page; the card's
+   own shadows paint under them (isolation). Guard: probe-layout look:playingGlow, matrix appear:glows. */
+@keyframes pulse-glow-op { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+.card.playing { contain: layout style; content-visibility: visible; overflow: visible; isolation: isolate; }
+.card.playing > .thumb-wrap { border-radius: inherit; overflow: hidden; }
+.card.playing::before, .card.playing::after { content: ""; position: absolute; inset: -2px; border-radius: 14px; z-index: -1;
+  pointer-events: none; }
+.card.playing::before { background: var(--success); }
+.card.playing::after { box-shadow: 0 0 9px 2px var(--success), 0 0 4px 2px var(--success); /* 2 + 9 + 2 = 13 px past the card: inside .scroll's var(--gap) padding, which clips past it (a card at the grid's edge); the tight second layer makes the peak denser at the same reach */ opacity: .5; will-change: opacity;
+  animation: pulse-glow-op 1.8s ease-in-out infinite; }
+.card.playing:is(.focused, .selected) { outline-offset: 2px; }
 
 /* PERF: the sweep moves a layer (transform), never background-position: a background-position animation runs on the main
    thread, so it forces a main frame every refresh, and each main frame restyles every running animation on the page —
@@ -1088,10 +1094,9 @@ input[type=range]:focus-visible { outline: none; }
    overridden here. State that is NOT glow stays: the playing item's green ring, the selected card's outline, accent
    borders/backgrounds on hover and active, the black depth shadows. */
 :root.no-glow { --glow-sm: 0 0 #0000; --glow: 0 0 #0000; }
-:root.no-glow .card.playing { animation: none; box-shadow: none; } /* the ring (::before) stays */
-:root.no-glow .playing-glow { display: none; animation: none; }
+:root.no-glow .card.playing::after { display: none; animation: none; } /* the ring stays */
 /* motion off: no loop but the spinner, so the playing card's glow holds at its middle brightness */
-:root.no-motion .playing-glow { animation: none; opacity: .55; }
+:root.no-motion .card.playing::after { animation: none; opacity: .75; } /* the pulse's middle */
 :root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
 :root.no-glow .pl-hover-glow { display: none; }
 :root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }

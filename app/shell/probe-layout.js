@@ -598,7 +598,7 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: "mouseMove", x: 5, y: 5 });
       return v;
     };
-    // the playing card's pulse: one .playing-glow per grid, anchored behind the playing card (same box, also after the card
+    // the playing card's ring and pulse: the card's own ::before / ::after, behind its thumbnail, moving with it (same box, also after the card
     // scrolls in from off screen, where content-visibility skipped it), pulsing by opacity alone (no repaint of the card),
     // gone under no-glow while the card's ring stays. Screenshot look-playingGlow.png.
     await cell("look:playingGlow", async () => {
@@ -610,10 +610,11 @@ app.whenReady().then(async () => {
       for (let i = 0; i < 60 && (await http("GET", "/current")).json?.path !== vid; i++) await sleep(250);
       try {
         await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
-        const read = `(() => { const sc = document.querySelector(".lib-scroll"), c = sc?.querySelector(".card.playing"), g = sc?.querySelector(".playing-glow");
+        const read = `(() => { const sc = document.querySelector(".lib-scroll"), c = sc?.querySelector(".card.playing"), g = c;
           const R = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
-          return c && g ? { card: R(c), glow: R(g), op: +getComputedStyle(g).opacity, shadow: getComputedStyle(g).boxShadow, ring: getComputedStyle(c, "::before").boxShadow,
-            anims: g.getAnimations().map((a) => a.animationName) } : { card: !!c, glow: !!g }; })()`;
+          const pulse = g ? getComputedStyle(g, "::after") : null;
+          return c && g ? { card: R(c), glow: R(g), op: +pulse.opacity, pulseShown: pulse.display !== "none", ring: getComputedStyle(c, "::before").backgroundColor,
+            anims: c.getAnimations({ subtree: true }).map((a) => a.animationName).filter((n) => n === "pulse-glow-op") } : { card: !!c, glow: !!g }; })()`;
         // from off screen: scroll away, then bring the card into view (the live app keeps it skipped until then)
         await js(`(() => { const sc = document.querySelector(".lib-scroll"); sc.scrollTo({ top: sc.scrollHeight, behavior: "instant" }); })()`); await sleep(300);
         await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(400);
@@ -623,16 +624,27 @@ app.whenReady().then(async () => {
         if (off > 1.5) v.push(`the glow isn't on the playing card: card ${J(a.card.map(Math.round))}, glow ${J(a.glow.map(Math.round))}`);
         if (!a.anims.includes("pulse-glow-op")) v.push(`the glow doesn't pulse (animations ${J(a.anims)})`);
         if (!/rgb/.test(a.ring)) v.push(`the card lost its ring (${a.ring})`);
+        // the halo fits inside the scroll's padding: past it, a card at the grid's edge has its glow cut off in a straight line
+        const reach = await js(`(() => { const c = document.querySelector(".lib-scroll .card.playing"), p = getComputedStyle(c, "::after");
+          const n = (p.boxShadow.match(/(-?[\\d.]+)px/g) || []).map(parseFloat); const inset = -parseFloat(p.left) || 0;
+          return { reach: inset + (n[2] || 0) + (n[3] || 0), pad: parseFloat(getComputedStyle(c.closest(".scroll")).paddingRight) }; })()`);
+        if (!(reach.reach <= reach.pad)) v.push(`the glow reaches ${reach.reach} px past the card, past the scroll's ${reach.pad} px padding: clipped at the grid's edge`);
         const ops = [];
         for (let i = 0; i < 12; i++) { ops.push((await js(read)).op); await sleep(150); }
-        if (Math.max(...ops) - Math.min(...ops) < 0.4) v.push(`the pulse is too faint to see: opacity ${Math.min(...ops).toFixed(2)}–${Math.max(...ops).toFixed(2)}`);
+        if (Math.max(...ops) - Math.min(...ops) < 0.3) v.push(`the pulse is too faint to see: opacity ${Math.min(...ops).toFixed(2)}–${Math.max(...ops).toFixed(2)}`);
+        // hovered, the card lifts 3 px (its ring and pulse are its own pseudo-elements, so they lift with it)
+        const cc = await js(`(() => { const r = document.querySelector(".lib-scroll .card.playing").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(cc.x), y: Math.round(cc.y) }); await sleep(400);
+        const hv = await js(read);
+        if (!(a.card[1] - hv.card[1] > 2)) v.push(`hovered, the playing card didn't lift (top ${a.card[1].toFixed(1)} -> ${hv.card[1].toFixed(1)})`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 }); await sleep(400);
         await shot("look-playingGlow");
         // the corners at the pulse's brightness levels: the glow held at fixed phases (its own animation paused there), the
         // card's top-left and bottom-right corners captured at 8x: look-playingGlow-corner-<phase>-<tl|br>.png
         const d = dbg();
         for (const [name, frac] of [["dim", 0], ["quarter", 0.15], ["half", 0.25], ["full", 0.5]]) {
-          const box = await js(`(() => { const sc = document.querySelector(".lib-scroll"), c = sc.querySelector(".card.playing"), g = sc.querySelector(".playing-glow");
-            const an = g.getAnimations()[0]; an.pause(); an.currentTime = ${frac} * 1800;
+          const box = await js(`(() => { const sc = document.querySelector(".lib-scroll"), c = sc.querySelector(".card.playing"), g = c;
+            const an = c.getAnimations({ subtree: true }).find((a) => a.animationName === "pulse-glow-op"); an.pause(); an.currentTime = ${frac} * 1800;
             const r = c.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, op: +getComputedStyle(g).opacity }; })()`);
           await sleep(250);
           for (const [corner, x, y] of [["tl", box.x - 14, box.y - 14], ["br", box.x + box.w - 26, box.y + box.h - 26]]) {
@@ -641,18 +653,18 @@ app.whenReady().then(async () => {
           }
           console.log(`        corner shots at ${name}: opacity ${box.op.toFixed(2)}`);
         }
-        await js(`document.querySelector(".lib-scroll .playing-glow").getAnimations()[0].play()`);
+        await js(`document.querySelector(".lib-scroll .card.playing").getAnimations({ subtree: true }).find((a) => a.animationName === "pulse-glow-op").play()`);
         // the open page doesn't see a /settings POST: reload, back to the playing card
         await setSettings({ glows: false }); await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
         await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(300);
-        const ng = await js(read.replace("+getComputedStyle(g).opacity", "getComputedStyle(g).display === 'none' ? -1 : 1"));
-        if (ng.op !== -1) v.push("no-glow: the pulse is still shown");
+        const ng = await js(read);
+        if (ng.pulseShown) v.push("no-glow: the pulse is still shown");
         if (!/rgb/.test(ng.ring ?? "")) v.push(`no-glow: the card lost its ring (${ng.ring})`);
         // motion off: no loop but the spinner, so the glow holds still (shown, no animation)
         await setSettings({ glows: true, morphs: false }); await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
         await js(`document.querySelector(".lib-scroll .card.playing")?.scrollIntoView({ block: "center", behavior: "instant" })`); await sleep(300);
         const nm = await js(read);
-        if (!nm.glow || nm.anims?.length || !(nm.op > 0.3)) v.push(`motion off: the glow should hold still and stay shown (${J({ anims: nm.anims, op: nm.op })})`);
+        if (!nm.glow || nm.anims?.length || !(nm.op > 0.3) || !nm.pulseShown) v.push(`motion off: the glow should hold still and stay shown (${J({ anims: nm.anims, op: nm.op })})`);
         console.log(`        ${J({ off: +off.toFixed(2), ops: ops.map((x) => +x.toFixed(2)), ring: a.ring.slice(0, 40) })}`);
       } finally { await setSettings({ glows: true, morphs: true }); }
       return v;

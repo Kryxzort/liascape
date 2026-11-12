@@ -175,8 +175,6 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
               autoPlayGifs={autoPlayGifs}
               onCancel={cardCancel} onClick={cardClick} onDownload={cardDownload} onContext={cardContext} onMiddle={cardMiddle} />
           ))}
-          {/* COOL: the playing card's pulse, anchored behind it (index.css .playing-glow) */}
-          {sorted.some((x) => x.pageUrl === playingPath) && <i className="playing-glow" aria-hidden />}
           {/* INFINITE FEEL: while more pages exist, always render a block of placeholder cards right
               after the real ones (they flow inline, filling the last partial row — no gap). The first
               placeholder is the load trigger: scrolling it toward view fires loadMore, which inserts the

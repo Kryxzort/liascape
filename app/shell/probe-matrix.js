@@ -274,6 +274,8 @@ let BASE_SETTINGS;
 const EFFECT_MS = 2500;
 // the rotation (player-adapter.md § Rotation): advance-on-end off → intervalSeconds is the timer; on → it is the minimum
 // play time and maxPlaySeconds the maximum (0 = off)
+// Every playlist setting, defaults included: POST /playlist/state merges field by field, so one left out here keeps the
+// value an earlier cell set (one cell's "Resume" start would make every later cell's Play resume)
 const PS = (o = {}) => ({ order: 0, overrideGlobalSettings: true, intervalSeconds: 600, switchWhenVideoEnds: false, maxPlaySeconds: 0,
   separateSceneTiming: true, switchScenesAfterSeconds: 1800, playlistStart: "start_over",
   transitionEnabled: true, transitionEffectIds: ["fade"], transitionDurationMs: 1200, transitionDurationMaxMs: 0, transitionShuffle: false, ...o });
@@ -597,6 +599,7 @@ C["playlistBarClick"] = { switch: true, async run(c) {
     if (!c.target) return c.skip = "no other item in the playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.target))}), "playlistBar item");`); },
   exp: { paused: false }, check: (c) => [...expectShown(c, c.target, { effect: !!c.before.cur?.path }), ...psKept(c)] };
+// item 1 is where "Start over" (the baseline's start) begins; under "Resume" Play goes back to the playlist's last item
 C["playlistBarPlay"] = { switch: true, async run(c) { await ui(`m.click(document.querySelector(".play-btn"), "Play");`); },
   exp: { paused: false }, check: (c) => [...(c.before.ps?.settings?.playlistStart === "start_over" ? []
     : [`the playlist starts with "${c.before.ps?.settings?.playlistStart}", not the baseline's start_over: item 1 proves nothing`]),
@@ -1978,7 +1981,7 @@ true`;
 const GLOW_SPECS = [
   { name: "active tab", tab: "Library", el: `document.querySelector(".tabs .tab-pill")`, read: "boxShadow" }, // the sliding pill under the active tab carries its fill + glow
   { name: "Stop button", tab: "Library", el: `[...document.querySelectorAll(".topbar button")].find((b) => b.textContent.trim() === "Stop")`, read: "boxShadow" },
-  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".lib-scroll .playing-glow")`, read: "animation" }, // the anchored glow layer behind the playing card
+  { name: "playing card pulse", tab: "Library", el: `document.querySelector(".lib-scroll .card.playing")`, read: "animation", pseudo: "::after" }, // the pulse: the playing card's own ::after
   { name: "hovered card", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing)")`, read: "boxShadow" },
   { name: "hovered card's playlist toggle", tab: "Library", hover: true, el: `document.querySelector(".card.lib:not(.playing) .pl-toggle")`, read: "filter" },
   { name: "hovered playlist-bar item", tab: "Library", hover: true, el: `document.querySelector(".pl-item:not(.playing)")`, read: "layer" },
