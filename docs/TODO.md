@@ -45,6 +45,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        back?) and QueryFiles numperpage at 100/200/500, a few gated requests; then audit every batch / concurrency
        constant (SteamGate spacing, the ffmpeg gate, the clip worker, download concurrency) and back each with a
        measurement or source in its comment, or fix it.
+30. [ ] Motion off means "nothing moves, short fades" (owner): the "Smooth window animations" toggle (and the system's
+       prefers-reduced-motion) serves both people sensitive to motion and people avoiding its cost. Today off makes
+       everything instant, so panels and menus pop. Instead: appear / leave / content swaps cross-fade in ~120 ms
+       (opacity only: no movement, compositor-only, ~free); every slide, zoom, morph, tilt or spring becomes that fade or
+       nothing; never a flash or a loop. Chevrons, carets and spinners keep showing state, as now. Sweep every
+       `:root.no-motion` rule and every `useMotion()` / `motionOn()` caller; the motion-off cells change from "no
+       in-between frames" to "only opacity changes, nothing moves" (probe-icons `icon:still:off` stays). Rewrite the
+       design.md Motion-off bullet and add a docs/decisions.md entry.
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
