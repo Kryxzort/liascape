@@ -87,9 +87,10 @@ for f in $FILES; do
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
-    # the Workshop filter column: not in the matrix (Browse needs the network) — its own probe stubs /browse
-    app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts)
-      echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js)" >&2 ;;
+    # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
+    # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
+    app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)
+      echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js; probe-layout.js resize:)" >&2 ;;
     app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { filterOf, useStore, type FilterScope, type TagState } from "../store";
+import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { WF_DOCK_QUERY, filterOf, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
 import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
-import { useLinger } from "../hooks/useLinger";
-import { useStableFn } from "../hooks/useStableFn";
-import { type MorphSource, morph, snapshot } from "../hooks/filterMorph";
+import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { keepCardInView } from "../hooks/gridKeys";
 
 // The Workshop filter column's data + hooks (components/WorkshopFilterColumn.tsx) — a module of its own so the component file
 // exports components only (fast refresh).
@@ -48,16 +47,21 @@ export const SORTS: [string, string][] = [
   ["totaluniquesubscribers", "Most Subscribed"], ["toprated", "Top Rated"],
 ];
 export const PERIODS: [number, string][] = [[1, "Today"], [7, "Week"], [30, "Month"], [90, "3 Months"], [180, "6 Months"], [365, "Year"]];
+// the Workshop's sort menu is one list: "Most Popular" once per period ("Most Popular · Week", value "trend:7"), then the
+// other sorts — the period isn't a second control (docs/decisions.md § "Filter the Workshop in a column of three-way switches")
+export const WS_SORT_OPTIONS = [
+  ...PERIODS.map(([d, l]) => ({ value: `trend:${d}`, label: `Most Popular · ${l}` })),
+  ...SORTS.filter(([v]) => v !== "trend").map(([v, l]) => ({ value: v, label: l })),
+];
+export const wsSortValue = (f: WorkshopFilter) => (f.sort === "trend" ? `trend:${f.trendDays}` : f.sort);
+export const wsSortPatch = (v: string): Partial<WorkshopFilter> => (v.startsWith("trend:") ? { sort: "trend", trendDays: +v.slice(6) } : { sort: v });
 
-// the column docks from this width; below it, it's a drawer. 1100: with the item sidebar docked too (≥ 900 px, 300–400 px) a
-// 1100 px window still leaves the grid ~540 px (3 Small cards); at 900–1099 the two side by side left 370–540 px.
-export const WF_DOCK_QUERY = "(min-width: 1100px)";
-export const WF_DOCK_MS = 220; // the docked column folding away (index.css `wf-dock-out`)
-export const WF_CLOSE_MS = 170; // the drawer's exit slide (index.css `wf-out`)
+export { WF_DOCK_QUERY };
+export const WF_CLOSE_MS = SIDE_CLOSE_MS; // the panel's exit slide: the item sidebar's (index.css `side-out`)
 const subscribeDock = (cb: () => void) => { const q = matchMedia(WF_DOCK_QUERY); q.addEventListener("change", cb); return () => q.removeEventListener("change", cb); };
 export const useFilterDocked = () => useSyncExternalStore(subscribeDock, () => matchMedia(WF_DOCK_QUERY).matches);
 
-// how many tags are on (include + exclude) — the drawer button's count
+// how many tags are on (include + exclude) — the split button's count
 export const useActiveTagCount = (scope: FilterScope = "workshop") =>
   useStore((s) => filterOf(s, scope).include.length + filterOf(s, scope).exclude.length);
 
@@ -142,42 +146,46 @@ export function visibleGroups(groups: Group[], known: Set<string> | null, states
   return out;
 }
 
-// The column's place on a page (Browse, the Library): docked from WF_DOCK_QUERY up — folded away and back with the
-// pill ⇄ title morph (hooks/filterMorph.ts) while the grid glides — else a drawer the "Filters · N" pill opens. `on` = the
-// page shows a column now. Each page folds its own (store filterColHidden / libFilterColHidden).
-// COOL: the docked column slides out / back in (WF_DOCK_MS) and the grid glides by its width instead of jumping — the margin
-// flips at once (the grid re-fits once), `.wf-shift-*` plays the offset back to 0 on transform only (n % 2 alternates two
-// identical keyframes so a quick re-toggle restarts it). Only on a toggle: a tab visit / a resize just shows the column.
-export function useFilterColumn(page: "browse" | "library", on: boolean) {
+// Open or close a page's panel from a user's click (the split button's toggle, the panel's ×). Docked, the grid re-fits its
+// columns to the new width: the row the eye is on (the first card wholly showing) stays where it was, as a pointer-focused
+// card does for the item sidebar (gridKeys.ts keepCardInView). Read on the click, the layout is clean. Guard: probe-filters
+// lib:interplay
+export function setFiltersFromClick(page: FilterPage, open: boolean) {
+  if (matchMedia(WF_DOCK_QUERY).matches) {
+    const sc = document.querySelector<HTMLElement>(page === "library" ? ".lib-scroll" : ".app > .scroll:not(.lib-scroll)");
+    const top = sc?.getBoundingClientRect().top ?? 0;
+    for (const c of sc?.querySelectorAll<HTMLElement>(".grid > .card [data-morph-id]") ?? []) {
+      if (c.getBoundingClientRect().top < top - 1) continue;
+      keepCardInView(sc!, c.dataset.morphId!);
+      break;
+    }
+  }
+  useStore.getState().setFiltersOpen(page, open);
+}
+// The filter panel's place on a page (Browse, the Library): on the right, docked beside the grid from WF_DOCK_QUERY up (the
+// grid makes room like it does for the item sidebar), else a drawer over the grid. Opened and closed by the top bar's split
+// button (components/SortFilterButton.tsx) and the panel's own ×; one right-hand panel at a time (store setFiltersOpen).
+// `on` = the page offers filters now. `panel` lingers through the exit slide (WF_CLOSE_MS). `entering`: the docked panel
+// slides in only when it's opened — a page that starts with it open (Browse is built on each visit, the kept Library shows
+// again) just shows it; a drawer always slides (it opens only on a click).
+export function useFilterOpen(page: FilterPage, on: boolean) {
+  const docked = useFilterDocked();
+  return useStore((s) => on && (docked ? !(page === "library" ? s.libFilterColHidden : s.filterColHidden) : s.filterDrawer === page));
+}
+export function useFilterPanel(page: FilterPage, on: boolean) {
   const motion = useMotion();
   const docked = useFilterDocked();
-  const colHidden = useStore((s) => (page === "library" ? s.libFilterColHidden : s.filterColHidden));
-  const setColHidden = useStore((s) => s.setFilterColHidden);
-  const dockCol = useLinger(on && docked && !colHidden ? true : null, WF_DOCK_MS, motion);
-  const [shift, setShift] = useState<{ dir: "in" | "out"; n: number } | null>(null);
-  useEffect(() => { if (!shift) return; const t = setTimeout(() => setShift(null), 420); return () => clearTimeout(t); }, [shift]);
-  // the pill ⇄ title morph: snapshot what's being left before the change, fly it onto its counterpart after the commit —
-  // this page's own (the Library's stays in the document while Browse shows)
-  const morphFrom = useRef<MorphSource | null>(null);
-  const el = (what: "open" | "title") => document.querySelector(`[data-wf-${what}][data-wf-page="${page}"]`);
-  const toggleCol = useStableFn(() => {
-    if (motion) {
-      morphFrom.current = snapshot(el(colHidden ? "open" : "title"));
-      setShift((s) => ({ dir: colHidden ? "in" : "out", n: (s?.n ?? 0) + 1 }));
-    }
-    setColHidden(!colHidden, page);
-  });
-  useLayoutEffect(() => {
-    const from = morphFrom.current; morphFrom.current = null;
-    if (from && shift) morph(from, el(shift.dir === "in" ? "title" : "open"));
-  }, [shift]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
-  if (drawerOpen && (docked || !on)) setDrawerOpen(false); // follow during render: a wider window / another source
-  const drawer = useLinger(on && !docked && drawerOpen ? true : null, WF_CLOSE_MS, motion);
-  const openFilters = useStableFn(() => (docked ? toggleCol() : setDrawerOpen(true)));
-  // leaving a page kept mounted (the Library): no drawer and no glide left to replay when it shows again
-  const reset = useCallback(() => { setDrawerOpen(false); setShift(null); }, []);
-  return { docked, open: docked && !colHidden, dockCol, shift, shiftClass: shift ? ` wf-shift-${shift.dir}-${shift.n % 2}` : "",
-    toggleCol, drawer, closeDrawer, openFilters, reset };
+  const open = useFilterOpen(page, on);
+  const panel = useLinger<"dock" | "drawer">(open ? (docked ? "dock" : "drawer") : null, WF_CLOSE_MS, motion);
+  const close = useCallback(() => setFiltersFromClick(page, false), [page]);
+  const [wasOpen, setWasOpen] = useState(open);
+  const [entering, setEntering] = useState(false);
+  if (wasOpen !== open) { setWasOpen(open); setEntering(open && motion); } // follow during render
+  useEffect(() => { if (!entering) return; const t = setTimeout(() => setEntering(false), 400); return () => clearTimeout(t); }, [entering]);
+  // a drawer left open goes when the window docks the panel (the docked state is its own) or the page stops offering
+  // filters, and when the page goes (Browse unmounts; the kept Library hides: a layout effect's cleanup runs then too)
+  const drawerMine = useStore((s) => s.filterDrawer === page);
+  useEffect(() => { if (drawerMine && (docked || !on)) useStore.setState({ filterDrawer: null }); }, [drawerMine, docked, on]);
+  useLayoutEffect(() => () => { setEntering(false); if (useStore.getState().filterDrawer === page) useStore.setState({ filterDrawer: null }); }, [page]);
+  return { docked, open, panel, entering, close };
 }

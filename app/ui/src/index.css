@@ -72,9 +72,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 /* ---- app shell ---- */
 .app { display: flex; flex-direction: column; height: 100vh; position: relative; }
-/* any tiled size: the top bar wraps onto a second row when its controls don't fit (tabs + pills
-   first, then the status / search / sort row) instead of pushing them off the window; nothing in it is fixed-width
-   beyond the tabs. The status has a 0 basis (min 140 px): it fills whatever a row leaves and truncates. */
+/* one row from 761 px up (§ narrow windows: the source pills scroll, the controls fold to icons); narrower it wraps onto a
+   second row (tabs + pills first, then the status / search / sort row) instead of pushing them off the window. The status
+   has a 0 basis: it fills whatever the row leaves and truncates. */
 .topbar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px;
   /* PERF: the item sidebar, the filter column and their scrims start at its bottom edge through anchor() — it changes
@@ -116,16 +116,16 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 }
 .search:hover, .search:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
 
-/* pills keep their natural one-row width while their row has room (the top bar wraps first); only a pill row wider
-   than the whole window wraps inside itself. The status (flex: 1000 1 0, min-width 140) takes the squeeze. */
+/* below 761 px (the top bar wraps there) pills keep their natural one-row width while their row has room; only a pill row
+   wider than the whole window wraps inside itself. From 761 px up their strip scrolls instead (§ narrow windows). */
 .pills { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
 .pill {
   padding: 6px 12px; border-radius: 999px; color: var(--subtext); font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: all .15s, box-shadow .2s;
 }
-.pill:hover, .pill.hover-hold { color: var(--text); box-shadow: var(--glow-sm); }
+.pill:hover { color: var(--text); box-shadow: var(--glow-sm); }
 .pill.active { color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
-.pill.active:hover, .pill.active.hover-hold { box-shadow: var(--glow); }
+.pill.active:hover { box-shadow: var(--glow); }
 
 /* ---- the segmented control (components/Segmented.tsx): every "pick one of a few" switch ----
    COOL: equal-width options in a grid, so the one accent highlight (`.seg-hl`) moves on transform alone — 1/n of the track
@@ -252,6 +252,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 
 
 /* Playing card border = green; gentle green glow pulse. */
+/* TRIAL (#11): the grow/shrink pulse below repaints the card's shadow every frame (~240/s at 240 Hz, idle too); the trial
+   holds the outer glow still at its middle size and pulses a lit rim INSIDE the border by opacity alone (its own layer:
+   the compositor runs it, no main-thread frame). Inside, because .card's content-visibility paint-contains it: a layer
+   outside the card would be clipped. Restore the commented rules to compare.
 @keyframes pulse-glow {
   0%,100% { box-shadow: 0 0 0 2px var(--success), 0 0 12px -3px var(--success); }
   50%     { box-shadow: 0 0 0 2px var(--success), 0 0 22px -1px var(--success); }
@@ -749,15 +753,31 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .st-use { transition: none; }
 :root.no-glow .st-use:hover:not(:disabled) { filter: none; }
 
-/* ---- Workshop: the sort row above the grid (sort + period; "Filters · N" while the filter column is a drawer) ---- */
-.wfilter { position: relative; display: flex; gap: 8px; align-items: center; margin-bottom: var(--gap); flex-wrap: wrap; }
-/* a local scope's row (the Library, the WE folder) holds only the pill: it keeps the pill's height while the pill is up in the
-   docked column, so a fold / unfold never moves the grid (1lh at the pill's 13 px + its 6 px padding twice) */
-.wfilter.wf-local { font-size: 13px; min-height: calc(1lh + 12px); }
 /* nothing in the list passes the filter (Library.tsx, Browse.tsx) */
 .wf-none { display: grid; justify-items: center; gap: 12px; padding: 12vh 16px; color: var(--muted); animation: side-rise-sm .25s ease-out; }
 :root.bg-live .wf-none > span { filter: drop-shadow(0 0 3.5px #000); }
-.wf-open { display: inline-flex; align-items: center; gap: 6px; }
+/* ---- the top bar's split button: the filter panel's toggle + the sort (components/SortFilterButton.tsx) ----
+   One control of two halves sharing the select's frame: the left half's own border stops where the sort's left border
+   draws the divider. COOL: the toggle fills with the accent (its small glow) while the panel is open; the count is an accent
+   chip (inverted on the lit toggle) that pops when it changes and shrinks away at 0. */
+.ss-split { flex: none; display: inline-flex; align-items: stretch; }
+.ss-filter { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--subtext);
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); border-right: 0;
+  border-radius: 8px 0 0 8px; transition: background-color .15s, border-color .15s, color .15s, box-shadow .2s; }
+.ss-split.filter-only .ss-filter { border-right: 1px solid var(--surface1); border-radius: 8px; }
+.ss-filter:hover, .ss-filter.active { color: var(--text); }
+.ss-filter:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.ss-filter.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
+.ss-filter.on:hover { box-shadow: var(--glow); }
+.ss-n { min-width: 18px; padding: 0 5px; border-radius: 999px; line-height: 17px; font-size: 11px; font-weight: 800; text-align: center;
+  font-variant-numeric: tabular-nums; color: var(--accent-fg); background: var(--accent); box-shadow: var(--glow-sm); }
+.ss-filter.on .ss-n { color: var(--accent); background: var(--accent-fg); box-shadow: none; }
+.ss-n.pop { animation: icon-pop var(--spring-dur) var(--spring); }
+.ss-n.out { animation: ss-n-out .17s cubic-bezier(.55, 0, .8, .2) forwards; }
+@keyframes ss-n-out { to { transform: scale(.5); opacity: 0; } }
+.ss-split:not(.sort-only) .ss-sort { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.ss-sort { gap: 7px; }
+.ss-sort-ico { flex: none; opacity: .8; }
 /* ---- custom dropdown (Select.tsx) — app-controlled, translucent ---- */
 .sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1);
@@ -1041,6 +1061,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
 :root.no-glow .side-chip > svg.lucide, :root.no-glow .side-sub-ico.subscribed > svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
+:root.no-glow :is(.ss-filter, .ss-filter.on, .ss-filter:hover, .ss-n) { box-shadow: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
@@ -1050,8 +1071,8 @@ input[type=range]:focus-visible { outline: none; }
    The tab pill jumps, the page appears in place, the playlist bar's hovered item lifts without easing and its
    neighbours stay put; the item sidebar appears / leaves / switches without sliding or fading. */
 :root.no-motion .tab-pill, :root.no-motion .seg-hl { transition: none; }
-:root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim, :root.no-motion .scroll[class*="wf-shift"] > *,
-:root.no-motion .wf-open .wf-chev { animation: none !important; transition: none !important; }
+:root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim,
+:root.no-motion :is(.ss-filter, .ss-n) { animation: none !important; transition: none !important; }
 :root.no-motion .side-panel, :root.no-motion .side-panel *, :root.no-motion .side-scrim { animation: none !important; transition: none !important; }
 :root.no-motion .app > .scroll { animation: none; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
@@ -1395,68 +1416,45 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 }
 
-/* ---- the Workshop filter column (components/WorkshopFilterColumn.tsx; docs/decisions.md § "Filter the Workshop in a column
-   of three-way switches"). Docked left of the grid from 1100 px (WF_DOCK_QUERY — the grid gets a
-   margin-left, its columns re-fit, like the item sidebar's margin-right), a drawer over the grid with a scrim below that.
+/* ---- the filter panel (components/WorkshopFilterColumn.tsx; docs/decisions.md § "Filter the Workshop in a column of
+   three-way switches", its placement). On the right, under the top bar's split button,
+   where the item sidebar docks (one of the two at a time: store setFiltersOpen), and in its shape: docked from 900 px
+   (WF_DOCK_QUERY) as wide as the sidebar (--side-w; the grid gets the same margin-right and re-fits its columns, so a swap
+   between the two moves no card), floating over the grid with a scrim below that.
    Calm by design (40 switches must not look like a mixing desk): an untouched row's switch is faint — no fill, muted
    glyphs, half opacity — and only the active segment of an include / exclude row is coloured (accent / danger). */
-.app { --wf-w: 240px; }
-.wf-col { position: absolute; top: anchor(--topbar bottom, 56px); left: 0; bottom: 0; width: var(--wf-w); z-index: 30;
+.wf-col { position: absolute; top: anchor(--topbar bottom, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 30;
   display: flex; flex-direction: column; overflow: hidden;
   background:
-    radial-gradient(300px 240px at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
+    radial-gradient(300px 240px at 100% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
     color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
-  border-right: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface0)); }
-/* only the shown page's column docks: the Library's stays mounted while another tab shows (App.tsx `data-page`) */
+  border-left: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface0)); }
+/* only the shown page's panel docks: the Library's stays mounted while another tab shows (App.tsx `data-page`) */
 .app[data-page="browse"]:has(> .wf-col[data-wf-page="browse"][data-mode="dock"]:not(.closing)) > .scroll,
-.app[data-page="library"]:has(> .wf-col[data-wf-page="library"][data-mode="dock"]:not(.closing)) > .scroll { margin-left: var(--wf-w); }
-/* the Library's docked column ends where its grid does, above the playlist bar (index.css .lib-scroll); the bar keeps its
-   full width, so a fold never resizes it */
+.app[data-page="library"]:has(> .wf-col[data-wf-page="library"][data-mode="dock"]:not(.closing)) > .scroll { margin-right: var(--side-w); }
+/* the Library's docked panel ends where its grid does, above the playlist bar (index.css .lib-scroll); the bar keeps its
+   full width, so opening or closing the panel never resizes it */
 .wf-col[data-wf-page="library"][data-mode="dock"] { bottom: var(--playlist-bar-h, 60px); }
-/* COOL: docked fold / unfold (Browse.tsx toggleCol): the column slides off its edge and back with a hint of overshoot; the grid
-   (its margin already flipped) plays its old offset back to 0 — transform only, no fill (a transform left on these would trap
-   their fixed-position descendants) */
-.wf-col[data-mode="dock"].entering { animation: wf-dock-in .34s cubic-bezier(.2, 1.12, .36, 1); }
-.wf-col[data-mode="dock"].closing { animation: wf-dock-out .22s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
-@keyframes wf-dock-in { from { transform: translateX(-100%); opacity: .25; } }
-@keyframes wf-dock-out { to { transform: translateX(-100%); opacity: .25; } }
-.scroll.wf-shift-out-0 > *, .scroll.wf-shift-out-1 > * { animation: wf-glide-out-a .34s cubic-bezier(.2, 1, .36, 1); }
-.scroll.wf-shift-out-1 > * { animation-name: wf-glide-out-b; }
-.scroll.wf-shift-in-0 > *, .scroll.wf-shift-in-1 > * { animation: wf-glide-in-a .34s cubic-bezier(.2, 1, .36, 1); }
-.scroll.wf-shift-in-1 > * { animation-name: wf-glide-in-b; }
-@keyframes wf-glide-out-a { from { transform: translateX(var(--wf-w)); } }
-@keyframes wf-glide-out-b { from { transform: translateX(var(--wf-w)); } }
-@keyframes wf-glide-in-a { from { transform: translateX(calc(-1 * var(--wf-w))); } }
-@keyframes wf-glide-in-b { from { transform: translateX(calc(-1 * var(--wf-w))); } }
-/* the pill's chevron points where the column goes: left while it's out (fold it), right while folded (bring it back) */
-.wf-open .wf-chev { margin-left: -2px; opacity: .75; transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
-.wf-open:not(.open) .wf-chev { transform: rotate(180deg); }
-/* the docked title IS the pill (hooks/filterMorph.ts): it carries the pill's own classes (`pill ico wf-open`) — no type or shape
-   of its own — so the ghost flies between two identical buttons and never stretches or changes font (no `.wf-title` type
-   rule may reach it) */
-.wf-title-btn { flex: none; }
-/* folding: the ghost carries the title down to the pill — the column sliding out must not take a second copy with it (it
-   would read as a duplicate button, the old one quietly sliding out) */
-.wf-col.closing [data-wf-title] { visibility: hidden; transition: none; }
-.wf-morph { display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
-.wf-col[data-mode="drawer"] { width: min(280px, 88vw); z-index: 46; outline: none;
-  border-right-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));
-  box-shadow: 14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
-  animation: wf-in .3s cubic-bezier(.2, 1.15, .36, 1); }
-.wf-col[data-mode="drawer"].closing { animation: wf-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+/* COOL: the item sidebar's motion, exactly (its keyframes, durations and curves — `.side-panel`): opened, it slides in from
+   the right with the springy overshoot, closed it slides back out to the right, quicker (WF_CLOSE_MS = SIDE_CLOSE_MS);
+   transform + opacity only. A page that starts with it docked just shows it (workshopFilter.ts `entering`). Swapped with the
+   sidebar, each plays its own over the same margin: the sidebar (z 40) slides over or off the panel (z 30). Guard:
+   probe-filters motion:match, panel:right, swap:* */
+.wf-col.entering, .wf-col[data-mode="drawer"] { animation: side-in .32s cubic-bezier(.2, 1.22, .36, 1); }
+.wf-col.closing { animation: side-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+.wf-col[data-mode="drawer"] { z-index: 46; outline: none;
+  border-left-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));
+  box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm); }
 .wf-scrim { position: absolute; inset: anchor(--topbar bottom, 56px) 0 0 0; z-index: 45; background: rgba(0,0,0,.4); animation: side-fade .2s ease-out; }
 .wf-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
-@keyframes wf-in { from { transform: translateX(-40px); opacity: 0; } }
-@keyframes wf-out { to { transform: translateX(-32px); opacity: 0; } }
 .wf-top { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 8px 9px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
-.wf-title { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 800; letter-spacing: .7px;
-  text-transform: uppercase; color: var(--accent); }
+.wf-title { font-size: 12px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; color: var(--accent); }
 .wf-clear { margin-left: auto; padding: 4px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; color: var(--subtext);
   transition: color .12s, background .12s, box-shadow .2s; }
 .wf-clear:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--surface0) 70%, transparent); box-shadow: var(--glow-sm); }
 .wf-clear:disabled { opacity: .4; cursor: default; }
-.wf-close { flex: none; }
+.wf-close { flex: none; margin-left: -2px; }
 .wf-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 10px 8px 16px; }
 /* a group: a soft card; one with active tags gets an accent edge */
 .wf-grp { position: relative; padding: 2px 4px 5px; border-radius: 11px;
@@ -1510,17 +1508,44 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .wf-fm.idle .wf-fm-seg[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); box-shadow: none; }
 /* live wallpaper behind the tabs: like the item sidebar — the docked column has no fill (--tr-side 0 %), its groups hold the
    darkness and the head's title gets the subtitle shadow; the drawer floats over cards, so it keeps a fill */
-:root.bg-live .wf-col[data-mode="dock"] { background: transparent; border-right-color: transparent; }
+:root.bg-live .wf-col[data-mode="dock"] { background: transparent; border-left-color: transparent; }
 :root.bg-live .wf-grp { background: color-mix(in srgb, var(--bg-crust) 72%, transparent); border-color: var(--surface1); }
 :root.bg-live .wf-col[data-mode="dock"] .wf-top { border-bottom-color: transparent; }
 :root.bg-live .wf-title, :root.bg-live .wf-clear { filter: drop-shadow(0 0 3.5px #000); }
 :root.bg-live .wf-col[data-mode="drawer"] { background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); }
 
 /* ---- narrow windows (any tiled size) ---- */
+/* from 761 px up the top bar never wraps (docs/decisions.md § "Filter the Workshop in a column of three-way switches", its
+   placement): Browse's source pills scroll sideways in their strip (components/SourcePills.tsx) and give way first, the search
+   down to 120 px, the status truncates; below 1280 px the sort folds to its icon, below 1000 px Import / Undo / Stop to theirs
+   (their names in the tooltip — hooks/useTopbarCompact.ts, the same widths). Guard: probe-filters split:noWrap:*, probe-layout resize:* */
+@media (min-width: 761px) {
+  .topbar { flex-wrap: nowrap; }
+  .topbar > .pills { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; }
+  .pill-strip + .mini { margin-left: 10px; }
+}
+/* the strip's padding (cancelled by its margin) leaves the active pill's glow room inside the scroll box; the edge a pill
+   hides behind fades out (SourcePills.tsx sets data-more-l / -r from its scroll and resize callbacks) */
+.pill-strip { display: flex; gap: 6px; min-width: 110px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  padding: 10px; margin: -10px; }
+.pill-strip > .pill { flex: none; white-space: nowrap; }
+.pill-strip::-webkit-scrollbar { display: none; }
+.pill-strip[data-more-l] { mask-image: linear-gradient(90deg, transparent 6px, #000 34px); }
+.pill-strip[data-more-r] { mask-image: linear-gradient(90deg, #000 calc(100% - 34px), transparent calc(100% - 6px)); }
+.pill-strip[data-more-l][data-more-r] { mask-image: linear-gradient(90deg, transparent 6px, #000 34px, #000 calc(100% - 34px), transparent calc(100% - 6px)); }
+@media (max-width: 1279.98px) {
+  .topbar { gap: 8px 10px; }
+  .status { min-width: 0; }
+  .ss-sort { min-width: 0; }
+  .ss-sort .sel-val { display: none; }
+}
+@media (max-width: 999.98px) {
+  .topbar .tb-label { display: none; }
+}
 /* below 760 px the source pills join the top bar's own rows (each wraps on its own, the search fills a row's end)
    instead of a pill block that spans the width */
 @media (max-width: 760px) {
-  .topbar > .pills:not(.level-pills) { display: contents; }
+  .topbar > .pills:not(.level-pills), .pill-strip { display: contents; }
 }
 @media (max-width: 640px) {
   .topbar { padding: 8px 10px; gap: 6px 8px; }

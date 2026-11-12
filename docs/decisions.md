@@ -223,7 +223,7 @@ A click focuses (the sidebar); double-click, Enter or the hover button downloads
 library has no download button: it would only apply the library's copy. `components/Card.tsx`.
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
-Owner: "make it so we can filter on library and wallpaper engine local too, cuz why not". The same column, chips and
+Owner: "make it so we can filter on library and wallpaper engine local too, cuz why not". The same column, toggle, chips and
 semantics as the Workshop's (`WorkshopTags.Build`), matched in the page against what each item knows: its saved Steam tags,
 else its project.json's genres, age rating and declared features, read at library load (cached by write time), never
 written to the index (Steam updates the file under a `local/<id>` link; old index files need nothing). Each list keeps its
@@ -233,9 +233,15 @@ Not a backend `/library` filter: the page already holds every item, and a reques
 `components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
 
 ### Filter the Workshop in a column of three-way switches — 2026-11-11
-The owner picked Wallpaper Engine's left filter column over dropdowns and chips. Each tag is include / off / hide;
+The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide;
 clicking the name toggles include only, because a cycle through hide surprised users ("users are gonna assume … it
 toggles left to right"), so hiding is always deliberate (✕ or right-click). `components/WorkshopFilterColumn.tsx`.
+Placement (2026-11-12, the owner's pick from live mockups): the column sits on the right, one panel at a time with the item
+sidebar and in its shape (its width, its 900 px dock, its slide: a swap moves no card), toggled by the left half of a split
+sort button in the top bar (`components/SortFilterButton.tsx`); the top bar never wraps for it from 761 px up. It replaced a
+left column folded by a "Filters · N" pill in a row above the grid, which scrolled away with the grid; rejected too: that
+pill in the top bar (it wrapped the bar), an edge handle (it cost grid width), a sticky row (it looked heavy). Guard
+probe-filters `split:*`, `panel:*`, `swap:*`.
 
 ### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12
 The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were "too small"

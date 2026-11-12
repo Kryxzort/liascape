@@ -1,8 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
-import { NoMatch, WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
-import { facetsOf, knownTags, localMatcher, useFilterColumn } from "../components/workshopFilter";
+import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
+import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { LibrarySide } from "../components/LibrarySide";
@@ -72,10 +72,11 @@ export const Library = memo(function Library() {
   const clearTags = useStore((s) => s.clearTags);
   const match = useMemo(() => localMatcher(libFilter), [libFilter]);
   const known = useMemo(() => knownTags(items, (i) => i.videoPath), [items]);
-  const col = useFilterColumn("library", true);
-  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection (and a drawer), its grid stays
-  // where it was
-  useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; col.reset(); });
+  // the filter panel (its toggle is the top bar's split button, App.tsx)
+  const col = useFilterPanel("library", items.length > 0);
+  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection (and a drawer: useFilterPanel),
+  // its grid stays where it was
+  useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
 
   // PERF: one predicate per filter change and each item's facets computed once (workshopFilter.ts facetsOf) — no per-card work
   const filtered = useMemo(() => {
@@ -202,9 +203,7 @@ export const Library = memo(function Library() {
 
   return (
     <>
-    {col.docked && col.dockCol.value && <WorkshopFilterColumn mode="dock" scope="library" known={known} closing={col.dockCol.closing} entering={col.shift?.dir === "in"} onFold={col.toggleCol} />}
-    <div className={`scroll lib-scroll${col.shiftClass}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
-      <WorkshopSortRow scope="library" drawer={!col.docked} open={col.open} onOpenFilters={col.openFilters} />
+    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {match && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid">
         {filtered.map((it) => (
@@ -218,7 +217,7 @@ export const Library = memo(function Library() {
         ))}
       </div>
     </div>
-    {!col.docked && col.drawer.value && <WorkshopFilterColumn mode="drawer" scope="library" known={known} closing={col.drawer.closing} onClose={col.closeDrawer} />}
+    {col.panel.value && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
     {sideItem && (() => {
       const targets = targetsFor(sideItem);
       return (

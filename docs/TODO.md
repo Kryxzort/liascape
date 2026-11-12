@@ -17,11 +17,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
-26. [ ] Filters move into a split sort button in the top bar (owner picked it from live mockups): `⚟ N │ Newest ▾` on
-       Library and Browse replaces the scrolling sort / "Filters · N" row (Browse's period joins the sort menu). The
-       filter half is the panel's only toggle (accent while open, count when active); the panel header is a plain
-       "Filters" title + Clear all + close (no pill, no morph); the panel slides in from the right and swaps with the
-       item sidebar (one right-hand panel at a time). Narrow windows: the sort half shrinks to an icon, never wraps.
 27. [ ] A live card preview in Settings for every card-related setting (owner): 2–3 real library items drawn with the real
        card component (one with a GIF, one video-only, one with both if any), pinned beside the card settings in Look &
        feel and shown only while those rows are on screen; reflects thumbnail shape, card size, GIF / video previews,

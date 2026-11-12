@@ -1,8 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { filterOf, useStore } from "../store";
 import { Card } from "../components/Card";
-import { NoMatch, WorkshopFilterColumn, WorkshopSortRow } from "../components/WorkshopFilterColumn";
-import { LIBRARY_TAG, facetsOf, knownTags, localMatcher, useFilterColumn } from "../components/workshopFilter";
+import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
+import { LIBRARY_TAG, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
@@ -159,16 +159,13 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId }));
 
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
-  // the filter column: docked from WF_DOCK_QUERY up, a drawer below (the sort row's "Filters · N" opens it)
-  const col = useFilterColumn("browse", !!scope);
+  // the filter panel: docked from WF_DOCK_QUERY up, a drawer below (its toggle is the top bar's split button, App.tsx)
+  const col = useFilterPanel("browse", !!scope);
   const sideW = shown.value && kept?.pageUrl === shown.value ? kept : null;
 
   return (
     <>
-    {/* keyed by scope: another source's column is another list's — its groups fade in fresh (index.css .wf-body) */}
-    {scope && col.docked && col.dockCol.value && <WorkshopFilterColumn key={scope} mode="dock" scope={scope} known={known} closing={col.dockCol.closing} entering={col.shift?.dir === "in"} onFold={col.toggleCol} />}
-    <div className={`scroll${col.shiftClass}`} ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
-      {scope && <WorkshopSortRow scope={scope} drawer={!col.docked} open={col.open} onOpenFilters={col.openFilters} />}
+    <div className="scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       <div className="grid">
           {sorted.map((w) => (
@@ -197,7 +194,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
         </div>
       )}
     </div>
-    {scope && !col.docked && col.drawer.value && <WorkshopFilterColumn key={scope} mode="drawer" scope={scope} known={known} closing={col.drawer.closing} onClose={col.closeDrawer} />}
+    {/* keyed by scope: another source's column is another list's — its groups fade in fresh (index.css .wf-body) */}
+    {scope && col.panel.value && <WorkshopFilterColumn key={scope} mode={col.panel.value} scope={scope} known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
     {sideW && (
       <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}

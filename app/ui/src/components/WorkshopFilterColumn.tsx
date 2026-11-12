@@ -1,11 +1,10 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
-import { Check, ChevronDown, Dot, SlidersHorizontal, ChevronLeft, X } from "lucide-react";
+import { Check, ChevronDown, Dot, X } from "lucide-react";
 import { filterOf, useStore, type FilterScope, type TagState } from "../store";
-import { Select } from "./Select";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
-import { PERIODS, SORTS, groupsFor, useActiveTagCount, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
+import { groupsFor, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
 
-// COOL: the filter column — Wallpaper Engine's left column (docs/decisions.md § "Filter the Workshop in a column of
+// COOL: the filter column — Wallpaper Engine's filter column (docs/decisions.md § "Filter the Workshop in a column of
 // three-way switches"), on the Workshop, on Browse's local Wallpaper Engine folder and on the Library, the same control
 // everywhere (§ "Filter the Library and the local Wallpaper Engine folder in the page"). Every Steam
 // tag is a row: its name + a compact three-way switch [✓ | · | ✕] = include / off / exclude. A click on a segment sets that
@@ -16,8 +15,10 @@ import { PERIODS, SORTS, groupsFor, useActiveTagCount, visibleGroups, type Group
 // switch — genreMatch default any, featureMatch default all —; all groups at once; an excluded tag hides.
 // Calm on purpose (40 switches must not look like a mixing desk): an untouched row's switch is faint (half
 // opacity, no fill, muted glyphs) and only the ACTIVE segment of an include / exclude row carries colour.
-// Docked left of the grid from WF_DOCK_QUERY up (a sibling of `.scroll` in `.app`, like the item sidebar on the right — index.css
-// `.app[data-page]:has(> .wf-col[data-mode=dock])`); narrower it's a drawer the sort row's "Filters · N" button opens over the grid.
+// On the right, where the item sidebar docks (one of the two at a time — store setFiltersOpen): docked beside the grid from
+// WF_DOCK_QUERY up (a sibling of `.scroll` in `.app` — index.css `.app[data-page]:has(> .wf-col[data-mode=dock])`), narrower a
+// drawer over the grid. The top bar's split button (components/SortFilterButton.tsx) is its toggle; its head is a plain title,
+// Clear all and ×.
 
 // a name click is a checkbox label: it toggles INCLUDE (off ↔ ✓; an excluded tag → off). Hiding is always deliberate — the ✕
 // segment or a right-click. (A cycle off → ✓ → ✕ skips over the middle segment, and a left-to-right wrap makes the first click
@@ -116,8 +117,8 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
 const SCOPE_NAME: Record<FilterScope, string> = { workshop: "Workshop", weLocal: "Wallpaper Engine", library: "Library" };
 // PERF: memo'd — the Library re-renders on every selection change (a box-selection drag: one per card it crosses), and
 // the column's ~40 rows must not with it. Guard: probe-select perf:drag
-export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, scope = "workshop", known = null, closing = false, entering = false, onClose, onFold }: {
-  mode: "dock" | "drawer"; scope?: FilterScope; known?: Set<string> | null; closing?: boolean; entering?: boolean; onClose?: () => void; onFold?: () => void;
+export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, scope = "workshop", known = null, closing = false, entering = false, onClose }: {
+  mode: "dock" | "drawer"; scope?: FilterScope; known?: Set<string> | null; closing?: boolean; entering?: boolean; onClose: () => void;
 }) {
   const f = useStore((s) => filterOf(s, scope));
   const clearIn = useStore((s) => s.clearTags);
@@ -136,7 +137,7 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
     panelRef.current?.focus({ preventScroll: true });
     const h = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || document.querySelector(".sel-pop, .modal-backdrop")) return;
-      e.preventDefault(); e.stopImmediatePropagation(); onClose?.();
+      e.preventDefault(); e.stopImmediatePropagation(); onClose();
     };
     addEventListener("keydown", h, true);
     return () => removeEventListener("keydown", h, true);
@@ -145,50 +146,19 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   return (
     <>
       {mode === "drawer" && <div className={`wf-scrim${closing ? " closing" : ""}`} onClick={onClose} />}
-      <aside ref={panelRef} className={`wf-col${closing ? " closing" : ""}${entering ? " entering" : ""}`} data-wf-col data-wf-page={page} data-wf-scope={scope}
+      <aside ref={panelRef} id={`wf-panel-${page}`} className={`wf-col${closing ? " closing" : ""}${entering ? " entering" : ""}`} data-wf-col data-wf-page={page} data-wf-scope={scope}
         data-mode={mode} aria-label={`${SCOPE_NAME[scope]} filters`}
         tabIndex={mode === "drawer" ? -1 : undefined}>
         <div className="wf-top">
-          {/* docked: the title IS the sort row's "Filters · N" pill, morphed up here (hooks/filterMorph.ts) — a click folds the column
-              and it flies back down */}
-          {mode === "dock"
-            ? <button type="button" className={`pill ico wf-open open wf-title-btn${n ? " active" : ""}`} data-wf-title data-wf-page={page} aria-expanded="true" onClick={onFold}>
-                <SlidersHorizontal size={14} /> Filters{n ? ` · ${n}` : ""}<ChevronLeft className="wf-chev" size={14} aria-hidden />
-              </button>
-            : <span className="wf-title"><SlidersHorizontal size={14} /> Filters</span>}
+          <span className="wf-title" data-wf-title>Filters</span>
           <button type="button" className="wf-clear" data-wf-clear disabled={!n} onClick={() => clearIn(scope)}>Clear all</button>
-          {mode === "drawer" && <button type="button" className="mini wf-close" aria-label="Close filters" onClick={onClose}><X size={16} /></button>}
+          <button type="button" className="mini wf-close" data-wf-close aria-label="Close filters" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="wf-scroll" ref={smoothRef}>
           {visibleGroups(groupsFor(scope), known, states).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
         </div>
       </aside>
     </>
-  );
-});
-
-// the row above the grid: the Workshop's sort + period, and the "Filters · N" pill: below the dock breakpoint it opens the
-// drawer; docked and folded it brings the column back — and while the column is out it isn't here at all: it morphed into
-// the column's title (hooks/filterMorph.ts) — one control, never two. A local scope (the Library, the WE folder) has no
-// sort here (theirs is in the top bar); its row keeps the pill's height while empty, so folding never moves the grid.
-export const WorkshopSortRow = memo(function WorkshopSortRow({ drawer, open, onOpenFilters, scope = "workshop" }: { drawer: boolean; open: boolean; onOpenFilters: () => void; scope?: FilterScope }) {
-  const f = useStore((s) => s.browseFilter);
-  const setF = useStore((s) => s.setBrowseFilter);
-  const n = useActiveTagCount(scope);
-  return (
-    <div className={`wfilter${scope === "workshop" ? "" : " wf-local"}`}>
-      {(drawer || !open) && (
-        <button type="button" className={`pill ico wf-open${n ? " active" : ""}`} data-wf-open data-wf-page={scope === "library" ? "library" : "browse"}
-          aria-expanded={drawer ? undefined : false} onClick={onOpenFilters}>
-          <SlidersHorizontal size={14} /> Filters{n ? ` · ${n}` : ""}
-          {!drawer && <ChevronLeft className="wf-chev" size={14} aria-hidden />}
-        </button>
-      )}
-      {scope === "workshop" && <Select value={f.sort} onChange={(v) => setF({ sort: v })} options={SORTS.map(([v, l]) => ({ value: v, label: l }))} />}
-      {scope === "workshop" && f.sort === "trend" && (
-        <Select value={f.trendDays} onChange={(v) => setF({ trendDays: +v })} options={PERIODS.map(([v, l]) => ({ value: String(v), label: l }))} />
-      )}
-    </div>
   );
 });
 

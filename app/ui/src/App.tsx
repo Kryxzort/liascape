@@ -1,7 +1,7 @@
 import { Activity, memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
-import { LocateFixed, RefreshCw, Square, Undo2, Upload } from "lucide-react";
+import { LocateFixed, Square, Undo2, Upload } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
 import { useStore } from "./store";
@@ -13,7 +13,10 @@ import { useMotion } from "./components/motion";
 import { CLIENT_ID } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
-import { Select } from "./components/Select";
+import { SortFilterButton } from "./components/SortFilterButton";
+import { SourcePills } from "./components/SourcePills";
+import { BUTTONS_NARROW, useNarrow } from "./hooks/useTopbarCompact";
+import { WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
 import { Segmented } from "./components/Segmented";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
@@ -33,12 +36,13 @@ const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m
 
 type Tab = "browse" | "library" | "settings";
 const TAB_ORDER: Tab[] = ["browse", "library", "settings"];
-const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
-const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"];
+const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
+const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
 
 export default function App() {
   const s = useStore();
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
+  const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
   // (index.css `.tab-pill`, `.app[data-tab-dir]`; transform + opacity only; :root.no-motion → none). No direction until
   // the first switch, so the app's first page doesn't slide in.
@@ -194,15 +198,7 @@ export default function App() {
             value={levelOf(s.settings?.settingsLevel)} onChange={(l) => s.setSetting("settingsLevel", l)}
             options={LEVELS.map((l) => ({ value: l, label: LEVEL_LABEL[l], attrs: { "data-level": l } }))} />
         )}
-        {tab === "browse" && (
-          <div className="pills">
-            {s.sources.filter((x) => x.available).map((x) => (
-              <button key={x.index} className={`pill${s.activeSource === x.index ? " active" : ""}`}
-                onClick={() => s.setSource(x.index)}>{x.name}</button>
-            ))}
-            <button className="mini" aria-label="Refresh" onClick={() => s.reload()}><RefreshCw size={16} /></button>
-          </div>
-        )}
+        {tab === "browse" && <SourcePills />}
 
         <div className="spacer" />
 
@@ -210,18 +206,20 @@ export default function App() {
         {s.status
           ? <span className="status">{s.status}</span>
           : tab === "library" && <span className="status muted-status">Your downloaded wallpapers</span>}
-        {s.undoDepth > 0 && <button className="btn ghost ico glow-pulse" onClick={() => s.undo()}><Undo2 size={14} /> Undo</button>}
+        {s.undoDepth > 0 && <button className="btn ghost ico glow-pulse" aria-label="Undo" title={narrow ? "Undo" : undefined} onClick={() => s.undo()}><Undo2 size={14} /><span className="tb-label">Undo</span></button>}
 
         {/* Stop — red/danger with a soft glow */}
-        {s.playingPath && <button className="btn danger ico glow-stop" onClick={() => s.stop()}><Square size={14} fill="currentColor" /> Stop</button>}
+        {s.playingPath && <button className="btn danger ico glow-stop" aria-label="Stop" title={narrow ? "Stop" : undefined} onClick={() => s.stop()}><Square size={14} fill="currentColor" /><span className="tb-label">Stop</span></button>}
 
         {tab === "browse" && src?.supportsSearch && (
           <input className="search" placeholder={`Search ${src.name}…`} value={s.query}
             onChange={(e) => s.setQuery(e.target.value)} />
         )}
-        {tab === "browse" && src?.supportsSorting && (
-          <Select value={s.browseSort} onChange={(v) => s.setBrowseSort(+v)}
-            options={BROWSE_SORTS.map((l, i) => ({ value: String(i), label: l }))} />
+        {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}
+        {tab === "browse" && (
+          <SortFilterButton page="browse" scope={s.browseScope()}
+            sort={src?.supportsTagFilter ? { value: wsSortValue(s.browseFilter), options: WS_SORT_OPTIONS, onChange: (v) => s.setBrowseFilter(wsSortPatch(v)) }
+              : src?.supportsSorting ? { value: String(s.browseSort), options: BROWSE_SORTS, onChange: (v) => s.setBrowseSort(+v) } : null} />
         )}
         {tab === "library" && (
           <>
@@ -230,13 +228,13 @@ export default function App() {
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>
               <LocateFixed size={16} /></button>
-            <button className="btn ghost ico" onClick={() => importRef.current?.click()}><Upload size={14} /> Import</button>
+            <button className="btn ghost ico" aria-label="Import" title={narrow ? "Import" : undefined} onClick={() => importRef.current?.click()}><Upload size={14} /><span className="tb-label">Import</span></button>
             <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
               style={{ display: "none" }} onChange={onImportFile} />
             <input className="search" placeholder="Search library…" value={s.libQuery}
               onChange={(e) => s.setLibQuery(e.target.value)} />
-            <Select value={s.libSort} onChange={(v) => s.setLibSort(+v)}
-              options={SORTS.map((l, i) => ({ value: String(i), label: l }))} />
+            <SortFilterButton page="library" scope={s.libraryItems.length ? "library" : null}
+              sort={{ value: String(s.libSort), options: SORTS, onChange: (v) => s.setLibSort(+v) }} />
           </>
         )}
       </div>

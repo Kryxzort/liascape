@@ -1,10 +1,17 @@
-// Workshop filter column probe — `scripts/test-ui-matrix.sh --probe probe-filters.js` (the matrix's hermetic stack; run it with
-// LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb). Wallpaper Engine's left filter column with a
+// Filter panel probe — `scripts/test-ui-matrix.sh --probe probe-filters.js` (the matrix's hermetic stack; run it with
+// LIASCAPE_MATRIX_SCREEN=2560x1440 so the wide sizes fit the private Xvfb). Wallpaper Engine's filter column with a
 // three-way switch per tag and click-to-cycle names (docs/decisions.md § "Filter the Workshop in a column of three-way
-// switches"). The stack has no network: the page's POST /browse
+// switches"), opened from the top bar's split button and on the right (the same entry, its placement).
+// The stack has no network: the page's POST /browse
 // and /detail are stubbed (each page-1 /browse body recorded in window.__browse — later pages in __more —, a fixed list of 24 fake Workshop items returned).
-//   wf:workshopOnly   the Workshop's column shows on it (none on the web sources — the WE folder's: local:weFolder); docked at 1400 px, left of the
-//                     grid (the grid starts at its right edge, no card under it); Features collapsed by default
+//   split:present     the split button `[⚟ N │ sort ▾]` in the top bar: the Library (toggle + its sort), the Workshop (toggle +
+//                     its sort menu with the period in it: "Most Popular · Month" POSTs trend / 30, "Most Recent" mostrecent;
+//                     no second select), the WE folder (toggle + its client sort); a web source has none; no row above any
+//                     grid (no `.wfilter`), the grid starts at the top of its scroll box
+//   split:toggle      the toggle: aria-expanded / aria-controls / aria-label ("Filters", "Filters, 2 on"), the count beside the
+//                     icon with tags on (gone at 0), lit in the accent while the panel is open and not while closed
+//   wf:workshopOnly   the Workshop's column shows on it (none on the web sources — the WE folder's: local:weFolder); docked at 1400 px, right of the
+//                     grid (the grid ends at its left edge, no card under it); Features collapsed by default
 //   wf:cycle          a click on a tag's NAME toggles include (off → include → off; an excluded tag → off); the POSTed include / exclude follow
 //   wf:segments       the switch's segments set include / off / exclude; a radiogroup labelled by the tag, aria-labels
 //                     "Include X" / "Off" / "Hide X", one Tab stop (the checked one), arrow keys step it
@@ -19,36 +26,47 @@
 //   wf:migrate        an old saved filter (type / ageRating / resolution / genres / features) → all includes, once; sort kept
 //   wf:library       the "In my library" row: ✓ = only the owned card, ✕ = all but it, no /browse request for it, never POSTed;
 //                    no download button on the owned card
-//   wf:morphLift     the fold/unfold ghost lifts and glows mid-flight only in proportion to how far it flies (no flash in place)
-//   wf:collapseCol   the docked column's collapse button → gone, the grid's margin too, the pill brings it back; remembered
-//   wf:drawer         below 1100 px: no docked column, "Filters · N" in the sort row opens it as a drawer over the grid with a
-//                     scrim (left edge, inside the window, above the item sidebar); a switch works in it; Escape / the scrim close it
-//   wf:size:<w>x<h>   the nine layout sizes: docked iff ≥ 1100 px, the grid keeps ≥ 240 px (also with the item sidebar open),
-//                     cards inside it, no sideways scroll; narrow: the drawer fits the window
-//   wf:noMotion       "Smooth window animations" off → the drawer opens and closes with no animation; on → it slides (transform
-//                     + opacity only)
-//   wf:noGlow         Glow effects off → an included segment has no glow
+//   panel:head        the panel's head: a plain "Filters" title (no button, no pill), Clear all, a close ×; no ghost copy
+//                     anywhere (the old fold morph is gone); × closes it
+//   panel:right       docked at 1400 px on the right, under the top bar and its button; opened it slides in from the right
+//                     (per frame: transform + opacity only, offsets that pass through in-between values and land on 0), closed
+//                     it slides out right; the grid's margin-right follows; remembered over a reload; a tab visit doesn't replay
+//   panel:persist     each page keeps its own open state over a reload (localStorage libFilterHidden / browseFilterHidden); the
+//                     item sidebar's isn't kept
+//   swap:browse / swap:library  one right-hand panel at a time: a right-click / an arrow key opens the item sidebar and closes the
+//                     filters, the toggle opens the filters and closes the sidebar; each plays its own slide (both animate),
+//                     and no frame shows both docked (per frame) or a grid margin wider than the larger of the two
+//   split:noWrap:<w>  800 / 960 / 1100 / 1920 px, Library and Workshop: the top bar is one row; the sort shows its label from
+//                     1280 px, below it folds to its icon with the label in its tooltip; panel open and closed. Screenshots
+//                     wf-split-<page>-<w>-<open|closed>.png
+//   wf:drawer         below 900 px (the item sidebar's breakpoint): no docked column, the split's toggle opens it as a drawer over the grid with a scrim
+//                     (right edge, inside the window, above the item sidebar); a switch works in it; Escape / the scrim close it
+//   wf:size:<w>x<h>   the nine layout sizes: docked iff ≥ 900 px, the grid keeps ≥ 240 px (also with the item sidebar open,
+//                     which closes the panel), cards inside it, no sideways scroll; narrow: the drawer fits the window
+//   wf:noMotion       "Smooth window animations" off → the drawer and the docked panel open and close with no animation; on →
+//                     they slide (transform + opacity only)
+//   wf:noGlow         Glow effects off → an included segment and the lit toggle have no glow
 //   wf:liveBg         live wallpaper behind the tabs → the docked column has no fill, its groups carry the darkness; the drawer
 //                     keeps a fill
-//   wf:cardSize:<w>x<h> 1920×1080 / 1100×700: the docked column — and the item sidebar opened beside it — changes the column
-//                     count, not the card size (within 5 % of the folded column's, or the closest column count's where none
+//   wf:cardSize:<w>x<h> 1920×1080 / 1100×700: the docked panel — and the item sidebar in its place — changes the column
+//                     count, not the card size (within 5 % of the no-panel one, or the closest column count's where none
 //                     is), no edge gap wider than the grid's gap
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
-//   lib:column        the Library's column docks at 1400 px left of its grid, above the playlist bar (full width); it offers only
+//   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
 //                     what the items know: Age / Type / Genre / Features (no "In my library", no Resolution), Everyone + Mature,
-//                     Anime + Nature; the row above the grid has the pill only (no Workshop sort)
+//                     Anime + Nature; no row above the grid
 //   lib:filter        include / exclude / age (untagged out under any age filter) / genre any → all / features all, from the
 //                     page: the cards follow, no /browse request; nothing left → "No wallpapers match" + Clear filters
 //   lib:scope         the Library's filter and the Workshop's never mix (each column, the POST, localStorage); both kept over a reload
 //   lib:interplay     Ctrl+A / the arrows reach only shown cards; a filter change drops hidden cards from the selection and
 //                     starts the grid at its top; a tab visit keeps the view; the playlist bar is untouched; over 300+ cards a
 //                     filter change re-renders the Library and its column, never the cards that stay (React's commit hook)
-//   lib:fold          the Library folds its own column (Browse's stays), the pill ⇄ title morph, the grid doesn't move down;
-//                     remembered; motion off → no ghost, no slide
-//   lib:drawer        below 1100 px the Library's pill opens its drawer; a switch works in it; Escape closes; a tab visit closes it
+//   lib:fold          the Library's toggle closes its own panel (Browse's stays), the grid doesn't move down; remembered;
+//                     motion off → no slide
+//   lib:drawer        below 900 px the Library's toggle opens its drawer; a switch works in it; Escape closes; a tab visit closes it
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
-//                     (no filter POSTed), "In my library" too, its own saved filter; no Workshop sort in its row
+//                     (no filter POSTed), "In my library" too, its own saved filter; its client sort in the split, no Workshop sort
 // Screenshots: <LIASCAPE_OUT>/wf-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -96,6 +114,19 @@ const PAGE = `window.__wf = {
   q(sel) { return [...document.querySelectorAll(sel)].find((e) => e.checkVisibility()) ?? null; },
   qa(sel) { return [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility()); },
   col() { return this.q(".wf-col:not(.closing)"); },
+  // the top bar's split button (one: the shown page's) and its filter toggle
+  split() { return this.q("[data-sortsplit]"); },
+  tog() { return this.q("[data-sortsplit] [data-wf-toggle]"); },
+  isOpen() { return this.tog()?.getAttribute("aria-expanded") === "true"; },
+  // the panel open (want) or closed through the toggle; false = no toggle
+  async open(want = true) { const t = this.tog(); if (!t) return false; if (this.isOpen() !== want) { t.click(); await this.sleep(450); } return true; },
+  // docked widths: the panel open (a cell before may have closed it — an item sidebar does)
+  async ensure() { if (innerWidth >= 900) await this.open(true); },
+  accent() { const e = document.createElement("i"); e.style.background = "var(--accent)"; document.body.append(e); const c = getComputedStyle(e).backgroundColor; e.remove(); return c; },
+  // a sort menu's options (opens and closes the split's select)
+  async sortOpts() { const b = this.q("[data-sortsplit] .ss-sort"); if (!b) return null; b.click(); await this.sleep(150);
+    const o = [...document.querySelectorAll(".sel-pop .sel-opt")].map((x) => x.textContent.trim()); document.querySelector(".sel-backdrop")?.click(); await this.sleep(100); return o; },
+  async pickSort(label) { this.q("[data-sortsplit] .ss-sort").click(); await this.sleep(150); this.byText(".sel-pop .sel-opt", label)?.click(); await this.sleep(150); },
   row(tag) { return [...(this.col()?.querySelectorAll(".wf-row") ?? [])].find((r) => r.dataset.wfTag === tag); },
   st(tag) { return this.row(tag)?.dataset.state ?? null; },
   seg(tag, s) { return this.row(tag)?.querySelector('[data-seg="' + s + '"]'); },
@@ -137,7 +168,7 @@ async function source(name) {
   for (let i = 0; i < 60; i++) { if (await page(`return m.cards() > 0 || !${J(name)}.includes("Workshop");`)) break; await sleep(100); }
   await sleep(300);
 }
-async function toWorkshop() { await tab("Browse"); await source(wsName); }
+async function toWorkshop(open = true) { await tab("Browse"); await source(wsName); if (open) await page(`await m.ensure();`); }
 async function shot(name) { const img = await win.webContents.capturePage(); const f = path.join(OUT, `wf-${name}.png`); fs.writeFileSync(f, img.toPNG()); return f; }
 async function resize(w, h) {
   win.setContentSize(w, h);
@@ -205,27 +236,28 @@ app.whenReady().then(async () => {
       // the local Wallpaper Engine folder has its own column (local:weFolder)
       for (const n of srcs.filter((s) => s.available && !s.supportsTagFilter && !s.supportsLocalFilter).map((s) => s.name)) {
         await source(n);
-        if (await page(`return !!m.q(".wf-col, [data-wf-open]");`)) v.push(`the filter column / button shows for ${n}`);
+        if (await page(`return !!m.q(".wf-col, [data-sortsplit]");`)) v.push(`the filter column / split button shows for ${n}`);
       }
       await source(wsName);
       const r = await page(`const c = m.col(); if (!c) return null; const sc = m.q(".scroll");
         const cards = [...sc.querySelectorAll(".card")].slice(0, 30).map((x) => x.getBoundingClientRect()).filter((b) => b.width);
-        return { mode: c.dataset.mode, c: m.rect(c), s: m.rect(sc), under: cards.filter((b) => b.left < m.rect(c).r - 1).length,
+        return { mode: c.dataset.mode, c: m.rect(c), s: m.rect(sc), W: innerWidth, under: cards.filter((b) => b.right > m.rect(c).x + 1).length,
           groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup),
           featRows: m.grp("features")?.querySelectorAll(".wf-row").length ?? -1, genreRows: m.grp("genre")?.querySelectorAll(".wf-row").length ?? -1,
-          subs: [...(m.grp("resolution")?.querySelectorAll(".wf-sub") ?? [])].map((x) => x.textContent), open: !!m.q("[data-wf-open]"),
+          subs: [...(m.grp("resolution")?.querySelectorAll(".wf-sub") ?? [])].map((x) => x.textContent), row: !!m.q(".wfilter"),
           cards: m.cards(), title: document.title };`);
       if (!r) return [...v, "no filter column on the Workshop source"];
-      console.log(`        ${J({ mode: r.mode, c: r.c, sLeft: r.s.x, groups: r.groups, subs: r.subs, cards: r.cards })}`);
+      console.log(`        ${J({ mode: r.mode, c: r.c, sRight: r.s.r, groups: r.groups, subs: r.subs, cards: r.cards })}`);
       if (r.mode !== "dock") v.push(`at 1400 px the column is "${r.mode}", not docked`);
-      if (r.c.x > 0.5 || r.c.w < 200 || r.c.w > 260) v.push(`the column sits at x ${r.c.x}, ${r.c.w} px wide (≈ 240 at the left edge)`);
-      if (r.s.x < r.c.r - 1) v.push(`the grid starts at ${r.s.x}, under the column (its right edge ${r.c.r})`);
+      const sideW = Math.min(400, Math.max(300, 0.26 * r.W)); // the item sidebar's width (index.css --side-w)
+      if (Math.abs(r.c.r - r.W) > 0.5 || Math.abs(r.c.w - sideW) > 1) v.push(`the column spans ${r.c.x}–${r.c.r}, ${r.c.w} px wide (want the item sidebar's ${sideW} at the right edge of ${r.W})`);
+      if (r.s.r > r.c.x + 1) v.push(`the grid ends at ${r.s.r}, under the column (its left edge ${r.c.x})`);
       if (r.under) v.push(`${r.under} cards under the column`);
       if (J(r.groups) !== J(["library", "age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
       if (r.featRows !== 0) v.push(`Features isn't collapsed by default (${r.featRows} rows)`);
       if (r.genreRows < 20) v.push(`${r.genreRows} genre rows`);
       if (J(r.subs) !== J(["Standard", "Ultrawide", "Dual", "Triple", "Portrait", "Other"])) v.push(`resolution sub-headings ${J(r.subs)}`);
-      if (r.open) v.push("docked, but the sort row still has the Filters pill (it morphed into the column's title)");
+      if (r.row) v.push("a sort / filter row above the grid (.wfilter)");
       if (!r.cards) v.push("no cards (the /browse stub didn't serve the list)");
       if (await page(`return !!m.q(".wf-col [title]");`)) v.push("a tooltip in the column");
       await shot("wide");
@@ -414,14 +446,14 @@ app.whenReady().then(async () => {
       const want = ["Scene", "Everyone", "1920 x 1080", "Anime", "Nature", "HDR"];
       const r = await page(`return { inc: [...m.qa('.wf-col .wf-row[data-state="inc"]')].map((x) => x.dataset.wfTag),
         exc: m.qa('.wf-col .wf-row[data-state="exc"]').length, saved: JSON.parse(localStorage.getItem("liascape.browseFilter")), last: m.last(),
-        sort: m.q(".wfilter .sel .sel-val")?.textContent };`);
+        sort: m.q("[data-sortsplit] .ss-sort .sel-val")?.textContent };`);
       // HDR sits in Features — collapsed or not, its count says it
       const visible = want.filter((t) => t !== "HDR" || r.inc.includes("HDR"));
       for (const t of visible) if (!r.inc.includes(t)) v.push(`${t} isn't included after the migration`);
       if (r.exc) v.push(`${r.exc} excluded rows after the migration`);
       if (!r.last || !sameSet(r.last.filter.include, want) || r.last.filter.exclude.length) v.push(`the POST: ${J(r.last?.filter)}`);
       if (r.last?.filter.sort !== "toprated" || r.last?.filter.trendDays !== 30) v.push(`sort ${r.last?.filter.sort} / ${r.last?.filter.trendDays} not kept`);
-      if (r.sort !== "Top Rated") v.push(`the sort Select shows "${r.sort}"`);
+      if (r.sort !== "Top Rated") v.push(`the split's sort shows "${r.sort}"`);
       if (!r.saved || "genres" in r.saved || "type" in r.saved || !sameSet(r.saved.include ?? [], want)) v.push(`saved after the migration: ${J(r.saved)}`);
       // once: a reload reads the new shape as it is (an exclude added after the migration stays)
       await page(`m.seg("Anime", "exc").click(); await m.sleep(500);`);
@@ -465,138 +497,359 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("wf:morphLift", async () => {
-      // the ghost's mid-flight lift and accent glow scale with how far it flies: docked, the title sits a few px from where the
-      // pill lands, and a full lift over no distance flashes the pill in place (swells + glows) instead of moving it
+    // ---- the split button and the panel on the right ----
+    await cell("split:present", async () => {
       const v = [];
-      if (!(await page(`return !!m.q(".wf-col[data-mode=dock]:not(.closing) [data-wf-title]");`))) { v.push("no docked column title (window too narrow?)"); return v; }
-      const k = await page(`m.q("[data-wf-title]").click(); await m.sleep(30);
-        const g = m.q(".wf-morph"); const a = g?.getAnimations().find((x) => x.effect.getKeyframes().length === 3);
-        if (!a) return null; const f = a.effect.getKeyframes();
-        const end = new DOMMatrixReadOnly(f[2].transform), mid = new DOMMatrixReadOnly(f[1].transform);
-        return { dist: Math.hypot(end.e, end.f), midScale: mid.a / ((1 + end.a) / 2), midGlow: /var\(--accent\)|rgb/.test(f[1].boxShadow ?? "") };`);
-      await page(`await m.sleep(500); m.q("[data-wf-open]")?.click(); await m.sleep(600);`);
-      if (!k) { v.push("no ghost animation on the fold"); return v; }
-      if (k.dist < 30 && k.midScale > 1.015) v.push(`a ${k.dist.toFixed(1)} px flight lifts the ghost ${k.midScale.toFixed(3)}× mid-way (it flashes in place)`);
-      if (k.dist < 30 && k.midGlow) v.push(`a ${k.dist.toFixed(1)} px flight glows mid-way (it flashes in place)`);
-      if (k.dist >= 120 && k.midScale < 1.05) v.push(`a ${k.dist.toFixed(0)} px flight lost its lift (${k.midScale.toFixed(3)}×)`);
-      // a real hovered click (the user's): the glow of whatever shows (pill, ghost, landed title) never dims mid-way — the
-      // landed button gets :hover only a beat after it appears under a still pointer, and must not ease back up to it
-      for (const dir of ["fold", "unfold"]) {
-        const c = await page(`const b = m.q("[data-wf-title]") || m.q("[data-wf-open]"); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
-        send({ type: "mouseMove", x: Math.round(c.x), y: Math.round(c.y) }); await sleep(500);
-        await page(`window.__gl = []; const t0 = performance.now(); const f = () => {
-          const el = m.q(".wf-morph") || [m.q("[data-wf-open]"), m.q("[data-wf-title]")].find((e) => e && getComputedStyle(e).visibility === "visible");
-          const mm = el && /(-?[0-9.]+)px (-?[0-9.]+)px ([0-9.]+)px/.exec(getComputedStyle(el).boxShadow); if (mm) window.__gl.push(+mm[3]);
-          if (performance.now() - t0 < 900) requestAnimationFrame(f); }; requestAnimationFrame(f); return true;`);
-        send({ type: "mouseDown", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1 }); await sleep(40);
-        send({ type: "mouseUp", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1 }); await sleep(1100);
-        const gl = await page(`return window.__gl;`);
-        if (gl.length < 10) v.push(`${dir}: only ${gl.length} glow samples — proved nothing`);
-        else if (Math.min(...gl) < gl[0] * 0.95) v.push(`${dir} under a hovering pointer: the glow dims ${gl[0]} → ${Math.min(...gl)} px and comes back (a blink)`);
+      const look = () => page(`const s = m.split(); if (!s) return null; const sc = m.q(".scroll"), g = sc.querySelector(".grid");
+        return { tog: !!s.querySelector("[data-wf-toggle]"), sort: s.querySelector(".ss-sort .sel-val")?.textContent ?? null, inTop: !!s.closest(".topbar"),
+          sels: m.qa(".topbar .sel").length, row: !!m.q(".wfilter"), rowSels: sc.querySelectorAll(".sel").length,
+          gridTop: g.getBoundingClientRect().top - sc.getBoundingClientRect().top - parseFloat(getComputedStyle(sc).paddingTop) };`);
+      const plain = (who, r, sort) => {
+        if (!r) { v.push(`${who}: no split button in the top bar`); return; }
+        if (!r.inTop) v.push(`${who}: the split button isn't in the top bar`);
+        if (!r.tog) v.push(`${who}: no filter toggle in the split button`);
+        if (sort && !r.sort) v.push(`${who}: no sort half`);
+        if (r.sels !== 1) v.push(`${who}: ${r.sels} selects in the top bar (want the split's sort only)`);
+        if (r.row || r.rowSels) v.push(`${who}: a sort / filter row above the grid (${r.rowSels} selects in it)`);
+        if (r.gridTop > 1) v.push(`${who}: the grid starts ${r.gridTop.toFixed(0)} px below its scroll box's top (want the top)`);
+      };
+      await tab("Library");
+      plain("Library", await look(), true);
+      const lo = await page(`return await m.sortOpts();`);
+      if (J(lo) !== J(["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"])) v.push(`Library sort menu ${J(lo)}`);
+      await toWorkshop();
+      plain("Workshop", await look(), true);
+      const wo = await page(`return await m.sortOpts();`);
+      const want = ["Today", "Week", "Month", "3 Months", "6 Months", "Year"].map((p) => `Most Popular · ${p}`).concat(["Most Recent", "Recently Updated", "Most Subscribed", "Top Rated"]);
+      if (J(wo) !== J(want)) v.push(`Workshop sort menu ${J(wo)} (want the period inside it: ${J(want)})`);
+      else {
+        for (const [label, sort, days] of [["Most Popular · Month", "trend", 30], ["Most Recent", "mostrecent", null], ["Most Popular · Week", "trend", 7]]) {
+          const n0 = await page(`return window.__browse.length;`);
+          await page(`await m.pickSort(${J(label)});`);
+          const b = await page(`return await m.settle(${n0});`);
+          const r = await look();
+          if (!b || b.filter.sort !== sort || (days != null && b.filter.trendDays !== days)) v.push(`"${label}" POSTed ${J(b && { sort: b.filter.sort, trendDays: b.filter.trendDays })}`);
+          if (r?.sort !== label) v.push(`after picking "${label}" the sort reads "${r?.sort}"`);
+          if (r?.sels !== 1) v.push(`"${label}": ${r?.sels} selects in the top bar (the period is in the one menu)`);
+        }
       }
-      send({ type: "mouseMove", x: 2, y: 2 }); await sleep(300);
+      await shot("split-workshop");
       return v;
     });
 
-    await cell("wf:collapseCol", async () => {
-      // fold / unfold the docked column: ONE control —
-      // the column's title while it's out, the sort row's pill while it's folded — and a ghost flying between them while the
-      // column slides (transform + opacity) and the grid glides (transform); remembered over a reload; no replay on a tab visit
+    await cell("split:toggle", async () => {
       const v = [];
-      const ml = `parseFloat(getComputedStyle(m.q(".scroll")).marginLeft)`;
-      const st = `({ col: !!m.q(".wf-col[data-mode=dock]:not(.closing)"), title: !!m.q("[data-wf-title]"),
-        pill: !!m.q("[data-wf-open]"), ml: ${ml}, ghosts: m.qa(".wf-morph").length })`;
-      const anim = `const a = (el) => el ? el.getAnimations().map((x) => Object.keys(x.effect.getKeyframes()[0] ?? {}).filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k))).flat() : null;`;
-      const r0 = await page(`return ${st};`);
-      if (!r0.col) { v.push("no docked column (window too narrow?)"); return v; }
-      if (!r0.title || r0.pill) v.push(`column out: title ${r0.title}, pill ${r0.pill} (want the title only)`);
-      const t0 = await page(`const t = m.q("[data-wf-title]").getBoundingClientRect(); return [t.left, t.top];`);
-      // fold: mid-flight
-      const fold = await page(`${anim} m.q("[data-wf-title]").click(); await m.sleep(120);
-        const g = m.q(".wf-morph"), col = m.q(".wf-col[data-mode=dock]"), pill = m.q("[data-wf-open]");
-        const gr = g?.getBoundingClientRect();
-        const ch = g?.querySelector(".wf-chev"), chA = ch?.getAnimations()[0];
-        const chDeg = ch ? (() => { const m = new DOMMatrixReadOnly(getComputedStyle(ch).transform); return Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI); })() : null;
-        return { ghost: !!g, gx: gr?.left, chevAnim: !!chA, chDeg, colAnim: a(col), gridAnim: a(m.q(".scroll > .grid")), ghostAnim: a(g),
-          pillHidden: pill ? getComputedStyle(pill).visibility === "hidden" : null,
-          oldTitle: (() => { const t = m.q(".wf-col.closing [data-wf-title]"); return t ? getComputedStyle(t).visibility : "gone"; })() };`);
-      if (!fold.ghost) v.push("no ghost flying from the title to the pill");
-      else if (fold.ghostAnim.some((k) => !["transform", "backgroundColor", "color", "boxShadow", "borderRadius"].includes(k))) v.push(`the ghost animates ${J(fold.ghostAnim)}`);
-      // the chevron turns on the way (0° on the title → 180° on the pill), mid-turn at 120 ms of 340 — not snapped at the landing
-      if (!fold.chevAnim) v.push("the ghost's chevron doesn't rotate");
-      else if (fold.chDeg === 0 || Math.abs(fold.chDeg) === 180) v.push(`the chevron sits at ${fold.chDeg}° mid-flight (not turning)`);
-      if (fold.pillHidden !== true) v.push(`the pill isn't held hidden under the flying ghost (${fold.pillHidden})`);
-      if (fold.oldTitle === "visible") v.push("the sliding-out column still shows its title beside the ghost (two buttons)");
-      if (!fold.colAnim?.length) v.push("the column didn't slide out");
-      else if (fold.colAnim.some((k) => !["transform", "opacity"].includes(k))) v.push(`the column animates ${J(fold.colAnim)}`);
-      if (!fold.gridAnim?.length) v.push("the grid didn't glide");
-      else if (fold.gridAnim.some((k) => k !== "transform")) v.push(`the grid animates ${J(fold.gridAnim)}`);
-      await page(`await m.sleep(500);`);
-      const r1 = await page(`const p = m.q("[data-wf-open]"); return { ...${st}, vis: p ? getComputedStyle(p).visibility : null,
-        exp: p?.getAttribute("aria-expanded"), anims: m.q(".scroll > .grid").getAnimations().length };`);
-      if (r1.col || r1.title) v.push("the column / its title is still there after folding");
-      if (!r1.pill || r1.vis !== "visible") v.push(`after folding the pill is ${r1.pill ? r1.vis : "missing"}`);
-      if (r1.exp !== "false") v.push(`the pill's aria-expanded is ${r1.exp}`);
-      if (r1.ml > 1) v.push(`the grid keeps a ${r1.ml}px left margin`);
-      if (r1.ghosts || r1.anims) v.push(`${r1.ghosts} ghost(s) / ${r1.anims} grid animation(s) left after the fold`);
-      await loadUi(); await toWorkshop();
-      if (await page(`return !!m.q(".wf-col");`)) v.push("folded isn't remembered over a reload");
-      // unfold: the ghost lands on the title
-      const unf = await page(`m.q("[data-wf-open]").click(); await m.sleep(120);
-        const t = m.q("[data-wf-title]"); return { cls: m.q(".wf-col[data-mode=dock]")?.className,
-        ghost: !!m.q(".wf-morph"), hidden: t ? getComputedStyle(t).visibility === "hidden" : null };`);
-      if (!/entering/.test(unf.cls ?? "")) v.push(`the column didn't slide in (${unf.cls})`);
-      if (!unf.ghost || !unf.hidden) v.push(`unfolding: ghost ${unf.ghost}, title held hidden ${unf.hidden}`);
-      await page(`await m.sleep(500);`);
-      const r2 = await page(`const t = m.q("[data-wf-title]"); return { ...${st}, vis: t ? getComputedStyle(t).visibility : null,
-        at: t ? [t.getBoundingClientRect().left, t.getBoundingClientRect().top] : null };`);
-      if (!r2.col || !r2.title || r2.pill) v.push(`after unfolding: column ${r2.col}, title ${r2.title}, pill ${r2.pill}`);
-      if (r2.vis !== "visible") v.push(`the title is ${r2.vis} after the ghost landed`);
-      if (r2.ghosts) v.push(`${r2.ghosts} ghost(s) left after unfolding`);
-      if (r2.at && (Math.abs(r2.at[0] - t0[0]) > 1 || Math.abs(r2.at[1] - t0[1]) > 1)) v.push(`the title rests at ${J(r2.at)}, was ${J(t0)}`);
-      if (Math.abs(r2.ml - r0.ml) > 1) v.push(`grid margin ${r2.ml} after unfolding (was ${r0.ml})`);
-      await tab("Library"); await tab("Browse");
-      if (await page(`return (m.q(".wf-col")?.getAnimations().length ?? -1) + m.qa(".wf-morph").length;`)) v.push("a tab visit replays the slide / morph");
+      await toWorkshop();
+      const st = () => page(`const t = m.tog(); if (!t) return null; const c = t.querySelector("[data-wf-count]"), i = t.querySelector("svg");
+        return { exp: t.getAttribute("aria-expanded"), ctl: !!document.getElementById(t.getAttribute("aria-controls") ?? "-"), label: t.getAttribute("aria-label"),
+          lit: getComputedStyle(t).backgroundColor === m.accent(), n: c?.textContent ?? null, beside: c && i ? c.getBoundingClientRect().left >= i.getBoundingClientRect().right - 1 : null,
+          col: !!m.col() };`);
+      let r = await st();
+      if (!r) return ["no filter toggle in the top bar"];
+      if (r.exp !== "true" || !r.col) v.push(`open: aria-expanded ${r.exp}, panel ${r.col}`);
+      if (!r.ctl) v.push("open: aria-controls doesn't name the panel");
+      if (r.label !== "Filters") v.push(`aria-label "${r.label}" with nothing on`);
+      if (!r.lit) v.push("open: the toggle isn't lit in the accent");
+      if (r.n !== null) v.push(`a count "${r.n}" with nothing on`);
+      await page(`m.seg("Anime", "inc").click(); m.seg("Mature", "exc").click(); await m.sleep(450);`);
+      r = await st();
+      if (r.n !== "2" || !r.beside) v.push(`two tags on: count ${r.n}, beside the icon ${r.beside}`);
+      if (r.label !== "Filters, 2 on") v.push(`aria-label "${r.label}" with two on`);
+      await page(`await m.open(false);`);
+      r = await st();
+      if (r.exp !== "false" || r.col) v.push(`closed: aria-expanded ${r.exp}, panel ${r.col}`);
+      if (r.lit) v.push("closed: the toggle is still lit");
+      if (r.n !== "2") v.push(`closed: the count reads ${r.n} (want 2)`);
+      await shot("split-toggle-closed");
+      await page(`await m.open(true); m.q("[data-wf-clear]").click(); await m.sleep(500);`);
+      r = await st();
+      if (r.n !== null || r.label !== "Filters") v.push(`after Clear all: count ${r.n}, aria-label "${r.label}"`);
       return v;
     });
+
+    await cell("panel:head", async () => {
+      const v = [];
+      await toWorkshop();
+      const r = await page(`const c = m.col(); if (!c) return null; const top = c.querySelector(".wf-top");
+        return { title: top.querySelector("[data-wf-title]")?.textContent.trim() ?? null, tag: top.querySelector("[data-wf-title]")?.tagName ?? null,
+          btns: [...top.querySelectorAll("button")].map((b) => b.matches("[data-wf-clear]") ? "clear" : b.matches("[data-wf-close]") ? "close" : b.textContent.trim() || b.className),
+          pills: top.querySelectorAll(".pill").length, close: top.querySelector("[data-wf-close]")?.getAttribute("aria-label") ?? null };`);
+      if (!r) return ["no docked panel at 1400 px"];
+      if (r.title !== "Filters" || r.tag !== "SPAN") v.push(`the head's title is ${r.tag} "${r.title}" (want a plain "Filters")`);
+      if (J(r.btns) !== J(["clear", "close"])) v.push(`the head's buttons ${J(r.btns)} (want Clear all, ×)`);
+      if (r.pills) v.push("a pill in the panel's head");
+      if (r.close !== "Close filters") v.push(`the × is labelled "${r.close}"`);
+      const g = await page(`m.col().querySelector("[data-wf-close]").click(); await m.sleep(40); const ghosts = document.querySelectorAll(".wf-morph").length;
+        await m.sleep(400); return { ghosts, col: !!m.q(".wf-col"), exp: m.tog()?.getAttribute("aria-expanded") };`);
+      if (g.ghosts) v.push(`${g.ghosts} ghost copies flying on close (no morph)`);
+      if (g.col || g.exp !== "false") v.push(`the × left the panel ${g.col ? "open" : "closed"}, the toggle aria-expanded ${g.exp}`);
+      await page(`await m.open(true);`);
+      return v;
+    });
+
+    // per-frame samples of the shown page's panel (transform x, opacity, closing) for `ms` after `act` (a toggle click)
+    const framesOf = (pg, act, ms = 650) => page(`window.__fr = []; const t0 = performance.now();
+      const sc = m.q(${J(pg === "library" ? ".lib-scroll" : ".scroll:not(.lib-scroll)")}); window.__gr = [];
+      const f = () => { const c = document.querySelector('.wf-col[data-wf-page="${pg}"]'); window.__gr.push(sc.getBoundingClientRect().right);
+        if (c) { const t = getComputedStyle(c).transform; const mm = new DOMMatrixReadOnly(t === "none" ? undefined : t);
+          window.__fr.push({ tx: mm.m41, op: +getComputedStyle(c).opacity, cl: c.classList.contains("closing"), an: c.getAnimations().length,
+            props: [...new Set(c.getAnimations().flatMap((a) => a.effect.getKeyframes().flatMap((k) => Object.keys(k))))].filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)) }); }
+        else window.__fr.push(null);
+        if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); };
+      window.__gr.push(sc.getBoundingClientRect().right); // before the toggle: its click commits before the first frame
+      requestAnimationFrame(f); ${act} await m.sleep(${ms + 120}); return window.__fr;`);
+    const gridEdge = () => page(`return window.__gr;`);
+    // the grid's right edge over a toggle: one step (the margin flips as the slide starts — the grid re-fits once, like for
+    // the item sidebar), the given way, and nothing after it
+    const oneStep = (v, what, gr, dir) => {
+      const steps = gr.filter((x, i) => i && Math.abs(x - gr[i - 1]) > 0.5).length;
+      if (steps !== 1) v.push(`${what}: the grid's right edge moved ${steps} times (want one step) ${J(gr.map(Math.round))}`);
+      if (dir * (gr[gr.length - 1] - gr[0]) <= 0) v.push(`${what}: the grid's right edge went ${Math.round(gr[0])} → ${Math.round(gr[gr.length - 1])}`);
+    };
+    await cell("panel:right", async () => {
+      const v = [];
+      await toWorkshop();
+      const geo = await page(`const c = m.col(), tb = document.querySelector(".topbar"), t = m.tog(); if (!c || !t) return null;
+        return { c: m.rect(c), tb: m.rect(tb), t: m.rect(t), W: innerWidth, mode: c.dataset.mode, mr: parseFloat(getComputedStyle(m.q(".scroll")).marginRight) };`);
+      if (!geo) return ["no docked panel / toggle at 1400 px"];
+      if (geo.mode !== "dock" || Math.abs(geo.c.r - geo.W) > 0.5) v.push(`the panel (${geo.mode}) spans ${geo.c.x}–${geo.c.r}, not at the right edge of ${geo.W}`);
+      if (Math.abs(geo.c.y - geo.tb.b) > 1) v.push(`the panel starts at ${geo.c.y}, the top bar ends at ${geo.tb.b}`);
+      if (!(geo.t.r > geo.c.x && geo.t.x < geo.c.r)) v.push(`the toggle (${geo.t.x}–${geo.t.r}) isn't above the panel (${geo.c.x}–${geo.c.r})`);
+      if (Math.abs(geo.mr - geo.c.w) > 1) v.push(`the grid's margin-right ${geo.mr} (want the panel's ${geo.c.w})`);
+      // closing: slides out to the right, fading, then gone
+      let fr = await framesOf("browse", `m.tog().click();`);
+      const out = fr.filter(Boolean);
+      const props = [...new Set(out.flatMap((x) => x.props))];
+      if (!out.length || !out.every((x) => x.cl)) v.push(`closing: ${out.length} frames of the panel, closing on ${out.filter((x) => x.cl).length}`);
+      if (!out.some((x) => x.tx > 2 && x.tx < 30 && x.op > 0.02 && x.op < 0.98)) v.push(`closing: no in-between frame (tx / opacity ${J(out.map((x) => [Math.round(x.tx), +x.op.toFixed(2)]))})`);
+      if (out.some((x, i) => i && x.tx < out[i - 1].tx - 0.5)) v.push("closing: it moves back left on the way out");
+      if (fr[fr.length - 1] !== null) v.push("closing: the panel is still there after the slide");
+      if (props.some((p) => !["transform", "opacity"].includes(p))) v.push(`closing animates ${J(props)}`);
+      oneStep(v, "closing", await gridEdge(), 1);
+      const mr = await page(`return parseFloat(getComputedStyle(m.q(".scroll")).marginRight);`);
+      if (mr > 1) v.push(`closed: the grid keeps a ${mr} px margin-right`);
+      // opening: from the right, through in-between offsets, landing on 0
+      fr = await framesOf("browse", `m.tog().click();`);
+      const inn = fr.filter(Boolean), first = inn[0], last = inn[inn.length - 1];
+      const props2 = [...new Set(inn.flatMap((x) => x.props))];
+      if (!first || !(first.tx > 2) || !(first.op < 0.9)) v.push(`opening: the first frame sits at ${first ? `${first.tx.toFixed(1)} px, opacity ${first.op.toFixed(2)}` : "nothing"} (want off to the right, faded)`);
+      if (!inn.some((x) => x.tx > 1 && x.tx < 38)) v.push(`opening: no in-between offset ${J(inn.map((x) => Math.round(x.tx)))}`);
+      if (inn.some((x) => x.tx < -6)) v.push(`opening: it overshoots ${Math.min(...inn.map((x) => x.tx)).toFixed(1)} px to the left`);
+      if (!last || Math.abs(last.tx) > 0.5 || last.op < 0.99 || last.cl) v.push(`opening: it lands at ${last ? `${last.tx.toFixed(1)} px, opacity ${last.op}` : "nothing"}`);
+      if (props2.some((p) => !["transform", "opacity"].includes(p))) v.push(`opening animates ${J(props2)}`);
+      oneStep(v, "opening", await gridEdge(), -1);
+      // the same per-frame path closing as opening, reversed: out to the right and faded, from where it rests
+      if (out.length && inn.length && (out[0].tx > 0.5 || out[0].op < 0.99)) v.push(`closing starts at ${out[0].tx.toFixed(1)} px / ${out[0].op} (want from rest)`);
+      // remembered over a reload, both ways; a tab visit shows it without the slide
+      await page(`await m.open(false);`); await loadUi(); await toWorkshop(false);
+      if (await page(`return !!m.q(".wf-col") || m.isOpen();`)) v.push("closed isn't remembered over a reload");
+      await page(`await m.open(true);`); await loadUi(); await toWorkshop(false);
+      if (!(await page(`return !!m.col() && m.isOpen();`))) v.push("open isn't remembered over a reload");
+      await tab("Library"); await tab("Browse");
+      if (await page(`return m.col()?.getAnimations().length ?? -1;`)) v.push("a tab visit replays the slide (or the panel is gone)");
+      return v;
+    });
+
+    // the panel's open / close is the item sidebar's, exactly: its duration, curve and keyframes, both ways; motion off → none
+    await cell("motion:match", async () => {
+      const v = [];
+      const SIG = `const sig = (el) => { const a = el?.getAnimations().find((x) => x.effect?.target === el); if (!a) return null;
+        const k = a.effect.getKeyframes(), t = a.effect.getTiming(), f = k[0], l = k[k.length - 1];
+        return { dur: t.duration, ease: getComputedStyle(el).animationTimingFunction, from: [f.transform ?? "", f.opacity ?? ""], to: [l.transform ?? "", l.opacity ?? ""] }; };`;
+      const run = async () => {
+        await toWorkshop();
+        const c = await page(`const t = m.q(".scroll:not(.lib-scroll) .card .thumb-wrap"); return t ? m.rect(t) : null;`);
+        if (!c) return null;
+        await rightAt(c.x + c.w / 2, c.y + c.h / 2); // the sidebar opens, the panel closes
+        // `lingers`: ms until the closed one is gone (polled to 150; the exit slide is 170 — motion off it goes on the next tick)
+        const gone = (sel) => `await (async () => { const t0 = performance.now(); while (m.q(${J(sel)}) && performance.now() - t0 < 150) await m.sleep(5); return Math.round(performance.now() - t0); })()`;
+        const a = await page(`${SIG} await m.sleep(30); return { sideIn: sig(m.q(".side-panel:not(.closing)")), panelOut: sig(m.q(".wf-col.closing")),
+          lingers: ${gone(".wf-col")} };`);
+        await sleep(600);
+        const b = await page(`${SIG} m.tog().click(); await m.sleep(30); return { panelIn: sig(m.q(".wf-col:not(.closing)")), sideOut: sig(m.q(".side-panel.closing")),
+          lingers: ${gone(".side-panel")} };`);
+        await sleep(600);
+        return { ...a, ...b, lingerA: a.lingers, lingerB: b.lingers };
+      };
+      const on = await run();
+      if (!on) return ["no Workshop card to right-click"];
+      console.log(`        motion on: ${J(on)}`);
+      const same = (what, x, y) => { if (!x || !y) v.push(`${what}: ${!x ? "the filter panel" : "the item sidebar"} didn't animate`);
+        else if (J(x) !== J(y)) v.push(`${what}: the panel ${J(x)} ≠ the sidebar ${J(y)}`); };
+      same("opening", on.panelIn, on.sideIn);
+      same("closing", on.panelOut, on.sideOut);
+      await setMotion(false);
+      const off = await run();
+      console.log(`        motion off: ${J(off)}`);
+      if (off.sideIn || off.panelOut || off.panelIn || off.sideOut) v.push(`motion off: something animates ${J(off)}`);
+      // gone within a tick or two (the matrix's loaded 60 Hz Xvfb), never the 170 ms slide
+      if (off.lingerA > 60 || off.lingerB > 60) v.push(`motion off: the closed one lingers (panel ${off.lingerA} ms, sidebar ${off.lingerB} ms)`);
+      await setMotion(true);
+      return v;
+    });
+
+    await cell("panel:persist", async () => {
+      const v = [];
+      const ls = () => page(`return [JSON.parse(localStorage.getItem("liascape.libFilterHidden")), JSON.parse(localStorage.getItem("liascape.browseFilterHidden"))];`);
+      await tab("Library");
+      if (!(await page(`return await m.open(true);`))) return ["no filter toggle on the Library"];
+      await toWorkshop();
+      await tab("Library"); await page(`await m.open(false);`);
+      await toWorkshop(false);
+      if (!(await page(`return m.isOpen() && !!m.col();`))) v.push("closing the Library's panel closed Browse's");
+      await loadUi(); await tab("Library");
+      if (await page(`return m.isOpen() || !!m.q('.wf-col[data-wf-page="library"]');`)) v.push("the Library's closed panel came back after a reload");
+      await toWorkshop(false);
+      if (!(await page(`return m.isOpen() && !!m.col();`))) v.push("Browse's open panel didn't stay open over a reload");
+      if (J(await ls()) !== J([true, false])) v.push(`saved ${J(await ls())} (want libFilterHidden true, browseFilterHidden false)`);
+      // the other way round
+      await page(`await m.open(false);`); await tab("Library"); await page(`await m.open(true);`);
+      await loadUi(); await tab("Library");
+      if (!(await page(`return m.isOpen() && !!m.q('.wf-col[data-wf-page="library"]:not(.closing)');`))) v.push("the Library's open panel didn't stay open over a reload");
+      await toWorkshop(false);
+      if (await page(`return m.isOpen() || !!m.q(".wf-col");`)) v.push("Browse's closed panel came back after a reload");
+      if (J(await ls()) !== J([false, true])) v.push(`saved ${J(await ls())} (want libFilterHidden false, browseFilterHidden true)`);
+      // the item sidebar's state isn't kept
+      await tab("Library");
+      const c = await page(`const t = m.q(".lib-scroll .card .thumb-wrap"); return t ? m.rect(t) : null;`);
+      if (c) { await rightAt(c.x + c.w / 2, c.y + c.h / 2); await sleep(600); }
+      if (!(await page(`return !!m.q(".side-panel:not(.closing)");`))) v.push("(the item sidebar didn't open for the check)");
+      await loadUi(); await tab("Library");
+      if (await page(`return !!m.q(".side-panel");`)) v.push("the item sidebar came back after a reload");
+      await page(`await m.open(true);`); await toWorkshop();
+      return v;
+    });
+
+    // one right-hand panel at a time, both ways, each with its own slide and never both docked in a frame
+    // started before the action (a page-side one in `act`, or a real input event sent after it returns), read `ms` later
+    const swapStart = (pg, ms = 650) => page(`window.__sw = []; window.__swEnd = false; const t0 = performance.now();
+      const f = () => { const c = document.querySelector('.wf-col[data-wf-page="${pg}"]'), s = document.querySelector('.side-panel[data-side="${pg}"]');
+        const run = (e) => e ? e.getAnimations().filter((a) => a.playState === "running" && a.effect?.target === e).length : 0;
+        window.__sw.push({ col: !!c && !c.classList.contains("closing"), colAny: !!c, side: !!s && !s.classList.contains("closing"), sideAny: !!s,
+          colAn: run(c), sideAn: run(s), mr: parseFloat(getComputedStyle(m.q(".scroll")).marginRight), gr: m.q(".scroll").getBoundingClientRect().right });
+        if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else window.__swEnd = true; };
+      requestAnimationFrame(f); return true;`);
+    const swapRead = () => page(`while (!window.__swEnd) await m.sleep(30); return window.__sw;`);
+    const swapFrames = async (pg, act) => { await swapStart(pg); await page(act); return swapRead(); };
+    const swapCell = (pg) => async () => {
+      const v = [];
+      if (pg === "library") { await tab("Library"); await page(`await m.ensure();`); } else await toWorkshop();
+      const scroll = pg === "library" ? ".lib-scroll" : ".scroll:not(.lib-scroll)";
+      const w0 = await page(`const c = m.col(); return c ? m.rect(c).w : null;`);
+      if (!w0) return [`${pg}: no docked panel to swap — proved nothing`];
+      const judge = (dir, fr, wSide) => {
+        const both = fr.filter((x) => x.col && x.side).length;
+        if (both) v.push(`${dir}: ${both} frame(s) with the filters and the item sidebar both docked`);
+        const wide = Math.max(...fr.map((x) => x.mr));
+        if (wide > Math.max(w0, wSide) + 1) v.push(`${dir}: the grid's margin-right reached ${wide} px (the panels are ${w0} / ${wSide})`);
+        // the two are the same width: the grid doesn't move at all while one replaces the other
+        const gr = fr.map((x) => x.gr);
+        if (Math.max(...gr) - Math.min(...gr) > 0.5) v.push(`${dir}: the grid's right edge moved during the swap ${J([...new Set(gr.map(Math.round))])}`);
+      };
+      // a right-click on a card: the sidebar slides in, the filters slide out
+      const c = await page(`const t = m.q("${scroll} .card .thumb-wrap"); return t ? m.rect(t) : null;`);
+      if (!c) return [`${pg}: no card to right-click`];
+      await swapStart(pg); await rightAt(c.x + c.w / 2, c.y + c.h / 2);
+      let fr = await swapRead();
+      const end1 = await page(`const s = m.q('.side-panel[data-side="${pg}"]:not(.closing)'); return { side: s ? m.rect(s).w : 0, col: !!m.q('.wf-col[data-wf-page="${pg}"]'), exp: m.tog()?.getAttribute("aria-expanded") };`);
+      if (!end1.side) v.push("right-click: no item sidebar");
+      if (end1.col || end1.exp !== "false") v.push(`right-click: the filters stayed (${end1.col ? "panel there" : "gone"}, toggle aria-expanded ${end1.exp})`);
+      judge("right-click", fr, end1.side);
+      if (!fr.some((x) => x.colAny && !x.col && x.colAn)) v.push("right-click: the filters didn't slide out (no closing frame with its animation)");
+      if (!fr.some((x) => x.side && x.sideAn)) v.push("right-click: the item sidebar didn't slide in");
+      // the toggle: the filters slide in, the sidebar slides out (both animate)
+      fr = await swapFrames(pg, `m.tog().click();`);
+      judge("toggle", fr, end1.side);
+      if (!fr.some((x) => x.sideAny && !x.side && x.sideAn)) v.push("toggle: the item sidebar didn't slide out (no closing frame with its animation)");
+      if (!fr.some((x) => x.col && x.colAn)) v.push("toggle: the filters didn't slide in");
+      const end2 = await page(`return { side: !!m.q('.side-panel[data-side="${pg}"]'), col: !!m.q('.wf-col[data-wf-page="${pg}"]:not(.closing)'), exp: m.tog()?.getAttribute("aria-expanded") };`);
+      if (end2.side || !end2.col || end2.exp !== "true") v.push(`toggle: sidebar ${end2.side}, filters ${end2.col}, aria-expanded ${end2.exp}`);
+      await shot(`swap-${pg}-filters`);
+      // a keyboard focus (an arrow) opens the sidebar: the filters slide out (animated) while it slides in
+      await page(`document.activeElement?.blur();`);
+      fr = await swapFrames(pg, `document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));`);
+      judge("arrow key", fr, end1.side);
+      if (!fr.some((x) => x.colAny && !x.col && x.colAn)) v.push("arrow key: the filters didn't slide out (no closing frame with its animation)");
+      if (!fr.some((x) => x.side && x.sideAn)) v.push("arrow key: the item sidebar didn't slide in");
+      const end3 = await page(`return { side: !!m.q('.side-panel[data-side="${pg}"]:not(.closing)'), col: !!m.q('.wf-col[data-wf-page="${pg}"]') };`);
+      if (!end3.side || end3.col) v.push(`arrow key: sidebar ${end3.side}, filters ${end3.col}`);
+      await shot(`swap-${pg}-sidebar`);
+      await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); await m.sleep(300); await m.open(true);`);
+      return v;
+    };
+    await cell("swap:browse", swapCell("browse"));
+    await cell("swap:library", swapCell("library"));
+
+    // the top bar never wraps; the sort folds to its icon (its label in a tooltip) below 1280 px
+    for (const [w, h] of [[800, 600], [960, 700], [1100, 700], [1920, 1080]]) {
+      await cell(`split:noWrap:${w}`, async () => {
+        const v = [];
+        await resize(w, h);
+        for (const pg of ["Library", "Workshop"]) {
+          if (pg === "Library") await tab("Library"); else await toWorkshop(false);
+          for (const st of ["closed", "open"]) {
+            if (!(await page(`return await m.open(${st === "open"});`))) { v.push(`${pg} ${w} px: no filter toggle`); continue; }
+            send({ type: "mouseMove", x: 2, y: h - 2 }); await sleep(200);
+            const r = await page(`const tb = document.querySelector(".topbar");
+              const kids = [...tb.querySelectorAll(":scope > *, :scope > .pills > *")].filter((e) => { const b = e.getBoundingClientRect();
+                return b.width > 0 && b.height > 0 && !e.matches(".pills, .spacer"); });
+              const mid = kids.map((e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; });
+              const s = m.split(), val = s?.querySelector(".ss-sort .sel-val"), sb = s?.getBoundingClientRect();
+              return { n: kids.length, spread: Math.max(...mid) - Math.min(...mid), tbH: tb.getBoundingClientRect().height, r: sb?.right ?? null, W: innerWidth,
+                label: val ? val.getBoundingClientRect().width > 0 : null, title: s?.querySelector(".ss-sort")?.getAttribute("title") ?? null, text: val?.textContent ?? null };`);
+            const at = `${pg} ${w} px, panel ${st}`;
+            console.log(`        ${at}: ${J(r)}`);
+            if (r.r == null) { v.push(`${at}: no split button`); continue; }
+            if (r.spread > 4 || r.tbH > 60) v.push(`${at}: the top bar wraps (its controls' centres ${r.spread.toFixed(0)} px apart, ${r.tbH.toFixed(0)} px tall — one row is ≤ 60)`);
+            if (r.r > r.W + 0.5) v.push(`${at}: the split button sticks out (${r.r} > ${r.W})`);
+            if (w >= 1280 && (!r.label || r.title)) v.push(`${at}: the sort's label shows ${r.label}, tooltip "${r.title}" (want the label, no tooltip)`);
+            if (w < 1280 && (r.label || r.title !== `Sort: ${r.text}`)) v.push(`${at}: the sort's label shows ${r.label}, tooltip "${r.title}" (want the icon, "Sort: ${r.text}")`);
+            await shot(`split-${pg.toLowerCase()}-${w}-${st}`);
+          }
+          await page(`await m.open(false);`);
+        }
+        await resize(1400, 900); await tab("Library"); await page(`await m.ensure();`); await toWorkshop();
+        return v;
+      });
+    }
 
     await cell("wf:drawer", async () => {
       const v = [];
-      await resize(1000, 700);
-      let r = await page(`return { col: !!m.q(".wf-col"), btn: m.q("[data-wf-open]")?.textContent.trim() ?? null };`);
-      if (r.col) v.push("at 1000 px the column is still on screen (docked)");
-      if (!r.btn) return [...v, "no Filters button in the sort row at 1000 px"];
+      await resize(860, 700);
+      let r = await page(`return { col: !!m.q(".wf-col"), btn: !!m.tog() };`);
+      if (r.col) v.push("at 860 px the column is still on screen (docked)");
+      if (!r.btn) return [...v, "no filter toggle in the top bar at 860 px"];
       // open, set two tags inside it
-      await page(`m.q("[data-wf-open]").click(); await m.sleep(450);`);
+      await page(`m.tog().click(); await m.sleep(450);`);
       r = await page(`const c = m.col(); if (!c) return null; const s = m.q(".wf-scrim");
         return { mode: c.dataset.mode, c: m.rect(c), scrim: !!s, z: +getComputedStyle(c).zIndex, W: innerWidth, H: innerHeight };`);
-      if (!r) return [...v, "the Filters button didn't open the drawer"];
+      if (!r) return [...v, "the filter toggle didn't open the drawer"];
       if (r.mode !== "drawer") v.push(`the column opened as "${r.mode}"`);
-      if (r.c.x < -0.5 || r.c.x > 0.5 || r.c.r > r.W + 0.5 || r.c.b > r.H + 0.5) v.push(`the drawer (${J(r.c)}) isn't at the left edge inside the ${r.W}×${r.H} window`);
+      if (r.c.x < -0.5 || Math.abs(r.c.r - r.W) > 0.5 || r.c.b > r.H + 0.5) v.push(`the drawer (${J(r.c)}) isn't at the right edge inside the ${r.W}×${r.H} window`);
       if (!r.scrim) v.push("no scrim");
       if (!(r.z > 40)) v.push(`the drawer's z-index ${r.z} is under the item sidebar's (40)`);
       await page(`m.seg("Anime", "inc").click(); m.seg("Mature", "exc").click(); await m.sleep(500);`);
-      const btn = await page(`return m.q("[data-wf-open]")?.textContent.trim();`);
-      if (!/Filters · 2/.test(btn ?? "")) v.push(`the button reads "${btn}" with two tags on`);
-      await shot("drawer-1000x700");
+      const btn = await page(`return m.tog()?.querySelector("[data-wf-count]")?.textContent ?? null;`);
+      if (btn !== "2") v.push(`the toggle's count reads "${btn}" with two tags on`);
+      await shot("drawer-860x700");
       // Escape closes it (and the item sidebar stays as it was)
       await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); await m.sleep(400);`);
       if (await page(`return !!m.q(".wf-col");`)) v.push("Escape didn't close the drawer");
-      // the scrim closes it; with the item sidebar open the drawer sits above it
-      await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(600); m.q("[data-wf-open]").click(); await m.sleep(450);`);
-      r = await page(`const c = m.col(), s = m.q(".side-panel:not(.closing)"); if (!c) return null;
-        const b = m.rect(c); const hit = document.elementFromPoint(b.x + b.w / 2, b.y + 60); return { side: !!s, top: !!hit?.closest(".wf-col"), W: innerWidth };`);
-      if (!r) v.push("the drawer didn't open again with the item sidebar open");
-      else { if (!r.side) v.push("(the item sidebar didn't open for the check)"); if (!r.top) v.push("the item sidebar covers the drawer"); }
-      await shot("drawer-sidebar-1000x700");
-      await page(`const c = m.col(), b = m.rect(c); document.elementFromPoint(Math.min(innerWidth - 20, b.r + 40), b.y + 40)?.click(); await m.sleep(400);`);
+      // with the item sidebar open the toggle swaps it for the drawer (one right-hand panel); the scrim closes the drawer
+      await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(600);`);
+      const side0 = await page(`return !!m.q(".side-panel:not(.closing)");`);
+      await page(`m.tog().click(); await m.sleep(450);`);
+      r = await page(`const c = m.col(); if (!c) return null; const b = m.rect(c); const hit = document.elementFromPoint(b.x + b.w / 2, b.y + 60);
+        return { side: !!m.q(".side-panel"), top: !!hit?.closest(".wf-col") };`);
+      if (!side0) v.push("(the item sidebar didn't open for the check)");
+      if (!r) v.push("the toggle didn't open the drawer with the item sidebar open");
+      else { if (r.side) v.push("the item sidebar stayed open beside the drawer"); if (!r.top) v.push("something covers the drawer"); }
+      await shot("drawer-sidebar-860x700");
+      await page(`const c = m.col(), b = m.rect(c); document.elementFromPoint(Math.max(20, b.x - 40), b.y + 40)?.click(); await m.sleep(400);`);
       if (await page(`return !!m.q(".wf-col");`)) v.push("a click on the scrim didn't close the drawer");
-      await page(`m.q(".side-panel [data-side-close]")?.click(); await m.sleep(400);`);
-      // widening docks it again
+      // widening docks it again (open: the docked state is its own, remembered open)
       await resize(1400, 900);
       if ((await page(`return m.col()?.dataset.mode;`)) !== "dock") v.push("back at 1400 px the column isn't docked");
-      if (await page(`return !!m.q("[data-wf-open]");`)) v.push("back at 1400 px the Filters pill is still there");
       return v;
     });
 
@@ -612,17 +865,18 @@ app.whenReady().then(async () => {
             over: cards.filter((b) => b.right > s.r + 1 || b.left < s.x - 1).length, n: cards.length,
             doc: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || sc.scrollWidth > sc.clientWidth + 1 };`);
         let g = await geo();
-        const docked = W >= 1100;
-        if (docked !== (g.col?.mode === "dock")) v.push(`${W} px: the column is ${g.col ? g.col.mode : "absent"} (docked from 1100)`);
+        const docked = W >= 900;
+        if (docked !== (g.col?.mode === "dock")) v.push(`${W} px: the column is ${g.col ? g.col.mode : "absent"} (docked from 900)`);
         if (g.grid < 240) v.push(`the grid is ${g.grid} px wide`);
         if (g.over) v.push(`${g.over}/${g.n} cards stick out of the grid`);
         if (g.doc) v.push("something scrolls sideways");
-        if (docked && g.s.x < g.col.r.r - 1) v.push("the grid runs under the column");
+        if (docked && g.col && g.s.r > g.col.r.x + 1) v.push("the grid runs under the column");
         await shot(`size-${w}x${h}`);
-        // the item sidebar open too
+        // the item sidebar opened: it takes the panel's place
         await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(650);`);
         g = await geo();
         const side = await page(`const p = m.q(".side-panel:not(.closing)"); return p ? m.rect(p) : null;`);
+        if (g.col) v.push(`the filter panel (${g.col.mode}) stayed open beside the item sidebar`);
         if (side && W >= 900) {
           if (g.grid < 240) v.push(`with the item sidebar open the grid is ${g.grid} px`);
           if (g.s.r > side.x + 1) v.push("the grid runs under the item sidebar");
@@ -630,11 +884,12 @@ app.whenReady().then(async () => {
         if (g.over) v.push(`sidebar open: ${g.over}/${g.n} cards stick out of the grid`);
         if (docked) await shot(`size-${w}x${h}-sidebar`);
         await page(`m.q(".side-panel [data-side-close]")?.click(); await m.sleep(400);`);
+        if (docked) await page(`await m.open(true);`);
         if (!docked) {
-          await page(`m.q("[data-wf-open]")?.click(); await m.sleep(450);`);
+          await page(`m.tog()?.click(); await m.sleep(450);`);
           const d = await page(`const c = m.col(); if (!c) return null; const b = m.rect(c); const close = c.querySelector(".wf-close"); const cb = close ? m.rect(close) : null;
             return { b, cb, W: innerWidth, H: innerHeight, sh: c.querySelector(".wf-scroll").scrollHeight > c.querySelector(".wf-scroll").clientHeight };`);
-          if (!d) v.push("the Filters button didn't open the drawer");
+          if (!d) v.push("the filter toggle didn't open the drawer");
           else {
             if (d.b.x < -0.5 || d.b.r > d.W + 0.5 || d.b.b > d.H + 0.5 || d.b.w < 200) v.push(`the drawer ${J(d.b)} doesn't fit the ${d.W}×${d.H} window`);
             if (!d.cb || d.cb.r > d.W + 0.5 || d.cb.y < 0) v.push("the drawer's close button is out of reach");
@@ -649,8 +904,8 @@ app.whenReady().then(async () => {
 
     await cell("wf:noMotion", async () => {
       const v = [];
-      await resize(1000, 700);
-      const probe = () => page(`m.q("[data-wf-open]").click(); await m.sleep(30);
+      await resize(860, 700);
+      const probe = () => page(`m.tog().click(); await m.sleep(30);
         const c = m.col(), s = m.q(".wf-scrim");
         const anims = [...(c?.getAnimations() ?? []), ...(s?.getAnimations() ?? [])];
         const props = [...new Set(anims.flatMap((a) => (a.effect?.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((p) => !["offset", "easing", "composite", "computedOffset"].includes(p)))))];
@@ -668,20 +923,28 @@ app.whenReady().then(async () => {
       console.log(`        motion off: ${J(r)}`);
       if (r.n) v.push(`motion off: ${r.n} animations on the drawer / scrim`);
       if (r.gone > 100) v.push(`motion off: the drawer took ${r.gone} ms to go`);
+      // docked: opened / closed in place, no slide
+      await resize(1400, 900); await page(`await m.ensure();`);
+      const dk = await page(`m.tog().click(); await m.sleep(30); const gone = !m.q(".wf-col"); m.tog().click(); await m.sleep(30);
+        const c = m.col(); return { gone, anims: c ? c.getAnimations().length : -1 };`);
+      if (!dk.gone) v.push("motion off: the docked panel lingers after closing");
+      if (dk.anims !== 0) v.push(`motion off: the docked panel ${dk.anims < 0 ? "didn't open" : `opens with ${dk.anims} animation(s)`}`);
       await setMotion(true);
-      await resize(1400, 900);
       return v;
     });
 
     await cell("wf:noGlow", async () => {
       const v = [];
       await page(`m.seg("Anime", "inc").click(); await m.sleep(100);`);
-      const bs = () => page(`return getComputedStyle(m.seg("Anime", "inc")).boxShadow;`);
+      const bs = () => page(`return [getComputedStyle(m.seg("Anime", "inc")).boxShadow, getComputedStyle(m.tog()).boxShadow];`);
+      const glowless = (x) => x === "none" || /0px 0px 0px 0px/.test(x) || /rgba\(0, 0, 0, 0\)/.test(x);
       const on = await bs();
       await setSettings({ glows: false }); await loadUi(); await toWorkshop();
       const off = await bs();
-      if (on === "none") v.push("glow on: an included segment has no glow");
-      if (off !== "none" && !/0px 0px 0px 0px/.test(off) && !/rgba\(0, 0, 0, 0\)/.test(off)) v.push(`Glow effects off: the included segment still glows (${off})`);
+      if (on[0] === "none") v.push("glow on: an included segment has no glow");
+      if (on[1] === "none") v.push("glow on: the lit filter toggle has no glow");
+      if (!glowless(off[0])) v.push(`Glow effects off: the included segment still glows (${off[0]})`);
+      if (!glowless(off[1])) v.push(`Glow effects off: the lit filter toggle still glows (${off[1]})`);
       await setSettings({ glows: true }); await loadUi(); await toWorkshop();
       return v;
     });
@@ -698,8 +961,8 @@ app.whenReady().then(async () => {
       if (alpha(r.col) > 0.01 || r.img !== "none") v.push(`the docked column has a fill (${r.col}, ${r.img.slice(0, 40)})`);
       if (alpha(r.grp) < 0.3) v.push(`its groups don't carry the darkness (${r.grp})`);
       await shot("liveBg-wide");
-      await resize(1000, 700);
-      await page(`m.q("[data-wf-open]").click(); await m.sleep(450);`);
+      await resize(860, 700);
+      await page(`m.tog().click(); await m.sleep(450);`);
       const d = await page(`return getComputedStyle(m.col()).backgroundColor;`);
       if (alpha(d) < 0.6) v.push(`the drawer over the grid has no fill (${d})`);
       await shot("liveBg-drawer");
@@ -735,23 +998,20 @@ app.whenReady().then(async () => {
           if (Math.abs(d) > tol) v.push(`${what}: cards ${g0.w.toFixed(1)} → ${g1.w.toFixed(1)} px (${(d * 100).toFixed(1)} %, within ±${(tol * 100).toFixed(1)} %) — ${g0.cols} → ${g1.cols} columns`);
           if (Math.max(g1.lgap, g1.rgap) > g1.gap + 1) v.push(`${what}: an edge gap of ${Math.max(g1.lgap, g1.rgap).toFixed(1)} px beside the row (≤ the ${g1.gap} px gap)`);
         };
-        if (!(await page(`return !!m.q(".wf-col[data-mode=dock]:not(.closing)");`))) {
-          await page(`m.q("[data-wf-open]")?.click(); await m.sleep(700);`);
-        }
+        await page(`await m.open(true); await m.sleep(250);`);
         const gCol = await geo();
-        if (!gCol || !(gCol.ml > 0)) return [`no docked column at ${w}×${h} (grid margin-left ${gCol?.ml}) — proved nothing`];
-        await page(`m.q("[data-wf-title]").click(); await m.sleep(700);`);
+        if (!gCol || !(gCol.mr > 0)) return [`no docked panel at ${w}×${h} (grid margin-right ${gCol?.mr}) — proved nothing`];
+        await page(`await m.open(false); await m.sleep(250);`);
         const g0 = await geo();
-        await page(`m.q("[data-wf-open]").click(); await m.sleep(700);`);
-        if (!g0 || g0.ml > 1) return [`folding the column left the grid ${g0 ? `a ${g0.ml} px margin` : "empty"} — proved nothing`];
+        if (!g0 || g0.mr > 1) return [`closing the panel left the grid ${g0 ? `a ${g0.mr} px margin` : "empty"} — proved nothing`];
         await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(800);`);
-        const gBoth = await geo();
-        await page(`m.q(".side-panel [data-side-close]")?.click(); await m.sleep(600);`);
-        console.log(`        no panel ${show(g0)}; filter column ${show(gCol)}; column + item sidebar ${show(gBoth)}`);
+        const gSide = await geo();
+        await page(`m.q(".side-panel [data-side-close]")?.click(); await m.sleep(600); await m.open(true);`);
+        console.log(`        no panel ${show(g0)}; filter panel ${show(gCol)}; item sidebar ${show(gSide)}`);
         if (Math.max(g0.lgap, g0.rgap) > g0.gap + 1) v.push(`no panel: an edge gap of ${Math.max(g0.lgap, g0.rgap).toFixed(1)} px beside the row`);
-        same("filter column", g0, gCol);
-        if (!(gBoth?.mr > 0)) v.push(`the item sidebar didn't dock beside the column (margin-right ${gBoth?.mr})`);
-        else same("filter column + item sidebar", g0, gBoth);
+        same("filter panel", g0, gCol);
+        if (!(gSide?.mr > 0)) v.push(`the item sidebar didn't dock (margin-right ${gSide?.mr})`);
+        else same("item sidebar", g0, gSide);
         return v;
       });
     }
@@ -773,10 +1033,10 @@ app.whenReady().then(async () => {
       libReady = true;
     };
     const libTitles = () => page(`return m.qa(".lib-scroll .card .lib-title[data-title]").map((e) => e.dataset.title).sort();`);
-    const libSeg = (tag, st) => page(`const r = [...(m.q('.wf-col[data-wf-page="library"]:not(.closing)')?.querySelectorAll(".wf-row") ?? [])].find((x) => x.dataset.wfTag === ${J(tag)});
+    const libSeg = (tag, st) => page(`await m.ensure(); const r = [...(m.q('.wf-col[data-wf-page="library"]:not(.closing)')?.querySelectorAll(".wf-row") ?? [])].find((x) => x.dataset.wfTag === ${J(tag)});
       if (!r) return false; r.querySelector('[data-seg="${st}"]').click(); await m.sleep(250); return true;`);
     // open the Features group (collapsed by default, and the collapse is shared with Browse's column) → its rows
-    const libFeatures = () => page(`const h = m.q('.wf-col[data-wf-page="library"] [data-wf-head="features"]');
+    const libFeatures = () => page(`await m.ensure(); const h = m.q('.wf-col[data-wf-page="library"] [data-wf-head="features"]');
       if (h?.getAttribute("aria-expanded") === "false") { h.click(); await m.sleep(200); }
       return [...(m.q('.wf-col[data-wf-page="library"] [data-wf-group="features"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);`);
     const libClear = () => page(`m.q('.wf-col[data-wf-page="library"] [data-wf-clear]')?.click(); await m.sleep(250);`);
@@ -784,18 +1044,18 @@ app.whenReady().then(async () => {
     await cell("lib:column", async () => {
       const v = [];
       await libSetup();
-      const r = await page(`const c = m.q('.wf-col[data-wf-page="library"]:not(.closing)'); if (!c) return null;
+      const r = await page(`await m.ensure(); const c = m.q('.wf-col[data-wf-page="library"]:not(.closing)'); if (!c) return null;
         const sc = m.q(".lib-scroll"), bar = m.q(".playlist-bar"), grid = sc.querySelector(".grid");
         const rows = (g) => [...(c.querySelector('[data-wf-group="' + g + '"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);
         return { mode: c.dataset.mode, scope: c.dataset.wfScope, c: m.rect(c), grid: m.rect(grid), bar: bar ? m.rect(bar) : null,
           groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup), age: rows("age"), type: rows("type"), genre: rows("genre"),
-          sorts: sc.querySelectorAll(".wfilter .sel").length, pill: !!sc.querySelector("[data-wf-open]"), label: c.getAttribute("aria-label"),
+          row: !!sc.querySelector(".wfilter"), W: innerWidth, label: c.getAttribute("aria-label"),
           cards: m.qa(".lib-scroll .card").length };`);
       if (!r) return ["no filter column on the Library"];
       console.log(`        ${J(r)}`);
       if (r.mode !== "dock" || r.scope !== "library") v.push(`the Library's column is ${r.mode} / ${r.scope}`);
-      if (r.c.x > 0.5 || r.c.w < 200) v.push(`the column sits at x ${r.c.x}, ${r.c.w} px wide`);
-      if (r.grid.x < r.c.r - 1) v.push(`the grid starts at ${r.grid.x}, under the column (its right edge ${r.c.r})`);
+      if (Math.abs(r.c.r - r.W) > 0.5 || r.c.w < 200) v.push(`the column spans ${r.c.x}–${r.c.r}, ${r.c.w} px wide (want the right edge of ${r.W})`);
+      if (r.grid.r > r.c.x + 1) v.push(`the grid ends at ${r.grid.r}, under the column (its left edge ${r.c.x})`);
       if (!r.bar) v.push("no playlist bar");
       else {
         if (r.c.b > r.bar.y + 1) v.push(`the column runs into the playlist bar (column bottom ${r.c.b}, bar top ${r.bar.y})`);
@@ -805,8 +1065,7 @@ app.whenReady().then(async () => {
       if (J(r.age) !== J(["Everyone", "Mature"])) v.push(`age rows ${J(r.age)} (want what the items know: Everyone, Mature)`);
       if (J(r.type) !== J(["Video", "Scene"])) v.push(`type rows ${J(r.type)}`);
       if (J(r.genre) !== J(["Anime", "Nature"])) v.push(`genre rows ${J(r.genre)}`);
-      if (r.sorts) v.push("a Workshop sort in the Library's row");
-      if (r.pill) v.push("docked, but the Library's row still has the Filters pill");
+      if (r.row) v.push("a sort / filter row above the Library's grid");
       if (r.label !== "Library filters") v.push(`aria-label ${r.label}`);
       // Features (collapsed by default, shared with Browse): open it, read, close it again
       const feat = await libFeatures();
@@ -876,58 +1135,55 @@ app.whenReady().then(async () => {
 
     await cell("lib:fold", async () => {
       const v = [];
-      await libSetup(); await tab("Library");
+      await libSetup(); await tab("Library"); await page(`await m.ensure();`);
       const st = () => page(`const sc = m.q(".lib-scroll"); return { col: !!m.q('.wf-col[data-wf-page="library"][data-mode=dock]:not(.closing)'),
-        pill: !!sc.querySelector("[data-wf-open]"), title: !!m.q('[data-wf-title][data-wf-page="library"]'),
-        ml: parseFloat(getComputedStyle(sc).marginLeft), gridTop: sc.querySelector(".grid").getBoundingClientRect().top };`);
+        open: m.isOpen(), mr: parseFloat(getComputedStyle(sc).marginRight), gridTop: sc.querySelector(".grid").getBoundingClientRect().top };`);
       const s0 = await st();
-      if (!s0.col || !s0.title || s0.pill) return [`unfolded: column ${s0.col}, title ${s0.title}, pill ${s0.pill} — proved nothing`];
-      const f = await page(`m.q('[data-wf-title][data-wf-page="library"]').click(); await m.sleep(120);
-        return { ghost: m.qa(".wf-morph").length, gridAnim: m.q(".lib-scroll > .grid").getAnimations().length };`);
-      if (!f.ghost) v.push("no ghost flying the title down to the pill");
-      if (!f.gridAnim) v.push("the Library's grid didn't glide");
-      await sleep(600);
+      if (!s0.col || !s0.open) return [`open: column ${s0.col}, toggle ${s0.open} — proved nothing`];
+      const f = await page(`m.tog().click(); await m.sleep(60); const c = m.q('.wf-col[data-wf-page="library"]');
+        return { closing: !!c?.classList.contains("closing"), anims: c ? c.getAnimations().length : 0 };`);
+      if (!f.closing || !f.anims) v.push(`closing the Library's panel: closing ${f.closing}, ${f.anims} animation(s) (want it sliding out)`);
+      await sleep(500);
       const s1 = await st();
-      if (s1.col || !s1.pill || s1.ml > 1) v.push(`folded: column ${s1.col}, pill ${s1.pill}, grid margin ${s1.ml}`);
-      if (Math.abs(s1.gridTop - s0.gridTop) > 1) v.push(`folding moved the grid down ${s0.gridTop} → ${s1.gridTop} (the pill's row must keep its height)`);
-      await toWorkshop();
-      if (!(await page(`return !!m.q('.wf-col[data-wf-page="browse"][data-mode=dock]:not(.closing)');`))) v.push("folding the Library's column folded Browse's too");
-      if (await page(`return parseFloat(getComputedStyle(m.q(".scroll")).marginLeft) < 1;`)) v.push("Browse's grid lost its margin beside its column");
+      if (s1.col || s1.open || s1.mr > 1) v.push(`closed: column ${s1.col}, toggle ${s1.open}, grid margin ${s1.mr}`);
+      if (Math.abs(s1.gridTop - s0.gridTop) > 1) v.push(`closing moved the grid ${s0.gridTop} → ${s1.gridTop}`);
+      await toWorkshop(false);
+      if (!(await page(`return !!m.q('.wf-col[data-wf-page="browse"][data-mode=dock]:not(.closing)');`))) v.push("closing the Library's panel closed Browse's too");
+      if (await page(`return parseFloat(getComputedStyle(m.q(".scroll")).marginRight) < 1;`)) v.push("Browse's grid lost its margin beside its panel");
       await loadUi(); await tab("Library");
-      if ((await st()).col) v.push("the Library's fold isn't remembered over a reload");
+      if ((await st()).col) v.push("the Library's closed panel isn't remembered over a reload");
       await shot("lib-folded");
-      // motion off: unfold / fold with no ghost and no slide
+      // motion off: opens in place, no slide
       await setMotion(false); await tab("Library");
-      const off = await page(`m.q('.lib-scroll [data-wf-open]').click(); await m.sleep(40);
-        const c = m.q('.wf-col[data-wf-page="library"]'); return { ghost: m.qa(".wf-morph").length, anims: c ? c.getAnimations().length : -1 };`);
-      if (off.anims < 0) v.push("motion off: the pill didn't bring the column back");
-      if (off.ghost || off.anims > 0) v.push(`motion off: ${off.ghost} ghost(s), ${off.anims} column animation(s)`);
+      const off = await page(`m.tog().click(); await m.sleep(40);
+        const c = m.q('.wf-col[data-wf-page="library"]'); return { anims: c ? c.getAnimations().length : -1 };`);
+      if (off.anims < 0) v.push("motion off: the toggle didn't open the panel");
+      if (off.anims > 0) v.push(`motion off: ${off.anims} panel animation(s)`);
       await setMotion(true); await tab("Library");
-      if (!(await st()).col) v.push("the Library's column isn't back after unfolding");
+      if (!(await st()).col) v.push("the Library's panel isn't back after opening it");
       return v;
     });
 
     await cell("lib:drawer", async () => {
       const v = [];
-      await libSetup(); await resize(1000, 700); await tab("Library");
-      if (await page(`return !!m.q('.wf-col[data-wf-page="library"]');`)) v.push("at 1000 px the Library's column is still docked");
-      const opened = await page(`const p = m.q('.lib-scroll [data-wf-open]'); if (!p) return null; p.click(); await m.sleep(450);
+      await libSetup(); await resize(860, 700); await tab("Library");
+      if (await page(`return !!m.q('.wf-col[data-wf-page="library"]');`)) v.push("at 860 px the Library's column is still docked");
+      const opened = await page(`const p = m.tog(); if (!p) return null; p.click(); await m.sleep(450);
         const c = m.q('.wf-col[data-wf-page="library"]'); return c ? { mode: c.dataset.mode, r: m.rect(c), scrim: !!m.q(".wf-scrim") } : false;`);
-      if (opened === null) return [...v, "no Filters pill in the Library's row at 1000 px"];
-      if (!opened || opened.mode !== "drawer" || !opened.scrim) v.push(`the pill opened ${J(opened)} (want the drawer + scrim)`);
+      if (opened === null) return [...v, "no filter toggle in the Library's top bar at 860 px"];
+      if (!opened || opened.mode !== "drawer" || !opened.scrim) v.push(`the toggle opened ${J(opened)} (want the drawer + scrim)`);
       else {
-        await libSeg("Scene", "inc");
+        await page(`const r = [...m.col().querySelectorAll(".wf-row")].find((x) => x.dataset.wfTag === "Scene"); r?.querySelector('[data-seg="inc"]').click(); await m.sleep(250);`);
         if (J(await libTitles()) !== J(["s1", "s2", "s3"])) v.push(`a switch in the drawer: ${J(await libTitles())}`);
         await shot("lib-drawer");
-        await libClear();
-        await page(`document.activeElement?.blur();`);
+        await page(`m.col()?.querySelector("[data-wf-clear]")?.click(); await m.sleep(250); document.activeElement?.blur();`);
         send({ type: "keyDown", keyCode: "Escape" }); send({ type: "keyUp", keyCode: "Escape" }); await sleep(400);
         if (await page(`return !!m.q('.wf-col[data-wf-page="library"]');`)) v.push("Escape didn't close the drawer");
-        await page(`m.q('.lib-scroll [data-wf-open]').click(); await m.sleep(400);`);
+        await page(`m.tog().click(); await m.sleep(400);`);
         await tab("Settings"); await tab("Library");
         if (await page(`return !!m.q('.wf-col[data-wf-page="library"]');`)) v.push("the drawer is still open after a tab visit");
       }
-      await libClear(); await resize(1400, 900);
+      await resize(1400, 900); await libClear();
       return v;
     });
 
@@ -948,20 +1204,22 @@ app.whenReady().then(async () => {
       try {
         const src = (await http("GET", "/sources")).json.find((x) => x.supportsLocalFilter);
         if (!src) return ["no source with supportsLocalFilter in /sources"];
-        await tab("Browse"); await source(src.name); await sleep(800);
+        await tab("Browse"); await source(src.name); await sleep(800); await page(`await m.ensure();`);
         const titles = () => page(`return m.qa(".scroll:not(.lib-scroll) .card .lib-title[data-title]").map((e) => e.dataset.title).sort();`);
         const all = await titles();
         if (all.length !== 4) return [`${J(all)} on ${src.name} (want the fake folder's 4) — proved nothing`];
         const r = await page(`const c = m.col(); if (!c) return null; const rows = (g) => [...(c.querySelector('[data-wf-group="' + g + '"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);
           return { scope: c.dataset.wfScope, mode: c.dataset.mode, groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup),
-            age: rows("age"), type: rows("type"), genre: rows("genre"), sorts: m.qa(".scroll:not(.lib-scroll) .wfilter .sel").length };`);
+            age: rows("age"), type: rows("type"), genre: rows("genre"), row: !!m.q(".wfilter"), tog: !!m.tog(), sorts: m.qa(".topbar .sel").length,
+            sort: (await m.sortOpts())?.[0] ?? null };`);
         if (!r) return [`no filter column on ${src.name}`];
         console.log(`        ${J(r)}`);
         if (r.scope !== "weLocal" || r.mode !== "dock") v.push(`column ${r.scope} / ${r.mode}`);
         if (J(r.groups) !== J(["library", "age", "type", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
         if (J(r.age) !== J(["Everyone", "Questionable"]) || J(r.type) !== J(["Video"]) || J(r.genre) !== J(["Anime", "Game", "Music", "Nature"]))
           v.push(`rows age ${J(r.age)}, type ${J(r.type)}, genre ${J(r.genre)}`);
-        if (r.sorts) v.push("a Workshop sort in the WE folder's row");
+        if (r.row) v.push("a sort / filter row above the WE folder's grid");
+        if (!r.tog || r.sorts !== 1 || r.sort !== "Default") v.push(`the WE folder's split: toggle ${r.tog}, ${r.sorts} select(s), menu starting "${r.sort}" (want its client sort)`);
         const n0 = await page(`return window.__browse.length + window.__more.length;`);
         const steps = [[["Anime", "inc"]], ["we-a", "we-c"], [["Everyone", "inc"]], ["we-a"], [["Everyone", "off"], ["Anime", "off"], ["Questionable", "exc"]], ["we-a", "we-own"],
           [["Questionable", "off"], ["@library", "inc"]], ["we-own"], [["@library", "exc"]], ["we-a", "we-b", "we-c"]];
@@ -1006,7 +1264,7 @@ app.whenReady().then(async () => {
       else {
         // counted over the click's own commits only (the switch commits in its event, the selection trim in a layout effect
         // right after): a card's own thumbnail loading meanwhile is not the filter's doing
-        await sleep(1500);
+        await page(`await m.ensure();`); await sleep(1500);
         const rc = await page(`const r = [...m.q('.wf-col[data-wf-page="library"]').querySelectorAll(".wf-row")].find((x) => x.dataset.wfTag === "Nature");
           window.__rc = { rendered: 0, mounted: 0, unmounted: 0 }; window.__rcWho = {};
           r.querySelector('[data-seg="exc"]').click(); await new Promise((res) => setTimeout(res, 0));
@@ -1051,6 +1309,18 @@ app.whenReady().then(async () => {
         if (g2.max < 40) v.push(`after hiding Nature the grid no longer scrolls (max ${g2.max}) — proved nothing`);
         else if (g2.top > 1) v.push(`a filter change left the grid at ${g2.top} (want the top)`);
         await libSeg("Nature", "off");
+      }
+      // the docked panel opened / closed from its toggle: the grid re-fits, the row the eye is on stays put
+      for (const want of [false, true]) {
+        await page(`const s = m.q(".lib-scroll"); s.scrollTop = Math.round(s.scrollHeight / 2); await m.sleep(300);`);
+        const at = (id) => page(`const sc = m.q(".lib-scroll"), top = sc.getBoundingClientRect().y;
+          const a = [...sc.querySelectorAll(".card.lib")].find((c) => (${id == null} ? c.getBoundingClientRect().top >= top - 1 : c.querySelector("[data-title]")?.dataset.title === ${J(id ?? "")}));
+          return a ? { id: a.querySelector("[data-title]")?.dataset.title ?? null, y: a.getBoundingClientRect().y - top } : { id: null, y: null };`);
+        const at0 = await at(null);
+        await page(`m.tog().click(); await m.sleep(600);`);
+        const at1 = (await at(at0.id)).y;
+        if (at0.id == null) v.push("no card in view to hold — proved nothing");
+        else if (at1 == null || Math.abs(at1 - at0.y) > 2) v.push(`${want ? "opening" : "closing"} the panel moved the row in view: ${at0.id} from ${at0.y?.toFixed(0)} to ${at1?.toFixed(0)} px`);
       }
       const plN2 = await page(`return m.qa(".pl-item").length;`);
       if (plN2 !== plN) v.push(`the playlist bar went from ${plN} to ${plN2} items through the Library's filter`);

@@ -104,11 +104,18 @@ const PAGE = `window.__ly = {
     return { id: a?.querySelector("[data-title]")?.dataset.title ?? null, y: a ? a.getBoundingClientRect().y - top : null }; },
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom }; },
   ty(el) { const m = new DOMMatrixReadOnly(getComputedStyle(el).transform === "none" ? undefined : getComputedStyle(el).transform); return m.m42; },
-  // the top bar's visible controls (what a user sees and clicks), leaves of its flex rows
+  // the top bar's visible controls (what a user sees and clicks), leaves of its flex rows. A source pill shows only where its
+  // sideways-scrolling strip does (components/SourcePills.tsx): clipped to the strip's box, gone when scrolled out of it
   topbarParts() {
     const tb = document.querySelector(".topbar");
-    const parts = [...tb.querySelectorAll(".tab, .pill, .seg, .mini, .search, .sel, .btn, .status")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== "hidden"; });
-    return { tb: this.rect(tb), parts: parts.map((e) => ({ k: e.className.split(" ")[0] + (e.textContent ? ":" + e.textContent.trim().slice(0, 14) : ""), ...this.rect(e), clipped: e.scrollWidth > e.clientWidth + 1 && !e.classList.contains("status") })) };
+    const shown = (e) => { const b = e.getBoundingClientRect(), st = e.closest(".pill-strip");
+      if (!st || getComputedStyle(st).display === "contents") return b;
+      const s = st.getBoundingClientRect(), cs = getComputedStyle(st), l = s.left + parseFloat(cs.paddingLeft), r = s.right - parseFloat(cs.paddingRight);
+      const x = Math.max(b.left, l), rr = Math.min(b.right, r);
+      return rr - x > 1 ? new DOMRect(x, b.top, rr - x, b.height) : new DOMRect(0, 0, 0, 0); };
+    const parts = [...tb.querySelectorAll(".tab, .pill, .seg, .mini, .search, .sel, .btn, .status")].filter((e) => { const b = shown(e); return b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== "hidden"; });
+    const r = (e) => { const b = shown(e); return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom }; };
+    return { tb: this.rect(tb), parts: parts.map((e) => ({ k: e.className.split(" ")[0] + (e.textContent ? ":" + e.textContent.trim().slice(0, 14) : ""), ...r(e), clipped: e.scrollWidth > e.clientWidth + 1 && !e.classList.contains("status") })) };
   },
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__ly; ${code} })()`);
@@ -906,6 +913,8 @@ app.whenReady().then(async () => {
         };
         const setQ = (q) => `const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(q)}); i.dispatchEvent(new Event("input", { bubbles: true }));`;
         await fresh("search", setQ("probe"), setQ(""));
+        // the item sidebar's round trip closed the filter panel (one right-hand panel at a time): its toggle brings it back
+        await page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") === "false") { t.click(); await m.sleep(500); }`);
         const tagged = await page(`const r = [...document.querySelectorAll(".wf-col:not(.closing) .wf-row[data-wf-tag]")].find((x) => !x.dataset.wfTag.startsWith("@") && x.querySelector(".wf-name")?.offsetParent); return r ? r.dataset.wfTag : null;`);
         if (!tagged) v.push("no filter row in the docked filter column — the filter case proved nothing");
         else {

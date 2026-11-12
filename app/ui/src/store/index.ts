@@ -9,6 +9,10 @@ export type PreviewKind = "gif" | "video" | "youtube" | "image";
 // what the backend gets: the filter without the UI-only "@" pseudo-tags (workshopFilter.ts LIBRARY_TAG)
 const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
   ({ ...f, include: f.include.filter((t) => !t.startsWith("@")), exclude: f.exclude.filter((t) => !t.startsWith("@")) });
+// the filter panel docks beside the grid from this width; below it, it floats over the grid. The item sidebar's own breakpoint
+// (index.css `.side-panel`): the two take turns on the right, so a swap between them never changes the grid.
+export const WF_DOCK_QUERY = "(min-width: 900px)";
+export type FilterPage = "browse" | "library";
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -146,8 +150,11 @@ interface State {
   // All / Any switches, all off; which groups are collapsed (remembered, shared)
   setTagState(tag: string, st: TagState, scope?: FilterScope): void; clearTags(scope?: FilterScope): void;
   setFilterIn(scope: FilterScope, p: Partial<WorkshopFilter>): void;
-  // the docked column folded away, per page (remembered)
-  filterColHidden: boolean; libFilterColHidden: boolean; setFilterColHidden(v: boolean, page?: "browse" | "library"): void;
+  // the filter panel, per page: docked, closed is remembered (filterColHidden / libFilterColHidden); as a drawer (a narrow
+  // window) it starts closed (filterDrawer = the page whose drawer is open). The right-hand side holds one panel at a time:
+  // opening the filters closes the page's item sidebar, focusing an item (focusLib / focusBrowse) closes its filters.
+  filterColHidden: boolean; libFilterColHidden: boolean; filterDrawer: FilterPage | null;
+  setFiltersOpen(page: FilterPage, open: boolean): void;
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
@@ -235,13 +242,20 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 }
 
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
+// an item's sidebar opening on `page` closes that page's filter panel, if it shows (docked: remembered closed; a drawer: shut)
+function closeFiltersFor(page: FilterPage) {
+  const s = useStore.getState();
+  if (s.filterDrawer === page) useStore.setState({ filterDrawer: null });
+  if ((page === "library" ? s.libFilterColHidden : s.filterColHidden) || !matchMedia(WF_DOCK_QUERY).matches) return;
+  s.setFiltersOpen(page, false);
+}
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
-  // the docked filter column folded away; remembered
-  filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false),
+  // the docked filter panel closed; remembered
+  filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false), filterDrawer: null,
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null,
@@ -277,6 +291,7 @@ export const useStore = create<State>((set, get) => ({
   // under the new pill all that time. Guard: matrix browse:switchSource.
   setSource(i) {
     set(i === get().activeSource ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
+    if (!get().browseScope() && get().filterDrawer === "browse") set({ filterDrawer: null }); // a source without filters
     LS.set("activeSource", i); get().reload();
   },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
@@ -302,9 +317,14 @@ export const useStore = create<State>((set, get) => ({
     set(scope === "library" ? { libFilter: f } : { weFilter: f }); LS.set(FILTER_KEY[scope], f);
   },
   clearTags(scope = "workshop") { const f = filterOf(get(), scope); if (f.include.length || f.exclude.length) get().setFilterIn(scope, { include: [], exclude: [] }); },
-  setFilterColHidden(v, page = "browse") {
-    if (page === "library") { set({ libFilterColHidden: v }); LS.set("libFilterHidden", v); }
-    else { set({ filterColHidden: v }); LS.set("browseFilterHidden", v); }
+  // Guard: probe-filters swap:browse, swap:library, panel:persist
+  setFiltersOpen(page, open) {
+    if (!matchMedia(WF_DOCK_QUERY).matches) {
+      const d = get().filterDrawer;
+      if (open || d === page) set({ filterDrawer: open ? page : null });
+    } else if (page === "library") { set({ libFilterColHidden: !open }); LS.set("libFilterHidden", !open); }
+    else { set({ filterColHidden: !open }); LS.set("browseFilterHidden", !open); }
+    if (open) { if (page === "library") get().focusLib(null); else get().focusBrowse(null); }
   },
   toggleFilterGroup(id) {
     const c = get().filterCollapsed, n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id];
@@ -595,8 +615,12 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // closing re-reads the library (the modal did too: what its edits saved, whatever the optimistic patches missed)
-  focusLib(path) { const was = get().libFocus; set({ libFocus: path }); if (was && !path) get().loadLibrary().catch(() => {}); },
-  focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); },
+  focusLib(path) {
+    const was = get().libFocus; set({ libFocus: path });
+    if (path) closeFiltersFor("library");
+    if (was && !path) get().loadLibrary().catch(() => {});
+  },
+  focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); if (pageUrl && get().browseScope()) closeFiltersFor("browse"); },
   setPreviewPref(side, k) { set((s) => ({ previewPref: { ...s.previewPref, [side]: k } })); },
 
   // ---- shared ----
