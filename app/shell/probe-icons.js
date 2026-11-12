@@ -25,6 +25,7 @@
 //   icon:playRing       Play's accent ring ripples out once per hover (motion on), none with motion off
 //   icon:act:off / icon:act:reduced   motion off / prefers-reduced-motion: hover / press start no animation and no transition
 //                       frames (download, the close X, the press)
+//   icon:still:off                    motion off: the hover holds, an emblem's tilt and the press squeeze end where they started
 //   icon:perf           while one-shots, holds and the magnet run: no layout forced from script and none bigger than an icon's
 //                       own SVG (dirty objects per Layout, from a trace; an idle stretch alongside for comparison), and an idle
 //                       page afterwards asks for no frames (rAF callbacks)
@@ -521,6 +522,42 @@ app.whenReady().then(async () => {
       return v;
     };
     await cell("icon:act:off", () => off("off"));
+    // motion off = icons stay still, not snap: the X's quarter turn, the trash lid, a section emblem's tilt and the press
+    // squeeze end where they started. Each is checked first with motion ON (it must move there, or this proved nothing).
+    await cell("icon:still:off", async () => {
+      const v = [], J = JSON.stringify;
+      const cases = [
+        ["x", browseSide, `document.querySelector(".side-panel:not(.closing) [data-side-close]")`, `document.querySelector(".side-panel:not(.closing) [data-side-close] svg")`],
+        ["trash lid", async () => { await closeSide(); await lib(); const c = await centre(`document.querySelector(".card.lib .thumb-wrap")`); await mv(c.x, c.y - 20, 400); },
+          `document.querySelector(".card.lib .del")`, `document.querySelector(".card.lib .del svg.lucide-trash-2 > :nth-child(4)")`],
+        ["section emblem", async () => { await closeSide(); await tab("Settings"); await sleep(900); },
+          `document.querySelector(".ssection")`, `document.querySelector(".ssection .ssection-ico")`],
+      ];
+      const moved = (l) => Math.abs(l.ang) > 1 || Math.abs(l.sx - 1) > 0.02 || Math.abs(l.tx) > 0.3 || Math.abs(l.ty) > 0.3 || Math.abs(l.skew) > 0.02;
+      const run = async () => {
+        const out = {};
+        for (const [name, go, host, part] of cases) {
+          await go(); const c = await centre(host); await mv(c.x, c.y, 120); await sleep(500);
+          out[name] = await page(`return m.look(${part});`); await mv(3, 3, 200);
+        }
+        await lib(); const c = await centre(bar("Save playlist")); await mv(c.x, c.y, 300);
+        send({ type: "mouseDown", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1 }); await sleep(250);
+        out.press = await page(`return m.look(${bar("Save playlist")}.querySelector("svg.lucide"));`);
+        await mv(3, 3, 50); send({ type: "mouseUp", x: 3, y: 3, button: "left", clickCount: 1 }); await sleep(200);
+        return out;
+      };
+      const on = await run();
+      await setMotion(false);
+      try {
+        const offL = await run();
+        console.log(`        on ${J(on)}\n        off ${J(offL)}`);
+        for (const k of Object.keys(on)) {
+          if (!moved(on[k])) v.push(`${k}: doesn't move with motion on either — proved nothing (${J(on[k])})`);
+          else if (moved(offL[k])) v.push(`${k}: still moves with motion off (${J(offL[k])})`);
+        }
+      } finally { await setMotion(true); }
+      return v;
+    });
     await cell("icon:act:reduced", () => off("reduced"));
     await cell("icon:magnet:off", async () => { await setMotion(false); try { return await magnet(true); } finally { await setMotion(true); } });
   } catch (e) {

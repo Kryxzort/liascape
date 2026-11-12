@@ -1057,6 +1057,16 @@ input[type=range]:focus-visible { outline: none; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
 :root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }
+/* motion off = icons stay still, not snap: a hover tilt, a turned X, a lifted lid or a press squeeze with no transition is
+   still a jump. Kept: the disclosure carets and chevrons (their turn says open / closed, instant here) and the spinner
+   (progress). !important beats the hover rules and any one-shot left over. Guard: probe-icons icon:still:off */
+:root.no-motion svg.lucide:not(.lucide-chevron-down, .lucide-chevron-up, .lucide-chevron-right, .lucide-chevron-left, .lucide-loader-circle, .sel-caret),
+:root.no-motion svg.lucide:not(.lucide-loader-circle) > *,
+:root.no-motion :is(.ssection-ico, .side-sec-ico, .side-tile-ico) { transform: none !important; }
+/* rotate / scale in a rule of their own: next to `transform` in one block, the build's CSS minifier folds all three into
+   `transform: rotate(0) scale(1)` and drops the individual properties the X's turn (rotate) and the press (scale) use */
+:root.no-motion svg.lucide:not(.lucide-chevron-down, .lucide-chevron-up, .lucide-chevron-right, .lucide-chevron-left, .lucide-loader-circle, .sel-caret) {
+  rotate: none !important; scale: none !important; }
 :root.no-motion [data-magnet] { translate: none !important; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .pl-item.hov:not(.playing) { transform: translateY(-2px); }
