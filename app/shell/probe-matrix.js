@@ -2054,8 +2054,9 @@ const VT_COUNT = String.raw`(() => { const m = window.__mx;
   const onScreen = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth; };
   const els = [...m.cards().map((c) => [c.querySelector(".lib-title")?.dataset.title, c.querySelector(".thumb-wrap")]), ...m.barItems().map((e) => [e.dataset.title, e])];
   const vs = [...document.querySelectorAll(".card.lib video.thumb.anim, .pl-item video.thumb.anim")];
-  // one item's layers: its video (mounted / playing), its gif, and whether the video is the one on top
-  const one = (e) => { const v = e.querySelector("video.thumb.anim"), g = e.querySelector("img.thumb.anim");
+  // one item's layers: its video (mounted / playing), its gif (shown: a gif that has shown stays mounted, hidden —
+  // components/MotionThumb.tsx keepHidden), and whether the video is the one on top
+  const one = (e) => { const v = e.querySelector("video.thumb.anim"), g = [...e.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden");
     return { video: !!v, playing: !!v && !v.paused && v.readyState >= 2, gif: !!g, videoOnTop: !!v && (!g || !!(g.compareDocumentPosition(v) & Node.DOCUMENT_POSITION_FOLLOWING)) }; };
   return { total: vs.length, playing: vs.filter((v) => !v.paused && v.readyState >= 2).length,
     cards: document.querySelectorAll(".card.lib video.thumb.anim").length, bar: document.querySelectorAll(".pl-item video.thumb.anim").length,
@@ -2165,6 +2166,91 @@ C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
       if (x.got.length !== 2) v.push(`${n}: k1 is in ${x.got.length} places on screen, expected its card and its playlist-bar item`);
       x.got.forEach((y, i) => { if (!k1Is(y, x.idle)) v.push(`${n}, k1's ${i ? "bar item" : "card"}: expected ${J(x.idle)}, got ${J(y)}`); });
       if (!k1Is(x.gotHover, x.hov)) v.push(`${n}, k1's card hovered: expected ${J(x.hov)}${x.hov.video ? " (playing, on top)" : ""}, got ${J(x.gotHover)}`);
+    }
+    return v;
+  } };
+
+// A gif preview that goes out of sight and comes back goes on from a later frame, never from frame 0 and never fetched
+// again, even after a garbage collection while it was away (components/MotionThumb.tsx keepHidden): k1's card on an
+// unhover + re-hover, and under "Animate GIF previews" scrolled away and back, the window inactive and active again, and
+// another tab and back. Out of sight, Chromium decodes none of its frames (counted in a trace: the gating that keeps a
+// backgrounded window's gifs from draining the decode threads). k1.gif (test-ui-matrix.sh) codes its frame index in its
+// colour: r = 40 + 4·i, g = 200 − 3·i, b = 90, 48 frames at 8 fps.
+C["appear:gifResume"] = { states: ["single"], noSwitch: true,
+  // k1 only on its card: the playlist bar's copy would share its decodes
+  async pre() { await post("/playlist/state", { videoPaths: [K[1], K[2], K[3]], settings: PS(), name: null }); },
+  async run(c) {
+    const { contentTracing } = require("electron");
+    const send = (e) => win.webContents.sendInputEvent(e);
+    // the frame k1's card shows now (from a screenshot of its centre): null = not on screen, -1 = not a k1.gif frame
+    const frame = async () => {
+      const p = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; const b = e.getBoundingClientRect();
+        return b.width > 8 && b.top >= 0 && b.bottom <= innerHeight ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null;`);
+      if (!p) return null;
+      const img = await win.webContents.capturePage({ x: p.x - 2, y: p.y - 2, width: 4, height: 4 });
+      const s = img.getSize(), px = img.toBitmap(), i = ((s.height >> 1) * s.width + (s.width >> 1)) * 4;
+      const f = Math.round((px[i + 2] - 40) / 4);
+      return f >= 0 && f < 48 && Math.abs(px[i] - 90) <= 8 && Math.abs(px[i + 1] - (200 - 3 * f)) <= 10 ? f : -1;
+    };
+    // wait for k1 to play into frames [lo, hi] (far from both the loop's start and its wrap)
+    const playTo = async (lo, hi) => { let f = null; await waitFor(async () => { f = await frame(); return f >= lo && f <= hi; }, 9000, 60); return f; };
+    // a full garbage collection in the page: Chromium resets a gif's animation once no <img> of it is left, and an
+    // unmounted one goes at the next GC (whenever that runs)
+    const gc = async () => { const d = win.webContents.debugger; d.attach("1.3"); try { await d.sendCommand("HeapProfiler.collectGarbage"); } finally { d.detach(); } };
+    // Chromium's own image decodes over `ms` (with a GC in it, when `collect`)
+    let tn = 0;
+    const decodesDuring = async (ms, collect) => {
+      await contentTracing.startRecording({ included_categories: ["blink", "cc", "disabled-by-default-devtools.timeline"], excluded_categories: ["*"] });
+      if (collect) { await sleep(300); await gc(); await sleep(ms - 300); } else await sleep(ms);
+      const f = await contentTracing.stopRecording(path.join(OUT, `gif-resume-${tn++}.json`));
+      let n = 0;
+      try { const t = JSON.parse(fs.readFileSync(f, "utf8")); for (const e of t.traceEvents || t) if (e.name === "ImageFrameGenerator::decode" && e.ph !== "E") n++; } finally { fs.rmSync(f, { force: true }); }
+      return n;
+    };
+    // one out-of-sight round: k1 playing mid-loop → hidden (decodes counted) → shown → the frame it shows
+    // (fetched: the gif's requests that reached the network stack — a memory-cache hit never does)
+    const round = async (hide, show) => {
+      const before = await playTo(6, 18);
+      const h0 = httpLog.length;
+      await hide();
+      const decodes = await decodesDuring(1500, true);
+      await show();
+      await sleep(250);
+      const after = await frame();
+      return { before, decodes, after, fetched: httpLog.slice(h0).filter((r) => r.url.includes("/anim")).length };
+    };
+    const card = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; e.scrollIntoView({ block: "center" }); await m.sleep(200);
+      const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+    c.card = !!card;
+    if (!card) return;
+    const hover = async () => { send({ type: "mouseMove", x: card.x - 3, y: card.y }); await sleep(40); send({ type: "mouseMove", x: card.x, y: card.y }); };
+    const away = async () => { send({ type: "mouseMove", x: 700, y: 4 }); };
+    // the default (gifs animate on hover only): unhover, re-hover
+    await hover();
+    c.playing = await decodesDuring(1500); // the counter's own check: an animating gif decodes ~12 frames in 1.5 s
+    c.hover = await round(away, hover);
+    await away();
+    await ui(`m.tab("Settings"); for (let i = 0; i < 40 && !m.input("Animate GIF previews"); i++) await m.sleep(100);
+      m.setCheck(m.input("Animate GIF previews"), true, "gifs"); await m.sleep(300); m.tab("Library"); await m.sleep(400);`);
+    c.saved = await waitFor(async () => (await getSettings()).autoPlayGifs === true, 4000, 100);
+    c.scroll = await round(
+      () => ui(`const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(100);`),
+      () => ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(50);`));
+    c.blur = await round(
+      () => js(`document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); true`),
+      () => js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`));
+    c.tab = await round(() => ui(`m.tab("Settings"); await m.sleep(50);`), () => ui(`m.tab("Library"); await m.sleep(50);`));
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.card) return ["no k1 card on screen"];
+    if (!(c.playing >= 6)) v.push(`k1 hovered: the trace counted ${c.playing} gif decodes in 1.5 s (≥ 6 expected at 8 fps) — the hidden counts prove nothing`);
+    if (!c.saved) v.push("turning Animate GIF previews on wasn't saved");
+    for (const [n, r] of [["unhover → re-hover", c.hover], ["scrolled away → back", c.scroll], ["window inactive → active", c.blur], ["another tab → back", c.tab]]) {
+      if (!r) { v.push(`${n}: never ran`); continue; }
+      if (!(r.before >= 6)) { v.push(`${n}: k1 never played into frames 6-18 before going out of sight (${J(r)}) — proved nothing`); continue; }
+      if (!(r.after >= 6)) v.push(`${n}: k1 came back at frame ${r.after}, from ${r.before} — it restarted (a later frame than 0 expected) ${J(r)}`);
+      if (r.decodes > 2) v.push(`${n}: ${r.decodes} gif decodes while out of sight (none expected) ${J(r)}`);
+      if (r.fetched) v.push(`${n}: k1's gif was fetched again ${r.fetched}× (its <img> left the page) ${J(r)}`);
     }
     return v;
   } };

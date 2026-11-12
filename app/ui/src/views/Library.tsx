@@ -54,7 +54,7 @@ export const Library = memo(function Library() {
   const setStatus = useStore((s) => s.setStatus);
   const refreshPlayingStatus = useStore((s) => s.refreshPlayingStatus);
   const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
+  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
 
   const [sel, setSel] = useState<Set<string>>(new Set());

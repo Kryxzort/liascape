@@ -57,7 +57,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
   const focusLib = useStore((s) => s.focusLib);
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
+  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as

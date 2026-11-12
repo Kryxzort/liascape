@@ -155,6 +155,13 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Let a hidden gif preview keep its own clock; don't resume it on a canvas — 2026-11-12
+A gif preview that goes out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and
+undecoded, and shows again at the frame Chromium's clock for it is on, as if it had played meanwhile; never from frame 0.
+Resuming at the exact frame it stopped on needs our own ImageDecoder-to-canvas player: 40 gifs cost about twice the
+renderer CPU of Chromium's gif animation (67–74 % vs 35 % of a core), ~400 MB more, and 22 % of the main thread when drawn
+there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Performance.
+
 ### Play every on-screen video preview, each as a small clip — 2026-11-12
 "Play video previews" has no cap (it was 4): every video preview on screen plays, each a clip of at most 10 s, 640 px and
 24 fps that the backend makes once (`/clip`), never the wallpaper's own file. A full-size `<video>` keeps one of

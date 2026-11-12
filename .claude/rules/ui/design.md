@@ -44,7 +44,7 @@ the floor; a new element is designed to delight within the toggles and the frame
 - Decode or animate nothing while `!appActive` (the store's focus/visibility flag) — it caused the main-thread freeze.
 - The page has 6 connections to the backend (Chromium, HTTP/1.1) and slow `/img` loads can hold them all: a list being replaced drops at once and its cards abort their unfinished image loads (`components/Card.tsx`), or the next API call queues behind them. Guard: matrix `browse:switchSource`.
 - Bulk-autoplay gif/webp previews; a video preview plays on hover, or under "Play video previews" every one on screen, as a small `clip()` (`/clip`), never the full file: a full-size `<video>` holds one of the 6 connections while it plays. Guard: matrix `appear:videoThumbs`.
-- Keep a gif `<img>` mounted and toggle its opacity; never swap its `src` (it restarts).
+- Keep a gif `<img>` mounted once it has shown and hide it (`visibility: hidden` or opacity 0: unpainted, so none of its frames decode); never unmount it or swap its `src`: either restarts the gif (`components/MotionThumb.tsx` keepHidden). Guard: matrix `appear:gifResume`.
 
 ## Interaction rules
 - Tooltips (`title=`) only when they tell something you can't see (an unclear icon-only control, a warning's reason, a setting's explanation, a value a short form hides). Never one that repeats the label, explains a click, names an obvious icon, or sits on cards / bar items. Icon-only controls always get an `aria-label`.

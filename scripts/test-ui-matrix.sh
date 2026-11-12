@@ -409,7 +409,9 @@ K1DIR=$(dirname "$(echo "$CLIPS" | jq -r '.[0]')")
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=480x480" -frames:v 1 "$K1DIR/k1.jpg"
 # duration= bounds the SOURCE: palettegen waits for its input to end while paletteuse queues every frame,
 # so an unbounded source grew to 18 GB until earlyoom killed it (an output -t never ends the input)
-timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=240x240:rate=12:duration=2" -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
+# Each frame is one solid colour that codes its index (r = 40 + 4·i, g = 200 − 3·i, b = 90; 48 frames at 8 fps), so a
+# screenshot tells which frame a card shows (probe-matrix appear:gifResume).
+timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=black:size=240x240:rate=8:duration=6,format=gbrp,geq=r='40+4*N':g='200-3*N':b=90" -vf "split[a][b];[a]palettegen[p];[b][p]paletteuse" "$K1DIR/k1.gif"
 
 # An explicit display from :90 up, never one with a socket, a lock file or an abstract socket: `-displayfd` alone
 # picks the first FREE-LOOKING display, and the session's Xwayland (:1, started with -listenfd) leaves a lock file

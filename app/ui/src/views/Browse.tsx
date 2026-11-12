@@ -50,7 +50,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const focusBrowse = useStore((s) => s.focusBrowse);
   const applyItem = useStore((s) => s.applyItem);
   const motion = useMotion();
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs unmount, no decode drain
+  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
   const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   // PERF: one Set per library change; each memo'd card gets a boolean, so only a card whose mark flips re-renders
   const libItems = useStore((s) => s.libraryItems);

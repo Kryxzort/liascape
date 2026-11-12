@@ -16,9 +16,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
        `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
        media URL, the dev proxy and the Host checks.
-19. [ ] GIF previews resume where they stopped instead of restarting (on unhover, scroll-away, window backgrounded) — only
-       if it costs no performance: measure (frames decoded, idle rAF, memory) before choosing a way (e.g. `ImageDecoder`
-       to a canvas vs keeping the `<img>` mounted).
 
 
 ## On a real desktop session (not hermetic)
