@@ -1048,10 +1048,12 @@ fn shared_a_align_end_boundary() {
 }
 
 /// Invariant #6: a start on an output whose transition is Running
-/// commits it, for every method — T1's B unpaused at once, its xfade/anticlick at 0 dB
-/// within 30 ms (rising monotonically), a frozen B released from its hold (advances); T1's
-/// A ramped out from where it was (monotone, no jump) and destroyed. T2 waits on B's end
-/// (seconds away), so it touches nothing on B while the commit ramps run.
+/// commits it, for every method — T1's B unpaused at once, its gain continuous at the commit
+/// (a frozen B, held silent, never steps on at full level), its xfade/anticlick at 0 dB within
+/// 30 ms (rising monotonically; a frozen B's anticlick ramp waits for its audio, invariant #8),
+/// a frozen B released from its hold (advances); T1's A ramped out from where it was (monotone,
+/// no jump) and destroyed. T2 waits on B's end (seconds away), so it touches nothing on B
+/// while the commit ramps run.
 #[test]
 fn commit_running_each_method() {
     let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
@@ -1068,6 +1070,7 @@ fn commit_running_each_method() {
         let t0 = start_of(&h.wait_event(&t1, "transition.started", MS(5000)));
         h.tick_to(t0 + MS(300));
         let a_gain0 = h.gain(&a);
+        let b_gain0 = h.gain(&b);
         let b_corner0 = h.corner(&b).unwrap();
         let t2 = h.start(json!({
             "outputs": "out:*", "to": {"kind": "color", "color": [0, 255, 0]},
@@ -1089,6 +1092,12 @@ fn commit_running_each_method() {
             !h.bool(&format!("{b}.paused")),
             "{method}: B unpaused at commit"
         );
+        close(
+            h.gain(&b),
+            b_gain0,
+            0.5,
+            &format!("{method}: B's gain continuous at the commit"),
+        );
         let mut a_gain = vec![a_gain0];
         let mut b_x = vec![h.f64(&format!("{b}.gain.xfade"))];
         let mut b_ac = vec![h.f64(&format!("{b}.gain.anticlick"))];
@@ -1106,11 +1115,21 @@ fn commit_running_each_method() {
             1e-9,
             &format!("{method}: B xfade at +30 ms"),
         );
+        if method == "frozen" {
+            let ok = h.tick_until(MS(500), |h| {
+                b_ac.push(h.f64(&format!("{b}.gain.anticlick")));
+                (h.gain(&b) - 0.0).abs() < 1e-6
+            });
+            assert!(
+                ok,
+                "frozen: B never ramped in (onset never confirmed/timed out)"
+            );
+        }
         close(
             *b_ac.last().unwrap(),
             0.0,
             1e-9,
-            &format!("{method}: B anticlick at +30 ms"),
+            &format!("{method}: B anticlick at the end of its ramp"),
         );
         close(h.gain(&b), 0.0, 1e-9, &format!("{method}: B audible"));
         assert!(

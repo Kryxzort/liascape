@@ -81,9 +81,11 @@ rewound if it ended because of it).
 
 `start` creates B first, then resolves every in-flight transition sharing an output: pre-Running → abort
 (`cancelled {reason: "superseded"}`; A's loop restored without a rewind, so the new request proceeds from A as it
-is); Running → commit (layers → B, fx/snapshots destroyed, B to 0 dB over 30 ms, A released,
-`handoff {committed: true}`); Handoff → left to settle. Only then is A captured. It also force-starts any other
-transition's pending onset on a node it is about to capture as A, so two transitions never fight one gain slot.
+is); Running → commit (layers → B, fx/snapshots destroyed, B to 0 dB over 30 ms — a still-paused `frozen` B
+un-paused at −96 with its 30 ms ramp held for audio, like its own handoff — A released, `handoff {committed: true}`);
+Handoff → left to settle. Only then is A captured. Entering Running, a transition force-starts any other
+transition's pending onset on its A's, so two transitions never fight one gain slot; never at `start`, where a
+committed frozen B becomes the new A before its audio flows.
 
 `cancel`: pre-Running → abort (an A that ended only because `end` turned its loop off is rewound); Running → snap
 back (layers → A, A's gains ramped back over 30 ms, B to −96 then destroyed); after handoff → `unsupported`.

@@ -103,7 +103,8 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   color/image/snapshot or a muted B. A cut's B is never held.
 - Write `settle_until` with `.max()` downstream of a scheduled onset, never plain assignment, so a later
   recompute can't shorten a still-ramping onset (`commit_unseen` drops a pending onset instead).
-- `start` force-starts another transition's pending onset on a node it is about to capture as A.
+- `begin_running` force-starts another transition's pending onset on its A's, never `start` (a committed frozen B
+  is the new A before its audio flows). Guard: `frozen_commit_holds_b_silent_until_audio_flows`.
 - Pause a held A at `t0 + ANTICLICK + AUDIO_SETTLE_TAIL`, not `t0 + ANTICLICK`: mpv's gain lags the graph.
 - Record gains for restore with `Animator::live_target_of`, never `target_of` (a finished ramp's stale
   target would undo a later `set`). Guard: `restore_uses_live_target_not_a_stale_finished_one`.

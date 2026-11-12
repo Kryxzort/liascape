@@ -769,29 +769,6 @@ impl Transitions {
             }
         }
 
-        // A node with another (unrelated, e.g. already-handed-off) transition's own
-        // pending onset is about to become *this* request's outgoing "A" — force that
-        // onset to start right now rather than leaving it to resolve invisibly later and
-        // fight whatever this transition does to the same gain slot (`note_gain`/`release`
-        // need a *live* animation to read a target from, not a silent gap). `build_sides`
-        // below computes the exact same `cur:<connector>` set.
-        let incoming: Vec<String> = outputs
-            .iter()
-            .filter_map(|o| {
-                g.resolve(&format!("cur:{}", o.strip_prefix("out:").unwrap_or(o)))
-                    .into_iter()
-                    .next()
-            })
-            .collect();
-        for tr in &mut self.active {
-            if tr.onset.as_ref().is_some_and(|o| incoming.contains(&o.id)) {
-                start_onset(tr, anim, now, "forced");
-            }
-        }
-        for id in &incoming {
-            self.restore_onsets.force(id, anim, now);
-        }
-
         let sides = build_sides(g, &outputs);
         let lead = sides.iter().position(|s| s.a.is_some());
         // From nothing there is nothing to transition from: whatever effect was asked for, B just
@@ -1647,6 +1624,20 @@ impl Transitions {
         // left alone — and gets back whatever was already changed on it (End's loop) — and
         // one no longer shown elsewhere is ours to hold.
         let layers: Vec<String> = tr.sides.iter().flat_map(|s| s.layers.clone()).collect();
+        // An A whose own onset (an earlier transition's B, a restored A) is still held for
+        // its audio is about to have its gains noted and ramped here: start that onset now
+        // so `note_gain`/`release` read a live ramp's target, not the held silence. Not at
+        // `start`: a committed `frozen` B becomes this request's A the instant it un-pauses,
+        // and forcing it there ramps it in before its audio flows (invariant #8).
+        // Guard: `frozen_commit_holds_b_silent_until_audio_flows`.
+        for a in tr.sides.iter().filter_map(|s| s.a.clone()) {
+            for other in &mut self.active {
+                if other.onset.as_ref().is_some_and(|o| o.id == a) {
+                    start_onset(other, anim, now, "forced");
+                }
+            }
+            self.restore_onsets.force(&a, anim, now);
+        }
         for side in &mut tr.sides {
             let Some(a) = side.a.clone() else {
                 continue;
@@ -2036,15 +2027,18 @@ impl Transitions {
             let was_paused = get_bool(g, &b, "paused");
             gset(g, &corr, &b, "paused", PropValue::Bool(false));
             if was_paused && tr.onset.is_none() {
+                // B's anticlick is still 0 dB here (only its xfade held it silent): opening
+                // the xfade without first closing the anticlick steps B on at full level the
+                // instant its output restarts. Guard: `frozen_commit_holds_b_silent_until_audio_flows`.
+                gset(g, &corr, &b, "gain.anticlick", PropValue::F64(SILENT_DB));
                 gset(g, &corr, &b, "gain.xfade", PropValue::F64(0.0));
-                let from = db_to_lin(gain_db(g, &b, "anticlick"));
                 schedule_onset(
                     tr,
                     g,
                     anim,
                     b.clone(),
                     "anticlick",
-                    from,
+                    0.0,
                     1.0,
                     ANTICLICK,
                     Curve::Linear,
@@ -3164,6 +3158,120 @@ mod tests {
         h.tick(40, &[]); // past the 30 ms ramp
         assert!((gain_db(&h.g, &b, "anticlick") - 0.0).abs() < 1e-6);
         assert!(h.has(&t, "transition.done"), "done once the onset resolved");
+    }
+
+    /// A `frozen` B superseded mid-effect is committed while still paused: it must come in
+    /// exactly like its own handoff — silent (B's summed gain at −96) until `AudioFlowing`,
+    /// then the 30 ms anticlick ramp — never at full level the instant its output starts
+    /// (a hard step-on: a click, and the dropout meter's micro-gap at a frozen S→V
+    /// supersede, where the recorded gain says "audible" a few ms before mpv's output runs).
+    #[test]
+    fn frozen_commit_holds_b_silent_until_audio_flows() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        assert!(h.has(&t, "transition.started"));
+        h.tick(200, &[]); // mid-effect (duration_ms = 500)
+        assert!(
+            h.bool(&b, "paused"),
+            "a frozen B is held through the effect"
+        );
+
+        h.start(req("/c.mkv", "frozen", "now", Some("fade")));
+        assert!(
+            h.events.iter().any(|e| e.corr == t
+                && matches!(
+                    e.kind,
+                    TransitionEventKind::Handoff {
+                        committed: true,
+                        ..
+                    }
+                )),
+            "the running transition is committed"
+        );
+        assert!(!h.bool(&b, "paused"), "B un-paused at the commit");
+        assert_eq!(
+            h.g.effective_gain_db(&b),
+            Some(SILENT_DB),
+            "B stays silent until its audio really flows"
+        );
+        assert_eq!(h.anim.target_of(&path(&b, "gain.anticlick")), None);
+        h.tick(16, &[]);
+        assert_eq!(h.g.effective_gain_db(&b), Some(SILENT_DB));
+
+        h.tick(5, &[(b.clone(), SourceEvent::AudioFlowing)]);
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            Some(0.0),
+            "the anticlick ramp starts once audio flows"
+        );
+        h.tick(15, &[]);
+        let mid = h.g.effective_gain_db(&b).unwrap();
+        assert!(
+            mid > SILENT_DB && mid < -1.0,
+            "mid-ramp, not stepped on: {mid}"
+        );
+        h.tick(20, &[]);
+        assert!((h.g.effective_gain_db(&b).unwrap() - 0.0).abs() < 1e-6);
+    }
+
+    /// The superseding transition enters Running before the committed frozen B's audio
+    /// flowed: it force-starts that held onset first, so it notes B's gain at its live
+    /// target (0 dB) — a cancel puts B back audible, never at the held −96.
+    #[test]
+    fn running_over_a_held_onset_forces_it_and_restores_to_audible() {
+        let mut h = H::new(&["V1"]);
+        let _a = h.video(&["V1"], 10.0, 1.0);
+        let t = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&t);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        let snap =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot")
+                .expect("snapshot");
+        h.observe(&snap, "ready", PropValue::Bool(true));
+        h.tick(16, &[]);
+        h.tick(200, &[]);
+
+        let t2 = h.start(req("/c.mkv", "frozen", "now", Some("fade")));
+        let c = h.b_of(&t2);
+        assert_eq!(
+            h.anim.target_of(&path(&b, "gain.anticlick")),
+            None,
+            "still held"
+        );
+        h.observe(&c, "ready", PropValue::Bool(true));
+        h.tick(2, &[(c.clone(), SourceEvent::Ready)]);
+        let snap2 =
+            h.g.ids_of(NodeKind::Source)
+                .into_iter()
+                .find(|s| get_str(&h.g, s, "kind") == "snapshot" && get_str(&h.g, s, "of") == b)
+                .expect("a snapshot of B");
+        h.observe(&snap2, "ready", PropValue::Bool(true));
+        h.tick(2, &[]);
+        assert!(h.has(&t2, "transition.started"));
+        // Cancelled inside the held onset's ONSET_TIMEOUT and before B is paused under the
+        // new effect: only the forced onset can have put a 0 dB target in B's record.
+        h.tick(20, &[]);
+        h.tr.cancel(&t2, &mut h.g, &mut h.anim, h.now).unwrap();
+        h.tick(40, &[]);
+        assert!(
+            (h.g.effective_gain_db(&b).unwrap() - 0.0).abs() < 1e-6,
+            "B restored audible: {:?}",
+            h.g.effective_gain_db(&b)
+        );
     }
 
     /// Unconfirmed past [`ONSET_TIMEOUT`], the onset ramps anyway rather than holding
