@@ -50,10 +50,14 @@ export function morph(from: MorphSource, to: Element | null) {
   const dx = end.left - from.rect.left, dy = end.top - from.rect.top;
   // COOL: mid-flight it lifts a touch (1.06×) and glows in the accent — one object travelling, not a swap — then settles into the
   // target's look. The midpoint's translate is the straight line's middle (the curve's ease comes from EASE, per segment).
+  // the lift and glow grow with the distance flown: docked, the title sits a few px from where the pill was, and a full lift
+  // over no distance reads as the pill flashing (swelling and glowing in place), not travelling. Guard: probe-filters wf:morphLift
+  const lift = Math.min(1, Math.hypot(dx, dy) / 120);
+  const mid: Keyframe = { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2}px) scale(${(1 + sx) / 2 * (1 + 0.06 * lift)}, ${(1 + sy) / 2 * (1 + 0.06 * lift)})` };
+  if (lift > 0.25) mid.boxShadow = "0 0 22px -3px var(--accent), 0 6px 18px rgba(0,0,0,.35)";
   const a = g.animate([
     { offset: 0, transform: "none", backgroundColor: from.style.bg, color: from.style.color, boxShadow: from.style.shadow, borderRadius: from.style.radius },
-    { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2}px) scale(${(1 + sx) / 2 * 1.06}, ${(1 + sy) / 2 * 1.06})`,
-      boxShadow: "0 0 22px -3px var(--accent), 0 6px 18px rgba(0,0,0,.35)" },
+    mid,
     { offset: 1, transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
       backgroundColor: cs.backgroundColor, color: cs.color, boxShadow: cs.boxShadow, borderRadius: cs.borderRadius },
   ], { duration: MORPH_MS, easing: EASE, fill: "forwards" });

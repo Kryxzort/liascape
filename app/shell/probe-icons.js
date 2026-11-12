@@ -2,7 +2,8 @@
 // docs/superpowers/specs/2026-11-12-icon-motion-design.md; the rule: .claude/rules/ui/design.md § Icon motion. Browse / Steam
 // answers are stubbed in the page (like probe-steam.js: nothing reaches Steam). Per-frame samples of the icon (or its moving
 // part) read in a rAF loop while a REAL pointer (sendInputEvent) hovers / presses its button.
-//   icon:act:<name>     hover → the icon (or its part) animates on transform / opacity only (its animations' keyframes), passes
+//   icon:act:<name>     hover → the icon (or its part) animates on transform / opacity only (its animations' keyframes), starts at
+//                       its rest state (no jump as the hover lands), passes
 //                       through ≥ 3 in-between frames, overshoots its rest (a spring) and settles back to rest. Names: download
 //                       (Browse sidebar), card-download (a Browse card's own button: the arrow into its tray), external-link
 //                       + copy (the sidebar's tiles), cloud-download (Subscribe), refresh (Browse top bar),
@@ -21,6 +22,7 @@
 //                       animation loops except progress (the spinner, the indeterminate bar)
 //   icon:magnet[:off]   the playlist bar's Play leans toward a pointer 14 px off its edge (≤ 3 px), is home when it's far; motion
 //                       off → never leans
+//   icon:playRing       Play's accent ring ripples out once per hover (motion on), none with motion off
 //   icon:act:off / icon:act:reduced   motion off / prefers-reduced-motion: hover / press start no animation and no transition
 //                       frames (download, the close X, the press)
 //   icon:perf           while one-shots, holds and the magnet run: no layout forced from script and none bigger than an icon's
@@ -204,7 +206,12 @@ app.whenReady().then(async () => {
       if (!rest) return [`no icon part ${part || "svg.lucide"} in ${host} — proved nothing`];
       await page(`window.__smp = m.sample(() => ${partExpr(host, part)}, ${opts.n ?? 75}); true`);
       await mv(c.x, c.y);
-      const props = await page(`await m.sleep(120); const e = ${partExpr(host, "svg")}; return e ? m.animProps(e) : [];`);
+      // read 120 ms into the hover, while the one-shot still runs: its first keyframe must be the icon's rest state (a
+      // first keyframe off rest is a visible jump the moment the hover lands)
+      const { props, offRest } = await page(`await m.sleep(120); const e = ${partExpr(host, "svg")}; if (!e) return { props: [], offRest: [] };
+        const offRest = e.getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSTransition)).map((a) => a.effect.getKeyframes()[0])
+          .filter((f) => (f.transform && f.transform !== "none" && !new DOMMatrixReadOnly(f.transform).isIdentity) || (f.opacity != null && +f.opacity !== 1)).map((f) => (f.transform ?? "") + " o" + (f.opacity ?? 1));
+        return { props: m.animProps(e), offRest };`);
       const s = await js(`window.__smp`);
       const mo = motionOf(s, rest), j = judge(mo.vals, mo.key);
       console.log(`        ${name}: moves ${mo.key} (max ${mo.dev.toFixed(2)}), ${j.between} in-between frames, ${j.cross} past rest after the peak, ends ${j.last?.toFixed(3)}; animates ${J(props)}`);
@@ -213,6 +220,7 @@ app.whenReady().then(async () => {
         if (!opts.noOvershoot && j.cross < 1) v.push(`hover: no spring — it never passes its rest after the peak (${mo.key})`);
         if (Math.abs(j.last) > j.eps * 2) v.push(`hover: it doesn't settle at rest (${mo.key} ends ${j.last.toFixed(3)})`);
       }
+      if (offRest.length) v.push(`hover: starts off its rest state (${offRest.join("; ")}) — it jumps when the hover lands`);
       const bad = props.filter((p) => !["transform", "opacity", "transformOrigin"].includes(p));
       if (bad.length) v.push(`animates ${bad.join(", ")} (transform / opacity only)`);
       await frames(name, host, opts.stay);
@@ -270,6 +278,20 @@ app.whenReady().then(async () => {
     await act("save", lib, bar("Save playlist"), null);
     await act("sliders", lib, bar("Playlist settings"), ":scope svg.lucide-sliders-horizontal > :nth-child(3)");
     await act("play", lib, `document.querySelector(".play-btn")`, null);
+    await cell("icon:playRing", async () => {
+      // Play's push: one accent ring ripples out from the button once per hover (index.css .play-btn::after), never under motion off
+      const v = [];
+      const ring = async () => { const c = await centre(`document.querySelector(".play-btn")`); await mv(3, 3, 500); await mv(c.x, c.y, 250);
+        return page(`return document.getAnimations().filter((a) => a.animationName === "play-ring" && a.effect.pseudoElement === "::after").length;`); };
+      await lib();
+      const on = await ring();
+      if (on !== 1) v.push(`motion on: ${on} ring animations on hover (want 1)`);
+      await setSettings({ morphs: false }); await load(); await lib();
+      const off = await ring();
+      if (off !== 0) v.push(`motion off: ${off} ring animations on hover (want 0)`);
+      await setSettings({ morphs: true }); await load();
+      return v;
+    });
     await act("sparkles", async () => { await tab("Settings"); await sleep(600); }, `[...document.querySelectorAll(".settings .btn")].find((b) => b.querySelector(".lucide-sparkles"))`, ":scope svg.lucide-sparkles > :nth-child(1)");
     await act("arrow-right", async () => { await lib(); await steamTodo(); }, `document.querySelector("[data-st=next]")`, null);
     await act("skip-forward", steamTodo, `document.querySelector("[data-st=skip]")`, ":scope svg.lucide-skip-forward > :nth-child(2)");

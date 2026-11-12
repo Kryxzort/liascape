@@ -19,6 +19,7 @@
 //   wf:migrate        an old saved filter (type / ageRating / resolution / genres / features) → all includes, once; sort kept
 //   wf:library       the "In my library" row: ✓ = only the owned card, ✕ = all but it, no /browse request for it, never POSTed;
 //                    no download button on the owned card
+//   wf:morphLift     the fold/unfold ghost lifts and glows mid-flight only in proportion to how far it flies (no flash in place)
 //   wf:collapseCol   the docked column's collapse button → gone, the grid's margin too, the pill brings it back; remembered
 //   wf:drawer         below 1100 px: no docked column, "Filters · N" in the sort row opens it as a drawer over the grid with a
 //                     scrim (left edge, inside the window, above the item sidebar); a switch works in it; Escape / the scrim close it
@@ -421,6 +422,24 @@ app.whenReady().then(async () => {
       else if ([...b.filter.include, ...b.filter.exclude].some((t) => t.startsWith("@"))) v.push(`the pseudo-tag went to the backend: ${J(b.filter)}`);
       await page(`document.querySelector("[data-wf-clear]").click(); await m.sleep(500);`);
       if (await page(`return m.cards();`) !== r0.cards) v.push("Clear all didn't bring the owned card back");
+      return v;
+    });
+
+    await cell("wf:morphLift", async () => {
+      // the ghost's mid-flight lift and accent glow scale with how far it flies: docked, the title sits a few px from where the
+      // pill lands, and a full lift over no distance flashes the pill in place (swells + glows) instead of moving it
+      const v = [];
+      if (!(await page(`return !!document.querySelector(".wf-col[data-mode=dock]:not(.closing) [data-wf-title]");`))) { v.push("no docked column title (window too narrow?)"); return v; }
+      const k = await page(`document.querySelector("[data-wf-title]").click(); await m.sleep(30);
+        const g = document.querySelector(".wf-morph"); const a = g?.getAnimations().find((x) => x.effect.getKeyframes().length === 3);
+        if (!a) return null; const f = a.effect.getKeyframes();
+        const end = new DOMMatrixReadOnly(f[2].transform), mid = new DOMMatrixReadOnly(f[1].transform);
+        return { dist: Math.hypot(end.e, end.f), midScale: mid.a / ((1 + end.a) / 2), midGlow: /var\(--accent\)|rgb/.test(f[1].boxShadow ?? "") };`);
+      await page(`await m.sleep(500); document.querySelector("[data-wf-open]")?.click(); await m.sleep(600);`);
+      if (!k) { v.push("no ghost animation on the fold"); return v; }
+      if (k.dist < 30 && k.midScale > 1.015) v.push(`a ${k.dist.toFixed(1)} px flight lifts the ghost ${k.midScale.toFixed(3)}× mid-way (it flashes in place)`);
+      if (k.dist < 30 && k.midGlow) v.push(`a ${k.dist.toFixed(1)} px flight glows mid-way (it flashes in place)`);
+      if (k.dist >= 120 && k.midScale < 1.05) v.push(`a ${k.dist.toFixed(0)} px flight lost its lift (${k.midScale.toFixed(3)}×)`);
       return v;
     });
 

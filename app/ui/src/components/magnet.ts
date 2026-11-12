@@ -4,7 +4,9 @@
 // `transform`), eased by CSS (index.css `[data-magnet]`: a quick follow while in range, `--spring-soft` home).
 // PERF: written in the pointer's own `pointermove`, never a requestAnimationFrame loop (an idle page asks for no frames —
 // Guard: probe-layout perf:idle); rects cached per element, re-read only with the pointer near it, at most every RECT_MS
-// and after a scroll / resize. Guard: probe-icons icon:perf.
+// and after a scroll / resize — and never by getBoundingClientRect: a read inside pointermove, right after the hover
+// changed a style, forces a layout there and then. An IntersectionObserver hands the box over with the next frame's own
+// layout instead; until it lands the last box is used. Guard: probe-icons icon:perf.
 // Nothing under `:root.no-motion`. Guard: probe-icons icon:magnet, icon:magnet:off.
 
 const REACH = 28;          // px around the box where the pull starts
@@ -12,8 +14,17 @@ const MAX_X = 3, MAX_Y = 2; // the most it leans, px
 const RECT_MS = 250;
 const FAR = 160, FAR_MS = 2000; // px off the cached box past which a move doesn't re-read it (a box at most this old)
 
-type M = { rect: DOMRect | null; at: number; x: number; y: number };
+type M = { rect: DOMRect | null; at: number; x: number; y: number; asked?: boolean };
 const els = new Map<HTMLElement, M>();
+// observe once = one entry with the element's box, measured in the frame's own layout; then let it go
+const boxes = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    boxes.unobserve(en.target);
+    const m = els.get(en.target as HTMLElement); if (!m) continue;
+    const r = en.boundingClientRect; // the resting box: the lean itself must not move what it measures
+    m.rect = new DOMRect(r.x - m.x, r.y - m.y, r.width, r.height); m.at = performance.now(); m.asked = false;
+  }
+});
 let stale = 0; // bumped by a scroll / resize: every cached rect is re-read
 
 function set(el: HTMLElement, m: M, x: number, y: number) {
@@ -33,13 +44,9 @@ function move(e: PointerEvent) {
     // a pointer far from where it was can't be near it: no read (a read can force a layout while one is pending)
     const far = m.rect && m.at >= stale && now - m.at < FAR_MS && Math.max(m.rect.left - e.clientX, e.clientX - m.rect.right, m.rect.top - e.clientY, e.clientY - m.rect.bottom) > FAR;
     if (far) { set(el, m, 0, 0); continue; }
-    if (!m.rect || now - m.at > RECT_MS || m.at < stale) {
-      // the resting box: the lean itself must not move what it measures
-      const r = el.getBoundingClientRect();
-      m.rect = new DOMRect(r.x - m.x, r.y - m.y, r.width, r.height); m.at = now;
-    }
+    if ((!m.rect || now - m.at > RECT_MS || m.at < stale) && !m.asked) { m.asked = true; boxes.observe(el); }
     const r = m.rect;
-    if (!r.width) { set(el, m, 0, 0); continue; }
+    if (!r?.width) { set(el, m, 0, 0); continue; }
     const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right), dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
     const dist = Math.hypot(dx, dy);
     if (dist >= REACH || (el as HTMLButtonElement).disabled) { set(el, m, 0, 0); continue; }
@@ -67,7 +74,7 @@ export function magnetRef(el: HTMLElement | null) {
   els.set(el, { rect: null, at: 0, x: 0, y: 0 });
   el.setAttribute("data-magnet", "");
   return () => {
-    els.delete(el);
+    els.delete(el); boxes.unobserve(el);
     el.style.translate = "";
     if (els.size === 0) bind(false);
   };

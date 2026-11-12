@@ -423,6 +423,14 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .play-btn { padding: 6px 16px; border-radius: 8px; background: var(--accent); color: var(--accent-fg);
   font-weight: 800; box-shadow: var(--glow-sm); transition: box-shadow .2s, transform .08s; }
 .play-btn:hover:not(:disabled) { box-shadow: var(--glow); }
+/* COOL: Play's push — as its triangle launches (iconMotion.ts lucide-play), one thin accent ring ripples out from the button,
+   once per hover. Transform + opacity on a pseudo-element only. Guard: probe-icons icon:act:play */
+.play-btn, .side-go { position: relative; }
+.play-btn::after, .side-go::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  border: 2px solid var(--accent); opacity: 0; }
+.play-btn:hover:not(:disabled)::after, .side-go:hover:not(:disabled)::after { animation: play-ring .7s cubic-bezier(.2, .7, .3, 1) .14s backwards; }
+@keyframes play-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(1.18, 1.6); opacity: 0; } }
+:root.no-motion .play-btn::after, :root.no-motion .side-go::after { animation: none; }
 .play-btn:disabled { opacity: .4; box-shadow: none; }
 .playlist-bar-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 /* low vertical padding now that the hover glow is a body-portal'd fixed layer (.pl-hover-glow) that
@@ -799,7 +807,7 @@ input[type=range]:focus-visible { outline: none; }
    opacity and the individual rotate / scale properties only — `scale` is the press's alone, so it composes with whatever
    else the icon does. A host is a button or link, minus the state-glyph controls (segmented options, the stepper, the
    filter switch). Guard: probe-icons. ---- */
-:where(svg.lucide) { transition: transform var(--spring-dur) var(--spring), rotate var(--spring-dur) var(--spring), scale var(--spring-dur) var(--spring); }
+:where(svg.lucide) { overflow: visible; transition: transform var(--spring-dur) var(--spring), rotate var(--spring-dur) var(--spring), scale var(--spring-dur) var(--spring); }
 /* the parts move in the icon's own 24-unit grid (iconMotion.ts recipes and the holds below) */
 :where(svg.lucide) > * { transform-box: view-box; transform-origin: 12px 12px; transition: transform var(--spring-dur) var(--spring); }
 /* object: an icon with no verb of its own tilts while its button is hovered (iconMotion.ts marks the acting ones data-act) */
