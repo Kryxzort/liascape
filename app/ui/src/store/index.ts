@@ -128,7 +128,9 @@ interface State {
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
   // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
-  status: string; error: string | null;
+  // statusPlaying: `status` is the persistent now-playing line (refreshPlayingStatus), not a message (setStatus) — the top
+  // bar's slot lets a running library operation show over the first, never over the second (components/TopbarStatus.tsx)
+  status: string; statusPlaying: boolean; error: string | null;
   // the item sidebar (WE-style): the focused Library item's path / Browse
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
@@ -263,7 +265,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", error: null,
+  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", statusPlaying: true, error: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -641,12 +643,12 @@ export const useStore = create<State>((set, get) => ({
   // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
   setStatus(s, timed = true, hold = false) {
     clearTimeout(statusTimer);
-    set({ status: s });
+    set({ status: s, statusPlaying: false });
     statusHeldUntil = hold && timed && s ? Date.now() + 5000 : 0;
-    if (timed && s) statusTimer = setTimeout(() => { statusHeldUntil = 0; if (get().status === s) set({ status: buildPlayingStatus(get) }); }, 5000);
+    if (timed && s) statusTimer = setTimeout(() => { statusHeldUntil = 0; if (get().status === s) set({ status: buildPlayingStatus(get), statusPlaying: true }); }, 5000);
   },
   // Persistent "now playing" line (no auto-clear) — after a held notice's time is up (its own timer then shows it)
-  refreshPlayingStatus() { if (Date.now() < statusHeldUntil) return; clearTimeout(statusTimer); set({ status: buildPlayingStatus(get) }); },
+  refreshPlayingStatus() { if (Date.now() < statusHeldUntil) return; clearTimeout(statusTimer); set({ status: buildPlayingStatus(get), statusPlaying: true }); },
 }));
 
 // Format an interval (e.g. "1h 30m", "45s").

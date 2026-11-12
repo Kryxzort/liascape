@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { api } from "../api/client";
+import { api, type LibraryOp } from "../api/client";
 import { DEBUG_ON } from "./debugFlag";
 
 interface Metrics { fps: number; low1: number; low01: number; ms: number; vis: number; cards: number; anim: number; heap: number; longs: number; }
@@ -98,7 +98,7 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     let autoRaf = 0;
     const stopScroll = () => { cancelAnimationFrame(autoRaf); autoRaf = 0; };
     const liascapeDbg = {
-      help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
+      help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) ops(list) status(text) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
       // overlay off → sample a second first (the meter isn't running); callers await (CDP awaitPromise, executeJavaScript)
       metrics: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return fmt(); },
       fps: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return `fps=${mRef.current.fps} low1%=${mRef.current.low1} ms=${mRef.current.ms}`; },
@@ -108,6 +108,11 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
       aspect: (x: string) => { S().setSetting("thumbnailAspect", x); return "aspect=" + x; },
       gifs: (on: boolean) => { S().setSetting("autoPlayGifs", on); return "autoPlayGifs=" + on; },
       active: (v: boolean) => { useStore.setState({ appActive: v }); return "appActive=" + v; }, // FREEZE FIX test hook
+      // the library's background operations as the backend's library-ops event would set them (several at once without
+      // running them: probe-libops libops:combined); the next real event replaces them
+      ops: (list: LibraryOp[]) => { S().setLibraryOps(list); return `ops=${list.length}`; },
+      // a status message in the top bar's slot, held or (timed) for its 5 s ("" clears it): probe-libops libops:status, libops:toggle
+      status: (text: string, timed = false) => { S().setStatus(text, timed); return `status=${text}`; },
       anim: () => `animLayers=${document.querySelectorAll("img.thumb.anim, video.thumb.anim").length}`,
       loadmore: () => { S().loadMore(); return "loadmore"; },
       play: () => { S().playPlaylist(); return "play"; },

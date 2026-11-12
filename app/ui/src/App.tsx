@@ -19,6 +19,8 @@ import { BUTTONS_NARROW, useNarrow } from "./hooks/useTopbarCompact";
 import { WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
 import { Segmented } from "./components/Segmented";
 import LibraryOpsLine from "./components/LibraryOpsLine";
+import { TopbarStatus } from "./components/TopbarStatus";
+import { TopbarSearch } from "./components/TopbarSearch";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -225,19 +227,14 @@ export default function App() {
 
         <div className="spacer" />
 
-        {/* status in the topbar: "Your downloaded wallpapers" (library) replaced by the active status + Undo */}
-        {s.status
-          ? <span className="status">{s.status}</span>
-          : tab === "library" && <span className="status muted-status">Your downloaded wallpapers</span>}
+        {/* the status slot: a status message, else the library's background work (not on Browse), else the Library's hint */}
+        <TopbarStatus tab={tab} />
         {s.undoDepth > 0 && <button className="btn ghost ico glow-pulse" aria-label="Undo" title={narrow ? "Undo" : undefined} onClick={() => s.undo()}><Undo2 size={14} /><span className="tb-label">Undo</span></button>}
 
         {/* Stop — red/danger with a soft glow */}
         {s.playingPath && <button className="btn danger ico glow-stop" aria-label="Stop" title={narrow ? "Stop" : undefined} onClick={() => s.stop()}><Square size={14} fill="currentColor" /><span className="tb-label">Stop</span></button>}
 
-        {tab === "browse" && src?.supportsSearch && (
-          <input className="search" placeholder={`Search ${src.name}…`} value={s.query}
-            onChange={(e) => s.setQuery(e.target.value)} />
-        )}
+        {tab === "browse" && src?.supportsSearch && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
         {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}
         {tab === "browse" && (
           <SortFilterButton page="browse" scope={s.browseScope()}
@@ -254,8 +251,7 @@ export default function App() {
             <button className="btn ghost ico" aria-label="Import" title={narrow ? "Import" : undefined} onClick={() => importRef.current?.click()}><Upload size={14} /><span className="tb-label">Import</span></button>
             <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
               style={{ display: "none" }} onChange={onImportFile} />
-            <input className="search" placeholder="Search library…" value={s.libQuery}
-              onChange={(e) => s.setLibQuery(e.target.value)} />
+            <TopbarSearch placeholder="Search library…" value={s.libQuery} onChange={s.setLibQuery} />
             <SortFilterButton page="library" scope={s.libraryItems.length ? "library" : null}
               sort={{ value: String(s.libSort), options: SORTS, onChange: (v) => s.setLibSort(+v) }} />
           </>
@@ -263,7 +259,7 @@ export default function App() {
       </div>
 
       {s.loading && <div className="loadbar" />}
-      <LibraryOpsLine />
+      <LibraryOpsLine show={tab !== "browse"} />
 
       {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>

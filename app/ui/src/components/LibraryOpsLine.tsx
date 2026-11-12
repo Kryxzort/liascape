@@ -1,58 +1,32 @@
-import { useSyncExternalStore } from "react";
-import type { ClipQuality, LibraryOp } from "../api/client";
 import { useStore } from "../store";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
-import { QUALITY_LABEL } from "./clipSource";
+import { opLabel, opsWords, useShownOps } from "./libraryOps";
 
-// The library's long background operations (the backend's Web/LibraryOps.cs: the preview clips following "Video preview
-// quality", Steam's tags / trailers / frame sizes) as a thin line on the top bar's bottom edge, in Browse's load bar's place
-// and look, with a small tab under it that says what and how far ("Making Low previews 42 / 318"). One line at a time:
-// Browse's load bar takes the place while a page loads, and the first operation shown stays until it ends.
-// Guard: --probe probe-libops.js (libops:*).
-function opLabel(op: LibraryOp): string {
-  if (op.id === "clips") return `Making ${QUALITY_LABEL[op.phase as ClipQuality] ?? op.phase} previews`;
-  if (op.id === "facts") return op.phase === "steam" ? "Asking Steam for tags" : op.phase === "trailers" ? "Looking for trailers" : "Reading frame sizes";
-  return "Updating the library";
-}
+// The library's long background operations (components/libraryOps.ts) as one thin line on the top bar's bottom edge: the
+// fill is every running operation's work together (the sum of done over the sum of total). What and how far is said in the
+// top bar's status slot (components/TopbarStatus.tsx), naming the operation that started first. The line and the words show
+// on the Library and Settings only: on Browse they read as Browse's own loading. Guard: --probe probe-libops.js (libops:*).
 
-// an operation over before this never shows: a line that flashes up for a moment says nothing
-const SHOW_AFTER_MS = 500;
-// the leave: the line fills to its end, then it and the tab fade (index.css .libops.closing)
+// the leave: the line fills to its end, then it fades (index.css .libops.closing)
 const LEAVE_MS = 450;
 
-// which operation the line shows: read here, outside React, so a timer can promote one once it has run SHOW_AFTER_MS
-const since = new Map<string, number>();
-let shown: LibraryOp | null = null;
-let timer = 0;
-const subs = new Set<() => void>();
-function update() {
-  const ops = useStore.getState().libraryOps, now = performance.now();
-  for (const o of ops) if (!since.has(o.id)) since.set(o.id, now);
-  for (const id of [...since.keys()]) if (!ops.some((o) => o.id === id)) since.delete(id);
-  clearTimeout(timer);
-  const next = (shown && ops.find((o) => o.id === shown!.id)) ?? ops.find((o) => now - since.get(o.id)! >= SHOW_AFTER_MS) ?? null;
-  if (!next && ops.length) timer = window.setTimeout(update, Math.max(0, Math.min(...ops.map((o) => since.get(o.id)! + SHOW_AFTER_MS - now))) + 5);
-  if (next !== shown) { shown = next; for (const f of subs) f(); }
-}
-useStore.subscribe((s, p) => { if (s.libraryOps !== p.libraryOps) update(); });
-const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
-
-export default function LibraryOpsLine() {
-  const op = useSyncExternalStore(subscribe, () => shown);
-  // Browse's load bar holds the place while a page of results loads
-  const loading = useStore((s) => s.loading);
+// `show`: the tab has the line (the Library, Settings); leaving such a tab fades it out where it is, with the page
+export default function LibraryOpsLine({ show }: { show: boolean }) {
+  const ops = useShownOps();
   const active = useStore((s) => s.appActive);
   const motion = useMotion();
-  const { value: cur, closing } = useLinger(loading ? null : op, LEAVE_MS, motion);
+  const { value: cur, closing } = useLinger(show && ops.length ? ops : null, LEAVE_MS, motion);
   if (!cur) return null;
-  const label = opLabel(cur);
-  const frac = closing ? 1 : cur.total > 0 ? Math.min(1, cur.done / cur.total) : 0;
+  // gone because the tab has no line while the work goes on: it fades, the fill stays where it was
+  const away = closing && ops.length > 0;
+  const done = cur.reduce((n, o) => n + o.done, 0), total = cur.reduce((n, o) => n + o.total, 0);
+  const frac = closing && !away ? 1 : total > 0 ? Math.min(1, done / total) : 0;
   return (
-    <div className={`libops${closing ? " closing" : ""}${active ? "" : " idle"}`} data-libops={cur.id} role="progressbar"
-      aria-label={label} aria-valuemin={0} aria-valuemax={cur.total} aria-valuenow={cur.done} aria-valuetext={`${label}: ${cur.done} of ${cur.total}`}>
+    <div className={`libops${closing ? " closing" : ""}${away ? " away" : ""}${active ? "" : " idle"}`} data-libops={cur.map((o) => o.id).join(" ")}
+      role="progressbar" aria-label={cur.map(opLabel).join(", ")} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}
+      aria-valuetext={opsWords(cur)}>
       <div className="libops-fill" style={{ transform: `scaleX(${frac})` }} />
-      <div className="libops-tab" aria-hidden><span className="libops-label">{label}</span><span className="libops-n">{cur.done} / {cur.total}</span></div>
     </div>
   );
 }

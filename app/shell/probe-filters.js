@@ -39,6 +39,21 @@
 //   split:noWrap:<w>  800 / 960 / 1100 / 1920 px, Library and Workshop: the top bar is one row; the sort shows its label from
 //                     1280 px, below it folds to its icon with the label in its tooltip; panel open and closed. Screenshots
 //                     wf-split-<page>-<w>-<open|closed>.png
+//   search:fold:<w>   800 / 850 / 870 / 1100 px, Library and Workshop: below 860 px the search is a "Search" magnifier button
+//                     (components/TopbarSearch.tsx), from 860 px a field ≥ 120 px; the bar one row. Screenshots
+//                     wf-search-fold-<page>-<w>.png
+//   search:worst:<w>  761–1279 px with Undo (a trashed item) and Stop (a wallpaper playing) beside the rest, the search closed
+//                     and opened: one row, nothing out of the window or over another control, a field ≥ 120 px
+//   search:open       motion on, 800 px: a click on the magnifier opens it focused — the field's edge and the control left of
+//                     it glide (in-between frames), the split right of it never moves, only transforms / opacity / a clip
+//                     animate; a blur while empty folds it back the same way. Screenshots wf-search-open-<page>-mid/end.png
+//   search:off        motion off: opening, the field fades in and the magnifier it was fades out; folding, the reverse — opacity
+//                     only, nothing moves (motion-off.js)
+//   search:keep       holding a query it stays open after a blur where the status slot keeps its room, folds lit (accent, dot,
+//                     "Search: <query>") where it hasn't; the list stays filtered; widening shows the field with the query
+//   search:escape     Escape clears and folds it (the list unfiltered); on the full field it clears it
+//   search:look       glow on: the focused field glows; Glow effects off: no glow round it nor on the lit dot; bg-live: its fill
+//                     is translucent. Screenshots wf-search-look-glow.png, wf-search-look-noglow-bglive.png
 //   wf:drawer         below 900 px (the item sidebar's breakpoint): no docked column, the split's toggle opens it as a drawer over the grid with a scrim
 //                     (right edge, inside the window, above the item sidebar); a switch works in it; Escape / the scrim close it
 //   wf:size:<w>x<h>   the nine layout sizes: docked iff ≥ 900 px, the grid keeps ≥ 240 px (also with the item sidebar open,
@@ -822,8 +837,270 @@ app.whenReady().then(async () => {
       });
     }
 
+    // ---- the search field's fold (components/TopbarSearch.tsx): below 860 px a magnifier; a click opens it in place (a morph on
+    // transforms: the window over its frame slides open, the controls to its left glide aside, nothing to its right moves);
+    // motion off it fades; it folds back on a blur while empty, holding a query it stays open where the bar has room, else
+    // folds lit; Escape clears and folds it. The app has no search shortcut: the click is the way in.
+    const SEARCH_AT = `(() => { const b = document.querySelector(".topbar .tsearch"); if (!b) return null; const i = b.querySelector("input.search"), btn = b.querySelector(".ts-btn");
+      const r = (e) => { const x = e.getBoundingClientRect(); return { x: +x.x.toFixed(1), r: +x.right.toFixed(1), w: +x.width.toFixed(1) }; };
+      return { folded: b.hasAttribute("data-folded"), open: b.hasAttribute("data-open"), lit: b.hasAttribute("data-lit"), box: r(b), input: r(i), label: btn.getAttribute("aria-label"),
+        btnFocusable: btn.tabIndex >= 0, inputVis: getComputedStyle(i).visibility, focused: document.activeElement === i, value: i.value, W: innerWidth }; })()`;
+    const searchAt = () => page(`return ${SEARCH_AT};`);
+    const clickAt = async (sel) => {
+      const p = await page(`const e = m.q(${J(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+      if (!p) throw new Error(`nothing at ${sel}`);
+      send({ type: "mouseMove", ...p }); await sleep(30);
+      send({ type: "mouseDown", ...p, button: "left", clickCount: 1 }); await sleep(30);
+      send({ type: "mouseUp", ...p, button: "left", clickCount: 1 });
+    };
+    const typeText = async (t) => { for (const ch of t) { send({ type: "char", keyCode: ch }); await sleep(25); } await sleep(300); };
+    const pressKey = async (k) => { send({ type: "keyDown", keyCode: k }); await sleep(20); send({ type: "keyUp", keyCode: k }); await sleep(300); };
+    const blurSearch = () => page(`document.activeElement?.blur(); await m.sleep(500);`);
+    const fold = async () => { await page(`const i = m.q(".topbar .tsearch input.search"); if (i?.value) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ""); i.dispatchEvent(new Event("input", { bubbles: true })); }`); await blurSearch(); };
+    // the page to search on: the Library, or the Workshop (its fake list) with its filter panel closed (the bar's room)
+    const toPage = async (pg) => { if (pg === "Library") await tab("Library"); else await toWorkshop(false); await page(`await m.open(false);`); await fold(); };
+    // the control left of the search that glides aside, the split right of it that must not move
+    const LEFT = { Library: ".topbar > .btn.ghost[aria-label=Import]", Workshop: ".topbar > .pills > .mini" };
+    const glides = (fr) => fr.filter((f, i) => i > 0 && i < fr.length - 1 && f[1] != null && fr[i - 1][1] != null && fr[i + 1][1] != null
+      && Math.abs(f[2] - fr[i - 1][2]) > 0.3 && Math.abs(fr[i + 1][2] - f[2]) > 0.3 && Math.sign(f[2] - fr[i - 1][2]) === Math.sign(fr[i + 1][2] - f[2])).length;
+    const stillX = (fr) => fr.filter((f, i) => i > 0 && f[1] != null && fr[i - 1][1] != null && Math.abs(f[2] - fr[i - 1][2]) > 0.75).length;
+    const ANIM_PROPS = `[...new Set(document.querySelector(".topbar").getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSTransition))
+      .flatMap((a) => (a.effect?.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((p) => !["offset", "easing", "composite", "computedOffset"].includes(p)))))]`;
+
+    // the tier: folded below 860 px on both pages, a field from 860 px (the bar one row either way)
+    for (const w of [800, 850, 870, 1100]) {
+      await cell(`search:fold:${w}`, async () => {
+        const v = [];
+        await resize(w, 700);
+        for (const pg of ["Library", "Workshop"]) {
+          await toPage(pg);
+          const s = await searchAt();
+          if (!s) { v.push(`${pg} ${w} px: no search`); continue; }
+          // the window manager-less Xvfb lands a px or so off the asked size: the tier is judged at the page's own width
+          if (s.W !== w) console.log(`        ${pg}: the window is ${s.W} px wide (asked ${w})`);
+          if (s.W < 860) {
+            if (!s.folded || s.box.w > 37) v.push(`${pg} ${w} px: the search isn't folded (${s.box.w} px wide)`);
+            if (s.label !== "Search" || !s.btnFocusable) v.push(`${pg} ${w} px: the magnifier is "${s.label}", focusable ${s.btnFocusable} (want a "Search" button)`);
+            if (s.inputVis !== "hidden") v.push(`${pg} ${w} px: the folded field's input shows (${s.inputVis})`);
+          } else if (s.folded || s.input.w < 119.5) v.push(`${pg} ${w} px: the field is ${s.folded ? "folded" : `${s.input.w} px wide`} (want a field ≥ 120 px)`);
+          const r = await page(`const tb = document.querySelector(".topbar"); const kids = [...tb.querySelectorAll(":scope > *, :scope > .pills > *")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && !e.matches(".pills, .spacer, .status"); });
+            const mid = kids.map((e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; }); return { spread: Math.max(...mid) - Math.min(...mid), right: Math.max(...kids.map((e) => e.getBoundingClientRect().right)) };`);
+          if (r.spread > 4) v.push(`${pg} ${w} px: the top bar wraps (centres ${r.spread.toFixed(0)} px apart)`);
+          if (r.right > w + 0.5) v.push(`${pg} ${w} px: a control sticks out (${r.right} > ${w})`);
+          await shot(`search-fold-${pg.toLowerCase()}-${w}`);
+        }
+        return v;
+      });
+    }
+
+    // the fullest bar the fold is sized for: Undo (a trashed item) and Stop (a wallpaper playing) beside everything else: one row,
+    // nothing out of the window, no control over another, a field ≥ 120 px where it isn't folded — closed and opened
+    const lib0 = (await http("GET", "/library")).json ?? [];
+    for (const w of [761, 800, 850, 870, 960, 1100, 1279]) {
+      await cell(`search:worst:${w}`, async () => {
+        const v = [];
+        const vid = lib0.find((i) => !i.isScene && /\.(mp4|webm|mkv)$/i.test(i.videoPath)) ?? lib0[0];
+        const gone = lib0.find((i) => i !== vid && i.videoPath !== vid?.videoPath);
+        if (!vid || !gone) return ["the stack's library has fewer than two items — proved nothing"];
+        // the undo depth is read on load; Stop follows the backend's wallpaper-changed, so the apply comes with the page open
+        await post("/library/trash", { items: [gone] });
+        await loadUi(); await resize(w, 700);
+        const ap = await post("/apply", { path: vid.videoPath });
+        for (let i = 0; i < 40 && !(await page(`return !!m.q(".topbar [aria-label=Stop]") && !!m.q(".topbar [aria-label=Undo]");`)); i++) await sleep(200);
+        if (ap.status !== 200) console.log(`        /apply answered ${ap.status} ${J(ap.json)}`);
+        try {
+          for (const pg of ["Library", "Workshop"]) {
+            await toPage(pg);
+            const has = await page(`return { undo: !!m.q(".topbar [aria-label=Undo]"), stop: !!m.q(".topbar [aria-label=Stop]") };`);
+            if (!has.undo || !has.stop) { v.push(`${pg} ${w} px: Undo ${has.undo}, Stop ${has.stop} — not the fullest bar, proved nothing`); continue; }
+            for (const st of ["closed", "opened"]) {
+              if (st === "opened") { if (!(await searchAt()).folded) break; await clickAt(".topbar .tsearch .ts-btn"); await sleep(600); }
+              const r = await page(`const tb = document.querySelector(".topbar"), sb = tb.querySelector(".pill-strip")?.getBoundingClientRect();
+                const parts = [...tb.querySelectorAll(".tab, .pill, .mini, .tsearch, .btn, [data-sortsplit]")].map((e) => { let b = e.getBoundingClientRect();
+                  if (sb && e.closest(".pill-strip")) { const x = Math.max(b.left, sb.left + 10), rr = Math.min(b.right, sb.right - 10); if (rr - x <= 1) return null; b = new DOMRect(x, b.top, rr - x, b.height); }
+                  return b.width > 0 ? { k: e.className.split(" ")[0] + ":" + (e.getAttribute("aria-label") ?? e.textContent.trim().slice(0, 12)), x: b.left, r: b.right, y: b.top, b: b.bottom, m: b.top + b.height / 2 } : null; }).filter(Boolean);
+                return { parts, W: innerWidth };`);
+              const at = `${pg} ${w} px, Undo + Stop, search ${st}`, ps = r.parts;
+              const mid = ps.map((p) => p.m);
+              if (Math.max(...mid) - Math.min(...mid) > 4) v.push(`${at}: the top bar wraps`);
+              for (const p of ps) if (p.x < -0.5 || p.r > r.W + 0.5) v.push(`${at}: ${p.k} sticks out (${p.x.toFixed(0)}–${p.r.toFixed(0)})`);
+              for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+                const a = ps[i], b = ps[j], ix = Math.min(a.r, b.r) - Math.max(a.x, b.x), iy = Math.min(a.b, b.b) - Math.max(a.y, b.y);
+                if (ix > 1 && iy > 1) v.push(`${at}: ${a.k} overlaps ${b.k} (${ix.toFixed(0)} px)`);
+              }
+              const s = await searchAt();
+              if (!s.folded && s.input.w < 119.5) v.push(`${at}: the field is ${s.input.w} px wide`);
+              await shot(`search-worst-${pg.toLowerCase()}-${w}-${st}`);
+            }
+            await fold();
+          }
+        } finally {
+          await post("/library/undo"); await post("/stop"); await loadUi(); await resize(1400, 900);
+        }
+        return v;
+      });
+    }
+
+    // motion on: the click opens it — the window's edge, the control to its left pass through in-between places, the split
+    // stays put; it takes the focus; only transforms / opacity / a clip animate. A blur while empty folds it the same way back.
+    await cell("search:open", async () => {
+      const v = [];
+      await resize(800, 700);
+      for (const pg of ["Library", "Workshop"]) {
+        await toPage(pg);
+        const sels = { win: ".topbar .tsearch .ts-win", left: LEFT[pg], split: ".topbar [data-sortsplit]" };
+        const sm = js(MO.SAMPLE(sels, 700));
+        await sleep(40);
+        await clickAt(".topbar .tsearch .ts-btn");
+        await sleep(90); await shot(`search-open-${pg.toLowerCase()}-mid`);
+        const props = await js(ANIM_PROPS);
+        const fr = await sm;
+        const s = await searchAt();
+        console.log(`        ${pg} open: win ${MO.brief(fr.win)} left ${MO.brief(fr.left)} props ${J(props)}`);
+        if (s.folded || !s.focused) v.push(`${pg}: a click on the magnifier left it ${s.folded ? "folded" : "open but unfocused"}`);
+        if (glides(fr.win) < 3) v.push(`${pg}: the field's edge didn't glide open (${glides(fr.win)} in-between frames)`);
+        if (glides(fr.left) < 3) v.push(`${pg}: ${LEFT[pg]} didn't glide aside (${glides(fr.left)} in-between frames)`);
+        if (stillX(fr.split)) v.push(`${pg}: the split button right of the search moved in ${stillX(fr.split)} frames`);
+        const bad = props.filter((p) => !["transform", "translate", "opacity", "clipPath"].includes(p));
+        if (bad.length) v.push(`${pg}: the morph animates ${bad.join(", ")}`);
+        await sleep(300); await shot(`search-open-${pg.toLowerCase()}-end`);
+        const sm2 = js(MO.SAMPLE(sels, 700));
+        await sleep(40);
+        await page(`document.activeElement?.blur();`);
+        await sleep(90); await shot(`search-fold-${pg.toLowerCase()}-mid`);
+        const fr2 = await sm2, s2 = await searchAt();
+        if (!s2.folded) v.push(`${pg}: a blur while empty didn't fold it`);
+        if (glides(fr2.win) < 3) v.push(`${pg}: the field's edge didn't glide shut (${glides(fr2.win)} in-between frames)`);
+        if (glides(fr2.left) < 3) v.push(`${pg}: ${LEFT[pg]} didn't glide back (${glides(fr2.left)} in-between frames)`);
+        if (stillX(fr2.split)) v.push(`${pg}: the split button moved while it folded`);
+      }
+      await resize(1400, 900);
+      return v;
+    });
+
+    // motion off: the opened field fades in where it lands while the magnifier fades out where it was; folding, the reverse;
+    // opacity only, nothing in it moves
+    await cell("search:off", async () => {
+      const v = [];
+      await setMotion(false);
+      await resize(800, 700);
+      try {
+        for (const pg of ["Library", "Workshop"]) {
+          await toPage(pg);
+          const sels = { field: ".topbar .tsearch:not([data-folded]) input.search", ghost: ".topbar .tsearch .ts-ghost", btn: ".topbar .tsearch[data-folded] .ts-btn" };
+          let sm = js(MO.SAMPLE(sels, 500));
+          await sleep(40);
+          await clickAt(".topbar .tsearch .ts-btn");
+          await sleep(40); await shot(`search-off-${pg.toLowerCase()}-open-mid`);
+          const props = await page(`return ${MO.OPACITY_ONLY}(document.querySelector(".topbar .tsearch"));`);
+          let fr = await sm;
+          console.log(`        ${pg} motion off, open: field ${MO.brief(fr.field)} ghost ${MO.brief(fr.ghost)}`);
+          v.push(...MO.judge(`${pg} motion off, open: the field`, fr.field, { appear: true }), ...MO.judge(`${pg} motion off, open: the magnifier it was`, fr.ghost, { leave: true, appear: false }));
+          if (props.length) v.push(`${pg} motion off: the search animates ${props.join(", ")} (opacity only)`);
+          if (!(await searchAt()).focused) v.push(`${pg} motion off: the opened field isn't focused`);
+          sm = js(MO.SAMPLE(sels, 500));
+          await sleep(40);
+          await page(`document.activeElement?.blur();`);
+          await sleep(40); await shot(`search-off-${pg.toLowerCase()}-fold-mid`);
+          fr = await sm;
+          v.push(...MO.judge(`${pg} motion off, fold: the magnifier`, fr.btn, { appear: true }), ...MO.judge(`${pg} motion off, fold: the field it was`, fr.ghost, { leave: true }));
+        }
+      } finally { await setMotion(true); await resize(1400, 900); }
+      return v;
+    });
+
+    // holding a query: it stays open after a blur where the status slot keeps its room (the Library at 840 px, nothing playing),
+    // the list filtered; where it hasn't (a wallpaper playing: Stop takes it), it folds lit — the accent, the dot, the query in
+    // its name; widening shows the field with the query
+    await cell("search:keep", async () => {
+      const v = [];
+      await resize(840, 700);
+      await toPage("Library");
+      const n0 = await page(`return m.qa(".lib-scroll .card.lib").length;`);
+      const q = (lib0.find((i) => !i.isScene)?.title ?? "k1").slice(0, 3);
+      await clickAt(".topbar .tsearch .ts-btn"); await sleep(450);
+      await typeText(q);
+      await blurSearch();
+      let s = await searchAt();
+      const n1 = await page(`return m.qa(".lib-scroll .card.lib").length;`);
+      if (s.folded || s.value !== q) v.push(`840 px, room: after a blur holding "${q}" it is ${s.folded ? "folded" : "open"} reading "${s.value}" (want open)`);
+      if (!(n1 < n0)) v.push(`the query "${q}" didn't filter the list (${n0} → ${n1} cards) — proved nothing`);
+      await shot("search-keep-open");
+      const vid = lib0.find((i) => !i.isScene) ?? lib0[0];
+      await post("/apply", { path: vid.videoPath });
+      try {
+        await sleep(800);
+        await clickAt(".topbar .tsearch .search"); await sleep(200);
+        await blurSearch();
+        s = await searchAt();
+        const look = await page(`const b = m.q(".topbar .tsearch .ts-btn"); return { color: getComputedStyle(b).color, dot: getComputedStyle(b, "::after").opacity, accent: m.accent() };`);
+        if (!s.lit || !s.folded) v.push(`840 px, Stop showing: after a blur holding "${q}" it is ${s.folded ? "folded" : "open"}, lit ${s.lit} (want folded and lit)`);
+        if (s.label !== `Search: ${q}`) v.push(`the lit magnifier's name is "${s.label}" (want "Search: ${q}")`);
+        if (look.color !== look.accent || +look.dot < 0.99) v.push(`the lit magnifier: colour ${look.color} (accent ${look.accent}), dot opacity ${look.dot}`);
+        if ((await page(`return m.qa(".lib-scroll .card.lib").length;`)) !== n1) v.push("folded lit, the list isn't filtered any more");
+        await shot("search-keep-lit");
+        await resize(1100, 700);
+        s = await searchAt();
+        if (s.folded || s.value !== q) v.push(`at 1100 px the field ${s.folded ? "stays folded" : `reads "${s.value}"`}`);
+      } finally { await post("/stop"); await resize(1400, 900); await fold(); }
+      return v;
+    });
+
+    // Escape (a real key) clears the query and folds it, the list unfiltered; from the full field it clears it
+    await cell("search:escape", async () => {
+      const v = [];
+      await resize(800, 700);
+      await toPage("Library");
+      const n0 = await page(`return m.qa(".lib-scroll .card.lib").length;`);
+      await clickAt(".topbar .tsearch .ts-btn"); await sleep(450);
+      await typeText("zzq");
+      if ((await page(`return m.qa(".lib-scroll .card.lib").length;`)) >= n0) v.push("the query didn't filter — proved nothing");
+      await pressKey("Escape");
+      let s = await searchAt();
+      if (!s.folded || s.value || s.focused) v.push(`after Escape: folded ${s.folded}, value "${s.value}", focused ${s.focused}`);
+      if ((await page(`return m.qa(".lib-scroll .card.lib").length;`)) !== n0) v.push("after Escape the list is still filtered");
+      await resize(1400, 900);
+      await clickAt(".topbar .tsearch .search"); await sleep(200);
+      await typeText("zzq");
+      await pressKey("Escape");
+      s = await searchAt();
+      if (s.value || s.focused) v.push(`wide, after Escape: value "${s.value}", focused ${s.focused}`);
+      return v;
+    });
+
+    // Glow effects off: no glow round the focused field or on the lit dot; the wallpaper behind every tab: the field's fill is
+    // translucent like the bar's (it was opaque-equal before: compare)
+    await cell("search:look", async () => {
+      const v = [];
+      const read = async (tag) => {
+        await resize(800, 700); await toPage("Library");
+        // past the morph and the glow's own fade in
+        await clickAt(".topbar .tsearch .ts-btn"); await sleep(900);
+        const r = await page(`const b = m.q(".topbar .tsearch"); return { glow: getComputedStyle(b.querySelector(".ts-glow")).boxShadow, glowOp: getComputedStyle(b.querySelector(".ts-glow")).opacity,
+          fill: getComputedStyle(b.querySelector(".ts-win > .ts-frame")).backgroundColor, dot: getComputedStyle(b.querySelector(".ts-btn"), "::after").boxShadow };`);
+        await shot(`search-look-${tag}`);
+        await fold();
+        return r;
+      };
+      const alpha = (c) => { const m = /\/\s*([\d.]+)\)|rgba\([^)]*,\s*([\d.]+)\)/.exec(c); return m ? +(m[1] ?? m[2]) : 1; };
+      const glowless = (x) => x === "none" || /0px 0px 0px 0px/.test(x) || /rgba\(0, 0, 0, 0\)/.test(x);
+      const on = await read("glow");
+      if (glowless(on.glow) || +on.glowOp < 0.99) v.push(`glow on: the focused field has no glow (${on.glow}, opacity ${on.glowOp})`);
+      await setSettings({ glows: false, liveWallpaperBehindAllTabs: true }); await loadUi();
+      try {
+        const off = await read("noglow-bglive");
+        console.log(`        ${J({ on, off })}`);
+        if (!glowless(off.glow)) v.push(`Glow effects off: the focused field still glows (${off.glow})`);
+        if (!glowless(off.dot)) v.push(`Glow effects off: the lit dot still glows (${off.dot})`);
+        if (!(alpha(off.fill) < alpha(on.fill)) && !(alpha(off.fill) < 1)) v.push(`bg-live: the field's fill isn't translucent (${off.fill}; without: ${on.fill})`);
+      } finally { await setSettings({ glows: true, liveWallpaperBehindAllTabs: false }); await loadUi(); await resize(1400, 900); }
+      return v;
+    });
+
     await cell("wf:drawer", async () => {
       const v = [];
+      // its own page: the Workshop's column (the cells before it may end anywhere — the search cells end on the Library)
+      await loadUi(); await toWorkshop(false);
       await resize(860, 700);
       let r = await page(`return { col: !!m.q(".wf-col"), btn: !!m.tog() };`);
       if (r.col) v.push("at 860 px the column is still on screen (docked)");

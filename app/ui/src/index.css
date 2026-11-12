@@ -110,13 +110,48 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 @keyframes tab-in-l { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
 
 .spacer { flex: 1; }
-/* the search field takes 240 px when there's room and gives way down to 120 */
-.search {
-  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
-  border-radius: 8px; padding: 7px 12px; flex: 0 1 240px; width: 240px; min-width: 120px; outline: none;
-  transition: border-color .15s, box-shadow .2s;
-}
-.search:hover, .search:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+/* ---- the top bar's search (components/TopbarSearch.tsx): 240 px when there's room, giving way down to 120; folded, a 36 px
+   magnifier button in the ghost buttons' look. The parts: the glow (outside the clip, so nothing cuts it; hidden during the
+   morph), a clip at the box (while it folds: at the open width, --ow), a rounded window that slides (its left edge is the
+   field's) and the frame under it that stands still; the magnifier and the text ride the window. ---- */
+.tsearch { position: relative; flex: 0 1 240px; width: 240px; min-width: 120px; height: 31px; }
+.tsearch[data-folded] { flex: none; width: 36px; min-width: 0; }
+/* opened from its fold: a little narrower, so it can more often stay open beside the status slot's count */
+.tsearch[data-open] { flex-basis: 200px; width: 200px; }
+.ts-glow { position: absolute; inset: 0; border-radius: 8px; box-shadow: var(--glow-sm); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.tsearch:is(:hover, :focus-within) .ts-glow { opacity: 1; }
+.tsearch[data-morph] .ts-glow { opacity: 0; transition: none; }
+/* the clip would cut the field's or the magnifier's own focus ring: the glow layer draws it (still only while tabbing) */
+:root.kbd-nav .tsearch:has(:focus-visible) .ts-glow { opacity: 1; outline: 2px solid var(--accent); outline-offset: 2px; }
+.ts-clip { position: absolute; top: 0; bottom: 0; right: 0; width: var(--ow, 100%); overflow: hidden; }
+.tsearch[data-morph] .ts-clip { pointer-events: none; }
+.ts-win { position: absolute; inset: 0; border-radius: 8px; overflow: hidden; }
+.ts-frame { position: absolute; inset: 0; border-radius: 8px; border: 1px solid var(--surface1);
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: border-color .15s, background-color .15s; }
+.tsearch:is(:hover, :focus-within) .ts-frame { border-color: var(--accent); }
+.tsearch[data-folded] .ts-frame { border-color: transparent; }
+.tsearch[data-folded]:hover .ts-frame { background: color-mix(in srgb, var(--surface1) 75%, transparent); }
+.tsearch .search { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0 12px 0 34px; border: 0; background: none;
+  color: var(--text); font: inherit; outline: none; }
+.tsearch[data-folded]:not([data-morph]) .search { visibility: hidden; }
+.ts-btn { position: absolute; left: 0; top: 0; bottom: 0; width: 36px; display: grid; place-items: center; color: var(--text);
+  transition: color .15s; }
+.tsearch:not([data-folded]) .ts-btn { pointer-events: none; color: var(--subtext); }
+.tsearch:not([data-folded]):focus-within .ts-btn { color: var(--accent); }
+/* folded holding a query: the magnifier in the accent and a dot — the list is filtered */
+.tsearch[data-lit] .ts-btn { color: var(--accent); }
+.ts-btn::after { content: ""; position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: var(--glow-sm); opacity: 0; scale: .4; transition: opacity .15s, scale var(--spring-dur) var(--spring); }
+.tsearch[data-lit] .ts-btn::after { opacity: 1; scale: 1; }
+:root.no-motion .ts-btn::after { scale: 1; transition: opacity var(--fade-dur) linear; }
+/* motion off: a highlight changes at once (the frame's border and fill, the magnifier's colour, the glow) */
+:root.no-motion .tsearch :is(.ts-frame, .ts-btn, .ts-glow) { transition: none; }
+/* motion off: the state it left, fading out over the new one (which fades in) */
+.ts-ghost { position: absolute; top: 0; bottom: 0; right: 0; pointer-events: none; animation: nm-out var(--fade-dur) linear forwards; }
+.ts-ghost:not(.open) .ts-frame { border-color: transparent; }
+.ts-ghost-ico { position: absolute; left: 0; top: 0; bottom: 0; width: 36px; display: grid; place-items: center; color: var(--text); }
+.ts-ghost.open .ts-ghost-ico { color: var(--subtext); }
+.ts-ghost-text { position: absolute; left: 34px; right: 12px; top: 50%; translate: 0 -50%; overflow: hidden; white-space: nowrap; color: var(--muted); }
 
 /* below 761 px (the top bar wraps there) pills keep their natural one-row width while their row has room; only a pill row
    wider than the whole window wraps inside itself. From 761 px up their strip scrolls instead (§ narrow windows). */
@@ -280,7 +315,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    thread, so it forces a main frame every refresh, and each main frame restyles every running animation on the page —
    Browse's 72 placeholder shimmers among them — though they run on the compositor. The layer is two 200 % tiles wide and
    travels one tile a second: the same sweep the tiled background made. Guard: probe-layout perf:skeleton */
-.loadbar { height: 3px; position: relative; overflow: hidden; }
+/* it lies over the top bar's bottom border (its first px, above the bar: z 6 > 5); the border itself goes while it runs (below) */
+.loadbar { height: 3px; position: relative; z-index: 6; margin-top: -1px; overflow: hidden; }
 .loadbar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 400%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 50% 100%;
   animation: slide 1s linear infinite; }
@@ -289,13 +325,14 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 :root.no-motion .loadbar::before { animation: none; transform: translateX(-12.5%); }
 
 /* ---- the library's background operations (components/LibraryOpsLine.tsx): Browse's load bar's place and look, a line
-   that fills with the count, and a tab hanging under it that says what ("Making Low previews 42 / 318"). Over the page
-   (anchored, no layout shift) and over the docked sidebar (40), under the scrims and modals. COOL: it fades in as the tab
-   drops out from under the top bar; the fill eases to each new count while a highlight sweeps along it (the progress
-   role's loop); at the end the fill runs out to the edge and it all fades. Guard: --probe probe-libops.js */
-.libops { position: absolute; top: anchor(--topbar bottom, 56px); left: 0; right: 0; height: 3px; z-index: 41; pointer-events: none;
+   that fills with the count (what it is, the top bar's status slot says). Over the page (anchored, no layout shift) and over
+   the docked sidebar (40), under the scrims and modals. COOL: it fades in; the fill eases to each new count while a highlight
+   sweeps along it (the progress role's loop); at the end the fill runs out to the edge and it fades; leaving for a tab
+   without it (`.away`) it only fades. Guard: --probe probe-libops.js */
+.libops { position: absolute; top: calc(anchor(--topbar bottom, 56px) - 1px); left: 0; right: 0; height: 3px; z-index: 41; pointer-events: none;
   background: color-mix(in srgb, var(--accent) 16%, transparent); animation: nm-in .24s ease-out; }
 .libops.closing { animation: nm-out .45s ease-in forwards; }
+.libops.closing.away { animation-duration: .2s; }
 .libops-fill { position: absolute; inset: 0; overflow: hidden; transform-origin: left; background: var(--accent); box-shadow: var(--glow-sm);
   transition: transform .6s cubic-bezier(.25, .8, .25, 1); }
 .libops.closing .libops-fill { transition-duration: .3s; }
@@ -303,20 +340,19 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   background: linear-gradient(90deg, transparent, var(--accent-hover), transparent) 0 0 / 50% 100%;
   animation: slide 1.6s linear infinite; }
 .libops.idle .libops-fill::after { animation-play-state: paused; }
-.libops-tab { position: absolute; top: 100%; left: 50%; translate: -50% 0; max-width: calc(100vw - 32px); display: flex; gap: 8px;
-  padding: 3px 12px 4px; border: 1px solid var(--surface0); border-top: 0; border-radius: 0 0 9px 9px;
-  background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent); color: var(--subtext); font-size: 11px;
-  font-weight: 600; line-height: 1.3; white-space: nowrap; animation: libops-drop .4s var(--spring-soft); }
-.libops-label { overflow: hidden; text-overflow: ellipsis; }
-.libops-n { color: var(--text); font-variant-numeric: tabular-nums; }
-@keyframes libops-drop { from { transform: translateY(-100%); opacity: 0; } }
 /* the live wallpaper behind: a dark track the accent reads on, whatever the picture */
 :root.bg-live .libops { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
+/* both lines cover the top bar's bottom border: their first px lies on it, and the border clears while one runs (the bar's own
+   fill is under it), so no grey edge shows above or through the line or its track — the dark one under bg-live included.
+   It comes back as the line fades out. Guard: probe-libops libops:edge */
+.topbar { transition: border-bottom-color .2s; }
+.app:has(> .libops:not(.closing), > .loadbar) > .topbar { border-bottom-color: transparent; }
+:root.no-motion .topbar { transition: none; }
 /* motion off: it fades in and out in place; the count steps (no ease, no sweep) */
 :root.no-motion .libops { animation: nm-in var(--fade-dur) linear; }
 :root.no-motion .libops.closing { animation: nm-out var(--fade-dur) linear forwards; }
 :root.no-motion .libops-fill { transition: none; }
-:root.no-motion .libops-fill::after, :root.no-motion .libops-tab { animation: none; }
+:root.no-motion .libops-fill::after { animation: none; }
 
 .theme-pick { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
   border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color .15s, box-shadow .2s; }
@@ -338,10 +374,41 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .btn.danger:hover { background: var(--danger-bg); box-shadow: 0 0 12px -3px var(--danger); }
 .btn.danger.solid { background: var(--danger); color: #1a1015; border-color: var(--danger); }
 .btn.danger.solid:hover { box-shadow: 0 0 16px -2px var(--danger); }
-/* grow into all free topbar space (anchored right, expands left) so it truncates only when there's
-   genuinely no room. High flex-grow beats the .spacer so the status claims the gap. */
-.status { color: var(--subtext); font-size: 13px; flex: 1000 1 0; min-width: min(140px, 100%); text-align: right;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the status slot (components/TopbarStatus.tsx): in the bar on every tab, growing into all its free space (anchored right,
+   expanding left; its high flex-grow beats the .spacer), so it truncates only when there's genuinely no room and its words
+   coming or going move nothing. Below 1280 px it keeps --keep (the Library: room for a count), from 1280 px 140 px. Its
+   lines share one grid cell: a new one fades in over the old one fading out. */
+.status { --keep: 0px; color: var(--subtext); font-size: 13px; flex: 1000 1 0; min-width: min(140px, 100%);
+  display: flex; justify-content: flex-end; align-items: center; }
+.app[data-page="library"] .topbar > .status { --keep: 72px; }
+/* the words' own box: hugging them (its padding hangs into the gap on the right, so the words end where the slot does) */
+.st-wrap { position: relative; min-width: 0; max-width: calc(100% + 8px); margin-right: -8px; padding: 3px 8px; border-radius: 7px;
+  display: grid; grid-template-columns: minmax(0, max-content); outline-offset: 0;
+  transition: background-color .15s, box-shadow .2s, color .15s, scale var(--press-dur); }
+.st-lines { display: grid; grid-template-columns: minmax(0, max-content); justify-content: end; min-width: 0; }
+/* COOL: two things to tell (the background work, what's playing): the words are a button that flips between them — a hover like
+   the bar's other controls (a tint, the small glow), a press squeeze, and two dots under the words' end saying which shows */
+.st-toggle { cursor: pointer; }
+.st-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--surface0) var(--tr), transparent); box-shadow: var(--glow-sm); }
+.st-toggle:hover .st-layer { color: var(--text); }
+.st-toggle:active { scale: .97; }
+.st-dots { position: absolute; right: 8px; bottom: -3px; display: flex; gap: 3px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.st-toggle .st-dots { opacity: 1; }
+.st-dots > i { width: 4px; height: 4px; border-radius: 50%; background: var(--surface2); transition: background-color .2s, box-shadow .2s; }
+.st-dots[data-on="0"] > i:first-child, .st-dots[data-on="1"] > i:last-child { background: var(--accent); box-shadow: var(--glow-sm); }
+:root.no-motion .st-toggle:active { scale: none; }
+:root.no-motion .st-dots { transition-duration: var(--fade-dur); transition-timing-function: linear; }
+:root.no-motion :is(.st-wrap, .st-dots > i) { transition: none; }
+/* each line hugs its own words at the right end (never stretched to a wider line fading out beside it) */
+.st-layer { grid-area: 1 / 1; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+  animation: nm-in .24s ease-out both; }
+.st-layer.out { animation: nm-out .2s ease-in forwards; }
+/* the background work: its name gives way (ellipsis) before its count */
+.st-op { display: flex; justify-content: flex-end; gap: 6px; }
+.st-op-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.st-op-n { flex: none; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.st-op-more { flex: none; }
+:root.no-motion .st-layer { animation-duration: var(--fade-dur); animation-timing-function: linear; }
 @keyframes glow-pulse-k { 0%,100% { box-shadow: 0 0 0 1px var(--accent); } 50% { box-shadow: var(--glow); } }
 .glow-pulse { animation: glow-pulse-k 1.6s ease-in-out infinite; } /* COOL: undo button calls attention */
 
@@ -1662,7 +1729,8 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 /* from 761 px up the top bar never wraps (docs/decisions.md § "Filter the Workshop in a column of three-way switches", its
    placement): Browse's source pills scroll sideways in their strip (components/SourcePills.tsx) and give way first, the search
    down to 120 px, the status truncates; below 1280 px the sort folds to its icon, below 1000 px Import / Undo / Stop to theirs
-   (their names in the tooltip — hooks/useTopbarCompact.ts, the same widths). Guard: probe-filters split:noWrap:*, probe-layout resize:* */
+   (their names in the tooltip), below 860 px the search to its magnifier (hooks/useTopbarCompact.ts, the same widths).
+   Guard: probe-filters split:noWrap:*, search:*, probe-layout resize:* */
 @media (min-width: 761px) {
   .topbar { flex-wrap: nowrap; }
   .topbar > .pills { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; }
@@ -1679,7 +1747,10 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .pill-strip[data-more-l][data-more-r] { mask-image: linear-gradient(90deg, transparent 6px, #000 34px, #000 calc(100% - 34px), transparent calc(100% - 6px)); }
 @media (max-width: 1279.98px) {
   .topbar { gap: 8px 10px; }
-  .status { min-width: 0; }
+  .status { min-width: var(--keep); }
+  /* the search opened from its fold takes its room from the status slot and the source strip first */
+  .topbar:has(.tsearch[data-open]) > .status { min-width: 0; }
+  .topbar:has(.tsearch[data-open]) .pill-strip { min-width: 48px; }
   .ss-sort { min-width: 0; }
   .ss-sort .sel-val { display: none; }
 }
@@ -1696,7 +1767,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   .tab { padding: 6px 10px; }
   .pill { padding: 5px 10px; }
   .seg.row :is(.seg-opt, .seg-ghost) { padding: 5px 10px; }
-  .search { flex: 1 1 140px; width: auto; }
+  .tsearch[data-open] { flex: 1 1 140px; width: auto; }
   .btn.ico { white-space: nowrap; }
 }
 

@@ -46,8 +46,14 @@ for f in $FILES; do
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
     scripts/test-library-facts.sh|scripts/test-clip-sweep.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
-    src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx)
+    src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
+    # the top bar's status slot: its words (a status message, the background work, the hint)
+    app/ui/src/components/TopbarStatus.tsx)
+      echo "  $f → nothing in the matrix (--probe probe-libops.js libops:status / libops:combined; LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js resize:)" >&2 ;;
+    # the top bar's search field and the widths its controls fold at: the matrix's Browse cells type into the search
+    app/ui/src/components/TopbarSearch.tsx|app/ui/src/hooks/useTopbarCompact.ts)
+      add "browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-filters.js search: split:; --probe probe-layout.js resize:)" ;;
     # the library's Steam tags / trailers / frame sizes: the filter column's data
     src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; its progress: --probe probe-libops.js)" >&2 ;;
     scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
