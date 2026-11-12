@@ -93,11 +93,14 @@ wait_for() { # $1 = tenths of a second, rest = a command that succeeds when read
 # ---- the watcher: what the compositor did while this script ran ------------------------------------------------
 # A Python sidecar for the whole of `up` / `down`, reading the session Hyprland's sockets only: every socket2 event
 # (window titles left out: they are the user's) and, at 20 Hz, the cursor position, the focused monitor and the active
-# window, into log/watch-<command>.log. The script marks its steps in run/step; a cursor move over 2 px, a focus change
+# window, into log/watch-<command>.log. The script marks its steps in run/step; a cursor warp onto a monitor's centre, a focus change
 # or an output / workspace / window / layer event while a step runs (or within 0.5 s after it) writes run/abort, and
 # the script stops at its next check.
 WATCH_PY='import json, os, socket, sys, time
 log, stepf, abortf, cap = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+import json as _json, subprocess as _sp
+CENTRES = [(m["x"] + m["width"] / m.get("scale", 1) / 2, m["y"] + m["height"] / m.get("scale", 1) / 2)
+           for m in _json.loads(_sp.run(["hyprctl", "-j", "monitors"], capture_output=True, text=True).stdout or "[]")]
 base = os.path.join(os.environ["XDG_RUNTIME_DIR"], "hypr", os.environ["HYPRLAND_INSTANCE_SIGNATURE"])
 def req(cmd):
     c = socket.socket(socket.AF_UNIX); c.settimeout(1); c.connect(base + "/.socket.sock"); c.sendall(cmd.encode()); out = b""
@@ -143,7 +146,9 @@ while time.time() < end:
         last = step
     cur = state()
     out.write("%s sample cursor=%.0f,%.0f mon=%s win=%s\n" % (ts(), cur[0], cur[1], cur[2], cur[3]))
-    moved = abs(cur[0] - prev[0]) > 2 or abs(cur[1] - prev[1]) > 2
+    # a warp, not a move: the private compositor cannot move the cursor, and the user does all the time; what a change on
+    # the session side does is snap it onto the exact centre of a monitor (CMonitor::onDisconnect)
+    moved = (abs(cur[0] - prev[0]) > 2 or abs(cur[1] - prev[1]) > 2) and any(abs(cur[0] - cx) <= 1 and abs(cur[1] - cy) <= 1 for cx, cy in CENTRES)
     if (moved or cur[2:] != prev[2:]) and (step or time.time() < grace) and not os.path.getsize(abortf):
         why = "%s during step \"%s\": cursor %.0f,%.0f -> %.0f,%.0f, monitor %s -> %s, window %s -> %s" % (
             ts(), step or last or "(grace)", prev[0], prev[1], cur[0], cur[1], prev[2], cur[2], prev[3], cur[3])
