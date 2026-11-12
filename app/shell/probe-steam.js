@@ -485,9 +485,9 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the download button's arrow is centred at rest as well as on hover: the arrow's pixel bounding box vs the button's
-    // centre — at rest (the card hovered, the button not) and
-    // on the button (its one-shot drop held where it lands). Pixels: the capture with the arrow minus without it.
+    // the download button is a bare glyph, like the Library card's buttons: at rest (the card hovered, the button not) and
+    // on the button (its one-shot drop held where it lands) it draws nothing but its arrow (the capture with the arrow
+    // hidden equals the one with the whole button hidden: no chip), and the arrow sits in its box's centre.
     await cell("look:dlCentre", async () => {
       const v = []; await load(SIGNED_OUT);
       const srcs = (await http("GET", "/sources")).json;
@@ -518,24 +518,16 @@ app.whenReady().then(async () => {
           if (d > 90) { n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
         }
         const cx = (b.x - rect.x + b.w / 2) * sc, cy = (b.y - rect.y + b.h / 2) * sc;
-        // Judge the arrow against the RING the eye sees (the inset accent shadow, same layer as the arrow), measured from the
-        // same capture with the same kind of threshold: a fractional button position shifts both by the same snap, so it
-        // cancels. Against the layout box the pixel grid alone is ±0.5 px — the old check failed or passed by where the card
-        // happened to land (226.70 vs 227.06), not by how it looks.
-        const lum = (P, i) => P[i] + P[i + 1] + P[i + 2], ci = (Math.round(cy) * W + Math.round(cx)) * 4, fill = lum(B, ci);
-        const r0 = (b.w / 2) * sc;
-        let rx0 = Infinity, rx1 = -Infinity, ry0 = Infinity, ry1 = -Infinity, rn = 0;
-        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-          const dr = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
-          if (dr < r0 - 3 * sc || dr > r0 + sc) continue; // the ring's annulus only — never the thumbnail outside the circle
-          if (lum(B, (y * W + x) * 4) - fill > 90) { rn++; rx0 = Math.min(rx0, x); rx1 = Math.max(rx1, x); ry0 = Math.min(ry0, y); ry1 = Math.max(ry1, y); }
-        }
-        const ax = (x0 + x1 + 1) / 2, ay = (y0 + y1 + 1) / 2;
-        const dx = ((ax - (rx0 + rx1 + 1) / 2)) / sc, dy = ((ay - (ry0 + ry1 + 1) / 2)) / sc;
-        const lx = (ax - cx) / sc, ly = (ay - cy) / sc;
+        // no chip: with the glyph hidden the button draws nothing — the same pixels as with the whole button hidden
+        await page(`document.getElementById("__dlc").textContent += " .dl-btn { visibility: hidden !important; }";`); await sleep(120);
+        const C = (await win.webContents.capturePage(rect)).toBitmap();
+        let chip = 0;
+        for (let k = 0; k < W * H * 4; k += 4) if (Math.abs(B[k] - C[k]) + Math.abs(B[k + 1] - C[k + 1]) + Math.abs(B[k + 2] - C[k + 2]) > 30) chip++;
+        // the glyph in its box: a pixel's grid snap either way (no ring to read it against any more)
+        const lx = ((x0 + x1 + 1) / 2 - cx) / sc, ly = ((y0 + y1 + 1) / 2 - cy) / sc;
         fs.writeFileSync(path.join(OUT, `dlc-${label}.png`), withArrow.resize({ width: W * 8, quality: "good" }).toPNG());
-        console.log(`        ${label}: arrow off the ring's centre by ${rn ? `(${dx.toFixed(2)}, ${dy.toFixed(2)}) css px` : "— (no ring: hovered, the chip is filled)"} (layout box: ${lx.toFixed(2)}, ${ly.toFixed(2)}) — ${n} arrow px, ${rn} ring px, button ${b.w.toFixed(1)}×${b.h.toFixed(1)} at (${b.x.toFixed(2)}, ${b.y.toFixed(2)})`);
-        return { dx, dy, n: rn ? n : 0 };
+        console.log(`        ${label}: ${n} arrow px, ${chip} chip px, arrow off its box's centre by (${lx.toFixed(2)}, ${ly.toFixed(2)}) css px`);
+        return { lx, ly, n, chip };
       };
       // several window sizes (cards, and so the button's position, land on fractional pixels at some sizes; a small window
       // can hide it)
@@ -551,11 +543,13 @@ app.whenReady().then(async () => {
         if (!b0) { v.push(`${W0}x${H0}: no download button`); continue; }
         mv(b0.x, b0.y);
         await sleep(100); await page(`for (const e of document.querySelectorAll(".dl-glyph *")) for (const a of e.getAnimations()) a.finish();`); // its drop, landed
-        await measure(`${W0}x${H0}-hover0`, "");
+        const hov = await measure(`${W0}x${H0}-hover0`, ".dl-btn::before { display: none !important; }"); // the bloom is meant to show
+        if (hov?.chip > 3) v.push(`${W0}x${H0}: hovered, the button draws ${hov.chip} px of its own (a chip): want the bare glyph`);
         await page(`document.getElementById("__dlc")?.remove();`);
         mv(5, 5); await sleep(300);
-        if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow or ring pixels at rest`); continue; }
-        if (Math.abs(rest.dx) > 0.5 || Math.abs(rest.dy) > 0.5) v.push(`${W0}x${H0}: at rest the arrow is off-centre by (${rest.dx.toFixed(2)}, ${rest.dy.toFixed(2)}) css px`);
+        if (!rest || !rest.n) { v.push(`${W0}x${H0}: no arrow pixels at rest — proved nothing`); continue; }
+        if (rest.chip > 3) v.push(`${W0}x${H0}: at rest the button draws ${rest.chip} px of its own (a chip): want the bare glyph`);
+        if (Math.abs(rest.lx) > 1 || Math.abs(rest.ly) > 1) v.push(`${W0}x${H0}: at rest the arrow is off its box's centre by (${rest.lx.toFixed(2)}, ${rest.ly.toFixed(2)}) css px`);
       }
       win.setContentSize(1000, 800); await sleep(400);
       return v;

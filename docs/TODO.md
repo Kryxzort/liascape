@@ -395,6 +395,12 @@ Two bug classes kept recurring; fix the class, not the instance:
       an optional build module, **Phase 4**, gated on the NVIDIA LINEAR-dmabuf external-only risk (spec §12); the
       `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike `lwe-core.md` §4.2; needs a host-side
       clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below).
+- [ ] **Presets and Application wallpapers** (owner, 2026-11-12: planned, with web wallpapers above): today
+      WorkshopTags.Unplayable drops Web / Application / Preset from Browse and the scrapers. When one becomes playable,
+      take it out of Unplayable and the Browse type filter. Its tag then shows in the sidebar on its own
+      (components/sideTags.ts hides only "Wallpaper", which every playable item carries, and the type).
+- [ ] **Sidebar type tags** (owner, 2026-11-12: "drop the scene/video for the while"): components/sideTags.ts hides
+      "Video" / "Scene" in both sidebars; revisit with the types above (show the type once there are more than two?).
 - [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
       `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once

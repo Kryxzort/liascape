@@ -54,6 +54,9 @@
 //                        close fades out (per frame: in-between opacity frames, the boxes still)
 //   look:focus           the focused card's ring is the accent (outline colour), off the card, with the accent glow; Glow effects
 //                        off → the ring without the glow
+//   look:sideTags        the sidebar's tags: no "Wallpaper", no type, none repeating a pill it shows; a genre stays
+//   look:sideRhythm      the sidebar's sections 12 px apart, the tag row included; its tags wear the pills' see-through fill and edge
+//                        the preview's switch strip and mute button wear the sidebar tiles' fill and edge
 //   look:locator         "go to playing" (grid + bar): the spotlight (dim + rings + glow) appears, the rings ripple, all gone in
 //                        ≤ 2 s; Glow effects off → no glow layer, still dim + rings; animations off → a still highlight that fades
 //                        in and out (opacity only, nothing scales)
@@ -1301,6 +1304,40 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // look:sideRhythm — the sidebar's sections sit 12 px apart (.side-body > * + *), the tag row included, and the tags wear the
+    // pills' see-through fill and edge (not .tag's solid one). The item's own tag row when it has one; else one is put where
+    // LibrarySide renders it (after the hero line): the rules under test are index.css's, not the data's.
+    await cell("look:sideRhythm", async () => {
+      const r = await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const b = m.side().querySelector(".side-body");
+        // the item's own tag row when it has one (a second row would measure itself, not the sidebar); else one put in its place
+        const hero = b.querySelector(".side-hero"), real = b.querySelector(":scope > .side-tags");
+        const t = real ?? document.createElement("div");
+        if (!real) { t.className = "tags side-tags"; t.innerHTML = '<span class="tag">Anime</span><span class="tag">Retro</span>'; hero.after(t); }
+        await m.sleep(400);
+        const kids = [...b.children].filter((e) => e.offsetHeight > 0), out = [];
+        for (let i = 1; i < kids.length; i++) out.push([kids[i - 1].className.split(" ").pop(), kids[i].className.split(" ").pop(),
+          Math.round(kids[i].getBoundingClientRect().top - kids[i - 1].getBoundingClientRect().bottom)]);
+        const cs = (e) => e ? { bg: getComputedStyle(e).backgroundColor, edge: getComputedStyle(e).borderTopColor, bw: getComputedStyle(e).borderTopWidth } : null;
+        const kidsAt = kids.map((e) => [e.className, Math.round(e.getBoundingClientRect().top), Math.round(e.getBoundingClientRect().bottom), getComputedStyle(e).marginTop, getComputedStyle(e).marginBottom, e === t ? (real ? "REAL" : "INJECTED") : ""]);
+        const p = m.side(), mat = (e) => e ? { bg: getComputedStyle(e).backgroundColor, edge: getComputedStyle(e).borderTopColor } : null;
+        const res = { gaps: out, kidsAt, tag: cs(t.querySelector(".tag")), pill: cs(b.querySelector(".side-pill")),
+          tile: mat(p.querySelector(".side-tile")), strip: mat(p.querySelector(".seg.strip")), mute: mat(p.querySelector(".side-mute:not(.on)")) };
+        if (!real) t.remove(); return res;`);
+      const v = [];
+      console.log(`        ${JSON.stringify(r)}`);
+      if (r.gaps.length < 2) v.push(`only ${r.gaps.length + 1} sections showing — proved nothing`);
+      for (const [a, b, g] of r.gaps) if (Math.abs(g - 12) > 1) v.push(`${a} → ${b}: ${g} px apart, want the sidebar's 12`);
+      if (!r.pill) v.push("no pill to compare the tags with — proved nothing");
+      else if (r.tag.bg !== r.pill.bg || r.tag.edge !== r.pill.edge || r.tag.bw !== r.pill.bw) v.push(`the tags' fill / edge ${JSON.stringify(r.tag)} ≠ the pills' ${JSON.stringify(r.pill)}`);
+      // the preview's switch strip and its mute button wear the sidebar tiles' material (the preview's controls are one family
+      // with the tiles under it)
+      if (!r.tile) v.push("no tile to compare the preview's controls with — proved nothing");
+      else for (const k of ["strip", "mute"]) if (r[k] && (r[k].bg !== r.tile.bg || r[k].edge !== r.tile.edge))
+        v.push(`the preview's ${k} ${JSON.stringify(r[k])} ≠ the tiles' ${JSON.stringify(r.tile)}`);
+      if (!r.strip && !r.mute) v.push("neither the preview's strip nor its mute showed — the controls' material proved nothing");
+      return v;
+    });
+
     await cell("look:locator", async () => {
       const v = [], J = JSON.stringify;
       await post("/apply", { path: K[0] }); await sleep(1500);
@@ -1361,7 +1398,9 @@ app.whenReady().then(async () => {
       const d = path.join(we, id); fs.mkdirSync(d, { recursive: true });
       ff(["-f", "lavfi", "-i", "smptebars=size=480x480", "-frames:v", "1", path.join(d, "preview.jpg")]);
       ff(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(d, "v.mp4")]);
-      fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title, type: "video", file: "v.mp4", preview: "preview.jpg" }));
+      // Steam's kind of tags (look:sideTags): the category, the type, a genre, a resolution
+      fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title, type: "video", file: "v.mp4", preview: "preview.jpg",
+        ...(title === "we1" ? { tags: ["Wallpaper", "Video", "Anime", "1920 x 1080"] } : {}) }));
     }
     await setSettings({ workshopFolder: we, autoAddWeWallpapersToLibrary: false });
     const srcs = (await http("GET", "/sources")).json;
@@ -1371,6 +1410,24 @@ app.whenReady().then(async () => {
     await page(`m.byText(".pill", ${JSON.stringify(weName)}).click();`);
     for (let i = 0; i < 80; i++) { if (await page(`return !!m.card("we1") && !!m.card("s1-local");`)) break; await sleep(150); }
     const libCount = async () => ((await http("GET", "/library")).json || []).length;
+
+    // look:sideTags — the sidebar lists only the tags that say something (components/sideTags.ts): never "Wallpaper" (every
+    // item here is one) nor the type ("Video" / "Scene"), nor a tag repeating a pill it shows (the resolution); a genre stays
+    await cell("look:sideTags", async () => {
+      const v = [];
+      await page(`await m.closeAll();`); await sleep(200);
+      const r = await page(`m.thumb("we1").click(); await m.waitSide("browse"); await m.sleep(500); const p = m.side();
+        return { tags: [...p.querySelectorAll(".side-tags .tag")].map((e) => e.textContent.trim()),
+          pills: [...p.querySelectorAll(".side-hero .side-pill")].map((e) => e.textContent.trim()) };`);
+      console.log(`        ${JSON.stringify(r)}`);
+      const resPill = r.pills.some((x) => /1920\s*[×x]\s*1080/.test(x));
+      for (const t of ["Wallpaper", "Video"]) if (r.tags.includes(t)) v.push(`lists "${t}" (says nothing here)`);
+      if (!r.tags.includes("Anime")) v.push(`the genre "Anime" is missing (tags ${JSON.stringify(r.tags)})`);
+      if (resPill && r.tags.includes("1920 x 1080")) v.push("lists the resolution its pill already shows");
+      if (!resPill && !r.tags.includes("1920 x 1080")) v.push("hid the resolution though no pill shows it");
+      await page(`await m.closeAll();`);
+      return v;
+    });
 
     await cell("browse:click", async () => {
       const v = [];
@@ -1410,16 +1467,19 @@ app.whenReady().then(async () => {
       const v = [], J = JSON.stringify;
       await page(`await m.closeAll();`); await mv(5, 5, 150);
       const c = await page(`const t = m.thumb("we1"); t.scrollIntoView({ block: "center" }); await m.sleep(200); return m.rect(t);`);
-      const read = `const b = m.thumb("we1").querySelector(".dl-btn"); const g = b.querySelector(".dl-glyph .dl-arrow"); const pb = getComputedStyle(b, "::before");
-        const an = g.getAnimations(); return { tr: getComputedStyle(b).transform, glow: pb.content !== "none" ? +pb.opacity : 0, anim: an.length, loop: an.some((a) => a.effect.getTiming().iterations === Infinity), op: +getComputedStyle(b).opacity, r: m.rect(b) };`;
+      const read = `const b = m.thumb("we1").querySelector(".dl-btn"); const g = b.querySelector(".dl-glyph .dl-arrow"); const cs = getComputedStyle(b), pb = getComputedStyle(b, "::before");
+        const an = g.getAnimations(); return { tr: cs.transform, bg: cs.backgroundColor, filter: cs.filter, glow: pb.content !== "none" ? +pb.opacity : 0, anim: an.length, loop: an.some((a) => a.effect.getTiming().iterations === Infinity), op: +getComputedStyle(b).opacity, r: m.rect(b) };`;
       await mv(c.x + c.w * 0.3, c.y + c.h * 0.3, 450);
       const a = await page(read);
       await mv(a.r.x + a.r.w / 2, a.r.y + a.r.h / 2, 500);
       const h = await page(read);
       console.log(`        card hover ${J(a)} → button hover ${J(h)}`);
       if (a.op < 0.9) v.push(`the download button doesn't show on a card hover (opacity ${a.op})`);
+      // a bare glyph (no chip); hovered, it lifts + grows and the accent bloom opens behind it
+      if (!/rgba\(0, 0, 0, 0\)|transparent/.test(a.bg) || !/rgba\(0, 0, 0, 0\)|transparent/.test(h.bg)) v.push(`the download button has a fill (${a.bg} → ${h.bg}): want a bare glyph`);
       if (h.tr === "none" || h.tr === a.tr) v.push(`hovered, the download button doesn't lift / grow (transform ${a.tr} → ${h.tr})`);
-      if (!(h.glow > 0.5) || a.glow > 0.1) v.push(`hovered, no glow layer (${a.glow} → ${h.glow})`);
+      if (!(h.glow > 0.5) || a.glow > 0.1) v.push(`hovered, no bloom (${a.glow} → ${h.glow})`);
+      if (!/drop-shadow/.test(h.filter) || h.filter === a.filter) v.push(`hovered, the arrow doesn't glow (filter ${a.filter} → ${h.filter})`);
       // the arrow drops once and lands (only progress loops — docs/superpowers/specs/2026-11-12-icon-motion-design.md)
       if (!h.anim || h.loop) v.push(`hovered, the arrow doesn't drop once (${h.anim} animations, looping ${h.loop})`);
       if (h.r) await (async () => { const img = await win.webContents.capturePage({ x: Math.max(0, Math.round(c.x - 20)), y: Math.max(0, Math.round(c.y - 20)), width: Math.round(c.w + 40), height: Math.round(c.h + 40) }); fs.writeFileSync(path.join(OUT, "side-look-dlhover.png"), img.toPNG()); })();

@@ -8,6 +8,7 @@ import { FolderFlap } from "./icons";
 import { usePreview, rangeFill, useOnline } from "./sidePreview";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
+import { sideTags } from "./sideTags";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -160,6 +161,8 @@ export function LibrarySide({
   const online = useOnline();
   const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl && online });
   const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
+  // the pills below show the resolution and the age rating: their tags would only repeat them
+  const tags = sideTags(item.tags, [item.resolution, item.ageRating]);
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");
@@ -194,9 +197,7 @@ export function LibrarySide({
               {copied ? <Check size={13} className="ico-pop" /> : <Hash size={13} />} {copied ? "Copied" : item.workshopId}</button>
           )}
         </div>
-        {item.tags && item.tags.length > 0 && (
-          <div className="tags side-tags">{item.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div>
-        )}
+        {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         {/* the right-click menu's actions (all four of them), as tiles */}
         <div className="side-tiles">
           <button className="side-tile" onClick={onReveal}><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</button>

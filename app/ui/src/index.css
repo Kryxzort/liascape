@@ -216,35 +216,33 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    on the picture is lost on any bright / busy thumbnail. The chip gives its own contrast; 30 px (22 on small cards). Calm at rest (no
    per-card breathing glow — a grid of them was paint for nothing); hover is where it comes alive. */
 /* above the 44 px title strip at every card size (else the strip covers the button's lower half) and on its own layer (z 3: over
-   the strip; the bloom's z -1 stays inside the button instead of falling behind the thumbnail) */
-.dl-btn { position: absolute; right: 6px; bottom: 50px; z-index: 3; width: 30px; height: 30px; padding: 0; border-radius: 50%;
-  display: grid; place-items: center; opacity: 0;
-  background: color-mix(in srgb, var(--bg-crust) 78%, transparent);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent), 0 2px 8px rgba(0,0,0,.45);
-  transition: opacity .15s ease, transform .22s cubic-bezier(.2, 1.4, .4, 1), background .15s, box-shadow .2s;
-  /* its own compositing layer at rest too: without one, at a fractional card position the resting arrow is rasterised
-     pixel-snapped while the ring sits on the fraction — off-centre until a hover's transform makes a layer drawn at the
-     exact offset. Guard: probe-steam look:dlCentre (pixels, three sizes). */
+   the strip). A bare glyph like the Library card's own buttons (.del, .pl-toggle): no chip, a dark halo to read on any
+   picture, an accent glow when hovered. Guard: probe-steam look:dlCentre (no chip), probe-sidebar look:dlHover. */
+.dl-btn { position: absolute; right: 6px; bottom: 50px; z-index: 3; width: 36px; height: 36px; padding: 0;
+  display: grid; place-items: center; opacity: 0; background: none;
+  filter: drop-shadow(0 0 3px rgba(0,0,0,.85));
+  transition: opacity .15s ease, filter .2s, transform .22s cubic-bezier(.2, 1.4, .4, 1), scale var(--press-dur) cubic-bezier(.3, 0, .6, 1);
+  /* its own compositing layer at rest too: the arrow is rasterised at the exact fractional offset, as it is mid-motion,
+     so it doesn't shift by a pixel when the hover's drop starts */
   will-change: transform; }
 .thumb-wrap:hover .dl-btn, .dl-btn:focus-visible { opacity: 1; }
-/* COOL: hovered — it lifts + grows, the chip fills with the accent,
-   an accent glow blooms behind it (a pre-blurred radial layer whose opacity fades in — no animated blur) and the arrow drops
-   once into its tray and lands on the spring (icon motion: progress is the only thing that loops) */
+/* COOL: hovered — it lifts + grows, the arrow glows in the accent, an accent bloom opens behind it (a pre-blurred radial layer
+   whose opacity fades in — no animated blur), and the arrow drops once into its tray, landing on the spring (icon motion:
+   progress is the only thing that loops); pressed, it squeezes */
 .dl-btn::before { content: ""; position: absolute; inset: -9px; border-radius: 50%; pointer-events: none; z-index: -1;
   background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 60%, transparent), color-mix(in srgb, var(--accent) 18%, transparent) 60%, transparent);
   opacity: 0; transition: opacity .2s; }
-.dl-btn:hover { transform: translateY(-2px) scale(1.12); background: var(--accent);
-  box-shadow: inset 0 0 0 1.5px var(--accent), var(--glow-sm), 0 3px 10px rgba(0,0,0,.4); }
-.dl-btn:active { transform: scale(.94); transition-duration: .08s; }
+.dl-btn:hover { transform: translateY(-2px) scale(1.12); filter: drop-shadow(0 0 5px var(--accent)); }
 .dl-btn:hover::before { opacity: 1; }
-.dl-btn:hover .dl-glyph { color: var(--accent-fg); }
+.dl-btn:active { scale: .9; }
+.dl-btn:hover .dl-glyph { color: var(--accent-hover); }
 /* the arrow falls through into its tray, a fresh one drops in from above and lands; the tray dips as it does — lucide's
    download recipe (components/iconMotion.ts `dl-glyph`: WAAPI, since a keyframe's timing function can't read the --spring var) */
 .dl-glyph > * { transform-box: view-box; transform-origin: 12px 12px; }
-/* WHOLE-pixel sizes with EVEN margins (a percentage is off-centre at some window sizes): 58 % makes a 17.4 px
-   glyph in the 30 px chip — 6.3 px margins, rounded to an off-centre arrow (measured (0.85, 0.44) px); 18 in 30 and 14 in 24 leave
-   6 / 5 px each side. The path itself is centred in its viewBox (Card.tsx). Guard: probe-steam look:dlCentre. */
-.dl-glyph { color: var(--accent); width: 18px; height: 18px; fill: currentColor; stroke: none; transform-origin: center;
+/* WHOLE-pixel sizes with EVEN margins (a percentage is off-centre at some window sizes: a fractional glyph rounds to an
+   off-centre arrow): 22 in 36 and 18 in 28 leave 7 / 5 px each side. The path itself is centred in its viewBox (Card.tsx).
+   Guard: probe-steam look:dlCentre. */
+.dl-glyph { color: var(--accent); width: 22px; height: 22px; fill: currentColor; stroke: none; transform-origin: center;
   transition: color .15s; }
 .badge {
   position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
@@ -353,8 +351,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* small cards: shrink + reposition the trash, toggle, title bar and chips so they're not oversized */
 @container (max-width: 150px) {
   .del { width: 24px; height: 24px; bottom: 30px; right: 4px; }
-  .dl-btn { width: 24px; height: 24px; bottom: 50px; right: 5px; }
-  .dl-btn .dl-glyph { width: 14px; height: 14px; }
+  .dl-btn { width: 28px; height: 28px; bottom: 50px; right: 5px; }
+  .dl-btn .dl-glyph { width: 18px; height: 18px; }
   .del svg { width: 15px; height: 15px; }
   .pl-toggle { width: 16px; height: 16px; top: 4px; right: 4px; }
   .warn { bottom: 30px; left: 4px; }
@@ -1148,7 +1146,7 @@ input[type=range]:focus-visible { outline: none; }
 /* the focused card: its accent ring only; the download button: lift + drop, no bloom; the locator: dim + edge + rings, no glow */
 :root.no-glow .card.focused { box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 :root.no-glow .dl-btn::before { display: none; }
-:root.no-glow .dl-btn:hover { box-shadow: inset 0 0 0 1.5px var(--accent), 0 3px 10px rgba(0,0,0,.4); }
+:root.no-glow .dl-btn:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
 :root.no-glow .go-playing:hover:not(:disabled) svg { filter: none; }
 :root.no-glow .locate-fx .lfx-ring { box-shadow: none; }
 :root.no-glow .side-sec::before { box-shadow: none; }
@@ -1209,6 +1207,7 @@ input[type=range]:focus-visible { outline: none; }
 /* pointer feedback: hover lifts and press squeezes don't move (the glow and colour still answer); the card's Download bar
    fades in place. The focused card keeps its lift: a state, shown at once like a caret */
 :root.no-motion :is(.card:hover:not(.focused), .dl, .dl-btn, .btn:active, .st-use) { transform: none; }
+:root.no-motion .dl-btn:active { scale: none; }
 :root.no-motion .card { transition: box-shadow .2s ease; }
 :root.no-motion .ns-btn::before { transform: none; }
 /* loops stand still: the undo / confirm buttons glow without pulsing, the drain toast's bar holds full width, dimmed */
@@ -1324,7 +1323,9 @@ input[type=range]:focus-visible { outline: none; }
    takes no pointer (only the chip opens it). */
 .side-vol { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; }
 .side-mute { position: relative; z-index: 1; width: 32px; height: 32px; padding: 0; border-radius: 50%;
-  display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.18);
+  /* the sidebar tiles' material (.side-tile): the preview's controls and its switch strip are one family with them */
+  display: grid; place-items: center; color: var(--text); background: color-mix(in srgb, var(--bg-crust) 50%, transparent);
+  border: 1px solid var(--surface1);
   transition: background .15s, color .15s, box-shadow .2s, border-color .15s; }
 .side-mute-ico { display: grid; place-items: center; }
 .side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
@@ -1332,7 +1333,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-mute:hover { box-shadow: none; }
 .side-vol-slide { position: absolute; right: 0; top: 0; height: 32px; display: flex; align-items: center; gap: 6px;
   padding: 0 40px 0 11px; border-radius: 16px; color: var(--text);
-  background: color-mix(in srgb, var(--bg-crust) 78%, transparent); box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1); box-shadow: 0 2px 10px rgba(0,0,0,.35);
   opacity: 0; transform: translateX(14px); transform-origin: right center; pointer-events: none;
   transition: opacity .16s ease-out, transform var(--spring-soft-dur) var(--spring-soft); }
 :is(.side-vol:hover, .side-vol:has(input:focus-visible, input:active), :root.kbd-nav .side-vol:has(:focus-visible)) .side-vol-slide { opacity: 1; transform: none; pointer-events: auto; }
@@ -1353,9 +1354,10 @@ input[type=range]:focus-visible { outline: none; }
 /* the preview switch (GIF / Video / YouTube / Picture): the segmented control's flat strip, fused to the picture's top edge
    (not an overlay, not tabs) — a little shorter than a pill row; its highlight is clipped to the strip's rounded top, and
    the unit's glow stands in for its own */
-.seg.strip { --seg-gap: 3px; overflow: clip; border-radius: 14px 14px 0 0; background: color-mix(in srgb, var(--bg-crust) 78%, transparent); }
+.seg.strip { --seg-gap: 3px; overflow: clip; border-radius: 14px 14px 0 0; background: color-mix(in srgb, var(--bg-crust) 50%, transparent);
+  border: 1px solid var(--surface1); border-bottom: 0; } /* the sidebar tiles' material; open where it meets the picture */
 .seg.strip .seg-hl { border-radius: 8px; box-shadow: none; }
-.seg.strip :is(.seg-opt, .seg-ghost) { height: 18px; padding: 0 8px; border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .2px; }
+.seg.strip :is(.seg-opt, .seg-ghost) { height: 17px; padding: 0 8px; border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .2px; }
 /* the strip clips: its focus ring is drawn inside the highlight, which covers the focused (= checked) option */
 :root.kbd-nav .seg.strip:has(.seg-opt:focus-visible) .seg-hl { outline: 2px solid var(--accent-fg); outline-offset: -3px; }
 
@@ -1383,7 +1385,12 @@ button.side-pill.copy { cursor: pointer; font: inherit; font-size: 12px; font-we
 button.side-pill.copy:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glow-sm); }
 button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--success); }
 :root.no-glow button.side-pill.copy:hover { box-shadow: none; }
+/* the sidebar's own rhythm (.side-body > * + *: 12 px between sections), not .tags' 10 px; the pills' see-through fill and
+   edge, a size smaller (the facts above, the tags under them). Guard: probe-sidebar look:sideRhythm */
 .side-tags { margin: 0; }
+.side-body > * + .side-tags, .side-body > .side-tags + * { margin-top: 12px; }
+.side-tags .tag { background: color-mix(in srgb, var(--surface0) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }
 .side-link { font-size: 12px; }
 /* the Browse sidebar's download buttons: big; the arrow drops into its tray on hover (iconMotion.ts, like the card's) */
 .side-cta { display: flex; flex-wrap: wrap; gap: 8px; }

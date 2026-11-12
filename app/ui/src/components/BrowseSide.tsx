@@ -7,6 +7,7 @@ import { useStore } from "../store";
 import { SubToggle } from "./SubToggle";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
+import { sideTags } from "./sideTags";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -55,7 +56,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
-  const tagRow = w.tags && w.tags.length > 0 ? <div className="tags side-tags">{w.tags.slice(0, 12).map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
+  const tags = sideTags(w.tags, [w.resolution]);
+  const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
 
   return (
     <>
