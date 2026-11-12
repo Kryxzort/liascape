@@ -9,6 +9,8 @@ namespace Liascape.Web;
 // (app/ui/src/components/LibraryOpsLine.tsx): each with its count while it runs.
 //   clips  ClipStore's sweep to the chosen "Video preview quality" (phase: low | mid | high)
 //   facts  LibraryFactsOps: Steam's tags (phase steam), trailer pages (trailers), frame sizes (sizes)
+//   scene-loudness  SceneLoudnessOps' queue (phase measure)
+//   video-loudness  LibraryService.BackfillLoudnessAsync, the library's videos not yet measured (phase measure)
 // WS `library-ops {ops: [{id, phase, done, total}]}` carries the whole list on every change: a start, a phase change and an
 // end at once, a count at most every EVERY (a frame-size pass reads dozens of files a second). GET /library/ops: the same
 // list, for a page that (re)connects mid-operation (store.resync). Guard: scripts/test-clip-sweep.sh, --probe probe-libops.js.
@@ -32,14 +34,15 @@ public static class LibraryOps
             int i = _ops.FindIndex(o => o.Id == id);
             if (i >= 0 && _ops[i] == op) return;
             bool now = i < 0 || _ops[i].Phase != phase || op.Done >= op.Total;
-            if (i < 0) _ops.Add(op); else _ops[i] = op;
+            // a start and an end go to the log too: an op shorter than a poll still leaves a trace (the tests grep it)
+            if (i < 0) { _ops.Add(op); Console.WriteLine($"library-ops: {id} started ({phase}, {total})"); } else _ops[i] = op;
             SendLocked(now);
         }
     }
 
     public static void End(string id)
     {
-        lock (_lock) { if (_ops.RemoveAll(o => o.Id == id) > 0) SendLocked(true); }
+        lock (_lock) { if (_ops.RemoveAll(o => o.Id == id) > 0) { Console.WriteLine($"library-ops: {id} ended"); SendLocked(true); } }
     }
 
     // under _lock: the order the UI sees is the order of the changes

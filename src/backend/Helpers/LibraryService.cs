@@ -411,22 +411,36 @@ public static class LibraryService
                 if (!indexes.TryGetValue(loc.Source, out var idx)) indexes[loc.Source] = idx = LibraryStore.LoadIndex(loc.Source);
                 return idx.GetValueOrDefault(loc.Key);
             }
+            // listed first, so the top bar's progress line has its total (Web/LibraryOps.cs "video-loudness")
+            var todo = new List<string>();
             foreach (var item in LoadAll())
             {
                 if (item.IsScene || !IsVideoFile(item.VideoPath)) continue;
                 var meta = Meta(item.VideoPath);
                 if (meta is { LoudnessI: not null, LoudnessTP: not null, LoudnessLRA: not null, LoudnessThresh: not null }
                     || meta?.LoudnessSkip == true) continue; // measured or no-audio
+                todo.Add(item.VideoPath);
+            }
+            int done = 0;
+            if (todo.Count > 0) Liascape.Web.LibraryOps.Set("video-loudness", "measure", 0, todo.Count);
+            foreach (var path in todo)
+            {
                 if (!SettingsService.Load().NormalizeAudio) break; // turned off mid-scan (checked before real work only)
-                var path = item.VideoPath;
                 await sem.WaitAsync().ConfigureAwait(false);
                 tasks.Add(System.Threading.Tasks.Task.Run(async () =>
-                    { try { await EnsureLoudnessAsync(path).ConfigureAwait(false); } finally { sem.Release(); } }));
+                {
+                    try { await EnsureLoudnessAsync(path).ConfigureAwait(false); }
+                    finally
+                    {
+                        sem.Release();
+                        Liascape.Web.LibraryOps.Set("video-loudness", "measure", System.Threading.Interlocked.Increment(ref done), todo.Count);
+                    }
+                }));
             }
             await System.Threading.Tasks.Task.WhenAll(tasks).ConfigureAwait(false);
         }
         catch { }
-        finally { System.Threading.Interlocked.Exchange(ref _backfilling, 0); }
+        finally { Liascape.Web.LibraryOps.End("video-loudness"); System.Threading.Interlocked.Exchange(ref _backfilling, 0); }
     }
 
     // ---------- LoadAll ----------

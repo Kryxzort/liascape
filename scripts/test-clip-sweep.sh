@@ -10,6 +10,7 @@
 #     released, the sweep starts at once and every clip ends up Mid.
 #  3b. a hold nobody renews runs out (the lease): Low, held and never released: the sweep starts on its own.
 #  4. cancel: High, then Low while a High encode runs: it is stopped, the sweep re-targets, every clip ends up Low.
+#  6. the video-loudness pass (normalization turned on) is listed on GET /library/ops while it measures, then dropped.
 #  5. restart: High, the backend stopped mid-sweep; the next start resumes it (only what is left) to the end; a card
 #     waiting for a new item's first clip goes before the sweep's rest.
 # Never touches ~/.config/liascape, ~/.cache or the real library; everything it started is stopped on exit.
@@ -67,6 +68,11 @@ for n in a b c d e; do
     || { echo "ABORT: ffmpeg can't make the fixtures"; exit 2; }
   IDX=$(jq -c --arg n "$n" '.[$n] = {title: $n}' <<< "$IDX")
 done
+# f: a small video with a 2-minute tone, for the video-loudness pass (case 6); it never gets a clip, so no sweep counts it
+mkdir -p "$LIB/imported/f"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=size=320x240:rate=10" -f lavfi -i "sine=frequency=440:duration=120" -shortest \
+  -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac "$LIB/imported/f/f.mp4" || { echo "ABORT: ffmpeg can't make f"; exit 2; }
+IDX=$(jq -c '.f = {title: "f"}' <<< "$IDX")
 printf '%s' "$IDX" > "$LIB/imported/index.json"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"legacy","WorkshopFolder":"$T/we","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"VideoPreviewQuality":"high"}
@@ -191,6 +197,17 @@ if [ "$left" -lt 2 ]; then ok "(one item left: nothing to queue behind)"
 elif [ -n "$emade" ] && [ -n "$lastre" ] && [ "$emade" -lt "$lastre" ]; then ok "the waiting card's clip went before the sweep's rest"
 else bad "the waiting card's clip (line ${emade:-none}) didn't go before the sweep's last (line ${lastre:-none})"; fi
 check "the wallpapers' own files still untouched" "$(sha256sum "$LIB"/imported/*/*.mp4 | sha256sum)" "$SRC_SUM"
+
+echo "== 6. the video-loudness pass shows on the progress feed"
+( for _ in $(seq 1 600); do api "$U/library/ops" | jq -r '.ops[].id' 2>/dev/null; sleep 0.05; done ) > "$T/ops-seen" &
+OPSP=$!
+api -X POST "$U/settings" -d '{"normalizeAudio":true}' >/dev/null || bad "POST /settings normalizeAudio"
+loudf() { jq -r '.f.loudnessI // empty' "$LIB/imported/index.json"; }
+for _ in $(seq 1 600); do [ -n "$(loudf)" ] && break; sleep 0.1; done
+sleep 1; kill $OPSP 2>/dev/null; wait $OPSP 2>/dev/null
+[ -n "$(loudf)" ] && ok "f measured ($(loudf) LUFS)" || bad "f never measured"
+grep -qx "video-loudness" "$T/ops-seen" && ok "/library/ops listed video-loudness while it ran" || bad "/library/ops never listed video-loudness"
+check "/library/ops dropped it once done" "$(api "$U/library/ops" | jq -c '[.ops[] | select(.id == "video-loudness")]')" "[]"
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

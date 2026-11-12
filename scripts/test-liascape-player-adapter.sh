@@ -1419,8 +1419,14 @@ FP1=$(fp8); EST1=$(jq -r '."900000008".loudnessI' "$IDX")
 curl -sf "$U/library" | jq -e --arg p "$S8" '.[] | select(.videoPath==$p) | .loudnessEstimated == true and (.loudnessLufs != null)' >/dev/null \
   && ok "/library: the item's loudness is the estimate (loudnessEstimated, $EST1 LUFS)" || bad "/library item: $(curl -sf "$U/library" | jq -c --arg p "$S8" '.[] | select(.videoPath==$p) | {loudnessLufs, loudnessEstimated}')"
 [ "$(post /library/scene-loudness/estimate "{\"paths\":[\"$S8\"]}" | jq -r .queued)" = 0 ] && ok "Estimate skips a scene already estimated for its configuration" || bad "a second Estimate re-queued S8"
+# the top bar's progress feed lists the queue while it runs (Web/LibraryOps.cs "scene-loudness": its start and end are logged,
+# a run shorter than any poll included)
+SLN=$(grep -c "library-ops: scene-loudness started" "$T/backend.log"); SLE=$(grep -c "library-ops: scene-loudness ended" "$T/backend.log")
 [ "$(post /library/scene-loudness/estimate "{\"paths\":[\"$S8\"],\"force\":true}" | jq -r .queued)" = 1 ] && waitfor 30000 sl_idle && [ "$(fp8)" = "$FP1" ] \
   && ok "Recalculate (force) re-estimates it: same fingerprint" || bad "force: fp $(fp8) (was $FP1)"
+[ "$(grep -c "library-ops: scene-loudness started" "$T/backend.log")" -gt "$SLN" ] && [ "$(grep -c "library-ops: scene-loudness ended" "$T/backend.log")" -gt "$SLE" ] \
+  && ok "the progress feed listed scene-loudness while it ran, then ended it" || bad "the progress feed never listed scene-loudness ($(grep -c 'library-ops: scene' "$T/backend.log") log lines)"
+[ "$(curl -sf "$U/library/ops" | jq -c '[.ops[] | select(.id == "scene-loudness")]')" = "[]" ] && ok "/library/ops dropped scene-loudness once idle" || bad "scene-loudness still listed when idle"
 post /library/scene-loudness/cancel '{}' | jq -e '.cancelled == false' >/dev/null && ok "cancel with nothing running: {cancelled: false}" || bad "idle cancel"
 setting '.NormalizeAudio = true | .NormalizeTargetLufs = -14'
 post /apply "{\"path\":\"$S8\"}" >/dev/null

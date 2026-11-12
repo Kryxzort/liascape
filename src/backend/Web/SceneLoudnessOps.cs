@@ -115,6 +115,11 @@ public static class SceneLoudnessOps
             EventBus.Broadcast("scene-loudness-progress", new { done, total, currentId = "", finished = true, cancelled });
         else
             EventBus.Broadcast("scene-loudness-progress", new { done, total, currentId = cur == null ? "" : IdOf(cur) });
+        // the top bar's progress line too: a startup or import pass runs with no Settings page open to show its count
+        bool running;
+        lock (_lock) running = _running;
+        if (running && total > 0) LibraryOps.Set("scene-loudness", "measure", done, total);
+        else LibraryOps.End("scene-loudness");
     }
 
     private static void Run()
