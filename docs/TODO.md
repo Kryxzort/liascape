@@ -21,6 +21,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        not"): the same column, chips and tri-state tags, filtering locally (tags, type, age rating… from each item's
        project.json / the library index) with no backend Workshop query; the features a source can't know stay hidden.
 
+25. [ ] Video preview clips that fit the card and loop like the wallpaper (owner): a "Video preview quality: Low / Mid /
+       High" setting (Segmented) with no storage options (one shared, capped, LRU cache); each clip sized to the card it
+       plays in (card px width × devicePixelRatio × quality, rounded up to a few width buckets so cards share clips) and
+       cropped to the card's shape (1:1 cards get square clips); full length, capped ~5 min — the 10 s clip plays first,
+       the full one is made in the background (niced, one at a time) and swaps in at a loop boundary.
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays
