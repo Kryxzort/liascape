@@ -9,6 +9,7 @@
 #
 # LIASCAPE_TEST_LOCK_HELD=1 in the environment = an outer run holds it already (a suite that calls another one).
 # LIASCAPE_TEST_LOCK=<path> overrides the lock file (default: $XDG_RUNTIME_DIR/liascape-tests.lock).
+# LIASCAPE_TEST_LOCK_MAX=<seconds>: the wrapped command's ceiling (default 5400; 0 = none).
 #
 # The lock is held by a small helper beside the run, never by the run's own shell: an open lock fd is inherited by every
 # child, and a child that outlives the run (dotnet's VBCSCompiler build server, a backend) would hold the lock for
@@ -41,5 +42,9 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 else
   [ $# -gt 0 ] || { echo "usage: bash scripts/test-lock.sh <command …>  (or source it from a test script)" >&2; exit 2; }
   __lt_what="$*"; __lt_lock
+  # a hung one-off (a CDP script whose page was replaced under it) must not hold the machine forever: a ceiling, then
+  # SIGTERM (and SIGKILL 10 s later). LIASCAPE_TEST_LOCK_MAX=<seconds>, 0 = none.
+  max=${LIASCAPE_TEST_LOCK_MAX:-5400}
+  [ "$max" -gt 0 ] && exec timeout -k 10 "$max" "$@"
   exec "$@"
 fi
